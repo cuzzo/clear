@@ -62,6 +62,29 @@ fn go_short_declaration_does_not_reuse_outer_non_nil_proof() -> Result<()> {
 }
 
 #[test]
+fn exact_native_stdlib_calls_emit_normalized_complexity_facts() -> Result<()> {
+    for (name, language, message, time, space) in [
+        ("stdlib_registry.c", Language::C, "strcmp", "O(N)", "O(1)"),
+        ("stdlib_registry.go", Language::Go, "BinarySearch", "O(log N)", "O(1)"),
+        ("stdlib_registry.java", Language::Java, "copyOf", "O(N)", "O(N)"),
+        ("stdlib_registry.cs", Language::CSharp, "BinarySearch", "O(log N)", "O(1)"),
+        ("stdlib_registry.py", Language::Python, "casefold", "O(N)", "O(N)"),
+    ] {
+        let document = syntax::parse_file(fixture(name), language)?;
+        let output = profile::extract(&document, Profile::Espalier);
+        let call = output
+            .complexity_facts
+            .iter()
+            .flat_map(|facts| facts.call_contexts.iter())
+            .find(|call| call.message == message)
+            .with_context(|| format!("missing {name} {message} complexity fact"))?;
+        assert_eq!(call.known_time_complexity.as_deref(), Some(time), "{name}");
+        assert_eq!(call.known_space_complexity.as_deref(), Some(space), "{name}");
+    }
+    Ok(())
+}
+
+#[test]
 fn ruby_calculator_extracts_methods() -> Result<()> {
     let file = examples_dir().join("ruby_calculator.rb");
     let document = syntax::parse_file(file.clone(), Language::Ruby)

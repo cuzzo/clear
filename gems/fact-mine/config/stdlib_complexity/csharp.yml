@@ -29,6 +29,36 @@ String:
   Split: linear_materialize
   Substring: linear_materialize
 Intrinsic:
+  "Array.BinarySearch": logarithmic
+  "Array.Clear": linear_scan
+  "Array.Copy": linear_scan
+  "Array.Fill": linear_scan
+  "Array.IndexOf": linear_scan
+  "Array.LastIndexOf": linear_scan
+  "Array.Reverse": linear_scan
+  "Array.Resize": linear_materialize
   "Array.Sort": sort
   "Enumerable.ToArray": linear_materialize
   "Enumerable.ToList": linear_materialize
+  "Math.Abs": constant
+  "Math.Ceiling": constant
+  "Math.Clamp": constant
+  "Math.Floor": constant
+  "Math.Max": constant
+  "Math.Min": constant
+  "Math.Pow": constant
+  "Math.Round": constant
+  "Math.Sign": constant
+  "Math.Sqrt": constant
+  "Math.Truncate": constant
+  "Path.ChangeExtension": linear_materialize
+  "Path.Combine": linear_materialize
+  "Path.GetDirectoryName": linear_materialize
+  "Path.GetExtension": linear_materialize
+  "Path.GetFileName": linear_materialize
+  "String.Compare": linear_scan
+  "String.Concat": linear_materialize
+  "String.Equals": linear_scan
+  "String.IsNullOrEmpty": constant
+  "String.IsNullOrWhiteSpace": linear_scan
+  "String.Join": linear_materialize

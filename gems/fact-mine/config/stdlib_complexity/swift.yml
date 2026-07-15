@@ -9,6 +9,8 @@ Array:
   firstIndex: linear_scan
   map: linear_materialize
   filter: linear_materialize
+  removeFirst: linear_scan
+  reversed: linear_materialize
   sorted: sort
 Hash:
   count: constant
@@ -23,6 +25,8 @@ Set:
   insert: constant
   remove: constant
 String:
+  hasPrefix: linear_scan
+  hasSuffix: linear_scan
   isEmpty: constant
   count: linear_scan
   contains: linear_scan

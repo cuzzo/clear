@@ -4,7 +4,7 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    configured_intrinsic_call_complexity, eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallComplexity, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
     NormalizedSemanticEffect,
 };
@@ -63,6 +63,18 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
         &C_CFG_PROFILE
     }
     // CFG-SPECIFIC END
+
+    fn intrinsic_call_complexity(
+        &self,
+        receiver: Option<&str>,
+        message: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        // The generic call extractor represents a bare C function as a
+        // synthetic `self` receiver. C has no instance dispatch here, so
+        // translate only that parser sentinel back to a free intrinsic.
+        let receiver = receiver.filter(|receiver| *receiver != "self");
+        configured_intrinsic_call_complexity("c", receiver, message)
+    }
 
     fn call_receiver(&self, parts: &NormalizedCallParts) -> String {
         if parts.receiver != "self" {

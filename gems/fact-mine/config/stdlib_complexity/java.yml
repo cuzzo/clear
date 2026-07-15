@@ -33,6 +33,40 @@ String:
   split: linear_materialize
   substring: linear_materialize
 Intrinsic:
+  "Arrays.asList": constant
+  "Arrays.binarySearch": logarithmic
+  "Arrays.copyOf": linear_materialize
+  "Arrays.copyOfRange": linear_materialize
+  "Arrays.equals": linear_scan
+  "Arrays.fill": linear_scan
+  "Arrays.hashCode": linear_scan
+  "Arrays.mismatch": linear_scan
+  "Arrays.toString": linear_materialize
   "Arrays.sort": sort
+  "Collections.emptyList": constant
+  "Collections.emptyMap": constant
+  "Collections.emptySet": constant
+  "Collections.singleton": constant
+  "Collections.singletonList": constant
+  "Collections.singletonMap": constant
   "Collections.sort": sort
   "Collections.binarySearch": logarithmic
+  "Math.abs": constant
+  "Math.ceil": constant
+  "Math.floor": constant
+  "Math.max": constant
+  "Math.min": constant
+  "Math.pow": constant
+  "Math.round": constant
+  "Math.sqrt": constant
+  "Objects.isNull": constant
+  "Objects.nonNull": constant
+  "Objects.requireNonNull": constant
+  "StrictMath.abs": constant
+  "StrictMath.ceil": constant
+  "StrictMath.floor": constant
+  "StrictMath.max": constant
+  "StrictMath.min": constant
+  "StrictMath.pow": constant
+  "StrictMath.round": constant
+  "StrictMath.sqrt": constant

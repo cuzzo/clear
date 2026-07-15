@@ -11,6 +11,7 @@ Array:
   lastIndexOf: linear_scan
   map: linear_materialize
   filter: linear_materialize
+  reversed: linear_materialize
   toList: linear_materialize
   sorted: sort
 Hash:
@@ -28,9 +29,11 @@ Set:
   size: constant
   isEmpty: constant
 String:
+  endsWith: linear_scan
   length: constant
   contains: linear_scan
   indexOf: linear_scan
   lastIndexOf: linear_scan
   split: linear_materialize
+  startsWith: linear_scan
   substring: linear_materialize

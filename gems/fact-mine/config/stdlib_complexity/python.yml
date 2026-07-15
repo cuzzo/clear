@@ -28,18 +28,63 @@ Set:
   update: linear_scan
   clear: linear_scan
 str:
+  capitalize: linear_materialize
+  casefold: linear_materialize
   count: linear_scan
+  endswith: linear_scan
   find: linear_scan
   index: linear_scan
+  lower: linear_materialize
+  lstrip: linear_materialize
+  partition: linear_materialize
+  removeprefix: linear_materialize
+  removesuffix: linear_materialize
   startswith: linear_scan
   replace: linear_materialize
+  rfind: linear_scan
+  rindex: linear_scan
+  rpartition: linear_materialize
+  rstrip: linear_materialize
   split: linear_materialize
+  splitlines: linear_materialize
   strip: linear_materialize
+  swapcase: linear_materialize
+  title: linear_materialize
+  upper: linear_materialize
+  zfill: linear_materialize
 String:
+  capitalize: linear_materialize
+  casefold: linear_materialize
   count: linear_scan
+  endswith: linear_scan
   find: linear_scan
   index: linear_scan
+  lower: linear_materialize
+  lstrip: linear_materialize
+  partition: linear_materialize
+  removeprefix: linear_materialize
+  removesuffix: linear_materialize
   startswith: linear_scan
   replace: linear_materialize
+  rfind: linear_scan
+  rindex: linear_scan
+  rpartition: linear_materialize
+  rstrip: linear_materialize
   split: linear_materialize
+  splitlines: linear_materialize
+  strip: linear_materialize
+  swapcase: linear_materialize
+  title: linear_materialize
+  upper: linear_materialize
+  zfill: linear_materialize
+bytes:
+  count: linear_scan
+  endswith: linear_scan
+  find: linear_scan
+  index: linear_scan
+  replace: linear_materialize
+  rfind: linear_scan
+  rindex: linear_scan
+  split: linear_materialize
+  startswith: linear_scan
   strip: linear_materialize

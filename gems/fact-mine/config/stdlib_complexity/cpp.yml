@@ -1,5 +1,8 @@
 Array:
   at: constant
+  back: constant
+  data: constant
+  front: constant
   size: constant
   empty: constant
   push_back: constant
@@ -20,10 +23,18 @@ Set:
   size: constant
   empty: constant
 String:
+  c_str: constant
+  compare: linear_scan
+  data: constant
+  ends_with: linear_scan
+  length: constant
   size: constant
   empty: constant
   find: linear_scan
+  starts_with: linear_scan
   substr: linear_materialize
-Intrinsic:
-  "std::sort": sort
-  "std::binary_search": logarithmic
+# Direct `std::algorithm` calls deliberately remain absent. The C++ adapter
+# currently projects them as a callable expression rather than a resolved
+# receiver/message pair; mapping that parser artifact here would make the
+# language registry depend on syntax details. Add these after the adapter
+# resolves direct calls to their native identities.

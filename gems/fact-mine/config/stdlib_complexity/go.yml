@@ -7,3 +7,65 @@ String:
 Intrinsic:
   len: constant
   cap: constant
+  # Package-qualified APIs only. Do not add fmt, reflection, interfaces, or
+  # synchronization: their work can include user-defined code or blocking.
+  "bytes.Compare": linear_scan
+  "bytes.Contains": linear_scan
+  "bytes.ContainsAny": linear_scan
+  "bytes.ContainsRune": linear_scan
+  "bytes.Equal": linear_scan
+  "bytes.HasPrefix": linear_scan
+  "bytes.HasSuffix": linear_scan
+  "bytes.Index": linear_scan
+  "bytes.LastIndex": linear_scan
+  "bytes.Repeat": linear_materialize
+  "bytes.Replace": linear_materialize
+  "bytes.ReplaceAll": linear_materialize
+  "bytes.Split": linear_materialize
+  "bytes.SplitAfter": linear_materialize
+  "bytes.ToLower": linear_materialize
+  "bytes.ToUpper": linear_materialize
+  "errors.New": constant
+  "maps.Clone": linear_materialize
+  "maps.Copy": linear_scan
+  "slices.BinarySearch": logarithmic
+  "slices.Clone": linear_materialize
+  "slices.Contains": linear_scan
+  "slices.Index": linear_scan
+  "slices.Sort": sort
+  "sort.Ints": sort
+  "sort.Search": logarithmic
+  "sort.Strings": sort
+  "strings.Compare": linear_scan
+  "strings.Contains": linear_scan
+  "strings.ContainsAny": linear_scan
+  "strings.ContainsRune": linear_scan
+  "strings.Cut": linear_scan
+  "strings.EqualFold": linear_scan
+  "strings.Fields": linear_materialize
+  "strings.HasPrefix": linear_scan
+  "strings.HasSuffix": linear_scan
+  "strings.Index": linear_scan
+  "strings.LastIndex": linear_scan
+  "strings.Join": linear_materialize
+  "strings.Repeat": linear_materialize
+  "strings.Replace": linear_materialize
+  "strings.ReplaceAll": linear_materialize
+  "strings.Split": linear_materialize
+  "strings.SplitAfter": linear_materialize
+  "strings.ToLower": linear_materialize
+  "strings.ToUpper": linear_materialize
+  "strings.Trim": linear_scan
+  "strings.TrimPrefix": linear_scan
+  "strings.TrimSuffix": linear_scan
+  "strings.TrimSpace": linear_scan
+  "time.Now": constant
+  "atomic.LoadInt32": constant
+  "atomic.LoadInt64": constant
+  "atomic.LoadPointer": constant
+  "atomic.StoreInt32": constant
+  "atomic.StoreInt64": constant
+  "atomic.StorePointer": constant
+  "atomic.CompareAndSwapInt32": constant
+  "atomic.CompareAndSwapInt64": constant
+  "atomic.CompareAndSwapPointer": constant

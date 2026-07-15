@@ -55,9 +55,6 @@ string:
   length: constant
 Intrinsic:
   "Array.isArray": constant
-  "Object.keys": linear_materialize
-  "Object.values": linear_materialize
-  "Object.entries": linear_materialize
 String:
   includes: linear_scan
   indexOf: linear_scan

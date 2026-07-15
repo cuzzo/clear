@@ -9,5 +9,12 @@ Intrinsic:
   memcmp: linear_scan
   memcpy: linear_scan
   memmove: linear_scan
+  memset: linear_scan
+  strcpy: linear_scan
+  strncpy: linear_scan
+  strcat: linear_scan
+  strncat: linear_scan
+  strcmp: linear_scan
+  strncmp: linear_scan
   qsort: sort
   bsearch: logarithmic

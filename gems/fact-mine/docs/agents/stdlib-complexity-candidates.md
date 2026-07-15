@@ -47,7 +47,7 @@ that can invoke user hooks, so it must never feed YAML automatically.
 
 | Language | Good candidates after identity is proven | Must stay unknown or need a richer model |
 | --- | --- | --- |
-| C | `strcpy`, `strncpy`, `strcat`, `strcmp`, `strstr`, `memset`, plus other ISO string/memory primitives | allocators, syscalls, platform APIs, project helpers |
+| C | `strcpy`, `strncpy`, `strcat`, `strcmp`, `memset`, plus other ISO string/memory primitives | allocators, syscalls, platform APIs, project helpers; two-input searches stay unknown until the operation algebra can represent `O(N*M)` time with `O(1)` auxiliary space |
 | C++ | direct `std` algorithms (`find`, `copy`, `lower_bound`, `sort`) and direct container methods | template forwarding/casts, ordered containers until their separate model, allocator-dependent APIs |
 | Go | `strings`/`bytes` scans and materializers, `sort`, `slices`, `maps`, primitive `errors`/`time`/`atomic` calls | `fmt` where rendered size is not modeled, reflection, synchronization wall time, arbitrary interfaces |
 | Java | `Math`, primitive wrappers, concrete `String`/`Arrays`/`Collections` calls | `List`/`Map` interfaces, user `equals`/hashing, reflection/class loading, IO |
@@ -66,6 +66,22 @@ removed 519 unknown operation/function pairs, but most affected functions had
 another unresolved project or callback call. Therefore the 22 increase in
 complete bounds is evidence that standard-library names are not the primary
 bottleneck, not evidence that the registry is ineffective.
+
+## Follow-up conservative expansion
+
+The subsequent exact-native expansion added ISO C string/memory calls, Go
+`strings`/`bytes`/`slices`/`maps` operations, Java arrays/collections/math,
+C# array/math/path/string APIs, and Python string/bytes operations. It also
+fixed C's synthetic bare-call receiver so configured C intrinsics actually
+reach the registry.
+
+Against the same 35-repository corpus, it raises complete time bounds from
+4,946 to 5,036 (+90) and reduces unknown operation/function pairs from 42,820
+to 42,224. The TypeScript pair count deliberately increases by 44 because
+`Object.keys`/`values`/`entries` were removed: proxies and getters can execute
+user code, and global binding identity is not yet proven. The detailed graph
+and timing feasibility evidence is in
+[`minimal-call-graph-feasibility.md`](minimal-call-graph-feasibility.md).
 
 ## Priority order
 

@@ -1292,10 +1292,19 @@ mod tests {
         );
         for (language, receiver, message, expected) in [
             ("c", None, "strlen", NormalizedCollectionOperation::LinearScan),
+            ("c", None, "strcmp", NormalizedCollectionOperation::LinearScan),
             ("go", None, "len", NormalizedCollectionOperation::Constant),
+            ("go", Some("strings"), "HasPrefix", NormalizedCollectionOperation::LinearScan),
+            ("go", Some("slices"), "BinarySearch", NormalizedCollectionOperation::Logarithmic),
+            ("go", Some("maps"), "Clone", NormalizedCollectionOperation::LinearMaterialize),
+            ("go", Some("atomic"), "LoadInt64", NormalizedCollectionOperation::Constant),
             ("php", None, "array_map", NormalizedCollectionOperation::LinearMaterialize),
             ("lua", Some("table"), "sort", NormalizedCollectionOperation::Sort),
             ("java", Some("Collections"), "binarySearch", NormalizedCollectionOperation::Logarithmic),
+            ("java", Some("Arrays"), "copyOf", NormalizedCollectionOperation::LinearMaterialize),
+            ("java", Some("Math"), "sqrt", NormalizedCollectionOperation::Constant),
+            ("csharp", Some("Array"), "BinarySearch", NormalizedCollectionOperation::Logarithmic),
+            ("csharp", Some("Math"), "Sqrt", NormalizedCollectionOperation::Constant),
         ] {
             assert_eq!(
                 configured_intrinsic_operation(language, receiver, message),
@@ -1304,5 +1313,10 @@ mod tests {
             );
         }
         assert_eq!(configured_intrinsic_operation("c", Some("project"), "strlen"), None);
+        assert_eq!(
+            configured_intrinsic_operation("javascript", Some("Object"), "keys"),
+            None,
+            "generic JavaScript object operations may invoke proxy or getter hooks"
+        );
     }
 }

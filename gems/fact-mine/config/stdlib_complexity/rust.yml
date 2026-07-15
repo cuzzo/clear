@@ -8,6 +8,9 @@ Array:
   push: constant
   pop: constant
   contains: linear_scan
+  insert: linear_scan
+  remove: linear_scan
+  reverse: linear_scan
   position: linear_scan
   binary_search: logarithmic
   clone: linear_materialize
