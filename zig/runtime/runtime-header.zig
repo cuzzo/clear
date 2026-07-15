@@ -628,6 +628,55 @@ pub const CheatLib = struct {
         return list;
     }
 
+    pub fn Grid(comptime T: type, comptime rank: usize) type {
+        if (rank < 2) @compileError("Grid requires at least two dimensions");
+        return struct {
+            const Self = @This();
+
+            items: []T = &.{},
+            capacity: usize = 0,
+            shape: [rank]usize = @splat(0),
+            strides: [rank]usize = @splat(0),
+
+            pub const empty: Self = .{};
+
+            pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+                if (self.capacity != 0) allocator.free(self.items.ptr[0..self.capacity]);
+                self.* = .empty;
+            }
+        };
+    }
+
+    fn rankOffset(dimensions: anytype, indices: anytype) usize {
+        if (dimensions.len != indices.len) @panic("rank index arity mismatch");
+        var offset: usize = 0;
+        var stride: usize = 1;
+        var axis = dimensions.len;
+        while (axis > 0) {
+            axis -= 1;
+            const extent: usize = @intCast(dimensions[axis]);
+            const index: usize = @intCast(indices[axis]);
+            if (index >= extent) @panic("rank index out of bounds");
+            const term = @mulWithOverflow(index, stride);
+            if (term[1] != 0) @panic("rank offset overflow");
+            const next = @addWithOverflow(offset, term[0]);
+            if (next[1] != 0) @panic("rank offset overflow");
+            offset = next[0];
+            const next_stride = @mulWithOverflow(stride, extent);
+            if (next_stride[1] != 0) @panic("rank stride overflow");
+            stride = next_stride[0];
+        }
+        return offset;
+    }
+
+    pub fn rankGet(container: anytype, dimensions: anytype, indices: anytype) ElementType(@TypeOf(container)) {
+        return getAt(container, rankOffset(dimensions, indices));
+    }
+
+    pub fn rankSet(container: anytype, dimensions: anytype, indices: anytype, value: anytype) void {
+        setAt(container, rankOffset(dimensions, indices), value);
+    }
+
     // Works for ArrayListUnmanaged (has .items) AND Standard Slices (direct access)
     // Also handles casting the index to usize automatically.
     // Unwraps optional containers (e.g. from hashmap.get()) before indexing.
@@ -817,14 +866,21 @@ pub const CheatLib = struct {
     // the comptime `@hasField` dispatch.
     pub fn setAt(container: anytype, index: anytype, value: anytype) void {
         const i: usize = @intCast(index);
-        const c = if (@typeInfo(@TypeOf(container)) == .pointer and @typeInfo(@TypeOf(container)).pointer.size == .one) container.* else container;
+        if (@typeInfo(@TypeOf(container)) == .pointer and @typeInfo(@TypeOf(container)).pointer.size == .one) {
+            if (@hasField(@TypeOf(container.*), "items")) {
+                container.items[i] = value;
+            } else {
+                container.*[i] = value;
+            }
+            return;
+        }
 
-        if (@hasField(@TypeOf(c), "items")) {
+        if (@hasField(@TypeOf(container), "items")) {
             // ArrayListUnmanaged
-            c.items[i] = value;
+            container.items[i] = value;
         } else {
             // Standard Slice
-            c[i] = value;
+            container[i] = value;
         }
     }
 

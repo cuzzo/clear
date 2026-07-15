@@ -613,9 +613,10 @@ x: Tuple<Int64, String, Int64> = Tuple{1, "1", 1};
 ```
 
 `Tuple{...}` creates an `AST::TupleLit`, not a list or struct literal. Inference
-preserves every positional type. Constant integer indexing returns the exact
-position type. Dynamic indexing into a heterogeneous tuple is rejected unless
-the result is explicitly matched through a future union facility.
+preserves every positional type. Tuple positions are fields spelled `._0`,
+`._1`, and so on; each returns its exact position type. A position outside the
+declared arity is a compile-time error. Array syntax such as `tuple[0]` is
+always rejected: a heterogeneous product is not a homogeneous fixed array.
 
 During migration, a list literal contextually coerced to `Tuple<...>` remains
 accepted and is auto-fixed to `Tuple{...}`. New code and formatter output use
@@ -633,7 +634,7 @@ boundaries are normative:
 | `[N]T`, `[]T`, and `{K}V` aliases for existing layouts | parser, canonical printer/fixer, source tests | The existing semantic type and lowering can be reused only where layout and defaults are identical. |
 | `BG STREAM YIELDS T` | parser, AST, annotator, diagnostics, formatter | The expected item type must reach the body before its `YIELD` sites are checked. |
 | `?`/`!` asynchronous tense join | annotator and shared type operations | This is a semantic least-upper-bound operation, not syntax. |
-| `Tuple{...}` | parser, AST, annotator, MIR literal lowering, formatter | A standalone heterogeneous tuple must retain positional types without an expected context. Existing tuple type, indexing, cleanup, and backend representation should be reused. |
+| `Tuple{...}` and `._N` | parser, AST, annotator, MIR literal/field lowering, formatter | A standalone heterogeneous tuple must retain positional types without an expected context, and its field-only access must lower to the backend tuple representation. |
 | Per-layer capabilities | recursive type model, annotator, ownership/cleanup, MIR, backends | The current flattened capability slots cannot identify an arbitrary collection layer. |
 | Flat multidimensional ranks | type/layout model, MIR indexing, runtime checks, backends | Nested arrays are not layout-equivalent to a flat rank with strides. |
 | Optional yielded values plus finite completion | annotator, `StreamStep` MIR/runtime protocol, consumers, backends | A parser cannot distinguish a yielded `NIL` from the old optional completion sentinel. |
@@ -646,10 +647,11 @@ claim flat ranks/per-layer capabilities in that series. This keeps the change
 mostly in the front end, but it is not parser-only.
 
 Tuple support in particular must not add a second tuple representation. The
-compiler already understands `Tuple<A, B>`, positional indexing, cleanup, and
-backend tuple layout. The minimum new path is a distinct `AST::TupleLit` whose
+compiler already understands `Tuple<A, B>`, cleanup, and backend tuple layout.
+The minimum new path is a distinct `AST::TupleLit` whose
 annotator infers its positional `Type` children and whose MIR lowering emits the
-existing tuple literal form. If current MIR can represent only contextually
+existing tuple literal form, plus compile-time checked `._N` aliases for the
+backend's positional fields. If current MIR can represent only contextually
 typed list-to-tuple coercion, that lowering is the one small semantic extension
 required; no tuple runtime container is introduced.
 
@@ -718,8 +720,9 @@ the stream-completion protocol change.
    site without synthesizing a union or `Any`.
 5. `feat(tuples): infer and lower dedicated tuple literals`
    Infer exact positional types for `AST::TupleLit` and lower it through the
-   existing tuple MIR/backend representation. Reuse existing indexing,
-   ownership, cleanup, and ABI behavior; add no tuple runtime container.
+   existing tuple MIR/backend representation. Add bounded `._N` positional
+   fields, reject array indexing, and reuse ownership, cleanup, and ABI
+   behavior; add no tuple runtime container.
 6. `feat(tools): print and migrate async contracts and tuple literals`
    Teach the formatter, diagnostics/fixes, LSP spans, and ruby-to-clear to emit
    `BG STREAM YIELDS T` and `Tuple{...}`. Auto-fix contextual tuple list
@@ -727,7 +730,7 @@ the stream-completion protocol change.
 
 The first delivery should touch the parser and AST, shared type/annotation
 logic, the tuple-literal MIR entry point, and syntax-producing tools. It should
-not require changes to tuple storage, tuple indexing, backend tuple layout, or
+not require changes to tuple storage, backend tuple layout, or
 the runtime. If implementation discovers that those existing tuple paths
 cannot be reused, stop and document the mismatch before widening the change.
 
@@ -874,7 +877,8 @@ Exit gate:
 ### Phase 6: Tuple literal and generic-boundary enforcement
 
 - Add `AST::TupleLit`, parser support, exact positional inference, MIR lowering,
-  Zig emission, cleanup, copyability, and constant-index checking.
+  Zig emission, cleanup, copyability, bounded `._N` field aliases, and explicit
+  rejection of Tuple array indexing.
 - Auto-fix contextual tuple list literals.
 - Register compiler-owned monadic/container generics and implement only
   equivalence-proven fixes.
@@ -951,7 +955,8 @@ Required adversarial tests include:
 - nested capability ownership/cleanup across BG, DO, BG STREAM, fields, returns,
   and FFI;
 - generic aliases whose names resemble standard Option/Result/List types;
-- tuple cleanup and dynamic heterogeneous index rejection.
+- tuple cleanup, out-of-range positional-field rejection, and rejection of all
+  heterogeneous array-style Tuple indexing.
 
 ## Risks and Non-Goals
 

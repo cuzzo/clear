@@ -256,6 +256,21 @@ module GenericAnalysis
     # HashMap is a built-in composite type rather than a registered generic
     # schema. Its own annotation validation checks the key/value shape.
     return if arg.map?
+    if arg.generic_instance?
+      if arg.generic_base == :Tuple
+        arg.generic_args.each { |nested_arg| validate_generic_type_arg!(facts, nested_arg) }
+        return
+      end
+      nested_schema = T.cast(lookup_type_schema(arg.generic_base), T.nilable(GenericSchema))
+      error!(facts.node, :GENERIC_UNKNOWN_TYPE_ARG, type: arg.resolved) if nested_schema.nil?
+      nested_params = schema_type_params(nested_schema)
+      if nested_params.length != arg.generic_args.length
+        error!(facts.node, :GENERIC_WRONG_ARG_COUNT,
+          type: arg.generic_base, expected: nested_params.length, got: arg.generic_args.length)
+      end
+      arg.generic_args.each { |nested_arg| validate_generic_type_arg!(facts, nested_arg) }
+      return
+    end
     return if BUILTIN_TYPES.include?(arg.resolved)
     return if facts.fn_type_params.include?(arg.resolved)
 
@@ -672,7 +687,9 @@ module GenericAnalysis
     node_type = node.full_type!(context: "declaration metadata target")
     value_type = node.value.full_type!(context: "declaration metadata value")
 
-    coll_src = if decl_type&.collection
+    coll_src = if decl_type&.rank?
+      nil
+    elsif decl_type&.collection
       decl_type
     elsif value_type.collection
       value_type

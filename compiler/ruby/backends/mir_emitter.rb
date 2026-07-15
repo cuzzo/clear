@@ -2426,7 +2426,7 @@ class MIREmitter
     case node.strategy
     when :pool, :list_capacity, :set_capacity
       "try #{node.zig_type}.initCapacity(#{alloc_zig(node.alloc)}, #{node.capacity})"
-    when :array_list_empty
+    when :array_list_empty, :grid_empty
       "@as(#{node.zig_type}, .empty)"
     when :list_empty, :set_empty, :map_empty
       "#{node.zig_type}{}"

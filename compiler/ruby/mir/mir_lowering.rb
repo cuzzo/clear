@@ -1525,6 +1525,8 @@ class MIRLowering
   sig { params(state: OwnershipFinalizationContext, marks: T::Array[MIR::Stmt], line: T.nilable(Integer), col: T.nilable(Integer)).void }
   def append_transfer_marks_to_body!(state, marks, line, col)
     marks.each do |mark|
+      next if mark.is_a?(MIR::MoveMark) && state.move_mark_names.include?(mark.name.to_s)
+      next if mark.is_a?(MIR::TransferMark) && state.transfer_mark_names.include?(mark.name.to_s)
       if ownership_finalized_node?(mark)
         append_already_finalized_node!(state, mark)
         next
@@ -1917,6 +1919,8 @@ class MIRLowering
   sig { params(marks: T::Array[MIR::Stmt], state: OwnershipFinalizationContext).void }
   def append_transfer_marks!(marks, state)
     marks.each do |mark|
+      next if mark.is_a?(MIR::MoveMark) && state.move_mark_names.include?(mark.name.to_s)
+      next if mark.is_a?(MIR::TransferMark) && state.transfer_mark_names.include?(mark.name.to_s)
       if ownership_finalized_node?(mark)
         append_already_finalized_node!(state, mark)
         next
@@ -2325,7 +2329,7 @@ class MIRLowering
     MIR.each_surface_node(node) do |surface_node|
       append_ownership_transfer_targets_for_surface_node!(operands, surface_node, state)
     end
-    operands.uniq
+    operands.uniq { |operand| [operand.name, operand.target, operand.target_alloc] }
   end
 
   sig { params(operands: T::Array[OwnershipTransferTarget], surface_node: MIR::Node, state: OwnershipFinalizationContext).void }

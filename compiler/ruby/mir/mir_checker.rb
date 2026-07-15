@@ -1420,7 +1420,8 @@ class MIRChecker
 
   sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
   def value_constructor_expr?(node)
-    return true if node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit) || node.is_a?(MIR::ArrayDefaultInit)
+    return true if node.is_a?(MIR::StructInit) || node.is_a?(MIR::TupleLiteral) ||
+      node.is_a?(MIR::ArrayInit) || node.is_a?(MIR::ArrayDefaultInit)
     if node.is_a?(MIR::BlockExpr)
       terminal = node.body.reverse.find do |item|
         item.is_a?(MIR::BreakStmt) && item.label == node.label

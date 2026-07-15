@@ -592,7 +592,17 @@ module CleanupClassifier
     end
 
     # Struct fallback (strings/collections/rc as fields).
-    classify_struct_cleanup_fields(ti, nil, schema_lookup)
+    struct_entry = classify_struct_cleanup_fields(ti, nil, schema_lookup)
+    return struct_entry if struct_entry
+
+    # Structural products such as Tuple have no nominal schema to classify,
+    # but their recursive type tree may still contain promises, collections,
+    # strings, or other cleanup-bearing values. The runtime uniform cleanup
+    # traversal handles those fields by type.
+    structural_product = classify_structural_product(ti, schema_lookup)
+    return structural_product if structural_product
+
+    nil
   end
 
   # ── Walk MATCH AS bindings ──────────────────────────────────────
@@ -847,8 +857,17 @@ module CleanupClassifier
     entry ||= classify_heap_storage(ti, node, schema_lookup, facts.sync)
     entry ||= classify_heap_composite(ti, node, schema_lookup, facts.sync)
     entry ||= classify_struct_cleanup_fields(ti, node, schema_lookup)
+    entry ||= classify_structural_product(ti, schema_lookup)
     entry ||= classify_non_copy_union(ti, schema_lookup)
     finalize_alloc_from_storage!(entry, node, ti, schema_lookup)
+  end
+
+  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.classify_structural_product(ti, schema_lookup)
+    return nil unless ti.tuple?
+    return nil unless ti.recursive_cleanup_shape?(T.unsafe(schema_lookup))
+
+    entry(:uniform, has_moved_guard: true)
   end
 
   sig { params(node: AST::Node).returns(BindingCleanupFacts) }

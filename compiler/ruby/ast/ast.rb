@@ -1350,6 +1350,9 @@ module AST
         vt = node_value.type_object
         t.merge_capabilities_from!(vt)
       end
+      # Rank topology belongs to the declared comma dimensions. A List[]
+      # initializer is construction syntax, not an @list capability.
+      t.collection = nil if type_obj.rank?
 
       self.full_type = t
 
@@ -2126,6 +2129,22 @@ module AST
     def items
       self[:items]
     end
+
+    sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
+    def coerce!(declared_type)
+      return super(declared_type) if declared_type.nil? || declared_type == :Any
+
+      target = declared_type.is_a?(FunctionSignature) ? Type.from_function_signature(declared_type) : Type.new(declared_type)
+      return super(declared_type) unless target.tuple?
+      return [nil, "Tuple arity mismatch: expected #{target.generic_args.length}, got #{items.length}"] if target.generic_args.length != items.length
+
+      items.zip(target.generic_args).each do |item, item_type|
+        _coerced, error = item.coerce!(item_type)
+        return [nil, error] if error
+      end
+      self.coerced_type = target
+      [target, nil]
+    end
   end
   DefaultArrayLit = Struct.new(:token, :type_info, :storage) do
     extend T::Sig
@@ -2355,6 +2374,17 @@ module AST
     # the value is a one-level pointer that lower_get_field must deref.
     attr_accessor :indirect_field
     attr_accessor :safe_nav_chain
+    # Zero-based Tuple position for `value._0`, `value._1`, ... . Kept
+    # separate from field text so lowering never treats Tuple access as a
+    # nominal struct lookup.
+    sig { returns(T.nilable(Integer)) }
+    def tuple_position
+      @tuple_position = T.let(@tuple_position, T.nilable(Integer))
+    end
+    sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
+    def tuple_position=(value)
+      @tuple_position = T.let(value, T.nilable(Integer))
+    end
     sig { returns(T::Boolean) }
     def wildcard?; field == '*' end
     sig { returns(String) }

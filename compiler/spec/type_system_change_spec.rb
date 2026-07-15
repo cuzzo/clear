@@ -133,13 +133,165 @@ RSpec.describe "type-system change contracts" do
   it "infers exact positional types for Tuple literals" do
     ast = annotate(<<~CLEAR)
       value = Tuple{10_i64, "OK", TRUE};
-      number = value[0];
+      number = value._0;
+      text = value._1;
+      flag = value._2;
     CLEAR
     tuple = ast.statements.first.value
 
     expect(tuple).to be_a(AST::TupleLit)
     expect(tuple.full_type!.generic_args.map(&:resolved)).to eq([:Int64, :"Byte[2]", :Bool])
-    expect(ast.statements.last.value.resolved_type).to eq(:Int64)
+    expect(ast.statements.drop(1).map { |statement| statement.value.resolved_type })
+      .to eq([:Int64, :"Byte[2]", :Bool])
+  end
+
+  it "keeps Tuple access distinct from homogeneous array indexing" do
+    expect { annotate('value = Tuple{"hi", 1_i64}; missing = value._2;') }
+      .to raise_error(CompilerError, /Position 2 is out of bounds.*2 positions/)
+    expect { annotate('value = Tuple{"hi", 1_i64}; first = value[0];') }
+      .to raise_error(CompilerError, /Tuple values use positional fields/)
+    expect { annotate('value: Int64 = 1_i64; first = value._0;') }
+      .to raise_error(CompilerError, /field.*_0|_0.*field/i)
+  end
+
+  it "emits Tuple positional fields as Zig anonymous-struct fields" do
+    zig = transpile(<<~CLEAR)
+      FN main() RETURNS Void ->
+        value: Tuple<Bool, Int64> = Tuple{TRUE, 1_i64};
+        flag = value._0;
+        number = value._1;
+        RETURN;
+      END
+    CLEAR
+
+    declared = parse("value: Tuple<Bool, Int64> = DEFAULT;").statements.first.type
+    expect(declared.zig_type).to eq("struct { bool, i64 }")
+    expect(zig).to include("const value = .{true, 1}")
+    expect(zig).to include('.@"0"')
+    expect(zig).to include('.@"1"')
+  end
+
+  it "keeps legacy contextual Tuple literals on the shared lowering path" do
+    zig = transpile(<<~CLEAR)
+      FN main() RETURNS Void ->
+        value: Tuple<Bool, Int64> = [TRUE, 1_i64];
+        RETURN;
+      END
+    CLEAR
+
+    expect(zig).to include("const value = .{true, 1}")
+  end
+
+  it "renders fixed SOA elements through recursive nested type lowering" do
+    plain, locked = parse(<<~CLEAR).statements.map(&:type)
+      plain: Int64[2]@soa = DEFAULT;
+      locked: Int64[2]@soa:locked = DEFAULT;
+    CLEAR
+
+    expect(plain.zig_type).to eq("CheatLib.SoaList(i64)")
+    expect(locked.zig_type).to eq("*CheatLib.Locked(CheatLib.SoaList(i64))")
+  end
+
+  it "owns cleanup-bearing values nested in typed Tuple literals" do
+    zig = transpile(<<~CLEAR)
+      FN main() RETURNS Void ->
+        value: Tuple<String, Int64> = Tuple{"hello", 1_i64};
+        text = value._0;
+        RETURN;
+      END
+    CLEAR
+
+    expect(zig).to match(/const __tmp_\d+ = @as\(\[\]const u8, try rt\.heapAlloc\(\)\.dupe\(u8, "hello"\)\)/)
+    expect(zig).to match(/const value = \.\{__tmp_\d+, 1\}/)
+    expect(zig).to include('CheatLib.cleanup(@TypeOf(value), rt.heapAlloc(), &value)')
+    expect(zig).to match(/errdefer if \(!__tmp_\d+_moved\) CheatLib\.cleanup/)
+    expect(zig).to match(/__tmp_\d+_moved = true/)
+    expect(zig.scan(/__tmp_\d+_moved = true/).length).to eq(1)
+  end
+
+  it "cleans a future field without changing ordinary promise-list allocation" do
+    tuple_zig = transpile(<<~CLEAR)
+      FN main() RETURNS Void ->
+        value: Tuple<~Int64, Bool> = Tuple{BG { RETURN 20_i64; }, TRUE};
+        RETURN;
+      END
+    CLEAR
+    list_zig = transpile(<<~CLEAR)
+      FN main() RETURNS Void ->
+        MUTABLE futures: [List]~Void = List[];
+        futures.append(BG { sleep(1_i64); });
+        RETURN;
+      END
+    CLEAR
+
+    expect(tuple_zig).to include("CheatLib.cleanup(@TypeOf(value), rt.heapAlloc(), &value)")
+    expect(list_zig).to include("try futures.append(rt.frameAlloc()")
+  end
+
+  it "validates recursively nested Tuple and nominal generic arguments" do
+    expect { annotate("value: Tuple<Tuple<Int64, Bool>, Bool> = DEFAULT;") }
+      .not_to raise_error
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Box<T> { value: T }
+        value: Tuple<Box<Int64>, Bool> = Tuple{Box<Int64>{ value: 1_i64 }, TRUE};
+      CLEAR
+    }.not_to raise_error
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Box<T> { value: T }
+        value: Tuple<Box<Int64, Bool>, Bool> = DEFAULT;
+      CLEAR
+    }.to raise_error(CompilerError, /expects 1 type argument.*got 2/i)
+    expect { annotate("value: Tuple<Missing<Int64>, Bool> = DEFAULT;") }
+      .to raise_error(CompilerError, /Unknown type argument/i)
+  end
+
+  it "composes Tuple recursively with collections and layer capabilities" do
+    types = parse(<<~CLEAR).statements.map(&:type)
+      fixed_outer: [2]Tuple<Int64, Bool> = DEFAULT;
+      list_outer: [List]Tuple<Int64, Bool> = DEFAULT;
+      pool_outer: [Pool(4)]Tuple<Int64, Bool> = DEFAULT;
+      set_outer: [Set]Tuple<Int64, Bool> = DEFAULT;
+      map_outer: {String}Tuple<Int64, Bool> = DEFAULT;
+      tuple_inner: Tuple<[2]Int64, [List]Bool, [Pool(4)]Int64, [Set]Bool, {String}Int64> = DEFAULT;
+      capable_inner: Tuple<[List]@shared Int64, {String}@sharded(2) Bool> = DEFAULT;
+    CLEAR
+
+    expect(types.first.element_type).to be_tuple
+    expect(types[1].element_type).to be_tuple
+    expect(types[2].element_type).to be_tuple
+    expect(types[3].element_type).to be_tuple
+    expect(types[4].value_type).to be_tuple
+    inner = types[5].generic_args
+    expect(inner[0]).to be_fixed
+    expect(inner[1]).to be_list_collection
+    expect(inner[2]).to be_pool
+    expect(inner[3]).to be_set_collection
+    expect(inner[4]).to be_map
+    expect(types[6].generic_args.first).to be_shared
+    expect(types[6].generic_args.last).to be_sharded
+  end
+
+  it "preserves the exact Tuple or collection node gated by each tense" do
+    type = parse(<<~CLEAR).statements.first.type
+      value: Tuple<?[List]Int64, [List]?Int64, !{String}Int64, {String}!Int64, ~[List]Int64, [List]~Int64> = DEFAULT;
+    CLEAR
+    optional_list, list_optional, fallible_map, map_fallible, future_list, list_future = type.generic_args
+
+    expect(optional_list).to be_optional
+    expect(T.must(optional_list.wrapped_type)).to be_list_collection
+    expect(list_optional).to be_list_collection
+    expect(T.must(list_optional.element_type)).to be_optional
+    expect(fallible_map).to be_error_union
+    expect(T.must(fallible_map.success_type)).to be_map
+    expect(map_fallible).to be_map
+    expect(map_fallible.value_type).to be_error_union
+    expect(future_list).to be_tense
+    expect(T.must(future_list.tense_type)).to be_list_collection
+    expect(list_future).to be_list_collection
+    expect(T.must(list_future.element_type)).to be_tense
+    expect(Type.new("Tuple<!Int64, Bool>").zig_type).to eq("struct { anyerror!i64, bool }")
   end
 
   it "lowers Tuple literals through the existing tuple MIR" do
@@ -275,10 +427,74 @@ RSpec.describe "type-system change contracts" do
   it "rejects unsupported dimensions before accepting ambiguous type syntax" do
     expect { parse("value: [Matrix]Int64 = DEFAULT;") }
       .to raise_error(ParserError, /Inline Pivot dimension/)
-    expect { parse("value: [10, 5]Int64 = DEFAULT;") }
-      .to raise_error(ParserError, /flat-rank lowering/)
     expect { parse("value: {Symbol, Int64}String = {};") }
       .to raise_error(ParserError, /nested maps use separate brace layers/)
+  end
+
+  it "models comma dimensions as one flat rectangular rank" do
+    fixed, dynamic, mixed = parse(<<~CLEAR).statements.map(&:type)
+      fixed: [2, 3]Int64 = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64, 6_i64];
+      dynamic: [List, List]Int64 = List[];
+      mixed: [4, List]Int64 = List[];
+    CLEAR
+
+    expect(fixed.rank_dimensions).to eq([2, 3])
+    expect(fixed.capacity).to eq(6)
+    expect(fixed).to be_fixed_rank
+    expect(dynamic.rank_dimensions).to eq(%i[LIST LIST])
+    expect(dynamic).to be_dynamic_rank
+    expect(mixed.rank_dimensions).to eq([4, :LIST])
+    expect(TypeExpressionPrinter.inline(fixed.shape.expression)).to eq("[2, 3]Int64")
+    expect(fixed.fixed_position_count).to eq(6)
+    expect(fixed.fixed_position_type(5)&.resolved).to eq(:Int64)
+    expect(fixed.fixed_position_type(6)).to be_nil
+  end
+
+
+  it "rejects collection layouts and unknown dimensions inside a flat rank" do
+    expect { parse("value: [Set, List]Int64 = DEFAULT;") }
+      .to raise_error(ParserError, /integer or List dimensions/)
+    expect { parse("value: [List, Set]Int64 = DEFAULT;") }
+      .to raise_error(ParserError, /integer or List dimensions/)
+  end
+
+  it "type-checks complete integer coordinates and exact fixed storage" do
+    ast = annotate(<<~CLEAR)
+      matrix: [2, 3]Int64 = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64, 6_i64];
+      item = matrix[1_i64, 2_i64];
+    CLEAR
+
+    expect(ast.statements.last.value.resolved_type).to eq(:Int64)
+    expect { annotate("matrix: [2, 3]Int64 = [1_i64];") }
+      .to raise_error(CompilerError, /requires 6 items, got 1/)
+    expect { annotate("matrix: [2, 3]Int64 = DEFAULT; item = matrix[1_i64];") }
+      .to raise_error(CompilerError, /expects 2 indices, got 1/)
+    expect { annotate('matrix: [2, 3]Int64 = DEFAULT; item = matrix[1_i64, "x"];') }
+      .to raise_error(CompilerError, /indices must be integers/)
+    expect { annotate("matrix: [List, List]Int64 = [1_i64];") }
+      .to raise_error(CompilerError, /requires explicit shape metadata/)
+  end
+
+  it "lowers fixed and dynamic ranks to flat layouts with checked indexing" do
+    zig = transpile(<<~CLEAR)
+      FN main() RETURNS Void ->
+        MUTABLE matrix: [2, 3]Int64 = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64, 6_i64];
+        item = matrix[1_i64, 2_i64];
+        matrix[0_i64, 1_i64] = item;
+        grid: [List, List]Int64 = List[];
+        grid_item = grid[0_i64, 0_i64];
+        RETURN;
+      END
+    CLEAR
+
+    expect(zig).to include("[6]i64")
+    expect(zig).to include("CheatLib.rankGet")
+    expect(zig).to include("CheatLib.rankSet")
+    expect(zig).to include("[2]usize{ 2, 3 }")
+    expect(zig).to include("[2]usize{ @as(usize, @intCast(1)), @as(usize, @intCast(2)) }")
+    expect(zig).to include("CheatLib.Grid(i64, 2)")
+    expect(zig).to include("grid.shape")
+    expect(zig).to include(".empty")
   end
 
   it "autofixes legacy annotations from their semantic type trees" do

@@ -83,6 +83,7 @@ module Annotator
 
         declared_type = node.type
         validate_type_annotation!(node, declared_type) if declared_type
+        validate_rank_initializer!(node, declared_type) if declared_type
         validate_stream_type!(node)
 
         promote_pipe_to_observable_dest!(node)
@@ -227,6 +228,21 @@ module Annotator
         track_union_alias(node.name, value)
         record_capability_binding(node.name, node, final_type, storage)
         nil
+      end
+
+      sig { params(node: DeclarationNode, declared_type: Type).void }
+      def validate_rank_initializer!(node, declared_type)
+        T.bind(self, SemanticAnnotator)
+        return unless declared_type.rank?
+        return unless node.value.is_a?(AST::ListLit)
+
+        item_count = node.value.items.length
+        if declared_type.fixed_rank? && item_count != T.must(declared_type.capacity)
+          error!(node, :RANK_LITERAL_SIZE, expected: T.must(declared_type.capacity), got: item_count)
+        end
+        if declared_type.dynamic_rank? && item_count != 0
+          error!(node, :RANK_DYNAMIC_LITERAL_NEEDS_SHAPE)
+        end
       end
 
       sig { params(node: DeclarationNode).returns(T::Boolean) }

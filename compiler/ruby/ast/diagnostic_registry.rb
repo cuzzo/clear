@@ -1535,6 +1535,34 @@ module DiagnosticRegistry
       cause: "Parameters, returns, and fields describe value shapes and ABIs, but `[List(N)]` and `[Set(N)]` describe how a particular value should initially allocate storage.",
       fix_hint: "Use `[]T` or `[Set]T` in the reusable type, then put the capacity hint on the local binding that constructs the collection.",
     },
+    RANK_INDEX_ARITY: {
+      severity: :error, category: :type,
+      template: "Index Error: rectangular rank expects %{expected} indices, got %{got}.",
+      summary: "Canonical rectangular indexing supplies one integer per axis.",
+      cause: "A comma-rank is one flat layout, so a complete element lookup must identify every axis.",
+      fix_hint: "Use `grid[x, y, ...]` with exactly one index for each declared dimension.",
+    },
+    RANK_INDEX_INTEGER: {
+      severity: :error, category: :type,
+      template: "Index Error: rectangular rank indices must be integers, got %{got}.",
+      summary: "Every rectangular axis uses an integer coordinate.",
+      cause: "Stride-based offset calculation is defined only for integer coordinates.",
+      fix_hint: "Convert the coordinate to an integer before indexing.",
+    },
+    RANK_LITERAL_SIZE: {
+      severity: :error, category: :type,
+      template: "Type Error: flat rank literal requires %{expected} items, got %{got}.",
+      summary: "A fixed rectangular rank owns exactly the product of its extents.",
+      cause: "The flat initializer does not fill the declared contiguous storage exactly.",
+      fix_hint: "Provide exactly the product of the declared dimensions as row-major items.",
+    },
+    RANK_DYNAMIC_LITERAL_NEEDS_SHAPE: {
+      severity: :error, category: :type,
+      template: "Type Error: a non-empty dynamic rank initializer requires explicit shape metadata.",
+      summary: "A flat item list cannot determine two or more dynamic extents unambiguously.",
+      cause: "The same flat item count may correspond to several rectangular shapes.",
+      fix_hint: "Initialize an empty dynamic rank, then use the shaped grid constructor once available; fixed ranks may use a flat row-major literal.",
+    },
     INDIRECT_ELEMENT_EXPLICIT: {
       severity: :error, category: :type,
       template: "Layout Error: inserting inline %{type} into `%{type}@indirect[]@list` requires a heap allocation. EASY may apply this uniquely forced layout; DEFAULT and STRICT require an explicit `@indirect` construction.",
@@ -1722,6 +1750,20 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "Unsupported Index",
       summary:  "Indexing-by-int isn't supported on this type.",
+    },
+    TUPLE_INDEX_SYNTAX: {
+      severity: :error, category: :type,
+      template: "Tuple values use positional fields, not array indexing.",
+      summary: "Access Tuple positions with `._0`, `._1`, and so on.",
+      cause: "A Tuple is a heterogeneous product whose positions may have different types; treating it as an array would imply homogeneous indexed access.",
+      fix_hint: "Replace `tuple[N]` with `tuple._N` when N is a compile-time Tuple position.",
+    },
+    FIXED_POSITION_OUT_OF_BOUNDS: {
+      severity: :error, category: :type,
+      template: "Position %{index} is out of bounds for %{type}, which has %{count} positions.",
+      summary: "A compile-time positional access must name an existing field.",
+      cause: "Fixed positional shapes expose exactly their declared number of positions, numbered from zero.",
+      fix_hint: "Use a position from 0 through count - 1.",
     },
 
     # Containers / unions / structs / generics in annotator

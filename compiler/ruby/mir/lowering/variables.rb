@@ -593,6 +593,11 @@ module MIRLoweringVariables
       return place_value_for_destination(placed, rhs, decl_alloc, ft)
     end
 
+    if ft.dynamic_rank? && rhs_unwrapped.is_a?(AST::ListLit) && rhs_unwrapped.items.empty?
+      inner = MIR::ContainerInit.new(bare_zig, :grid_empty, decl_alloc, nil)
+      return has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
+    end
+
     if ft.pool?
       return lower(node.value) if rhs_unwrapped.is_a?(AST::MoveNode) || AST.call?(rhs_unwrapped) || !rhs_unwrapped.is_a?(AST::ListLit)
       inner = MIR::ContainerInit.new(bare_zig, :pool, decl_alloc, ft.capacity)
@@ -1119,6 +1124,17 @@ module MIRLoweringVariables
     return lower_direct_indexed_set(node, cast_index: false) if bc_target?
 
     receiver_type = Type.new(ti)
+
+    if receiver_type.rank?
+      target = MIR::AddressOf.new(T.cast(lower(target_node), MIR::Node))
+      index_nodes = node.name.index.is_a?(AST::TupleLit) ? node.name.index.items : [node.name.index]
+      lowered_indices = index_nodes.map { |index_node| T.cast(lower(index_node), MIR::Node) }
+      coordinates = rank_coordinates(target, receiver_type, lowered_indices)
+      value = T.cast(lower(node.value), MIR::Node)
+      call = MIR::RuntimeCall.new(MIR::RuntimeCalls.rank_set_spec,
+        [target, coordinates.dimensions, coordinates.indices, value])
+      return MIR::ExprStmt.new(call, false)
+    end
 
     # Raw fixed-size arrays (`Int64[N]`): emit native Zig indexed assignment.
     # The CheatLib.setAt template takes `container: anytype` and copies the

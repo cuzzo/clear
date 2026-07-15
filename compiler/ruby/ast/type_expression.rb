@@ -189,6 +189,78 @@ class TypeExpressionTree
     )
   end
 
+  # Replace the argument children of a nominal type without flattening any
+  # child expression back through a source string. The parser uses this while
+  # legacy outer syntax is still accepted (for example
+  # `Tuple<[List]Int64, {String}Bool>`): the outer parser may normalize its own
+  # suffixes, but recursive Inline Pivot children retain their topology and
+  # per-layer capabilities exactly.
+  sig do
+    params(
+      expression: TypeExpression,
+      name: Symbol,
+      arguments: T::Array[TypeExpression]
+    ).returns(TypeExpression)
+  end
+  def self.with_nominal_arguments(expression, name, arguments)
+    case expression
+    when OptionalTypeExpression
+      OptionalTypeExpression.new(
+        inner: with_nominal_arguments(expression.inner, name, arguments),
+        capabilities: expression.capabilities,
+      )
+    when FallibleTypeExpression
+      FallibleTypeExpression.new(
+        inner: with_nominal_arguments(expression.inner, name, arguments),
+        error_set: expression.error_set,
+        capabilities: expression.capabilities,
+      )
+    when FutureTypeExpression
+      FutureTypeExpression.new(
+        inner: with_nominal_arguments(expression.inner, name, arguments),
+        capabilities: expression.capabilities,
+      )
+    when LinearTypeExpression
+      LinearTypeExpression.new(
+        kind: expression.kind,
+        dimensions: expression.dimensions,
+        item: with_nominal_arguments(expression.item, name, arguments),
+        allocation_hint: expression.allocation_hint,
+        capabilities: expression.capabilities,
+      )
+    when StreamTypeExpression
+      StreamTypeExpression.new(
+        cardinality: expression.cardinality,
+        item: with_nominal_arguments(expression.item, name, arguments),
+        capabilities: expression.capabilities,
+      )
+    when FunctionTypeExpression
+      expression
+    when TupleTypeExpression
+      return expression unless name == :Tuple
+
+      TupleTypeExpression.new(items: arguments, capabilities: expression.capabilities)
+    when NamedTypeExpression
+      return expression unless expression.name == name
+
+      NamedTypeExpression.new(name: name, arguments: arguments, capabilities: expression.capabilities)
+    when MapTypeExpression
+      return expression unless name == :HashMap
+
+      key = arguments.length == 1 ? expression.key : arguments.fetch(0)
+      value = arguments.length == 1 ? arguments.fetch(0) : arguments.fetch(1)
+      MapTypeExpression.new(
+        key: key,
+        value: value,
+        key_implicit: arguments.length == 1,
+        legacy_separator: expression.legacy_separator,
+        capabilities: expression.capabilities,
+      )
+    else
+      expression
+    end
+  end
+
   sig { params(expression: TypeExpression).returns(Integer) }
   def self.node_count(expression)
     each_node(expression).length

@@ -18,18 +18,22 @@ module Annotator
           node.target.safe_nav_chain == true
         target_type_info = T.must(target_type_info.wrapped_type) if implicit_safe_nav
 
-        if target_type_info.tuple?
-          unless node.index.is_a?(AST::Literal) && node.index.value.is_a?(Integer)
-            error!(node, :UNSUPPORTED_INDEX)
+        if target_type_info.rank?
+          indices = node.index.is_a?(AST::TupleLit) ? node.index.items : [node.index]
+          if indices.length != target_type_info.rank
+            error!(node, :RANK_INDEX_ARITY, expected: target_type_info.rank, got: indices.length)
           end
-          tuple_index = T.cast(node.index.value, Integer)
-          tuple_types = target_type_info.generic_args
-          unless tuple_index >= 0 && tuple_index < tuple_types.length
-            error!(node, :UNSUPPORTED_INDEX)
+          indices.each do |index|
+            index_type = index.full_type!(context: "rank index")
+            error!(index, :RANK_INDEX_INTEGER, got: index_type.resolved) unless index_type.integer?
           end
-          stamp_type!(node, T.must(tuple_types[tuple_index]))
+          stamp_type!(node, T.must(target_type_info.element_type))
           node.container_borrow = true
           return
+        end
+
+        if target_type_info.tuple?
+          error!(node, :TUPLE_INDEX_SYNTAX)
         end
 
         # Look up index operation from the registry
@@ -100,6 +104,23 @@ module Annotator
         end
         target_type = T.must(target_type.wrapped_type) if implicit_safe_nav
         type = target_type.resolved
+
+        if target_type.tuple? && (match = /\A_(\d+)\z/.match(node.field.to_s))
+          position = match[1].to_i
+          position_type = target_type.fixed_position_type(position)
+          if position_type.nil?
+            error!(node, :FIXED_POSITION_OUT_OF_BOUNDS,
+              index: position, count: T.must(target_type.fixed_position_count), type: Type.surface_name(target_type))
+          end
+          field_type = T.must(position_type)
+          navigation = node.target.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+          field_type = Type.optional_of(field_type) if navigation && !field_type.optional?
+          node.tuple_position = position
+          node.safe_nav_chain = true if implicit_safe_nav
+          node.container_borrow = true
+          stamp_type!(node, field_type)
+          return
+        end
 
         # Struct Field Lookup
         if node.wildcard?

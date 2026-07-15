@@ -705,6 +705,15 @@ class ClearParser
     else
       # INDEX: list[0]
       # INDEX: hash["OK"]
+      if match!(:CHAR, ',')
+        indices = T.let([first], T::Array[AST::Node])
+        loop do
+          indices << parse_expression
+          break unless match!(:CHAR, ',')
+        end
+        consume(:CHAR, ']')
+        return AST::GetIndex.new(start_token, lhs, AST::TupleLit.new(start_token, indices, nil))
+      end
       consume(:CHAR, ']')
       AST::GetIndex.new(start_token, lhs, first)
     end
@@ -728,6 +737,13 @@ class ClearParser
     else
       name_token = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
       name = name_token.text!
+      # The lexer intentionally keeps identifiers and numeric literals
+      # separate, so Rust-style Tuple fields arrive as `_` then `0`.
+      # Join only this exact positional spelling; ordinary names cannot
+      # absorb a trailing number here.
+      if name == "_" && (match?(:NUMBER) || match?(:INT64))
+        name = "_#{consume_number.value}"
+      end
 
       # Predicate suffix: name? followed by ( → method call with ? suffix
       if match?(:CHAR, '?') && peek_at(1)&.value == '('
@@ -3369,6 +3385,8 @@ class ClearParser
     auto_tok = T.let(nil, T.nilable(Lexer::Token))
     auto_type = false
     base = T.let("", String)
+    generic_base = T.let(nil, T.nilable(Symbol))
+    generic_argument_expressions = T.let([], T::Array[TypeExpression])
     if match?(:KEYWORD, 'Auto')
       # Auto — gradual-typing placeholder. Resolved to a concrete type
       # by the inference pass (see docs/agents/gradual-typing.md). At
@@ -3389,10 +3407,13 @@ class ClearParser
     # preserves the synchronization family as part of T.
     # In type-annotation context, '<' is always a generic argument list, never a comparison.
     if match?(:CHAR, '<')
+      generic_base = base.to_sym
       consume(:CHAR, '<')
       type_args = []
       until match?(:CHAR, '>')
-        type_args << type_annotation_source(parse_type_annotation(migration_root: false))
+        argument = parse_type_annotation(migration_root: false)
+        type_args << type_annotation_source(argument)
+        generic_argument_expressions << argument.shape.expression
         match!(:CHAR, ',')
       end
       consume(:CHAR, '>')
@@ -3478,6 +3499,14 @@ class ClearParser
       ownership = :shared
     end
     t = Type.new(base_sym, ownership: ownership, sync: sync, layout: layout, location: loc, collection: collection, shard_count: shard_count, observable: observable, auto: auto_type)
+    unless generic_base.nil?
+      expression = TypeExpressionTree.with_nominal_arguments(
+        t.shape.expression,
+        generic_base,
+        generic_argument_expressions,
+      )
+      t.replace_shape!(t.shape.with_expression(expression))
+    end
     t.auto_token = auto_tok if auto_tok
     t.apply_type_annotation_extras!(soa: is_soa, elem_ownership: elem_ownership, elem_sync: elem_sync, elem_layout: elem_layout, observable_token: observable_token)
     t
@@ -3581,6 +3610,7 @@ class ClearParser
 
     kind = T.let(:array, Symbol)
     dimension = T.let(nil, T.nilable(T.any(Integer, Symbol)))
+    dimensions = T.let([], T::Array[T.any(Integer, Symbol)])
     allocation_hint = T.let(nil, T.nilable(Integer))
     if match?(:NUMBER) || match?(:INT64)
       dimension = consume_number.value.to_i
@@ -3603,14 +3633,28 @@ class ClearParser
         error!(previous, :PARSER_EXPECTED, expected: "an Inline Pivot dimension", got: layout, type: previous.type, line: previous.line)
       end
     end
-    if match?(:CHAR, ',')
-      error!(current, :PARSER_EXPECTED, expected: "one dimension until flat-rank lowering is enabled", got: current.value, type: current.type, line: current.line)
+    dimensions << T.must(dimension)
+    while match!(:CHAR, ',')
+      if !allocation_hint.nil? || kind == :set || kind == :pool
+        error!(previous, :PARSER_EXPECTED, expected: "integer or List dimensions in a flat rank", got: previous.value, type: previous.type, line: previous.line)
+      end
+      if match?(:NUMBER) || match?(:INT64)
+        dimensions << consume_number.value.to_i
+      else
+        layout = consume(:TYPE_ID).text!
+        unless layout == "List"
+          error!(previous, :PARSER_EXPECTED, expected: "integer or List dimensions in a flat rank", got: layout, type: previous.type, line: previous.line)
+        end
+        dimensions << :LIST
+      end
     end
     consume(:CHAR, ']')
-    caps = parse_inline_capabilities(collection: kind == :array ? nil : kind)
+    kind = :rank if dimensions.length > 1
+    collection = %i[list set pool].include?(kind) ? kind : nil
+    caps = parse_inline_capabilities(collection: collection)
     LinearTypeExpression.new(
       kind: kind,
-      dimensions: [T.must(dimension)],
+      dimensions: dimensions,
       item: parse_inline_type_expression,
       allocation_hint: allocation_hint,
       capabilities: caps

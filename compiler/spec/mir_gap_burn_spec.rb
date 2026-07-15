@@ -2631,6 +2631,14 @@ RSpec.describe "MIR gap-burn characterization" do
     low.send(:append_transfer_marks!, [finalized_for_append], append_state)
     expect(append_state.out).to eq([finalized_for_append])
 
+    duplicate_state = ownership_finalization_context(out: [MIR::MoveMark.new("owned")])
+    duplicate_state.transfer_mark_names << "owned"
+    low.send(:append_transfer_marks!, [
+      MIR::MoveMark.new("owned"),
+      MIR::TransferMark.new("owned", :return, :heap),
+    ], duplicate_state)
+    expect(duplicate_state.out).to contain_exactly(MIR::MoveMark.new("owned"))
+
     expect(low.send(:alloc_mark_present?, [MIR::AllocMark.new("owned", :heap, Type.new(:String))], "owned")).to eq(true)
     expect(low.send(:transfer_mark_present?, [MIR::TransferMark.new("owned", :return, :heap)], "owned")).to eq(true)
     borrowed = MIR::OwnedBorrow.new("borrowed", "source")

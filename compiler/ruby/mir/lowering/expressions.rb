@@ -136,11 +136,17 @@ module MIRLoweringExpressions
     const :type_info, Type
     const :target_name, T.nilable(String)
     const :needs_mut_ref, T::Boolean
+    const :rank_indices, T.nilable(T::Array[MIR::Node]), default: nil
 
     sig { returns(T::Boolean) }
     def optional?
       optional
     end
+  end
+
+  class RankCoordinates < T::Struct
+    const :dimensions, MIR::Node
+    const :indices, MIR::ArrayInit
   end
 
   INTEGER_LITERAL_CASTS = T.let({
@@ -1209,7 +1215,7 @@ module MIRLoweringExpressions
     target_type_sym = ti.resolved.to_s.to_sym
     union_schema = union_schemas.dig(target_type_sym)
     union_variants = union_schema.is_a?(Schemas::UnionSchema) ? union_schema.variants : nil
-    field_str = node.field.to_s
+    field_str = node.tuple_position.nil? ? node.field.to_s : "@\"#{node.tuple_position}\""
     union_payload = union_variants && (union_variants.key?(node.field) ||
                                        union_variants.key?(field_str) ||
                                        union_variants.key?(field_str.to_sym))
@@ -1376,16 +1382,21 @@ module MIRLoweringExpressions
     target = optional ? MIR::Ident.new("_r") : T.cast(lower(target_node), MIR::Node)
     target_type = Type.from_node!(target_node, context: "index target")
     target_type = T.must(target_type.wrapped_type) if implicit_safe_nav
+    rank_indices = if target_type.rank?
+      index_nodes = node.index.is_a?(AST::TupleLit) ? node.index.items : [node.index]
+      index_nodes.map { |index_node| T.cast(lower(index_node), MIR::Node) }
+    end
 
     IndexAccessPlan.new(
       target: target,
-      index: T.cast(lower(node.index), MIR::Node),
+      index: rank_indices ? T.must(rank_indices.first) : T.cast(lower(node.index), MIR::Node),
       optional: optional,
       optional_source: optional_source,
       target_ast: target_ast,
       type_info: target_type,
       target_name: target_node.is_a?(AST::Identifier) ? target_node.name : nil,
       needs_mut_ref: node.needs_mut_ref == true,
+      rank_indices: rank_indices,
     )
   end
 
@@ -1403,6 +1414,8 @@ module MIRLoweringExpressions
     target = plan.target
     index = plan.index
     ti = plan.type_info
+    return rank_index_value(target, ti, T.must(plan.rank_indices)) if ti.rank?
+
     if ti.rc_map? && !bc_target?
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
@@ -1460,6 +1473,28 @@ module MIRLoweringExpressions
     else
       index_collection_value(target, index, plan)
     end
+  end
+
+  sig { params(target: MIR::Node, type_info: Type, indices: T::Array[MIR::Node]).returns(MIR::RuntimeCall) }
+  def rank_index_value(target, type_info, indices)
+    T.bind(self, MIRLowering) rescue nil
+    coordinates = rank_coordinates(target, type_info, indices)
+    MIR::RuntimeCall.new(MIR::RuntimeCalls.rank_get_spec, [target, coordinates.dimensions, coordinates.indices])
+  end
+
+  sig { params(target: MIR::Node, type_info: Type, indices: T::Array[MIR::Node]).returns(RankCoordinates) }
+  def rank_coordinates(target, type_info, indices)
+    T.bind(self, MIRLowering) rescue nil
+    rank = type_info.rank
+    cast_indices = indices.map { |index| MIR::Cast.new(index, "usize", :intCast) }
+    index_array = MIR::ArrayInit.new("usize", rank.to_s, cast_indices)
+    dimensions = if type_info.fixed_rank?
+      items = type_info.rank_dimensions.map { |dimension| MIR::Lit.new(T.cast(dimension, Integer).to_s) }
+      MIR::ArrayInit.new("usize", rank.to_s, items)
+    else
+      MIR::FieldGet.new(target, "shape")
+    end
+    RankCoordinates.new(dimensions: dimensions, indices: index_array)
   end
 
   sig { params(target: MIR::Node, index: MIR::Node, plan: IndexAccessPlan).returns(MIR::Node) }

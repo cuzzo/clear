@@ -1,0 +1,27 @@
+FN swap(value: Tuple<Bool, Int64>) RETURNS Tuple<Int64, Bool> ->
+    RETURN Tuple{value._1, value._0};
+END
+
+FN main() RETURNS Void ->
+    value: Tuple<Bool, Int64> = Tuple{TRUE, 42_i64};
+    ASSERT value._0;
+    ASSERT value._1 == 42_i64;
+
+    swapped: Tuple<Int64, Bool> = swap(value);
+    ASSERT swapped._0 == 42_i64;
+    ASSERT swapped._1;
+
+    nested: Tuple<Tuple<Int64, Bool>, Bool> = Tuple{swapped, TRUE};
+    ASSERT nested._0._0 == 42_i64;
+    ASSERT nested._0._1;
+    ASSERT nested._1;
+
+    inferred = Tuple{FALSE, 7_i64};
+    ASSERT !(inferred._0);
+    ASSERT inferred._1 == 7_i64;
+
+    textual: Tuple<String, Int64> = Tuple{"hello", 5_i64};
+    ASSERT textual._0 == "hello";
+    ASSERT textual._1 == 5_i64;
+    RETURN;
+END

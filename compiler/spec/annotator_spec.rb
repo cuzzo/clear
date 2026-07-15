@@ -1651,10 +1651,10 @@ RSpec.describe SemanticAnnotator do
         end
 
 
-        it "resolves literal tuple indices positionally" do
+        it "resolves tuple positional fields exactly" do
           tuple_ast = run(<<~FLUX)
             key: Tuple<String@symbol, Int64> = [:kind, 1];
-            value = key[1];
+            value = key._1;
           FLUX
           expect(tuple_ast.statements.last.resolved_type).to eq(:Int64)
         end

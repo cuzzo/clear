@@ -359,6 +359,12 @@ class TypeShape
     linear = linear_expression
     return nil if linear.nil?
 
+    if linear.dimensions.length > 1
+      return nil unless linear.dimensions.all? { |dimension| dimension.is_a?(Integer) }
+
+      return linear.dimensions.reduce(1) { |product, dimension| product * T.cast(dimension, Integer) }
+    end
+
     dimension = linear.dimensions.last
     dimension == :LIST ? nil : dimension
   end
@@ -2125,7 +2131,13 @@ class Type
     else
       value_elem_layout
     end
-    value_collection = value_type.nil? ? nil : value_type.collection
+    # A list literal is merely the storage initializer for a rectangular
+    # rank. It must not overwrite the rank's semantic topology with :list.
+    value_collection = if final_type.rank? || value_type.nil?
+      nil
+    else
+      value_type.collection
+    end
     link_src = !value_type.nil? && value_type.link? ? value_type.link_source : nil
     apply_capabilities!(
       shard_count: Type.capability_integer_or_unset(final_shard_count),
@@ -2525,6 +2537,59 @@ class Type
   sig { returns(T::Boolean) }
   def array?
     shape.array
+  end
+
+  sig { returns(T::Boolean) }
+  def rank?
+    expression = shape.expression
+    expression = expression.inner if expression.is_a?(FallibleTypeExpression)
+    expression = expression.inner if expression.is_a?(OptionalTypeExpression) && expression.inner.is_a?(LinearTypeExpression)
+    expression.is_a?(LinearTypeExpression) && expression.dimensions.length > 1
+  end
+
+  sig { returns(T::Array[T.any(Integer, Symbol)]) }
+  def rank_dimensions
+    return [] unless rank?
+
+    expression = shape.expression
+    expression = expression.inner if expression.is_a?(FallibleTypeExpression)
+    expression = expression.inner if expression.is_a?(OptionalTypeExpression)
+    T.cast(expression, LinearTypeExpression).dimensions
+  end
+
+  sig { returns(Integer) }
+  def rank
+    rank_dimensions.length
+  end
+
+  sig { returns(T::Boolean) }
+  def dynamic_rank?
+    rank? && rank_dimensions.any? { |dimension| dimension == :LIST }
+  end
+
+  sig { returns(T::Boolean) }
+  def fixed_rank?
+    rank? && !dynamic_rank?
+  end
+
+  # Compile-time positional validation shared by heterogeneous Tuples and
+  # fixed homogeneous arrays. Surface syntax remains distinct: Tuple uses
+  # `._N`; arrays use `[N]`.
+  sig { returns(T.nilable(Integer)) }
+  def fixed_position_count
+    return generic_args.length if tuple?
+    return T.cast(capacity, T.nilable(Integer)) if fixed? && !dynamic?
+
+    nil
+  end
+
+  sig { params(index: Integer).returns(T.nilable(Type)) }
+  def fixed_position_type(index)
+    count = fixed_position_count
+    return nil if count.nil? || index.negative? || index >= count
+    return generic_args.fetch(index) if tuple?
+
+    element_type
   end
 
   sig { returns(T::Boolean) }
@@ -4089,6 +4154,10 @@ class Type
     return false if seen_set.include?(key)
     seen_set << key
 
+    if tuple?
+      return generic_args.any? { |arg| arg.needs_cleanup?(schema_lookup, seen_set) }
+    end
+
     if schema_lookup
       lookup = schema_lookup
       schema = lookup.call(resolved)
@@ -4225,7 +4294,6 @@ class Type
     return true if any_rc? || link?       # RC refcount is heap-managed
     return true if any_sync?              # mutex is OS resource
     return true if resource?              # file handle, socket, etc.
-
     # Frame collections/maps: backing buffer uses frame allocator, arena rewind handles it.
     # UNLESS elements have heap internals (e.g. list of RC pointers).
     if collection?
@@ -4368,6 +4436,19 @@ class Type
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
   # ruby-to-clear: effects reentrant
   def zig_type(is_param: false, is_field: false)
+    compute_zig_type(is_param: is_param, is_field: is_field)
+  end
+
+  # Zig permits inferred error sets (`!T`) only in function return positions.
+  # Recursive type positions—Tuple fields, collection elements, map values,
+  # and promise payloads—must name a concrete error set.
+  sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
+  def nested_zig_type(is_param: false, is_field: false)
+    if error_union?
+      payload = error_union_payload_with_outer_capabilities
+      return "anyerror!#{payload.nested_zig_type(is_param: is_param, is_field: is_field)}"
+    end
+
     compute_zig_type(is_param: is_param, is_field: is_field)
   end
 
@@ -4925,7 +5006,7 @@ class Type
     end
 
     inner_zig = if fixed_soa?
-      base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
+      base_zig = T.must(element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       "CheatLib.SoaList(#{base_zig})"
     else
       bare_data_type.zig_type(is_param: is_param, is_field: is_field)
@@ -4947,7 +5028,7 @@ class Type
   sig { returns(String) }
   # ruby-to-clear: effects reentrant
   def map_zig_type
-    val_zig = value_type.zig_type
+    val_zig = value_type.nested_zig_type
     if striped?
       current_shard_count = T.must(shard_count)
       if numeric_map?
@@ -5001,7 +5082,8 @@ class Type
     # A node reference is always a four-byte nullable generational handle.
     # Optionality is encoded by NodeRef's zero sentinel instead of Zig's
     # optional tag, keeping ?T@node fields compact too.
-    # 1. Handle Error Union: !T -> !zig_type
+    # 1. Handle Error Union: !T -> !zig_type. Recursive positions call
+    # nested_zig_type, which supplies a concrete `anyerror` set for Zig.
     if error_union?
       inner_zig = error_union_payload_with_outer_capabilities.zig_type(is_param: is_param, is_field: is_field)
       return "!#{inner_zig}"
@@ -5011,7 +5093,7 @@ class Type
     if optional?
       inner = T.must(wrapped_type)
       return inner.zig_type(is_param: is_param, is_field: is_field) if inner.node?
-      inner_zig = T.must(wrapped_type).zig_type(is_param: is_param, is_field: is_field)
+      inner_zig = T.must(wrapped_type).nested_zig_type(is_param: is_param, is_field: is_field)
       return "?#{inner_zig}"
     end
 
@@ -5067,9 +5149,21 @@ class Type
       return "[]const u8"
     end
 
-    # 3b. Handle Pool / ShardedPool collection
+    # 3b. Handle rectangular ranks before collection compatibility flags.
+    # A rank may be initialized by List[], but that value-level construction
+    # detail must never change its flat Grid/array representation.
+    if rank?
+      base_zig = T.must(element_type).nested_zig_type(is_param: is_param, is_field: is_field)
+      if dynamic_rank?
+        return "CheatLib.Grid(#{base_zig}, #{rank})"
+      end
+
+      return "[#{T.must(capacity)}]#{base_zig}"
+    end
+
+    # 3c. Handle Pool / ShardedPool collection
     if pool?
-      base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
+      base_zig = T.must(element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       if soa?
         return "CheatLib.SoaPool(#{base_zig})"
       end
@@ -5080,15 +5174,15 @@ class Type
       return "CheatLib.Pool(#{base_zig})"
     end
 
-    # 3c. Handle @set collection
+    # 3d. Handle @set collection
     if set_collection?
-      base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
+      base_zig = T.must(element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.Set(#{base_zig})"
     end
 
-    # 3d. Handle @list / ShardedList / SoaList collection
+    # 3e. Handle @list / ShardedList / SoaList collection
     if list_collection?
-      base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
+      base_zig = T.must(element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       if soa?
         return "CheatLib.SoaList(#{base_zig})"
       end
@@ -5099,17 +5193,17 @@ class Type
       return "std.ArrayListUnmanaged(#{base_zig})"
     end
 
-    # 3e. Handle fixed SOA arrays (T[N]@soa — no @pool/@list wrapper)
+    # 3f. Handle fixed SOA arrays (T[N]@soa — no @pool/@list wrapper)
     if fixed_soa?
-      base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
+      base_zig = T.must(element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.SoaList(#{base_zig})"
     end
 
-    # 4. Handle Arrays recursively
+    # 4. Handle one-dimensional arrays recursively
     #    Dynamic arrays use ArrayListUnmanaged only for local variables to support growth.
     #    Struct fields and function parameters use slices.
     if array?
-      base_zig = T.must(element_type).zig_type(is_param: is_param, is_field: is_field)
+      base_zig = T.must(element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       array_capacity_value = capacity
       if dynamic? && !is_param && !is_field
         # Dynamic arrays (ArrayListUnmanaged) are always value-typed locals.
@@ -5157,7 +5251,7 @@ class Type
     i = T.let(0, Integer)
     while i < args.length
       arg_type = args[i]
-      args_zig_parts << T.unsafe(arg_type).zig_type
+      args_zig_parts << T.unsafe(arg_type).nested_zig_type
       i += 1
     end
     args_zig = args_zig_parts.join(", ")

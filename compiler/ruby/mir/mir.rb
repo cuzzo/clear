@@ -3707,6 +3707,22 @@ module MIR
       RuntimeCallSpec,
     )
 
+    RANK_GET = T.let(
+      RuntimeCallSpec.new(
+        callee: "CheatLib.rankGet",
+        callable_contract: CallableContract.no_ownership(3),
+      ).freeze,
+      RuntimeCallSpec,
+    )
+
+    RANK_SET = T.let(
+      RuntimeCallSpec.new(
+        callee: "CheatLib.rankSet",
+        callable_contract: CallableContract.no_ownership(4),
+      ).freeze,
+      RuntimeCallSpec,
+    )
+
     sig { returns(RuntimeCallSpec) }
     def self.eql_spec
       EQL
@@ -3715,6 +3731,16 @@ module MIR
     sig { returns(RuntimeCallSpec) }
     def self.thread_count_spec
       THREAD_COUNT
+    end
+
+    sig { returns(RuntimeCallSpec) }
+    def self.rank_get_spec
+      RANK_GET
+    end
+
+    sig { returns(RuntimeCallSpec) }
+    def self.rank_set_spec
+      RANK_SET
     end
 
     sig { params(element_zig: String).returns(RuntimeCallSpec) }

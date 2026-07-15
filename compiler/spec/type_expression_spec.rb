@@ -158,6 +158,49 @@ RSpec.describe "recursive Type accessors" do
 end
 
 RSpec.describe TypeExpressionTree do
+  it "replaces nominal arguments through streams and leaves unrelated nodes intact" do
+    tuple = TupleTypeExpression.new(items: [NamedTypeExpression.new(name: :Old)])
+    stream = StreamTypeExpression.new(cardinality: :FINITE, item: tuple)
+    replacement = NamedTypeExpression.new(name: :Int64)
+    updated = described_class.with_nominal_arguments(stream, :Tuple, [replacement])
+
+    expect(updated).to be_a(StreamTypeExpression)
+    updated_tuple = T.cast(T.cast(updated, StreamTypeExpression).item, TupleTypeExpression)
+    expect(updated_tuple.items).to contain_exactly(replacement)
+
+    wrapped = [
+      OptionalTypeExpression.new(inner: tuple),
+      FallibleTypeExpression.new(inner: tuple),
+      FutureTypeExpression.new(inner: tuple),
+      LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: tuple),
+    ]
+    expect(wrapped.map { |node| described_class.with_nominal_arguments(node, :Tuple, [replacement]).class })
+      .to eq(wrapped.map(&:class))
+
+    named = NamedTypeExpression.new(name: :Box)
+    updated_named = T.cast(described_class.with_nominal_arguments(named, :Box, [replacement]), NamedTypeExpression)
+    expect(updated_named.arguments).to contain_exactly(replacement)
+    expect(described_class.with_nominal_arguments(named, :Other, [replacement])).to equal(named)
+
+    signature = Type::FunctionType.new(params: [], return_type: Type.new(:Void))
+    function = FunctionTypeExpression.new(signature: signature)
+    expect(described_class.with_nominal_arguments(function, :Tuple, [replacement])).to equal(function)
+
+    map = MapTypeExpression.new(
+      key: NamedTypeExpression.new(name: :String),
+      value: NamedTypeExpression.new(name: :Old),
+    )
+    updated_map = T.cast(described_class.with_nominal_arguments(map, :HashMap, [replacement]), MapTypeExpression)
+    expect(updated_map.value).to equal(replacement)
+
+    unknown_class = Class.new do
+      include TypeExpression
+      define_method(:capabilities) { TypeCapabilities.new(ownership: :affine) }
+    end
+    unknown = T.cast(unknown_class.new, TypeExpression)
+    expect(described_class.with_nominal_arguments(unknown, :Tuple, [replacement])).to equal(unknown)
+  end
+
   it "updates capability-bearing unary and stream nodes exhaustively" do
     item = NamedTypeExpression.new(name: :Item)
     linear = LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: item)
