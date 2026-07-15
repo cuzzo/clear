@@ -23,7 +23,7 @@ use crate::syntax::{self, Document};
 use crate::type_inference::TypeExpr;
 
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Which fact-set to produce.
