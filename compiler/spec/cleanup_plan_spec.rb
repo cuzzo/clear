@@ -96,6 +96,25 @@ RSpec.describe CleanupClassifier do
   end
 
   describe "binding cleanup facts" do
+    it "classifies owned fallible captures through their successful type" do
+      plan = cleanup_plan_for(<<~CLEAR, "main")
+        FN makeLabel() RETURNS !String ->
+          RETURN "ready";
+        END
+
+        FN main() RETURNS Void ->
+          IF makeLabel() IS_OK AS label THEN
+            ASSERT label == "ready", "label";
+          END
+          RETURN;
+        END
+      CLEAR
+
+      entry = plan.facts.entry_for("label")
+      expect(entry.kind).to eq(:uniform)
+      expect(entry.has_moved_guard?).to eq(true)
+    end
+
     it "builds cleanup classification plans from legacy binding maps" do
       entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
 

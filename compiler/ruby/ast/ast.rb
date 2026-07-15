@@ -533,6 +533,14 @@ module AST
       node.is_a?(AST::MoveNode) || node.is_a?(AST::ShareNode)
   end
 
+  # IS_OK annotation exposes the successful payload as the expression's
+  # regular type while retaining the fallible source type for capture logic.
+  sig { params(node: AST::Node).returns(Type) }
+  def self.capture_expr_source_type(node)
+    fallible = node.respond_to?(:error_union_type) ? T.unsafe(node).error_union_type : nil
+    fallible || Type.from_node!(node, context: "capture expression")
+  end
+
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.collection_method_call?(node)
     !!(node.is_a?(AST::MethodCall) &&

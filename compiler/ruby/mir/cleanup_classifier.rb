@@ -678,7 +678,7 @@ module CleanupClassifier
   private_class_method def self.walk_capture_bindings(body, schema_lookup, bindings)
     each_capture_binding(body) do |name, expr, anchor_node|
       next unless AST.capture_expr_owns_result?(expr)
-      expr_ti = Type.from_node!(expr, context: "capture binding")
+      expr_ti = AST.capture_expr_source_type(expr)
       inner_ti = if expr_ti.stream_step?
         expr_ti.stream_step_item_type
       elsif expr_ti.error_union?

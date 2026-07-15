@@ -147,4 +147,10 @@ RSpec.describe "ClearParser WITH MATCH records" do
     expect { parse_statement("WITH cell AS value MATCH END") }
       .to raise_error(ParserError, /at least one WHEN arm/i)
   end
+
+  it "reports an unknown WITH MATCH family without fabricating one" do
+    expect {
+      parse_statement("WITH cell AS value MATCH WHEN LOKCED -> { PASS; } END")
+    }.to raise_error(ParserError, /Unknown REQUIRES family 'LOKCED'/)
+  end
 end

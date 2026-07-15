@@ -38,6 +38,7 @@ module MIRLoweringCapabilities
     T.nilable(T.any(
       AST::Node,
       AST::RawBody,
+      Lexer::Token,
       T::Hash[BasicObject, BasicObject],
       Symbol,
       String,
@@ -787,7 +788,7 @@ module MIRLoweringCapabilities
   def ast_contains_return?(node)
     T.bind(self, MIRLowering) rescue nil
     case node
-    when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type, AST::FunctionDef
+    when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type, Lexer::Token, AST::FunctionDef
       false
     when Array
       node.any? { |item| ast_contains_return?(item) }

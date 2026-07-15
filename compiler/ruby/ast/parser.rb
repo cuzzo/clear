@@ -1935,7 +1935,7 @@ class ClearParser
   def parse_requires_family_or_reentrance
     tok = consume(:TYPE_ID)
     token_value = tok.text!
-    if REQUIRES_VALID_FAMILIES.include?(token_value)
+    result = if REQUIRES_VALID_FAMILIES.include?(token_value)
       RequiresKind.new(family: token_value.to_sym)
     elsif REQUIRES_REENTRANCE_KINDS.include?(token_value)
       RequiresKind.new(reentrance: :non_reentrant)
@@ -1947,8 +1947,8 @@ class ClearParser
         "closest REQUIRES family/kind",
         category: :type, cascade: true
       )
-      RequiresKind.new
     end
+    T.must(result)
   end
 
   # Legacy thin wrapper: callers that only need families.

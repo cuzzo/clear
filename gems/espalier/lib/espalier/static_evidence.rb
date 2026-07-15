@@ -619,7 +619,7 @@ module Espalier
 
     def corpus_metadata
       git_top = begin
-        git_root
+        git_root_for(@root)
       rescue ArgumentError
         nil
       end

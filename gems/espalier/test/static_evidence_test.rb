@@ -6,6 +6,25 @@ require "tmpdir"
 require_relative "../lib/espalier"
 
 class StaticEvidenceTest < Minitest::Test
+  def test_marks_only_a_git_worktree_root_as_a_complete_corpus
+    Dir.mktmpdir("espalier-closed-corpus") do |dir|
+      system("git", "-C", dir, "init", "--quiet", exception: true)
+      File.write(File.join(dir, "worker.rb"), <<~RUBY)
+        class Worker
+          def call
+            1
+          end
+        end
+      RUBY
+
+      complete = Espalier::StaticEvidence.build([dir], root: dir)
+      partial = Espalier::StaticEvidence.build([File.join(dir, "worker.rb")], root: dir)
+
+      assert_equal true, complete.dig("corpus", "complete")
+      assert_equal false, partial.dig("corpus", "complete")
+    end
+  end
+
   def test_builds_static_evidence_using_rust_fact_mine
     nil_kill_features = loaded_nil_kill_features
 

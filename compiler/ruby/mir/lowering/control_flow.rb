@@ -285,7 +285,7 @@ module MIRLoweringControlFlow
 
   sig { params(expr: AST::Node).returns(Type) }
   def capture_expr_payload_type(expr)
-    ti = Type.from_node!(expr)
+    ti = AST.capture_expr_source_type(expr)
     if ti.stream_step?
       T.must(ti.stream_step_item_type)
     elsif ti.error_union?

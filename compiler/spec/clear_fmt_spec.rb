@@ -13,6 +13,11 @@ require_relative "../ruby/ast/parser" unless defined?(ClearParser)
 # src/backends/formatter.rb.
 
 RSpec.describe Formatter do
+  it "keeps adjacent Inline Pivot collection layers flush" do
+    source = "value: []{String}[2]Tuple<Int64, String> = DEFAULT;\n"
+    expect(Formatter.format(source)).to include("[]{String}[2]Tuple<Int64, String>")
+  end
+
   # Mirrors the CLI's behaviour from `clear` (case 'fmt'):
   #   - default:  format every file in place; emit path on change
   #   - --stdout: print formatted output for the file

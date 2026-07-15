@@ -314,6 +314,35 @@ RSpec.describe ClearFixSupport do
     expect(migration&.fixes&.map(&:description)).to include("Rewrite as `[]Int64`.")
   end
 
+  it "isolates REQUIRE warmup diagnostics and direct non-Ruby findings" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "helper.clear"), "STRUCT Helper { value: Int64 }\n")
+      source = <<~CLEAR
+        REQUIRE "helper.clear";
+        values: Int64[]@list = [];
+        missing = unknownName;
+      CLEAR
+
+      findings = described_class.collect_findings(source, source_dir: dir)
+      expect(findings.map(&:category)).to include(:type_migration)
+
+      direct = described_class.send(
+        :findings_for_path,
+        File.join(dir, "sample.clear"),
+        "values: Int64[]@list = [];\n",
+        out: StringIO.new,
+        only_set: nil,
+      )
+      expect(direct.map(&:category)).to include(:type_migration)
+    end
+  end
+
+  it "always restores collectors after malformed full and migration-only input" do
+    expect(described_class.collect_findings('value = "unterminated')).to eq([])
+    expect(described_class.collect_type_migrations('value = "unterminated')).to eq([])
+    expect(FixCollector.enabled?).to be(false)
+  end
+
   it "skips malformed CLEAR heredocs without aborting a bulk fix run" do
     Dir.mktmpdir do |dir|
       path = File.join(dir, "negative_spec.rb")
