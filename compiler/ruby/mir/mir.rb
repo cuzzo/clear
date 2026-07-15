@@ -4921,7 +4921,8 @@ module MIR
       return OwnershipEffect.none unless sig
 
       heap_return = sig.heap_return_alloc? == true
-      if sig.emits_allocating? && !sig.mutates_receiver? && !sig.return_type.void?
+      if sig.emits_allocating? && !sig.mutates_receiver? &&
+          !sig.frame_return_alloc? && !sig.return_type.void?
         return OwnershipEffect.owned(alloc: heap_return ? :heap : nil)
       end
       OwnershipEffect.from_callable_facts(

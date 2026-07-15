@@ -38,6 +38,17 @@ RSpec.describe "register MIR ownership contracts" do
     }.not_to raise_error
   end
 
+  it "distinguishes owned collection results from frame-arena strings" do
+    split_sig = T.must(IntrinsicRegistry.lookup(STD_LIB, "split"))
+    to_string_sig = IntrinsicRegistry.overloads(STD_LIB, "toString").first
+
+    split_effect = MIR::InlineBc.new(:split, [], split_sig).ownership_effect
+    string_effect = MIR::InlineBc.new(:toString, [], to_string_sig).ownership_effect
+
+    expect(split_effect.produces_owned).to be(true)
+    expect(string_effect.produces_owned).to be(false)
+  end
+
   it "searches typed WITH bodies containing lexer tokens for return flow" do
     expect {
       compile_register(<<~CLEAR)
