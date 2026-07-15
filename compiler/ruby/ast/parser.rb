@@ -2820,6 +2820,7 @@ class ClearParser
         index -= 1
         item
       end
+      stamp_source_range!(nested, if_token, previous)
       body = [nested]
     end
     T.cast(body.fetch(0), T.any(AST::IfStatement, AST::IfBind))

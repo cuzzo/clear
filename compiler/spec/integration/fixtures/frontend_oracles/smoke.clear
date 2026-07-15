@@ -1,0 +1,7 @@
+FN main(value: Int64) RETURNS Int64 ->
+  IF value > 0_i64 THEN
+    RETURN value;
+  ELSE
+    RETURN 0_i64;
+  END
+END

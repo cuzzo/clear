@@ -1,0 +1,24 @@
+[
+  {
+    "name": "missing THEN",
+    "source": "IF TRUE PASS; END",
+    "snapshot": {
+      "class": "ParserError",
+      "message": "Expected `THEN`, got 'PASS' (line 1).",
+      "file": "oracle.clear",
+      "start": [1, 9, 8],
+      "end": [1, 13, 12]
+    }
+  },
+  {
+    "name": "mismatched group delimiter",
+    "source": "value = (1_i64];",
+    "snapshot": {
+      "class": "ParserError",
+      "message": "Expected ), got ] (CHAR) line 1",
+      "file": "oracle.clear",
+      "start": [1, 15, 14],
+      "end": [1, 16, 15]
+    }
+  }
+]
