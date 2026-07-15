@@ -332,15 +332,15 @@ test "BUG: Pool.deinit must free struct variant fields in HashMap values" {
     // testing.allocator detects leaks.
 }
 
-// --- Bug 6: cleanup() on union struct variant doesn't free *T (@indirect) field ---
+// --- Bug 6: cleanup() on union struct variant doesn't free *T (@boxed) field ---
 // NOTE: This is blocked by an annotator bug - HashMap.get() returns a by-value
-// copy of a union with @indirect fields, creating shared ownership of the *T
+// copy of a union with @boxed fields, creating shared ownership of the *T
 // pointer. The annotator must prevent this (non-Copy type) before cleanup can
 // safely free *T fields. See annotator specs for the illegal-state test.
 
 test "BUG: cleanup(LamValue.Lambda) must free *MinValue body pointer" {
     // A union with an inline struct variant containing body: *MinValue
-    // (the @indirect pattern). cleanup() must free the heap-allocated
+    // (the @boxed pattern). cleanup() must free the heap-allocated
     // pointer. Currently cleanup's struct handler only handles RC fields
     // and nested struct recursion - it skips single-pointer fields.
     const alloc = std.testing.allocator;
@@ -386,7 +386,7 @@ test "BUG: cleanup(Lambda) with List body must not double-free shared slice" {
 
 // Bug 7: HashMap.get returns shallow copy sharing *T with map entry.
 // This is an ILLEGAL STATE that the annotator prevents (non-Copy unions
-// with @indirect fields cannot be copied by value). No Zig test needed -
+// with @boxed fields cannot be copied by value). No Zig test needed -
 // the annotator's use_after_move_spec covers this at the language level.
 
 // --- Bug 8: HashMap deinit must free duped strings inside struct variant slice fields ---
@@ -599,7 +599,7 @@ test "dupeValue deep-copies cleanup-bearing struct union payload fields independ
 }
 
 // Recursive union type similar to the interpreter's Value (17 variants,
-// @indirect pointers, slices of self). needsCleanup must handle this
+// @boxed pointers, slices of self). needsCleanup must handle this
 // without exceeding comptime branch limits.
 const RecValue_Pair = struct { car: *RecValue, cdr: *RecValue };
 const RecValue_Lambda = struct { params: []RecValue, body: *RecValue, env_id: u64 };

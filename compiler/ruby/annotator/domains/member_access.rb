@@ -184,7 +184,7 @@ module Annotator
           field_type = apply_type_subst(field_type, subst)
         end
         if field_type.indirect?
-          # A struct-pointee @indirect field is an owned heap pointer that
+          # A struct-pointee @boxed field is an owned heap pointer that
           # moves like the old `%T`: bind/move the `*T`, let Zig auto-deref
           # field access, and free once. An explicit read-deref there turns
           # the move into a value copy and leaks the box. String/scalar and
@@ -251,7 +251,7 @@ module Annotator
         cap_error = [
           [sym&.locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@locked"],
           [sym&.write_locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@writeLocked"],
-          [sym&.atomic_ptr?, :CAP_FIELD_NEEDS_WITH_SNAPSHOT, "SNAPSHOT", "@indirect:atomic"],
+          [sym&.atomic_ptr?, :CAP_FIELD_NEEDS_WITH_SNAPSHOT, "SNAPSHOT", "@boxed:atomic"],
         ].find { |candidate| candidate[0] }
         if cap_error && !in_auto_lock && !in_with_block
           emit_cap_field_needs_with!(node,
@@ -401,7 +401,7 @@ module Annotator
           if Schemas.inline_struct?(raw_expected)
             error!(node, :UNION_INLINE_VARIANT_OLD_SYNTAX, union: node.name, variant: variant_name, union2: node.name, variant2: variant_name)
           end
-          # @indirect single-type payload: unwrap inner type for type-checking;
+          # @boxed single-type payload: unwrap inner type for type-checking;
           # mark the value node so the transpiler heap-allocates it via create(*T).
           indirect_payload = raw_expected.is_a?(Type) && raw_expected.indirect?
           raw_for_check = if indirect_payload
@@ -509,7 +509,7 @@ module Annotator
             # The field declaration is the explicit layout decision.  A
             # literal placed into that field is contextually constructed in
             # its declared representation in every mode; requiring a second
-            # @indirect at each initializer would duplicate the contract.
+            # @boxed at each initializer would duplicate the contract.
             val_node.needs_heap_create = true
             current_fn_ctx&.record_heap_use!
           end

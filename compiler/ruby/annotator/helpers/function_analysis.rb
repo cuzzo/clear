@@ -793,7 +793,7 @@ module FunctionAnalysis
     return Type.coercion_surface_name(type) unless element
 
     element_name = Type.surface_name_type(element)
-    element_name += "@indirect" if element.indirect?
+    element_name += "@boxed" if element.indirect?
     collection_name = type.collection ? "@#{type.collection}" : ""
     "#{element_name}[]#{collection_name}"
   end

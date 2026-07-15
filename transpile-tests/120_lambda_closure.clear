@@ -10,7 +10,7 @@ UNION Value {
     Symbol: String,
     NativeFn: String,
     List: Value[],
-    Lambda { params: Value[], body: Value @indirect, envId: Id<Env> },
+    Lambda { params: Value[], body: Value @boxed, envId: Id<Env> },
     EnvRef: Id<Env>
 }
 

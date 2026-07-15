@@ -2375,7 +2375,7 @@ module AST
     # assignment — writes go through visit_assignment_field's
     # auto-lock path instead.
     attr_accessor :is_assignment_lhs
-    # Set by visit_GetField when this reads an @indirect (heap-boxed) field:
+    # Set by visit_GetField when this reads an @boxed (heap-boxed) field:
     # the value is a one-level pointer that lower_get_field must deref.
     attr_accessor :indirect_field
     attr_accessor :safe_nav_chain

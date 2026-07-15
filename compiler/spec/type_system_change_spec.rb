@@ -794,8 +794,23 @@ RSpec.describe "type-system change contracts" do
     expect(TypeExpressionPrinter.inline(type.shape.expression))
       .to eq("[]@local {Symbol}@shared:locked Int64")
 
-    boxed_item = parse("value: []Int64@indirect = DEFAULT;").statements.first.type
+    boxed_item = parse("value: []Int64@boxed = DEFAULT;").statements.first.type
     expect(T.must(boxed_item.element_type).layout).to eq(:indirect)
+  end
+
+  it "accepts legacy @indirect while fixing it to canonical @boxed" do
+    source = <<~CLEAR
+      value: []Int64@indirect = DEFAULT;
+      shared_value: []Int64@shared:indirect = DEFAULT;
+    CLEAR
+    rewritten, count, = ClearFixSupport.apply_to_source(source, only_set: Set[:type_migration])
+
+    expect(parse(source).statements.first.type.element_type&.layout).to eq(:indirect)
+    expect(count).to eq(2)
+    expect(rewritten).to eq(<<~CLEAR)
+      value: []Int64@boxed = DEFAULT;
+      shared_value: []Int64@shared:boxed = DEFAULT;
+    CLEAR
   end
 
   it "enforces capability-site and semantic-node budgets" do

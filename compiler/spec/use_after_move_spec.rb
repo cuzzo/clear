@@ -249,13 +249,13 @@ RSpec.describe UseAfterMoveChecker do
   end
 
   # =========================================================================
-  # Union with @indirect inline struct variant is non-Copy.
-  # @indirect creates a *T heap pointer - by-value copy creates shared
+  # Union with @boxed inline struct variant is non-Copy.
+  # @boxed creates a *T heap pointer - by-value copy creates shared
   # ownership of the same pointer, which is an illegal state (double-free).
   # =========================================================================
-  it "raises on use after move for union with @indirect struct variant" do
+  it "raises on use after move for union with @boxed struct variant" do
     expect_error(<<~CLEAR, /USE AFTER MOVE/)
-      UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+      UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
       FN makeLambda!() RETURNS Value ->
           RETURN Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
       END

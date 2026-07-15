@@ -1,6 +1,6 @@
 STRUCT User { id: Int64 }
 
-FN makeUser() RETURNS !User @indirect ->
+FN makeUser() RETURNS !User @boxed ->
     u = User{ id: 1 };
     RETURN u; # Should disable local free
 END

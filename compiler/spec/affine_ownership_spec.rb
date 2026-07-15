@@ -370,7 +370,7 @@ RSpec.describe SemanticAnnotator do
   describe "Parameter ownership" do
     let(:preamble) {
       <<~CLEAR
-        UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+        UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
       CLEAR
     }
 
@@ -442,7 +442,7 @@ RSpec.describe SemanticAnnotator do
   describe "Borrow capture in struct/union construction" do
     let(:preamble) {
       <<~CLEAR
-        UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
+        UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @boxed, id: Int64 } }
       CLEAR
     }
 
@@ -483,7 +483,7 @@ RSpec.describe SemanticAnnotator do
     context "default lambda parameter is borrowed" do
       let(:code) {
         <<~CLEAR
-          UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+          UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
           FN test!(MUTABLE map: {String}Value) RETURNS !Void ->
               v = Value.Nil;
               map["key"] = v;
@@ -502,7 +502,7 @@ RSpec.describe SemanticAnnotator do
     context "default function parameter (borrowed) cannot be stored" do
       let(:code) {
         <<~CLEAR
-          UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+          UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
           FN test!(v: Value, MUTABLE map: {String}Value) RETURNS Void ->
               map["key"] = v;
               RETURN;
@@ -518,7 +518,7 @@ RSpec.describe SemanticAnnotator do
     context "TAKES function parameter (owned) can be stored" do
       let(:code) {
         <<~CLEAR
-          UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+          UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
           FN test!(TAKES v: Value, MUTABLE map: {String}Value) RETURNS !Void ->
               map["key"] = v;
               RETURN;
@@ -540,7 +540,7 @@ RSpec.describe SemanticAnnotator do
     context "MATCH AS on borrowed parameter produces borrowed binding" do
       let(:code) {
         <<~CLEAR
-          UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
+          UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @boxed, id: Int64 } }
           FN bad(v: Value) RETURNS Value ->
               PARTIAL MATCH v START
                   Value.List AS items ->
@@ -560,7 +560,7 @@ RSpec.describe SemanticAnnotator do
     context "MATCH AS on owned TAKES parameter is still a borrow" do
       let(:code) {
         <<~CLEAR
-          UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
+          UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @boxed, id: Int64 } }
           FN bad(TAKES v: Value) RETURNS !Value ->
               PARTIAL MATCH v START
                   Value.List AS items ->
@@ -580,7 +580,7 @@ RSpec.describe SemanticAnnotator do
     context "MATCH TAKES on owned parameter produces owned binding" do
       let(:code) {
         <<~CLEAR
-          UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
+          UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @boxed, id: Int64 } }
           FN good(TAKES v: Value) RETURNS !Value ->
               PARTIAL MATCH TAKES v START
                   Value.List AS items ->
@@ -606,7 +606,7 @@ RSpec.describe SemanticAnnotator do
     context "assigning non-Copy list element to variable" do
       let(:code) {
         <<~CLEAR
-          UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+          UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
           FN test!(MUTABLE list: []Value) RETURNS !Void ->
               list.append(Value.Nil);
               f = list[0];
@@ -625,7 +625,7 @@ RSpec.describe SemanticAnnotator do
     context "storing non-Copy list element into HashMap" do
       let(:code) {
         <<~CLEAR
-          UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+          UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
           FN test!(MUTABLE list: []Value, MUTABLE map: {String}Value) RETURNS Void ->
               list.append(Value.Nil);
               IF list[0] EXISTS AS value THEN map["key"] = value; END

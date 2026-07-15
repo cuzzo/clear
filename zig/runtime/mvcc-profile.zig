@@ -14,12 +14,12 @@
 //   - read count (and how it compares to commits) tells us if MVCC's
 //     lock-free read path is actually paying off
 //   - commit count + struct size = COW byte volume; if writers are
-//     copying GBs per second, the binding belongs in `@indirect` so
+//     copying GBs per second, the binding belongs in `@boxed` so
 //     the CAS payload is a pointer-swap instead of a struct-copy
 //   - retry count tells us how often writers race; high retries
 //     mean MVCC isn't a fit (writer-heavy)
 //
-// Used by `clear doctor` (Tranche C) to recommend `@indirect` for COW
+// Used by `clear doctor` (Tranche C) to recommend `@boxed` for COW
 // thrash and `@shared:writeLocked` / `@shared:locked` for write-heavy
 // MVCC misuse.
 
@@ -178,7 +178,7 @@ pub noinline fn recordUpdate(addr: usize, struct_size: u32, retries: u64, commit
 /// Record a successful `updateMulti()` commit touching this cell.
 /// The cell's `multi_commits` increments per participating cell; the doctor uses
 /// `multi_commits == 0 && commits > 0` as the gate for the
-/// "upgrade @shared:versioned -> @indirect:atomic" suggestion
+/// "upgrade @shared:versioned -> @boxed:atomic" suggestion
 /// (multi-cell commits forbid the upgrade because AtomicPtr has
 /// no multi-pointer CAS).
 pub noinline fn recordMultiCommit(addr: usize, struct_size: u32) void {

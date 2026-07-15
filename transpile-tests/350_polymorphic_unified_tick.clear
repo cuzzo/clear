@@ -20,11 +20,11 @@
 #   @local                heap *T direct mutation
 #   @multiowned           Rc *T direct mutation
 #   @shared               Arc *T direct mutation
-#   @indirect             heap *T direct mutation (auto-monomorph)
+#   @boxed             heap *T direct mutation (auto-monomorph)
 #   @shared:locked        Arc(Locked(T)) acquire/release
 #   @shared:writeLocked   Arc(RwLocked(T)) write/release
 #   @shared:versioned     Arc(Versioned(T)) update + CAS retry
-#   @indirect:atomic      AtomicPtr(T) update + CAS retry
+#   @boxed:atomic      AtomicPtr(T) update + CAS retry
 #   @locked               Locked(T) bare acquire/release
 #   @writeLocked          RwLocked(T) bare write/release
 #   @versioned            Versioned(T) bare update + CAS retry
@@ -46,13 +46,13 @@ FN main() RETURNS !Void ->
     MUTABLE local_c     = Counter{ value: 0 } @local;
     MUTABLE multi_c     = Counter{ value: 0 } @multiowned;
     MUTABLE shared_c    = Counter{ value: 0 } @shared;
-    MUTABLE indirect_c  = Counter{ value: 0 } @indirect;
+    MUTABLE indirect_c  = Counter{ value: 0 } @boxed;
 
     # Arc-wrapped sync containers.
     MUTABLE locked_c    = Counter{ value: 0 } @shared:locked;
     MUTABLE wlocked_c   = Counter{ value: 0 } @shared:writeLocked;
     MUTABLE versioned_c = Counter{ value: 0 } @shared:versioned;
-    MUTABLE atomic_c    = Counter{ value: 0 } @indirect:atomic;
+    MUTABLE atomic_c    = Counter{ value: 0 } @boxed:atomic;
 
     # Bare (no Arc) sync containers.
     MUTABLE bare_locked_c    = Counter{ value: 0 } @locked;
@@ -119,7 +119,7 @@ FN main() RETURNS !Void ->
     WITH EXCLUSIVE locked_c       AS l_view { ASSERT l_view.value == 3_i64, "shared:locked: 3 ticks -> 3"; }
     WITH EXCLUSIVE wlocked_c      AS w_view { ASSERT w_view.value == 3_i64, "shared:writeLocked: 3 ticks -> 3"; }
     WITH SNAPSHOT  versioned_c    AS v_view { ASSERT v_view.value == 3_i64, "shared:versioned: 3 ticks -> 3"; }
-    WITH SNAPSHOT  atomic_c       AS a_view { ASSERT a_view.value == 3_i64, "indirect:atomic: 3 ticks -> 3"; }
+    WITH SNAPSHOT  atomic_c       AS a_view { ASSERT a_view.value == 3_i64, "boxed:atomic: 3 ticks -> 3"; }
     WITH EXCLUSIVE bare_locked_c  AS bl_view { ASSERT bl_view.value == 3_i64, "bare locked: 3 ticks -> 3"; }
     WITH EXCLUSIVE bare_wlocked_c AS bw_view { ASSERT bw_view.value == 3_i64, "bare writeLocked: 3 ticks -> 3"; }
     WITH SNAPSHOT  bare_versioned_c AS bv_view { ASSERT bv_view.value == 3_i64, "bare versioned: 3 ticks -> 3"; }

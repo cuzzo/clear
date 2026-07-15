@@ -477,7 +477,7 @@ class TypeExpressionParser
       when "local" then sync = :local
       when "raw" then sync = :raw
       when "symbol" then sync = :symbol
-      when "indirect" then layout = :indirect
+      when "boxed", "indirect" then layout = :indirect
       end
     end
     [base, TypeCapabilities.new(ownership: ownership, sync: sync, layout: layout)]
@@ -712,7 +712,7 @@ class TypeExpressionPrinter
     parts = T.let([], T::Array[String])
     ownership = capabilities.ownership
     parts << T.must(Type.ownership_surface_name_for(ownership)) unless ownership.nil? || ownership == :affine
-    parts << "@indirect" if capabilities.layout == :indirect
+    parts << "@boxed" if capabilities.layout == :indirect
     parts << "@soa" if capabilities.soa
     parts << "@sharded(#{capabilities.shard_count})" unless capabilities.shard_count.nil?
     sync = capabilities.sync

@@ -74,7 +74,7 @@ module Annotator
 
         choices = [
           ["@node", "Store this edge in the compiler-managed graph slot map"],
-          ["@indirect", "Make this a unique owned heap edge"],
+          ["@boxed", "Make this a unique owned heap edge"],
           ["@multiowned", "Use local reference-counted shared identity"],
           ["@shared", "Use cross-execution atomic shared identity"],
           ["@link", "Make this a non-owning link to an independently owned node"],

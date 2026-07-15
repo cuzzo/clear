@@ -1716,7 +1716,7 @@ module MIRLoweringExpressions
         end
         end
       end
-      # @indirect field: hoist HeapCreate to a named temp so it is a Let-init,
+      # @boxed field: hoist HeapCreate to a named temp so it is a Let-init,
       # not an anonymous sub-expression (INV-H).
       if v.needs_heap_create
         zig_t = transpile_type(v.full_type!.resolved.to_s)
@@ -1771,7 +1771,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::UnionVariantLit).returns(MIR::Node) }
   def lower_union_variant_lit(node)
     T.bind(self, MIRLowering) rescue nil
-    # Collect hoisted statements for @indirect fields (same pattern as lower_struct_lit).
+    # Collect hoisted statements for @boxed fields (same pattern as lower_struct_lit).
     hoisted = T.let([], T::Array[MIR::Node])
     variant_alloc = alloc_for_node(node)
     variant_field_types = union_variant_lit_field_types(node)
@@ -1790,12 +1790,12 @@ module MIRLoweringExpressions
         hoist_alloc(materialized, v, err_cleanup: true)
         end
       end
-      # @indirect is signalled by the annotator's needs_heap_create stamp
+      # @boxed is signalled by the annotator's needs_heap_create stamp
       # (same single source the struct-literal path reads).
       if v.needs_heap_create
         field_sym = Type.from_node!(v, context: "indirect union field").resolved
         zig_t = transpile_type(field_sym.to_s)
-        # @indirect union fields: HeapCreate emits __p.* = val (shallow copy).
+        # @boxed union fields: HeapCreate emits __p.* = val (shallow copy).
         # Borrowed field access has no owned local to transfer, so the
         # indirect cell needs an independent copy. Identifier payloads move
         # into the cell and are guarded by ordinary ownership transfer marks.

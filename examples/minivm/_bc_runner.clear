@@ -58,7 +58,7 @@ END
 # Uses Env[50000]@pool for scoped environments instead of a flat HashMap.
 # Each Env holds a HashMap<Value> for its local bindings.
 # Parent links stored as Value.EnvRef in vars["__p"].
-# Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
+# Lambda closures capture envId: Id<Env> directly; body stored as Value @boxed.
 # Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
 
 # Native function dispatch by numeric ID.

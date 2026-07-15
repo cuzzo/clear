@@ -3038,7 +3038,7 @@ class MIRLowering
     from_t = from_type
     to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to_type)
     return nil if from_t.semantic_type_key == to_t.semantic_type_key
-    # @indirect is constructed by destination placement (HeapCreate); it is
+    # @boxed is constructed by destination placement (HeapCreate); it is
     # not a Zig coercion. Emitting `@as(*T, value)` here wraps the payload in a
     # pointer cast before HeapCreate, so the generated initializer tries to
     # assign `*T` into a `T` cell. Keep numeric/shape coercions intact, but let

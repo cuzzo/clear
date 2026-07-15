@@ -1,12 +1,12 @@
 # Test: try/catch pattern - Error matched, handleCatch returns Tco with
-# @indirect field containing frame-allocated string, eval resolves Tco.
+# @boxed field containing frame-allocated string, eval resolves Tco.
 
 UNION Value {
     Nil, TrueVal, FalseVal,
     Number: Float64, Str: String, Symbol: String,
     List: Value[],
     Error { errMsg: String, errKind: String },
-    Tco { tcoAst: Value @indirect, tcoEnv: Int64 },
+    Tco { tcoAst: Value @boxed, tcoEnv: Int64 },
 }
 
 FN getStr(v: Value) RETURNS String ->

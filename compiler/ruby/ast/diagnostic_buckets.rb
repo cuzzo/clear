@@ -318,7 +318,7 @@ module DiagnosticBuckets
       category: :type,
       frequency: 2,
       alien_factor: :high,
-      summary: "Capability sigils require specific underlying types: `@indirect:atomic` on a struct, `@observable` on a Set, `@multiowned` not on local primitives. Hard to reason about without a capability mental model.",
+      summary: "Capability sigils require specific underlying types: `@boxed:atomic` on a struct, `@observable` on a Set, `@multiowned` not on local primitives. Hard to reason about without a capability mental model.",
       codes: %i[
         FN_PARAM_NO_CAPABILITY
         INDIRECT_ATOMIC_PRIMITIVE STRUCT_ATOMIC_NEEDS_INDIRECT
@@ -394,7 +394,7 @@ module DiagnosticBuckets
       category: :capability,
       frequency: 5,
       alien_factor: :high,
-      summary: "Reading or writing a field directly on a `@locked` / `@writeLocked` / `@indirect:atomic` binding is rejected. The lock or atomic cell must be unwrapped via `WITH EXCLUSIVE` (locks) or `WITH SNAPSHOT` (atomic) so the inner value is accessible through the alias.",
+      summary: "Reading or writing a field directly on a `@locked` / `@writeLocked` / `@boxed:atomic` binding is rejected. The lock or atomic cell must be unwrapped via `WITH EXCLUSIVE` (locks) or `WITH SNAPSHOT` (atomic) so the inner value is accessible through the alias.",
       codes: %i[
         CAP_FIELD_NEEDS_WITH_EXCLUSIVE
         CAP_FIELD_NEEDS_WITH_SNAPSHOT

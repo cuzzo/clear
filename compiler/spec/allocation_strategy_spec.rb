@@ -418,13 +418,13 @@ RSpec.describe "Allocation Strategy Invariants" do
     end
 
     # Scenario: :heap_ptr_return
-    # A variable returned from a RETURNS Struct @indirect function must be heap-allocated
+    # A variable returned from a RETURNS Struct @boxed function must be heap-allocated
     # so the returned pointer is valid after the frame is rewound.
     # upgrade_heap_ptr_returns_to_heap! handles this.
-    it ":heap_ptr_return — returned var in RETURNS Struct @indirect → storage :heap" do
+    it ":heap_ptr_return — returned var in RETURNS Struct @boxed → storage :heap" do
       ast = run_mir(<<~CLEAR)
         STRUCT Node { val: Int64 }
-        FN makeNode!() RETURNS !Node @indirect ->
+        FN makeNode!() RETURNS !Node @boxed ->
           n = Node { val: 42 };
           RETURN n;
         END
@@ -444,7 +444,7 @@ RSpec.describe "Allocation Strategy Invariants" do
         STRUCT Inner { val: Float64 }
         STRUCT Outer { child: Inner }
         FN test!() RETURNS !Void ->
-          MUTABLE outer: Outer @indirect = Outer { child: Inner { val: 0.0 } };
+          MUTABLE outer: Outer @boxed = Outer { child: Inner { val: 0.0 } };
           child: Inner = Inner { val: 42.0 };
           outer.child = child;
           RETURN;

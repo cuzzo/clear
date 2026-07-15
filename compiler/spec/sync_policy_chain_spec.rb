@@ -68,7 +68,7 @@ RSpec.describe "SYNC POLICY chain (#328)" do
           RETURN;
         END
         FN main() RETURNS Void ->
-          MUTABLE cfg = Cfg{ port: 80 } @indirect:atomic;
+          MUTABLE cfg = Cfg{ port: 80 } @boxed:atomic;
           bumpPort!(cfg);
           RETURN;
         END

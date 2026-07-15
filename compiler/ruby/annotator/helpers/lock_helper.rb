@@ -403,7 +403,7 @@ module LockHelper
     # SNAPSHOT-transaction blocks have a per-cell-family possibility
     # set:
     #   @versioned       -> {MvccConflict}    (Versioned.update bounded retry)
-    #   @indirect:atomic -> {AtomicConflict}  (AtomicPtr.update bounded retry)
+    #   @boxed:atomic -> {AtomicConflict}  (AtomicPtr.update bounded retry)
     # LockTimeout / LockCycle / Deadlock never apply because the
     # lock-free CAS paths don't acquire a mutex. The cell-family
     # check mirrors the dispatch in

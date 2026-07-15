@@ -1041,7 +1041,7 @@ module Annotator
 
         # Arc-only (Group 1: @shared without inner sync) — refcounted, escapable.
         return true if SemanticAnnotator::STORAGE_OUTLIVES_DECLARING_SCOPE.include?(info.storage) && info.sync.nil?
-        # @indirect:atomic — heap-pinned AtomicPtr cell with own lifetime
+        # @boxed:atomic — heap-pinned AtomicPtr cell with own lifetime
         # mechanism (M3.5 promotion).
         return true if info.atomic_ptr?
         # Any sync wrapper (Group 1 sync sigils — atomic, locked,

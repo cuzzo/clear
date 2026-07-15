@@ -306,7 +306,7 @@ RSpec.describe CleanupClassifier do
       plan = cleanup_plan_for(<<~CLEAR, "main")
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           RETURN;
         END
       CLEAR
@@ -436,7 +436,7 @@ RSpec.describe CleanupClassifier do
     context "COPY of non-Copy union" do
       let(:plan) do
         cleanup_for(<<~CLEAR, "test")
-          UNION Data { Empty, Text: String, Nested { label: String, inner: Data @indirect } }
+          UNION Data { Empty, Text: String, Nested { label: String, inner: Data @boxed } }
           FN makeData() RETURNS Data ->
               RETURN Data{ Text: "hello" };
           END
@@ -1411,7 +1411,7 @@ RSpec.describe CleanupClassifier do
   describe "COPY non-Copy union consumed by MATCH TAKES" do
     it "keeps cleanup for COPY result after refine_moved_guards" do
       plan = mir_plan_for(<<~CLEAR, "main")
-        UNION Data { Empty, Text: String, Nested { label: String, inner: Data @indirect } }
+        UNION Data { Empty, Text: String, Nested { label: String, inner: Data @boxed } }
         FN makeNested() RETURNS !Data ->
             inner = Data{ Text: "hello" };
             RETURN Data.Nested{ label: "outer", inner: inner };

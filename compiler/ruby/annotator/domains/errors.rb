@@ -570,7 +570,7 @@ module Annotator
            expected_t.sync.nil? && expected_t.resolved == actual_t.resolved
           return true
         end
-        # @indirect on a return type is a storage directive: the value is
+        # @boxed on a return type is a storage directive: the value is
         # heap-boxed into a `*T` cell at the RETURN site (escape analysis),
         # so the returned expression need not already carry :indirect.
         layout_ok = expected_t.layout == actual_t.layout || expected_t.indirect?

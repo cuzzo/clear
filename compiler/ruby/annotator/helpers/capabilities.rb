@@ -240,7 +240,7 @@ module CapabilityHelper
 	        name = fact.target_label
 	        storage = fact.storage
 	        actual = if snapshot_sync && snapshot_layout == :indirect
-	          "@#{snapshot_layout}:#{snapshot_sync}"
+	          "@boxed:#{snapshot_sync}"
 	        elsif snapshot_sync
 	          "@#{snapshot_sync}"
 	        elsif storage
@@ -255,7 +255,7 @@ module CapabilityHelper
               description_code: :WITH_ADD_VERSIONED
             ),
             FixableHelper::CapabilityFixCandidate.new(
-              sigil: "@indirect:atomic",
+              sigil: "@boxed:atomic",
               description_code: :WITH_ADD_INDIRECT_ATOMIC
             ),
           ],

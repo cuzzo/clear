@@ -468,7 +468,7 @@ class BcEmitter
       when MIR::StructDef
         # Only the bounded-concurrent lowering uses the StructDef-with-method
         # pattern for synthesized worker callbacks. Other StructDefs (e.g.
-        # the @indirect cleanup helpers in mir_lowering, or generic union
+        # the @boxed cleanup helpers in mir_lowering, or generic union
         # variants) may carry methods that aren't VM-compileable. Restrict
         # collection to the known-good prefix to avoid trying to compile
         # incidentally-named nested FnDefs.

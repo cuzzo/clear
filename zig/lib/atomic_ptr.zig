@@ -1,8 +1,8 @@
-//! AtomicPtr(T) is the lock-free atomic-pointer cell for `@indirect:atomic`.
+//! AtomicPtr(T) is the lock-free atomic-pointer cell for `@boxed:atomic`.
 //! It publishes whole-T snapshots via atomic pointer swap; readers get an
 //! EBR-pinned snapshot for the duration of a `WITH SNAPSHOT` block.
 //!
-//! Mental model: this is the runtime side of CLEAR's `@indirect:atomic`.
+//! Mental model: this is the runtime side of CLEAR's `@boxed:atomic`.
 //! Roughly Rust `arc-swap::ArcSwap<T>` semantics with EBR (instead of
 //! arc-swap's hazard-pointer-style fast path) for snapshot reclamation.
 //!

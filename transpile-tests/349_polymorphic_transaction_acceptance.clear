@@ -105,7 +105,7 @@ FN main() RETURNS Void ->
     ASSERT read_versioned(versioned_c) == 3_i64, "versioned: cumulative result 3";
 
     # ATOMIC indirect: mutate-then-read.
-    MUTABLE atomic_c = Counter{ value: 0 } @indirect:atomic;
+    MUTABLE atomic_c = Counter{ value: 0 } @boxed:atomic;
     tick_atomic!(atomic_c);
     tick_atomic!(atomic_c);
     tick_atomic!(atomic_c);

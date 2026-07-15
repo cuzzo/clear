@@ -2,7 +2,7 @@
 # read-mode SNAPSHOT on a `REQUIRES c: VERSIONED | ATOMIC` parameter.
 # After #324/#328/#330 unified the SNAPSHOT shape across both
 # families (Versioned.read for @versioned, AtomicPtr.read for
-# @indirect:atomic; both return a Guard the body reads via field
+# @boxed:atomic; both return a Guard the body reads via field
 # access), the body is uniform and per-arm MATCH dispatch is no
 # longer required.
 
@@ -18,7 +18,7 @@ FN dump(c: Cfg) RETURNS Void
 END
 
 FN main() RETURNS Void ->
-    cfg = Cfg{ port: 8080 } @indirect:atomic;
+    cfg = Cfg{ port: 8080 } @boxed:atomic;
     dump(cfg);
     RETURN;
 END

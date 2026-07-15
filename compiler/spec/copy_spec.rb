@@ -38,7 +38,7 @@ RSpec.describe "COPY keyword" do
   # =========================================================================
   it "allows storing COPY of borrowed parameter into HashMap" do
     src = <<~CLEAR
-      UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+      UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
       FN test!(v: Value, MUTABLE map: {String}Value) RETURNS !Void ->
           owned = COPY v;
           map["key"] = owned;
@@ -53,7 +53,7 @@ RSpec.describe "COPY keyword" do
   # =========================================================================
   it "allows storing COPY of borrowed slice into union variant" do
     src = <<~CLEAR
-      UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
+      UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @boxed, id: Int64 } }
       FN test(items: Value[]) RETURNS !Value ->
           ownedItems = COPY items;
           RETURN Value.Lambda{ params: ownedItems, body: Value{ Num: 0.0 }, id: 1 };
@@ -68,7 +68,7 @@ RSpec.describe "COPY keyword" do
   it "emits dupeUnionValue for COPY of union" do
     src = <<~CLEAR
       STRUCT Env { x: Int64 }
-      UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
+      UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @boxed, id: Int64 } }
       FN test!(v: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
           pool.insert(Env{ x: 1 });
           owned = COPY v;
@@ -80,16 +80,16 @@ RSpec.describe "COPY keyword" do
   end
 
   # =========================================================================
-  # BUG: @indirect union fields shallow-copied when reconstructing variant
-  # When a union variant with @indirect fields is reconstructed in a new union
-  # literal (e.g. in a MATCH TAKES block), the @indirect field is shallow-copied
+  # BUG: @boxed union fields shallow-copied when reconstructing variant
+  # When a union variant with @boxed fields is reconstructed in a new union
+  # literal (e.g. in a MATCH TAKES block), the @boxed field is shallow-copied
   # via HeapCreate (__p.* = val), leaving the new copy pointing at heap memory
   # that is freed by the original binding's cleanup. The fix is to emit
-  # dupeUnionValue for @indirect fields whose type is a union.
+  # dupeUnionValue for @boxed fields whose type is a union.
   # =========================================================================
-  it "deep-copies @indirect union fields when reconstructing variant in new union literal" do
+  it "deep-copies @boxed union fields when reconstructing variant in new union literal" do
     src = <<~CLEAR
-      UNION Val { Nil, Box { data: Val @indirect, id: Int64 } }
+      UNION Val { Nil, Box { data: Val @boxed, id: Int64 } }
       FN rebuild(TAKES v: Val) RETURNS !Val ->
           PARTIAL MATCH TAKES v START
               Val.Box AS b ->

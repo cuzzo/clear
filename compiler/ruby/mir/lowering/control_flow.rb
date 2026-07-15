@@ -1369,7 +1369,7 @@ module MIRLoweringControlFlow
   # Returns true if a MIR::Call node returns a non-Copy union type that needs
   # a cleanup defer when used as a temporary in a non-TAKES argument position.
   # heap_storage? misses these: unions like Value are stack-sized but own heap
-  # memory (via @indirect fields). When returned inline as a non-TAKES argument,
+  # memory (via @boxed fields). When returned inline as a non-TAKES argument,
   # they must be hoisted to a named let with a defer.
   sig { params(expr: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
   def call_union_return_needs_hoist?(expr, ast_node)

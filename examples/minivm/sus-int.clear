@@ -54,7 +54,7 @@ END
 # Uses Env[50000]@pool for scoped environments instead of a flat HashMap.
 # Each Env holds a HashMap<Value> for its local bindings.
 # Parent links stored as Value.EnvRef in vars["__p"].
-# Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
+# Lambda closures capture envId: Id<Env> directly; body stored as Value @boxed.
 # Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
 
 STRUCT Env {
@@ -66,11 +66,11 @@ UNION Value {
     Number: Float64, Str: String, Symbol: String,
     List: Value[],
     Vector: Value[],
-    Pair { pairCar: Value @indirect, pairCdr: Value @indirect },
-    Lambda { params: Value[], body: Value @indirect, envId: Id<Env> },
+    Pair { pairCar: Value @boxed, pairCdr: Value @boxed },
+    Lambda { params: Value[], body: Value @boxed, envId: Id<Env> },
     NativeFn: Int64,
     EnvRef: Id<Env>,
-    Tco { tcoAst: Value @indirect, tcoEnv: Id<Env> },
+    Tco { tcoAst: Value @boxed, tcoEnv: Id<Env> },
     Error { errMsg: String, errKind: String },
     Int64Val: Int64,
     TypedI64Arr: Int64[],
@@ -2589,9 +2589,9 @@ FN main() RETURNS !Void ->
     ASSERT (evalIn!("(float->int 42.9)", TRUE, rootId, pool, penv) OR_ELSE RAISE) == "42", "float->int truncates";
 
     # Typed structs: BLOCKED by compiler bug #2 (arena lifetime).
-    # TypedI64Arr inside Pair{@indirect} gets freed when the special form handler returns.
+    # TypedI64Arr inside Pair{@boxed} gets freed when the special form handler returns.
     # The construction + access special forms are implemented but data doesn't survive.
-    # Fix: PromotionPlan needs to promote Int64[]@list to heap when escaping via @indirect.
+    # Fix: PromotionPlan needs to promote Int64[]@list to heap when escaping via @boxed.
     # Tests disabled until compiler fix:
 
     print("Interpreter smoke tests PASSED!");

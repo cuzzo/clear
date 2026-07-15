@@ -14,7 +14,7 @@ require_relative "../ruby/annotator/helpers/with_match_check" unless defined?(Wi
 #      POLYMORPHIC or broaden REQUIRES.
 #   3. WITH POLYMORPHIC on a polymorphic param → accepted.
 #   4. SNAPSHOTTED REQUIRES family admits @versioned, @atomic, and
-#      @indirect:atomic (the umbrella for retry-style sync); the
+#      @boxed:atomic (the umbrella for retry-style sync); the
 #      narrower VERSIONED / ATOMIC families pin behavior.
 #   5. The auto-shim path (WITH on a parameter without REQUIRES) is
 #      grandfathered — plain WITH still works there because the shim
@@ -199,7 +199,7 @@ RSpec.describe "True-Sync-Polymorphism dispatch (#326)" do
       }.not_to raise_error
     end
 
-    it "admits @indirect:atomic at call sites" do
+    it "admits @boxed:atomic at call sites" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
@@ -210,7 +210,7 @@ RSpec.describe "True-Sync-Polymorphism dispatch (#326)" do
             RETURN;
           END
           FN main() RETURNS Void ->
-            c = C{ v: 0 } @indirect:atomic;
+            c = C{ v: 0 } @boxed:atomic;
             read(c);
             RETURN;
           END

@@ -644,7 +644,7 @@ module CleanupClassifier
   end
 
   # Single dispatch point for MATCH AS variant cleanup. Returns nil when the
-  # variant doesn't need an AS-binding cleanup (unit variants, @indirect
+  # variant doesn't need an AS-binding cleanup (unit variants, @boxed
   # pointees, plain non-heap-bearing inline structs).
   sig { params(variant_type: Schemas::UnionSchema::VariantValue, union_lookup: T.any(String, Symbol), variant_name: T.any(String, Symbol)).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.match_as_entry_for(variant_type, union_lookup, variant_name)
@@ -1175,7 +1175,7 @@ module CleanupClassifier
   # Catch-all for heap pointers not handled by classify_heap_storage.
   # Heap-stored composite (struct or union) whose cleanup the uniform
   # CheatLib.cleanup path handles via @TypeOf comptime dispatch.
-  # Covers @alwaysMutable / @indirect annotations AND structs promoted
+  # Covers @alwaysMutable / @boxed annotations AND structs promoted
   # to heap by MIRPass upgrade phases where type_info.provenance is not
   # set (only node.@storage_override is set).
   #

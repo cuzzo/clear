@@ -20,7 +20,7 @@ RSpec.describe "ClearParser capability records" do
   end
 
   it "joins expression capability dimensions into a named result" do
-    forward = parse_expr("value @shared:locked(rank: 7):indirect")
+    forward = parse_expr("value @shared:locked(rank: 7):boxed")
     reverse = parse_expr("value @locked(rank: -2):shared")
 
     expect(forward).to be_a(AST::CapabilityWrap)
@@ -58,7 +58,7 @@ RSpec.describe "ClearParser capability records" do
       "Counter@multiowned[]" => [:multiowned, nil, nil],
       "Counter@link[]" => [:link, nil, nil],
       "Counter@writeLocked[]" => [nil, :write_locked, nil],
-      "Counter@indirect[]" => [nil, nil, :indirect],
+      "Counter@boxed[]" => [nil, nil, :indirect],
     }
 
     expected.each do |source, dimensions|

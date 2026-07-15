@@ -283,7 +283,7 @@ RSpec.describe TypeExpressionTree do
       "Box@local" => [:affine, :local, nil],
       "Box@raw" => [:affine, :raw, nil],
       "Box@symbol" => [:affine, :symbol, nil],
-      "Box@indirect" => [:affine, nil, :indirect],
+      "Box@boxed" => [:affine, nil, :indirect],
     }
 
     expected.each do |source, dimensions|

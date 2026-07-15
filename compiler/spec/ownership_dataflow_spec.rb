@@ -40,7 +40,7 @@ RSpec.describe OwnershipDataflow do
       src = <<~SRC
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           b = a;
           RETURN;
         END
@@ -81,9 +81,9 @@ RSpec.describe OwnershipDataflow do
     it "detects maybe_moved through if-then branch" do
       src = <<~SRC
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           IF TRUE THEN
             consume!(GIVE a);
           END
@@ -98,9 +98,9 @@ RSpec.describe OwnershipDataflow do
     it "detects moved through both branches" do
       src = <<~SRC
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           IF TRUE THEN
             consume!(GIVE a);
           ELSE
@@ -117,7 +117,7 @@ RSpec.describe OwnershipDataflow do
       src = <<~SRC
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           IF TRUE THEN
             x = 1;
           END
@@ -134,7 +134,7 @@ RSpec.describe OwnershipDataflow do
       src = <<~SRC
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           RETURN;
         END
       SRC
@@ -148,7 +148,7 @@ RSpec.describe OwnershipDataflow do
       src = <<~SRC
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           RETURN;
         END
       SRC
@@ -181,9 +181,9 @@ RSpec.describe OwnershipDataflow do
     it "reports has_moved_guard for maybe_moved variables" do
       src = <<~SRC
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           IF TRUE THEN
             consume!(a);
           END
@@ -199,9 +199,9 @@ RSpec.describe OwnershipDataflow do
     it "marks cleanup facts guarded when dataflow finds a partial move" do
       src = <<~SRC
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           IF TRUE THEN
             consume!(a);
           END
@@ -233,7 +233,7 @@ RSpec.describe OwnershipDataflow do
       src = <<~SRC
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           b = a;
           RETURN;
         END
@@ -248,7 +248,7 @@ RSpec.describe OwnershipDataflow do
     it "tracks TAKES param as owned" do
       src = <<~SRC
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
       SRC
       df = analyze(src, "consume!")
       expect(df.exit_states["u"]).to eq(:owned)
@@ -257,9 +257,9 @@ RSpec.describe OwnershipDataflow do
     it "treats explicit GIVE calls as linear-scope moves for heap values" do
       fn_node = annotated_function(<<~SRC, "main")
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           consume!(GIVE a);
           RETURN;
         END

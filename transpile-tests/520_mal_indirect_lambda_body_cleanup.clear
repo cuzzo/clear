@@ -1,5 +1,5 @@
 # Regression from examples/mal:
-# A recursive union with an @indirect payload is copied out of a lambda-like
+# A recursive union with an @boxed payload is copied out of a lambda-like
 # variant into a TCO-like variant. This is the MAL closure body path.
 
 UNION Value {
@@ -7,8 +7,8 @@ UNION Value {
     Str: String,
     Symbol: String,
     List: Value[],
-    Lambda { params: Value[], body: Value @indirect },
-    Tco { ast: Value @indirect }
+    Lambda { params: Value[], body: Value @boxed },
+    Tco { ast: Value @boxed }
 }
 
 STRUCT Env {

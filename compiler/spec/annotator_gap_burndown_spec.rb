@@ -1047,23 +1047,23 @@ RSpec.describe "annotator branch gap burndown" do
         END
       CHT
       <<~CHT,
-        UNION Box { Empty, Item: String @indirect }
+        UNION Box { Empty, Item: String @boxed }
         FN main() RETURNS Void ->
           b = Box{ Item: COPY "abc" };
           RETURN;
         END
       CHT
       <<~CHT,
-        UNION Box { Empty, Item: String @indirect }
+        UNION Box { Empty, Item: String @boxed }
         top = Box{ Item: COPY "abc" };
       CHT
       <<~CHT,
-        UNION Value { Nil, Lambda { body: Value @indirect } }
+        UNION Value { Nil, Lambda { body: Value @boxed } }
         top = Value.Lambda{ body: Value.Nil };
       CHT
       <<~CHT,
         STRUCT Box { label: String }
-        UNION Shape { Empty, Named { label: String }, Boxed: Box @indirect }
+        UNION Shape { Empty, Named { label: String }, Boxed: Box @boxed }
         FN main() RETURNS Void ->
           s = Shape.Named{ label: COPY "abc" };
           PARTIAL MATCH TAKES s START
@@ -1134,7 +1134,7 @@ RSpec.describe "annotator branch gap burndown" do
       <<~CHT,
         STRUCT Counter { value: Int64 }
         FN main() RETURNS Void ->
-          MUTABLE c = Counter{ value: 1_i64 } @indirect:atomic;
+          MUTABLE c = Counter{ value: 1_i64 } @boxed:atomic;
           WITH SNAPSHOT c AS MUTABLE x {
             x.value = x.value + 1_i64;
           } ON AtomicConflict RAISE
@@ -1207,7 +1207,7 @@ RSpec.describe "annotator branch gap burndown" do
       <<~CHT,
         STRUCT Counter { value: Int64 }
         FN main() RETURNS Void ->
-          c = Counter{ value: 1_i64 } @indirect:atomic;
+          c = Counter{ value: 1_i64 } @boxed:atomic;
           x = c.value;
           RETURN;
         END

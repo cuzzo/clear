@@ -254,7 +254,7 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
       STRUCT Counter { value: Int64 }
 
       FN main() RETURNS Void ->
-          c = Counter{ value: 15_i64 } @indirect:atomic;
+          c = Counter{ value: 15_i64 } @boxed:atomic;
           WITH SNAPSHOT c AS r {
               ASSERT r.value == 15_i64, "atomic indirect struct cleanup";
           }
@@ -266,7 +266,7 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
     <<~CHT
       STRUCT Cfg { setting: Int64 }
 
-      FN make() RETURNS !Cfg @indirect ->
+      FN make() RETURNS !Cfg @boxed ->
           cfg = Cfg{ setting: 99_i64 };
           RETURN cfg;
       END

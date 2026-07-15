@@ -2793,7 +2793,7 @@ module MIR
   #     __p.* = init;
   #     break :blk __p;
   # }
-  # Used for: @indirect fields, heap struct literals, capability boxing.
+  # Used for: @boxed fields, heap struct literals, capability boxing.
   # alloc: Symbol (:heap, :frame) resolved via rt.
   HeapCreate = Struct.new(:zig_type, :init, :alloc, :label) do
     extend T::Sig
@@ -3226,7 +3226,7 @@ module MIR
 
   # SNAPSHOT-mutable single-cell: `WITH SNAPSHOT cell AS MUTABLE va
   # { body } [ON MvccConflict <action>]` for a @versioned (MVCC) or
-  # @indirect:atomic (AtomicPtr M3.6) cell in transaction mode.
+  # @boxed:atomic (AtomicPtr M3.6) cell in transaction mode.
   # Versioned: lowers to `Versioned.update(rt, alloc, fn(va: *T) ...)`
   # wrapped in catch+switch for ON MvccConflict handling.
   # AtomicPtr (is_atomic_ptr=true): lowers to

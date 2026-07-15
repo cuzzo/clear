@@ -1906,7 +1906,7 @@ RSpec.describe MIRLowering do
   describe "indirect aggregate field ownership" do
     it "moves recursive union locals when they are boxed into indirect inline-variant fields" do
       src = <<~CLEAR
-        UNION Node { Nil, One: String, Pair { left: Node @indirect, right: Node @indirect } }
+        UNION Node { Nil, One: String, Pair { left: Node @boxed, right: Node @boxed } }
 
         FN mk() RETURNS !Node ->
             left = Node{ One: COPY "a" };

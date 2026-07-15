@@ -305,7 +305,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
 
   when :return_recursive_union_payload
     <<~CHT
-      UNION Node { Nil, One: String, Pair { left: Node @indirect, right: Node @indirect } }
+      UNION Node { Nil, One: String, Pair { left: Node @boxed, right: Node @boxed } }
 
       FN mk() RETURNS !Node ->
           left = Node{ One: COPY "a" };

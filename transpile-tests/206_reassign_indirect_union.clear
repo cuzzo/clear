@@ -2,12 +2,12 @@
 # Bug: `x = f(x)` generated `cleanup(x); x = f(x)` (use-after-free).
 # Fix: generate `{ const __new = f(x); cleanup(x); x = __new; }`.
 #
-# Unions with @indirect fields are non-Copy and have heap cleanup.
+# Unions with @boxed fields are non-Copy and have heap cleanup.
 # This test uses MUTABLE v = transform(v) to trigger the bug.
 
 UNION Val {
     Nil,
-    Box: Int64 @indirect,
+    Box: Int64 @boxed,
 }
 
 FN transform(v: Val) RETURNS !Val ->

@@ -1,6 +1,6 @@
-# AtomicPtr M3.6: WITH SNAPSHOT MUTABLE for @indirect:atomic.
+# AtomicPtr M3.6: WITH SNAPSHOT MUTABLE for @boxed:atomic.
 # Verifies the compiler lowers `WITH SNAPSHOT cell AS MUTABLE x
-# { ... }` on @indirect:atomic to AtomicPtr.update(rt, alloc, ...)
+# { ... }` on @boxed:atomic to AtomicPtr.update(rt, alloc, ...)
 # with NO conflict handler today (Rust rcu retries until success;
 # AtomicConflict will land once #330 bounds the loop at 256).
 
@@ -9,7 +9,7 @@ STRUCT Counter {
 }
 
 FN main() RETURNS Void ->
-    cfg = Counter{ value: 0 } @indirect:atomic;
+    cfg = Counter{ value: 0 } @boxed:atomic;
 
     # Read: confirm initial value.
     WITH SNAPSHOT cfg AS c {

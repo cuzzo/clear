@@ -239,7 +239,7 @@ module Schemas
   # One union variant whose payload is an anonymous inline struct
   # (`UNION Shape { Circle { radius: Float64 } }`). `fields` maps field
   # name (String) to its declared type input. `deinit_entries` is filled in by
-  # the annotator after parse (which fields need @indirect / array
+  # the annotator after parse (which fields need @boxed / array
   # cleanup) and is intentionally mutable in place, like
   # StructSchema#methods.
   # ruby-to-clear: pub

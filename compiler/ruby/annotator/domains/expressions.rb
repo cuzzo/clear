@@ -340,7 +340,7 @@ module Annotator
         # primitives error.
         is_atomic_primitive = node.atomic? && !node.indirect?
 
-        # `@indirect:atomic` is the struct-as-AtomicPtr form. Reject it on
+        # `@boxed:atomic` is the struct-as-AtomicPtr form. Reject it on
         # primitives before the generic primitive-capability error so the
         # diagnostic can name the right migration path.
         if ti.primitive? && node.atomic_ptr?
@@ -349,6 +349,9 @@ module Annotator
 
         if ti.primitive? && !is_atomic_primitive && node.capability?
           cap_name = node.sync || node.ownership || node.layout
+          # The semantic layout remains :indirect internally, but diagnostics
+          # must use the canonical CLEAR spelling.
+          cap_name = :boxed if cap_name == :indirect
           error!(node, :CAPABILITY_ON_PRIMITIVE,
             cap: cap_name,
             type: base_type)
@@ -382,7 +385,7 @@ module Annotator
         if node.atomic_ptr? && !node.ownership
           ti.apply_reference_ownership!(:shared)
         end
-        # @indirect forces heap location (same as @local, but different intent).
+        # @boxed forces heap location (same as @local, but different intent).
         ti.pin_heap_for_indirect!       if node.indirect?
 
         # Lock ranks induce a total order only if every declaration of a type

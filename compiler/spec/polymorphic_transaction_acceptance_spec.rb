@@ -21,7 +21,7 @@ require_relative "../ruby/ast/ast" unless defined?(MIR::ReassignPlan)
 #   END
 #
 # called from EVERY binding kind: @local, @multiowned, @locked,
-# @writeLocked, @versioned, @atomic primitive, @indirect:atomic,
+# @writeLocked, @versioned, @atomic primitive, @boxed:atomic,
 # @shared:locked, @shared:writeLocked, @shared:versioned -- and the
 # emitter generates the right Zig per case (no-op for non-sync,
 # acquire/release for lock-style, snapshot/CAS for snapshot-style).
@@ -135,7 +135,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
 
   # ── 3. ATOMIC indirect lowers via AtomicPtr.update ────────────
 
-  describe "@indirect:atomic binding lowers via AtomicPtr.update" do
+  describe "@boxed:atomic binding lowers via AtomicPtr.update" do
     it "emits .update(rt, .heapAlloc()) with the AtomicConflict catch bridge (#330: bounded at 256)" do
       src = fn_with_requires(
         suffix: "Atomic",
@@ -143,7 +143,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
         with_form: "WITH SNAPSHOT c AS MUTABLE x { x.value = x.value + 1; r = x.value; }",
       ) + <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE c = CounterAtomic{ value: 0 } @indirect:atomic;
+          MUTABLE c = CounterAtomic{ value: 0 } @boxed:atomic;
           _ = tick_Atomic!(c);
           RETURN;
         END
@@ -315,7 +315,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
           MUTABLE locked_c    = Counter{ value: 0 } @shared:locked;
           MUTABLE wlocked_c   = Counter{ value: 0 } @shared:writeLocked;
           MUTABLE versioned_c = Counter{ value: 0 } @shared:versioned;
-          MUTABLE atomic_c    = Counter{ value: 0 } @indirect:atomic;
+          MUTABLE atomic_c    = Counter{ value: 0 } @boxed:atomic;
 
           tick!(local_c)     OR_ELSE EXIT;
           tick!(multi_c)     OR_ELSE EXIT;

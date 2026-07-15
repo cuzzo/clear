@@ -115,12 +115,12 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
   end
 
   # AtomicConflict path: same precedence chain, different cell type.
-  describe "precedence chain for @indirect:atomic (AtomicConflict)" do
+  describe "precedence chain for @boxed:atomic (AtomicConflict)" do
     it "no inline → baked-in default's AtomicConflict RAISE handler" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
         FN main() RETURNS Void ->
-          MUTABLE c = C{ v: 0 } @indirect:atomic;
+          MUTABLE c = C{ v: 0 } @boxed:atomic;
           WITH SNAPSHOT c AS MUTABLE x { x.v = 1; }
           RETURN;
         END
@@ -141,7 +141,7 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
 
         STRUCT C { v: Int64 }
         FN main() RETURNS Void ->
-          MUTABLE c = C{ v: 0 } @indirect:atomic;
+          MUTABLE c = C{ v: 0 } @boxed:atomic;
           WITH SNAPSHOT c AS MUTABLE x { x.v = 1; }
           RETURN;
         END
@@ -160,9 +160,9 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
     REJECTION_CASES = [
       # [requires_family, binding_sigil, expected_arg_family_name]
       [:LOCKED,      "@shared:versioned",       "VERSIONED"],
-      [:LOCKED,      "@shared:indirect:atomic", "ATOMIC"],
+      [:LOCKED,      "@shared:boxed:atomic", "ATOMIC"],
       [:VERSIONED,   "@shared:locked",   "LOCKED"],
-      [:VERSIONED,   "@shared:indirect:atomic", "ATOMIC"],
+      [:VERSIONED,   "@shared:boxed:atomic", "ATOMIC"],
       [:ATOMIC,      "@shared:locked",   "LOCKED"],
       [:ATOMIC,      "@shared:versioned",       "VERSIONED"],
       [:SNAPSHOTTED, "@shared:locked",   "LOCKED"],  # SNAPSHOTTED rejects LOCKED
@@ -222,7 +222,7 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
       }.not_to raise_error
     end
 
-    it "SNAPSHOTTED ACCEPTS @indirect:atomic (the umbrella property)" do
+    it "SNAPSHOTTED ACCEPTS @boxed:atomic (the umbrella property)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
@@ -233,7 +233,7 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
             RETURN;
           END
           FN main() RETURNS Void ->
-            MUTABLE c = C{ v: 0 } @indirect:atomic;
+            MUTABLE c = C{ v: 0 } @boxed:atomic;
             bump!(c);
             RETURN;
           END
@@ -271,17 +271,17 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
       }.to raise_error(/AtomicConflict.*not.*possible|not a possible error/m)
     end
 
-    it "ON MvccConflict on @indirect:atomic SNAPSHOT MUTABLE → error (wrong family)" do
+    it "ON MvccConflict on @boxed:atomic SNAPSHOT MUTABLE → error (wrong family)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
           FN main() RETURNS Void ->
-            MUTABLE c = C{ v: 0 } @indirect:atomic;
+            MUTABLE c = C{ v: 0 } @boxed:atomic;
             WITH SNAPSHOT c AS MUTABLE x { x.v = 1; } ON MvccConflict RAISE
             RETURN;
           END
         CLEAR
-      }.to raise_error(/ON MvccConflict.*isn'?t valid.*@indirect:atomic|AtomicConflict.*not.*MvccConflict/m)
+      }.to raise_error(/ON MvccConflict.*isn'?t valid.*@boxed:atomic|AtomicConflict.*not.*MvccConflict/m)
     end
   end
 
@@ -316,11 +316,11 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
       expect(zig).not_to include("error.AtomicConflict")
     end
 
-    it "@indirect:atomic SNAPSHOT MUTABLE emits ErrorName.AtomicConflict, not MvccConflict" do
+    it "@boxed:atomic SNAPSHOT MUTABLE emits ErrorName.AtomicConflict, not MvccConflict" do
       src = <<~CLEAR
         STRUCT C { v: Int64 }
         FN main() RETURNS Void ->
-          MUTABLE c = C{ v: 0 } @indirect:atomic;
+          MUTABLE c = C{ v: 0 } @boxed:atomic;
           WITH SNAPSHOT c AS MUTABLE x { x.v = 1; }
           RETURN;
         END

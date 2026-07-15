@@ -1,11 +1,11 @@
-# Test: @indirect field must deep-copy when capturing shared data.
+# Test: @boxed field must deep-copy when capturing shared data.
 #
-# Pattern: Lambda body captures a Value via @indirect. The @indirect
+# Pattern: Lambda body captures a Value via @boxed. The @boxed
 # heap-allocates a *Value. If the source Value contains heap data,
 # the stored value must be a deep copy so cleanup doesn't double-free.
 
 STRUCT Env { x: Int64 }
-UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
+UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @boxed, id: Int64 } }
 
 FN captureLambda!(TAKES bodyVal: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
     pool.insert(Env{ x: 1 });

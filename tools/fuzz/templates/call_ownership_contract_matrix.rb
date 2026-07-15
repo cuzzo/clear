@@ -321,7 +321,7 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
       END
 
       FN main() RETURNS Void ->
-        MUTABLE c = Counter{ value: 1_i64 } @indirect:atomic;
+        MUTABLE c = Counter{ value: 1_i64 } @boxed:atomic;
         h = spawn(c);
         NEXT h;
         RETURN;

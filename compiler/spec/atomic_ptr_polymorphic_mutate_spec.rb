@@ -10,7 +10,7 @@ require_relative "../ruby/ast/ast" unless defined?(MIR::ReassignPlan)
 #
 # Error message (design contract docs/agents/atomicptr.md §6.4):
 #   "Mutate surface differs by family: @versioned bounds retries and
-#    requires `ON MvccConflict`; @indirect:atomic retries unbounded and
+#    requires `ON MvccConflict`; @boxed:atomic retries unbounded and
 #    forbids it. Dispatch per family with `WITH SNAPSHOT c AS
 #    MUTABLE x MATCH ...`."
 RSpec.describe "Polymorphic VERSIONED|ATOMIC mutate without MATCH (M3.11)" do

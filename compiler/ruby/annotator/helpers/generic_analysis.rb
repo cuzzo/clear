@@ -600,7 +600,7 @@ module GenericAnalysis
     sync = t.sync_surface_name
     parts << ownership if ownership
     parts << sync if sync
-    parts << "@indirect" if t.indirect?
+    parts << "@boxed" if t.indirect?
 
     parts.join("")
   end

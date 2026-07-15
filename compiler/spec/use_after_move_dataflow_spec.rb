@@ -97,7 +97,7 @@ RSpec.describe UseAfterMoveChecker do
       expect { check_errors(<<~CLEAR) }.to raise_error(CompilerError, /USE AFTER MOVE.*`a`/m)
         STRUCT Box { id: Int64 }
         FN main() RETURNS Void ->
-          a: Box @indirect = Box{ id: 1 };
+          a: Box @boxed = Box{ id: 1 };
           b = a;
           c = a.id;
           RETURN;
@@ -144,7 +144,7 @@ RSpec.describe UseAfterMoveChecker do
       expect_no_error(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           b = a;
           RETURN;
         END
@@ -270,7 +270,7 @@ RSpec.describe UseAfterMoveChecker do
       df = analyze_state(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           b = a;
           RETURN;
         END
@@ -310,7 +310,7 @@ RSpec.describe UseAfterMoveChecker do
       df = analyze_state(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           b = a;
           RETURN;
         END
@@ -335,7 +335,7 @@ RSpec.describe UseAfterMoveChecker do
       df = analyze_state(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           b = a;
           RETURN;
         END
@@ -775,9 +775,9 @@ RSpec.describe UseAfterMoveChecker do
     it "reports GIVE of a borrowed heap value inside the borrow scope" do
       errors = borrow_errors(<<~CLEAR)
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           WITH BORROWED a AS ref {
             consume!(GIVE a);
           }
@@ -820,7 +820,7 @@ RSpec.describe UseAfterMoveChecker do
     it "struct literal return copies fields (CopyNode), source stays owned" do
       df = analyze_state(<<~CLEAR, "wrap")
         STRUCT Wrapper { data: Int64[] }
-        FN wrap() RETURNS !Wrapper @indirect ->
+        FN wrap() RETURNS !Wrapper @boxed ->
           MUTABLE items: []Int64 = List[];
           items.append(1_i64);
           RETURN Wrapper{ data: items };
@@ -867,7 +867,7 @@ RSpec.describe UseAfterMoveChecker do
       df = analyze_state(<<~CLEAR)
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           b = a;
           RETURN;
         END

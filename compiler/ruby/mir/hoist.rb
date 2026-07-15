@@ -376,7 +376,7 @@ module Hoist
     # move so ownership dataflow transfers the temp into the container
     # instead of cleaning it up at scope exit.
     ident.was_moved = moved if ident.respond_to?(:was_moved=)
-    # An @indirect field value carries needs_heap_create; the stamp must
+    # An @boxed field value carries needs_heap_create; the stamp must
     # follow the value to its new position.
     if concat.respond_to?(:needs_heap_create) && concat.needs_heap_create
       ident.needs_heap_create = true

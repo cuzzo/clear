@@ -1517,8 +1517,8 @@ class Type
     # :raw and :symbol are data-access modes, not locks — they don't force heap provenance.
     pin_heap_for_sync_wrapper! if sync_requires_heap_provenance?
     # `:indirect` layout is the explicit "heap-pinned cell with a stable
-    # address" form (used by @indirect:atomic = AtomicPtr(T)). Force heap
-    # provenance even without an active sync, mirroring the @indirect
+    # address" form (used by @boxed:atomic = AtomicPtr(T)). Force heap
+    # provenance even without an active sync, mirroring the @boxed
     # CapabilityWrap branch in the annotator (annotator.rb:3517).
     pin_heap_for_indirect! if indirect?
     # Symbol strings live in static read-only memory — always rodata, never heap/frame.
@@ -2805,7 +2805,7 @@ class Type
     sync == :atomic
   end
 
-  # AtomicPtr cell: @indirect:atomic. The `sync == :atomic && layout ==
+  # AtomicPtr cell: @boxed:atomic. The `sync == :atomic && layout ==
   # :indirect` pair was reinvented inline ~8x (decomplex Missing-Abstraction).
   sig { returns(T::Boolean) }
   def atomic_ptr?
@@ -5190,7 +5190,7 @@ class Type
       return "CheatLib.NodeRef(#{Type.zig_type_name_for(resolved)})"
     end
 
-    # @indirect is a heap-pinned cell boxed by a single HeapCreate, so its
+    # @boxed is a heap-pinned cell boxed by a single HeapCreate, so its
     # Zig type must be exactly one pointer level around the bare pointee for
     # every type uniformly (the String/slice path below otherwise drops it).
     if plain_indirect_value?

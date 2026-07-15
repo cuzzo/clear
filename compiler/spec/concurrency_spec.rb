@@ -445,9 +445,9 @@ RSpec.describe SemanticAnnotator do
         expect { run(code) }.to raise_error(CompilerError, /Capability @locked cannot be applied to primitive type/)
       end
 
-      it "raises error when @indirect is used on a number literal" do
-        code = "FN f() RETURNS !Void -> x = 42 @indirect; RETURN; END"
-        expect { run(code) }.to raise_error(CompilerError, /Capability @indirect cannot be applied to primitive type/)
+      it "raises error when @boxed is used on a number literal" do
+        code = "FN f() RETURNS !Void -> x = 42 @boxed; RETURN; END"
+        expect { run(code) }.to raise_error(CompilerError, /Capability @boxed cannot be applied to primitive type/)
       end
     end
   end

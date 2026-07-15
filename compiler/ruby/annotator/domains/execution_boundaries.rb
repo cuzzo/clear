@@ -276,7 +276,7 @@ module Annotator
       LOCK_POSSIBLE_TYPES = %i[LockTimeout LockCycle Deadlock].freeze
       # SNAPSHOT MUTABLE commit errors depend on the cell family.
       # @versioned -> MvccConflict (Versioned.update bounded retry).
-      # @indirect:atomic -> AtomicConflict after bounded AtomicPtr retries.
+      # @boxed:atomic -> AtomicConflict after bounded AtomicPtr retries.
       # The dispatch picks per cell at
       # validate_lock_error_clause! time; SNAPSHOT_POSSIBLE_TYPES is the
       # union over both for the resolve_error_selectors! reachability
@@ -411,7 +411,7 @@ module Annotator
         end
       end
 
-      # Reject `cfg.field = ...` when `cfg` is `@indirect:atomic`. The cell
+      # Reject `cfg.field = ...` when `cfg` is `@boxed:atomic`. The cell
       # publishes whole-T snapshots via atomic pointer swap, not per-field writes.
       # Only the WITH SNAPSHOT MUTABLE alias (a regular *T pointer
       # passed to AtomicPtr.update's closure) accepts field assignments.
@@ -422,7 +422,7 @@ module Annotator
       # cell binding -- the alias path falls through.
       #
       # Walks the target's chain to find the root Identifier. For
-      # GetField / GetIndex chains rooted at an @indirect:atomic
+      # GetField / GetIndex chains rooted at an @boxed:atomic
       # binding, fires the rejection. Other chain shapes (param
       # passing, etc.) are handled elsewhere.
 
@@ -463,7 +463,7 @@ module Annotator
       # threshold (they don't synchronize).
       #
       # Atomic is admitted when:
-      #   - a binding has concrete sync `:atomic` (primitive or indirect:atomic).
+      #   - a binding has concrete sync `:atomic` (primitive or boxed:atomic).
       #   - a polymorphic param's REQUIRES disjunction includes `:ATOMIC`
       #     literally, or `:SNAPSHOTTED` (which expands to {VERSIONED, ATOMIC}).
       # The fix: narrow REQUIRES to a non-ATOMIC family
@@ -492,7 +492,7 @@ module Annotator
 
       # Does this capability's binding potentially run as `:atomic` at runtime?
       #   - concrete sync `:atomic` (covers primitive @atomic and
-      #     indirect:atomic via sym.indirect?, both flagged
+      #     boxed:atomic via sym.indirect?, both flagged
       #     by sym.atomic?);
       #   - polymorphic REQUIRES disjunction admitting :ATOMIC or
       #     :SNAPSHOTTED (which expands to {VERSIONED, ATOMIC}).

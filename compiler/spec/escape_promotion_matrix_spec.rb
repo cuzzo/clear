@@ -26,7 +26,7 @@ require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 #   :struct_with_list    - storage :heap, cleanup :heap (heap field)
 #   :union_pure          - storage :stack, no cleanup (no heap variants)
 #   :union_with_heap     - storage :heap, cleanup :heap
-#   :indirect_int        - storage :heap, cleanup :heap (@indirect = boxed)
+#   :indirect_int        - storage :heap, cleanup :heap (@boxed = boxed)
 #
 # Cells that fail at landing time are the surface area of the
 # `needs_escape_promotion?` coverage gap.
@@ -129,11 +129,11 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
       "lst", :heap, :heap,
     ],
     indirect_int: [
-      # @indirect Int64 boxes the Int64 onto the heap; cleanup
+      # @boxed Int64 boxes the Int64 onto the heap; cleanup
       # allocator is :heap (per `cleanup_allocator` for indirect).
       # Reformulated to use !B so the make() body is fallible-typed
       # consistently with the other heap cells.
-      "UNION B { Box: Int64 @indirect }\n" \
+      "UNION B { Box: Int64 @boxed }\n" \
       "FN make() RETURNS !B -> MUTABLE b = B{ Box: 7_i64 }; RETURN b; END",
       "b", :heap, :heap,
     ],

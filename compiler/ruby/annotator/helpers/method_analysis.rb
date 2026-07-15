@@ -219,7 +219,7 @@ module MethodAnalysis
     parts = [Type.surface_name_type(type)]
     ownership = type.ownership_surface_name
     parts << ownership if ownership
-    parts << "@indirect" if type.indirect?
+    parts << "@boxed" if type.indirect?
     parts.join
   end
 
@@ -234,7 +234,7 @@ module MethodAnalysis
         confidence: :interactive,
         edits: [Edit.new(
           span: Span.new(file: nil, line: token.line, col: token.column + token.value.to_s.length, length: 0),
-          replacement: " @indirect",
+          replacement: " @boxed",
         )],
       )
     end

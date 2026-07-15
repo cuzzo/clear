@@ -528,7 +528,7 @@ pub fn bind(comptime deps: type) type {
         return ptr;
     }
 
-    /// Move the payload out of a unique @indirect allocation and release only
+    /// Move the payload out of a unique @boxed allocation and release only
     /// its allocation shell. Ownership of every cleanup-bearing field moves
     /// into the returned value; no destructor and no deep copy runs here.
     pub fn unboxMove(comptime T: type, alloc: std.mem.Allocator, boxed: *T) T {

@@ -2,22 +2,22 @@ require "rspec"
 require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 require_relative "../ruby/ast/ast" unless defined?(MIR::ReassignPlan)
 
-# AtomicPtr M3.10 -- reject bare mutation on @indirect:atomic.
+# AtomicPtr M3.10 -- reject bare mutation on @boxed:atomic.
 #
-# An assignment whose target's root binding is @indirect:atomic and is
+# An assignment whose target's root binding is @boxed:atomic and is
 # NOT inside a WITH SNAPSHOT ... AS MUTABLE block is invalid: the
 # AtomicPtr cell publishes whole-T snapshots via atomic pointer swap,
 # not per-field writes. The error message MUST explicitly distinguish
 # from primitive @shared:atomic (which uses direct ops like c += 1
 # because the cell fits in a single CAS-able machine word):
 #
-#   "@indirect:atomic requires `WITH SNAPSHOT cfg AS MUTABLE x { x.port = 9090; }`
+#   "@boxed:atomic requires `WITH SNAPSHOT cfg AS MUTABLE x { x.port = 9090; }`
 #    for mutation. Atomic pointer swap publishes a new whole-T snapshot,
 #    not a per-field write -- the WITH SNAPSHOT block clones the snapshot,
 #    mutates the clone, and CAS-publishes it. (This is different from
 #    primitive @shared:atomic Int64/Float64/Bool, which use direct ops
 #    like c += 1 because they fit in a single CAS-able machine word.)"
-RSpec.describe "Bare mutation on @indirect:atomic (M3.10)" do
+RSpec.describe "Bare mutation on @boxed:atomic (M3.10)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
     ast = ClearParser.new(tokens, src).parse
@@ -26,20 +26,20 @@ RSpec.describe "Bare mutation on @indirect:atomic (M3.10)" do
   end
 
   describe "rejected: bare field assignment OUTSIDE WITH SNAPSHOT" do
-    it "rejects `cfg.port = 9090` on an @indirect:atomic Cfg" do
+    it "rejects `cfg.port = 9090` on an @boxed:atomic Cfg" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
           FN main!() RETURNS Void ->
-            MUTABLE cfg = Cfg{ port: 8080 } @indirect:atomic;
+            MUTABLE cfg = Cfg{ port: 8080 } @boxed:atomic;
             cfg.port = 9090;
             RETURN;
           END
         CLEAR
-      }.to raise_error(/@indirect:atomic.\W+requires.*WITH SNAPSHOT.*MUTABLE.*atomic pointer swap.*different from primitive .@shared:atomic/im)
+      }.to raise_error(/@boxed:atomic.\W+requires.*WITH SNAPSHOT.*MUTABLE.*atomic pointer swap.*different from primitive .@shared:atomic/im)
     end
 
-    it "rejects compound assignment `cfg.port += 1` on an @indirect:atomic Cfg" do
+    it "rejects compound assignment `cfg.port += 1` on an @boxed:atomic Cfg" do
       # Even compound assignments (which desugar to read+write under
       # M1/M2 atomic primitives) aren't valid on the AtomicPtr cell --
       # there's no per-field cmpxchg on a struct field.
@@ -47,12 +47,12 @@ RSpec.describe "Bare mutation on @indirect:atomic (M3.10)" do
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
           FN main!() RETURNS Void ->
-            MUTABLE cfg = Cfg{ port: 8080 } @indirect:atomic;
+            MUTABLE cfg = Cfg{ port: 8080 } @boxed:atomic;
             cfg.port += 1;
             RETURN;
           END
         CLEAR
-      }.to raise_error(/@indirect:atomic.\W+requires.*WITH SNAPSHOT.*different from primitive .@shared:atomic/im)
+      }.to raise_error(/@boxed:atomic.\W+requires.*WITH SNAPSHOT.*different from primitive .@shared:atomic/im)
     end
   end
 
@@ -62,7 +62,7 @@ RSpec.describe "Bare mutation on @indirect:atomic (M3.10)" do
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
           FN main!() RETURNS !Void ->
-            MUTABLE cfg = Cfg{ port: 8080 } @indirect:atomic;
+            MUTABLE cfg = Cfg{ port: 8080 } @boxed:atomic;
             WITH SNAPSHOT cfg AS MUTABLE x {
               x.port = 9090;
             }
@@ -77,7 +77,7 @@ RSpec.describe "Bare mutation on @indirect:atomic (M3.10)" do
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
           FN main!() RETURNS !Void ->
-            MUTABLE cfg = Cfg{ port: 8080 } @indirect:atomic;
+            MUTABLE cfg = Cfg{ port: 8080 } @boxed:atomic;
             WITH SNAPSHOT cfg AS MUTABLE x {
               x.port = x.port + 1;
             }

@@ -925,7 +925,7 @@ module FixableHelper
   end
 
   # Capability: direct field access (`c.value`) on a `@locked` /
-  # `@writeLocked` / `@indirect:atomic` binding. :interactive fix
+  # `@writeLocked` / `@boxed:atomic` binding. :interactive fix
   # wraps the offending source line with `WITH <perm> name AS alias`,
   # rewriting `name.<field>` references on the line to `alias.<field>`.
   # Bare `name` references (e.g. passing it as a function arg) are

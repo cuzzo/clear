@@ -1007,7 +1007,7 @@ RSpec.describe ZigTranspiler do
     it "eliminates val cleanup when always moved into HashMap" do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
-        UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
+        UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @boxed, id: Int64 } }
         FN test!(MUTABLE pool: [Pool(10)]Env, MUTABLE map: {String}Value) RETURNS !Void ->
             pool.insert(Env{ x: 1 });
             val = Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
@@ -1025,7 +1025,7 @@ RSpec.describe ZigTranspiler do
 
     it "moves owned map assignment values without deep-copying them" do
       src = <<~CLEAR
-        UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
+        UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @boxed, id: Int64 } }
         FN test!(MUTABLE map: {String}Value) RETURNS !Void ->
             val = Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
             map["key"] = val;
@@ -1043,7 +1043,7 @@ RSpec.describe ZigTranspiler do
     it "does not emit source_moved for plain MATCH AS on non-Copy variant" do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
-        UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
+        UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @boxed, id: Int64 } }
         FN test!(TAKES v: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
             pool.insert(Env{ x: 1 });
             PARTIAL MATCH v START
@@ -1060,7 +1060,7 @@ RSpec.describe ZigTranspiler do
     it "keeps v moved guard when can_fail call precedes MATCH TAKES" do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
-        UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
+        UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @boxed, id: Int64 } }
         FN test!(TAKES v: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
             pool.insert(Env{ x: 1 });
             PARTIAL MATCH TAKES v START
@@ -1078,7 +1078,7 @@ RSpec.describe ZigTranspiler do
     it "does NOT emit source_moved for MATCH AS on Copy payload" do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
-        UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
+        UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @boxed, id: Int64 } }
         FN test!(TAKES v: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
             pool.insert(Env{ x: 1 });
             PARTIAL MATCH v START
@@ -1206,7 +1206,7 @@ RSpec.describe ZigTranspiler do
         STRUCT Env { vars: {String}Value }
         UNION Value {
             Nil, Number: Float64, Symbol: String, List: Value[],
-            Lambda { params: Value[], body: Value @indirect, envId: Id<Env> }
+            Lambda { params: Value[], body: Value @boxed, envId: Id<Env> }
         }
         FN main() RETURNS Void ->
             MUTABLE pool: [Pool(10)]Env = [];
@@ -1491,7 +1491,7 @@ RSpec.describe ZigTranspiler do
         STRUCT Env { vars: []String }
         UNION Value {
           Nil,
-          Tco { tcoAst: String @indirect, tcoEnv: Id<Env> }
+          Tco { tcoAst: String @boxed, tcoEnv: Id<Env> }
         }
 
         FN getEnvId!(v: Value, MUTABLE pool: [Pool(8)]Env) RETURNS !Id<Env> ->
@@ -1517,7 +1517,7 @@ RSpec.describe ZigTranspiler do
         STRUCT Env { vars: []String }
         UNION Value {
           Nil,
-          Tco { tcoAst: String @indirect, tcoEnv: Id<Env> }
+          Tco { tcoAst: String @boxed, tcoEnv: Id<Env> }
         }
 
         FN eval!(TAKES ast: String, envId: Id<Env>, MUTABLE pool: [Pool(8)]Env) RETURNS String EFFECTS REENTRANT ->
@@ -1772,9 +1772,9 @@ RSpec.describe ZigTranspiler do
   end
 
   describe "INV: recursive union indirect payload moves" do
-    it "marks local recursive union payloads moved after boxing into @indirect fields" do
+    it "marks local recursive union payloads moved after boxing into @boxed fields" do
       src = <<~CLEAR
-        UNION Node { Nil, One: String, Pair { left: Node @indirect, right: Node @indirect } }
+        UNION Node { Nil, One: String, Pair { left: Node @boxed, right: Node @boxed } }
 
         FN mk() RETURNS !Node ->
             left = Node{ One: COPY "a" };
@@ -1804,7 +1804,7 @@ RSpec.describe ZigTranspiler do
   describe "BUG-MIR-002: heap-returning call in non-TAKES arg position is hoisted" do
     it "hoists non-Copy union return from function call used as non-TAKES arg" do
       src = <<~CLEAR
-        UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+        UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
         FN makeVal!() RETURNS !Value ->
             RETURN Value.Lambda{ body: Value{ Num: 1.0 }, id: 1 };
         END
@@ -1818,7 +1818,7 @@ RSpec.describe ZigTranspiler do
       zig = transpile(src)
       # makeVal!() returns a heap-owning Value. useVal borrows it (non-TAKES).
       # The temporary must be hoisted to a named let with a cleanup defer,
-      # otherwise the Lambda's @indirect body pointer leaks.
+      # otherwise the Lambda's @boxed body pointer leaks.
       expect(zig).to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &__hoist_\d+\)/)
     end
 

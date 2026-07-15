@@ -55,7 +55,7 @@ RSpec.describe "Call-site error collapsing (#329)" do
       expect(call.collapsed_errors).to eq(Set[:MvccConflict])
     end
 
-    it "passing @indirect:atomic to REQUIRES SNAPSHOTTED → {AtomicConflict}" do
+    it "passing @boxed:atomic to REQUIRES SNAPSHOTTED → {AtomicConflict}" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
         FN tick!(MUTABLE c: C) RETURNS !Void
@@ -65,7 +65,7 @@ RSpec.describe "Call-site error collapsing (#329)" do
           RETURN;
         END
         FN main() RETURNS Void ->
-          MUTABLE c = C{ v: 0 } @indirect:atomic;
+          MUTABLE c = C{ v: 0 } @boxed:atomic;
           tick!(c);
           RETURN;
         END
@@ -157,7 +157,7 @@ RSpec.describe "Call-site error collapsing (#329)" do
         END
 
         FN main() RETURNS Void ->
-          MUTABLE v = C{ v: 0 } @indirect:atomic;
+          MUTABLE v = C{ v: 0 } @boxed:atomic;
           a!(v);
           RETURN;
         END

@@ -3,7 +3,7 @@
 # Uses Env[50000]@pool for scoped environments instead of a flat HashMap.
 # Each Env holds a HashMap<Value> for its local bindings.
 # Parent links stored as Value.EnvRef in vars["__p"].
-# Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
+# Lambda closures capture envId: Id<Env> directly; body stored as Value @boxed.
 # Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
 
 STRUCT Env {
@@ -15,11 +15,11 @@ UNION Value {
     Number: Float64, Str: String, Symbol: String,
     List: Value[],
     Vector: Value[],
-    Pair { pairCar: Value @indirect, pairCdr: Value @indirect },
+    Pair { pairCar: Value @boxed, pairCdr: Value @boxed },
     Lambda { envId: Id<Env> },
     NativeFn: Int64,
     EnvRef: Id<Env>,
-    Tco { tcoAst: Value @indirect, tcoEnv: Id<Env> },
+    Tco { tcoAst: Value @boxed, tcoEnv: Id<Env> },
     Error { errMsg: String, errKind: String }
 }
 

@@ -31,9 +31,9 @@ RSpec.describe "automatic ownership transport" do
   it "keeps parent cleanup when a local field view is inferred as a borrow" do
     zig = transpile(<<~CLEAR)
       STRUCT Node { value: Int64 }
-      STRUCT Container { node: Node @indirect, id: Int64 }
+      STRUCT Container { node: Node @boxed, id: Int64 }
       FN makeContainer(v: Int64) RETURNS !Container ->
-        node: Node @indirect = Node{ value: v };
+        node: Node @boxed = Node{ value: v };
         RETURN Container{ node: node, id: 1 };
       END
       FN main() RETURNS !Void ->

@@ -144,7 +144,7 @@ FuzzGenerator.register(
 
   if p[:composition] == :stream_of_tuple
     next <<~CLEAR
-      FN makeTupleStream() RETURNS ~Tuple<Int64, Bool>[INF] ->
+      FN makeTupleStream() RETURNS [~INF]Tuple<Int64, Bool> ->
           RETURN BG STREAM YIELDS Tuple<Int64, Bool> {
               YIELD Tuple{7_i64, TRUE};
               WHILE TRUE DO YIELD Tuple{8_i64, FALSE}; END

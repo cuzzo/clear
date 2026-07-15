@@ -404,7 +404,7 @@ class MIRChecker
         transfers << name
         return_transfers << name if node.target == :return
       when MIR::ErrDeferStmt
-        # @indirect field temps use ErrDeferStmt(DestroyPtr) instead of ErrCleanup.
+        # @boxed field temps use ErrDeferStmt(DestroyPtr) instead of ErrCleanup.
         # Track their names so ALLOC_WITHOUT_CLEANUP does not false-positive on them.
         body = node.body
         ptr = body.ptr if body.is_a?(MIR::DestroyPtr)
@@ -2286,7 +2286,7 @@ class MIRChecker
     # ALLOC_WITHOUT_CLEANUP: every HEAP AllocMark must have a Cleanup, ErrCleanup,
     # ErrDeferStmt(DestroyPtr), or explicit TransferMark. Frame allocations are
     # freed by the arena rewind and do not require an explicit cleanup node.
-    # Exception: @indirect field temps use ErrDeferStmt(DestroyPtr) (errdefer_destroy_names).
+    # Exception: @boxed field temps use ErrDeferStmt(DestroyPtr) (errdefer_destroy_names).
     allocs.each do |name, alloc_marks|
       next if cleanups.key?(name)
       next if errdefer_destroy_names.include?(name)

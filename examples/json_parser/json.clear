@@ -1,7 +1,7 @@
 # JSON Parser in CLEAR
 #
 # Parses JSON strings into a JsonValue union. Exercises:
-#   - Recursive unions with @indirect (JsonValue contains JsonValue[])
+#   - Recursive unions with @boxed (JsonValue contains JsonValue[])
 #   - HashMap<JsonValue> as a union variant
 #   - @list building inside recursive functions
 #   - String escape parsing (tests lexer escape fix)

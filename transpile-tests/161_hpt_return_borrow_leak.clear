@@ -5,7 +5,7 @@
 UNION Val {
     Nil,
     Str: String,
-    Lambda { params: Val[], body: Val @indirect, envId: Int64 }
+    Lambda { params: Val[], body: Val @boxed, envId: Int64 }
 }
 
 FN getStr(v: Val) RETURNS !String ->

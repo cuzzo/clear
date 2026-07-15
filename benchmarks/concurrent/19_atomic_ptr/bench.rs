@@ -3,7 +3,7 @@
 // Same producer-consumer config swap workload as the CLEAR + Go bench:
 // 1 writer publishes a Counter via ArcSwap<Counter>; N readers each
 // load the snapshot reads_per times and verify the structural
-// invariant `b == a * 2`. Compares the M3 @indirect:atomic surface
+// invariant `b == a * 2`. Compares the M3 @boxed:atomic surface
 // against arc-swap's `ArcSwap::rcu` (the canonical Rust idiom for
 // lock-free atomic-pointer publish).
 //

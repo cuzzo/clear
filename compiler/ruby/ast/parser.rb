@@ -373,6 +373,7 @@ class ClearParser
     rule(:VAR_ID, '@alwaysMutable', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@versioned', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@atomic', action: :parse_capability_wrap_suffix),
+    rule(:VAR_ID, '@boxed', action: :parse_capability_wrap_suffix),
     rule(:VAR_ID, '@indirect', action: :parse_capability_wrap_suffix),
     rule(:CHAR, '{', action: :parse_inline_union_variant_suffix),
   ].freeze, T::Array[ParserRule])
@@ -384,7 +385,7 @@ class ClearParser
   # Three orthogonal dimensions:
   #   ownership: :multiowned | :shared         (who keeps it alive)
   #   sync:      :locked | :write_locked | :local | :versioned | :atomic  (how it's synchronized)
-  #   layout:    :indirect                      (where it lives — heap pointer)
+  #   layout:    :indirect                      (source spelling: @boxed)
   # `:versioned` is MVCC (Versioned(T) atomic-pointer COW + EBR). `:atomic` is
   # a single-cell lock-free primitive (Atomic(T) on Int64/Float64/Bool). Both
   # compose with `:shared` (Arc<Versioned(T)> / [M1] Arc<Atomic(T)>); neither
@@ -401,6 +402,7 @@ class ClearParser
     '@local'          => sigil_attrs(dim: :sync, val: :local),
     '@versioned'      => sigil_attrs(dim: :sync, val: :versioned),
     '@atomic'         => sigil_attrs(dim: :sync, val: :atomic),
+    '@boxed'          => sigil_attrs(dim: :layout, val: :indirect),
     '@indirect'       => sigil_attrs(dim: :layout, val: :indirect),
     '@alwaysMutable'  => sigil_attrs(dim: :sync, val: :always_mutable),
   }.freeze, SigilTable)
@@ -779,6 +781,7 @@ class ClearParser
   sig { params(lhs: AST::Node).returns(AST::CapabilityWrap) }
   def parse_capability_wrap_suffix(lhs)
     token = consume(:VAR_ID)
+    emit_boxed_capability_migration(token)
     attrs = T.must(CAP_SIGIL_ATTRS[token.text!])
     joined = parse_cap_join(token, attrs)
     cw = AST::CapabilityWrap.new(token, lhs, joined.ownership, joined.sync, joined.layout)
@@ -1590,7 +1593,7 @@ class ClearParser
           end
           variants[var_name] = Schemas::InlineStructVariant.new(fields: field_pairs.to_h)
         elsif match!(:CHAR, ':')
-          # Single-type payload: Data: Number  (or Data: Number @indirect)
+          # Single-type payload: Data: Number  (or Data: Number @boxed)
           vtype = parse_type_annotation
           reject_auto_in_aggregate_field!(vtype, var_name, nil, "UNION variant payload")
           variants[var_name] = vtype
@@ -3496,7 +3499,7 @@ class ClearParser
 
     loc = is_indirect ? :heap : nil
     layout = is_indirect ? :indirect : nil
-    # Mirror CapabilityWrap's auto-promotion so @indirect:atomic has the same
+    # Mirror CapabilityWrap's auto-promotion so @boxed:atomic has the same
     # ownership whether it appears in an expression or a type annotation.
     if sync == :atomic && layout == :indirect && ownership.nil?
       ownership = :shared
@@ -3543,6 +3546,29 @@ class ClearParser
       token: start_token,
       category: :type_migration,
       fixes: [Fix.new(description: fix_description(:REWRITE_INLINE_PIVOT_TYPE, type: replacement), confidence: :auto, edits: [edit])]
+    ))
+  end
+
+  sig { params(token: Lexer::Token).void }
+  def emit_boxed_capability_migration(token)
+    return unless FixCollector.type_migrations_enabled?
+    return unless %w[@indirect indirect].include?(token.text!)
+
+    replacement = token.text!.start_with?("@") ? "@boxed" : "boxed"
+    edit = Edit.new(
+      span: Span.new(file: nil, line: token.line, col: token.column, length: token.text!.length),
+      replacement: replacement
+    )
+    FixCollector.push(FixableFinding.new(
+      level: :info,
+      message: "Legacy @indirect capability is now spelled @boxed",
+      token: token,
+      category: :type_migration,
+      fixes: [Fix.new(
+        description: fix_description(:RENAME_BOXED_CAPABILITY, old: token.text!, new: replacement),
+        confidence: :auto,
+        edits: [edit]
+      )]
     ))
   end
 
@@ -3881,9 +3907,9 @@ class ClearParser
   end
 
   # All recognized capability tokens.
-  ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @node @locked @writeLocked @link @indirect].freeze
+  ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @node @locked @writeLocked @link @boxed @indirect].freeze
   ELEMENT_SYNC_TOKENS = %w[@locked @writeLocked locked writeLocked].freeze
-  CAPABILITY_TOKENS = %w[@multiowned @shared @node @split @locked @writeLocked @local @versioned @atomic @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
+  CAPABILITY_TOKENS = %w[@multiowned @shared @node @split @locked @writeLocked @local @versioned @atomic @boxed @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
   CAPABILITY_OWNERSHIP_VALUES = T.let({
     "@multiowned" => :multiowned,
     "@shared" => :shared,
@@ -3973,10 +3999,14 @@ class ClearParser
     return result unless match?(:VAR_ID) && ELEMENT_CAPABILITY_TOKENS.include?(current.value)
     return result unless element_capability_suffix?
 
-    apply_element_capability!(result, consume(:VAR_ID).text!)
+    token = consume(:VAR_ID)
+    emit_boxed_capability_migration(token)
+    apply_element_capability!(result, token.text!)
     if match?(:CHAR, ':')
       consume(:CHAR, ':')
-      apply_element_capability!(result, consume(:VAR_ID).text!)
+      token = consume(:VAR_ID)
+      emit_boxed_capability_migration(token)
+      apply_element_capability!(result, token.text!)
     end
     result
   end
@@ -4013,7 +4043,7 @@ class ClearParser
       result.sync = :write_locked
     when "@link"
       result.ownership = :link
-    when "@indirect", "indirect"
+    when "@boxed", "boxed", "@indirect", "indirect"
       result.layout = :indirect
     end
   end
@@ -4033,6 +4063,7 @@ class ClearParser
   # Apply a single capability token to the result hash. Detects duplicates.
   sig { params(result: CapabilityParseResult, token: Lexer::Token, value: String, validate_shard_count: T::Boolean).void }
   def apply_capability!(result, token, value = token.value, validate_shard_count: false)
+    emit_boxed_capability_migration(token)
     ownership = CAPABILITY_OWNERSHIP_VALUES[value]
     if ownership
       current = result.ownership
@@ -4060,7 +4091,7 @@ class ClearParser
     end
 
     case value
-    when "@indirect"
+    when "@boxed", "@indirect"
       error!(token, :DUPLICATE_LAYOUT_CAP) if result.is_indirect
       result.is_indirect = true
     when "@soa"
@@ -4522,6 +4553,7 @@ class ClearParser
       end
       attrs = T.must(attrs)
       next_tok = consume(:VAR_ID)
+      emit_boxed_capability_migration(next_tok)
       apply_cap_dim!(next_tok, attrs, dims)
       parse_lock_rank_arg!(next_tok, attrs, dims)
     end
