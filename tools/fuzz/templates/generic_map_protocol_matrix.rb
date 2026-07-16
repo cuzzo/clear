@@ -11,6 +11,8 @@ GENERIC_MAP_PROTOCOL_CELLS = [
   { shape: :associated_storage_string },
   { shape: :associated_storage_numeric },
   { shape: :optional_capture_method_boundary },
+  { shape: :user_protocol_declaration },
+  { shape: :duplicate_user_protocol_requirement, expected: :compile_error },
   { shape: :associated_storage_wrong_key, expected: :compile_error },
   { shape: :borrowed_value, expected: :compile_error },
   { shape: :non_map_argument, expected: :compile_error },
@@ -123,6 +125,25 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
         ASSERT holder.copied() OR_ELSE RAISE OR_ELSE "" == "key";
       END
     CLEAR
+  when :user_protocol_declaration
+    <<~CLEAR
+      PUB PROTOCOL Lookup<Key, Value> {
+        METHOD get(self: Self, key: Key) RETURNS !?Value;
+        FN clear!(MUTABLE self: Self) RETURNS !Void;
+      }
+      STRUCT Holder<S: Lookup> { storage: S }
+      FN main() RETURNS Void -> PASS END
+    CLEAR
+  when :duplicate_user_protocol_requirement
+    {
+      source: <<~CLEAR,
+        PROTOCOL Named {
+          METHOD name(self: Self) RETURNS String;
+          METHOD name(self: Self) RETURNS String;
+        }
+      CLEAR
+      error_code: :IMPLEMENTATION_DUPLICATE_MEMBER,
+    }
   when :non_map_argument
     {
       source: <<~CLEAR,

@@ -43,6 +43,8 @@ module Annotator
       attr_reader :root_scope
       sig { returns(Annotator::FunctionRegistry) }
       attr_reader :function_registry
+      sig { returns(T::Hash[String, AST::ProtocolDef]) }
+      attr_reader :protocols
 
       sig do
         params(
@@ -61,6 +63,7 @@ module Annotator
         @root_scope = T.let(root_scope || Scope.new, Scope)
         @scope_stack = T.let([@root_scope], T::Array[Scope])
         @function_registry = T.let(function_registry || Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
+        @protocols = T.let({}, T::Hash[String, AST::ProtocolDef])
         @local_type_declaration_names = T.let(Set.new, T::Set[Symbol])
         initialize_builtin_environment! if install_builtins
       end
@@ -81,9 +84,20 @@ module Annotator
           root_scope: @root_scope,
           function_registry: @function_registry,
           implementation_resolutions: implementation_resolutions,
+          protocols: @protocols,
           type_names: @root_scope.types.keys,
           function_names: resolved_function_names
         )
+      end
+
+      sig { params(name: String).returns(T::Boolean) }
+      def protocol_declared?(name)
+        name == "Map" || @protocols.key?(name)
+      end
+
+      sig { params(protocol: AST::ProtocolDef).void }
+      def register_protocol!(protocol)
+        @protocols[protocol.name] = protocol
       end
 
       sig { params(node: T.any(TypeDeclaration, AST::ExternFnDecl)).void }

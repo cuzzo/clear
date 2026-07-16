@@ -1102,7 +1102,7 @@ class MIRLowering
 
     # --- Top-level ---
     when AST::Program           then lower_program(node)
-    when AST::ImplementationDef then nil
+    when AST::ImplementationDef, AST::ProtocolDef then nil
 
     # --- Marker nodes from MIRPass ---
     when MIR::Drop              then lower_drop(node)

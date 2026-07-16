@@ -1669,6 +1669,38 @@ module AST
     const :bounds, T::Array[GenericBoundDecl], default: []
   end
 
+  class ProtocolRequirement < T::Struct
+    include Locatable
+
+    const :token, Lexer::Token
+    const :name, String
+    const :params, T::Array[AST::Param]
+    const :return_type, Type
+    const :is_method, T::Boolean, default: true
+  end
+
+  ProtocolDef = Struct.new(:token, :name, :name_token, :associated_types, :requirements, :visibility) do
+    extend T::Sig
+    include Locatable
+    include HasBodies
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:associated_types] = (self[:associated_types] || []).dup
+      self[:requirements] = (self[:requirements] || []).dup
+    end
+
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    def associated_types = self[:associated_types]
+
+    sig { returns(T::Array[AST::ProtocolRequirement]) }
+    def requirements = self[:requirements]
+
+    sig { returns(T::Array[RawBody]) }
+    def child_bodies = []
+  end
+
   FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime,
                             :body, :catch_clauses, :default_catch, :visibility, :deferred_drops,
                             :uses_frame, :explicit_return_type, :type_params, :tail_call, :requires,

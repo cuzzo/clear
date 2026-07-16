@@ -158,6 +158,8 @@ class ClearParser
       parse_function_def(visibility, is_method: true)
     elsif match?(:KEYWORD, 'STRUCT')
       parse_struct_def(visibility)
+    elsif match?(:KEYWORD, 'PROTOCOL')
+      parse_protocol_def(visibility)
     elsif match?(:KEYWORD, 'ENUM')
       parse_enum_def(visibility)
     elsif match?(:KEYWORD, 'UNION')
@@ -354,6 +356,48 @@ class ClearParser
     node = AST::StructDef.new(tok, name, fields, visibility, generic_params.map(&:name))
     node.generic_params = generic_params
     node
+  end
+
+  sig { params(visibility: Symbol).returns(AST::ProtocolDef) }
+  def parse_protocol_def(visibility = :package)
+    token = consume(:KEYWORD, 'PROTOCOL')
+    name_token = consume(:TYPE_ID)
+    associated_types = parse_generic_type_params
+    consume(:CHAR, '{')
+    requirements = T.let([], T::Array[AST::ProtocolRequirement])
+    until match?(:CHAR, '}')
+      requirements << parse_protocol_requirement
+    end
+    consume(:CHAR, '}')
+    AST::ProtocolDef.new(
+      token, name_token.text!, name_token, associated_types, requirements, visibility,
+    )
+  end
+
+  sig { returns(AST::ProtocolRequirement) }
+  def parse_protocol_requirement
+    token = if match?(:KEYWORD, 'METHOD')
+      consume(:KEYWORD, 'METHOD')
+    else
+      consume(:KEYWORD, 'FN')
+    end
+    method = token.text! == 'METHOD'
+    name_token = consume(:VAR_ID)
+    name = name_token.text!
+    params = parse_argument_list
+    return_type = if match!(:KEYWORD, 'RETURNS')
+      parse_type_annotation
+    else
+      Type.new(:Void)
+    end
+    consume(:CHAR, ';')
+    AST::ProtocolRequirement.new(
+      token: token,
+      name: name,
+      params: params,
+      return_type: return_type,
+      is_method: method,
+    )
   end
 
   sig { returns(AST::ImplementationDef) }

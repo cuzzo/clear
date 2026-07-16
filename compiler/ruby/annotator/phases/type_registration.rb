@@ -18,9 +18,43 @@ module Annotator
         end
         resolve_recursive_struct_layouts!(structs)
         declarations.type_declarations.each do |node|
+          register_protocol_declaration(node) if node.is_a?(AST::ProtocolDef)
+        end
+        declarations.type_declarations.each do |node|
+          next if node.is_a?(AST::ProtocolDef)
           register_type_declaration(node)
         end
       end
+
+      sig { params(node: AST::ProtocolDef).void }
+      def register_protocol_declaration(node)
+        T.bind(self, ResolutionSession)
+        if protocol_declared?(node.name) || current_scope.resolve_type_entry(node.name.to_sym)
+          error!(node.name_token, :DUPLICATE_DECLARATION, label: "protocol", name: node.name)
+        end
+
+        seen_associated = T.let(Set.new, T::Set[String])
+        node.associated_types.each do |associated|
+          error!(associated.token || node, :GENERIC_DUPLICATE_TYPE_PARAM,
+            param: associated.name, struct: node.name) if seen_associated.include?(associated.name)
+          error!(associated.token || node, :IMPLEMENTATION_BINDER_HAS_BOUND,
+            name: associated.name) unless associated.bounds.empty?
+          seen_associated.add(associated.name)
+        end
+
+        seen_requirements = T.let(Set.new, T::Set[String])
+        node.requirements.each do |requirement|
+          if seen_requirements.include?(requirement.name)
+            error!(requirement, :IMPLEMENTATION_DUPLICATE_MEMBER,
+              owner: node.name, name: requirement.name)
+          end
+          seen_requirements.add(requirement.name)
+          stamp_type!(requirement, :Void)
+        end
+        register_protocol!(node)
+        stamp_type!(node, :Void)
+      end
+      private :register_protocol_declaration
 
       class RecursiveFieldEdge < T::Struct
         const :owner, Symbol
@@ -242,7 +276,7 @@ module Annotator
 
         params.each do |param|
           param.bounds.each do |bound|
-            next if bound.type.resolved == :Map
+            next if protocol_declared?(bound.type.resolved.to_s)
             error!(bound.token || param.token, :GENERIC_UNKNOWN_PROTOCOL,
               protocol: Type.surface_name(bound.type))
           end

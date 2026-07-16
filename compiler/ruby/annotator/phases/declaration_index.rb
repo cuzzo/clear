@@ -8,7 +8,7 @@ module Annotator
     extend T::Sig
 
     TypeDeclaration = T.type_alias do
-      T.any(AST::StructDef, AST::ExternStructDecl, AST::EnumDef, AST::UnionDef)
+      T.any(AST::StructDef, AST::ExternStructDecl, AST::EnumDef, AST::UnionDef, AST::ProtocolDef)
     end
 
     class ErrorTypeRegistration < T::Struct
@@ -46,7 +46,7 @@ module Annotator
           case stmt
           when AST::RequireNode
             imports << stmt
-          when AST::StructDef, AST::ExternStructDecl, AST::EnumDef
+          when AST::StructDef, AST::ExternStructDecl, AST::EnumDef, AST::ProtocolDef
             type_declarations << stmt
           when AST::UnionDef
             type_declarations << stmt

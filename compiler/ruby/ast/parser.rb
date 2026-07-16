@@ -276,6 +276,7 @@ class ClearParser
     rule(:KEYWORD, 'IF', action: :parse_if_statement),
     rule(:KEYWORD, 'COMPTIME', action: :parse_comptime_statement),
     rule(:KEYWORD, 'STRUCT', action: :parse_struct_def),
+    rule(:KEYWORD, 'PROTOCOL', action: :parse_protocol_def),
     rule(:KEYWORD, 'IMPLEMENTATION', action: :parse_implementation_def),
     rule(:KEYWORD, 'ENUM', action: :parse_enum_def),
     rule(:KEYWORD, 'UNION', action: :parse_union_def),
