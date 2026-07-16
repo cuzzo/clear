@@ -10,7 +10,6 @@ require_relative "../../ast/std_lib"
 require_relative "../../ast/async_result_shape"
 require_relative "../../semantic/ownership_graph"
 require_relative "../../semantic/ownership_transport"
-require_relative "annotation_boundary"
 require_relative "body_analysis"
 require_relative "builtin_environment"
 require_relative "declaration_index"
@@ -38,8 +37,6 @@ require_relative "../helpers/function_analysis"
 require_relative "../helpers/prefixed_int_range"
 require_relative "../helpers/pipe_analysis"
 require_relative "../../semantic/escape_analysis"
-require_relative "../../semantic/semantic_index"
-require_relative "../../semantic/pass_state"
 require_relative "../../semantic/bg_capture_classifier"
 require_relative "../../semantic/effect_inference"
 require_relative "../../semantic/concurrency_checks"
@@ -85,7 +82,6 @@ class Annotator::Phases::TypeAnalysisSession
   include UnionAnalysis
   include LockHelper
   include TestAnnotation
-  include Annotator::Phases::AnnotationBoundary
   include Annotator::Phases::AutoFinalization
   include Annotator::Phases::BodyAnalysis
   include Annotator::Phases::DeferredValidation
@@ -133,6 +129,13 @@ class Annotator::Phases::TypeAnalysisSession
     prop :annotation_ancestors, T::Array[AST::Node], factory: -> { [] }
   end
 
+  class Config < T::Struct
+    const :importer, T.nilable(ModuleImporter)
+    const :source_dir, String
+    const :strict_test, T::Boolean
+    const :source_code, T.nilable(String)
+  end
+
   CapabilityAuditInputs = Annotator::Phases::CapabilityAuditInputs
 
   sig { returns(T::Hash[String, AST::FunctionDef]) }
@@ -164,7 +167,7 @@ class Annotator::Phases::TypeAnalysisSession
 
   sig { returns(OwnershipGraph) }
   def ownership_graph
-    @annotation_products.typed_program&.ownership_graph || @audit_inputs.ownership_graph
+    @audit_inputs.ownership_graph
   end
   private :ownership_graph
 
@@ -192,9 +195,6 @@ class Annotator::Phases::TypeAnalysisSession
   def semantic_program
     @program
   end
-
-  sig { returns(T.nilable(SemanticIndex)) }
-  attr_reader :semantic_index
 
   sig { returns(T::Hash[Symbol, Integer]) }
   def semantic_lock_type_ranks
@@ -557,25 +557,20 @@ class Annotator::Phases::TypeAnalysisSession
 
   sig { override.returns(T.nilable(String)) }
   def source_code
-    @source_code
-  end
-
-  sig { params(value: T.nilable(String)).returns(T.nilable(String)) }
-  def source_code=(value)
-    @source_code = value
+    @config.source_code
   end
 
   sig { params(importer: T.nilable(ModuleImporter), compiler: T.nilable(ModuleImporter), source_dir: T.nilable(String), strict_test: T::Boolean, source_code: T.nilable(String)).void }
   def initialize(importer: nil, compiler: nil, source_dir: nil, strict_test: false, source_code: nil)
-    @importer   = T.let(importer || compiler, T.nilable(ModuleImporter))
-    @source_dir = T.let(source_dir ? File.expand_path(source_dir) : Dir.pwd, String)
-    @strict_test = T.let(strict_test, T::Boolean)
-    @source_code = source_code
+    @config = T.let(Config.new(
+      importer: importer || compiler,
+      source_dir: source_dir ? File.expand_path(source_dir) : Dir.pwd,
+      strict_test: strict_test,
+      source_code: source_code
+    ), Config)
     @traversal_state = T.let(TraversalState.new, TraversalState)
     @audit_inputs = T.let(CapabilityAuditInputs.new, CapabilityAuditInputs)
     @function_registry = T.let(Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
-    @semantic_index = T.let(nil, T.nilable(SemanticIndex))
-    @annotation_products = T.let(Annotator::Phases::AnnotationProducts.new, Annotator::Phases::AnnotationProducts)
     @program = T.let(nil, T.nilable(AST::Program))
     @language_mode = T.let(:default, Symbol)
     @comptime_type_param_refinements = T.let({}, T::Hash[Symbol, Type])
@@ -586,12 +581,7 @@ class Annotator::Phases::TypeAnalysisSession
 
   sig { returns(T::Boolean) }
   def strict_test?
-    @strict_test
-  end
-
-  sig { returns(Annotator::Phases::AnnotationProducts) }
-  def annotation_products
-    @annotation_products
+    @config.strict_test
   end
 
   sig { returns(T::Boolean) }
@@ -611,40 +601,11 @@ class Annotator::Phases::TypeAnalysisSession
   end
   private :with_struct_literal_call_argument
 
-  sig { params(node: AST::Program).returns(NilClass) }
-  def annotate!(node)
-    # Reset user-registered error types so state from prior runs (rspec
-    # parallel, multi-program test harness) doesn't leak in. Stdlib
-    # types are preserved.
-    AST.reset_user_types!
-    reset_compilation_state!
-    @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
-    @language_mode = node.language_mode
-    @annotation_products = Annotator::Phases::AnnotationPipeline.run(
-      program: node,
-      importer: active_importer,
-      source_dir: import_source_dir,
-      source_code: @source_code,
-      products: @annotation_products,
-      type_session: self
-    )
-    raise "annotation pipeline did not publish complete products" unless @annotation_products.complete?
-    @semantic_index = T.let(SemanticIndex.from_products(
-      annotation_products: @annotation_products,
-      id_index: semantic_id_index_from_body_summaries,
-    ), T.nilable(SemanticIndex))
-    mark_annotation_complete!(node)
-    nil
-  end
-
-  sig { returns(Symbol) }
-  def language_mode
-    @language_mode
-  end
-
   sig { params(resolution: Annotator::Phases::ResolutionFacts).returns(Annotator::Phases::TypeAnalysisHandoff) }
   def execute_type_analysis!(resolution)
-    @annotation_products = @annotation_products.publish_resolution(resolution)
+    reset_compilation_state!
+    @program = resolution.program
+    @language_mode = resolution.program.language_mode
     ownership = analyze_resolution!(resolution)
     inventory = Annotator::Phases::AnnotationTypeInventory.scan(resolution.program)
     inventory.verify_resolved!
@@ -655,11 +616,15 @@ class Annotator::Phases::TypeAnalysisSession
       unresolved_node_count: inventory.unresolved_node_count,
       ownership_graph: ownership
     )
-    @annotation_products = @annotation_products.publish_typed_program(typed_program)
     Annotator::Phases::TypeAnalysisHandoff.new(
       typed_program: typed_program,
       audit_request: release_capability_audit_request!
     )
+  end
+
+  sig { returns(Symbol) }
+  def language_mode
+    @language_mode
   end
 
   sig { params(resolution: Annotator::Phases::ResolutionFacts).returns(OwnershipGraph) }
@@ -686,7 +651,7 @@ class Annotator::Phases::TypeAnalysisSession
   def release_capability_audit_request!
     Annotator::Phases::CapabilityAuditRequest.new(
       inputs: release_capability_audit_inputs!,
-      source_code: @source_code,
+      source_code: @config.source_code,
       language_mode: language_mode,
       strict_test: strict_test?
     )
@@ -699,8 +664,6 @@ private
     @traversal_state = TraversalState.new
     @audit_inputs = CapabilityAuditInputs.new
     @function_registry = Annotator::FunctionRegistry.new
-    @semantic_index = nil
-    @annotation_products = Annotator::Phases::AnnotationProducts.new
     @program = nil
     @branch_terminated = false
     @comptime_type_param_refinements = {}
@@ -716,21 +679,12 @@ private
 
   sig { returns(T.nilable(ModuleImporter)) }
   def active_importer
-    @importer
+    @config.importer
   end
 
   sig { returns(String) }
   def import_source_dir
-    @source_dir
-  end
-
-  sig { returns(Semantic::SemanticIdIndex) }
-  def semantic_id_index_from_body_summaries
-    summaries = function_body_summaries
-    Semantic::SemanticIdIndex.new(
-      definitions: summaries.transform_values(&:definition_id),
-      bodies: summaries.transform_values(&:body_id)
-    )
+    @config.source_dir
   end
 
   sig { params(name: String).returns(Semantic::BodyIdentity) }
@@ -1005,7 +959,7 @@ private
     Annotator::Phases::ResolutionSession.new(
       importer: active_importer,
       source_dir: import_source_dir,
-      source_code: @source_code,
+      source_code: @config.source_code,
       root_scope: current_scope,
       function_registry: semantic_function_registry,
       install_builtins: false
@@ -1208,6 +1162,9 @@ private
   private :semantic_held_lock_types
   private :semantic_lock_type_ranks
   private :semantic_program
+  private :semantic_root_scope
+  private :scope_stack
+  private :source_code
   private :smooth_depth
   private :stamp_type!
   private :with_conditional_context
@@ -1222,7 +1179,3 @@ private
   private :strict_test?
 
 end
-
-# Load the coordinator only after the phase-owned executor exists. This keeps
-# the pipeline/session dependency acyclic and lets each phase file load alone.
-require_relative "annotation_pipeline"

@@ -18,7 +18,7 @@ RSpec.describe Annotator::Phases::TypeAnalysisPhase do
       source_dir: Dir.pwd,
       source_code: source
     )
-    session = SemanticAnnotator.new(source_code: source)
+    session = Annotator::Phases::TypeAnalysisSession.new(source_code: source)
 
     result = described_class.run(resolution: resolution, session: session).typed_program
 

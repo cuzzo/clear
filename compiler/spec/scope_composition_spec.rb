@@ -296,7 +296,7 @@ RSpec.describe Scope do
   end
 
   it "collects branch drops from owned entries without dropping inherited bindings" do
-    annotator = SemanticAnnotator.new
+    annotator = Annotator::Phases::TypeAnalysisSession.new
     root = annotator.send(:current_scope)
 
     outer = root.declare("outer", nil, Type.new(:String), false, false, nil, :heap)

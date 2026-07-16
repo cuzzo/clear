@@ -25,7 +25,14 @@ require_relative "../../ast/fixable_suggestion_helper"
 
 # ruby-to-clear: emit-module-methods
 module FixableHelper
-    extend T::Sig
+  extend T::Helpers
+  extend T::Sig
+  abstract!
+
+  sig { abstract.returns(T.nilable(String)) }
+  def source_code; end
+  private :source_code
+
   include FixableSuggestionHelper
 
   DiagnosticKwValue = T.type_alias { DiagnosticRegistry::DiagnosticKwValue }
@@ -300,7 +307,7 @@ module FixableHelper
   sig { params(use_node: AST::Identifier, og_node: OwnershipGraph::Node).returns(NilClass) }
   def emit_use_of_moved_error!(use_node, og_node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    @source_code = T.let(@source_code, T.nilable(String))
+    src = source_code
     name = use_node.name.to_s
     move_line = og_node.move_line
     move_col = og_node.move_col
@@ -326,9 +333,8 @@ module FixableHelper
 
     replacement_col = move_col
     replacement_length = name.length
-    source_code = @source_code
-    if source_code
-      move_text = source_code.lines[move_line - 1].to_s
+    if src
+      move_text = src.lines[move_line - 1].to_s
       prefix = move_text[0, move_col - 1].to_s
       if (give_prefix = prefix.match(/GIVE\s+\z/))
         replacement_col = give_prefix.begin(0) + 1
@@ -376,7 +382,7 @@ module FixableHelper
 
     scope = lookup_scope_for(name)
     decl = scope&.resolve_entry(name)&.reg
-    src = @source_code
+    src = source_code
     if decl && decl.token && src
       dline = decl.token.line
       line_text = src.lines[dline - 1] || ''
@@ -495,14 +501,14 @@ module FixableHelper
 
   # Best-effort: extract the source-line text at the move site so the
   # error can quote the consumer call (e.g. "process(GIVE msg)"). Falls
-  # back to nil when @source_code isn't set (programmatic use of the
+  # back to nil when source_code isn't set (programmatic use of the
   # annotator) or the line is past EOF.
   sig { params(line_num: Integer).returns(T.nilable(String)) }
   def consumer_source_text(line_num)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    @source_code = T.let(@source_code, T.nilable(String))
-    return nil unless @source_code && line_num
-    line = @source_code.lines[line_num - 1]
+    src = source_code
+    return nil unless src && line_num
+    line = src.lines[line_num - 1]
     return nil unless line
     text = line.strip
     text = text.chomp(';').strip
@@ -588,14 +594,14 @@ module FixableHelper
   sig { params(node: AST::Literal, val: Integer, target_type: Symbol, min: Integer, max: Integer).returns(NilClass) }
   def emit_int_overflow_error!(node, val, target_type, min, max)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    @source_code = T.let(@source_code, T.nilable(String))
+    src = source_code
     tok = node.token
-    return error!(node, :INT_LITERAL_OVERFLOW, val: val, type: target_type, min: min, max: max) unless tok && @source_code
+    return error!(node, :INT_LITERAL_OVERFLOW, val: val, type: target_type, min: min, max: max) unless tok && src
 
     best = smallest_fitting_int_type(val)
     return error!(node, :INT_LITERAL_OVERFLOW, val: val, type: target_type, min: min, max: max) unless best
 
-    line_text = @source_code.lines[tok.line - 1] || ''
+    line_text = src.lines[tok.line - 1] || ''
 
     # Prefer the suffix form first (precise span; local replacement).
     snippet = line_text[(tok.column - 1)..] || ''
@@ -945,12 +951,12 @@ module FixableHelper
   sig { params(node: AST::GetField, code: Symbol, name: NameCandidate, field: String, cap: String, perm: String).void }
   def emit_cap_field_needs_with!(node, code, name:, field:, cap:, perm:)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    @source_code = T.let(@source_code, T.nilable(String))
+    src = source_code
     kw = { name: name, field: field, cap: cap }
     fixes = []
-    if @source_code && node.respond_to?(:token) && node.token
+    if src && node.respond_to?(:token) && node.token
       line_num = node.token.line
-      line_text = @source_code.lines[line_num - 1] || ''
+      line_text = src.lines[line_num - 1] || ''
       body = line_text.chomp
       indent = body[/\A\s*/] || ''
       inner = body.lstrip
@@ -1026,9 +1032,8 @@ module FixableHelper
   sig { params(node: AST::WithBlock, names: T::Enumerable[String], verb: String).returns(NilClass) }
   def emit_with_guard_mutable_mutated!(node, names, verb)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    @source_code = T.let(@source_code, T.nilable(String))
+    src = source_code
     names = names.to_a
-    src = @source_code
     edits = []
     if src && node.respond_to?(:token) && node.token
       # Search the WITH block's lines for `MUTABLE <name>` and drop
@@ -1153,10 +1158,9 @@ module FixableHelper
   sig { params(node: AST::WithBlock, name: String, got: Type::TypeInput).returns(NilClass) }
   def emit_with_materialized_needs_tense!(node, name, got)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    @source_code = T.let(@source_code, T.nilable(String))
+    src = source_code
     scope = lookup_scope_for(name)
     decl = scope&.resolve_entry(name)&.reg
-    src = @source_code
     fix = nil
     if decl && src
       token = decl.respond_to?(:token) ? decl.token : nil
@@ -1293,12 +1297,12 @@ module FixableHelper
   # strings, hex/oct/bin ints, separator-bearing numbers, and
   # suffixed numbers. Scan the source line forward from tok.column
   # to recover the true span. Falls back to `tok.value.to_s.length`
-  # when @source_code is unavailable.
+  # when source_code is unavailable.
   sig { params(tok: Lexer::Token).returns(Integer) }
   def literal_source_length(tok)
-    @source_code = T.let(@source_code, T.nilable(String))
-    return tok.value.to_s.length unless @source_code
-    line = @source_code.lines[tok.line - 1]
+    src = source_code
+    return tok.value.to_s.length unless src
+    line = src.lines[tok.line - 1]
     return tok.value.to_s.length unless line
     rest = line[(tok.column - 1)..]
     return tok.value.to_s.length if rest.nil? || rest.empty?
@@ -1371,13 +1375,13 @@ module FixableHelper
   end
   def build_decl_cap_insert_fix(name, sigil, description_code: :ADD_DECL_CAPABILITY_GENERIC, description_params: {}, confidence: :auto)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    @source_code = T.let(@source_code, T.nilable(String))
+    src = source_code
     scope = lookup_scope_for(name)
     decl = scope&.resolve_entry(name)&.reg
     return nil unless decl && decl.respond_to?(:token) && decl.token
-    return nil unless @source_code
+    return nil unless src
     dline = decl.token.line
-    line_text = @source_code.lines[dline - 1] || ''
+    line_text = src.lines[dline - 1] || ''
     # Search from the decl-name column so a prior statement's `;` on
     # the same line is skipped.
     semi_idx = line_text.index(';', decl.token.column - 1)
@@ -1409,13 +1413,13 @@ module FixableHelper
   end
   def build_decl_cap_replace_fix(name, old_sigil, new_sigil, description_code: :CHANGE_DECL_CAPABILITY_GENERIC, description_params: {}, confidence: :auto)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    @source_code = T.let(@source_code, T.nilable(String))
+    src = source_code
     scope = lookup_scope_for(name)
     decl = scope&.resolve_entry(name)&.reg
     return nil unless decl && decl.respond_to?(:token) && decl.token
-    return nil unless @source_code
+    return nil unless src
     dline = decl.token.line
-    line_text = @source_code.lines[dline - 1] || ''
+    line_text = src.lines[dline - 1] || ''
     idx = line_text.index(old_sigil)
     return nil unless idx
     fix_params = description_params.merge(
@@ -1520,13 +1524,14 @@ module FixableHelper
   sig { params(source_sym: SymbolEntry, source_name: String).returns(T.nilable(Fix)) }
   def build_atomic_escape_migration_fix(source_sym, source_name)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    src = source_code
     return nil unless source_sym && source_sym.respond_to?(:sync) && source_sym.atomic?
-    return nil unless @source_code
+    return nil unless src
     reg = source_sym.respond_to?(:reg) ? source_sym.reg : nil
     return nil unless reg && reg.token
     line_num = reg.token.line
     return nil unless line_num
-    src_line = @source_code.lines[line_num - 1] || ''
+    src_line = src.lines[line_num - 1] || ''
     # The sigil chain is order-independent: `@shared:atomic` and
     # `@atomic:shared` parse to the same Type. Match either form.
     # Search from the decl-name column so a prior decl's @shared:atomic

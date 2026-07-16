@@ -1188,7 +1188,7 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
   end
 
   it "handles defensive Auto restamp paths without stale fact rewrites" do
-    annotator = SemanticAnnotator.new
+    annotator = Annotator::Phases::TypeAnalysisSession.new
     token = Lexer::Token.new(:VAR_ID, "x", 1, 1)
     param = AST::Param.new(name: "x", type: Type.new(:Auto, auto: true))
     fn = AST::FunctionDef.new(token, "f", [param], [], Type.new(:Void), nil, [], [], nil, :pub, [], false)
@@ -1246,7 +1246,7 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
     expect(missing_call.full_type.auto?).to be(true)
 
     auto_sig = FunctionSignature.new(params: [], return_type: Type.new(:Auto, auto: true))
-    annotator.semantic_root_scope.declare("auto_ret", nil, auto_sig, false, false, nil, :static)
+    annotator.send(:semantic_root_scope).declare("auto_ret", nil, auto_sig, false, false, nil, :static)
     auto_call = AST::FuncCall.new(token, "auto_ret", [])
     auto_call.full_type = Type.new(:Auto, auto: true)
     expect {

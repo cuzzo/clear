@@ -218,7 +218,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
       source = AST::Identifier.new(Lexer::Token.new(:IDENTIFIER, "x", 1, 1), "x")
 
       expect {
-        SemanticAnnotator.new.send(:verify_no_mixed_atomic_returned_lifetime!, fn, [source])
+        Annotator::Phases::TypeAnalysisSession.new.send(:verify_no_mixed_atomic_returned_lifetime!, fn, [source])
       }.not_to raise_error
     end
   end

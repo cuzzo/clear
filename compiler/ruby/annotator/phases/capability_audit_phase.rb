@@ -27,6 +27,9 @@ module Annotator
           strict_test: request.strict_test
         )
         session.audit!
+        unless request.inputs.deferred_with_validations.empty?
+          raise "capability audit left deferred validations pending"
+        end
 
         summaries = typed_program.body_summaries
         CapabilityAuditReport.new(

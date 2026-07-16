@@ -58,7 +58,7 @@ RSpec.describe "ClearParser effect records" do
 
   it "provides the typed span to effect-clause diagnostics" do
     function = parse_function("EFFECTS REENTRANT")
-    edit = SemanticAnnotator.new.send(
+    edit = Annotator::Phases::TypeAnalysisSession.new.send(
       :effects_clause_edits,
       function,
       "EFFECTS REENTRANT:TAIL_CALL",

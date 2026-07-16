@@ -121,7 +121,8 @@ RSpec.describe "architecture invariants: annotator shell" do
     type_session = source("compiler/ruby/annotator/phases/type_analysis_session.rb")
     visitor_names = type_session.scan(/^\s*def (visit_[A-Z]\w*)/).flatten
     expect(visitor_names).not_to include("visit_Program")
-    expect(type_session).to include("AnnotationPipeline.run")
+    expect(source("compiler/ruby/annotator/annotator.rb")).to include("AnnotationPipeline.new")
+    expect(type_session).not_to include("AnnotationPipeline")
   end
 
   it "keeps annotator error hints registry-backed" do

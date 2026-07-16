@@ -8254,7 +8254,7 @@ class RegisterBcEmitter
     # the program. Pull them in so calls like `Point{ x: 1.0, y: 2.0 }`
     # in the importing file resolve.
     annotator = @frontend_result.respond_to?(:annotator) ? @frontend_result.annotator : nil
-    types_table = annotator&.scope_stack&.first&.types
+    types_table = annotator&.semantic_root_scope&.types
     types_table&.each do |name, entry|
       schema = entry.is_a?(Hash) ? entry[:schema] : nil
       next unless schema.is_a?(Hash)

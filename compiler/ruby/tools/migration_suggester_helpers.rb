@@ -36,8 +36,7 @@ module MigrationSuggesterHelpers
   def run_analyze(source)
     tokens = Lexer.new(source).tokenize
     ast    = ClearParser.new(tokens, source).parse
-    ann    = SemanticAnnotator.new
-    ann.source_code = source
+    ann    = SemanticAnnotator.new(source_code: source)
     ann.annotate!(ast)
     candidates = []
     ast.statements.each do |stmt|

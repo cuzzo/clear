@@ -968,8 +968,7 @@ RSpec.describe SemanticAnnotator do
       FLUX
       tokens = Lexer.new(src).tokenize
       ast    = ClearParser.new(tokens, src).parse
-      ann    = SemanticAnnotator.new
-      ann.source_code = src
+      ann    = SemanticAnnotator.new(source_code: src)
       FixCollector.enable!
       begin
         ann.annotate!(ast) rescue nil

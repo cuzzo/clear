@@ -22,8 +22,8 @@ RSpec.describe "annotator branch gap burndown" do
     Lexer::Token.new(type, value, 1, 1)
   end
 
-  def quiet_annotator
-    ann = SemanticAnnotator.new(source_code: "")
+  def quiet_annotator(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: source_code)
     errors = []
     ann.define_singleton_method(:error!) do |node, code, *args, **kwargs|
       errors << [node, code, args, kwargs]
@@ -44,7 +44,7 @@ RSpec.describe "annotator branch gap burndown" do
     resolution = Annotator::Phases::ResolutionFacts.new(
       program: program,
       declarations: Annotator::Phases::DeclarationIndexer.index(program),
-      root_scope: type_session.semantic_root_scope,
+      root_scope: type_session.send(:semantic_root_scope),
       function_registry: registry,
       type_names: [],
       function_names: registry.names
@@ -59,7 +59,7 @@ RSpec.describe "annotator branch gap burndown" do
     audit = Annotator::Phases::CapabilityAuditSession.new(
       typed_program: typed_program,
       inputs: type_session.send(:phase_audit_inputs),
-      source_code: type_session.source_code,
+      source_code: type_session.send(:source_code),
       language_mode: type_session.send(:language_mode),
       strict_test: type_session.send(:strict_test?)
     )
@@ -1297,7 +1297,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers literal source span recovery branches directly" do
-    ann = SemanticAnnotator.new(source_code: "missing\nplain = \"abc\"\nesc = \"a\\\\\"b\"\ntriple = \"\"\"abc\"\"\"\nopen = \"\"\"abc\nnum = 123_456_i64\n")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "missing\nplain = \"abc\"\nesc = \"a\\\\\"b\"\ntriple = \"\"\"abc\"\"\"\nopen = \"\"\"abc\nnum = 123_456_i64\n")
     tok_missing = Lexer::Token.new(:STRING, "x", 99, 1)
     tok_plain = Lexer::Token.new(:STRING, "abc", 2, 9)
     tok_escape = Lexer::Token.new(:STRING, "a\"b", 3, 7)
@@ -1314,7 +1314,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers collection narrowing helper branches directly" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     sig = FunctionSignature.new(
       params: [],
       return_type: Type.new(:Void),
@@ -1345,7 +1345,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "narrows receiver collections from mutating method calls" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     sig = FunctionSignature.new(
       params: [],
       return_type: Type.new(:Void),
@@ -1375,7 +1375,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "returns an invalid source fact when no pipeline item type is known" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     source = AST::Identifier.new(token, "mystery")
     source.full_type = Type.new(:Mystery)
     fact = ann.send(:pipeline_source_fact, source, Type.new(:Mystery))
@@ -1385,7 +1385,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "returns a typed source fact with the item type and source kind" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     list = AST::Identifier.new(token, "items")
     list_type = Type.new(:"String[]")
     list.full_type = list_type
@@ -1413,7 +1413,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "uses one compact predicate for all annotator pipeline operators" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     expect(ann.send(:pipe_complex_op?, AST::CollectOp.new(token(:COLLECT, "COLLECT")))).to be(true)
     expect(ann.send(:pipe_complex_op?, AST::RecoverOp.new(token(:RECOVER, "RECOVER"), AST::DefaultLit.new(token(:DEFAULT, "DEFAULT"))))).to be(true)
     expect(ann.send(:pipe_complex_op?, AST::Identifier.new(token, "not_pipeline"))).to be(false)
@@ -1442,7 +1442,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers borrow source resolver branches directly" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     source = AST::Identifier.new(token, "source")
 
     intrinsic = FunctionSignature.new(
@@ -1495,7 +1495,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "matches intrinsic overloads through typed capability argument specs" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     matching_arg = typed_identifier("matching", Type.new(:String, sync: :locked, ownership: :borrowed))
     wrong_sync_arg = typed_identifier("wrong_sync", Type.new(:String, sync: :raw, ownership: :borrowed))
     wrong_owner_arg = typed_identifier("wrong_owner", Type.new(:String, sync: :locked, ownership: :owned))
@@ -1524,12 +1524,12 @@ RSpec.describe "annotator branch gap burndown" do
     expect { annotate_source("FN main() RETURNS Void -> x: Missing<Int64> = 1_i64; RETURN; END") }.to raise_error(CompilerError)
 
     unknown = AST::StructLit.new(nil, "Missing", {}, :stack, nil)
-    expect { SemanticAnnotator.new(source_code: "").send(:visit_StructLit, unknown) }.to raise_error(CompilerError)
+    expect { Annotator::Phases::TypeAnalysisSession.new(source_code: "").send(:visit_StructLit, unknown) }.to raise_error(CompilerError)
 
     lit = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
     lit.full_type = Type.new(:Int64)
 
-    union_ann = SemanticAnnotator.new(source_code: "")
+    union_ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     union_ann.define_singleton_method(:lookup_type_schema) do |name|
       Schemas::UnionSchema.new(variants: { Good: Type.new(:Int64) }) if name == :Choice
     end
@@ -1537,7 +1537,7 @@ RSpec.describe "annotator branch gap burndown" do
     bad_variant = AST::StructLit.new(nil, "Choice", { "Bad" => lit }, :stack, nil)
     expect { union_ann.send(:visit_StructLit, bad_variant) }.to raise_error(CompilerError)
 
-    struct_ann = SemanticAnnotator.new(source_code: "")
+    struct_ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     struct_ann.define_singleton_method(:lookup_type_schema) do |name|
       if name == :Box
         Schemas::StructSchema.new(fields: {
@@ -1700,7 +1700,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(unknown_cap[:capability]).to eq(:unknown)
     expect(cap_ann.send(:pending_deferred_validation_count)).to be > 0
 
-    bad_param_ann = SemanticAnnotator.new(source_code: "")
+    bad_param_ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     bad_fn = AST::FunctionDef.new(token, "bad_default", [
       AST::Param.new(name: "plain", type: Type.new(:Int64), default: AST::DefaultLit.new(token(:DEFAULT, "DEFAULT")))
     ], Type.new(:Void), [], :package)
@@ -1730,7 +1730,7 @@ RSpec.describe "annotator branch gap burndown" do
     param_ann.send(:declare_and_verify_params, fn)
     expect(direct_errors(param_ann).map { |e| e[1] }).to include(:DEFAULT_STRUCT_MISSING_DEFAULTS, :DEFAULT_VALUE_TYPE_MISMATCH)
 
-    pipe_ann = SemanticAnnotator.new(source_code: "")
+    pipe_ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     void_lit = AST::Literal.new(token(:NIL, "nil"), :NIL, nil, :stack)
     void_lit.full_type = Type.new(:Void)
     err_lit = AST::Literal.new(token(:STRING, "x"), :STRING, "x", :rodata)
@@ -2036,11 +2036,11 @@ RSpec.describe "annotator branch gap burndown" do
     ], false)
     nil_schema_ann.send(:annotate_struct_pattern!, nil_schema_match, nil_schema_pat)
 
-    span_ann = SemanticAnnotator.new(source_code: "x = \"a\\\"b\";\ny = \"\"\"multi\"\"\";\nz = ;\n")
+    span_ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "x = \"a\\\"b\";\ny = \"\"\"multi\"\"\";\nz = ;\n")
     expect(span_ann.send(:literal_source_length, Lexer::Token.new(:STRING, "a\"b", 1, 5))).to eq(6)
     expect(span_ann.send(:literal_source_length, Lexer::Token.new(:STRING, "multi", 2, 5))).to eq(11)
     expect(span_ann.send(:literal_source_length, Lexer::Token.new(:NUMBER, "1", 3, 5))).to eq(1)
-    expect(SemanticAnnotator.new(source_code: nil).send(:literal_source_length, Lexer::Token.new(:STRING, "abc", 1, 1))).to eq(3)
+    expect(Annotator::Phases::TypeAnalysisSession.new(source_code: nil).send(:literal_source_length, Lexer::Token.new(:STRING, "abc", 1, 1))).to eq(3)
 
     bind_ann = quiet_annotator
     bind_ann.send(:current_scope).declare("a", nil, Type.new(:Int64), true, false, nil, :stack, Set.new, [], sync: :atomic)
@@ -2065,7 +2065,7 @@ RSpec.describe "annotator branch gap burndown" do
   it "covers direct generic, precondition, index, next, and concurrent branch clusters" do
     generic_node = Struct.new(:token).new(nil)
     expect {
-      SemanticAnnotator.new(source_code: "").send(:validate_type_annotation!, generic_node, Type.new(:"Missing<Int64>"))
+      Annotator::Phases::TypeAnalysisSession.new(source_code: "").send(:validate_type_annotation!, generic_node, Type.new(:"Missing<Int64>"))
     }.to raise_error(CompilerError)
 
     pre_ann = quiet_annotator
@@ -2162,8 +2162,8 @@ RSpec.describe "annotator branch gap burndown" do
     sig.instance_variable_set(:@return_lifetime, [:wildcard])
     lifetime_ann.send(:verify_param_lifetime!, arg, sig.params.first, sig)
 
-    expect(SemanticAnnotator.new(source_code: "").send(:init_value_contents_heap?, nil)).to eq(false)
-    init_ann = SemanticAnnotator.new(source_code: "")
+    expect(Annotator::Phases::TypeAnalysisSession.new(source_code: "").send(:init_value_contents_heap?, nil)).to eq(false)
+    init_ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     struct_lit = AST::StructLit.new(token, Type.new(:Thing), { "a" => nil })
     expect(init_ann.send(:init_value_contents_heap?, struct_lit)).to eq(true)
 
@@ -2175,7 +2175,7 @@ RSpec.describe "annotator branch gap burndown" do
     post_ann.define_singleton_method(:visit) { |_node| nil }
     post_ann.send(:visit_post_clauses!, post_fn)
 
-    effects_ann = SemanticAnnotator.new(source_code: "")
+    effects_ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     caller = AST::FunctionDef.new(token, "caller", [], [], Type.new(:Void), nil, [], [], nil, :package)
     callee = AST::FunctionDef.new(token, "callee", [], [], Type.new(:"!Void"), nil, [], [], nil, :package)
     nil_return = AST::FunctionDef.new(token, "nil_return", [], [], nil, nil, [], [], nil, :package)
@@ -2233,7 +2233,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers retryable WITH fallible source discovery branches directly" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     arg = AST::Literal.new(token(:STRING, "x"), :STRING, "x", :rodata)
     fn = AST::FuncCall.new(token, "fallible_fn", [arg])
     fn.error_union_type = Type.new(:"!String")
@@ -2559,8 +2559,7 @@ RSpec.describe "annotator branch gap burndown" do
     shard_ann.send(:analyze_shard_op, AST::BinaryOp.new(token(:PIPE, "|>"), left, :SMOOTH, AST::ShardOp.new(token(:SHARD, "SHARD"), numeric_target, string_key)))
     expect(direct_errors(shard_ann).map { |e| e[1] }).to include(:SHARD_NEEDS_RANGE_OR_COLLECTION, :SHARD_TARGET_BAD, :SHARD_KEY_NEEDS_STRING)
 
-    fix_ann = quiet_annotator
-    fix_ann.instance_variable_set(:@source_code, "WITH SNAPSHOT cell AS MUTABLE guard {\n  guard.value;\n}\n")
+    fix_ann = quiet_annotator(source_code: "WITH SNAPSHOT cell AS MUTABLE guard {\n  guard.value;\n}\n")
     with_node = AST::WithBlock.new(token(:WITH, "WITH"), [], [], [])
     fix_ann.send(:emit_with_guard_mutable_mutated!, with_node, ["guard"], "is")
     expect(direct_errors(fix_ann).map { |e| e[1] }).to include(:fixable)
@@ -2646,8 +2645,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers fixable helper branch matrix directly" do
-    ann = quiet_annotator
-    ann.instance_variable_set(:@source_code, [
+    ann = quiet_annotator(source_code: [
       "MUTABLE local: Int64 @local = 1_i64;",
       "other: Byte = 1000_i64;",
       "wide = 1000_i8;",
@@ -3732,43 +3730,43 @@ RSpec.describe "annotator branch gap burndown" do
     expect(ann.send(:slot_id_for, unknown_slot)).to be_nil
     expect(ann.send(:build_auto_ambiguity_message, "return of auto_fn", ["Int64", "String"], return_slot)).to include("UNION Result")
 
-    ann.instance_variable_set(:@source_code, nil)
-    expect(ann.send(:consumer_source_text, 1)).to be_nil
-    ann.instance_variable_set(:@source_code, ";\n  process(GIVE msg);\n")
-    expect(ann.send(:consumer_source_text, 1)).to be_nil
-    expect(ann.send(:consumer_source_text, 2)).to eq("process(GIVE msg)")
-    expect(ann.send(:consumer_source_text, 99)).to be_nil
+    nil_source_ann = quiet_annotator(source_code: nil)
+    expect(nil_source_ann.send(:consumer_source_text, 1)).to be_nil
+    consumer_ann = quiet_annotator(source_code: ";\n  process(GIVE msg);\n")
+    expect(consumer_ann.send(:consumer_source_text, 1)).to be_nil
+    expect(consumer_ann.send(:consumer_source_text, 2)).to eq("process(GIVE msg)")
+    expect(consumer_ann.send(:consumer_source_text, 99)).to be_nil
 
     expect(ann.send(:variant_anchor_from_getfield, AST::GetField.new(token, AST::Identifier.new(nil, "Shape"), "Wrong"))).to be_nil
     expect(ann.send(:build_cast_wrap_fix, nil, :Int64)).to be_nil
     expect(ann.send(:build_cast_wrap_fix, AST::Identifier.new(nil, "x"), :Int64)).to be_nil
     expect(ann.send(:build_cast_wrap_fix, AST::PassStmt.new(token), :Int64)).to be_nil
 
-    ann.instance_variable_set(:@source_code, "x = 999_i64;\ny: Int64 = 999_i64;\n")
+    overflow_ann = quiet_annotator(source_code: "x = 999_i64;\ny: Int64 = 999_i64;\n")
     no_token = AST::Literal.new(nil, :INT64, 999, :stack)
-    ann.send(:emit_int_overflow_error!, no_token, 999, :Int8, -128, 127)
+    overflow_ann.send(:emit_int_overflow_error!, no_token, 999, :Int8, -128, 127)
     no_best = AST::Literal.new(token(:NUMBER, "999999999999999999999999_i64"), :INT64, 999999999999999999999999, :stack)
     no_best.token.line = 1
     no_best.token.column = 5
-    ann.send(:emit_int_overflow_error!, no_best, 999999999999999999999999, :Int8, -128, 127)
+    overflow_ann.send(:emit_int_overflow_error!, no_best, 999999999999999999999999, :Int8, -128, 127)
     same_suffix = AST::Literal.new(token(:NUMBER, "999_i64"), :INT64, 999, :stack)
     same_suffix.token.line = 2
     same_suffix.token.column = 12
-    ann.send(:emit_int_overflow_error!, same_suffix, 999, :Int64, -9_223_372_036_854_775_808, 9_223_372_036_854_775_807)
+    overflow_ann.send(:emit_int_overflow_error!, same_suffix, 999, :Int64, -9_223_372_036_854_775_808, 9_223_372_036_854_775_807)
 
     atomic_type = Type.new(:Int64)
     atomic_sym = SymbolEntry.new(reg: nil, type: atomic_type, mutable: true, storage: :heap, sync: :atomic)
     expect(ann.send(:build_atomic_escape_migration_fix, SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: true, storage: :heap), "cell")).to be_nil
     expect(ann.send(:build_atomic_escape_migration_fix, atomic_sym, "cell")).to be_nil
-    ann.instance_variable_set(:@source_code, "cell: Int64 = 0_i64;\n")
-    expect(ann.send(:build_atomic_escape_migration_fix, atomic_sym, "cell")).to be_nil
+    atomic_source_ann = quiet_annotator(source_code: "cell: Int64 = 0_i64;\n")
+    expect(atomic_source_ann.send(:build_atomic_escape_migration_fix, atomic_sym, "cell")).to be_nil
     no_token_decl = AST::VarDecl.new(nil, "cell", Type.new(:Int64), nil, true)
     atomic_sym.reg = no_token_decl
-    expect(ann.send(:build_atomic_escape_migration_fix, atomic_sym, "cell")).to be_nil
+    expect(atomic_source_ann.send(:build_atomic_escape_migration_fix, atomic_sym, "cell")).to be_nil
     no_line_token = token(:VAR_ID, "cell")
     no_line_token.line = nil
     atomic_sym.reg = AST::VarDecl.new(no_line_token, "cell", Type.new(:Int64), nil, true)
-    expect(ann.send(:build_atomic_escape_migration_fix, atomic_sym, "cell")).to be_nil
+    expect(atomic_source_ann.send(:build_atomic_escape_migration_fix, atomic_sym, "cell")).to be_nil
   end
 
   it "covers auto inference and fixable fallback arms directly" do
@@ -3805,8 +3803,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(val_slot.sources).to include(val)
     expect(list_slot.sources).to include(val)
 
-    ann = quiet_annotator
-    ann.instance_variable_set(:@source_code, [
+    ann = quiet_annotator(source_code: [
       "a: Int64 @local= 1_i64;",
       "b: Int64@local = 2_i64;",
       "c: Int64 = 3_i64",
@@ -3843,7 +3840,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers phase body-summary accessors directly" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     summary = Annotator::Phases::FunctionBodySummary.new(
       name: "body_fn",
       callees: Set["callee"],
@@ -3859,7 +3856,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "keeps lambda-contained calls out of function call-site facts" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     outer_call = AST::FuncCall.new(token(:VAR_ID, "outer"), "outer", [])
     lambda_call = AST::FuncCall.new(token(:VAR_ID, "lambda_inner"), "lambda_inner", [])
     lambda_node = AST::LambdaLit.new(token(:LAMBDA, "%"), [], [], [lambda_call], :stack, nil)
@@ -3882,7 +3879,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "records direct failure sources in the function body summary scan" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     call = AST::FuncCall.new(token(:VAR_ID, "callee"), "callee", [])
     direct_raise = AST::Raise.new(token(:RAISE, "RAISE"), :System, nil, nil)
     bg = AST::BgBlock.new(token(:BG, "BG"), [], [], nil, false, false, nil, false)
@@ -3897,7 +3894,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "marks call-site facts as locally absorbed by OR_ELSE fallbacks" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     call = AST::FuncCall.new(token(:VAR_ID, "fallible"), "fallible", [])
     fallback = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
     rescue_expr = AST::BinaryOp.new(token(:OR_ELSE, "OR_ELSE"), call, :OR_ELSE, fallback)
@@ -3921,7 +3918,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "records binding and assignment body facts during the function body summary scan" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     value = AST::Literal.new(token(:NUMBER, "1_i64"), :INT64, 1, :stack)
     decl = AST::VarDecl.new(token(:VAR, "VAR"), "created", Type.new(:Int64), value, false)
     bind = AST::BindExpr.new(token(:IDENTIFIER, "created"), "created", nil, value)
@@ -3939,7 +3936,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "treats callees without effect sets as non-suspending body-scan calls" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     callee = AST::FunctionDef.new(token(:FN, "FN"), "plain", [], [], Type.new(:Void), nil, [], [], nil, :private, [], false)
     ann.send(:register_function_node!, callee)
     call = AST::FuncCall.new(token(:VAR_ID, "plain"), "plain", [])
@@ -3949,7 +3946,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "records WITH scope nodes without leaking nested WITH or lambda bodies into the outer scope" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     outer_call = AST::FuncCall.new(token(:VAR_ID, "outer"), "outer", [])
     inner_call = AST::FuncCall.new(token(:VAR_ID, "inner"), "inner", [])
     lambda_call = AST::FuncCall.new(token(:VAR_ID, "lambda_inner"), "lambda_inner", [])
@@ -4000,7 +3997,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "keeps lambda calls out of call-site facts while preserving lambda failure facts" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     lambda_raise = AST::Raise.new(token(:RAISE, "RAISE"), :System, nil, nil)
     lambda_call = AST::FuncCall.new(token(:VAR_ID, "lambda_inner"), "lambda_inner", [])
     lambda_node = AST::LambdaLit.new(token(:LAMBDA, "%"), [], [], [lambda_call, lambda_raise], :stack, nil)
@@ -4019,7 +4016,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "records suspension points in the function body summary scan" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
     promise = AST::Identifier.new(token(:IDENTIFIER, "promise"), "promise")
     next_expr = AST::NextExpr.new(token(:NEXT, "NEXT"), promise)
     yielded = AST::Literal.new(token(:INT64, "1"), :INT64, 1, :stack)
@@ -4233,7 +4230,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers whole-program schema lookup fallback directly" do
-    ann = audit_from_type_session(SemanticAnnotator.new(source_code: ""))
+    ann = audit_from_type_session(Annotator::Phases::TypeAnalysisSession.new(source_code: ""))
 
     allow(EscapeAnalysis).to receive(:propagate_caller_sync!)
     allow(BgCaptureClassifier).to receive(:classify_all!) do |_fn_nodes, schema_lookup:|

@@ -3,6 +3,10 @@ require "spec_helper"
 require_relative "../ruby/annotator/annotator" unless defined?(SemanticAnnotator::ReceiverState)
 
 RSpec.describe "annotator receiver state boundaries" do
+  def type_session(source_code: "")
+    Annotator::Phases::TypeAnalysisSession.new(source_code: source_code)
+  end
+
   def tok(type = :VAR_ID, value = "x")
     Lexer::Token.new(type, value, 1, 1)
   end
@@ -21,9 +25,9 @@ RSpec.describe "annotator receiver state boundaries" do
   end
 
   it "keeps scope stack access typed and restores pushed scopes on exceptions" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = type_session
 
-    expect(ann.scope_stack).to contain_exactly(ann.semantic_root_scope)
+    expect(ann.send(:scope_stack)).to contain_exactly(ann.send(:semantic_root_scope))
 
     expect do
       ann.send(:with_new_scope) do
@@ -33,12 +37,12 @@ RSpec.describe "annotator receiver state boundaries" do
       end
     end.to raise_error("force unwind")
 
-    expect(ann.scope_stack).to contain_exactly(ann.semantic_root_scope)
+    expect(ann.send(:scope_stack)).to contain_exactly(ann.send(:semantic_root_scope))
     expect(ann.send(:outer_scope_vars)).not_to include("local")
   end
 
   it "restores function, loop, conditional, and smooth contexts on exceptions" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = type_session
     ctx = FunctionContext.new(name: "stateful", return_type: Type.new(:Void))
 
     expect do
@@ -70,7 +74,7 @@ RSpec.describe "annotator receiver state boundaries" do
   end
 
   it "restores held lock state around nested WITH analysis" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = type_session
     ident = locked_identifier("cell")
     cap = AST::Capability.new(capability: :EXCLUSIVE, var_node: ident)
     with_node = AST::WithBlock.new(tok(:WITH, "WITH"), [cap], [])
@@ -89,7 +93,7 @@ RSpec.describe "annotator receiver state boundaries" do
   end
 
   it "scopes predicate context while preserving recorded predicate call sites" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = type_session
     pred_expr = AST::Literal.new(tok(:TRUE, "TRUE"), :BOOL, true, :stack)
     call = AST::FuncCall.new(tok(:VAR_ID, "check"), "check", [])
     ctx = CapabilityHelper::PredicateContext.new(
@@ -119,7 +123,7 @@ RSpec.describe "annotator receiver state boundaries" do
   end
 
   it "restores auto-locked assignment context when RHS analysis raises" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = type_session
     ann.send(:current_scope).declare("cell", nil, Type.new(:Counter), true, false, nil, :heap, Set.new, [], sync: :locked)
     locked_target = AST::GetField.new(tok(:DOT, "."), AST::Identifier.new(tok(:VAR_ID, "cell"), "cell"), "value")
     value = AST::Literal.new(tok(:INT64, "1"), :INT64, 1, :stack)
@@ -135,7 +139,7 @@ RSpec.describe "annotator receiver state boundaries" do
   end
 
   it "restores pipeline SOA tracking around pipeline body analysis" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = type_session
     node = AST::BinaryOp.new(tok(:PIPE, "|>"), AST::Identifier.new(tok(:VAR_ID, "xs"), "xs"), :PIPE, AST::Identifier.new(tok(:VAR_ID, "ys"), "ys"))
 
     expect do

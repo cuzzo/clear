@@ -23,7 +23,7 @@ RSpec.describe "predicate-impurity rejection" do
     resolution = Annotator::Phases::ResolutionPhase.run(
       program: ast, importer: nil, source_dir: Dir.pwd, source_code: source
     )
-    type_session = SemanticAnnotator.new(source_code: source)
+    type_session = Annotator::Phases::TypeAnalysisSession.new(source_code: source)
     handoff = Annotator::Phases::TypeAnalysisPhase.run(
       resolution: resolution, session: type_session
     )

@@ -742,7 +742,7 @@ module Annotator
       def emit_missing_stream_yields_contract!(node, contract)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
         contract_name = Type.surface_name(contract)
-        source = @source_code
+        source = source_code
         token = node.token
         fix = T.let(nil, T.nilable(Fix))
         if source && token

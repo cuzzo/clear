@@ -35,8 +35,7 @@ module LSP
       begin
         tokens    = Lexer.new(source).tokenize
         ast       = ClearParser.new(tokens, source).parse
-        annotator = SemanticAnnotator.new
-        annotator.source_code = source
+        annotator = SemanticAnnotator.new(source_code: source)
         annotator.annotate!(ast)
       rescue CompilerError, ParserError => e
         fatal = synthetic_finding_from(e)

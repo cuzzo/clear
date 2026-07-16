@@ -18,7 +18,7 @@ RSpec.describe Annotator::Phases::CapabilityAuditPhase do
       source_dir: Dir.pwd,
       source_code: source
     )
-    session = SemanticAnnotator.new(source_code: source)
+    session = Annotator::Phases::TypeAnalysisSession.new(source_code: source)
     handoff = Annotator::Phases::TypeAnalysisPhase.run(resolution: resolution, session: session)
     report = described_class.run(
       typed_program: handoff.typed_program,

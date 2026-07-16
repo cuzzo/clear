@@ -26,9 +26,9 @@ class PipelineRewriter
   # OrderByOp, IndexOp, WindowOp, JoinOp: require structural MIR/runtime
   # lowering that the MIR pipeline lowerers own.
 
-  sig { params(annotator: T.nilable(Annotator::Phases::TypeAnalysisSession)).void }
+  sig { params(annotator: T.nilable(SemanticAnnotator)).void }
   def initialize(annotator = nil)
-    @annotator = T.let(annotator, T.nilable(Annotator::Phases::TypeAnalysisSession))
+    @annotator = T.let(annotator, T.nilable(SemanticAnnotator))
     @var_counter = T.let(0, Integer)
   end
 

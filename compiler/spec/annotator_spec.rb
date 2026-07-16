@@ -579,7 +579,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "errors DEFAULT when direct param analysis has no type" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           token = Lexer::Token.new(:IDENTIFIER, "cfg", 1, 1)
           param = AST::Param.new(name: "cfg", type: nil, default: AST::DefaultLit.new(token),
             mutable: false, takes: false, comptime: false, name_token: token,
@@ -627,7 +627,7 @@ RSpec.describe SemanticAnnotator do
 
       context "observable type annotations" do
         it "rejects sync and ownership wrappers layered onto observables" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           token = Lexer::Token.new(:TYPE_ID, "Float64", 1, 1)
           node = AST::Identifier.new(token, "running")
           type = Type.new(:"~Float64", ownership: :shared, sync: :locked, observable: true)
@@ -638,7 +638,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "rejects sharded collection annotations with fewer than two shards" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           token = Lexer::Token.new(:TYPE_ID, "Float64", 1, 1)
           node = AST::Identifier.new(token, "items")
           type = Type.new(:"Float64[]", collection: :list, shard_count: 1)
@@ -651,7 +651,7 @@ RSpec.describe SemanticAnnotator do
 
       context "direct visitor type propagation" do
         it "preserves sync and link metadata when unwrapping optionals" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           allow(annotator).to receive(:visit)
           token = Lexer::Token.new(:IDENTIFIER, "maybe_box", 1, 1)
           target = AST::Identifier.new(token, "maybe_box")
@@ -668,7 +668,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "allows optional unwrap results without ownership metadata" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           allow(annotator).to receive(:visit)
           token = Lexer::Token.new(:IDENTIFIER, "maybe_n", 1, 1)
           target = AST::Identifier.new(token, "maybe_n")
@@ -682,7 +682,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "allows optional unwrap targets whose ownership was unset" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           allow(annotator).to receive(:visit)
           token = Lexer::Token.new(:IDENTIFIER, "maybe_n", 1, 1)
           target = AST::Identifier.new(token, "maybe_n")
@@ -698,7 +698,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "types open-ended slice nodes" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           allow(annotator).to receive(:visit)
           token = Lexer::Token.new(:IDENTIFIER, "items", 1, 1)
           target = AST::Identifier.new(token, "items")
@@ -711,7 +711,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "marks explicit non-value COPY outside a function as heap-owned" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           allow(annotator).to receive(:visit)
           token = Lexer::Token.new(:IDENTIFIER, "label", 1, 1)
           value = AST::Identifier.new(token, "label")
@@ -725,7 +725,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "ignores unknown intrinsic reject predicates" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           token = Lexer::Token.new(:IDENTIFIER, "n", 1, 1)
           arg = AST::Identifier.new(token, "n")
 
@@ -733,7 +733,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "accepts assignment narrowing from NIL" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           token = Lexer::Token.new(:IDENTIFIER, "x", 1, 1)
           value = AST::Identifier.new(token, "value")
           node = AST::Assignment.new(token, "x", value)
@@ -745,7 +745,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "declares params with direct sync and ignores unknown requires families" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           token = Lexer::Token.new(:IDENTIFIER, "locked", 1, 1)
           locked = AST::Param.new(name: "locked", type: Type.new(:Int64), default: nil,
             mutable: false, takes: false, comptime: false, name_token: token,
@@ -3234,7 +3234,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "rejects hash-shaped intrinsic overloads when the base type cannot match" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         token = Lexer::Token.new(:IDENTIFIER, "arg", 1, 1)
         arg = AST::Identifier.new(token, "arg")
         arg.full_type = Type.new(:String)

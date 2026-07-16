@@ -72,7 +72,7 @@ RSpec.describe UseAfterMoveChecker do
   end
 
   it "maps move actions to user-facing phrases (active and passive forms)" do
-    annotator = SemanticAnnotator.new
+    annotator = Annotator::Phases::TypeAnalysisSession.new
 
     # Active form is used by USE_OF_MOVED_VALUE — the consumer is the
     # subject of the sentence ("`process(GIVE msg)` already GAVE it away").
