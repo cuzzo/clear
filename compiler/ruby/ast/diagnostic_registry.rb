@@ -467,6 +467,46 @@ module DiagnosticRegistry
       summary: "Inherent methods require an explicit receiver ownership parameter.",
       fix_hint: "Start the parameter list with self, MUTABLE self, or TAKES self. Its owner type is inferred.",
     },
+    CONFORMANCE_UNKNOWN_PROTOCOL: {
+      severity: :error, category: :type,
+      template: "Cannot implement unknown protocol %{protocol}.",
+      summary: "A conformance must name a declared PROTOCOL.",
+      fix_hint: "Declare or import the protocol before this IMPLEMENTATION.",
+    },
+    CONFORMANCE_ORPHAN: {
+      severity: :error, category: :type,
+      template: "Cannot implement %{protocol} for non-local type %{owner}; this package owns neither side of the conformance.",
+      summary: "Explicit conformances obey the orphan/coherence rule.",
+      fix_hint: "Move the conformance to the package defining the protocol or concrete STRUCT.",
+    },
+    CONFORMANCE_UNKNOWN_OWNER: {
+      severity: :error, category: :type,
+      template: "Cannot implement a protocol for unknown type %{owner}.",
+      summary: "A conformance owner must be a declared, imported, or built-in type.",
+      fix_hint: "Declare or import %{owner}, or correct the type name after FOR.",
+    },
+    CONFORMANCE_DUPLICATE: {
+      severity: :error, category: :type,
+      template: "%{owner} already has a %{protocol} conformance.",
+      summary: "A protocol/concrete-type pair has exactly one conformance.",
+      fix_hint: "Keep one IMPLEMENTATION %{protocol} FOR %{owner} block.",
+    },
+    CONFORMANCE_PROTOCOL_ARITY: {
+      severity: :error, category: :type,
+      template: "Protocol %{protocol} expects %{expected} associated type argument(s), got %{got}.",
+      summary: "A conformance must bind every primary associated type exactly once.",
+    },
+    CONFORMANCE_OWNER_ARITY: {
+      severity: :error, category: :type,
+      template: "Conformance owner %{owner} expects %{expected} type argument(s), got %{got}.",
+      summary: "The concrete type in a conformance must use its declared generic arity.",
+    },
+    CONFORMANCE_REQUIREMENTS: {
+      severity: :error, category: :type,
+      template: "%{owner} does not satisfy %{protocol}: %{count} incompatible requirement(s):%{details}",
+      summary: "A conformance is checked completely at its declaration.",
+      fix_hint: "Implement every listed requirement with the exact receiver, parameter, return, ownership, and mutability contract.",
+    },
     TOP_LEVEL_METHOD_REQUIRES_IMPLEMENTATION: {
       severity: :error, category: :type,
       template: "METHOD '%{name}' must be inside IMPLEMENTATION Owner { ... }; top-level METHOD declarations are not owner-safe.",

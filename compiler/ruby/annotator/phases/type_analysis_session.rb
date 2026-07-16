@@ -54,6 +54,7 @@ require_relative "../helpers/method_analysis"
 require_relative "../helpers/union"
 require_relative "../helpers/auto_inference"
 require_relative "capability_evidence"
+require_relative "conformance_validation"
 require_relative "phase_handoffs"
 require_relative "../../compiler/module_importer"
 
@@ -84,6 +85,7 @@ class Annotator::Phases::TypeAnalysisSession
   include TestAnnotation
   include Annotator::Phases::AutoFinalization
   include Annotator::Phases::BodyAnalysis
+  include Annotator::Phases::ConformanceValidation
   include Annotator::Phases::DeferredValidation
   include Annotator::Phases::ExpressionDomains
   include Annotator::Phases::ProgramFinalization
@@ -628,6 +630,7 @@ class Annotator::Phases::TypeAnalysisSession
   sig { params(resolution: Annotator::Phases::ResolutionFacts).returns(OwnershipGraph) }
   def analyze_resolution!(resolution)
     adopt_resolution_facts!(resolution)
+    validate_conformances!(resolution.conformance_resolutions)
     bridge_reentrance!(resolution.program)
     validate_and_resolve_sync_policy!(resolution.program)
     seed_error_type_registrations!(resolution.declarations)

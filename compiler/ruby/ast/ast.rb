@@ -1737,6 +1737,7 @@ module AST
       end, T::Array[AST::GenericParamDecl])
       @semantic_with_blocks = T.let([], T::Array[AST::WithBlock])
       @implementation_owner = T.let(nil, T.nilable(String))
+      @conformance_protocol = T.let(nil, T.nilable(String))
       @source_name = T.let(name, String)
     end
 
@@ -1801,6 +1802,14 @@ module AST
     sig { params(value: T.nilable(String)).void }
     def implementation_owner=(value)
       @implementation_owner = value
+    end
+
+    sig { returns(T.nilable(String)) }
+    def conformance_protocol = @conformance_protocol
+
+    sig { params(value: T.nilable(String)).void }
+    def conformance_protocol=(value)
+      @conformance_protocol = value
     end
 
     sig { returns(String) }

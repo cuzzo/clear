@@ -8,6 +8,7 @@ require_relative "../../ast/scope"
 require_relative "../../semantic/ownership_graph"
 require_relative "../function_registry"
 require_relative "body_analysis"
+require_relative "conformance_registration"
 require_relative "declaration_index"
 require_relative "implementation_registration"
 
@@ -30,6 +31,7 @@ module Annotator
           root_scope: root_scope,
           function_registry: function_registry,
           implementation_resolutions: [],
+          conformance_resolutions: [],
           protocols: {},
           type_names: root_scope.types.keys,
           function_names: function_registry.names
@@ -46,6 +48,8 @@ module Annotator
       attr_reader :function_registry
       sig { returns(T::Array[ImplementationResolution]) }
       attr_reader :implementation_resolutions
+      sig { returns(T::Array[ConformanceResolution]) }
+      attr_reader :conformance_resolutions
       sig { returns(T::Hash[String, AST::ProtocolDef]) }
       attr_reader :protocols
       sig { returns(T::Array[Symbol]) }
@@ -62,15 +66,17 @@ module Annotator
           type_names: T::Array[Symbol],
           function_names: T::Array[String],
           implementation_resolutions: T::Array[ImplementationResolution],
+          conformance_resolutions: T::Array[ConformanceResolution],
           protocols: T::Hash[String, AST::ProtocolDef]
         ).void
       end
-      def initialize(program:, declarations:, root_scope:, function_registry:, type_names:, function_names:, implementation_resolutions: [], protocols: {})
+      def initialize(program:, declarations:, root_scope:, function_registry:, type_names:, function_names:, implementation_resolutions: [], conformance_resolutions: [], protocols: {})
         @program = T.let(program, AST::Program)
         @declarations = T.let(declarations, DeclarationIndex)
         @root_scope = T.let(root_scope, Scope)
         @function_registry = T.let(function_registry, Annotator::FunctionRegistry)
         @implementation_resolutions = T.let(implementation_resolutions.dup.freeze, T::Array[ImplementationResolution])
+        @conformance_resolutions = T.let(conformance_resolutions.dup.freeze, T::Array[ConformanceResolution])
         @protocols = T.let(protocols.dup.freeze, T::Hash[String, AST::ProtocolDef])
         @type_names = T.let(type_names.dup.freeze, T::Array[Symbol])
         @function_names = T.let(function_names.dup.freeze, T::Array[String])

@@ -40,7 +40,9 @@ module Annotator
           return_lifetime: get_lifetime_path(node)
         )
         entry = current_scope.declare(node.name, nil, signature, false, false, nil, :static)
-        register_implementation_member_signature!(node, signature) if node.implementation_owner
+        if node.implementation_owner && node.conformance_protocol.nil?
+          register_implementation_member_signature!(node, signature)
+        end
         entry
       end
 

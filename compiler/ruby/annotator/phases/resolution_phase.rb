@@ -9,6 +9,7 @@ require_relative "../../ast/std_lib"
 require_relative "../../compiler/module_importer"
 require_relative "annotation_products"
 require_relative "builtin_environment"
+require_relative "conformance_registration"
 require_relative "import_resolution"
 require_relative "implementation_registration"
 require_relative "signature_registration"
@@ -32,6 +33,7 @@ module Annotator
       include ErrorHelper
       include ScopeHelper
       include BuiltinEnvironment
+      include ConformanceRegistration
       include ImportResolution
       include ImplementationRegistration
       include SignatureRegistration
@@ -45,6 +47,7 @@ module Annotator
       attr_reader :function_registry
       sig { returns(T::Hash[String, AST::ProtocolDef]) }
       attr_reader :protocols
+      private :protocols
 
       sig do
         params(
@@ -74,7 +77,9 @@ module Annotator
         @local_type_declaration_names = declarations.type_declarations.map { |node| node.name.to_sym }.to_set
         declarations.imports.each { |node| visit_RequireNode(node) }
         register_type_declarations(declarations)
+        conformance_resolutions = resolve_conformance_declarations!(declarations)
         implementation_resolutions = resolve_implementation_declarations!(declarations)
+        prepare_conformance_members!(declarations, conformance_resolutions, program)
         prepare_implementation_members!(declarations, implementation_resolutions, program)
         register_program_signatures(declarations)
 
@@ -84,6 +89,7 @@ module Annotator
           root_scope: @root_scope,
           function_registry: @function_registry,
           implementation_resolutions: implementation_resolutions,
+          conformance_resolutions: conformance_resolutions,
           protocols: @protocols,
           type_names: @root_scope.types.keys,
           function_names: resolved_function_names
@@ -99,6 +105,7 @@ module Annotator
       def register_protocol!(protocol)
         @protocols[protocol.name] = protocol
       end
+      private :protocol_declared?, :register_protocol!
 
       sig { params(node: T.any(TypeDeclaration, AST::ExternFnDecl)).void }
       def register_local_declaration!(node)

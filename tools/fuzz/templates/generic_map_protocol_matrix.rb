@@ -12,7 +12,10 @@ GENERIC_MAP_PROTOCOL_CELLS = [
   { shape: :associated_storage_numeric },
   { shape: :optional_capture_method_boundary },
   { shape: :user_protocol_declaration },
+  { shape: :concrete_user_protocol_conformance },
+  { shape: :generic_user_protocol_conformance },
   { shape: :duplicate_user_protocol_requirement, expected: :compile_error },
+  { shape: :user_protocol_conformance_mismatch, expected: :compile_error },
   { shape: :associated_storage_wrong_key, expected: :compile_error },
   { shape: :borrowed_value, expected: :compile_error },
   { shape: :non_map_argument, expected: :compile_error },
@@ -134,6 +137,24 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
       STRUCT Holder<S: Lookup> { storage: S }
       FN main() RETURNS Void -> PASS END
     CLEAR
+  when :concrete_user_protocol_conformance
+    <<~CLEAR
+      PROTOCOL Sized { METHOD size(self: Self) RETURNS Int64; }
+      STRUCT Box { value: Int64 }
+      IMPLEMENTATION Sized FOR Box {
+        METHOD size(self) RETURNS Int64 -> RETURN self.value; END
+      }
+      FN main() RETURNS Void -> PASS END
+    CLEAR
+  when :generic_user_protocol_conformance
+    <<~CLEAR
+      PROTOCOL Lookup<Key, Value> { METHOD get(self: Self, key: Key) RETURNS ?Value; }
+      STRUCT Store<K, V> { last_key: ?K fallback: ?V }
+      IMPLEMENTATION<K, V> Lookup<K, V> FOR Store<K, V> {
+        METHOD get(self, key: K) RETURNS ?V -> RETURN NIL; END
+      }
+      FN main() RETURNS Void -> PASS END
+    CLEAR
   when :duplicate_user_protocol_requirement
     {
       source: <<~CLEAR,
@@ -143,6 +164,17 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
         }
       CLEAR
       error_code: :IMPLEMENTATION_DUPLICATE_MEMBER,
+    }
+  when :user_protocol_conformance_mismatch
+    {
+      source: <<~CLEAR,
+        PROTOCOL Named { METHOD name(self: Self) RETURNS String; }
+        STRUCT User { id: Int64 }
+        IMPLEMENTATION Named FOR User {
+          METHOD name(self) RETURNS Int64 -> RETURN self.id; END
+        }
+      CLEAR
+      error_code: :CONFORMANCE_REQUIREMENTS,
     }
   when :non_map_argument
     {
