@@ -149,17 +149,24 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
     CLEAR
   when :generic_user_protocol_conformance
     <<~CLEAR
-      PROTOCOL Lookup<Key, Value> { METHOD get(self: Self, key: Key) RETURNS ?Value; }
-      STRUCT Store<K, V> { last_key: ?K fallback: ?V }
+      PROTOCOL Lookup<Key, Value> {
+        METHOD get(self: Self, key: Key) RETURNS ?Value;
+        FN same(left: Self, right: Self) RETURNS Bool;
+      }
+      STRUCT Store<K, V> { last_key: ?K fallback: ?V marker: Int64 }
       IMPLEMENTATION Lookup<K, V> FOR Store {
         METHOD get(self, key: K) RETURNS ?V -> RETURN NIL; END
+        FN same(left: Store<K, V>, right: Store<K, V>) RETURNS Bool ->
+          RETURN left.marker == right.marker;
+        END
       }
       FN lookup<S: Lookup>(store: S, key: S::Key) RETURNS ?S::Value ->
         RETURN store.get(key);
       END
       FN main() RETURNS Void ->
-        store = Store<String, Int64>{ last_key: NIL, fallback: NIL };
+        store = Store<String, Int64>{ last_key: NIL, fallback: NIL, marker: 1_i64 };
         ASSERT lookup(store, "missing") == NIL;
+        ASSERT same(store, Store<String, Int64>{ last_key: NIL, fallback: NIL, marker: 1_i64 });
       END
     CLEAR
   when :duplicate_user_protocol_requirement

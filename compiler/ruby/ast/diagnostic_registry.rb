@@ -585,6 +585,12 @@ module DiagnosticRegistry
       summary: "Static protocol dispatch requires one unambiguous requirement.",
       fix_hint: "Use protocols with distinct method names or split this operation behind a named adapter FN.",
     },
+    GENERIC_PROTOCOL_FUNCTION_AMBIGUOUS: {
+      severity: :error, category: :type,
+      template: "FN '%{name}' is declared by multiple bounds: %{protocols}.",
+      summary: "Static protocol dispatch requires one unambiguous function requirement.",
+      fix_hint: "Use protocols with distinct function names or introduce one explicitly named adapter FN.",
+    },
     CONFORMANCE_BINDERS_CANNOT_INFER: {
       severity: :error, category: :type,
       template: "Cannot infer %{owner}'s %{expected} generic binder(s) from the protocol arguments; found %{got}.",

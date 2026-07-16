@@ -1468,6 +1468,12 @@ module MIRLoweringFunctions
       return intercept
     end
 
+    if node.protocol_name
+      receiver_index = T.must(node.protocol_receiver_index)
+      receiver = node.args.fetch(receiver_index)
+      return lower_user_protocol_call(node, node.args, receiver.full_type!(context: "protocol function lowering"))
+    end
+
     # Intrinsic pattern: already resolved by annotator
     return lower_intrinsic(node) if node.zig_pattern
 
@@ -1603,12 +1609,20 @@ module MIRLoweringFunctions
   def lower_user_protocol_method_call(node)
     T.bind(self, MIRLowering) rescue nil
 
-    signature = T.must(matched_call_signature(node))
     ast_args = [node.object] + node.args
+    receiver_type = node.object.full_type!(context: "protocol receiver lowering")
+    lower_user_protocol_call(node, ast_args, receiver_type)
+  end
+  private :lower_user_protocol_method_call
+
+  sig { params(node: CallNode, ast_args: T::Array[AST::Node], receiver_type: Type).returns(MIR::Node) }
+  def lower_user_protocol_call(node, ast_args, receiver_type)
+    T.bind(self, MIRLowering) rescue nil
+
+    signature = T.must(matched_call_signature(node))
     mir_args = ast_args.each_with_index.map do |argument, index|
       lower_call_arg_from_facts(call_arg_facts(argument, signature, index))
     end
-    receiver_type = node.object.full_type!(context: "protocol receiver lowering")
     type_arg = MIR::Ident.new(generic_type_arg_zig(receiver_type))
     all_args = [type_arg, MIR::Ident.new(runtime_binding_name)] + mir_args
     fn_zig = "__clearProtocol_#{T.must(node.protocol_name)}_#{zig_safe_name(T.must(node.protocol_operation).to_s)}"
@@ -1625,7 +1639,7 @@ module MIRLoweringFunctions
       mir_args,
     )
   end
-  private :lower_user_protocol_method_call
+  private :lower_user_protocol_call
 
   sig do
     params(

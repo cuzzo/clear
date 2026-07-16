@@ -49,6 +49,20 @@ RSpec.describe "generic protocol declarations" do
     expect { transpile(source) }.not_to raise_error
   end
 
+  it "preserves protocol requirement effect contracts" do
+    source = <<~CLEAR
+      PROTOCOL Runnable {
+        METHOD run(self: Self) RETURNS Int64 EFFECTS REENTRANT;
+      }
+    CLEAR
+    protocol = ClearParser.new(Lexer.new(source).tokenize, source).parse.statements.first
+    requirement = protocol.requirements.fetch(0)
+
+    expect(requirement.effects_decl).to eq(:reentrant)
+    expect(requirement.max_depth_n).to be_nil
+    expect(requirement.tight_reentrance).to be(false)
+  end
+
   it "does not allow a user protocol to replace an intrinsic protocol" do
     expect {
       transpile("PROTOCOL Map { METHOD count(self: Self) RETURNS Int64; }")

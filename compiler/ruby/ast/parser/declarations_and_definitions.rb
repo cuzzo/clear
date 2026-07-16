@@ -390,6 +390,7 @@ class ClearParser
     else
       Type.new(:Void)
     end
+    effects = parse_effects_decl
     consume(:CHAR, ';')
     AST::ProtocolRequirement.new(
       token: token,
@@ -397,6 +398,9 @@ class ClearParser
       params: params,
       return_type: return_type,
       is_method: method,
+      effects_decl: effects.kind,
+      max_depth_n: effects.max_depth,
+      tight_reentrance: effects.tight,
     )
   end
 

@@ -10,6 +10,7 @@ PROTOCOL Sized {
 PROTOCOL Identity<Value> {
   METHOD identity(self: Self, TAKES value: Value) RETURNS Value;
   METHOD missing(self: Self) RETURNS ?Value;
+  FN same(left: Self, right: Self) RETURNS Bool;
 }
 
 STRUCT Box { value: Int64 }
@@ -35,6 +36,10 @@ IMPLEMENTATION Identity<V> FOR Store {
   METHOD missing(self) RETURNS ?V ->
     RETURN NIL;
   END
+
+  FN same(left: Store<V>, right: Store<V>) RETURNS Bool ->
+    RETURN left.marker == right.marker;
+  END
 }
 
 FN measured<S: Sized>(value: S) RETURNS Int64 ->
@@ -53,14 +58,22 @@ FN absent<S: Identity>(store: S) RETURNS ?S::Value ->
   RETURN store.missing();
 END
 
+
+FN equivalent<S: Identity>(left: S, right: S) RETURNS Bool ->
+  RETURN same(left, right);
+END
+
 FN main() RETURNS !Void ->
   box = Box{ value: 7_i64 };
   ASSERT measured(box) == 7_i64;
+  ASSERT box.size() == 7_i64;
   ASSERT checked(box) == 7_i64;
 
   store = Store<Int64>{ marker: 1_i64 };
   ASSERT roundTrip(store, 42_i64) == 42_i64;
   ASSERT absent(store) == NIL;
+  ASSERT equivalent(store, Store<Int64>{ marker: 1_i64 });
+  ASSERT same(store, Store<Int64>{ marker: 1_i64 });
 
   projected = ProjectionBox<Store<Int64>>{ latest: NIL };
   ASSERT projected.latest == NIL;

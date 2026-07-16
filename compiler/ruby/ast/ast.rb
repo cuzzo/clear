@@ -1677,6 +1677,9 @@ module AST
     const :params, T::Array[AST::Param]
     const :return_type, Type
     const :is_method, T::Boolean, default: true
+    const :effects_decl, T.nilable(Symbol), default: nil
+    const :max_depth_n, T.nilable(Integer), default: nil
+    const :tight_reentrance, T::Boolean, default: false
   end
 
   ProtocolDef = Struct.new(:token, :name, :name_token, :associated_types, :requirements, :visibility) do
@@ -2551,6 +2554,30 @@ module AST
                                      # original `!T` is stashed here for OR_ELSE consumers
                                      # that need to know whether to emit `catch fallback`
                                      # (error union) or `orelse fallback` (optional).
+    sig { returns(T.nilable(Symbol)) }
+    def protocol_operation
+      @protocol_operation = T.let(@protocol_operation, T.nilable(Symbol))
+    end
+    sig { params(value: Symbol).void }
+    def protocol_operation=(value)
+      @protocol_operation = value
+    end
+    sig { returns(T.nilable(String)) }
+    def protocol_name
+      @protocol_name = T.let(@protocol_name, T.nilable(String))
+    end
+    sig { params(value: String).void }
+    def protocol_name=(value)
+      @protocol_name = value
+    end
+    sig { returns(T.nilable(Integer)) }
+    def protocol_receiver_index
+      @protocol_receiver_index = T.let(@protocol_receiver_index, T.nilable(Integer))
+    end
+    sig { params(value: Integer).void }
+    def protocol_receiver_index=(value)
+      @protocol_receiver_index = value
+    end
     sig { returns(FalseClass) }
     def wildcard?; false end
     sig { returns(String) }

@@ -10,6 +10,14 @@ module Annotator
     module ConformanceValidation
       extend T::Sig
 
+      PROTOCOL_EFFECT_SUFFIXES = T.let({
+        reentrant: "",
+        reentrant_thunk: ":THUNK",
+        reentrant_tail_call: ":TAIL_CALL",
+        reentrant_not_logical: ":NOT_LOGICAL",
+        reentrant_max_depth: ":MAX_DEPTH",
+      }.freeze, T::Hash[Symbol, String])
+
       sig { params(resolutions: T::Array[ConformanceResolution]).void }
       def validate_conformances!(resolutions)
         T.bind(self, TypeAnalysisSession)
@@ -66,12 +74,31 @@ module Annotator
         end
         expected_return = apply_type_subst(requirement.return_type, substitutions)
         actual_return = member.return_type || Type.new(:Void)
-        return nil if expected_return.semantic_type_key == actual_return.semantic_type_key
+        unless expected_return.semantic_type_key == actual_return.semantic_type_key
+          return "#{requirement.name}: expected RETURNS #{Type.surface_name(expected_return)}, " \
+            "found #{Type.surface_name(actual_return)}"
+        end
 
-        "#{requirement.name}: expected RETURNS #{Type.surface_name(expected_return)}, " \
-          "found #{Type.surface_name(actual_return)}"
+        actual_effect = member.reentrance_kind || member.effects_decl
+        return nil if protocol_effect_accepts?(requirement.effects_decl, actual_effect)
+
+        expected = requirement.effects_decl ? protocol_effect_name(T.must(requirement.effects_decl)) : "no reentrant effect"
+        found = actual_effect ? protocol_effect_name(actual_effect) : "no reentrant effect"
+        "#{requirement.name}: expected #{expected}, found #{found}"
       end
       private :conformance_requirement_mismatch
+
+      sig { params(required: T.nilable(Symbol), actual: T.nilable(Symbol)).returns(T::Boolean) }
+      def protocol_effect_accepts?(required, actual) = required == :reentrant ||
+        (required.nil? ? actual.nil? : actual.nil? || actual == required)
+      private :protocol_effect_accepts?
+
+      sig { params(effect: Symbol).returns(String) }
+      def protocol_effect_name(effect)
+        suffix = PROTOCOL_EFFECT_SUFFIXES.fetch(effect, ":#{effect.to_s.upcase}")
+        "EFFECTS REENTRANT#{suffix}"
+      end
+      private :protocol_effect_name
     end
   end
 end

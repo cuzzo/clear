@@ -93,6 +93,34 @@ RSpec.describe "explicit generic protocol conformances" do
     expect(call.matched_signature.return_type.wrapped_type.projection_protocol).to eq(:Lookup)
   end
 
+  it "resolves prefix FN requirements through static protocol dispatch" do
+    zig = ZigTranspiler.new.transpile(<<~CLEAR)
+      PROTOCOL Comparable { FN same(left: Self, right: Self) RETURNS Bool; }
+      STRUCT Box { value: Int64 }
+      IMPLEMENTATION Comparable FOR Box {
+        FN same(left: Box, right: Box) RETURNS Bool -> RETURN left.value == right.value; END
+      }
+      FN equivalent<T: Comparable>(left: T, right: T) RETURNS Bool ->
+        RETURN same(left, right);
+      END
+      FN main() RETURNS Void ->
+        ASSERT equivalent(Box{ value: 7_i64 }, Box{ value: 7_i64 });
+      END
+    CLEAR
+
+    expect(zig).to include("__clearProtocol_Comparable_same(T, rt, left, right)")
+    expect(zig).to include("return __conformance_Comparable_Box_same(rt, self, arg1)")
+    expect(zig).not_to include("vtable")
+  end
+
+  it "rejects ambiguous prefix FN requirements" do
+    expect_error(<<~CLEAR, /FN 'identify' is declared by multiple bounds: Left, Right/i)
+      PROTOCOL Left { FN identify(value: Self) RETURNS Int64; }
+      PROTOCOL Right { FN identify(value: Self) RETURNS Int64; }
+      FN bad<T: Left & Right>(value: T) RETURNS Int64 -> RETURN identify(value); END
+    CLEAR
+  end
+
   it "checks user protocol bounds at concrete generic instantiations" do
     expect_error(<<~CLEAR, /S requires Sized, but User does not conform/i)
       PROTOCOL Sized { METHOD size(self: Self) RETURNS Int64; }
@@ -100,6 +128,52 @@ RSpec.describe "explicit generic protocol conformances" do
       FN measured<S: Sized>(value: S) RETURNS Int64 -> RETURN value.size(); END
       FN main(user: User) RETURNS Int64 -> RETURN measured(user); END
     CLEAR
+  end
+
+  it "enforces conditional conformance binder bounds at the concrete owner" do
+    source = <<~CLEAR
+      PROTOCOL Hashable { METHOD hash(self: Self) RETURNS Int64; }
+      PROTOCOL Sized { METHOD size(self: Self) RETURNS Int64; }
+      STRUCT Key { value: Int64 }
+      STRUCT Unhashable { value: Int64 }
+      STRUCT Box<T> { value: T }
+      IMPLEMENTATION Hashable FOR Key {
+        METHOD hash(self) RETURNS Int64 -> RETURN self.value; END
+      }
+      IMPLEMENTATION<T: Hashable> Sized FOR Box {
+        METHOD size(self) RETURNS Int64 -> RETURN self.value.hash(); END
+      }
+      FN measured<S: Sized>(value: S) RETURNS Int64 -> RETURN value.size(); END
+      FN measuredGeneric<T: Hashable>(value: Box<T>) RETURNS Int64 -> RETURN measured(value); END
+    CLEAR
+
+    expect {
+      annotate(source + <<~CLEAR)
+        FN main() RETURNS Int64 ->
+          RETURN measured(Box<Key>{ value: Key{ value: 7_i64 } });
+        END
+      CLEAR
+    }.not_to raise_error
+
+    expect_error(source + <<~CLEAR, /S requires Sized, but Box<Unhashable> does not conform/i)
+      FN main() RETURNS Int64 ->
+        RETURN measured(Box<Unhashable>{ value: Unhashable{ value: 7_i64 } });
+      END
+    CLEAR
+
+    expect {
+      annotate(<<~CLEAR)
+        PROTOCOL Sized { METHOD size(self: Self) RETURNS Int64; }
+        STRUCT MapBox<M> { values: M }
+        IMPLEMENTATION<M: Map> Sized FOR MapBox {
+          METHOD size(self) RETURNS Int64 -> RETURN self.values.count(); END
+        }
+        FN measured<S: Sized>(value: S) RETURNS Int64 -> RETURN value.size(); END
+        FN main() RETURNS Int64 ->
+          RETURN measured(MapBox<{String}Int64>{ values: {} });
+        END
+      CLEAR
+    }.not_to raise_error
   end
 
   it "lowers bounded calls through a zero-witness compile-time adapter" do
@@ -265,6 +339,44 @@ RSpec.describe "explicit generic protocol conformances" do
         IMPLEMENTATION Store<K, V> FOR Box { #{member} }
       CLEAR
     end
+  end
+
+  it "requires implementations to preserve or narrow protocol effects" do
+    expect_error(<<~CLEAR, /run: expected no reentrant effect, found EFFECTS REENTRANT/i)
+      PROTOCOL Runnable { METHOD run(self: Self) RETURNS Int64; }
+      STRUCT Task { value: Int64 }
+      IMPLEMENTATION Runnable FOR Task {
+        METHOD run(self) RETURNS Int64 EFFECTS REENTRANT -> RETURN self.run(); END
+      }
+    CLEAR
+
+    expect {
+      annotate(<<~CLEAR)
+        PROTOCOL Runnable {
+          METHOD run(self: Self) RETURNS Int64 EFFECTS REENTRANT;
+        }
+        STRUCT Task { value: Int64 }
+        IMPLEMENTATION Runnable FOR Task {
+          METHOD run(self) RETURNS Int64 -> RETURN self.value; END
+        }
+        FN execute<T: Runnable>(task: T) RETURNS Int64 EFFECTS REENTRANT ->
+          RETURN task.run();
+        END
+      CLEAR
+    }.not_to raise_error
+
+
+    expect {
+      annotate(<<~CLEAR)
+        PROTOCOL Runnable {
+          METHOD run(self: Self) RETURNS Int64 EFFECTS REENTRANT:TAIL_CALL;
+        }
+        STRUCT Task { value: Int64 }
+        IMPLEMENTATION Runnable FOR Task {
+          METHOD run(self) RETURNS Int64 -> RETURN self.value; END
+        }
+      CLEAR
+    }.not_to raise_error
   end
 
   it "checks duplicate members, receiver presence, and conformance binders" do

@@ -22,12 +22,58 @@ module Annotator
           return
         end
 
+        if resolve_user_protocol_function_call!(node)
+          record_predicate_call_site!(node)
+          record_named_call_site!(node)
+          return
+        end
+
         resolve_call(node, node.args)
         record_predicate_call_site!(node)
         record_named_call_site!(node)
         record_held_lock_call_site!(node)
         nil
       end
+
+      sig { params(node: AST::FuncCall).returns(T::Boolean) }
+      def resolve_user_protocol_function_call!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        return false if lookup_scope_for(node.name)
+
+        matches = T.let([], T::Array[[AST::ProtocolDef, AST::ProtocolRequirement, Type, Integer]])
+        node.args.each_with_index do |argument, index|
+          receiver = argument.full_type!(context: "protocol function dispatch")
+          user_protocol_names_for_receiver(receiver).each do |name|
+            next if name == "Map"
+
+            protocol = semantic_protocol(name)
+            requirement = protocol&.requirements&.find do |candidate|
+              !candidate.is_method && candidate.name == node.name &&
+                candidate.params[index]&.type&.resolved == :Self
+            end
+            matches << [protocol, requirement, receiver, index] if protocol && requirement
+          end
+        end
+        matches.uniq! { |protocol, requirement, _receiver| [protocol.name, requirement.name] }
+        return false if matches.empty?
+        if matches.length > 1
+          error!(node, :GENERIC_PROTOCOL_FUNCTION_AMBIGUOUS,
+            name: node.name, protocols: matches.map { |match| match.first.name }.join(", "))
+        end
+
+        protocol, requirement, receiver, receiver_index = T.must(matches.first)
+        signature = protocol_requirement_signature(protocol, requirement, receiver)
+        verify_function_signature!(node, signature, node.args)
+        node.matched_signature = signature
+        node.protocol_name = protocol.name
+        node.protocol_operation = requirement.name.to_sym
+        node.protocol_receiver_index = receiver_index
+        stamp_resolved_call_result!(node, signature.return_type)
+        record_effect(EffectTracker::REENTRANT) if signature.reentrant
+        current_fn_ctx&.mark_runtime_used!
+        true
+      end
+      private :resolve_user_protocol_function_call!
 
       sig { params(node: AST::MethodCall).void }
       def visit_MethodCall(node)
@@ -129,7 +175,7 @@ module Annotator
       def resolve_user_protocol_method_call!(node, receiver)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-        protocol_names = generic_parameter_protocol_names(receiver.resolved).reject { |name| name == "Map" }
+        protocol_names = user_protocol_names_for_receiver(receiver)
         return false if protocol_names.empty?
 
         matches = protocol_names.filter_map do |name|
@@ -151,6 +197,42 @@ module Annotator
         end
 
         protocol, requirement = T.must(matches.first)
+        signature = protocol_requirement_signature(protocol, requirement, receiver)
+        verify_function_signature!(node, signature, [node.object] + node.args)
+        node.matched_signature = signature
+        node.protocol_name = protocol.name
+        node.protocol_operation = requirement.name.to_sym
+        stamp_resolved_call_result!(node, signature.return_type)
+        record_effect(EffectTracker::REENTRANT) if signature.reentrant
+        current_fn_ctx&.mark_runtime_used!
+        record_predicate_call_site!(node)
+        true
+      end
+      private :resolve_user_protocol_method_call!
+
+      sig { params(receiver: Type).returns(T::Array[String]) }
+      def user_protocol_names_for_receiver(receiver)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        bounded = generic_parameter_protocol_names(receiver.resolved).reject { |name| name == "Map" }
+        return bounded unless bounded.empty?
+
+        semantic_protocols.keys.select do |name|
+          !conformance_match(name, receiver).nil?
+        end
+      end
+      private :user_protocol_names_for_receiver
+
+      sig do
+        params(
+          protocol: AST::ProtocolDef,
+          requirement: AST::ProtocolRequirement,
+          receiver: Type,
+        ).returns(FunctionSignature)
+      end
+      def protocol_requirement_signature(protocol, requirement, receiver)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
         substitutions = protocol.associated_types.each_with_object({Self: receiver}) do |associated, table|
           table[associated.name.to_sym] = Type.new(TypeProjectionExpression.new(
             owner: receiver.resolved,
@@ -158,7 +240,7 @@ module Annotator
             protocol: protocol.name.to_sym,
           ))
         end
-        signature = FunctionSignature.new(
+        FunctionSignature.new(
           params: requirement.params.map do |param|
             AST::Param.new(
               name: param.name,
@@ -169,17 +251,10 @@ module Annotator
             )
           end,
           return_type: apply_type_subst(requirement.return_type, substitutions),
+          reentrant: requirement.effects_decl == :reentrant,
         )
-        verify_function_signature!(node, signature, [node.object] + node.args)
-        node.matched_signature = signature
-        node.protocol_name = protocol.name
-        node.protocol_operation = requirement.name.to_sym
-        stamp_resolved_call_result!(node, signature.return_type)
-        current_fn_ctx&.mark_runtime_used!
-        record_predicate_call_site!(node)
-        true
       end
-      private :resolve_user_protocol_method_call!
+      private :protocol_requirement_signature
 
       sig { params(node: AST::MethodCall, index: Integer, expected: Type).void }
       def verify_protocol_method_argument!(node, index, expected)

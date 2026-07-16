@@ -464,12 +464,32 @@ module GenericAnalysis
   def conformance_match(protocol, concrete)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
+    conformance_match_avoiding(protocol, concrete, Set.new)
+  end
+  private :conformance_match
+
+  sig do
+    params(
+      protocol: String,
+      concrete: Type,
+      active: T::Set[String],
+    ).returns(T.nilable(Annotator::Phases::ConformanceMatch))
+  end
+  def conformance_match_avoiding(protocol, concrete, active)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+    key = "#{protocol}:#{concrete.semantic_type_key}"
+    return nil if active.include?(key)
+
+    next_active = active.dup.add(key)
+
     semantic_conformance_resolutions.each do |resolution|
       next unless resolution.protocol.name == protocol
 
       owner = resolution.declaration.owner_type
       substitutions = conformance_owner_substitutions(owner, concrete)
       next unless substitutions
+      next unless conformance_binder_bounds_satisfied?(resolution, substitutions, next_active)
 
       return Annotator::Phases::ConformanceMatch.new(
         resolution: resolution,
@@ -478,7 +498,33 @@ module GenericAnalysis
     end
     nil
   end
-  private :conformance_match
+  private :conformance_match_avoiding
+
+  sig do
+    params(
+      resolution: Annotator::Phases::ConformanceResolution,
+      substitutions: T::Hash[Symbol, Type],
+      active: T::Set[String],
+    ).returns(T::Boolean)
+  end
+  def conformance_binder_bounds_satisfied?(resolution, substitutions, active)
+    resolution.declaration.binders.all? do |binder|
+      concrete = substitutions[binder.name.to_sym]
+      next false unless concrete
+
+      binder.bounds.all? do |bound|
+        protocol = protocol_base_name(bound.type)
+        if protocol == "Map"
+          concrete.map? || generic_parameter_has_map_bound?(concrete.resolved)
+        elsif generic_parameter_protocol_names(concrete.resolved).include?(protocol)
+          true
+        else
+          !conformance_match_avoiding(protocol, concrete, active).nil?
+        end
+      end && (!binder.bounds.any? { |bound| bound.type.polymorphic_shared? } || concrete.shared?)
+    end
+  end
+  private :conformance_binder_bounds_satisfied?
 
   sig { params(pattern: Type, concrete: Type).returns(T.nilable(T::Hash[Symbol, Type])) }
   def conformance_owner_substitutions(pattern, concrete)
