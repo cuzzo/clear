@@ -582,6 +582,77 @@ class AST::WithBlock
   def view_kind=(value); end
 end
 
+class Annotator::Phases::AnnotationPipeline
+  sig { returns(Annotator::Phases::AnnotationProducts) }
+  def products; end
+end
+
+class Annotator::Phases::AnnotationProducts
+  sig { returns(T.nilable(Annotator::Phases::CapabilityAuditReport)) }
+  def capability_audit; end
+  sig { returns(T.nilable(Annotator::Phases::ResolutionFacts)) }
+  def resolution; end
+  sig { returns(T.nilable(Annotator::Phases::TypedProgramFacts)) }
+  def typed_program; end
+end
+
+class Annotator::Phases::AnnotationTypeInventory
+  sig { returns(Integer) }
+  def typed_node_count; end
+  sig { returns(T::Array[Annotator::Phases::AnnotationTypeInventory::Violation]) }
+  def violations; end
+end
+
+class Annotator::Phases::CapabilityAuditReport
+  sig { returns(Integer) }
+  def checked_call_sites; end
+  sig { returns(T::Array[String]) }
+  def checked_functions; end
+  sig { returns(Integer) }
+  def checked_with_sites; end
+  sig { returns(Annotator::Phases::TypedProgramFacts) }
+  def typed_program; end
+  sig { returns(Integer) }
+  def violation_count; end
+end
+
+class Annotator::Phases::ResolutionFacts
+  sig { returns(Annotator::Phases::DeclarationIndex) }
+  def declarations; end
+  sig { returns(T::Array[String]) }
+  def function_names; end
+  sig { returns(Annotator::FunctionRegistry) }
+  def function_registry; end
+  sig { returns(AST::Program) }
+  def program; end
+  sig { returns(Scope) }
+  def root_scope; end
+  sig { returns(T::Array[Symbol]) }
+  def type_names; end
+end
+
+class Annotator::Phases::ResolutionSession
+  sig { returns(Annotator::FunctionRegistry) }
+  def function_registry; end
+  sig { returns(Scope) }
+  def root_scope; end
+  sig { returns(T.nilable(String)) }
+  def source_code; end
+end
+
+class Annotator::Phases::TypedProgramFacts
+  sig { returns(Annotator::Phases::TypedProgramFacts::BodySummaries) }
+  def body_summaries; end
+  sig { returns(OwnershipGraph) }
+  def ownership_graph; end
+  sig { returns(Annotator::Phases::ResolutionFacts) }
+  def resolution; end
+  sig { returns(Integer) }
+  def typed_node_count; end
+  sig { returns(Integer) }
+  def unresolved_node_count; end
+end
+
 class Assignment
   sig { returns(T.untyped) }
   def auto_atomic_op; end
@@ -866,6 +937,13 @@ class ForEach
   def mark_per_iter=(value); end
 end
 
+class FrontendResourceBudget::Exceeded
+  sig { returns(Symbol) }
+  def kind; end
+  sig { returns(Integer) }
+  def limit; end
+end
+
 class FsmTransform::RecursiveSplitter::Builder
   sig { returns(T::Array[FsmTransform::RecursiveSplitter::SegmentSlot]) }
   def segments; end
@@ -944,7 +1022,7 @@ class FunctionContext
   def heap_count; end
   sig { params(value: Integer).returns(Integer) }
   def heap_count=(value); end
-  sig { returns(T::Array[LifetimeSource]) }
+  sig { returns(T::Array[FunctionContext::LifetimeSource]) }
   def lifetime; end
   sig { returns(Integer) }
   def loop_depth; end
@@ -1070,7 +1148,7 @@ class FunctionDef
 end
 
 class FunctionReturn
-  sig { returns(Kind) }
+  sig { returns(FunctionReturn::Kind) }
   def kind; end
 end
 
@@ -1309,7 +1387,7 @@ class MIREmitter
 end
 
 class MIRLoweringSchemas
-  sig { returns(T::Hash[Symbol, EnumVariants]) }
+  sig { returns(T::Hash[Symbol, MIRLoweringSchemas::EnumVariants]) }
   def enum_schemas; end
   sig { returns(T::Hash[Symbol, Schemas::StructSchema]) }
   def struct_schemas; end
@@ -1391,9 +1469,9 @@ class ModuleImporter
 end
 
 class OwnershipDataflow
-  sig { returns(T::Hash[Integer, OwnershipState]) }
+  sig { returns(T::Hash[Integer, OwnershipDataflow::OwnershipState]) }
   def block_in; end
-  sig { returns(T::Hash[Integer, T.nilable(OwnershipState)]) }
+  sig { returns(T::Hash[Integer, T.nilable(OwnershipDataflow::OwnershipState)]) }
   def block_out; end
 end
 
@@ -1463,7 +1541,7 @@ class Schemas::StructSchema
   def extern_module; end
   sig { returns(T::Hash[String, AST::StructField]) }
   def fields; end
-  sig { returns(MethodsMap) }
+  sig { returns(Schemas::StructSchema::MethodsMap) }
   def methods; end
   sig { returns(Symbol) }
   def visibility; end
@@ -1504,12 +1582,10 @@ class Scope::ScopeTypes
 end
 
 class SemanticAnnotator
+  sig { returns(Annotator::Phases::AnnotationProducts) }
+  def annotation_products; end
   sig { returns(T.nilable(SemanticIndex)) }
   def semantic_index; end
-  sig { returns(T.untyped) }
-  def source_code; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def source_code=(value); end
 end
 
 class SourceError
@@ -1575,7 +1651,7 @@ class SymbolEntry
   def layout; end
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def layout=(value); end
-  sig { returns(BindingLifecycleFacts) }
+  sig { returns(SymbolEntry::BindingLifecycleFacts) }
   def lifecycle; end
   sig { returns(T::Array[SymbolEntry]) }
   def lifetime; end
@@ -1719,6 +1795,41 @@ class Type
   def shape; end
 end
 
+class TypeCapabilities
+  sig { returns(T.untyped) }
+  def collection; end
+  sig { returns(T.untyped) }
+  def elem_layout; end
+  sig { returns(T.untyped) }
+  def elem_ownership; end
+  sig { returns(T.untyped) }
+  def elem_sync; end
+  sig { returns(T.untyped) }
+  def layout; end
+  sig { returns(T.untyped) }
+  def link_source; end
+  sig { returns(T.untyped) }
+  def lock_rank; end
+  sig { returns(T.untyped) }
+  def observable; end
+  sig { returns(T.untyped) }
+  def observable_terminal; end
+  sig { returns(T.untyped) }
+  def observable_token; end
+  sig { returns(T.untyped) }
+  def ownership; end
+  sig { returns(T.untyped) }
+  def ownership_set; end
+  sig { returns(T.untyped) }
+  def polymorphic_shared; end
+  sig { returns(T.untyped) }
+  def shard_count; end
+  sig { returns(T.untyped) }
+  def soa; end
+  sig { returns(T.untyped) }
+  def sync; end
+end
+
 class TypeShape
   sig { returns(T::Boolean) }
   def auto; end
@@ -1815,13 +1926,13 @@ class WithBlock
 end
 
 class ZigTranspiler
-  sig { returns(T.nilable(EnumSchemaMap)) }
+  sig { returns(T.nilable(ZigTranspiler::EnumSchemaMap)) }
   def enum_schemas; end
-  sig { returns(T.nilable(ModuleTypeDefs)) }
+  sig { returns(T.nilable(ZigTranspiler::ModuleTypeDefs)) }
   def module_type_defs; end
-  sig { returns(T.nilable(StructSchemaMap)) }
+  sig { returns(T.nilable(ZigTranspiler::StructSchemaMap)) }
   def struct_schemas; end
-  sig { returns(T.nilable(UnionSchemaMap)) }
+  sig { returns(T.nilable(ZigTranspiler::UnionSchemaMap)) }
   def union_schemas; end
 end
 

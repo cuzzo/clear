@@ -7,6 +7,7 @@ ivar_types = Hash.new { |h, k| h[k] = {} }
 declared = Hash.new { |h, k| h[k] = [] }
 defined_methods = Hash.new { |h, k| h[k] = Set.new }
 struct_props = Hash.new { |h, k| h[k] = {} }
+known_constants = Set.new
 
 extract_symbol_arg = lambda do |node|
   if node.is_a?(Prism::SymbolNode)
@@ -96,6 +97,7 @@ struct_walk = lambda do |node, scope|
   when Prism::ClassNode
     name = node.constant_path.is_a?(Prism::ConstantReadNode) ? node.constant_path.name : node.constant_path.full_name
     class_path = (scope + [name.to_s]).join('::')
+    known_constants << class_path
     if node.body.is_a?(Prism::StatementsNode)
       node.body.body.each { |stmt| record_struct_prop.call(stmt, class_path) }
     end
@@ -103,7 +105,9 @@ struct_walk = lambda do |node, scope|
     return
   when Prism::ModuleNode
     name = node.constant_path.is_a?(Prism::ConstantReadNode) ? node.constant_path.name : node.constant_path.full_name
-    struct_walk.(node.body, scope + [name.to_s])
+    module_scope = scope + [name.to_s]
+    known_constants << module_scope.join('::')
+    struct_walk.(node.body, module_scope)
     return
   end
   if node.respond_to?(:child_nodes)
@@ -119,6 +123,7 @@ class_walk = lambda do |node, scope|
     name = node.constant_path.is_a?(Prism::ConstantReadNode) ? node.constant_path.name : node.constant_path.full_name
     new_scope = scope + [name.to_s]
     class_path = new_scope.join('::')
+    known_constants << class_path
     if node.body.is_a?(Prism::StatementsNode)
       node.body.body.each do |stmt|
         if stmt.is_a?(Prism::CallNode) && [:attr_accessor, :attr_reader, :attr_writer].include?(stmt.name)
@@ -148,8 +153,12 @@ class_walk = lambda do |node, scope|
     return
   when Prism::ModuleNode
     name = node.constant_path.is_a?(Prism::ConstantReadNode) ? node.constant_path.name : node.constant_path.full_name
-    class_walk.(node.body, scope + [name.to_s])
+    module_scope = scope + [name.to_s]
+    known_constants << module_scope.join('::')
+    class_walk.(node.body, module_scope)
     return
+  when Prism::ConstantWriteNode
+    known_constants << (scope + [node.name.to_s]).join('::')
   end
   if node.respond_to?(:child_nodes)
     node.child_nodes.compact.each { |c| class_walk.(c, scope) }
@@ -200,7 +209,18 @@ normalize_type = lambda do |class_path, type_str|
     type_str = type_str.gsub(/\bEffectSet\b/, "FunctionSignature::EffectSet")
     type_str = type_str.gsub(/\bRequiresMap\b/, "FunctionSignature::RequiresMap")
   end
-  type_str
+
+  # `class A::B::C` in the generated RBI does not establish the same
+  # lexical constant nesting as source written with nested module/class
+  # bodies. Qualify sibling types that Ruby source can resolve lexically so
+  # Sorbet sees the same constants in the flattened RBI declaration.
+  namespaces = class_path.split("::")
+  type_str.gsub(/(?<![:\w])([A-Z]\w*)(?![:\w])/) do |name|
+    resolved = namespaces.length.downto(1).lazy
+      .map { |length| (namespaces.first(length) + [name]).join("::") }
+      .find { |candidate| known_constants.include?(candidate) }
+    resolved || name
+  end
 end
 
 puts <<~HDR
