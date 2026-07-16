@@ -9,36 +9,19 @@ RSpec.describe Annotator::Phases::TypeAnalysisPhase do
     Lexer::Token.new(:VAR_ID, value, 1, 1)
   end
 
-  def resolution_for(program)
-    Annotator::Phases::ResolutionFacts.new(
+  it "runs directly on a phase-owned session and rejects unresolved output" do
+    source = ""
+    program = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    resolution = Annotator::Phases::ResolutionPhase.run(
       program: program,
-      declarations: Annotator::Phases::DeclarationIndexer.index(program),
-      root_scope: Scope.new,
-      function_registry: Annotator::FunctionRegistry.new,
-      type_names: [],
-      function_names: []
+      importer: nil,
+      source_dir: Dir.pwd,
+      source_code: source
     )
-  end
+    session = SemanticAnnotator.new(source_code: source)
 
-  it "owns body typing and finalization order and rejects unresolved output" do
-    program = AST::Program.new(token, [])
-    resolution = resolution_for(program)
-    events = []
-      operations = Annotator::Phases::TypeAnalysisOperations.new(
-        prepare: ->(_resolution) { events << :prepare; nil },
-      analyze_bodies: ->(_declarations, _program) { events << :bodies; nil },
-      resolve_catches: ->(_declarations) { events << :catches; nil },
-      finalize_program: lambda do |node|
-        events << :program
-        node.full_type = Type.new(:Void)
-        nil
-      end,
-      finalize_auto_types: ->(_program) { events << :auto; nil }
-    )
+    result = described_class.run(resolution: resolution, session: session)
 
-    result = described_class.run(resolution: resolution, operations: operations)
-
-    expect(events).to eq([:prepare, :bodies, :catches, :program, :auto])
     expect(result.resolution).to equal(resolution)
     expect(result.typed_node_count).to eq(1)
     expect(result.unresolved_node_count).to eq(0)

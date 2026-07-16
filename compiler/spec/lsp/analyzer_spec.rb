@@ -15,7 +15,7 @@ RSpec.describe LSP::Analyzer do
       ast = Object.new
       lexer = instance_double(Lexer, tokenize: tokens)
       parser = instance_double(ClearParser, parse: ast)
-      annotator = instance_double(SemanticAnnotator)
+      annotator = instance_double(Annotator::Phases::TypeAnalysisSession)
 
       expect(Lexer).to receive(:new).with(source).and_return(lexer)
       expect(ClearParser).to receive(:new).with(tokens, source).and_return(parser)

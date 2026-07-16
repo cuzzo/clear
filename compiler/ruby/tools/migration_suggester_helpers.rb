@@ -57,7 +57,7 @@ module MigrationSuggesterHelpers
   # `classify_uses!` (also shared) handles the non-WITH cases
   # (Identifier disqualify, FuncCall/MethodCall arg disqualify,
   # ReturnNode disqualify).
-  sig { params(fn_node: AST::FunctionDef, annotator: SemanticAnnotator).returns(T::Array[Hash]) }
+  sig { params(fn_node: AST::FunctionDef, annotator: Annotator::Phases::TypeAnalysisSession).returns(T::Array[Hash]) }
   def analyze_fn(fn_node, annotator)
     candidates = {}
     walk_recursive(fn_node.body) do |node|

@@ -9,7 +9,7 @@ module Annotator
 
       sig { params(fn_node: AST::FunctionDef).returns(T::Array[String]) }
       def infer_implicit_type_params(fn_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         explicit = fn_node.type_params.map(&:to_s)
         return explicit unless explicit.empty?
@@ -22,7 +22,7 @@ module Annotator
 
       sig { params(type: T.nilable(Type), out: T::Array[String], explicit: T::Array[String]).void }
       def collect_implicit_type_params(type, out, explicit)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return unless type.is_a?(Type)
         name = type.resolved.to_s
@@ -51,7 +51,7 @@ module Annotator
       # CLEAR operations, so :stack is always safe here.
       sig { params(node: AST::Cast).returns(Type) }
       def visit_Cast(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         target_type = Type.new(node.target)
         if node.value.is_a?(AST::ListLit) && target_type.tuple?
@@ -70,7 +70,7 @@ module Annotator
 
       sig { params(node: AST::CallSiteOverride).void }
       def visit_CallSiteOverride(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         sigil = node.kind == :thunk ? "@thunk" : "@maxDepth"
         variant_hint = node.kind == :thunk ? "'EFFECTS REENTRANT:THUNK'" : "'EFFECTS REENTRANT:MAX_DEPTH(#{node.n})'"
@@ -80,7 +80,7 @@ module Annotator
 
       sig { params(node: AST::UnaryOp).returns(T.any(Type, Symbol)) }
       def visit_UnaryOp(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         if node.op == :IS_OK
           with_body_fact_failure_absorbed(true) { visit(node.right) }
@@ -124,7 +124,7 @@ module Annotator
       # ==========================================
       sig { params(node: AST::Literal).returns(Type) }
       def visit_Literal(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         literal_type = case node.type
           when :NUMBER then Type.new(:Float64)
@@ -162,7 +162,7 @@ module Annotator
 
       sig { params(node: AST::DefaultLit).returns(Symbol) }
       def visit_DefaultLit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Resolved type is set by declare_and_verify_params / visit_StructLit context.
         # Standalone DEFAULT is not valid; callers validate the context.
@@ -171,7 +171,7 @@ module Annotator
 
       sig { params(node: AST::BinaryOp).returns(T.nilable(T.any(Type, Symbol, Integer))) }
       def visit_BinaryOp(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Special operators that need custom handling
         case node.op
@@ -268,7 +268,7 @@ module Annotator
 
       sig { params(node: AST::Placeholder).returns(T.nilable(SymbolEntry)) }
       def visit_Placeholder(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Just resolve it like an identifier
         result = visit_Identifier(AST::Identifier.new(node.token, "_"))
@@ -280,7 +280,7 @@ module Annotator
       # =========================================================
       sig { params(node: AST::BinaryOp).returns(Type) }
       def visit_BindVar(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Logic: expression AS @name
         # The value flows through, but we declare a new variable in the scope.
@@ -322,7 +322,7 @@ module Annotator
 
       sig { params(node: AST::CapabilityWrap).returns(T.nilable(Type)) }
       def visit_CapabilityWrap(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.value)
 
@@ -408,7 +408,7 @@ module Annotator
 
       sig { params(node: AST::OptionalUnwrap).returns(Type) }
       def visit_OptionalUnwrap(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.target)
 
@@ -431,7 +431,7 @@ module Annotator
       # Used to determine whether an IF/MATCH node can be promoted to expression mode.
       sig { params(branch: T::Array[AST::Node]).returns(T.nilable(Type)) }
       def expr_result_type(branch)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return nil if branch.empty?
         last = branch.last
@@ -453,7 +453,7 @@ module Annotator
       # Sets expr_mode = true and full_type = result_type if valid; errors otherwise.
       sig { params(parent_node: AST::Node, if_node: AST::IfStatement).returns(T.nilable(Type)) }
       def promote_to_expr_if!(parent_node, if_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Recursively promote ELSE_IF chains first
         if if_node.else_branch&.length == 1 && (nested = if_node.else_branch.first).is_a?(AST::IfStatement)
@@ -502,7 +502,7 @@ module Annotator
       # Promotes an AST::MatchStatement that is used in expression position.
       sig { params(parent_node: AST::Node, match_node: AST::MatchStatement).returns(T.nilable(Type)) }
       def promote_to_expr_match!(parent_node, match_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         case_types = match_node.case_result_types || []
         default_type = match_node.default_result_type

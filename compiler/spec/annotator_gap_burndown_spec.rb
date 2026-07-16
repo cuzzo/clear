@@ -607,7 +607,7 @@ RSpec.describe "annotator branch gap burndown" do
     target.symbol = entry
     value = AST::GetIndex.new(token, target, AST::Literal.new(token(:INT64, "0"), :INT64, 0, :stack))
     value.full_type = Type.new(:Int64)
-    ann.send(:phase_receiver_state).with_block_depth = 1
+    ann.send(:phase_traversal_state).with_block_depth = 1
     ann.define_singleton_method(:visit) { |_node| nil }
     ann.define_singleton_method(:collect_bg_sources_in_expr) { |_node| [] }
     ann.define_singleton_method(:verify_return) { |_node| nil }
@@ -2864,7 +2864,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann = quiet_annotator
     analysis = ann.send(:new_capture_analysis)
     analysis.has_outer_ref = true
-    ann.send(:phase_receiver_state).current_bg_pinned = true
+    ann.send(:phase_traversal_state).current_bg_pinned = true
     ann.define_singleton_method(:visit) { |_node| nil }
     ann.define_singleton_method(:with_fiber_capture_analysis) do |is_parallel: false, mark_moves: false, &blk|
       blk.call

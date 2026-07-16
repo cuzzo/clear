@@ -9,7 +9,7 @@ module Annotator
 
       sig { params(node: AST::MoveNode).returns(T.nilable(T::Set[String])) }
       def visit_MoveNode(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         record_capture_site!(node, copied: false)
         without_capture_moves { visit(node.value) }
@@ -58,7 +58,7 @@ module Annotator
       # +container_desc+: string for error messages (e.g. "MyUnion.Variant")
       sig { params(val_node: AST::Node, expected_type: T.nilable(Type::TypeInput), container_desc: T.nilable(String), container_alloc: Symbol).returns(T.nilable(AST::Node)) }
       def ensure_owned_value!(val_node, expected_type, container_desc = nil, container_alloc: :heap)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return nil if val_node.is_a?(AST::Literal) && val_node.type == :NIL
         return nil if val_node.is_a?(AST::CopyNode)
@@ -119,7 +119,7 @@ module Annotator
 
       sig { params(node: AST::CopyNode).returns(T.nilable(T::Boolean)) }
       def visit_CopyNode(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         record_capture_site!(node, copied: true)
         without_capture_moves { visit(node.value) }
@@ -133,7 +133,7 @@ module Annotator
       # source AST or perform a second name lookup.
       sig { params(node: AST::CopyNode).returns(T.nilable(T::Boolean)) }
       def finish_previsited_copy!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # COPY produces an owned deep-copy. The source is NOT consumed.
         # Clone the Type so mutating provenance doesn't affect the inner node.
@@ -167,7 +167,7 @@ module Annotator
 
       sig { params(node: AST::CopyNode).returns(T.nilable(T::Boolean)) }
       def collection_copy_deep_copy_required(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Determine if elements need deep copy (dupeUnionValue) vs shallow (memcpy).
         # For list/array types, check if element type is a non-Copy union.
@@ -186,7 +186,7 @@ module Annotator
 
       sig { params(node: AST::Copy).returns(T.nilable(T::Boolean)) }
       def visit_Copy(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         record_capture_site!(node, copied: true)
         without_capture_moves { visit(node.value) }
@@ -200,7 +200,7 @@ module Annotator
       # FunctionReturn#resolve dispatches without a call node.
       sig { params(node: AST::LinkNode).returns(T.nilable(Type)) }
       def visit_LinkNode(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.value)
         ti = node.value.full_type!(context: "LINK value")
@@ -218,7 +218,7 @@ module Annotator
 
       sig { params(node: AST::ResolveNode).returns(T.nilable(Type)) }
       def visit_ResolveNode(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.value)
         ti = node.value.full_type!(context: "RESOLVE value")
@@ -237,7 +237,7 @@ module Annotator
 
       sig { params(node: AST::FreezeNode).returns(Symbol) }
       def visit_FreezeNode(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         without_capture_moves { visit(node.value) }
         ti = node.value.full_type!(context: "FREEZE value")
@@ -253,7 +253,7 @@ module Annotator
 
       sig { params(node: AST::CloneNode).returns(T.nilable(T::Boolean)) }
       def visit_CloneNode(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         record_capture_site!(node, copied: true)
         without_capture_moves { visit(node.value) }
@@ -264,7 +264,7 @@ module Annotator
       # deliberately does not revisit the source expression.
       sig { params(node: AST::CloneNode).returns(T.nilable(T::Boolean)) }
       def finish_previsited_clone!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         type = node.value.full_type!(context: "CLONE value")
         root = get_root_object(node.value)
@@ -284,7 +284,7 @@ module Annotator
 
       sig { params(node: AST::ShareNode).void }
       def visit_ShareNode(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.value)
         source_type = node.value.full_type!(context: "SHARE value")
@@ -311,7 +311,7 @@ module Annotator
 
       sig { params(node: AST::Node).returns(AST::Node) }
       def get_root_object(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         curr = T.let(node, AST::Node)
         while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
@@ -324,7 +324,7 @@ module Annotator
       # Used by the WHILE loop moved-value check to skip variables not referenced in the body.
       sig { params(nodes: T.any(AST::Node, T::Array[AST::Node])).returns(T::Set[String]) }
       def collect_body_identifier_names(nodes)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         names = Set.new
         traverse = T.let(nil, T.untyped)
@@ -354,7 +354,7 @@ module Annotator
 
       sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def handle_assign_move(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         plan = node.respond_to?(:ownership_transport_plan) ? T.unsafe(node).ownership_transport_plan : nil
         return if language_mode != :strict && plan.is_a?(OwnershipTransportPlan) && plan.action != :move
@@ -382,7 +382,7 @@ module Annotator
 
       sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def reject_scoped_assignment_move!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Non-escaping values (WITH block aliases) cannot be moved/consumed.
         # Copy types (Int64, Bool, Float64, etc.) are exempt: assignment copies the
@@ -400,7 +400,7 @@ module Annotator
 
       sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def handle_assignment_path_move!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         reject_borrowed_index_assignment_move!(node)
         path = get_path_to_root(node.value)
@@ -415,14 +415,14 @@ module Annotator
 
       sig { params(graph_path: String, value_type: Type).void }
       def declare_assignment_graph_path!(graph_path, value_type)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         ownership_graph.declare(graph_path, kind: :affine, type_info: value_type, scope_depth: ownership_graph.scope_depth)
       end
 
       sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def reject_borrowed_index_assignment_move!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Container indexing of borrowed source into an owned target (HashMap
         # assignment) is an error. Plain variable declarations get borrow marking
@@ -442,7 +442,7 @@ module Annotator
 
       sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def handle_assignment_identifier_move!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return unless node.value.is_a?(AST::Identifier)
         rhs_name = node.value.name
@@ -476,7 +476,7 @@ module Annotator
 
       sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def handle_assign_borrow(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return unless node.value.is_a?(AST::FuncCall) || node.value.is_a?(AST::MethodCall)
         call_node = node.value
@@ -503,7 +503,7 @@ module Annotator
       # Returns the AST node of the argument the return value borrows from, or nil.
       sig { params(call_node: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(AST::Node)) }
       def resolve_borrow_source(call_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Path 1: stdlib functions with lifetime: "self"
         matched_def = call_node.matched_stdlib_def
@@ -553,7 +553,7 @@ module Annotator
 
       sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
       def verify_unrestricted!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         path = get_path_to_root(node.name)
         return if path.empty?
@@ -565,7 +565,7 @@ module Annotator
 
       sig { params(node: AST::Locatable, branch: T.nilable(Symbol)).void }
       def finalize_scope(node, branch: nil)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         drops = T.let([], T::Array[AST::DeferredDrop])
         current_scope.owned_names.each do |name|
@@ -642,7 +642,7 @@ module Annotator
 
       sig { params(node: T.nilable(AST::MatchStatement)).returns(T::Array[AST::DeferredDrop]) }
       def collect_scope_drops(node: nil)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         drops = T.let([], T::Array[AST::DeferredDrop])
         current_scope.owned_entries.each do |name, info|
@@ -666,7 +666,7 @@ module Annotator
 
       sig { params(name: String, info: SymbolEntry, resource: T::Boolean).returns(AST::DeferredDrop) }
       def deferred_drop_for(name, info, resource: false)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         AST::DeferredDrop.new(
           name: name,
@@ -681,7 +681,7 @@ module Annotator
       # emit `.items[idx]` instead of by-value `getAt(list, idx)`.
       sig { params(node: AST::Node).void }
       def mark_chain_needs_mut_ref!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         curr = T.let(node, T.nilable(AST::Node))
         while curr
@@ -692,7 +692,7 @@ module Annotator
 
       sig { params(node: T.any(AST::Node, String, Symbol)).returns(T::Array[Symbol]) }
       def get_path_to_root(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         path = []
         curr = T.let(node, T.untyped)
@@ -710,7 +710,7 @@ module Annotator
       # source. Nil-lifetime bindings flow through unchanged.
       sig { params(assign_node: AST::Assignment).void }
       def verify_tied_assignment!(assign_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         val = assign_node.value
         sym = val.respond_to?(:symbol) ? val.symbol : nil
@@ -750,7 +750,7 @@ module Annotator
       # a matching `RETURNS <source>:T`; wildcard accepts any source.
       sig { params(return_node: AST::ReturnNode).void }
       def verify_tied_return!(return_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         val = return_node.value
         return unless val.is_a?(AST::Identifier)
@@ -818,7 +818,7 @@ module Annotator
       # Returns the String name or nil if not found.
       sig { params(sym: SymbolEntry).returns(T.nilable(String)) }
       def lookup_source_name(sym)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         sc = sym.scope
         if sc
@@ -839,7 +839,7 @@ module Annotator
 
       sig { params(val_node: AST::Node).returns(T::Array[SymbolEntry]) }
       def lifetime_sources_for_value(val_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         sources = T.let([], T::Array[SymbolEntry])
         if val_node.respond_to?(:symbol)
@@ -856,7 +856,7 @@ module Annotator
       # For a free local in current scope, depth = current scope.
       sig { params(target_node: AST::Node).returns(T.nilable(Integer)) }
       def dest_scope_depth_for_target(target_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         if target_node.is_a?(AST::Identifier)
           sym = target_node.symbol
@@ -885,7 +885,7 @@ module Annotator
       #     visit_BgBlock via has_non_escaping_capture.
       sig { params(decl_node: T.any(AST::VarDecl, AST::BindExpr)).void }
       def stamp_bg_handle_lifetime!(decl_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         sources = collect_bg_sources_in_expr(decl_node.value).uniq
         return if sources.empty?
@@ -898,7 +898,7 @@ module Annotator
       # materialized for heap storage at bind time.
       sig { params(decl_node: T.any(AST::VarDecl, AST::BindExpr)).void }
       def stamp_init_contents_heap!(decl_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         sym = decl_node.symbol
         return unless sym
@@ -908,7 +908,7 @@ module Annotator
 
       sig { params(init: T.nilable(AST::Node)).returns(T::Boolean) }
       def init_value_contents_heap?(init)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return false unless init
         case init
@@ -952,7 +952,7 @@ module Annotator
       # generically via Struct.members. Opt-OUT only for the small finite
       # set of AST classes whose lifetime is determined by symbol /
       # return-type rather than by sub-expression containment (see
-      # SemanticAnnotator::BG_SOURCE_OPAQUE_AST_NODES). New AST container types added later
+      # Annotator::Phases::TypeAnalysisSession::BG_SOURCE_OPAQUE_AST_NODES). New AST container types added later
       # propagate for free; missing-recursion bugs surface as compile-time
       # over-rejection rather than silent UAF.
       BgSourceWalkValue = T.type_alias do
@@ -977,10 +977,10 @@ module Annotator
 
       sig { params(expr: BgSourceWalkValue).returns(T::Array[SymbolEntry]) }
       def collect_bg_sources_in_expr(expr)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return bg_sources_for_block(expr) if expr.is_a?(AST::BgBlock) || expr.is_a?(AST::BgStreamBlock)
-        return [] if SemanticAnnotator::BG_SOURCE_OPAQUE_AST_NODES.include?(expr.class)
+        return [] if Annotator::Phases::TypeAnalysisSession::BG_SOURCE_OPAQUE_AST_NODES.include?(expr.class)
         return [] unless expr.is_a?(Struct)
         expr.members.flat_map do |m|
           v = expr[m]
@@ -990,7 +990,7 @@ module Annotator
 
       sig { params(v: BgSourceWalkValue).returns(T::Array[SymbolEntry]) }
       def collect_bg_sources_walk(v)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         case v
         when Array then v.flat_map { |x| collect_bg_sources_walk(x) }
@@ -1002,7 +1002,7 @@ module Annotator
 
       sig { params(expr: BgSourceWalkValue).returns(T::Array[SymbolEntry]) }
       def bg_sources_for_block(expr)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         analysis = expr.respond_to?(:capture_analysis) ? T.unsafe(expr).capture_analysis : nil
         return [] unless analysis && analysis.respond_to?(:capture_symbols)
@@ -1022,7 +1022,7 @@ module Annotator
       # source binding's death = pointer-into-freed-memory.
       sig { params(analysis: CapabilityHelper::CaptureAnalysis).returns(T::Array[SymbolEntry]) }
       def bg_lifetime_sources(analysis)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         analysis.capture_symbols.each_value.reject { |info|
           info && bg_capture_independent?(info)
@@ -1037,10 +1037,10 @@ module Annotator
       # silent UAFs.
       sig { params(info: SymbolEntry).returns(T::Boolean) }
       def bg_capture_independent?(info)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Arc-only (Group 1: @shared without inner sync) — refcounted, escapable.
-        return true if SemanticAnnotator::STORAGE_OUTLIVES_DECLARING_SCOPE.include?(info.storage) && info.sync.nil?
+        return true if Annotator::Phases::TypeAnalysisSession::STORAGE_OUTLIVES_DECLARING_SCOPE.include?(info.storage) && info.sync.nil?
         # @boxed:atomic — heap-pinned AtomicPtr cell with own lifetime
         # mechanism (M3.5 promotion).
         return true if info.atomic_ptr?
@@ -1048,8 +1048,8 @@ module Annotator
         # write_locked, local, versioned, always_mutable) captures the
         # binding by reference into the fiber frame; lifetime-bound
         # regardless of inner type. Excluded: pure data-access modes
-        # listed in SemanticAnnotator::SYNC_DOES_NOT_BIND_CAPTURE.
-        return false if info.sync && !SemanticAnnotator::SYNC_DOES_NOT_BIND_CAPTURE.include?(info.sync)
+        # listed in Annotator::Phases::TypeAnalysisSession::SYNC_DOES_NOT_BIND_CAPTURE.
+        return false if info.sync && !Annotator::Phases::TypeAnalysisSession::SYNC_DOES_NOT_BIND_CAPTURE.include?(info.sync)
         # Rc storage: bound to declaring scope (refcount-shared but
         # captures borrow without bumping the count).
         return false if info.storage == :multiowned
@@ -1068,7 +1068,7 @@ module Annotator
       # capture into the fiber frame, even if every field is Copy).
       sig { params(t: Type).returns(T::Boolean) }
       def value_copy_capture?(t)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         t.bg_capture_is_value_copy? { |name| lookup_type_schema(name) }
       end
@@ -1077,7 +1077,7 @@ module Annotator
       # there is no source-restricted path the return value must match.
       sig { params(func_node: AST::FunctionDef).returns(T::Array[T.any(String, Symbol)]) }
       def get_lifetime_paths(func_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         rl = func_node.return_lifetime
         return [] if rl.nil?
@@ -1094,7 +1094,7 @@ module Annotator
       # cases, matching the old contract for those shapes.
       sig { params(func_node: AST::FunctionDef).returns(T.nilable(String)) }
       def get_lifetime_path(func_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         paths = get_lifetime_paths(func_node)
         return nil if paths.size != 1 || paths.first == :wildcard
@@ -1105,7 +1105,7 @@ module Annotator
       # Walk through GetField/GetIndex chains to find the root Identifier name.
       sig { params(node: T.nilable(AST::Node)).returns(T.nilable(String)) }
       def root_variable_name(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         curr = T.let(node, T.nilable(AST::Node))
         while curr
@@ -1127,7 +1127,7 @@ module Annotator
       # Sets provenance on the type_info; cleanup_alloc is now derived from provenance.
       sig { params(node: T.any(AST::VarDecl, AST::BindExpr)).returns(T.nilable(Symbol)) }
       def set_cleanup_alloc!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         ti = node.full_type!(context: "cleanup binding")
         return unless ti
@@ -1166,7 +1166,7 @@ module Annotator
 
       sig { params(name: String, node: T.nilable(AST::Node), type_info: Type::TypeInput).returns(T.nilable(T::Set[String])) }
       def og_declare(name, node, type_info)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         entry = current_scope.resolve_entry(name) rescue nil
         kind = classify_og_kind(type_info, sync: entry&.sync)
@@ -1178,7 +1178,7 @@ module Annotator
 
       sig { params(node: AST::Node).returns(T::Boolean) }
       def share_consumes_source?(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return false if node.is_a?(AST::CopyNode)
 
@@ -1202,7 +1202,7 @@ module Annotator
       # is a plain affine type that won't accept a refcounted handle.
       sig { params(node: AST::Node, action: Symbol, consumer_param_type: T.nilable(Type)).returns(T.nilable(T::Boolean)) }
       def move_if_not_copyable!(node, action: :move, consumer_param_type: nil)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return unless node.is_a?(AST::Identifier)
         vt = node.full_type!(context: "move candidate")
@@ -1228,7 +1228,7 @@ module Annotator
 
       sig { params(node: AST::Node, action: Symbol, consumer_param_type: T.nilable(Type)).returns(T.nilable(T::Boolean)) }
       def move_if_takes_ownership!(node, action: :takes, consumer_param_type: nil)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return unless node.is_a?(AST::Identifier)
         vt = node.full_type!(context: "TAKES ownership candidate")
@@ -1249,7 +1249,7 @@ module Annotator
       # Borrows can't outlive the scope they reference. Use COPY for owned data.
       sig { params(val_node: AST::Node, container_desc: String).returns(NilClass) }
       def reject_borrowed_value!(val_node, container_desc)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         borrowed_name = nil
         if val_node.is_a?(AST::GetIndex)
@@ -1270,7 +1270,7 @@ module Annotator
 
       sig { params(type_info: Type::TypeInput, sync: T.nilable(Symbol)).returns(Symbol) }
       def classify_og_kind(type_info, sync: nil)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         t = Type.new(type_info)
         if t.multiowned? || t.shared?

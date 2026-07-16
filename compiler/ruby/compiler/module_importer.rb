@@ -171,7 +171,7 @@ class ModuleImporter
 
   private
 
-  sig { params(ast: AST::Program, annotator: SemanticAnnotator, source_dir: String).returns(ModuleImporter::CompiledModule) }
+  sig { params(ast: AST::Program, annotator: Annotator::Phases::TypeAnalysisSession, source_dir: String).returns(ModuleImporter::CompiledModule) }
   def compile_module_mir(ast, annotator, source_dir)
     require_relative "../mir/mir"
     require_relative "../mir/mir_lowering"
@@ -253,7 +253,7 @@ class ModuleImporter
     )
   end
 
-  sig { params(ast: AST::Program, annotator: SemanticAnnotator).void }
+  sig { params(ast: AST::Program, annotator: Annotator::Phases::TypeAnalysisSession).void }
   def sync_global_scope_function_signatures!(ast, annotator)
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)

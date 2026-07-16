@@ -12,7 +12,7 @@ module UnionAnalysis
   # default bodies that have no concrete override.
   sig { params(node: AST::UnionDef).void }
   def validate_union_methods!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     union_name = node.name
 
     # Detect duplicate method stub declarations.
@@ -95,7 +95,7 @@ module UnionAnalysis
   # Returns true if handled, false if the target is not an enum/union.
   sig { params(node: AST::GetField).returns(T.nilable(T::Boolean)) }
   def resolve_variant_access(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return false unless node.target.is_a?(AST::Identifier)
 
     type_name = node.target.name.to_sym
@@ -137,7 +137,7 @@ module UnionAnalysis
 
   sig { params(node: AST::UnionVariantLit).returns(T.nilable(Symbol)) }
   def visit_UnionVariantLit(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     schema = lookup_type_schema(node.union_name.to_sym)
     var_data = validate_union_schema!(node, schema)
     validate_union_fields!(node, T.must(var_data).typed_fields)
@@ -149,7 +149,7 @@ module UnionAnalysis
   # Returns the variant data hash on success.
   sig { params(node: AST::UnionVariantLit, schema: Schemas::SchemaValue).returns(T.nilable(Schemas::InlineStructVariant)) }
   def validate_union_schema!(node, schema)
-    T.bind(self, SemanticAnnotator) rescue {}
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue {}
     if schema.nil?
       error!(node, :UNION_TYPE_UNKNOWN, name: node.union_name)
     end
@@ -184,7 +184,7 @@ module UnionAnalysis
   # missing required fields, and type-check each field value.
   sig { params(node: AST::UnionVariantLit, expected_fields: T::Hash[String, Type]).void }
   def validate_union_fields!(node, expected_fields)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     node.fields.each_key do |fname|
       unless expected_fields.key?(fname)
         error!(node, :UNION_INLINE_VARIANT_UNKNOWN_FIELD, union: node.union_name, variant: node.variant_name, field: fname)

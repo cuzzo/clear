@@ -122,42 +122,18 @@ module Annotator
       private_class_method :location
     end
 
-    # Narrow migration interface for the existing body/type algorithms. The
-    # phase owns their ordering and product boundary; each callback will move
-    # behind an explicit context as the monolithic receiver is retired.
-    class TypeAnalysisOperations < T::Struct
-      Prepare = T.type_alias { T.proc.params(resolution: ResolutionFacts).void }
-      AnalyzeBodies = T.type_alias do
-        T.proc.params(declarations: DeclarationIndex, program: AST::Program).void
-      end
-      ResolveCatches = T.type_alias { T.proc.params(declarations: DeclarationIndex).void }
-      FinalizeProgram = T.type_alias { T.proc.params(program: AST::Program).void }
-
-      const :prepare, Prepare
-      const :analyze_bodies, AnalyzeBodies
-      const :resolve_catches, ResolveCatches
-      const :finalize_program, FinalizeProgram
-      const :finalize_auto_types, FinalizeProgram
-    end
-
     class TypeAnalysisPhase
       extend T::Sig
 
       sig do
         params(
           resolution: ResolutionFacts,
-          operations: TypeAnalysisOperations
+          session: TypeAnalysisSession
         ).returns(TypedProgramFacts)
       end
-      def self.run(resolution:, operations:)
+      def self.run(resolution:, session:)
         program = resolution.program
-        declarations = resolution.declarations
-
-        operations.prepare.call(resolution)
-        operations.analyze_bodies.call(declarations, program)
-        operations.resolve_catches.call(declarations)
-        operations.finalize_program.call(program)
-        operations.finalize_auto_types.call(program)
+        session.analyze_resolution!(resolution)
 
         inventory = AnnotationTypeInventory.scan(program)
         inventory.verify_resolved!

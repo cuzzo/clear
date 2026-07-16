@@ -6,7 +6,7 @@ module FunctionAnalysis
     extend T::Sig
     extend T::Helpers
 
-  requires_ancestor { SemanticAnnotator }
+  requires_ancestor { Annotator::Phases::TypeAnalysisSession }
 
   RoutineNode = T.type_alias { T.any(AST::FunctionDef, AST::LambdaLit) }
   RoutineBody = T.type_alias { T.any(AST::RawBody, AST::Node) }
@@ -92,7 +92,7 @@ module FunctionAnalysis
   # visit all statements, finalize scope, and resolve the return type.
   sig { params(node: RoutineNode, body: RoutineBody, declared_return: DeclaredReturn, is_implicit: T::Boolean).returns(T.nilable(Symbol)) }
   def analyze_routine(node, body, declared_return, is_implicit)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     verify_captures!(node)
 
     found_returns = collect_routine_returns do
@@ -105,7 +105,7 @@ module FunctionAnalysis
           Set.new
         end
         transport_facts = OwnershipTransportFacts.new(parameter_ids: parameter_ids)
-        phase_receiver_state.ownership_transport_frames << transport_facts unless language_mode == :strict
+        phase_audit_inputs.ownership_transport_frames << transport_facts unless language_mode == :strict
 
         # PRE clauses run at function entry -- visit them with parameters in
         # scope so each predicate type-checks and resolves identifiers
@@ -122,7 +122,7 @@ module FunctionAnalysis
           finalize_ownership_transport_facts!(transport_facts) unless language_mode == :strict
         ensure
           unless language_mode == :strict
-            popped = phase_receiver_state.ownership_transport_frames.pop
+            popped = phase_audit_inputs.ownership_transport_frames.pop
             Kernel.raise "BUG: ownership transport fact frame mismatch" unless popped.equal?(transport_facts)
           end
         end
@@ -156,7 +156,7 @@ module FunctionAnalysis
 
   sig { params(node: RoutineNode, blk: T.proc.void).void }
   def with_routine_analysis_scope(node, &blk)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
 
     with_new_scope do
       og_push_scope
@@ -172,7 +172,7 @@ module FunctionAnalysis
 
   sig { params(blk: T.proc.void).returns(T::Array[AST::ReturnFact]) }
   def collect_routine_returns(&blk)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
 
     # Save and reset returns on the current FunctionContext (supports nested lambdas).
     fn_ctx = current_fn_ctx
@@ -191,7 +191,7 @@ module FunctionAnalysis
 
   sig { params(params: T::Array[AST::Param], return_type: Symbol).returns(FunctionSignature) }
   def build_lambda_signature(params, return_type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     normalized_params = params.map do |param|
       AST::Param.new(
         name: param.name,
@@ -231,7 +231,7 @@ module FunctionAnalysis
 
   sig { params(node: AST::LambdaLit).returns(T.nilable(FunctionSignature)) }
   def visit_LambdaLit(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     lambda_ctx = FunctionContext.new(name: "<lambda>", return_type: :Any)
     push_function_context!(lambda_ctx)
     begin
@@ -249,7 +249,7 @@ module FunctionAnalysis
 
   sig { params(node: AST::FunctionDef).returns(T.nilable(FunctionContext)) }
   def visit_FunctionDef(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     effects_begin_function(node.name)
 
     is_implicit_return = node.implicit_return_type?
@@ -399,7 +399,7 @@ module FunctionAnalysis
   # call result placement is decided later by escape analysis.
   sig { params(node: CallNode, args: CallArgList).returns(T.nilable(Symbol)) }
   def resolve_call(node, args)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     func_name = node.name
 
     scope = lookup_scope_for(func_name)
@@ -550,7 +550,7 @@ module FunctionAnalysis
 
   sig { params(node: CallNode, signature: FunctionSignature, args: T.nilable(CallArgList)).returns(NilClass) }
   def verify_function_signature!(node, signature, args = nil)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     args ||= node.args
     site = call_signature_site(node, args)
     site.assign_signature!(signature)
@@ -602,7 +602,7 @@ module FunctionAnalysis
 
   sig { params(plan: CallArityPlan).void }
   def verify_call_arity!(plan)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     return unless plan.mismatch?
 
     if plan.exact?
@@ -616,7 +616,7 @@ module FunctionAnalysis
 
   sig { params(plan: CallArityPlan).void }
   def inject_default_arguments!(plan)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     plan.injectable_defaults.each do |param|
       injected = default_argument_for(param)
       visit(injected)
@@ -643,7 +643,7 @@ module FunctionAnalysis
     ).returns(CallArgumentFacts)
   end
   def call_argument_facts(site, param, arg_node, index)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     is_give = arg_node.is_a?(AST::MoveNode)
     inner_node = is_give ? T.cast(T.unsafe(arg_node).value, AST::Locatable) : arg_node
     arg_type = arg_node.full_type!(context: "call argument")
@@ -665,7 +665,7 @@ module FunctionAnalysis
 
   sig { params(facts: CallArgumentFacts).void }
   def verify_mutable_argument!(facts)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     return unless param_mutable?(facts.param)
 
     arg_node = facts.arg_node
@@ -684,7 +684,7 @@ module FunctionAnalysis
 
   sig { params(facts: CallArgumentFacts).void }
   def verify_takes_argument!(facts)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     if facts.is_give && !facts.param.takes
       error!(facts.arg_node, :GIVE_TO_BORROW_PARAM, param: facts.param.name)
     end
@@ -729,7 +729,7 @@ module FunctionAnalysis
 
   sig { params(facts: CallArgumentFacts).void }
   def verify_owned_takes_argument!(facts)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     return unless borrowed_takes_argument?(facts.inner_node)
 
     arg_ti = facts.inner_node.full_type!(context: "TAKES index argument")
@@ -744,7 +744,7 @@ module FunctionAnalysis
 
   sig { params(facts: CallArgumentFacts).void }
   def verify_link_argument!(facts)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     return unless facts.arg_type.link?
     return if facts.expected_type.any? || facts.expected_type.link?
 
@@ -754,7 +754,7 @@ module FunctionAnalysis
 
   sig { params(facts: CallArgumentFacts, signature: FunctionSignature, atomic_bare_value_args: T::Array[AST::Locatable]).void }
   def verify_argument_type!(facts, signature, atomic_bare_value_args)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     if facts.expected_type.array? && facts.actual_type.array?
       expected_element = facts.expected_type.element_type
       actual_element = facts.actual_type.element_type
@@ -800,7 +800,7 @@ module FunctionAnalysis
 
   sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
   def fn_type_argument_match?(facts)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     return false unless facts.expected_type.fn_type?
 
     actual_type = facts.arg_node.full_type!(context: "fn-typed argument")
@@ -814,7 +814,7 @@ module FunctionAnalysis
 
   sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
   def reentrant_fn_argument_allowed_by_callee?(facts)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     return false unless facts.actual_type.fn_type?
 
     actual_sig = facts.actual_type.function_signature
@@ -828,7 +828,7 @@ module FunctionAnalysis
 
   sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
   def reentrant_fn_argument_rejected?(facts)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     return false unless facts.actual_type.fn_type?
 
     actual_sig = facts.actual_type.function_signature
@@ -843,7 +843,7 @@ module FunctionAnalysis
 
   sig { params(facts: CallArgumentFacts, signature: FunctionSignature, atomic_bare_value_args: T::Array[AST::Locatable]).void }
   def verify_atomic_argument!(facts, signature, atomic_bare_value_args)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     arg_node = facts.arg_node
     if explicit_primitive_atomic_param?(facts.expected_type)
       unless arg_node.is_a?(AST::Identifier) && atomic_cell_arg?(arg_node)
@@ -861,7 +861,7 @@ module FunctionAnalysis
 
   sig { params(facts: CallArgumentFacts, matched: T::Boolean).returns(T::Boolean) }
   def shared_argument_match?(facts, matched:)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     return false if matched
     return false unless facts.expected_type.shared? && facts.expected_type.resolved == facts.actual_type.resolved
 
@@ -877,7 +877,7 @@ module FunctionAnalysis
 
   sig { params(facts: CallArgumentFacts).returns(T::Boolean) }
   def basic_argument_match?(facts)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     # Range validation is contextual: an unsuffixed literal is initially
     # Int64, but the callee's parameter may be Byte/Int8/etc. Validate before
     # any of the compatibility fast paths return. Previously only the
@@ -902,7 +902,7 @@ module FunctionAnalysis
 
   sig { params(facts: CallArgumentFacts, encountered_args: T::Array[EncounteredCallArgument]).void }
   def verify_argument_aliases!(facts, encountered_args)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     current_path = facts.path
     return if current_path.empty?
 
@@ -955,7 +955,7 @@ module FunctionAnalysis
 
   sig { params(arg_node: AST::Locatable, expected_type_obj: Type, param: AST::Param).returns(T::Boolean) }
   def atomic_cell_to_bare_value_param?(arg_node, expected_type_obj, param)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
     return false unless sym&.atomic?
@@ -970,7 +970,7 @@ module FunctionAnalysis
 
   sig { params(arg_node: AST::Locatable, param: AST::Param, signature: FunctionSignature).returns(T::Boolean) }
   def atomic_cell_to_atomic_param?(arg_node, param, signature)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return false unless arg_node.is_a?(AST::Identifier)
     sym = arg_node.symbol
     return false unless sym&.atomic?
@@ -984,20 +984,20 @@ module FunctionAnalysis
 
   sig { params(arg_node: AST::Identifier).returns(T::Boolean) }
   def atomic_cell_arg?(arg_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     sym = arg_node.symbol
     !!(sym&.atomic? && !sym.indirect?)
   end
 
   sig { params(type: Type).returns(T.nilable(T::Boolean)) }
   def explicit_primitive_atomic_param?(type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     type.atomic? && type.primitive?
   end
 
   sig { params(node: CallNode, atomic_args: CallArgList).void }
   def warn_multi_atomic_bare_value_call!(node, atomic_args)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     unique_args = atomic_args.compact
     return if unique_args.length < 2
 
@@ -1011,7 +1011,7 @@ module FunctionAnalysis
 
   sig { params(arg_node: AST::Locatable, param: AST::Param, signature: FunctionSignature).returns(T::Boolean) }
   def verify_param_lifetime!(arg_node, param, signature)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return true if !arg_node.is_a?(AST::Identifier)
 
     if param.mutable && !ownership_graph.can_write?(arg_node.name)
@@ -1044,7 +1044,7 @@ module FunctionAnalysis
   #                             `RETURNS (a b c):T` (multi)
   sig { params(node: AST::FunctionDef).returns(T.nilable(T::Boolean)) }
   def verify_lifetime!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     rl = node.return_lifetime
     return true if rl.nil?
 
@@ -1077,7 +1077,7 @@ module FunctionAnalysis
   # returned value's runtime layout depends on the caller's family choice.
   sig { params(node: AST::FunctionDef, sources: LifetimeSourceList).void }
   def verify_no_mixed_atomic_returned_lifetime!(node, sources)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     requires_map = node.respond_to?(:requires) ? (node.requires || {}) : {}
     return if requires_map.empty?
 
@@ -1097,7 +1097,7 @@ module FunctionAnalysis
 
   sig { params(node: AST::FunctionDef, source_node: T.any(AST::Node, String, Symbol)).void }
   def verify_lifetime_source!(node, source_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     path = get_path_to_root(source_node)
     return if path.empty?
     root_param_name = T.must(path.first).to_s
@@ -1134,7 +1134,7 @@ module FunctionAnalysis
 
   sig { params(node: RoutineNode).void }
   def declare_and_verify_params(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     requires_map = T.let(node.is_a?(AST::FunctionDef) ? node.requires || {} : {}, T::Hash[String, T::Set[Symbol]])
     node.params.each do |param|
       # Validate Defaults
@@ -1227,7 +1227,7 @@ module FunctionAnalysis
   # Cannot be part of declare, needs to happen in outer-scope
   sig { params(node: RoutineNode).void }
   def verify_captures!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     captures = node.captures
     return if captures.nil? || captures.empty?
 
@@ -1268,7 +1268,7 @@ module FunctionAnalysis
 
   sig { params(node: RoutineNode).void }
   def declare_captures(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     captures = node.captures
     return if captures.nil? || captures.empty?
 
@@ -1290,7 +1290,7 @@ module FunctionAnalysis
 
   sig { params(node: RoutineNode, found_returns: T::Array[AST::ReturnFact], declared_return: DeclaredReturn).void }
   def verify_returns(node, found_returns, declared_return)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     declared_type = declared_return.nil? ? nil : Type.new(declared_return)
     if found_returns.size > 1
       return if declared_type&.any?
@@ -1312,7 +1312,7 @@ module FunctionAnalysis
 
   sig { params(return_type: Type::TypeInput).returns(Symbol) }
   def get_return_strategy(return_type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     type = Type.new(return_type)
 
     if !type.requires_move? || type.heap?
@@ -1327,7 +1327,7 @@ module FunctionAnalysis
 
   sig { params(node: AST::Node).returns(T::Boolean) }
   def verify_return(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     # A returned value is a borrow when it is a direct indexed/field access OR
     # a variable that the ownership graph marked as :borrowed.
     return true unless return_is_borrow?(node)
@@ -1387,7 +1387,7 @@ module FunctionAnalysis
 
   sig { params(node: AST::Node).returns(T::Boolean) }
   def return_is_borrow?(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     if node.is_a?(AST::Identifier)
       return false unless ownership_graph[node.name]&.kind == :borrowed
       # Parameters (reg=nil) and MATCH bindings (reg=nil) are safe to return —
@@ -1404,7 +1404,7 @@ module FunctionAnalysis
 
   sig { params(path_a: T::Array[Symbol], path_b: T::Array[Symbol]).returns(T::Boolean) }
   def paths_overlap?(path_a, path_b)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return false if path_a.first != path_b.first
 
     len = [path_a.size, path_b.size].min
@@ -1423,7 +1423,7 @@ module FunctionAnalysis
 
   sig { params(arg: AST::Locatable, kind: Symbol).returns(T::Boolean) }
   def reject_arg_type_matches?(arg, kind)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     pred = REJECT_TYPE_PREDICATES[kind]
     return false unless pred
     type = arg.full_type!(context: "intrinsic reject argument")
@@ -1433,7 +1433,7 @@ module FunctionAnalysis
 
   sig { params(definitions: T::Array[FunctionSignature], args: CallArgList).returns(T.nilable(FunctionSignature)) }
   def find_matching_intrinsic(definitions, args)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     definitions.find do |config|
       next true if config.intrinsic_varargs?
 
@@ -1448,7 +1448,7 @@ module FunctionAnalysis
 
   sig { params(spec: IntrinsicArgSpec, arg: AST::Locatable).returns(T::Boolean) }
   def intrinsic_arg_matches?(spec, arg)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return true if spec.unconstrained_any?
     return true if spec.type == :"Any[]" && any_array_intrinsic_arg?(spec.type, arg)
     return false unless spec.type == :Any || is_safe_autocast?(arg.resolved_type, spec.type)
@@ -1463,7 +1463,7 @@ module FunctionAnalysis
 
   sig { params(spec: Symbol, arg: AST::Locatable).returns(T::Boolean) }
   def any_array_intrinsic_arg?(spec, arg)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return false unless spec == :"Any[]"
 
     type = arg.full_type!(context: "intrinsic Any[] argument")

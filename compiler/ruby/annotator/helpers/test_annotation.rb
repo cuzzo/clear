@@ -19,7 +19,7 @@ module TestAnnotation
     extend T::Sig
     extend T::Helpers
 
-  requires_ancestor { SemanticAnnotator }
+  requires_ancestor { Annotator::Phases::TypeAnalysisSession }
 
   # Known IO builtins that don't appear in @fn_nodes (runtime-level).
   # Used by `validate_strict_io!` to demand a STUB for any reachable
@@ -31,7 +31,7 @@ module TestAnnotation
 
   sig { params(node: AST::TestBlock).returns(T.nilable(Symbol)) }
   def visit_TestBlock(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     with_new_scope do
       node.setup.each { |s| visit(s) }
       visit_test_lets(node)
@@ -43,7 +43,7 @@ module TestAnnotation
 
   sig { params(node: AST::WhenBlock).returns(T.nilable(Symbol)) }
   def visit_WhenBlock(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     node.setup.each { |s| visit(s) }
     visit_test_lets(node)
     visit_test_hook_bodies(node)
@@ -76,7 +76,7 @@ module TestAnnotation
   # variable declarations at the top of each test body.
   sig { params(node: TestContainerNode).void }
   def visit_test_lets(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless node.respond_to?(:lets)
     (node.lets || []).each do |let_node|
       visit(let_node.expr)
@@ -97,7 +97,7 @@ module TestAnnotation
   # compile time.
   sig { params(node: TestContainerNode).void }
   def visit_test_hook_bodies(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless node.respond_to?(:before_each)
     (node.before_each || []).each { |body| body.each { |s| visit(s) } }
     (node.after_each  || []).each { |body| body.each { |s| visit(s) } }
@@ -107,42 +107,42 @@ module TestAnnotation
 
   sig { params(node: AST::TestThat).returns(T.nilable(Symbol)) }
   def visit_TestThat(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     visit_stmts(node.body)
     stamp_type!(node, :Void)
   end
 
   sig { params(node: AST::AssertRaises).void }
   def visit_AssertRaises(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     visit(node.expression)
     stamp_type!(node, :Void)
   end
 
   sig { params(node: AST::BenchmarkStmt).returns(Symbol) }
   def visit_BenchmarkStmt(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     visit(node.expression)
     stamp_type!(node, :Void)
   end
 
   sig { params(node: AST::SmashStmt).returns(Symbol) }
   def visit_SmashStmt(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     visit(node.expression)
     stamp_type!(node, :Void)
   end
 
   sig { params(node: AST::ProfileStmt).returns(Symbol) }
   def visit_ProfileStmt(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     visit(node.expression)
     stamp_type!(node, :Void)
   end
 
   sig { params(node: AST::StubDecl).returns(Symbol) }
   def visit_StubDecl(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     # Visit the value for type checking if it's an expression.
     # node.value is either an AST expression or a Symbol like :CAPTURES.
     # Only descend into AST expressions; Symbols are leaf metadata.
@@ -164,7 +164,7 @@ module TestAnnotation
   # effect set includes :BLOCKING / :EXTERN qualify as IO.
   sig { params(test_that: AST::TestThat, stubbed_fns: T::Set[String], body_summary: Annotator::Phases::BodyScanSummary).returns(NilClass) }
   def validate_strict_io!(test_that, stubbed_fns, body_summary)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     calls = body_summary.callees
     visited = Set.new
     queue = calls.to_a.dup

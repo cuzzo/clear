@@ -26,14 +26,14 @@ module ReentranceBridge
     extend T::Sig
     extend T::Helpers
 
-  requires_ancestor { SemanticAnnotator }
+  requires_ancestor { Annotator::Phases::TypeAnalysisSession }
 
   # Compute and stamp the canonical reentrance_kind for every FunctionDef
   # in @fn_nodes. Idempotent. Validates REQUIRES clauses against the
   # parameter list of each function.
   sig { params(program_node: AST::Program).void }
   def bridge_reentrance!(program_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     program_node.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       fn_node = stmt
@@ -88,7 +88,7 @@ module ReentranceBridge
   #   force them via auto-fix).
   sig { params(fn_node: AST::FunctionDef, body_facts: T.any(Annotator::Phases::BodyScanSummary, Annotator::Phases::FunctionBodySummary)).returns(NilClass) }
   def offer_plain_reentrant_variant_fix!(fn_node, body_facts)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless fn_node.reentrance_kind == :reentrant
     return unless fn_node.effects_span # no span => can't auto-edit
     return unless fn_node.effects_decl == :reentrant # only act on the new clause
@@ -136,7 +136,7 @@ module ReentranceBridge
   #   :MAX_DEPTH(N) -> System MaxDepthExceeded    (depth counter)
   sig { params(fn_node: AST::FunctionDef).returns(NilClass) }
   def validate_not_logical_return!(fn_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless [:reentrant_not_logical, :reentrant_max_depth].include?(fn_node.reentrance_kind)
     rt = fn_node.declared_return_type
     return if rt&.error_union?
@@ -165,7 +165,7 @@ module ReentranceBridge
   # 5 will use this to keep :THUNK out of @service).
   sig { params(fn_node: AST::FunctionDef, body_facts: T.any(Annotator::Phases::BodyScanSummary, Annotator::Phases::FunctionBodySummary)).returns(T.nilable(T::Boolean)) }
   def route_thunk_to_tail_call_compat!(fn_node, body_facts)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless fn_node.reentrance_kind == :reentrant_thunk
     return unless thunk_all_self_calls_in_tail_position?(fn_node, body_facts)
     fn_node.tail_call = true
@@ -175,7 +175,7 @@ module ReentranceBridge
   # wrapped or nested self-call would still consume real stack.
   sig { params(fn_node: AST::FunctionDef, body_scan: Annotator::Phases::BodyScanSummary).void }
   def validate_tail_call!(fn_node, body_scan)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fn_name = fn_node.name
     all_self_calls = body_scan.call_site_facts.filter_map { |fact|
       fact.node if fact.callee_name == fn_name
@@ -203,7 +203,7 @@ module ReentranceBridge
   # spawn site so OS-thread cost is an explicit user choice.
   sig { params(node: EffectTracker::AsyncValidationNode, call_names: T::Set[String], user_size: T.nilable(Symbol), can_smash: T::Boolean).void }
   def validate_fiber_stack!(node, call_names, user_size, can_smash)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     if can_smash
       emit_can_smash_unsupported_error!(node)
       return
@@ -246,7 +246,7 @@ module ReentranceBridge
   # plain `EFFECTS REENTRANT` callee. Bounded variants do not force @service.
   sig { params(call_names: T::Set[String]).returns(T.nilable(String)) }
   def find_plain_reentrant_callee(call_names)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     visited = T.let(Set.new, T::Set[String])
     queue = T.let(call_names.to_a.dup, T::Array[String])
     until queue.empty?
@@ -264,7 +264,7 @@ module ReentranceBridge
   # such functions force spawn sites to @service until SCC depth products exist.
   sig { params(call_names: T::Set[String]).returns(T.nilable(String)) }
   def find_mutual_max_depth_callee(call_names)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     visited = T.let(Set.new, T::Set[String])
     queue = T.let(call_names.to_a.dup, T::Array[String])
     until queue.empty?
@@ -282,7 +282,7 @@ module ReentranceBridge
   # DO branches fall back to a plain error because their span is ambiguous.
   sig { params(node: EffectTracker::AsyncValidationNode, reentrant_fn: String, user_size: T.nilable(Symbol)).void }
   def emit_service_required_error!(node, reentrant_fn, user_size)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fix = service_required_fix(node, user_size)
 
     return error!(node, :STACK_NEEDS_SERVICE_FIXABLE, reentrant_fn: reentrant_fn) unless fix
@@ -294,7 +294,7 @@ module ReentranceBridge
 
   sig { params(node: EffectTracker::AsyncValidationNode, user_size: T.nilable(Symbol)).returns(T.nilable(Fix)) }
   def service_required_fix(node, user_size)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return nil unless node.is_a?(AST::BgBlock)
 
     prefix_token = node.prefix_token
@@ -356,7 +356,7 @@ module ReentranceBridge
   # call-graph is settled and transitive cycles are visible.
   sig { void }
   def validate_not_logical_recursion!
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fn_nodes = function_node_map
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_not_logical
@@ -389,7 +389,7 @@ module ReentranceBridge
   # exactly. Only the cross-fn cycle case demotes.
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def validate_max_depth_mutual_cycle!
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fn_nodes = function_node_map
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_max_depth
@@ -426,7 +426,7 @@ module ReentranceBridge
 
   sig { void }
   def validate_thunk_recursion!
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fn_nodes = function_node_map
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_thunk
@@ -468,7 +468,7 @@ module ReentranceBridge
   # precise error).
   sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
   def try_stamp_mutual_thunk_plan!(fn_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fn_nodes = function_node_map
     cycle_names = thunk_cycle_members(fn_node.name)
     return false if cycle_names.size < 2
@@ -527,7 +527,7 @@ module ReentranceBridge
   # UnexpectedRecursion if violated.
   sig { params(fn_node: AST::FunctionDef).void }
   def emit_mutual_thunk_unsupported!(fn_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fn_nodes = function_node_map
     name = fn_node.name
     cycle_names = thunk_cycle_members(name)
@@ -631,7 +631,7 @@ module ReentranceBridge
   # shape and the user's source layout would need manual editing anyway).
   sig { params(fn_node: AST::FunctionDef, replacement: String).returns(T::Array[Edit]) }
   def effects_clause_edits(fn_node, replacement)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     span = fn_node.effects_span
     return [] unless span
     s = span.start_token
@@ -650,7 +650,7 @@ module ReentranceBridge
   # to enumerate cycle members for tagged-union frame codegen.
   sig { params(start: String).returns(T::Array[String]) }
   def thunk_cycle_members(start)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     start_s = start.to_s
     forward = compute_reachable(function_call_graph, start_s)
     reverse_graph = {}
@@ -665,7 +665,7 @@ module ReentranceBridge
 
   sig { params(graph: T::Hash[String, T::Set[String]], start: String).returns(T::Set[String]) }
   def compute_reachable(graph, start)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     seen = Set.new
     queue = (graph[start] || Set.new).to_a
     until queue.empty?
@@ -683,7 +683,7 @@ module ReentranceBridge
   # self-call edge.)
   sig { params(start: String).returns(T::Boolean) }
   def reachable_from_self?(start)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     visited = Set.new
     queue   = (function_call_graph[start] || Set.new).to_a
     until queue.empty?
@@ -705,7 +705,7 @@ module ReentranceBridge
   # recursive self-call is the direct value of a RETURN node.
   sig { params(fn_node: AST::FunctionDef, body_facts: T.any(Annotator::Phases::BodyScanSummary, Annotator::Phases::FunctionBodySummary)).returns(T::Boolean) }
   def thunk_all_self_calls_in_tail_position?(fn_node, body_facts)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     all = body_facts.call_site_facts.filter_map { |fact|
       fact.node if fact.callee_name == fn_node.name
     }
@@ -720,7 +720,7 @@ module ReentranceBridge
 
   sig { params(fn_node: AST::FunctionDef).returns(T.nilable(Symbol)) }
   def canonical_reentrance_kind(fn_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fn_node.effects_decl
   end
 
@@ -762,7 +762,7 @@ module ReentranceBridge
   #     on reentrance and constraining the param is not their choice
   sig { params(fn_node: AST::FunctionDef).void }
   def offer_unconstrained_fn_param_fix!(fn_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return if [:reentrant, :reentrant_thunk, :reentrant_tail_call, :reentrant_not_logical, :reentrant_max_depth].include?(fn_node.reentrance_kind)
     return unless fn_node.arrow_token
 
@@ -813,7 +813,7 @@ module ReentranceBridge
 
   sig { params(fn_node: AST::FunctionDef).void }
   def validate_requires_clauses!(fn_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return if fn_node.requires_clauses.nil? || fn_node.requires_clauses.empty?
     # Params come from the parser as hashes ({ name:, type:, default:, ... }).
     # See pre_register_function in annotator.rb.

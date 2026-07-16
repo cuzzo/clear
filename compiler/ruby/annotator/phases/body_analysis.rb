@@ -132,49 +132,49 @@ module Annotator
 
       sig { params(summary: FunctionBodySummary).void }
       def record_function_body_summary!(summary)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         semantic_function_registry.record_body_summary!(summary)
       end
 
       sig { returns(T::Hash[String, FunctionBodySummary]) }
       def function_body_summaries
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         semantic_function_registry.body_summaries
       end
 
       sig { returns(T::Hash[String, T::Set[String]]) }
       def function_call_graph
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         semantic_function_registry.call_graph
       end
 
       sig { returns(T::Hash[String, T::Set[String]]) }
       def function_propagating_callees
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         semantic_function_registry.propagating_callees
       end
 
       sig { params(name: String).returns(T::Boolean) }
       def function_has_fnptr_call?(name)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         semantic_function_registry.fnptr_call?(name)
       end
 
       sig { params(name: String).returns(T::Boolean) }
       def function_raises_directly?(name)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         semantic_function_registry.raises_directly?(name)
       end
 
       sig { returns(T::Array[BodyFactFrame]) }
       def body_fact_frames
-        T.bind(self, SemanticAnnotator)
-        phase_receiver_state.body_fact_frames
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        phase_traversal_state.body_fact_frames
       end
 
       sig { params(identity: Semantic::BodyIdentity, block: T.proc.void).returns(BodyScanSummary) }
       def with_body_fact_frame(identity, &block)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         frame = BodyFactFrame.for_identity(identity)
         body_fact_frames << frame
@@ -296,7 +296,7 @@ module Annotator
 
       sig { params(node: AST::WithBlock).void }
       def record_body_fact_with_block!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         frame = body_fact_frames.last
         return unless frame
 
@@ -322,13 +322,13 @@ module Annotator
 
       sig { returns(T::Array[AsyncBodyFact]) }
       def async_body_facts
-        T.bind(self, SemanticAnnotator)
-        phase_receiver_state.async_body_facts
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        phase_traversal_state.async_body_facts
       end
 
       sig { params(node: AsyncBodyNode, summary: BodyScanSummary, validation_node: AsyncValidationNode).returns(AsyncBodyFact) }
       def record_async_body_fact!(node, summary, validation_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         fact = AsyncBodyFact.new(node: node, summary: summary, validation_node: validation_node)
         async_body_facts << fact
         fact
@@ -351,7 +351,7 @@ module Annotator
 
       sig { params(node: AST::Node).void }
       def record_body_fact_node!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         frames = body_fact_frames
         return if frames.empty?
 
@@ -496,7 +496,7 @@ module Annotator
 
       sig { params(declarations: DeclarationIndex, program: AST::Program).void }
       def analyze_program_bodies!(declarations, program)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         declarations.body_statements.each { |stmt| visit(stmt) }
 

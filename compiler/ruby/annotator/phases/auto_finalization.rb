@@ -13,14 +13,14 @@ module Annotator
 
       sig { params(program: AST::Program).void }
       def finalize_auto_types!(program)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         run_auto_inference!(program)
       end
 
       sig { params(program: AST::Program, resolved_slots: AutoUnifier::ResultMap).void }
       def apply_auto_resolution_stamps!(program, resolved_slots)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         touched_functions = restamp_auto_resolution_slots!(resolved_slots)
         touched_functions.each { |fn| restamp_auto_function_signature!(fn) }
@@ -30,7 +30,7 @@ module Annotator
 
       sig { params(resolved_slots: AutoUnifier::ResultMap).returns(T::Set[AST::FunctionDef]) }
       def restamp_auto_resolution_slots!(resolved_slots)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         touched_functions = T.let(Set.new, T::Set[AST::FunctionDef])
         resolved_slots.each_value do |resolution|
@@ -70,7 +70,7 @@ module Annotator
 
       sig { params(slot: AutoConstraintCollector::Slot).void }
       def restamp_auto_local!(slot)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         decl = T.cast(slot.decl_node, AutoConstraintCollector::DeclarationNode)
         concrete = Type.new(T.cast(decl.type, Type))
@@ -95,7 +95,7 @@ module Annotator
 
       sig { params(fn: AST::FunctionDef).void }
       def restamp_auto_function_signature!(fn)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         signature = FunctionSignature.new(
           params: fn.params,
@@ -114,7 +114,7 @@ module Annotator
 
       sig { params(program: AST::Program).void }
       def restamp_stale_auto_nodes!(program)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         nodes = T.let([], T::Array[AST::Locatable])
         AST.each_locatable(program, descend_functions: true) { |node| nodes << node }
@@ -167,7 +167,7 @@ module Annotator
 
       sig { params(node: AST::Locatable).returns(T.nilable(Type)) }
       def concrete_function_call_type_for(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return nil unless node.is_a?(AST::FuncCall)
         entry = semantic_root_scope.resolve_entry(node.name)
@@ -181,7 +181,7 @@ module Annotator
 
       sig { params(node: AST::Locatable).returns(T::Boolean) }
       def restamp_binary_type_after_auto!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return false unless node.is_a?(AST::BinaryOp)
         left_type = auto_finalization_node_type(node.left)

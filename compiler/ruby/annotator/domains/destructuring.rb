@@ -13,7 +13,7 @@ module Annotator
 
       sig { params(node: AST::DestructuringAssignment).void }
       def visit_DestructuringAssignment(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.value)
         rhs = destructure_rhs_facts(node)
@@ -44,7 +44,7 @@ module Annotator
 
       sig { params(node: AST::DestructuringAssignment).returns(DestructureRhsFacts) }
       def destructure_rhs_facts(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         value_type = node.value.full_type!(context: "destructuring assignment value").success_type
         element_type = value_type.tuple? ? Type.new(:Any) : (value_type.element_type || Type.new(:Any))
@@ -53,7 +53,7 @@ module Annotator
 
       sig { params(node: AST::DestructuringAssignment, rhs: DestructureRhsFacts).void }
       def validate_destructure_shape!(node, rhs)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         value_type = rhs.value_type
         unless value_type.tuple? || (value_type.fixed? && value_type.array?)
@@ -67,7 +67,7 @@ module Annotator
 
       sig { params(node: AST::DestructuringAssignment, rhs: DestructureRhsFacts).void }
       def validate_destructure_copyable!(node, rhs)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Tuple is the compiler's typed multi-return value. Destructuring consumes
         # its slots, so individual affine values do not need to be copyable.
@@ -95,7 +95,7 @@ module Annotator
 
       sig { params(node: AST::DestructuringAssignment, target: AST::DestructureTarget, value_type: Type).void }
       def finalize_destructure_declaration_target!(node, target, value_type)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         validate_type_annotation!(target, target.type) if target.type
         final_type = target.type || value_type
@@ -110,7 +110,7 @@ module Annotator
 
       sig { params(node: AST::DestructuringAssignment, target: AST::DestructureTarget, value_type: Type).void }
       def finalize_destructure_assignment_target!(node, target, value_type)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         scope = current_scope
         unless ownership_graph.can_write?(target.name)
@@ -141,7 +141,7 @@ module Annotator
 
       sig { params(node: AST::DestructuringAssignment, target_type: Type::TypeInput, value_type: Type).void }
       def validate_destructure_target_type!(node, target_type, value_type)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return if target_type.nil? || target_type == :Any || value_type.resolved == :Any
         return if target_type == :NIL

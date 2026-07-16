@@ -83,9 +83,9 @@ module LockHelper
   # First declaration of T with a rank wins; subsequent mismatches error.
   sig { params(type_sym: Symbol, rank: Integer, node: AST::CapabilityWrap).returns(T.nilable(Integer)) }
   def record_lock_type_rank!(type_sym, rank, node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless type_sym && rank
-    lock_type_ranks = phase_receiver_state.lock_analysis.type_ranks
+    lock_type_ranks = phase_audit_inputs.lock_analysis.type_ranks
     existing = lock_type_ranks[type_sym]
     if existing.nil?
       lock_type_ranks[type_sym] = rank
@@ -98,18 +98,18 @@ module LockHelper
   # lock type, or nil if the type has no rank declared anywhere.
   sig { params(cap: CapabilityHelper::WithCapabilityFact).returns(T.nilable(Integer)) }
   def rank_of_cap(cap)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     t = cap.lock_identity
     return nil unless t
-    phase_receiver_state.lock_analysis.type_ranks[t]
+    phase_audit_inputs.lock_analysis.type_ranks[t]
   end
 
   sig { params(node: AST::WithBlock, lock_capabilities: CapabilityHelper::WithCapabilityFacts).void }
   def record_lock_clause_site!(node, lock_capabilities)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless node.lock_error_clause
     cap_types = lock_capabilities.filter_map(&:lock_identity)
-    phase_receiver_state.lock_analysis.clause_sites << LockClauseSite.new(node: node, cap_types: cap_types)
+    phase_audit_inputs.lock_analysis.clause_sites << LockClauseSite.new(node: node, cap_types: cap_types)
     nil
   end
 
@@ -122,7 +122,7 @@ module LockHelper
   # [Note].
   sig { params(node: AST::WithBlock, lock_capabilities: CapabilityHelper::WithCapabilityFacts).returns(T.nilable(CapabilityHelper::WithCapabilityFacts)) }
   def check_nested_lock_reacquire!(node, lock_capabilities)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     held_locks = current_held_locks
     lock_capabilities.each do |cap|
       vn = cap.var_name
@@ -149,10 +149,10 @@ module LockHelper
   # visible but not blocking.
   sig { params(node: AST::WithBlock, lock_capabilities: CapabilityHelper::WithCapabilityFacts).returns(T.nilable(CapabilityHelper::WithCapabilityFacts)) }
   def check_lock_rank_ordering!(node, lock_capabilities)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     held_lock_types = current_held_lock_types
     return if held_lock_types.empty?
-    lock_type_ranks = phase_receiver_state.lock_analysis.type_ranks
+    lock_type_ranks = phase_audit_inputs.lock_analysis.type_ranks
     return if lock_type_ranks.empty?
     escape = node.deadlock_escape
     lock_capabilities.each do |cap|
@@ -184,12 +184,12 @@ module LockHelper
   # the programmer put the opt-out at the site that reads most naturally
   # — the outer holder, the inner acquire, or both — and each form has
   # the same suppression effect on the cycle graph.
-  sig { params(fn_name: String, cap: CapabilityHelper::WithCapabilityFact, held_stack: T::Array[SemanticAnnotator::HeldLockTypeEntry], escape: T.nilable(SemanticAnnotator::DeadlockEscape)).void }
+  sig { params(fn_name: String, cap: CapabilityHelper::WithCapabilityFact, held_stack: T::Array[Annotator::Phases::TypeAnalysisSession::HeldLockTypeEntry], escape: T.nilable(Annotator::Phases::TypeAnalysisSession::DeadlockEscape)).void }
   def record_with_acquire!(fn_name, cap, held_stack, escape)
-    T.bind(self, SemanticAnnotator) rescue {}
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue {}
     t = cap.lock_identity
     return unless t
-    state = phase_receiver_state.lock_analysis
+    state = phase_audit_inputs.lock_analysis
     T.must(state.direct_acquires[fn_name]) << t
     site_tok = cap.var_node.token
     acquirer_opt = !escape.nil?
@@ -202,10 +202,10 @@ module LockHelper
     end
   end
 
-  sig { params(fn_name: String, callee_name: String, held_stack: T::Array[SemanticAnnotator::HeldLockTypeEntry], site_token: Lexer::Token).void }
+  sig { params(fn_name: String, callee_name: String, held_stack: T::Array[Annotator::Phases::TypeAnalysisSession::HeldLockTypeEntry], site_token: Lexer::Token).void }
   def record_held_call!(fn_name, callee_name, held_stack, site_token)
-    T.bind(self, SemanticAnnotator) rescue nil
-    state = phase_receiver_state.lock_analysis
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    state = phase_audit_inputs.lock_analysis
     held_stack.each do |held|
       T.must(state.held_calls[fn_name]) << LockHeldCallSite.new(
         held: held.type,
@@ -222,9 +222,9 @@ module LockHelper
   # structure.
   sig { returns(T::Hash[String, T::Set[Symbol]]) }
   def propagate_lock_acquires!
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     transitive = T.let({}, TransitiveAcquires)
-    phase_receiver_state.lock_analysis.direct_acquires.each { |fn, set| transitive[fn] = set.dup }
+    phase_audit_inputs.lock_analysis.direct_acquires.each { |fn, set| transitive[fn] = set.dup }
     function_call_graph.each_key { |fn| transitive[fn] ||= Set.new }
 
     loop do
@@ -248,8 +248,8 @@ module LockHelper
 
   sig { params(transitive_acquires: TransitiveAcquires).void }
   def resolve_held_calls!(transitive_acquires)
-    T.bind(self, SemanticAnnotator) rescue nil
-    state = phase_receiver_state.lock_analysis
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    state = phase_audit_inputs.lock_analysis
     state.held_calls.each do |fn, sites|
       sites.each do |site|
         (transitive_acquires[site.callee] || Set.new).each do |t|
@@ -271,11 +271,11 @@ module LockHelper
   # runtime, so ON :LockCycle handlers reaching them are live).
   sig { params(include_opted_out: T::Boolean).returns(LockGraph) }
   def build_lock_graph(include_opted_out: false)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     adj = T.let(Hash.new { |h, k| h[k] = Set.new }, T::Hash[Symbol, T::Set[Symbol]])
     nodes = T.let(Set.new, T::Set[Symbol])
     live = T.let([], T::Array[LockEdge])
-    phase_receiver_state.lock_analysis.direct_edges.each do |_fn, edges|
+    phase_audit_inputs.lock_analysis.direct_edges.each do |_fn, edges|
       edges.each do |e|
         next if e.opted_out && !include_opted_out
         T.must(adj[e.held]) << e.acquired
@@ -341,7 +341,7 @@ module LockHelper
   # Called as a post-pass once function_call_graph is complete.
   sig { void }
   def check_lock_cycles!
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     transitive_acquires = propagate_lock_acquires!
     resolve_held_calls!(transitive_acquires)
 
@@ -361,8 +361,8 @@ module LockHelper
 
   sig { void }
   def check_lock_handler_reachability!
-    T.bind(self, SemanticAnnotator) rescue nil
-    clause_sites = phase_receiver_state.lock_analysis.clause_sites
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    clause_sites = phase_audit_inputs.lock_analysis.clause_sites
     return if clause_sites.empty?
 
     full = build_lock_graph(include_opted_out: true)
@@ -394,7 +394,7 @@ module LockHelper
   # set. A selector that expands to the empty set here is dead code.
   sig { params(site: LockClauseSite, types_in_cycle: T::Set[Symbol], types_with_self: T::Set[Symbol]).void }
   def verify_handler_reachability!(site, types_in_cycle, types_with_self)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     node    = site.node
     clause  = node.lock_error_clause
     return unless clause
@@ -441,7 +441,7 @@ module LockHelper
 
   sig { params(scc: T::Array[Symbol], adj: T::Hash[Symbol, T::Set[Symbol]]).returns(T::Boolean) }
   def scc_is_cyclic?(scc, adj)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return true if scc.length > 1
     node = T.must(scc.first)
     T.must(adj[node]).include?(node)
@@ -449,7 +449,7 @@ module LockHelper
 
   sig { params(scc: T::Array[Symbol], edges: T::Array[LockEdge]).returns(T.noreturn) }
   def report_lock_cycle!(scc, edges)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     scc_set = scc.to_set
     participating = edges.select { |e| scc_set.include?(e.held) && scc_set.include?(e.acquired) }
     sample = participating.first

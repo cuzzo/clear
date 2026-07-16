@@ -110,7 +110,7 @@ class FunctionReturn
   # ruby-to-clear: skip
   sig do
     params(receiver: T.nilable(Type), args: T::Array[AST::Node],
-           host: T.nilable(SemanticAnnotator)).returns(Type)
+           host: T.nilable(Annotator::Phases::TypeAnalysisSession)).returns(Type)
   end
   # ruby-to-clear: skip
   def resolve(receiver, args = [], host = nil)
@@ -150,7 +150,7 @@ class FunctionReturn
   end
 
   # ruby-to-clear: skip
-  sig { params(args: T::Array[AST::Node], host: T.nilable(SemanticAnnotator)).returns(Type) }
+  sig { params(args: T::Array[AST::Node], host: T.nilable(Annotator::Phases::TypeAnalysisSession)).returns(Type) }
   def resolve_infer(args, host)
     raise "FunctionReturn infer requires a SemanticAnnotator host" unless host
 

@@ -16,7 +16,7 @@ module AllocHelper
   # The OS stack reclaims them each iteration; LLVM can SROA the fields.
   sig { params(node: AllocDeclarationNode, storage: Symbol).returns(Symbol) }
   def downgrade_frame_to_stack(node, storage)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     return storage unless storage == :frame && current_loop_depth.positive?
     return storage unless node.value.is_a?(AST::StructLit)
 
@@ -29,7 +29,7 @@ module AllocHelper
   # Finalize storage tier (stack/frame/heap) and record allocation effects.
   sig { params(node: AllocDeclarationNode, final_type: T.any(Symbol, Type)).returns(Symbol) }
   def finalize_decl_storage!(node, final_type)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     storage = node.finalize_storage!(final_type) { |n| lookup_type_schema(n.to_sym) }
     storage = downgrade_frame_to_stack(node, storage)
     current_fn_ctx&.record_frame_use! if storage == :frame
@@ -45,7 +45,7 @@ module AllocHelper
   # Delegates to Type#resolve_resource_close for type-specific logic.
   sig { params(node: AST::Node).returns(Type::ResourceCloseResult) }
   def resolve_resource_close(node)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     ti = node.full_type!
     ti.resolve_resource_close(->(name) { lookup_type_schema(name) })
   end

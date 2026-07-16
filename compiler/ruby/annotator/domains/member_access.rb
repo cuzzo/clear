@@ -8,7 +8,7 @@ module Annotator
 
       sig { params(node: AST::GetIndex).returns(T.nilable(Type)) }
       def visit_GetIndex(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.target)
         visit(node.index)
@@ -83,7 +83,7 @@ module Annotator
 
       sig { params(node: AST::GetField).returns(T.nilable(T.any(Type, Symbol))) }
       def visit_GetField(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Enum/Union variant access: TypeName.Variant
         # Must be checked BEFORE visiting target to avoid "variable not found" error.
@@ -167,8 +167,8 @@ module Annotator
 
         field_type = field_def.type
         # SOA tracking: record field access on pipeline variable `_`
-        if phase_receiver_state.pipeline_accessed_fields && node.target.is_a?(AST::Identifier) && node.target.name == "_"
-          T.must(phase_receiver_state.pipeline_accessed_fields).add(node.field)
+        if phase_traversal_state.pipeline_accessed_fields && node.target.is_a?(AST::Identifier) && node.target.name == "_"
+          T.must(phase_traversal_state.pipeline_accessed_fields).add(node.field)
         end
         # For generic instances (e.g. Pair<Number>), substitute type params into field type.
         # Handles compound types like T[], ?T, !T via apply_type_subst.
@@ -212,7 +212,7 @@ module Annotator
 
       sig { params(node: AST::GetField).void }
       def emit_moved_field_path_error_if_needed!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         path = get_path_to_root(node)
         return if path.empty?
@@ -231,7 +231,7 @@ module Annotator
 
       sig { params(node: AST::GetField).void }
       def emit_capability_field_access_error_if_needed!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Capability-wrapped bindings hide the inner T behind a lock /
         # atomic cell. Direct field access on the outer binding skips the
@@ -246,7 +246,7 @@ module Annotator
         return if node.is_assignment_lhs
 
         sym = node.target.symbol
-        in_auto_lock = phase_receiver_state.auto_locked_assign_name == node.target.name
+        in_auto_lock = phase_traversal_state.auto_locked_assign_name == node.target.name
         in_with_block = inside_with_block?
         cap_error = [
           [sym&.locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@locked"],
@@ -263,7 +263,7 @@ module Annotator
 
       sig { params(node: AST::Slice).void }
       def visit_Slice(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.target)
         visit(node.start) if node.start
@@ -289,7 +289,7 @@ module Annotator
 
       sig { params(node: AST::HashLit).void }
       def visit_HashLit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         expected_map = node.coerced_type_info
         if expected_map&.map?
@@ -353,7 +353,7 @@ module Annotator
 
       sig { params(node: AST::StructLit).returns(T.nilable(Symbol)) }
       def visit_StructLit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         display_name = node.name.to_s
         schema = lookup_type_schema(display_name.to_sym)
@@ -537,7 +537,7 @@ module Annotator
 
       sig { params(node: AST::ListLit).returns(T.nilable(T.any(Symbol, Type))) }
       def visit_ListLit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # 1. Analyze all items
         node.items.each { |item| visit(item) }
@@ -633,7 +633,7 @@ module Annotator
 
       sig { params(node: AST::TupleLit).void }
       def visit_TupleLit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         node.items.each { |item| visit(item) }
         item_types = node.items.map { |item| item.full_type!(context: "tuple literal item") }
@@ -643,7 +643,7 @@ module Annotator
 
       sig { params(node: AST::DefaultArrayLit).returns(Type) }
       def visit_DefaultArrayLit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         type_info = Type.new(node.type_info)
         stamp_type!(node, type_info)
         node.storage = :stack
@@ -652,7 +652,7 @@ module Annotator
 
       sig { params(node: AST::RangeLit).returns(T.nilable(Type)) }
       def visit_RangeLit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.start)
         visit(node.finish)
@@ -692,7 +692,7 @@ module Annotator
 
       sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Type) }
       def infer_element_type(args, node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         receiver = args.first
         ti = receiver.is_a?(AST::Locatable) ? receiver.full_type!(context: "element receiver") : nil
@@ -703,7 +703,7 @@ module Annotator
 
       sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Type) }
       def infer_optional_element_type(args, node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         receiver = args.first
         ti = receiver.is_a?(AST::Locatable) ? receiver.full_type!(context: "optional element receiver") : nil
@@ -716,7 +716,7 @@ module Annotator
 
       sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Type) }
       def infer_to_list(args, node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         receiver = T.must(args[0])
         recv_t = receiver.full_type!(context: "toList receiver")

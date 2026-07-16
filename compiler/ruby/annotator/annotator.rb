@@ -58,8 +58,10 @@ require_relative "helpers/union"
 require_relative "helpers/auto_inference"
 require_relative "../compiler/module_importer" # ModuleImporter — referenced by SemanticAnnotator#initialize's sig
 
-# Handle Type inference, and semantic validation
-class SemanticAnnotator
+# Phase-owned executor for body typing and fact collection.  The public
+# SemanticAnnotator below is only a construction boundary; mutable traversal
+# state belongs to this session and is discarded after one annotation run.
+class Annotator::Phases::TypeAnalysisSession
     extend T::Sig
 
   include ErrorHelper
@@ -124,12 +126,28 @@ class SemanticAnnotator
 
   DeadlockEscape = T.type_alias { T::Hash[Symbol, T.any(Symbol, Lexer::Token)] }
 
-  class ReceiverState < T::Struct
+  class TraversalState < T::Struct
     prop :scopes, T::Array[Scope], factory: -> { [Scope.new] }
     prop :function_contexts, T::Array[FunctionContext], factory: -> { [] }
     prop :loop_depth, Integer, default: 0
     prop :conditional_depth, Integer, default: 0
     prop :smooth_depth, Integer, default: 0
+    prop :body_fact_frames, T::Array[Annotator::Phases::BodyFactFrame], factory: -> { [] }
+    prop :async_body_facts, T::Array[Annotator::Phases::AsyncBodyFact], factory: -> { [] }
+    prop :stream_yield_frames, T::Array[StreamYieldFrame], factory: -> { [] }
+    prop :with_block_depth, Integer, default: 0
+    prop :match_pattern_depth, Integer, default: 0
+    prop :current_bg_pinned, T::Boolean, default: false
+    prop :pipeline_accessed_fields, T.nilable(T::Set[String]), default: nil
+    prop :auto_locked_assign_name, T.nilable(String), default: nil
+    prop :struct_literal_call_argument_depth, Integer, default: 0
+    prop :annotation_ancestors, T::Array[AST::Node], factory: -> { [] }
+  end
+
+  # Facts gathered while typing but consumed only by the capability audit.
+  # Keeping this separate makes the eventual phase transfer explicit and
+  # prevents traversal mechanics from becoming audit-owned lifecycle state.
+  class CapabilityAuditInputs < T::Struct
     prop :held_locks, HeldLockMap, factory: -> { {} }
     prop :held_lock_types, T::Array[HeldLockTypeEntry], factory: -> { [] }
     prop :current_predicate_context, T.nilable(CapabilityHelper::PredicateContext), default: nil
@@ -138,23 +156,13 @@ class SemanticAnnotator
       factory: -> { [] }
     prop :predicate_call_sites, T::Array[CapabilityHelper::PredicateCallSite], factory: -> { [] }
     prop :capability_audit, CapabilityAudit::BindingAuditStore, factory: -> { {} }
-    prop :body_fact_frames, T::Array[Annotator::Phases::BodyFactFrame], factory: -> { [] }
-    prop :async_body_facts, T::Array[Annotator::Phases::AsyncBodyFact], factory: -> { [] }
-    prop :stream_yield_frames, T::Array[StreamYieldFrame], factory: -> { [] }
-    prop :with_block_depth, Integer, default: 0
-    prop :match_pattern_depth, Integer, default: 0
-    prop :current_bg_pinned, T::Boolean, default: false
     prop :capture_stack, T::Array[CapabilityHelper::CaptureContext], factory: -> { [] }
     prop :capture_move_suppression_depth, Integer, default: 0
     prop :snapshot_txn_frames, T::Array[SnapshotTxnFrame], factory: -> { [] }
-    prop :pipeline_accessed_fields, T.nilable(T::Set[String]), default: nil
-    prop :auto_locked_assign_name, T.nilable(String), default: nil
-    prop :struct_literal_call_argument_depth, Integer, default: 0
     prop :effect_state, T.nilable(EffectTracker::EffectState), default: nil
     prop :lock_analysis, LockHelper::LockAnalysisState, factory: -> { LockHelper::LockAnalysisState.new }
     prop :ownership_graph, OwnershipGraph, factory: -> { OwnershipGraph.new }
     prop :ownership_transport_frames, T::Array[OwnershipTransportFacts], factory: -> { [] }
-    prop :annotation_ancestors, T::Array[AST::Node], factory: -> { [] }
   end
 
   sig { returns(T::Hash[String, AST::FunctionDef]) }
@@ -172,15 +180,21 @@ class SemanticAnnotator
     semantic_function_registry.nodes
   end
 
-  sig { returns(ReceiverState) }
-  def phase_receiver_state
-    @receiver_state
+  sig { returns(TraversalState) }
+  def phase_traversal_state
+    @traversal_state
   end
-  private :phase_receiver_state
+
+  sig { returns(CapabilityAuditInputs) }
+  def phase_audit_inputs
+    @audit_inputs
+  end
+
+  private :phase_traversal_state, :phase_audit_inputs
 
   sig { returns(OwnershipGraph) }
   def ownership_graph
-    @receiver_state.ownership_graph
+    @audit_inputs.ownership_graph
   end
   private :ownership_graph
 
@@ -196,12 +210,12 @@ class SemanticAnnotator
 
   sig { returns(T::Array[Scope]) }
   def scope_stack
-    @receiver_state.scopes
+    @traversal_state.scopes
   end
 
   sig { returns(Scope) }
   def semantic_root_scope
-    T.must(@receiver_state.scopes.first)
+    T.must(@traversal_state.scopes.first)
   end
 
   sig { returns(T.nilable(AST::Program)) }
@@ -214,7 +228,7 @@ class SemanticAnnotator
 
   sig { returns(T::Hash[Symbol, Integer]) }
   def semantic_lock_type_ranks
-    @receiver_state.lock_analysis.type_ranks
+    @audit_inputs.lock_analysis.type_ranks
   end
 
   sig { returns(T::Array[HeldLockTypeEntry]) }
@@ -224,17 +238,17 @@ class SemanticAnnotator
 
   sig { returns(Integer) }
   def pending_deferred_validation_count
-    @receiver_state.deferred_with_validations.length
+    @audit_inputs.deferred_with_validations.length
   end
 
   sig { returns(T::Array[Annotator::Phases::DeferredWithValidation]) }
   def deferred_with_validations
-    @receiver_state.deferred_with_validations
+    @audit_inputs.deferred_with_validations
   end
 
   sig { returns(T.nilable(FunctionContext)) }
   def current_fn_ctx
-    @receiver_state.function_contexts.last
+    @traversal_state.function_contexts.last
   end
 
   sig { returns(FunctionContext) }
@@ -286,14 +300,14 @@ class SemanticAnnotator
 
   sig { params(ctx: FunctionContext).returns(FunctionContext) }
   def push_function_context!(ctx)
-    @receiver_state.function_contexts << ctx
+    @traversal_state.function_contexts << ctx
     ctx
   end
   private :push_function_context!
 
   sig { returns(T.nilable(FunctionContext)) }
   def pop_function_context!
-    @receiver_state.function_contexts.pop
+    @traversal_state.function_contexts.pop
   end
   private :pop_function_context!
 
@@ -315,7 +329,7 @@ class SemanticAnnotator
 
   sig { params(effect: Symbol, fn_name: String).void }
   def record_snapshot_txn_violation!(effect, fn_name)
-    frame = @receiver_state.snapshot_txn_frames.last
+    frame = @audit_inputs.snapshot_txn_frames.last
     return unless frame
 
     frame.violations << SnapshotTxnViolation.new(effect: effect, fn: fn_name)
@@ -323,7 +337,7 @@ class SemanticAnnotator
 
   sig { returns(T::Boolean) }
   def inside_snapshot_transaction_body?
-    !@receiver_state.snapshot_txn_frames.empty?
+    !@audit_inputs.snapshot_txn_frames.empty?
   end
   private :inside_snapshot_transaction_body?
 
@@ -341,14 +355,14 @@ class SemanticAnnotator
     if fn_ctx
       fn_ctx.enter_conditional!
     else
-      @receiver_state.conditional_depth += 1
+      @traversal_state.conditional_depth += 1
     end
     blk.call
   ensure
     if fn_ctx
       fn_ctx.exit_conditional!
     else
-      @receiver_state.conditional_depth -= 1
+      @traversal_state.conditional_depth -= 1
     end
   end
 
@@ -362,14 +376,14 @@ class SemanticAnnotator
     if fn_ctx
       fn_ctx.enter_loop!
     else
-      @receiver_state.loop_depth += 1
+      @traversal_state.loop_depth += 1
     end
     blk.call
   ensure
     if fn_ctx
       fn_ctx.exit_loop!
     else
-      @receiver_state.loop_depth -= 1
+      @traversal_state.loop_depth -= 1
     end
   end
   private :with_loop_context
@@ -391,50 +405,50 @@ class SemanticAnnotator
       .returns(T.type_parameter(:Result))
   end
   def with_smooth_context(&blk)
-    @receiver_state.smooth_depth += 1
+    @traversal_state.smooth_depth += 1
     blk.call
   ensure
-    @receiver_state.smooth_depth -= 1
+    @traversal_state.smooth_depth -= 1
   end
 
   sig { returns(Integer) }
   def smooth_depth
-    @receiver_state.smooth_depth
+    @traversal_state.smooth_depth
   end
 
   sig { returns(Integer) }
   def current_loop_depth
-    current_fn_ctx&.loop_depth || @receiver_state.loop_depth
+    current_fn_ctx&.loop_depth || @traversal_state.loop_depth
   end
 
   sig { returns(Integer) }
   def current_conditional_depth
-    current_fn_ctx&.conditional_depth || @receiver_state.conditional_depth
+    current_fn_ctx&.conditional_depth || @traversal_state.conditional_depth
   end
 
   sig { returns(T::Boolean) }
   def inside_with_block?
-    @receiver_state.with_block_depth.positive?
+    @traversal_state.with_block_depth.positive?
   end
 
   sig { returns(T::Boolean) }
   def inside_match_pattern_context?
-    @receiver_state.match_pattern_depth.positive?
+    @traversal_state.match_pattern_depth.positive?
   end
 
   sig { returns(HeldLockMap) }
   def current_held_locks
-    @receiver_state.held_locks
+    @audit_inputs.held_locks
   end
 
   sig { returns(T::Array[HeldLockTypeEntry]) }
   def current_held_lock_types
-    @receiver_state.held_lock_types
+    @audit_inputs.held_lock_types
   end
 
   sig { returns(T.nilable(CapabilityHelper::PredicateContext)) }
   def current_predicate_context
-    @receiver_state.current_predicate_context
+    @audit_inputs.current_predicate_context
   end
 
   sig do
@@ -446,26 +460,26 @@ class SemanticAnnotator
       .returns(T.type_parameter(:Result))
   end
   def with_predicate_context(ctx, &blk)
-    previous = @receiver_state.current_predicate_context
-    @receiver_state.current_predicate_context = ctx
+    previous = @audit_inputs.current_predicate_context
+    @audit_inputs.current_predicate_context = ctx
     blk.call
   ensure
-    @receiver_state.current_predicate_context = previous
+    @audit_inputs.current_predicate_context = previous
   end
 
   sig { returns(T::Array[CapabilityHelper::PredicateCallSite]) }
   def predicate_call_sites
-    @receiver_state.predicate_call_sites
+    @audit_inputs.predicate_call_sites
   end
 
   sig { returns(CapabilityAudit::BindingAuditStore) }
   def capability_audit
-    @receiver_state.capability_audit
+    @audit_inputs.capability_audit
   end
 
   sig { returns(T.nilable(StreamYieldFrame)) }
   def current_stream_yield_frame
-    @receiver_state.stream_yield_frames.last
+    @traversal_state.stream_yield_frames.last
   end
 
   sig do
@@ -478,12 +492,12 @@ class SemanticAnnotator
   end
   def with_stream_yield_frame(node, &blk)
     frame = StreamYieldFrame.new(node: node, expected_type: node.declared_yield_type)
-    @receiver_state.stream_yield_frames << frame
+    @traversal_state.stream_yield_frames << frame
     begin
       blk.call
       frame.yield_types
     ensure
-      popped = @receiver_state.stream_yield_frames.pop
+      popped = @traversal_state.stream_yield_frames.pop
       raise "BUG: stream yield frame mismatch" unless popped.equal?(frame)
     end
   end
@@ -494,10 +508,10 @@ class SemanticAnnotator
       .returns(T.type_parameter(:Result))
   end
   def with_match_pattern_context(&blk)
-    @receiver_state.match_pattern_depth += 1
+    @traversal_state.match_pattern_depth += 1
     blk.call
   ensure
-    @receiver_state.match_pattern_depth -= 1
+    @traversal_state.match_pattern_depth -= 1
   end
 
   sig { params(family: Symbol).returns(T::Array[Symbol]) }
@@ -522,24 +536,24 @@ class SemanticAnnotator
       .returns(T.type_parameter(:Result))
   end
   def with_held_locks(node, lock_capabilities, &blk)
-    previous_locks = @receiver_state.held_locks
-    previous_types = @receiver_state.held_lock_types
-    @receiver_state.held_locks = previous_locks.dup
-    @receiver_state.held_lock_types = previous_types.dup
+    previous_locks = @audit_inputs.held_locks
+    previous_types = @audit_inputs.held_lock_types
+    @audit_inputs.held_locks = previous_locks.dup
+    @audit_inputs.held_lock_types = previous_types.dup
     opted_out = !node.deadlock_escape.nil?
 
     lock_capabilities.each do |capability|
       variable_name = capability.var_name
       token = capability.var_node.token
-      @receiver_state.held_locks[variable_name] ||= HeldLockEntry.new(token: token)
+      @audit_inputs.held_locks[variable_name] ||= HeldLockEntry.new(token: token)
       lock_type = capability.lock_identity
-      @receiver_state.held_lock_types << HeldLockTypeEntry.new(type: lock_type, opted_out: opted_out) if lock_type
+      @audit_inputs.held_lock_types << HeldLockTypeEntry.new(type: lock_type, opted_out: opted_out) if lock_type
     end
 
     blk.call
   ensure
-    @receiver_state.held_locks = T.must(previous_locks)
-    @receiver_state.held_lock_types = T.must(previous_types)
+    @audit_inputs.held_locks = T.must(previous_locks)
+    @audit_inputs.held_lock_types = T.must(previous_types)
   end
 
   sig do
@@ -549,7 +563,7 @@ class SemanticAnnotator
   end
   def with_snapshot_transaction_body(node, &blk)
     frame = SnapshotTxnFrame.new
-    @receiver_state.snapshot_txn_frames << frame
+    @audit_inputs.snapshot_txn_frames << frame
     result = blk.call
     txn_violations = frame.violations
     unless txn_violations.empty?
@@ -558,7 +572,7 @@ class SemanticAnnotator
     end
     result
   ensure
-    popped = @receiver_state.snapshot_txn_frames.pop
+    popped = @audit_inputs.snapshot_txn_frames.pop
     Kernel.raise "BUG: snapshot transaction frame mismatch" if popped && !popped.equal?(frame)
   end
 
@@ -580,7 +594,8 @@ class SemanticAnnotator
     @source_dir = T.let(source_dir ? File.expand_path(source_dir) : Dir.pwd, String)
     @strict_test = T.let(strict_test, T::Boolean)
     @source_code = source_code
-    @receiver_state = T.let(ReceiverState.new, ReceiverState)
+    @traversal_state = T.let(TraversalState.new, TraversalState)
+    @audit_inputs = T.let(CapabilityAuditInputs.new, CapabilityAuditInputs)
     @function_registry = T.let(Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
     @semantic_index = T.let(nil, T.nilable(SemanticIndex))
     @annotation_products = T.let(Annotator::Phases::AnnotationProducts.new, Annotator::Phases::AnnotationProducts)
@@ -604,17 +619,17 @@ class SemanticAnnotator
 
   sig { returns(T::Boolean) }
   def struct_literal_call_argument_context?
-    @receiver_state.struct_literal_call_argument_depth > 0
+    @traversal_state.struct_literal_call_argument_depth > 0
   end
   private :struct_literal_call_argument_context?
 
   sig { params(block: T.proc.void).void }
   def with_struct_literal_call_argument(&block)
-    @receiver_state.struct_literal_call_argument_depth += 1
+    @traversal_state.struct_literal_call_argument_depth += 1
     begin
       block.call
     ensure
-      @receiver_state.struct_literal_call_argument_depth -= 1
+      @traversal_state.struct_literal_call_argument_depth -= 1
     end
   end
   private :with_struct_literal_call_argument
@@ -643,27 +658,31 @@ class SemanticAnnotator
     @language_mode
   end
 
-private
-
-  sig { returns(Annotator::Phases::AnnotationPipelineOperations) }
-  def annotation_pipeline_operations
-    Annotator::Phases::AnnotationPipelineOperations.new(
-      prepare_type_analysis: ->(resolution) {
-        adopt_resolution_facts!(resolution)
-        bridge_reentrance!(resolution.program)
-        validate_and_resolve_sync_policy!(resolution.program)
-        seed_error_type_registrations!(resolution.declarations)
-      },
-      analyze_bodies: ->(declarations, program) { analyze_program_bodies!(declarations, program) },
-      resolve_catches: ->(declarations) { resolve_catch_clauses_from_declarations!(declarations) },
-      finalize_program_type: ->(program) { finalize_program_type!(program) },
-      finalize_auto_types: ->(program) { finalize_auto_types!(program) },
-      finalize_program_audit: ->(program) { finalize_program_audit!(program) },
-      analyze_whole_program: -> { run_whole_program_semantics! },
-      run_deferred_validations: -> { run_deferred_validations! },
-      publish_products: ->(products) { @annotation_products = products; nil }
-    )
+  sig { params(products: Annotator::Phases::AnnotationProducts).void }
+  def publish_annotation_products!(products)
+    @annotation_products = products
   end
+
+  sig { params(resolution: Annotator::Phases::ResolutionFacts).void }
+  def analyze_resolution!(resolution)
+    adopt_resolution_facts!(resolution)
+    bridge_reentrance!(resolution.program)
+    validate_and_resolve_sync_policy!(resolution.program)
+    seed_error_type_registrations!(resolution.declarations)
+    analyze_program_bodies!(resolution.declarations, resolution.program)
+    resolve_catch_clauses_from_declarations!(resolution.declarations)
+    finalize_program_type!(resolution.program)
+    finalize_auto_types!(resolution.program)
+  end
+
+  sig { params(typed_program: Annotator::Phases::TypedProgramFacts).void }
+  def audit_typed_program!(typed_program)
+    finalize_program_audit!(typed_program.program)
+    run_whole_program_semantics!
+    run_deferred_validations!
+  end
+
+private
 
   sig { params(node: AST::Program).returns(NilClass) }
   def visit_Program(node)
@@ -673,14 +692,15 @@ private
       source_dir: import_source_dir,
       source_code: @source_code,
       products: @annotation_products,
-      operations: annotation_pipeline_operations
+      type_session: self
     )
     nil
   end
 
   sig { void }
   def reset_compilation_state!
-    @receiver_state = ReceiverState.new
+    @traversal_state = TraversalState.new
+    @audit_inputs = CapabilityAuditInputs.new
     @function_registry = Annotator::FunctionRegistry.new
     @semantic_index = nil
     @annotation_products = Annotator::Phases::AnnotationProducts.new
@@ -693,7 +713,7 @@ private
 
   sig { params(resolution: Annotator::Phases::ResolutionFacts).void }
   def adopt_resolution_facts!(resolution)
-    @receiver_state.scopes = [resolution.root_scope]
+    @traversal_state.scopes = [resolution.root_scope]
     @function_registry = resolution.function_registry
   end
 
@@ -799,7 +819,7 @@ private
   sig { params(node: T.nilable(AST::Node)).returns(T.untyped) }
   def visit(node)
     return unless node
-    @receiver_state.annotation_ancestors << node
+    @traversal_state.annotation_ancestors << node
     begin
       result = case node
       when AST::StructDef, AST::ExternStructDecl, AST::EnumDef, AST::UnionDef
@@ -815,7 +835,7 @@ private
       record_ownership_transport_fact!(node)
       result
     ensure
-      popped = @receiver_state.annotation_ancestors.pop
+      popped = @traversal_state.annotation_ancestors.pop
       Kernel.raise "BUG: annotation ancestor stack mismatch" unless popped.equal?(node)
     end
   end
@@ -836,10 +856,10 @@ private
   sig { params(node: AST::Node).void }
   def record_ownership_transport_fact!(node)
     return if language_mode == :strict
-    fact_frames = @receiver_state.ownership_transport_frames
+    fact_frames = @audit_inputs.ownership_transport_frames
     facts = fact_frames.last
     return unless facts
-    ancestors = @receiver_state.annotation_ancestors[0...-1] || []
+    ancestors = @traversal_state.annotation_ancestors[0...-1] || []
 
     if node.is_a?(AST::Identifier)
       fact_frames.each { |frame| frame.record_read(node, ancestors) }
@@ -904,7 +924,7 @@ private
   # Outer scope variable set.
   sig { returns(T::Set[String]) }
   def outer_scope_vars
-    @receiver_state.scopes.flat_map(&:visible_names).to_set
+    @traversal_state.scopes.flat_map(&:visible_names).to_set
   end
 
   sig { returns(T::Array[AST::FunctionDef]) }
@@ -1005,4 +1025,40 @@ private
   private :current_held_lock_types
   private :semantic_function_registry
 
+end
+
+# Compatibility construction boundary.  Existing callers keep using
+# SemanticAnnotator.new while receiving the phase-owned executor directly;
+# no annotator-wide receiver or duplicate state is created here.
+class SemanticAnnotator
+  class << self
+    extend T::Sig
+
+    sig do
+      params(
+        importer: T.nilable(ModuleImporter),
+        compiler: T.nilable(ModuleImporter),
+        source_dir: T.nilable(String),
+        strict_test: T::Boolean,
+        source_code: T.nilable(String)
+      ).returns(Annotator::Phases::TypeAnalysisSession)
+    end
+    def new(importer: nil, compiler: nil, source_dir: nil, strict_test: false, source_code: nil)
+      Annotator::Phases::TypeAnalysisSession.new(
+        importer: importer,
+        compiler: compiler,
+        source_dir: source_dir,
+        strict_test: strict_test,
+        source_code: source_code
+      )
+    end
+  end
+
+  ReceiverState = Annotator::Phases::TypeAnalysisSession::TraversalState
+  HeldLockEntry = Annotator::Phases::TypeAnalysisSession::HeldLockEntry
+  HeldLockTypeEntry = Annotator::Phases::TypeAnalysisSession::HeldLockTypeEntry
+  DeadlockEscape = T.type_alias { Annotator::Phases::TypeAnalysisSession::DeadlockEscape }
+  BG_SOURCE_OPAQUE_AST_NODES = Annotator::Phases::TypeAnalysisSession::BG_SOURCE_OPAQUE_AST_NODES
+  SYNC_DOES_NOT_BIND_CAPTURE = Annotator::Phases::TypeAnalysisSession::SYNC_DOES_NOT_BIND_CAPTURE
+  STORAGE_OUTLIVES_DECLARING_SCOPE = Annotator::Phases::TypeAnalysisSession::STORAGE_OUTLIVES_DECLARING_SCOPE
 end

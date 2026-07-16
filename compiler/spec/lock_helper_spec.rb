@@ -30,11 +30,11 @@ RSpec.describe LockHelper do
     Class.new do
       include LockHelper
 
-      attr_reader :phase_receiver_state, :errors, :notes
+      attr_reader :phase_audit_inputs, :errors, :notes
       attr_accessor :function_call_graph, :held_locks, :held_lock_types
 
       def initialize
-        @phase_receiver_state = SemanticAnnotator::ReceiverState.new
+        @phase_audit_inputs = Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs.new
         @function_call_graph = {}
         @held_locks = {}
         @held_lock_types = []
@@ -292,7 +292,7 @@ RSpec.describe LockHelper do
       wrap = AST::CapabilityWrap.new(token, identifier("value"), nil, :locked, nil)
 
       host.record_lock_type_rank!(:Counter, 10, wrap)
-      expect(host.phase_receiver_state.lock_analysis.type_ranks).to eq(Counter: 10)
+      expect(host.phase_audit_inputs.lock_analysis.type_ranks).to eq(Counter: 10)
       host.record_lock_type_rank!(:Counter, 10, wrap)
 
       expect {
@@ -307,7 +307,7 @@ RSpec.describe LockHelper do
       cap = cap_fact(type: :Counter)
       expect(host.send(:rank_of_cap, cap)).to be_nil
 
-      host.phase_receiver_state.lock_analysis.type_ranks[:Counter] = 7
+      host.phase_audit_inputs.lock_analysis.type_ranks[:Counter] = 7
       expect(host.send(:rank_of_cap, cap)).to eq(7)
     end
   end
@@ -332,7 +332,7 @@ RSpec.describe LockHelper do
 
     it "rejects non-ascending ranked acquires and allows ascending acquires" do
       node = with_block
-      host.phase_receiver_state.lock_analysis.type_ranks.merge!(Outer: 10, Inner: 11, Lower: 9)
+      host.phase_audit_inputs.lock_analysis.type_ranks.merge!(Outer: 10, Inner: 11, Lower: 9)
       host.held_lock_types = [held_type(:Outer)]
 
       expect { host.check_lock_rank_ordering!(node, [cap_fact(type: :Inner)]) }.not_to raise_error
@@ -348,7 +348,7 @@ RSpec.describe LockHelper do
     it "downgrades ranked acquire violations to notes when explicitly opted out" do
       node = with_block
       node.deadlock_escape = { kind: :lock_cycle, token: token }
-      host.phase_receiver_state.lock_analysis.type_ranks.merge!(Outer: 10, Lower: 9)
+      host.phase_audit_inputs.lock_analysis.type_ranks.merge!(Outer: 10, Lower: 9)
       host.held_lock_types = [held_type(:Outer)]
 
       expect { host.check_lock_rank_ordering!(node, [cap_fact(type: :Lower)]) }.not_to raise_error
@@ -361,7 +361,7 @@ RSpec.describe LockHelper do
       cap = cap_fact(type: :Inner)
       host.record_with_acquire!("fn", cap, [held_type(:Outer)], nil)
 
-      state = host.phase_receiver_state.lock_analysis
+      state = host.phase_audit_inputs.lock_analysis
       expect(state.direct_acquires["fn"]).to eq(Set[:Inner])
       edge = state.direct_edges["fn"].first
       expect(edge.held).to eq(:Outer)
@@ -375,7 +375,7 @@ RSpec.describe LockHelper do
       host.record_with_acquire!("outer_opted", cap, [held_type(:Outer, opted_out: true)], nil)
       host.record_with_acquire!("inner_opted", cap, [held_type(:Outer)], { kind: :deadlock, token: token })
 
-      state = host.phase_receiver_state.lock_analysis
+      state = host.phase_audit_inputs.lock_analysis
       expect(state.direct_edges["outer_opted"].first.opted_out).to be(true)
       expect(state.direct_edges["inner_opted"].first.opted_out).to be(true)
     end
@@ -384,14 +384,14 @@ RSpec.describe LockHelper do
       host.record_held_call!("caller", "callee", [held_type(:Outer)], token(8))
       host.send(:resolve_held_calls!, { "callee" => Set[:Inner, :Other] })
 
-      edges = host.phase_receiver_state.lock_analysis.direct_edges["caller"]
+      edges = host.phase_audit_inputs.lock_analysis.direct_edges["caller"]
       expect(edges.map { |edge| [edge.held, edge.acquired, edge.fn_name] })
         .to match_array([[:Outer, :Inner, "caller"], [:Outer, :Other, "caller"]])
       expect(edges.map { |edge| edge.site_token.line }).to eq([8, 8])
     end
 
     it "propagates lock acquires through the function call graph to a fixed point" do
-      state = host.phase_receiver_state.lock_analysis
+      state = host.phase_audit_inputs.lock_analysis
       state.direct_acquires["leaf"] << :LeafLock
       state.direct_acquires["middle"] << :MiddleLock
       host.function_call_graph = {
@@ -408,7 +408,7 @@ RSpec.describe LockHelper do
     end
 
     it "filters opted-out edges from the normal cycle graph but keeps them for reachability" do
-      state = host.phase_receiver_state.lock_analysis
+      state = host.phase_audit_inputs.lock_analysis
       state.direct_edges["fn"] << LockHelper::LockEdge.new(
         held: :A, acquired: :B, site_token: token, fn_name: "fn", opted_out: false
       )
@@ -441,7 +441,7 @@ RSpec.describe LockHelper do
     end
 
     it "runs the complete cycle post-pass through held calls and reports cycles" do
-      state = host.phase_receiver_state.lock_analysis
+      state = host.phase_audit_inputs.lock_analysis
       state.direct_acquires["callee"] << :B
       state.direct_edges["caller"] << LockHelper::LockEdge.new(
         held: :B, acquired: :A, site_token: token(6), fn_name: "caller", opted_out: false
@@ -464,11 +464,11 @@ RSpec.describe LockHelper do
     it "records clause sites only for WITH blocks that have handlers" do
       cap = cap_fact(type: :Counter)
       host.record_lock_clause_site!(with_block(clause: nil), [cap])
-      expect(host.phase_receiver_state.lock_analysis.clause_sites).to eq([])
+      expect(host.phase_audit_inputs.lock_analysis.clause_sites).to eq([])
 
       node = with_block(clause: error_clause(selector(:type, :LockTimeout)))
       host.record_lock_clause_site!(node, [cap])
-      site = host.phase_receiver_state.lock_analysis.clause_sites.fetch(0)
+      site = host.phase_audit_inputs.lock_analysis.clause_sites.fetch(0)
       expect(site.node).to equal(node)
       expect(site.cap_types).to eq([:Counter])
     end
@@ -558,18 +558,18 @@ RSpec.describe LockHelper do
 
     it "derives LockCycle reachability from multi-node SCCs in the full graph" do
       node = with_block(clause: error_clause(selector(:type, :LockCycle)))
-      host.phase_receiver_state.lock_analysis.clause_sites << LockHelper::LockClauseSite.new(
+      host.phase_audit_inputs.lock_analysis.clause_sites << LockHelper::LockClauseSite.new(
         node: node,
         cap_types: [:A]
       )
-      host.phase_receiver_state.lock_analysis.direct_edges["a"] << LockHelper::LockEdge.new(
+      host.phase_audit_inputs.lock_analysis.direct_edges["a"] << LockHelper::LockEdge.new(
         held: :A,
         acquired: :B,
         site_token: token(3),
         fn_name: "a",
         opted_out: false
       )
-      host.phase_receiver_state.lock_analysis.direct_edges["b"] << LockHelper::LockEdge.new(
+      host.phase_audit_inputs.lock_analysis.direct_edges["b"] << LockHelper::LockEdge.new(
         held: :B,
         acquired: :A,
         site_token: token(4),
@@ -582,11 +582,11 @@ RSpec.describe LockHelper do
 
     it "derives Deadlock reachability from self-loop SCCs" do
       node = with_block(clause: error_clause(selector(:type, :Deadlock)))
-      host.phase_receiver_state.lock_analysis.clause_sites << LockHelper::LockClauseSite.new(
+      host.phase_audit_inputs.lock_analysis.clause_sites << LockHelper::LockClauseSite.new(
         node: node,
         cap_types: [:A]
       )
-      host.phase_receiver_state.lock_analysis.direct_edges["a"] << LockHelper::LockEdge.new(
+      host.phase_audit_inputs.lock_analysis.direct_edges["a"] << LockHelper::LockEdge.new(
         held: :A,
         acquired: :A,
         site_token: token(3),
@@ -599,11 +599,11 @@ RSpec.describe LockHelper do
 
     it "uses opted-out graph edges for handler reachability" do
       node = with_block(clause: error_clause(selector(:type, :Deadlock)))
-      host.phase_receiver_state.lock_analysis.clause_sites << LockHelper::LockClauseSite.new(
+      host.phase_audit_inputs.lock_analysis.clause_sites << LockHelper::LockClauseSite.new(
         node: node,
         cap_types: [:A]
       )
-      host.phase_receiver_state.lock_analysis.direct_edges["a"] << LockHelper::LockEdge.new(
+      host.phase_audit_inputs.lock_analysis.direct_edges["a"] << LockHelper::LockEdge.new(
         held: :A,
         acquired: :A,
         site_token: token(3),

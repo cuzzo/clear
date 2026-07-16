@@ -11,14 +11,14 @@ module Annotator
 
       sig { params(program: AST::Program).void }
       def finalize_program_type!(program)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         stamp_program_result_type!(program)
       end
 
       sig { params(program: AST::Program).void }
       def finalize_program_audit!(program)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         check_indirect_reentrancy!
         validate_not_logical_recursion!
@@ -45,7 +45,7 @@ module Annotator
 
       sig { void }
       def restamp_function_metadata!
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         semantic_function_nodes.each_value do |fn|
           signature = FunctionSignature.unwrap(fn.full_type!(context: "program function signature"))
@@ -58,7 +58,7 @@ module Annotator
 
       sig { params(program: AST::Program).void }
       def stamp_program_result_type!(program)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         final_statement = program.statements.last
         if final_statement

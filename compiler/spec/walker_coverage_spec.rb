@@ -43,7 +43,8 @@ RSpec.describe "AST walker coverage" do
       .map { |name, _| name.to_s }
 
     visit_methods =
-      (SemanticAnnotator.instance_methods + SemanticAnnotator.private_instance_methods)
+      (Annotator::Phases::TypeAnalysisSession.instance_methods +
+        Annotator::Phases::TypeAnalysisSession.private_instance_methods)
         .grep(/^visit_/)
         .map { |m| m.to_s.sub("visit_", "") }
 

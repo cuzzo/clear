@@ -1100,7 +1100,7 @@ class AST::WhileLoop
 end
 
 class CompilerFrontend::Result
-  sig { returns(SemanticAnnotator) }
+  sig { returns(Annotator::Phases::TypeAnalysisSession) }
   def annotator; end
   sig { returns(AST::Program) }
   def ast; end

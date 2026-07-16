@@ -9,37 +9,20 @@ RSpec.describe Annotator::Phases::CapabilityAuditPhase do
     Lexer::Token.new(:VAR_ID, value, 1, 1)
   end
 
-  def typed_program_for(program)
-    resolution = Annotator::Phases::ResolutionFacts.new(
+  it "runs directly on the typed session and preserves the exact typed-program input" do
+    source = ""
+    program = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    resolution = Annotator::Phases::ResolutionPhase.run(
       program: program,
-      declarations: Annotator::Phases::DeclarationIndexer.index(program),
-      root_scope: Scope.new,
-      function_registry: Annotator::FunctionRegistry.new,
-      type_names: [],
-      function_names: []
+      importer: nil,
+      source_dir: Dir.pwd,
+      source_code: source
     )
-    Annotator::Phases::TypedProgramFacts.new(
-      resolution: resolution,
-      body_summaries: {},
-      typed_node_count: 1,
-      unresolved_node_count: 0
-    )
-  end
+    session = SemanticAnnotator.new(source_code: source)
+    typed_program = Annotator::Phases::TypeAnalysisPhase.run(resolution: resolution, session: session)
 
-  it "owns audit ordering and preserves the exact typed-program input" do
-    program = AST::Program.new(token, [])
-    program.full_type = Type.new(:Void)
-    typed_program = typed_program_for(program)
-    events = []
-    operations = Annotator::Phases::CapabilityAuditOperations.new(
-      finalize_program_audit: ->(_program) { events << :program; nil },
-      analyze_whole_program: -> { events << :whole_program; nil },
-      run_deferred_validations: -> { events << :deferred; nil }
-    )
+    report = described_class.run(typed_program: typed_program, session: session)
 
-    report = described_class.run(typed_program: typed_program, operations: operations)
-
-    expect(events).to eq([:program, :whole_program, :deferred])
     expect(report.typed_program).to equal(typed_program)
     expect(report).to be_success
   end

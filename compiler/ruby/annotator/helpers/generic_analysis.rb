@@ -53,7 +53,7 @@ module GenericAnalysis
   # @param kind   String — "struct", "union", or "function"
   sig { params(node: GenericDeclarationNode, type_params: T::Array[String], kind: String).void }
   def validate_type_param_list!(node, type_params, kind)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     seen = {}
     type_params.each do |param|
       param_sym = param.to_sym
@@ -92,7 +92,7 @@ module GenericAnalysis
 
   sig { params(node: AnnotationNode, type_obj: Type, is_param: T::Boolean).returns(NilClass) }
   def validate_type_annotation!(node, type_obj, is_param: false)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return if type_obj.fn_type?
 
     facts = type_annotation_facts(node, type_obj, is_param)
@@ -107,7 +107,7 @@ module GenericAnalysis
 
   sig { params(facts: TypeAnnotationFacts).void }
   def validate_collection_allocation_hint!(facts)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     return unless facts.type_obj.preallocation_hint?
     return if !facts.is_param && (facts.node.is_a?(AST::VarDecl) || facts.node.is_a?(AST::BindExpr))
 
@@ -116,7 +116,7 @@ module GenericAnalysis
 
   sig { params(node: AnnotationNode, type_obj: Type, is_param: T::Boolean).returns(TypeAnnotationFacts) }
   def type_annotation_facts(node, type_obj, is_param)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     TypeAnnotationFacts.new(
       node: node,
       type_obj: type_obj,
@@ -137,7 +137,7 @@ module GenericAnalysis
 
   sig { params(facts: TypeAnnotationFacts).void }
   def validate_param_annotation_capabilities!(facts)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless facts.is_param
 
     type_obj = facts.type_obj
@@ -149,7 +149,7 @@ module GenericAnalysis
 
   sig { params(facts: TypeAnnotationFacts).void }
   def validate_collection_annotation_capabilities!(facts)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     type_obj = facts.type_obj
     shape = facts.inner
     error!(facts.node, :ATSPLIT_STREAM_ONLY) if type_obj.split? && !type_obj.stream?
@@ -168,7 +168,7 @@ module GenericAnalysis
 
   sig { params(facts: TypeAnnotationFacts).void }
   def validate_observable_annotation_capabilities!(facts)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     type_obj = facts.type_obj
     return unless type_obj.tense? && type_obj.observable?
 
@@ -202,7 +202,7 @@ module GenericAnalysis
 
   sig { params(facts: TypeAnnotationFacts).void }
   def validate_shape_annotation_capabilities!(facts)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     type_obj = facts.type_obj
     error!(facts.node, :SOA_NEEDS_FIXED_ARRAY) if type_obj.soa_requires_fixed_array?
 
@@ -222,7 +222,7 @@ module GenericAnalysis
 
   sig { params(facts: TypeAnnotationFacts).void }
   def validate_generic_instance_annotation!(facts)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     inner = facts.inner
     base_name = inner.generic_base
     return if base_name == :Id
@@ -243,7 +243,7 @@ module GenericAnalysis
 
   sig { params(facts: TypeAnnotationFacts, arg: Type).void }
   def validate_generic_type_arg!(facts, arg)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     if arg.optional? || arg.error_union? || arg.tense?
       wrapped = arg.wrapped_type || arg.payload_type || arg.tense_type
       validate_generic_type_arg!(facts, wrapped)
@@ -285,7 +285,7 @@ module GenericAnalysis
 
   sig { params(facts: TypeAnnotationFacts).void }
   def validate_plain_type_annotation!(facts)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     base_name = facts.inner.resolved
     return if facts.fn_type_params.include?(base_name)
 
@@ -299,7 +299,7 @@ module GenericAnalysis
 
   sig { params(node: AnnotationNode, base_name: Symbol).returns(T.nilable(GenericSchema)) }
   def annotation_schema_for!(node, base_name)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     schema = T.cast(lookup_type_schema(base_name), T.nilable(GenericSchema))
     return schema if schema
 
@@ -344,7 +344,7 @@ module GenericAnalysis
   # @return Hash — e.g. { T: :Number, K: :String }
   sig { params(node: GenericCallNode, signature: FunctionSignature, actual_args: GenericCallArgs, type_params: T::Array[Symbol]).returns(GenericSubstitution) }
   def infer_generic_type_args!(node, signature, actual_args, type_params)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     subst = T.let({}, GenericSubstitution)
     signature.params.each_with_index do |param, i|
       arg = actual_args[i]
@@ -364,7 +364,7 @@ module GenericAnalysis
 
   sig { params(node: GenericCallNode, signature: FunctionSignature, actual_args: GenericCallArgs, type_params: T::Array[Symbol]).returns(NilClass) }
   def enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     shared_args = T.let([], T::Array[SharedGenericArg])
     signature.params.each_with_index do |param, i|
       arg = actual_args[i]
@@ -395,7 +395,7 @@ module GenericAnalysis
   # Handles both direct uses (T) and nested generic uses (Cache<T>).
   sig { params(node: GenericCallNode, param_type: Type, actual_type: Type, type_params: T::Array[Symbol], subst: GenericSubstitution).void }
   def extract_type_bindings!(node, param_type, actual_type, type_params, subst)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     p_res = param_type.resolved
     a_res = actual_type.resolved
     if param_type.fn_type? && actual_type.fn_type?
@@ -436,7 +436,7 @@ module GenericAnalysis
   #      apply_type_subst(Type(:"Cache<T>"), { T: :Number }) → Type(:"Cache<Number>")
   sig { params(type_obj: Type::TypeInput, subst: GenericSubstitution).returns(Type) }
   def apply_type_subst(type_obj, subst)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return Type.new(:Any) if type_obj.nil?
     t = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
     if t.fn_type?
@@ -459,7 +459,7 @@ module GenericAnalysis
 
   sig { params(expression: TypeExpression, subst: GenericSubstitution).returns(TypeExpression) }
   def apply_expression_subst(expression, subst)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     case expression
     when NamedTypeExpression
       if expression.arguments.empty? && subst.key?(expression.name)
@@ -537,19 +537,19 @@ module GenericAnalysis
 
   sig { params(type: Type).returns(Type) }
   def generic_binding_value(type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     Type.new(type)
   end
 
   sig { params(type: Type).returns(T::Boolean) }
   def generic_shared_family_param?(type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     type.polymorphic_shared? && type.resolved.to_s.match?(/\A[A-Z]\z/)
   end
 
   sig { params(type: Type).returns(Type) }
   def generic_shared_payload_binding(type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     t = Type.new(type)
     t.apply_reference_ownership!(:affine)
     t.mark_stack_value!
@@ -559,7 +559,7 @@ module GenericAnalysis
 
   sig { params(left: GenericBinding, right: GenericBinding).returns(T::Boolean) }
   def same_generic_binding?(left, right)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     l = left.is_a?(Type) ? left : Type.new(left)
     r = right.is_a?(Type) ? right : Type.new(right)
     l.resolved == r.resolved &&
@@ -572,7 +572,7 @@ module GenericAnalysis
 
   sig { params(left: Type, right: Type).returns(T::Boolean) }
   def same_shared_call_capability?(left, right)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     left.sync == right.sync &&
       left.layout == right.layout &&
       left.elem_ownership == right.elem_ownership &&
@@ -581,7 +581,7 @@ module GenericAnalysis
 
   sig { params(type: Type).returns(T::Boolean) }
   def generic_type_has_capabilities?(type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     type.ownership != :affine ||
       !type.sync.nil? ||
       !type.layout.nil? ||
@@ -592,7 +592,7 @@ module GenericAnalysis
 
   sig { params(type: GenericBinding).returns(String) }
   def generic_binding_source(type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     t = type.is_a?(Type) ? type : Type.new(type)
     parts = [t.resolved.to_s]
 
@@ -607,7 +607,7 @@ module GenericAnalysis
 
   sig { params(type: Type).returns(String) }
   def shared_call_capability_display(type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     caps = ["@shared"]
     caps << "indirect" if type.indirect?
     caps << T.must(type.sync_family_name)
@@ -618,7 +618,7 @@ module GenericAnalysis
   # replaced by their inferred concrete types.
   sig { params(signature: FunctionSignature, subst: GenericSubstitution).returns(FunctionSignature) }
   def substitute_type_params(signature, subst)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     FunctionSignature.new(
       params: signature.params.map { |p| p.dup.tap { |np| np.type = apply_type_subst(p.type, subst) } },
       return_type: apply_type_subst(signature.return_type, subst),
@@ -634,7 +634,7 @@ module GenericAnalysis
   # Validate stream type annotations on variable declarations.
   sig { params(node: DeclarationNode).returns(NilClass) }
   def validate_stream_type!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless node.type&.future?
     if node.type.multiowned?
       error!(node, :RC_PROMISE_NEEDS_SHARED)
@@ -649,7 +649,7 @@ module GenericAnalysis
   # Handles: BgStreamBlock ~T[INF] retyping, shard_count, @shared promise ownership.
   sig { params(node: DeclarationNode, final_type: TypeShape).void }
   def propagate_declared_type_to_value!(node, final_type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless node.type
     final_type_info = final_type.is_a?(Type) ? final_type : Type.new(final_type)
 
@@ -737,7 +737,7 @@ module GenericAnalysis
   # These fields are lost during finalize_storage! and coerce!.
   sig { params(node: DeclarationNode, final_type: TypeShape).void }
   def propagate_collection_metadata!(node, final_type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     _ = final_type
     decl_type = node.type
     node_type = node.full_type!(context: "declaration metadata target")
@@ -777,7 +777,7 @@ module GenericAnalysis
   # from container access (HashMap/Pool/List indexing, through OR).
   sig { params(node: DeclarationNode).returns(T.nilable(T::Boolean)) }
   def register_container_borrow!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     container = find_container_source(node.value)
     return unless container
     var_name = node.name.is_a?(String) ? node.name : node.name.to_s
@@ -794,7 +794,7 @@ module GenericAnalysis
   # (GetIndex on map/list) or extracts a non-Copy field from a struct (GetField).
   sig { params(expr: T.nilable(AST::Node)).returns(T.nilable(String)) }
   def find_container_source(expr)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return nil unless expr
     # COPY/CLONE produce owned/retained values; no borrow relationship.
     return nil if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode)
@@ -831,7 +831,7 @@ module GenericAnalysis
 
   sig { params(expr: AST::GetField).returns(T.nilable(String)) }
   def field_container_source(expr)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
 
     # Non-Copy field extraction from a struct is a borrow of the parent.
     # Without this, the extracted variable gets its own cleanup defer while

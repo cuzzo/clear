@@ -18,7 +18,7 @@ module Annotator
 
       sig { void }
       def run_whole_program_semantics!
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Caller sync depends on annotated call-site args, so propagate it after
         # the body walk and before replaying deferred WITH validations.
@@ -83,7 +83,7 @@ module Annotator
 
       sig { void }
       def restamp_requires_on_signatures!
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         root_scope = whole_program_root_scope
         whole_program_fn_nodes.each do |name, fn|
@@ -95,28 +95,28 @@ module Annotator
 
       sig { returns(T::Hash[String, AST::FunctionDef]) }
       def whole_program_fn_nodes
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         semantic_function_nodes
       end
       private :whole_program_fn_nodes
 
       sig { returns(Scope) }
       def whole_program_root_scope
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         semantic_root_scope
       end
       private :whole_program_root_scope
 
       sig { returns(T.nilable(AST::Program)) }
       def whole_program_node
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         semantic_program
       end
       private :whole_program_node
 
       sig { returns(T::Hash[Symbol, Integer]) }
       def whole_program_lock_type_ranks
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         semantic_lock_type_ranks
       end
       private :whole_program_lock_type_ranks

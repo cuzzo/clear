@@ -14,7 +14,7 @@ module Annotator
       # strict about requiring a registered name.
       sig { params(declarations: Annotator::Phases::DeclarationIndex).void }
       def resolve_catch_clauses_from_declarations!(declarations)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         declarations.function_declarations.each do |fn|
           fn.catch_clauses.each { |clause| resolve_catch_clause!(clause) }
@@ -23,7 +23,7 @@ module Annotator
 
       sig { params(declarations: Annotator::Phases::DeclarationIndex).void }
       def seed_error_type_registrations!(declarations)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         declarations.error_type_registrations.each do |registration|
           _, conflict = AST.register_type!(
@@ -47,7 +47,7 @@ module Annotator
       # with parser-authored per-WITH clauses.
       sig { returns(T::Array[AST::ErrorClause]) }
       def baked_in_default_sync_policy
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         [
           AST::ErrorClause.new(
@@ -71,7 +71,7 @@ module Annotator
       # user's if present, else the baked-in default).
       sig { params(program_node: AST::Program).void }
       def validate_and_resolve_sync_policy!(program_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         decls = program_node.statements.select { |s| s.is_a?(AST::SyncPolicyDecl) }
 
@@ -103,7 +103,7 @@ module Annotator
       # the union of named errors must cover the required set exactly.
       sig { params(decl: AST::SyncPolicyDecl).void }
       def validate_sync_policy_body!(decl)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         seen = []
         (decl.handlers || []).each do |clause|
@@ -145,7 +145,7 @@ module Annotator
       # REQUIRES set.
       sig { params(sig: FunctionSignature, args: T::Array[AST::Node]).returns(T::Set[Symbol]) }
       def collapse_errors_for_call(sig, args)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         require_relative 'helpers/with_match_check' unless defined?(WithMatchCheck)
         collapsed = Set.new
@@ -171,7 +171,7 @@ module Annotator
       # use one path. Inline-only errors intentionally have no policy fallback.
       sig { params(error_name: Symbol).returns(T.nilable(AST::ErrorClause)) }
       def synthesize_clause_from_policy(error_name)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         handlers = @program&.sync_policy
         return nil unless handlers
@@ -184,7 +184,7 @@ module Annotator
       # explicit and visits block-action handler bodies so their types are annotated.
       sig { params(node: AST::SyncPolicyDecl).void }
       def visit_SyncPolicyDecl(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         (node.handlers || []).each do |clause|
           case clause.action
@@ -213,7 +213,7 @@ module Annotator
       #   mixed `CATCH Kind, Type` simply ORs the two checks.
       sig { params(clause: AST::CatchClause).void }
       def resolve_catch_clause!(clause)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         kinds = []
         types = []
@@ -277,7 +277,7 @@ module Annotator
       # @return [Array<Array<Hash>>] Array of drops for each branch
       sig { params(node: AST::Assert).returns(T.nilable(Symbol)) }
       def visit_Assert(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.condition)
         if node.condition.resolved_type != :Bool
@@ -294,7 +294,7 @@ module Annotator
 
       sig { params(node: AST::DieNode).returns(Symbol) }
       def visit_DieNode(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
          # Usually takes an integer status code
          visit(node.status) if node.status
@@ -303,7 +303,7 @@ module Annotator
 
       sig { params(node: AST::Raise).returns(T.nilable(T::Boolean)) }
       def visit_Raise(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.message_expr) if node.message_expr
         resolve_error_registration!(node, node.kind, node.error_name, node.token)
@@ -324,7 +324,7 @@ module Annotator
       # naming the first registration line for context.
       sig { params(node: T.any(AST::Raise, AST::OrElseExit), kind_sym: T.nilable(Symbol), type_name_str: T.nilable(String), site_tok: Lexer::Token).returns(NilClass) }
       def resolve_error_registration!(node, kind_sym, type_name_str, site_tok)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return if type_name_str.nil?
         type_sym = type_name_str.to_sym
@@ -349,7 +349,7 @@ module Annotator
 
       sig { params(site: T.any(AST::Locatable, Lexer::Token), type_name: String, conflict: AST::ErrorTypeConflict).void }
       def emit_error_type_conflict!(site, type_name, conflict)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         first_site = T.cast(conflict[:first_site], T.nilable(Lexer::Token))
         first_loc = first_site ? " (first registered at line #{first_site.line})" : ""
@@ -368,7 +368,7 @@ module Annotator
 
       sig { params(node: AST::ReturnNode).returns(T.nilable(T::Boolean)) }
       def visit_ReturnNode(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Handle optional return node for Void functions.
         fn_ctx = current_fn_ctx!
@@ -507,14 +507,14 @@ module Annotator
 
       sig { params(value: AST::Locatable).returns(Type) }
       def return_value_type(value)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         value.full_type!(context: "return value")
       end
 
       sig { params(actual_type: Type, expected_type: Type).returns(T::Boolean) }
       def return_type_compatible?(actual_type, expected_type)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return true if expected_type.any? || actual_type.any?
         return true if actual_type.resolved == :NoReturn
@@ -529,7 +529,7 @@ module Annotator
 
       sig { params(expected_type: Type, actual_type: Type).returns(T.nilable(T.any(String, Symbol))) }
       def unique_union_payload_variant(expected_type, actual_type)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         target_type = expected_type.value_payload_type
         schema = lookup_type_schema(target_type.resolved)
@@ -562,7 +562,7 @@ module Annotator
 
       sig { params(expected_t: Type, actual_t: Type).returns(T::Boolean) }
       def same_return_capabilities?(expected_t, actual_t)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         name = expected_t.resolved.to_s
         if name.match?(/\A[A-Z]\z/) && !lookup_type_schema(name.to_sym) &&
@@ -583,7 +583,7 @@ module Annotator
 
       sig { params(type: Type).returns(String) }
       def type_display(type)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         parts = [type.resolved.to_s]
 
@@ -600,7 +600,7 @@ module Annotator
       # =========================================================
       sig { params(node: AST::BinaryOp).returns(T.nilable(Symbol)) }
       def visit_OrElse(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Logic: val OR_ELSE default
         rhs_propagates =
@@ -724,7 +724,7 @@ module Annotator
       # propagation VarDecl does for `MUTABLE v: T[]@list = []`.
       sig { params(rhs: AST::Node, expected: T.nilable(Type)).void }
       def coerce_empty_collection_fallback!(rhs, expected)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return unless expected.is_a?(Type)
         empty_list = rhs.is_a?(AST::ListLit) && rhs.items.empty? &&
@@ -736,21 +736,21 @@ module Annotator
 
       sig { params(node: AST::OrElseRaise).returns(Symbol) }
       def visit_OrElseRaise(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         stamp_type!(node, :Void)
       end
 
       sig { params(node: AST::OrElseBreak).returns(Symbol) }
       def visit_OrElseBreak(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         stamp_type!(node, :Void)
       end
 
       sig { params(node: AST::OrElsePass).returns(Symbol) }
       def visit_OrElsePass(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # This is a marker node for OR_ELSE PASS - no type annotation needed
         # The actual type handling is done in visit_OrElse
@@ -759,7 +759,7 @@ module Annotator
 
       sig { params(node: AST::OrElsePrune).returns(Symbol) }
       def visit_OrElsePrune(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # This is a marker node for OR_ELSE PRUNE - no type annotation needed
         # The actual type handling is done in visit_OrElse
@@ -768,7 +768,7 @@ module Annotator
 
       sig { params(node: AST::OrElseExit).returns(T.nilable(Symbol)) }
       def visit_OrElseExit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.message) if node.message
         resolve_error_registration!(node, node.kind, node.error_name, node.token)

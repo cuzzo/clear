@@ -12,7 +12,7 @@ module Annotator
 
       sig { params(program: AST::Program).void }
       def mark_annotation_complete!(program)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         verify_annotation_boundary!(program)
         MIRPassState.for!(program).mark!(:annotated)
@@ -20,7 +20,7 @@ module Annotator
 
       sig { params(program: AST::Program).void }
       def verify_annotation_boundary!(program)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         program.full_type!(context: "annotation boundary program")
         assert_no_annotation_type_violations!(program)
@@ -31,7 +31,7 @@ module Annotator
 
       sig { params(program: AST::Program).void }
       def assert_no_annotation_type_violations!(program)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         typed_program = annotation_products.typed_program
         if typed_program && typed_program.program.equal?(program)
@@ -44,7 +44,7 @@ module Annotator
 
       sig { void }
       def assert_no_pending_deferred_validations!
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         unless pending_deferred_validation_count.zero?
           raise "annotation boundary has pending deferred validations"
@@ -54,7 +54,7 @@ module Annotator
 
       sig { void }
       def assert_annotation_function_signatures!
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         semantic_function_nodes.each do |name, fn|
           signature = FunctionSignature.unwrap(fn.full_type!(context: "annotation boundary function #{name}"))
