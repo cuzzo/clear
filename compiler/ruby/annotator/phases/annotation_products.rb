@@ -1,0 +1,181 @@
+# typed: strict
+# frozen_string_literal: true
+
+require "sorbet-runtime"
+
+require_relative "../../ast/ast"
+require_relative "../../ast/scope"
+require_relative "../function_registry"
+require_relative "body_analysis"
+require_relative "declaration_index"
+
+module Annotator
+  module Phases
+    # Immutable product of declaration/import/name/contract resolution.
+    # Scope and FunctionRegistry remain compatibility references during the
+    # migration, while the product-owned indexes are frozen snapshots.
+    class ResolutionFacts
+      extend T::Sig
+
+      sig { returns(AST::Program) }
+      attr_reader :program
+      sig { returns(DeclarationIndex) }
+      attr_reader :declarations
+      sig { returns(Scope) }
+      attr_reader :root_scope
+      sig { returns(Annotator::FunctionRegistry) }
+      attr_reader :function_registry
+      sig { returns(T::Array[Symbol]) }
+      attr_reader :type_names
+      sig { returns(T::Array[String]) }
+      attr_reader :function_names
+
+      sig do
+        params(
+          program: AST::Program,
+          declarations: DeclarationIndex,
+          root_scope: Scope,
+          function_registry: Annotator::FunctionRegistry,
+          type_names: T::Array[Symbol],
+          function_names: T::Array[String]
+        ).void
+      end
+      def initialize(program:, declarations:, root_scope:, function_registry:, type_names:, function_names:)
+        @program = program
+        @declarations = declarations
+        @root_scope = root_scope
+        @function_registry = function_registry
+        @type_names = T.let(type_names.dup.freeze, T::Array[Symbol])
+        @function_names = T.let(function_names.dup.freeze, T::Array[String])
+        freeze
+      end
+    end
+
+    # Immutable publication boundary for body typing and type finalization.
+    class TypedProgramFacts
+      extend T::Sig
+
+      BodySummaries = T.type_alias { T::Hash[String, FunctionBodySummary] }
+
+      sig { returns(ResolutionFacts) }
+      attr_reader :resolution
+      sig { returns(BodySummaries) }
+      attr_reader :body_summaries
+      sig { returns(Integer) }
+      attr_reader :typed_node_count
+      sig { returns(Integer) }
+      attr_reader :unresolved_node_count
+
+      sig do
+        params(
+          resolution: ResolutionFacts,
+          body_summaries: BodySummaries,
+          typed_node_count: Integer,
+          unresolved_node_count: Integer
+        ).void
+      end
+      def initialize(resolution:, body_summaries:, typed_node_count:, unresolved_node_count:)
+        raise "typed program cannot publish unresolved nodes" unless unresolved_node_count.zero?
+
+        @resolution = resolution
+        @body_summaries = T.let(body_summaries.dup.freeze, BodySummaries)
+        @typed_node_count = typed_node_count
+        @unresolved_node_count = unresolved_node_count
+        freeze
+      end
+
+      sig { returns(AST::Program) }
+      def program
+        resolution.program
+      end
+    end
+
+    # Immutable result of capability, ownership, effect, lock, and deferred
+    # semantic validation over a completely typed program.
+    class CapabilityAuditReport
+      extend T::Sig
+
+      sig { returns(TypedProgramFacts) }
+      attr_reader :typed_program
+      sig { returns(T::Array[String]) }
+      attr_reader :checked_functions
+      sig { returns(Integer) }
+      attr_reader :checked_call_sites, :checked_with_sites, :violation_count
+
+      sig do
+        params(
+          typed_program: TypedProgramFacts,
+          checked_functions: T::Array[String],
+          checked_call_sites: Integer,
+          checked_with_sites: Integer,
+          violation_count: Integer
+        ).void
+      end
+      def initialize(typed_program:, checked_functions:, checked_call_sites:, checked_with_sites:, violation_count:)
+        @typed_program = typed_program
+        @checked_functions = T.let(checked_functions.dup.freeze, T::Array[String])
+        @checked_call_sites = checked_call_sites
+        @checked_with_sites = checked_with_sites
+        @violation_count = violation_count
+        freeze
+      end
+
+      sig { returns(T::Boolean) }
+      def success?
+        violation_count.zero?
+      end
+    end
+
+    # Mutable pipeline ledger with fail-closed publication order. The values it
+    # publishes are immutable and retain their exact upstream product identity.
+    class AnnotationProducts
+      extend T::Sig
+
+      sig { returns(T.nilable(ResolutionFacts)) }
+      attr_reader :resolution
+      sig { returns(T.nilable(TypedProgramFacts)) }
+      attr_reader :typed_program
+      sig { returns(T.nilable(CapabilityAuditReport)) }
+      attr_reader :capability_audit
+
+      sig { void }
+      def initialize
+        @resolution = T.let(nil, T.nilable(ResolutionFacts))
+        @typed_program = T.let(nil, T.nilable(TypedProgramFacts))
+        @capability_audit = T.let(nil, T.nilable(CapabilityAuditReport))
+      end
+
+      sig { params(facts: ResolutionFacts).void }
+      def publish_resolution!(facts)
+        raise "resolution facts already published" if @resolution
+
+        @resolution = facts
+      end
+
+      sig { params(facts: TypedProgramFacts).void }
+      def publish_typed_program!(facts)
+        resolution = @resolution
+        raise "type analysis requires resolution facts" unless resolution
+        raise "type analysis used different resolution facts" unless facts.resolution.equal?(resolution)
+        raise "typed program facts already published" if @typed_program
+
+        @typed_program = facts
+      end
+
+      sig { params(report: CapabilityAuditReport).void }
+      def publish_capability_audit!(report)
+        typed_program = @typed_program
+        raise "capability audit requires typed program facts" unless typed_program
+        raise "capability audit used different typed program facts" unless report.typed_program.equal?(typed_program)
+        raise "capability audit report already published" if @capability_audit
+
+        @capability_audit = report
+      end
+
+      sig { returns(T::Boolean) }
+      def complete?
+        !@resolution.nil? && !@typed_program.nil? && !@capability_audit.nil?
+      end
+    end
+  end
+end
