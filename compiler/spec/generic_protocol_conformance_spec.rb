@@ -21,6 +21,20 @@ RSpec.describe "explicit generic protocol conformances" do
     expect { annotate(source) }.to raise_error(CompilerError, pattern)
   end
 
+  it "fails closed if projection resolution produces an unregistered issue kind" do
+    session = Annotator::Phases::ResolutionSession.new(
+      importer: nil,
+      source_dir: Dir.pwd,
+      source_code: "",
+      install_builtins: false,
+    )
+    issue = Annotator::ProtocolProjectionIssue.new(code: :UNKNOWN_INTERNAL_ISSUE, arguments: {})
+
+    expect {
+      session.__send__(:emit_protocol_projection_issue!, AST::Program.new([]), issue)
+    }.to raise_error(ArgumentError, /Unhandled protocol projection issue/)
+  end
+
   it "validates concrete and generic conformances through semantic types" do
     concrete = <<~CLEAR
       PROTOCOL Sized { METHOD size(self: Self) RETURNS Int64; }
