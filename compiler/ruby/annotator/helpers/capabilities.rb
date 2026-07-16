@@ -1135,7 +1135,7 @@ module CapabilityHelper
   def with_fiber_capture_analysis(is_parallel: false, mark_moves: false, &blk)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
     ctx = T.let(nil, T.nilable(CaptureContext))
-    state = T.let(phase_audit_inputs, Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs)
+    state = T.let(phase_audit_inputs, Annotator::Phases::CapabilityAuditInputs)
     ctx = CaptureContext.new(
       analysis: new_capture_analysis,
       outer_scope: current_scope,

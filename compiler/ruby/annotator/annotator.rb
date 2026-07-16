@@ -56,6 +56,7 @@ require_relative "../mir/alloc"
 require_relative "helpers/method_analysis"
 require_relative "helpers/union"
 require_relative "helpers/auto_inference"
+require_relative "phases/capability_evidence"
 require_relative "../compiler/module_importer" # ModuleImporter — referenced by SemanticAnnotator#initialize's sig
 
 # Phase-owned executor for body typing and fact collection.  The public
@@ -98,21 +99,10 @@ class Annotator::Phases::TypeAnalysisSession
   include Annotator::Domains::Expressions
   include Annotator::Domains::Lifetimes
 
-  class SnapshotTxnViolation < T::Struct
-    const :effect, Symbol
-    const :fn, String
-  end
-
-  class HeldLockEntry < T::Struct
-    const :token, T.nilable(Lexer::Token)
-  end
-
-  HeldLockMap = T.type_alias { T::Hash[String, HeldLockEntry] }
-
-  class HeldLockTypeEntry < T::Struct
-    const :type, Symbol
-    const :opted_out, T::Boolean
-  end
+  SnapshotTxnViolation = Annotator::Phases::SnapshotTxnViolation
+  HeldLockEntry = Annotator::Phases::HeldLockEntry
+  HeldLockMap = T.type_alias { Annotator::Phases::HeldLockMap }
+  HeldLockTypeEntry = Annotator::Phases::HeldLockTypeEntry
 
   class StreamYieldFrame < T::Struct
     const :node, AST::BgStreamBlock
@@ -121,9 +111,7 @@ class Annotator::Phases::TypeAnalysisSession
     prop :closed, T::Boolean, default: false
   end
 
-  class SnapshotTxnFrame < T::Struct
-    const :violations, T::Array[SnapshotTxnViolation], factory: -> { [] }
-  end
+  SnapshotTxnFrame = Annotator::Phases::SnapshotTxnFrame
 
   DeadlockEscape = T.type_alias { T::Hash[Symbol, T.any(Symbol, Lexer::Token)] }
 
@@ -144,27 +132,7 @@ class Annotator::Phases::TypeAnalysisSession
     prop :annotation_ancestors, T::Array[AST::Node], factory: -> { [] }
   end
 
-  # Facts gathered while typing but consumed only by the capability audit.
-  # Keeping this separate makes the eventual phase transfer explicit and
-  # prevents traversal mechanics from becoming audit-owned lifecycle state.
-  class CapabilityAuditInputs < T::Struct
-    prop :held_locks, HeldLockMap, factory: -> { {} }
-    prop :held_lock_types, T::Array[HeldLockTypeEntry], factory: -> { [] }
-    prop :current_predicate_context, T.nilable(CapabilityHelper::PredicateContext), default: nil
-    prop :deferred_with_validations,
-      T::Array[Annotator::Phases::DeferredWithValidation],
-      factory: -> { [] }
-    prop :predicate_call_sites, T::Array[CapabilityHelper::PredicateCallSite], factory: -> { [] }
-    prop :async_body_facts, T::Array[Annotator::Phases::AsyncBodyFact], factory: -> { [] }
-    prop :capability_audit, CapabilityAudit::BindingAuditStore, factory: -> { {} }
-    prop :capture_stack, T::Array[CapabilityHelper::CaptureContext], factory: -> { [] }
-    prop :capture_move_suppression_depth, Integer, default: 0
-    prop :snapshot_txn_frames, T::Array[SnapshotTxnFrame], factory: -> { [] }
-    prop :effect_state, T.nilable(EffectTracker::EffectState), default: nil
-    prop :lock_analysis, LockHelper::LockAnalysisState, factory: -> { LockHelper::LockAnalysisState.new }
-    prop :ownership_graph, OwnershipGraph, factory: -> { OwnershipGraph.new }
-    prop :ownership_transport_frames, T::Array[OwnershipTransportFacts], factory: -> { [] }
-  end
+  CapabilityAuditInputs = Annotator::Phases::CapabilityAuditInputs
 
   sig { returns(T::Hash[String, AST::FunctionDef]) }
   def semantic_function_nodes
@@ -1241,7 +1209,7 @@ end
 # Callers cannot accidentally mix facts from one session with configuration
 # from another, or invoke the audit before the type session relinquishes them.
 class Annotator::Phases::CapabilityAuditRequest < T::Struct
-  const :inputs, Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs
+  const :inputs, Annotator::Phases::CapabilityAuditInputs
   const :source_code, T.nilable(String)
   const :language_mode, Symbol
   const :strict_test, T::Boolean
@@ -1255,7 +1223,7 @@ class Annotator::Phases::CapabilityAuditSession
 
   class Context < T::Struct
     const :typed_program, Annotator::Phases::TypedProgramFacts
-    const :inputs, Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs
+    const :inputs, Annotator::Phases::CapabilityAuditInputs
     const :source_code, T.nilable(String)
     const :language_mode, Symbol
     const :strict_test, T::Boolean
@@ -1278,7 +1246,7 @@ class Annotator::Phases::CapabilityAuditSession
   sig do
     params(
       typed_program: Annotator::Phases::TypedProgramFacts,
-      inputs: Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs,
+      inputs: Annotator::Phases::CapabilityAuditInputs,
       source_code: T.nilable(String),
       language_mode: Symbol,
       strict_test: T::Boolean
@@ -1303,7 +1271,7 @@ class Annotator::Phases::CapabilityAuditSession
 
   private
 
-  sig { returns(Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs) }
+  sig { returns(Annotator::Phases::CapabilityAuditInputs) }
   def phase_audit_inputs
     @context.inputs
   end

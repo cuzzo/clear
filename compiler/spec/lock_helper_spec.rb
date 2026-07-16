@@ -34,7 +34,7 @@ RSpec.describe LockHelper do
       attr_accessor :function_call_graph, :held_locks, :held_lock_types
 
       def initialize
-        @phase_audit_inputs = Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs.new
+        @phase_audit_inputs = Annotator::Phases::CapabilityAuditInputs.new
         @function_call_graph = {}
         @held_locks = {}
         @held_lock_types = []
