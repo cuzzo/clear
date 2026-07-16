@@ -141,7 +141,7 @@ expected hard error is absent.
 | `destructuring_assignment_matrix` | 6      | Fixed-shape destructuring declaration, typed/mutable targets, reassignment, mixed declaration, and discard. |
 | `indexed_assignment_matrix`| 20           | Indexed assignment into lists/maps across value shapes. |
 | `indirect_recursive_union` | 12           | Recursive union payloads through indirect storage. |
-| `match_matrix`             | 18           | MATCH lowering over union/scalar shapes plus AS payload bindings. |
+| `match_matrix`             | 24           | MATCH and runtime `IS_A` lowering over union/scalar shapes plus AS payload bindings. |
 | `mir_lowering_shape_matrix` | 87          | MIR lowering shape coverage for list/hash literals, var declarations, returns, branch locals, function args, loop locals, and node dispatch shapes. |
 | `stream_into_boundary`      | 66           | NEXT value passed across BG / DO / BG STREAM boundary, all sync wrappers |
 | `lifetimed_return`          | 36           | BG handle escape rejection — exercises bg_lifetime_sources stamping |

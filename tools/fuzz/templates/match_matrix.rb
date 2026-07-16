@@ -12,7 +12,16 @@
 # expected :pass; a failing/leaking :pass cell is a SURFACED bug.
 
 MM_CELLS = []
-MM_SUBJECT = %i[union_payload union_unit enum union_string_as union_list_as union_inline_struct_as]
+MM_SUBJECT = %i[
+  union_payload
+  union_unit
+  enum
+  union_string_as
+  union_list_as
+  union_inline_struct_as
+  union_is_a_variant
+  union_is_a_payload_type
+]
 MM_DEFAULT = %i[with_default no_default]
 MM_OUTCOME = %i[matched default_taken]
 
@@ -134,6 +143,22 @@ FuzzGenerator.register(:match_matrix, cells: MM_CELLS) do |p|
               Box.Item AS x -> got = x.label.length() + x.count;,
       #{mm_default_arm(p[:default]).gsub("9.0", "9_i64")}    END
           ASSERT got == #{expected}, "union inline struct AS match";
+          RETURN;
+      END
+    CHT
+  when :union_is_a_variant, :union_is_a_payload_type
+    subject_expr = p[:outcome] == :default_taken ? 'Value{ Text: "no" }' : "Value{ Number: 4.5 }"
+    expected = p[:outcome] == :default_taken ? "9.0" : "4.5"
+    target = p[:subject] == :union_is_a_variant ? "Value.Number" : "Number"
+    else_branch = p[:default] == :with_default ? " ELSE got = 9.0;" : ""
+    <<~CHT
+      UNION Value { Empty, Number: Float64, Text: String }
+
+      FN main() RETURNS Void ->
+          value: Value = #{subject_expr};
+          MUTABLE got: Float64 = 0.0;
+          IF value IS_A #{target} AS number THEN got = number;#{else_branch} END
+          ASSERT got == #{expected}, "runtime IS_A partial union match";
           RETURN;
       END
     CHT
