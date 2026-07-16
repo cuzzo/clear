@@ -42,9 +42,11 @@ RSpec.describe "annotator import resolution boundaries" do
     importer.define_singleton_method(:compile_file) { |_path, caller_dir:| mod }
     importer.define_singleton_method(:compile_package) { |_path, caller_dir:| mod }
 
-    annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir)
+    annotator = Annotator::Phases::ResolutionSession.new(
+      importer: importer, source_dir: source_dir, source_code: nil
+    )
     annotator.send(:visit_RequireNode, AST::RequireNode.new(tok, "helper.clear", "helper", kind))
-    annotator.send(:current_scope)
+    annotator.root_scope
   end
 
   it "imports function signatures as isolated semantic copies" do
@@ -271,7 +273,7 @@ RSpec.describe "annotator import resolution boundaries" do
   end
 
   it "rejects REQUIRE when no importer is configured" do
-    annotator = SemanticAnnotator.new
+    annotator = Annotator::Phases::ResolutionSession.new(importer: nil, source_dir: Dir.pwd, source_code: nil)
 
     expect {
       annotator.send(:visit_RequireNode, AST::RequireNode.new(tok, "helper.clear", "helper", :local))

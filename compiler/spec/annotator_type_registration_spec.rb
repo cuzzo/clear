@@ -11,11 +11,15 @@ RSpec.describe Annotator::Phases::TypeRegistration do
   end
 
   def register(*nodes)
-    annotator = SemanticAnnotator.new
+    annotator = resolution_session
     program = AST::Program.new(tok("program"), nodes)
     index = Annotator::Phases::DeclarationIndexer.index(program)
     annotator.register_type_declarations(index)
     [annotator, program]
+  end
+
+  def resolution_session
+    Annotator::Phases::ResolutionSession.new(importer: nil, source_dir: Dir.pwd, source_code: nil)
   end
 
   it "registers struct, enum, extern struct, and extern resource schemas" do
@@ -35,7 +39,7 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     resource.close_method = "close"
 
     annotator, = register(struct, enum, native, resource)
-    scope = annotator.send(:current_scope)
+    scope = annotator.root_scope
 
     box_schema = scope.types.fetch(:Box).schema
     expect(box_schema).to be_a(Schemas::StructSchema)
@@ -73,8 +77,8 @@ RSpec.describe Annotator::Phases::TypeRegistration do
   end
 
   it "allows identical imported extern struct declarations to be re-declared locally" do
-    annotator = SemanticAnnotator.new
-    annotator.send(:current_scope).declare_type(
+    annotator = resolution_session
+    annotator.root_scope.declare_type(
       :CompilerRegex,
       Schemas::StructSchema.new(fields: {}, extern_module: "compiler_regex")
     )
@@ -88,8 +92,8 @@ RSpec.describe Annotator::Phases::TypeRegistration do
   end
 
   it "rejects imported extern struct declarations with incompatible shapes" do
-    annotator = SemanticAnnotator.new
-    annotator.send(:current_scope).declare_type(
+    annotator = resolution_session
+    annotator.root_scope.declare_type(
       :CompilerRegex,
       Schemas::StructSchema.new(fields: {}, extern_module: "compiler_regex")
     )
@@ -126,7 +130,7 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     union = AST::UnionDef.new(tok("Value"), "Value", { Data: inline, Empty: nil }, :package)
 
     annotator, = register(union)
-    scope = annotator.send(:current_scope)
+    scope = annotator.root_scope
 
     union_schema = scope.types.fetch(:Value).schema
     expect(union_schema).to be_a(Schemas::UnionSchema)

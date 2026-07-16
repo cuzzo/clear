@@ -24,7 +24,8 @@ RSpec.describe Annotator::Phases::TypeAnalysisPhase do
     program = AST::Program.new(token, [])
     resolution = resolution_for(program)
     events = []
-    operations = Annotator::Phases::TypeAnalysisOperations.new(
+      operations = Annotator::Phases::TypeAnalysisOperations.new(
+        prepare: ->(_resolution) { events << :prepare; nil },
       analyze_bodies: ->(_declarations, _program) { events << :bodies; nil },
       resolve_catches: ->(_declarations) { events << :catches; nil },
       finalize_program: lambda do |node|
@@ -37,7 +38,7 @@ RSpec.describe Annotator::Phases::TypeAnalysisPhase do
 
     result = described_class.run(resolution: resolution, operations: operations)
 
-    expect(events).to eq([:bodies, :catches, :program, :auto])
+    expect(events).to eq([:prepare, :bodies, :catches, :program, :auto])
     expect(result.resolution).to equal(resolution)
     expect(result.typed_node_count).to eq(1)
     expect(result.unresolved_node_count).to eq(0)

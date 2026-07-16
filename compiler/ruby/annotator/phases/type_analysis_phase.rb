@@ -126,12 +126,14 @@ module Annotator
     # phase owns their ordering and product boundary; each callback will move
     # behind an explicit context as the monolithic receiver is retired.
     class TypeAnalysisOperations < T::Struct
+      Prepare = T.type_alias { T.proc.params(resolution: ResolutionFacts).void }
       AnalyzeBodies = T.type_alias do
         T.proc.params(declarations: DeclarationIndex, program: AST::Program).void
       end
       ResolveCatches = T.type_alias { T.proc.params(declarations: DeclarationIndex).void }
       FinalizeProgram = T.type_alias { T.proc.params(program: AST::Program).void }
 
+      const :prepare, Prepare
       const :analyze_bodies, AnalyzeBodies
       const :resolve_catches, ResolveCatches
       const :finalize_program, FinalizeProgram
@@ -151,6 +153,7 @@ module Annotator
         program = resolution.program
         declarations = resolution.declarations
 
+        operations.prepare.call(resolution)
         operations.analyze_bodies.call(declarations, program)
         operations.resolve_catches.call(declarations)
         operations.finalize_program.call(program)

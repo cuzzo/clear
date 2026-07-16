@@ -82,13 +82,9 @@ class SemanticAnnotator
   include Annotator::Phases::AnnotationBoundary
   include Annotator::Phases::AutoFinalization
   include Annotator::Phases::BodyAnalysis
-  include Annotator::Phases::BuiltinEnvironment
   include Annotator::Phases::DeferredValidation
   include Annotator::Phases::ExpressionDomains
-  include Annotator::Phases::ImportResolution
   include Annotator::Phases::ProgramFinalization
-  include Annotator::Phases::TypeRegistration
-  include Annotator::Phases::SignatureRegistration
   include Annotator::Phases::WholeProgramSemantics
   include Annotator::Domains::ControlFlow
   include Annotator::Domains::Variables
@@ -652,12 +648,12 @@ private
   sig { returns(Annotator::Phases::AnnotationPipelineOperations) }
   def annotation_pipeline_operations
     Annotator::Phases::AnnotationPipelineOperations.new(
-      resolve_import: ->(stmt) { visit_RequireNode(stmt); nil },
-      register_types: ->(declarations) { register_type_declarations(declarations) },
-      register_signatures: ->(declarations) { register_program_signatures(declarations) },
-      resolve_reentrance: ->(program) { bridge_reentrance!(program) },
-      resolve_sync_policy: ->(program) { validate_and_resolve_sync_policy!(program) },
-      seed_error_types: ->(declarations) { seed_error_type_registrations!(declarations) },
+      prepare_type_analysis: ->(resolution) {
+        adopt_resolution_facts!(resolution)
+        bridge_reentrance!(resolution.program)
+        validate_and_resolve_sync_policy!(resolution.program)
+        seed_error_type_registrations!(resolution.declarations)
+      },
       analyze_bodies: ->(declarations, program) { analyze_program_bodies!(declarations, program) },
       resolve_catches: ->(declarations) { resolve_catch_clauses_from_declarations!(declarations) },
       finalize_program_type: ->(program) { finalize_program_type!(program) },
@@ -673,8 +669,9 @@ private
   def visit_Program(node)
     @annotation_products = Annotator::Phases::AnnotationPipeline.run(
       program: node,
-      root_scope: semantic_root_scope,
-      function_registry: semantic_function_registry,
+      importer: active_importer,
+      source_dir: import_source_dir,
+      source_code: @source_code,
       products: @annotation_products,
       operations: annotation_pipeline_operations
     )
@@ -692,7 +689,12 @@ private
     @comptime_type_param_refinements = {}
     effects_init!
     capability_audit_init!
-    initialize_builtin_environment!
+  end
+
+  sig { params(resolution: Annotator::Phases::ResolutionFacts).void }
+  def adopt_resolution_facts!(resolution)
+    @receiver_state.scopes = [resolution.root_scope]
+    @function_registry = resolution.function_registry
   end
 
   sig { returns(T.nilable(ModuleImporter)) }
@@ -801,9 +803,9 @@ private
     begin
       result = case node
       when AST::StructDef, AST::ExternStructDecl, AST::EnumDef, AST::UnionDef
-        register_type_declaration(node)
+        local_resolution_session.register_local_type_declaration(node)
       when AST::ExternFnDecl
-        register_extern_function_signature(node)
+        local_resolution_session.register_local_extern_declaration(node)
         nil
       else
         method_name = "visit_#{node.class.name.split('::').last}"
@@ -817,6 +819,19 @@ private
       Kernel.raise "BUG: annotation ancestor stack mismatch" unless popped.equal?(node)
     end
   end
+
+  sig { returns(Annotator::Phases::ResolutionSession) }
+  def local_resolution_session
+    Annotator::Phases::ResolutionSession.new(
+      importer: active_importer,
+      source_dir: import_source_dir,
+      source_code: @source_code,
+      root_scope: current_scope,
+      function_registry: semantic_function_registry,
+      install_builtins: false
+    )
+  end
+  private :local_resolution_session
 
   sig { params(node: AST::Node).void }
   def record_ownership_transport_fact!(node)

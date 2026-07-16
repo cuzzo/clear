@@ -14,19 +14,14 @@ module Annotator
     # proven algorithms while AnnotationPipeline alone knows phase classes,
     # order, and product publication.
     class AnnotationPipelineOperations < T::Struct
-      ImportResolver = T.type_alias { ResolutionOperations::ImportResolver }
-      DeclarationAction = T.type_alias { ResolutionOperations::DeclarationAction }
-      ProgramAction = T.type_alias { ResolutionOperations::ProgramAction }
+      PrepareTypeAnalysis = T.type_alias { TypeAnalysisOperations::Prepare }
+      DeclarationAction = T.type_alias { TypeAnalysisOperations::ResolveCatches }
+      ProgramAction = T.type_alias { TypeAnalysisOperations::FinalizeProgram }
       AnalyzeBodies = T.type_alias { TypeAnalysisOperations::AnalyzeBodies }
       AuditAction = T.type_alias { CapabilityAuditOperations::AuditAction }
       ProductPublisher = T.type_alias { T.proc.params(products: AnnotationProducts).void }
 
-      const :resolve_import, ImportResolver
-      const :register_types, DeclarationAction
-      const :register_signatures, DeclarationAction
-      const :resolve_reentrance, ProgramAction
-      const :resolve_sync_policy, ProgramAction
-      const :seed_error_types, DeclarationAction
+      const :prepare_type_analysis, PrepareTypeAnalysis
       const :analyze_bodies, AnalyzeBodies
       const :resolve_catches, DeclarationAction
       const :finalize_program_type, ProgramAction
@@ -43,18 +38,19 @@ module Annotator
       sig do
         params(
           program: AST::Program,
-          root_scope: Scope,
-          function_registry: Annotator::FunctionRegistry,
+          importer: T.nilable(ModuleImporter),
+          source_dir: String,
+          source_code: T.nilable(String),
           products: AnnotationProducts,
           operations: AnnotationPipelineOperations
         ).returns(AnnotationProducts)
       end
-      def self.run(program:, root_scope:, function_registry:, products:, operations:)
+      def self.run(program:, importer:, source_dir:, source_code:, products:, operations:)
         resolution = ResolutionPhase.run(
           program: program,
-          root_scope: root_scope,
-          function_registry: function_registry,
-          operations: resolution_operations(operations)
+          importer: importer,
+          source_dir: source_dir,
+          source_code: source_code
         )
         products = products.publish_resolution(resolution)
         operations.publish_products.call(products)
@@ -75,22 +71,10 @@ module Annotator
         products
       end
 
-      sig { params(operations: AnnotationPipelineOperations).returns(ResolutionOperations) }
-      def self.resolution_operations(operations)
-        ResolutionOperations.new(
-          resolve_import: operations.resolve_import,
-          register_types: operations.register_types,
-          register_signatures: operations.register_signatures,
-          resolve_reentrance: operations.resolve_reentrance,
-          resolve_sync_policy: operations.resolve_sync_policy,
-          seed_error_types: operations.seed_error_types
-        )
-      end
-      private_class_method :resolution_operations
-
       sig { params(operations: AnnotationPipelineOperations).returns(TypeAnalysisOperations) }
       def self.type_analysis_operations(operations)
         TypeAnalysisOperations.new(
+          prepare: operations.prepare_type_analysis,
           analyze_bodies: operations.analyze_bodies,
           resolve_catches: operations.resolve_catches,
           finalize_program: operations.finalize_program_type,

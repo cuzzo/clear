@@ -12,8 +12,10 @@ RSpec.describe "annotator completion phases" do
     ClearParser.new(Lexer.new(source).tokenize, source).parse
   end
 
-  it "initializes builtin environment during annotator construction" do
-    scope = SemanticAnnotator.new.send(:current_scope)
+  it "initializes builtin environment inside the resolution phase" do
+    scope = Annotator::Phases::ResolutionSession.new(
+      importer: nil, source_dir: Dir.pwd, source_code: nil
+    ).root_scope
 
     expect(scope.resolve_entry!("argv").type.resolved).to eq(:String)
     expect(scope.types.fetch(:Range).schema).to be_a(Schemas::StructSchema)

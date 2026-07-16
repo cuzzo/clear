@@ -815,13 +815,16 @@ RSpec.describe "architecture invariants: post-annotation type access" do
       source(rel).lines.each_with_index.filter_map do |line, idx|
         next if line.strip.start_with?("#")
         next unless line.match?(/\.full_type\s*=(?![=~])/)
-        next if rel == "compiler/ruby/annotator/annotator.rb" && line.include?("node.full_type = T.cast(value, AST::SyntheticTypeInput)")
+        next if [
+          "compiler/ruby/annotator/annotator.rb",
+          "compiler/ruby/annotator/phases/resolution_phase.rb",
+        ].include?(rel) && line.include?("node.full_type = T.cast(value, AST::SyntheticTypeInput)")
         "#{rel}:#{idx + 1}: #{line.strip}"
       end
     end
 
     expect(offenders).to be_empty,
-      "annotator type producers must call SemanticAnnotator#stamp_type!, not write .full_type directly:\n" \
+      "annotator type producers must call their phase-owned stamp_type!, not write .full_type directly:\n" \
       "#{offenders.join("\n")}"
   end
 

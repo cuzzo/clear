@@ -231,8 +231,10 @@ RSpec.describe "annotator branch gap burndown" do
     }.to raise_error(RuntimeError, /annotation stamp missing type for AST::Identifier/)
   end
 
-  it "dispatches extern declarations through the generic visitor" do
-    ann = SemanticAnnotator.new(source_code: "")
+  it "registers extern declarations through the resolution session" do
+    session = Annotator::Phases::ResolutionSession.new(
+      importer: nil, source_dir: Dir.pwd, source_code: ""
+    )
     extern_fn = AST::ExternFnDecl.new(
       token(:VAR_ID, "native_len"),
       "native_len",
@@ -242,10 +244,10 @@ RSpec.describe "annotator branch gap burndown" do
       nil
     )
 
-    result = ann.send(:visit, extern_fn)
+    index = Annotator::Phases::DeclarationIndexer.index(AST::Program.new(token(:PROGRAM, "program"), [extern_fn]))
+    session.register_program_signatures(index)
 
-    signature = FunctionSignature.unwrap(ann.send(:current_scope).resolve_entry!("native_len").type)
-    expect(result).to be_nil
+    signature = FunctionSignature.unwrap(session.root_scope.resolve_entry!("native_len").type)
     expect(signature.extern).to eq(true)
     expect(signature.return_type.resolved).to eq(:Int64)
     expect(extern_fn.full_type!.resolved).to eq(:Void)

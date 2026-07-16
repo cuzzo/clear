@@ -12,7 +12,7 @@ module Annotator
 
       sig { params(node: AST::RequireNode).void }
       def visit_RequireNode(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
         importer = active_importer
         unless importer
           error!(node, :REQUIRE_NEEDS_IMPORTER)

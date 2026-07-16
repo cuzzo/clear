@@ -5,36 +5,21 @@ require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 require_relative "../ruby/annotator/phases/resolution_phase"
 
 RSpec.describe Annotator::Phases::ResolutionPhase do
-  def token(type, value)
-    Lexer::Token.new(type, value, 1, 1)
-  end
-
   it "owns resolution ordering without traversing function bodies" do
-    body_value = AST::Literal.new(token(:INT64, "1"), :INT64, 1, :stack)
-    body_type = body_value.full_type
-    fn = AST::FunctionDef.new(token(:FN, "FN"), "main", [], [], Type.new(:Int64), nil, [body_value], nil, nil, nil, nil, nil)
-    program = AST::Program.new(token(:PROGRAM, "program"), [fn])
-    scope = Scope.new
-    registry = Annotator::FunctionRegistry.new
-    events = []
-    operations = Annotator::Phases::ResolutionOperations.new(
-      resolve_import: ->(_node) { events << :import; nil },
-      register_types: ->(_declarations) { events << :types; nil },
-      register_signatures: lambda do |_declarations|
-        events << :signatures
-        scope.declare("main", nil, FunctionSignature.new(params: [], return_type: Type.new(:Int64)), false, false, nil, :static)
-        nil
-      end,
-      resolve_reentrance: ->(_node) { events << :reentrance; nil },
-      resolve_sync_policy: ->(_node) { events << :sync; nil },
-      seed_error_types: ->(_declarations) { events << :errors; nil }
-    )
+    source = <<~CLEAR
+      STRUCT Box { value: Int64 }
 
-    result = described_class.run(program: program, root_scope: scope, function_registry: registry, operations: operations)
+      FN main() RETURNS Int64 ->
+        RETURN missing_name;
+      END
+    CLEAR
+    program = ClearParser.new(Lexer.new(source).tokenize, source).parse
 
-    expect(events).to eq([:types, :signatures, :reentrance, :sync, :errors])
+    result = described_class.run(program: program, importer: nil, source_dir: Dir.pwd, source_code: source)
+
     expect(result.function_names).to include("main")
-    expect(body_value.full_type).to equal(body_type)
+    expect(result.type_names).to include(:Box)
+    expect(result.function_registry.nodes).to be_empty
   end
 
   it "publishes real compiler resolution facts before body typing" do

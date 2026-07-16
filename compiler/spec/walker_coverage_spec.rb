@@ -26,7 +26,7 @@ RSpec.describe "AST walker coverage" do
   INDIRECT_DISPATCH = %w[
     StructDef ExternStructDecl EnumDef UnionDef ExternFnDecl
 
-    Require StringConcat StructPattern ThrowNode CatchBlock
+    Require RequireNode StringConcat StructPattern ThrowNode CatchBlock
 
     SelectOp WhereOp IndexOp OrderByOp LimitOp SkipOp UnnestOp DistinctOp
     EachOp FindOp AnyOp AllOp CountOp SumOp AverageOp MaxOp MinOp
