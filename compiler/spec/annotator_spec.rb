@@ -2127,6 +2127,25 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "Validation & Errors" do
+      context "an inherent method that shares an intrinsic name" do
+        let(:code) {
+          <<~FLUX
+            STRUCT Cache { count: Int64 }
+            IMPLEMENTATION Cache {
+              METHOD length(self) RETURNS Int64 -> RETURN self.count; END
+            }
+            cache = Cache{ count: 3_i64 };
+            res = cache.length();
+          FLUX
+        }
+
+        it "prefers the nominal owner's method" do
+          expect { ast }.not_to raise_error
+          binding = ast.statements.find { |node| node.is_a?(AST::BindExpr) && node.name == "res" }
+          expect(binding&.value&.resolved_type).to eq(:Int64)
+        end
+      end
+
       context "Undefined Method" do
         let(:code) {
           base_funcs + <<~FLUX

@@ -107,12 +107,12 @@ module Annotator
           reject_mutating_borrowed_receiver!(node)
           return
         end
-        if resolve_intrinsic_method_call!(node)
-          validate_indirect_collection_insertion!(node)
+        if resolve_inherent_method_call!(node)
           reject_mutating_borrowed_receiver!(node)
           return
         end
-        if resolve_inherent_method_call!(node)
+        if resolve_intrinsic_method_call!(node)
+          validate_indirect_collection_insertion!(node)
           reject_mutating_borrowed_receiver!(node)
           return
         end
