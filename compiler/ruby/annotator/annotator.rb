@@ -651,7 +651,14 @@ class Annotator::Phases::TypeAnalysisSession
     reset_compilation_state!
     @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
     @language_mode = node.language_mode
-    visit(node)
+    @annotation_products = Annotator::Phases::AnnotationPipeline.run(
+      program: node,
+      importer: active_importer,
+      source_dir: import_source_dir,
+      source_code: @source_code,
+      products: @annotation_products,
+      type_session: self
+    )
     raise "annotation pipeline did not publish complete products" unless @annotation_products.complete?
     @semantic_index = T.let(SemanticIndex.from_products(
       annotation_products: @annotation_products,
@@ -702,19 +709,6 @@ class Annotator::Phases::TypeAnalysisSession
   end
 
 private
-
-  sig { params(node: AST::Program).returns(NilClass) }
-  def visit_Program(node)
-    @annotation_products = Annotator::Phases::AnnotationPipeline.run(
-      program: node,
-      importer: active_importer,
-      source_dir: import_source_dir,
-      source_code: @source_code,
-      products: @annotation_products,
-      type_session: self
-    )
-    nil
-  end
 
   sig { void }
   def reset_compilation_state!
@@ -861,7 +855,6 @@ private
   sig { params(node: AST::Node).returns(T.untyped) }
   def dispatch_visit(node)
     case node
-    when AST::Program then visit_Program(node)
     when AST::FunctionDef, AST::LambdaLit then dispatch_function_visit(node)
     when AST::BlockExpr, AST::IfStatement, AST::IsA, AST::IfBind,
          AST::MatchStatement, AST::ForRange, AST::ForEach, AST::WhileLoop,

@@ -6,14 +6,11 @@ require_relative "../ruby/ast/ast" unless defined?(MIR::ReassignPlan)
 # either via a direct `visit_<NodeName>` method or via the indirect
 # dispatch list below.
 #
-# Why: SemanticAnnotator dispatches AST traversal via
-# `method_name = "visit_#{node.class.name.split('::').last}"`. If you add
-# a new AST::Locatable Struct class but forget to add a visit_ method
-# (and don't route it through one of the indirect-dispatch parents), the
-# annotator silently skips it and downstream passes (escape analysis,
-# MIR lowering, ...) never see the node. The bug surfaces only when a
-# user happens to write code that triggers the new node -- at which
-# point you get a NoMethodError or, worse, silently-wrong analysis.
+# Why: TypeAnalysisSession uses an explicit, domain-grouped visitor router. If
+# a new AST::Locatable Struct class is not added to that router (or routed
+# through one of the indirect-dispatch parents), annotation raises a stable
+# internal error. This test catches the missing route earlier and documents
+# the intentionally indirect cases.
 #
 # This test makes the "did you wire your new node?" check explicit and
 # fails fast at CI time. See docs/agents/walkers-cleanup.md for the
@@ -24,7 +21,7 @@ RSpec.describe "AST walker coverage" do
   # rather than directly. Adding a new entry here is intentional: it documents
   # that the node is handled without a dedicated visit_ method.
   INDIRECT_DISPATCH = %w[
-    StructDef ExternStructDecl EnumDef UnionDef ExternFnDecl
+    Program StructDef ExternStructDecl EnumDef UnionDef ExternFnDecl
 
     Require RequireNode StringConcat StructPattern ThrowNode CatchBlock
 
@@ -58,16 +55,14 @@ RSpec.describe "AST walker coverage" do
           #{missing.map { |n| "AST::#{n}" }.join("\n  ")}
 
         Either:
-          (a) Add `def visit_<Name>(node)` to SemanticAnnotator (or one
-              of its included helper modules in src/annotator/helpers/),
+          (a) Add `def visit_<Name>(node)` and route it through
+              TypeAnalysisSession#dispatch_visit,
               OR
           (b) If the node is a sub-expression visited via a parent's
               visit_ method, add it to INDIRECT_DISPATCH in this spec
               with a comment explaining the dispatch path.
 
-        The annotator dispatches via
-          method_name = "visit_#{'#'}{node.class.name.split('::').last}"
-        so a node without one is silently skipped.
+        The explicit dispatch router must account for every direct visitor.
       MSG
     }
   end

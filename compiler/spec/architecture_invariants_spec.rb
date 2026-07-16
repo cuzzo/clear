@@ -117,9 +117,10 @@ RSpec.describe "architecture invariants: annotator shell" do
     File.read(File.join(ARCH_ROOT, rel))
   end
 
-  it "keeps concrete AST visitors out of SemanticAnnotator except program orchestration" do
+  it "keeps program orchestration out of AST visitor dispatch" do
     visitor_names = source("compiler/ruby/annotator/annotator.rb").scan(/^\s*def (visit_[A-Z]\w*)/).flatten
-    expect(visitor_names).to eq(["visit_Program"])
+    expect(visitor_names).not_to include("visit_Program")
+    expect(source("compiler/ruby/annotator/annotator.rb")).to include("AnnotationPipeline.run")
   end
 
   it "keeps annotator error hints registry-backed" do
