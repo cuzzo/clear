@@ -78,10 +78,17 @@ pub fn scan_documents_with_corpus(documents: &[Document], corpus_complete: bool)
             })
             && !accessor_messages.contains(norm)
         {
+            // Absence of a reader is not evidence of dead state when the
+            // selected corpus is open. Readers commonly live in consumers,
+            // tests, or a later compiler stage outside the requested path.
+            // Do not count an unverifiable observation as superfluous state.
+            if !corpus_complete {
+                continue;
+            }
             results.push(SuperfluousStateFinding {
                 field: norm.clone(),
-                score: if corpus_complete { 0.85 } else { 0.35 },
-                classification: if corpus_complete { "dead_state" } else { "unread_in_corpus" }.to_string(),
+                score: 0.85,
+                classification: "dead_state".to_string(),
                 writer_method_count: self_writes
                     .iter()
                     .map(|w| (w.file.clone(), w.defn.clone()))
@@ -108,8 +115,8 @@ pub fn scan_documents_with_corpus(documents: &[Document], corpus_complete: bool)
                 reader_methods: Vec::new(),
                 ctorset: self_writes.iter().all(|w| w.defn == "initialize"),
                 adjacent_sites: None,
-                confidence: if corpus_complete { "high" } else { "low" }.to_string(),
-                confidence_reason: (!corpus_complete).then(|| "the selected files are not a proven closed corpus; readers may exist outside the target".to_string()),
+                confidence: "high".to_string(),
+                confidence_reason: None,
             });
             continue;
         }
@@ -170,6 +177,14 @@ pub fn scan_documents_with_corpus(documents: &[Document], corpus_complete: bool)
 
         let score = base * intra_bonus * adj_bonus * ctor_penalty;
         if score < 0.1 {
+            continue;
+        }
+
+        // A field is not a derived cache merely because one method writes it
+        // and another reads it. That is the normal shape of encapsulated
+        // object state and immutable result records. Require independent
+        // re-derivation evidence before making the eliminability claim.
+        if !intra && adj_bonus == 1.0 && row.re_derivations.is_empty() {
             continue;
         }
 
@@ -287,9 +302,9 @@ mod tests {
     #[test]
     fn test_superfluous_state_edge_cases() {
         // 1. Read-before-write in same method (disqualifies intra-method)
-        // 2. Constructor-set only (ctorset)
+        // 2. Constructor-set state without derivation evidence
         // 3. Score below threshold (< 0.1)
-        // 4. Derived cache (read & write in different methods, not adjacent)
+        // 4. Ordinary state (read & write in different methods, not adjacent)
         // 5. Adjacent call bonus
         let doc: Document = serde_json::from_value(json!({
             "file": "example.rb",
@@ -304,7 +319,7 @@ mod tests {
                 { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "w2", "line": 21, "span": [21, 1, 21, 10], "owner": "Class" },
                 { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "w3", "line": 22, "span": [22, 1, 22, 10], "owner": "Class" },
                 { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "w4", "line": 23, "span": [23, 1, 23, 10], "owner": "Class" },
-                // Derived cache (different methods, no adjacency info)
+                // Ordinary state (different methods, no adjacency/derivation evidence)
                 { "field": "derived", "receiver": "self", "file": "example.rb", "function": "m3", "line": 30, "span": [30, 1, 30, 10], "owner": "Class" },
                 // Adjacent call
                 { "field": "adj", "receiver": "self", "file": "example.rb", "function": "set_val", "line": 40, "span": [40, 1, 40, 10], "owner": "Class" }
@@ -318,7 +333,7 @@ mod tests {
                 { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "r1", "line": 25, "span": [25, 1, 25, 10], "owner": "Class" },
                 { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "r2", "line": 26, "span": [26, 1, 26, 10], "owner": "Class" },
                 { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "r3", "line": 27, "span": [27, 1, 27, 10], "owner": "Class" },
-                // Derived cache read
+                // Ordinary state read
                 { "field": "derived", "receiver": "self", "file": "example.rb", "function": "m4", "line": 35, "span": [35, 1, 35, 10], "owner": "Class" },
                 // Adjacent call read
                 { "field": "adj", "receiver": "self", "file": "example.rb", "function": "get_val", "line": 45, "span": [45, 1, 45, 10], "owner": "Class" }
@@ -349,21 +364,10 @@ mod tests {
         // Validate "low_score" is excluded (base = 1/(12+1) = 0.076 < 0.1)
         assert!(!findings.iter().any(|f| f.field == "low_score"));
 
-        // Validate "rbw" (Read-Before-Write) is classified as derived_cache since it's disqualified from intra_method
-        let rbw = findings.iter().find(|f| f.field == "rbw").unwrap();
-        assert_eq!(rbw.classification, "derived_cache");
-        assert_eq!(rbw.score, 0.5); // base (1/2) * intra_bonus (1) * ctor_penalty (1)
-
-        // Validate "ctor_var" has the 0.33x penalty
-        let ctor = findings.iter().find(|f| f.field == "ctor_var").unwrap();
-        assert!(ctor.ctorset);
-        assert_eq!(ctor.classification, "derived_cache");
-        assert!((ctor.score - 0.165).abs() < 0.01); // base (1/2) * ctor_penalty (0.33) = 0.165
-
-        // Validate "derived" is classified as derived_cache
-        let derived = findings.iter().find(|f| f.field == "derived").unwrap();
-        assert_eq!(derived.classification, "derived_cache");
-        assert_eq!(derived.score, 0.5);
+        // Ordinary state is not eliminable without evidence of re-derivation.
+        assert!(!findings.iter().any(|f| f.field == "rbw"));
+        assert!(!findings.iter().any(|f| f.field == "ctor_var"));
+        assert!(!findings.iter().any(|f| f.field == "derived"));
 
         // Validate "adj" is classified as adjacent_call with a 5.0x bonus
         let adj = findings.iter().find(|f| f.field == "adj").unwrap();
@@ -442,14 +446,36 @@ mod tests {
     }
 
     #[test]
-    fn partial_corpus_downgrades_dead_state_claim() {
+    fn partial_corpus_omits_dead_state_claim() {
         let doc: Document = serde_json::from_value(json!({
             "file": "annotator.rb", "language": "ruby",
             "state_writes": [{ "field": "semantic_index", "receiver": "self", "file": "annotator.rb", "function": "annotate", "line": 10, "span": [10, 1, 10, 20], "owner": "Annotator" }]
         })).unwrap();
         let findings = scan_documents_with_corpus(&[doc], false);
-        assert_eq!(findings[0].classification, "unread_in_corpus");
-        assert_eq!(findings[0].confidence, "low");
-        assert!(findings[0].confidence_reason.is_some());
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn rederivation_evidence_identifies_a_real_derived_cache() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "cache.rb",
+            "language": "ruby",
+            "state_writes": [
+                { "field": "cache", "receiver": "self", "file": "cache.rb", "function": "refresh", "line": 4, "span": [4, 1, 4, 10], "owner": "Cache" }
+            ],
+            "state_reads": [
+                { "field": "cache", "receiver": "self", "file": "cache.rb", "function": "fetch", "line": 8, "span": [8, 1, 8, 10], "owner": "Cache" }
+            ],
+            "predicate_aliases": [
+                { "name": "cache_valid?", "body": "@cache == source", "file": "cache.rb", "defn": "cache_valid?", "line": 12, "span": [12, 1, 12, 24] }
+            ],
+            "comparison_uses": [
+                { "canon_source": "@cache == source", "file": "cache.rb", "function": "recompute", "line": 16, "raw": "@cache == source", "span": [16, 1, 16, 24], "enclosing_span": [16, 1, 16, 24] }
+            ]
+        })).unwrap();
+
+        let findings = scan_documents(&[doc]);
+        let cache = findings.iter().find(|finding| finding.field == "cache").unwrap();
+        assert_eq!(cache.classification, "derived_cache");
     }
 }

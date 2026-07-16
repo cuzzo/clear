@@ -155,10 +155,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 
     /// A stable state identity for analyzers that must distinguish two owners
-    /// with the same field spelling. Empty means the field spelling is the
-    /// appropriate portable identity.
-    fn state_identity(&self, _owner: &str, _field: &str) -> String {
-        String::new()
+    /// with the same field spelling. Owner qualification is the portable
+    /// default: two unrelated classes both having `config` or `kind` state
+    /// must never be analyzed as one mutable field.
+    fn state_identity(&self, owner: &str, field: &str) -> String {
+        (!owner.is_empty())
+            .then(|| format!("{owner}::{field}"))
+            .unwrap_or_default()
     }
 
     fn empty_check_call(&self, _message: &str) -> bool {
@@ -902,6 +905,9 @@ mod tests {
 
         // other default trait methods with missing lines
         assert!(!b.emit_index_assignment_mutation(&node, None));
+        assert_eq!(b.state_identity("First", "config"), "First::config");
+        assert_eq!(b.state_identity("Second", "config"), "Second::config");
+        assert_eq!(b.state_identity("", "config"), "");
         assert_eq!(b.self_member_receiver("m"), "m");
         assert!(b.owner_name_from_text(&node).is_none());
         assert!(b.literal_receiver_type(&node).is_none());

@@ -24,14 +24,6 @@
       "reader_method_count": 0,
       "score": 0.85,
       "writer_method_count": 1
-    },
-    {
-      "classification": "derived_cache",
-      "ctorset": false,
-      "field": "cache_state",
-      "reader_method_count": 2,
-      "score": 0.3333333333333333,
-      "writer_method_count": 1
     }
   ],
   "options": {}

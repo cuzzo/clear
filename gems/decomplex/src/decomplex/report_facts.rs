@@ -622,7 +622,7 @@ fn state_heatmap_findings_for_groups(
         let report = state_mesh::scan_documents_with_semantic_aliases_and_min_writes(
             documents,
             semantic_aliases,
-            1,
+            2,
         );
         rows.extend(state_heatmap_findings(&report));
     }
@@ -965,8 +965,8 @@ mod tests {
         let partial = collect(&[source], &Options::default(), false).unwrap();
         assert_eq!(partial.pointer("/corpus/complete"), Some(&json!(false)));
         let state = partial.get("detectors").and_then(|v| v.get("superfluous_state"))
-            .and_then(Value::as_array).and_then(|rows| rows.first()).unwrap();
-        assert_eq!(state.get("classification"), Some(&json!("unread_in_corpus")));
+            .and_then(Value::as_array).unwrap();
+        assert!(state.is_empty(), "partial corpora cannot prove state is unread");
     }
 
     fn run_git(dir: &Path, args: &[&str]) {
@@ -1252,6 +1252,28 @@ mod tests {
         let row = &res[0];
         assert_eq!(row.get("field").unwrap(), "@field");
         assert_eq!(row.get("messiness").unwrap(), 4.5);
+    }
+
+    #[test]
+    fn state_heatmap_omits_write_once_value_state() {
+        let document: Document = serde_json::from_value(json!({
+            "file": "result.rb",
+            "language": "ruby",
+            "state_writes": [
+                { "field": "published", "identity": "Result::published", "receiver": "self", "file": "result.rb", "function": "initialize", "line": 2, "span": [2, 1, 2, 12], "owner": "Result" },
+                { "field": "cursor", "identity": "Worker::cursor", "receiver": "self", "file": "result.rb", "function": "initialize", "line": 8, "span": [8, 1, 8, 9], "owner": "Worker" },
+                { "field": "cursor", "identity": "Worker::cursor", "receiver": "self", "file": "result.rb", "function": "advance", "line": 12, "span": [12, 1, 12, 9], "owner": "Worker" }
+            ]
+        })).unwrap();
+        let documents = vec![document];
+        let aliases = semantic_alias::scan_documents(&documents);
+        let groups = BTreeMap::from([(Language::Ruby, documents)]);
+
+        let rows = state_heatmap_findings_for_groups(&groups, &aliases).unwrap();
+        let rows = rows.as_array().unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get("field").unwrap(), "cursor");
     }
 
     #[test]
