@@ -4,9 +4,9 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
-    NormalizedSemanticEffect, NormalizedStateRead,
+    eliminable_guard_from_call, nil_guard_from_predicates, type_before_parameter_name,
+    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
+    NormalizedNilGuardFact, NormalizedSemanticEffect, NormalizedStateRead,
 };
 use super::CallSite;
 use super::StateDeclaration;
@@ -103,6 +103,10 @@ const PHP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct PhpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
+    fn parameter_type_from_signature(&self, parameter: &str) -> Option<String> {
+        type_before_parameter_name(parameter)
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("php")
     }

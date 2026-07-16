@@ -4,9 +4,10 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
-    NormalizedSemanticEffect, NormalizedStateRead, NormalizedStateWrite,
+    eliminable_guard_from_call, nil_guard_from_predicates, type_after_parameter_colon,
+    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
+    NormalizedNilGuardFact, NormalizedOwner, NormalizedSemanticEffect, NormalizedStateRead,
+    NormalizedStateWrite,
 };
 use super::{CallSite, StateDeclaration};
 use crate::ast::{Child, Node, Span};
@@ -290,6 +291,10 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
     fn parameter_name_from_signature(&self, param: &str) -> Option<String> {
         let before_colon = param.split_once(':')?.0.trim();
         simple_identifier(before_colon).then(|| before_colon.to_string())
+    }
+
+    fn parameter_type_from_signature(&self, param: &str) -> Option<String> {
+        type_after_parameter_colon(param)
     }
 
     fn case_pattern_values(&self, pattern_values: Vec<String>) -> Vec<String> {

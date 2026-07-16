@@ -1184,6 +1184,15 @@ pub(crate) fn type_before_parameter_name(parameter: &str) -> Option<String> {
     (!type_name.is_empty()).then(|| type_name.to_string())
 }
 
+/// Extract the declared type from `name: Type` parameters. Languages opt in
+/// explicitly; the shared helper does not assign meaning to colon syntax.
+pub(crate) fn type_after_parameter_colon(parameter: &str) -> Option<String> {
+    let declaration = parameter.split('=').next().unwrap_or(parameter).trim();
+    let (_, type_name) = declaration.split_once(':')?;
+    let type_name = type_name.trim();
+    (!type_name.is_empty()).then(|| type_name.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

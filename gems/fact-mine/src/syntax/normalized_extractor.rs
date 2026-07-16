@@ -210,9 +210,17 @@ impl<'a> Extractor<'a> {
             file: self.file.clone(),
             name: name.clone(),
             owner: owner.clone(),
-            dispatch_kind: self
-                .behavior
-                .function_dispatch_kind_from_node(&name, node, &owner),
+            dispatch_kind: if self.owners.is_empty() && owner == self.file_owner {
+                // The extractor creates a stable file owner for lexical
+                // declarations. That storage identity is not an instance
+                // dispatch fact. A real declaration may legitimately have
+                // the same name as its file, so owner-stack context is the
+                // proof that distinguishes the two.
+                "top".to_string()
+            } else {
+                self.behavior
+                    .function_dispatch_kind_from_node(&name, node, &owner)
+            },
             line: node.first_lineno,
             span: span(node),
             body,

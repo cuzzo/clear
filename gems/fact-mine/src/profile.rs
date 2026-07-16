@@ -3390,30 +3390,30 @@ fn canonical_declared_type(document: &Document, name: &str) -> Option<String> {
         })
 }
 
-fn declared_receiver_symbol(
+fn declared_receiver_type(
     document: &Document,
     definition: Option<&syntax::FunctionDef>,
     receiver: &str,
 ) -> Option<String> {
     let definition = definition?;
-    let key = format!("{}\0{}\0{}", definition.owner, definition.name, definition.line);
+    let key = format!(
+        "{}\0{}\0{}",
+        definition.owner, definition.name, definition.line
+    );
     document
         .method_param_types
         .get(&key)
         .and_then(|parameters| parameters.get(receiver))
-        .and_then(|name| canonical_declared_type(document, name))
+        .cloned()
 }
 
-fn flow_receiver_symbol(
+fn flow_receiver_type(
     document: &Document,
     owner: &str,
     function: &str,
     receiver: &str,
     call_span: [usize; 4],
 ) -> Option<String> {
-    if !document.symbol_scope.canonical {
-        return None;
-    }
     let place_ids = document
         .places
         .iter()
@@ -3442,9 +3442,24 @@ fn flow_receiver_symbol(
                 && node_ids.contains(fact.node_id.as_str())
         })
         .flat_map(|fact| fact.types.iter())
-        .filter_map(|name| canonical_declared_type(document, name))
+        .map(|name| name.strip_prefix("declared:").unwrap_or(name).to_string())
         .collect::<BTreeSet<_>>();
-    (types.len() == 1).then(|| types.into_iter().next()).flatten()
+    (types.len() == 1)
+        .then(|| types.into_iter().next())
+        .flatten()
+}
+
+fn exact_document_owner<'a>(document: &'a Document, type_name: &str) -> Option<&'a str> {
+    let type_name = type_name.strip_prefix("declared:").unwrap_or(type_name);
+    let owners = document
+        .owner_defs
+        .iter()
+        .filter(|owner| owner.name == type_name)
+        .map(|owner| owner.name.as_str())
+        .collect::<BTreeSet<_>>();
+    (owners.len() == 1)
+        .then(|| owners.into_iter().next())
+        .flatten()
 }
 
 fn source_function<'a>(
@@ -3497,12 +3512,12 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .owner_defs
                     .iter()
                     .any(|owner| owner.name == call.receiver);
-            let declared_receiver_symbol = (!receiver_is_type)
-                .then(|| declared_receiver_symbol(document, source_definition, &call.receiver))
+            let declared_receiver_type = (!receiver_is_type)
+                .then(|| declared_receiver_type(document, source_definition, &call.receiver))
                 .flatten();
-            let flow_receiver_symbol = (!receiver_is_type && declared_receiver_symbol.is_none())
+            let flow_receiver_type = (!receiver_is_type && declared_receiver_type.is_none())
                 .then(|| {
-                    flow_receiver_symbol(
+                    flow_receiver_type(
                         document,
                         &call.owner,
                         &call.function,
@@ -3511,18 +3526,17 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     )
                 })
                 .flatten();
-            let instance_receiver_symbol = declared_receiver_symbol.or(flow_receiver_symbol);
+            let instance_receiver_type = declared_receiver_type.or(flow_receiver_type);
+            let instance_receiver_owner = instance_receiver_type
+                .as_deref()
+                .and_then(|type_name| exact_document_owner(document, type_name));
+            let instance_receiver_symbol = instance_receiver_type
+                .as_deref()
+                .and_then(|type_name| canonical_declared_type(document, type_name));
             let receiver_symbol = static_receiver_symbol.or(instance_receiver_symbol.clone());
             let source_dispatch = source_definition
                 .map(|definition| definition.dispatch_kind.as_str())
-                .filter(|kind| !kind.is_empty())
-                .unwrap_or_else(|| {
-                    if call.owner.is_empty() {
-                        "top"
-                    } else {
-                        "instance"
-                    }
-                });
+                .filter(|kind| !kind.is_empty());
             let target_candidates = document
                 .function_defs
                 .iter()
@@ -3530,20 +3544,21 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     if definition.name != call.message {
                         return false;
                     }
-                    let dispatch = if definition.dispatch_kind.is_empty() {
-                        if definition.owner.is_empty() { "top" } else { "instance" }
-                    } else {
-                        definition.dispatch_kind.as_str()
-                    };
-                    if implicit && source_dispatch == "top" {
+                    let dispatch = definition.dispatch_kind.as_str();
+                    if dispatch.is_empty() {
+                        return false;
+                    }
+                    if implicit && source_dispatch == Some("top") {
                         dispatch == "top"
                     } else if implicit {
-                        definition.owner == call.owner && dispatch == source_dispatch
+                        definition.owner == call.owner && Some(dispatch) == source_dispatch
                     } else if receiver_is_type {
                         definition.owner == call.receiver && dispatch == "class"
-                    } else if let Some(receiver_owner) = instance_receiver_symbol.as_deref() {
+                    } else if instance_receiver_owner == Some(definition.owner.as_str()) {
+                        dispatch == "instance"
+                    } else if let Some(receiver_symbol) = instance_receiver_symbol.as_deref() {
                         canonical_symbol_owner(document, &definition.owner).as_deref()
-                            == Some(receiver_owner)
+                            == Some(receiver_symbol)
                             && dispatch == "instance"
                     } else {
                         false
@@ -3563,9 +3578,9 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     || call.receiver.strip_prefix("this.")
                         == Some(row.field.trim_start_matches('@'))
             });
-            let kind = if target_def.is_some_and(|definition| {
-                implicit && definition.owner == call.owner
-            }) {
+            let kind = if target_def
+                .is_some_and(|definition| implicit && definition.owner == call.owner)
+            {
                 "internal_call"
             } else if target.is_some() {
                 "resolved_call"
@@ -3596,12 +3611,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 owner: call.owner.clone(),
                 function: call.function.clone(),
                 receiver: call.receiver.clone(),
-                receiver_kind: if receiver_is_type {
-                    "type"
-                } else {
-                    "value"
-                }
-                .to_string(),
+                receiver_kind: if receiver_is_type { "type" } else { "value" }.to_string(),
                 receiver_symbol,
                 constructor_target: behavior
                     .constructor_dispatch_name(&call.receiver, &call.message),
@@ -3612,12 +3622,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 line: call.line,
                 span: call.span,
                 conditional: call.conditional,
-                confidence: if resolved {
-                    "high"
-                } else {
-                    "partial"
-                }
-                .to_string(),
+                confidence: if resolved { "high" } else { "partial" }.to_string(),
                 unresolved_reason,
             }
         })
@@ -4556,6 +4561,7 @@ def py_fn(a: int) -> str:
                     "file": "test.rb",
                     "name": "hello",
                     "owner": "Greeter",
+                    "dispatch_kind": "instance",
                     "line": 1,
                     "span": [1, 0, 1, 10],
                     "body": {
@@ -4574,6 +4580,7 @@ def py_fn(a: int) -> str:
                     "file": "test.rb",
                     "name": "helper",
                     "owner": "Greeter",
+                    "dispatch_kind": "instance",
                     "line": 2,
                     "span": [2, 0, 2, 10],
                     "body": {

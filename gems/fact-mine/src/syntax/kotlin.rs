@@ -4,9 +4,9 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
-    NormalizedSemanticEffect,
+    eliminable_guard_from_call, nil_guard_from_predicates, type_after_parameter_colon,
+    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
+    NormalizedNilGuardFact, NormalizedSemanticEffect,
 };
 use super::CallSite;
 use super::StateDeclaration;
@@ -138,6 +138,10 @@ impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
             .unwrap_or(before_colon)
             .trim();
         simple_identifier(name).then(|| name.to_string())
+    }
+
+    fn parameter_type_from_signature(&self, param: &str) -> Option<String> {
+        type_after_parameter_colon(param)
     }
 
     fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {

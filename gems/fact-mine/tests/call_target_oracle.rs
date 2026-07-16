@@ -58,6 +58,91 @@ fn c_free_call_resolves_to_exact_declaration_id_and_span() -> Result<()> {
 }
 
 #[test]
+fn lexical_free_calls_share_the_exact_top_level_contract() -> Result<()> {
+    for (source, suffix, language) in [
+        (
+            "def target; end\ndef run\n  target\nend\n",
+            ".rb",
+            Language::Ruby,
+        ),
+        (
+            "def target():\n    pass\ndef run():\n    target()\n",
+            ".py",
+            Language::Python,
+        ),
+        (
+            "package contract\nfunc target() {}\nfunc run() { target() }\n",
+            ".go",
+            Language::Go,
+        ),
+        (
+            "function target(): void {}\nfunction run(): void { target(); }\n",
+            ".ts",
+            Language::TypeScript,
+        ),
+        (
+            "void target() {}\nvoid run() { target(); }\n",
+            ".c",
+            Language::C,
+        ),
+        (
+            "void target() {}\nvoid run() { target(); }\n",
+            ".cpp",
+            Language::Cpp,
+        ),
+        (
+            "fn target() {}\nfn run() { target(); }\n",
+            ".rs",
+            Language::Rust,
+        ),
+        (
+            "fun target() {}\nfun run() { target() }\n",
+            ".kt",
+            Language::Kotlin,
+        ),
+        (
+            "func target() {}\nfunc run() { target() }\n",
+            ".swift",
+            Language::Swift,
+        ),
+        (
+            "fn target() void {}\nfn run() void { target(); }\n",
+            ".zig",
+            Language::Zig,
+        ),
+        (
+            "<?php\nfunction target(): void {}\nfunction run(): void { target(); }\n",
+            ".php",
+            Language::Php,
+        ),
+        (
+            "function target() end\nfunction run() target() end\n",
+            ".lua",
+            Language::Lua,
+        ),
+    ] {
+        let output = extract_source(source, suffix, language)?;
+        let target = output
+            .methods
+            .iter()
+            .find(|method| method.name == "target")
+            .with_context(|| format!("{suffix}: missing lexical target"))?;
+        assert_eq!(target.kind, "top", "{suffix}: {target:?}");
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == "target")
+            .with_context(|| format!("{suffix}: missing lexical target call"))?;
+        assert_eq!(
+            call.target.as_deref(),
+            Some(target.id.as_str()),
+            "{suffix}: {call:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn java_instance_call_resolves_to_exact_declaration_id_and_span() -> Result<()> {
     let output = extract_source(
         "class Worker {\n  int helper() {\n    return 1;\n  }\n  int run() {\n    return helper();\n  }\n}\n",
@@ -118,7 +203,9 @@ fn java_import_resolves_cross_file_to_exact_qualified_owner() -> Result<()> {
     let target = output
         .methods
         .iter()
-        .find(|method| method.symbol_owner.as_deref() == Some("alpha.Helper") && method.name == "work")
+        .find(|method| {
+            method.symbol_owner.as_deref() == Some("alpha.Helper") && method.name == "work"
+        })
         .context("missing alpha.Helper.work")?;
     assert_eq!(target.span, Some([3, 2, 3, 40]));
     let call = output
@@ -147,7 +234,9 @@ fn java_complete_typed_local_resolves_through_canonical_import() -> Result<()> {
     let target = output
         .methods
         .iter()
-        .find(|method| method.symbol_owner.as_deref() == Some("alpha.Helper") && method.name == "work")
+        .find(|method| {
+            method.symbol_owner.as_deref() == Some("alpha.Helper") && method.name == "work"
+        })
         .context("missing alpha.Helper instance work")?;
     let call = output
         .calls
@@ -158,6 +247,105 @@ fn java_complete_typed_local_resolves_through_canonical_import() -> Result<()> {
     assert_eq!(call.receiver_symbol.as_deref(), Some("alpha.Helper"));
     assert_eq!(call.target.as_deref(), Some(target.id.as_str()));
     assert_eq!(call.kind, "resolved_call");
+    Ok(())
+}
+
+#[test]
+fn declared_parameter_instance_calls_share_the_exact_same_document_contract() -> Result<()> {
+    for (source, suffix, language, message) in [
+        (
+            "class Target\n  def work; end\nend\nclass Runner\n  extend T::Sig\n  sig { params(value: Target).void }\n  def run(value)\n    value.work\n  end\nend\n",
+            ".rb",
+            Language::Ruby,
+            "work",
+        ),
+        (
+            "package contract\ntype Target struct{}\nfunc (Target) Work() {}\nfunc Run(value Target) { value.Work() }\n",
+            ".go",
+            Language::Go,
+            "Work",
+        ),
+        (
+            "class Target { void work() {} }\nclass Runner { void run(Target value) { value.work(); } }\n",
+            ".java",
+            Language::Java,
+            "work",
+        ),
+        (
+            "class Target { work(): void {} }\nfunction run(value: Target): void { value.work(); }\n",
+            ".ts",
+            Language::TypeScript,
+            "work",
+        ),
+        (
+            "class Target { public void Work() {} }\nclass Runner { void Run(Target value) { value.Work(); } }\n",
+            ".cs",
+            Language::CSharp,
+            "Work",
+        ),
+        (
+            "class Target:\n    def work(self) -> None:\n        pass\n\ndef run(value: Target) -> None:\n    value.work()\n",
+            ".py",
+            Language::Python,
+            "work",
+        ),
+        (
+            "class Target { public: void work() {} };\nvoid run(Target value) { value.work(); }\n",
+            ".cpp",
+            Language::Cpp,
+            "work",
+        ),
+        (
+            "class Target { fun work() {} }\nfun run(value: Target) { value.work() }\n",
+            ".kt",
+            Language::Kotlin,
+            "work",
+        ),
+        (
+            "class Target { func work() {} }\nfunc run(value: Target) { value.work() }\n",
+            ".swift",
+            Language::Swift,
+            "work",
+        ),
+        (
+            "struct Target;\nimpl Target { fn work(&self) {} }\nfn run(value: Target) { value.work(); }\n",
+            ".rs",
+            Language::Rust,
+            "work",
+        ),
+        (
+            "const Target = struct { fn work(_: Target) void {} };\nfn run(value: Target) void { value.work(); }\n",
+            ".zig",
+            Language::Zig,
+            "work",
+        ),
+        (
+            "<?php\nclass Target { public function work(): void {} }\nfunction run(Target $value): void { $value->work(); }\n",
+            ".php",
+            Language::Php,
+            "work",
+        ),
+    ] {
+        let output = extract_source(source, suffix, language)?;
+        let target = output
+            .methods
+            .iter()
+            .find(|method| method.name == message && method.owner.contains("Target"))
+            .with_context(|| format!("{suffix}: missing Target.{message}"))?;
+        let call = output
+            .calls
+            .iter()
+            .find(|call| {
+                call.receiver.trim_start_matches('$') == "value" && call.message == message
+            })
+            .with_context(|| format!("{suffix}: missing value.{message}"))?;
+        assert_eq!(
+            call.target.as_deref(),
+            Some(target.id.as_str()),
+            "{suffix}: {call:?}"
+        );
+        assert_eq!(call.kind, "resolved_call", "{suffix}: {call:?}");
+    }
     Ok(())
 }
 
@@ -193,7 +381,11 @@ fn wrong_owner_overloads_and_value_receivers_remain_unknown() -> Result<()> {
     for call in output.calls.iter().filter(|call| {
         call.function == "run" && matches!(call.message.as_str(), "missing" | "work")
     }) {
-        assert_eq!(call.target, None, "unexpected target for {}.{}", call.receiver, call.message);
+        assert_eq!(
+            call.target, None,
+            "unexpected target for {}.{}",
+            call.receiver, call.message
+        );
     }
     Ok(())
 }
@@ -250,7 +442,10 @@ fn undeclared_ffi_call_remains_unknown() -> Result<()> {
         .find(|call| call.message == "foreign_api")
         .context("missing FFI call")?;
     assert_eq!(call.target, None);
-    assert_eq!(call.unresolved_reason.as_deref(), Some("target_not_defined_in_document"));
+    assert_eq!(
+        call.unresolved_reason.as_deref(),
+        Some("target_not_defined_in_document")
+    );
     Ok(())
 }
 
