@@ -641,9 +641,24 @@ class Annotator::Phases::TypeAnalysisSession
     @language_mode
   end
 
-  sig { params(products: Annotator::Phases::AnnotationProducts).void }
-  def publish_annotation_products!(products)
-    @annotation_products = products
+  sig { params(resolution: Annotator::Phases::ResolutionFacts).returns(Annotator::Phases::TypeAnalysisHandoff) }
+  def execute_type_analysis!(resolution)
+    @annotation_products = @annotation_products.publish_resolution(resolution)
+    ownership = analyze_resolution!(resolution)
+    inventory = Annotator::Phases::AnnotationTypeInventory.scan(resolution.program)
+    inventory.verify_resolved!
+    typed_program = Annotator::Phases::TypedProgramFacts.new(
+      resolution: resolution,
+      body_summaries: resolution.function_registry.body_summaries,
+      typed_node_count: inventory.typed_node_count,
+      unresolved_node_count: inventory.unresolved_node_count,
+      ownership_graph: ownership
+    )
+    @annotation_products = @annotation_products.publish_typed_program(typed_program)
+    Annotator::Phases::TypeAnalysisHandoff.new(
+      typed_program: typed_program,
+      audit_request: release_capability_audit_request!
+    )
   end
 
   sig { params(resolution: Annotator::Phases::ResolutionFacts).returns(OwnershipGraph) }
@@ -1184,6 +1199,8 @@ private
   private :pending_deferred_validation_count
   private :predicate_call_sites
   private :release_capability_audit_inputs!
+  private :release_capability_audit_request!
+  private :analyze_resolution!
   private :record_snapshot_txn_violation!
   private :register_function_node!
   private :semantic_function_nodes
@@ -1213,6 +1230,11 @@ class Annotator::Phases::CapabilityAuditRequest < T::Struct
   const :source_code, T.nilable(String)
   const :language_mode, Symbol
   const :strict_test, T::Boolean
+end
+
+class Annotator::Phases::TypeAnalysisHandoff < T::Struct
+  const :typed_program, Annotator::Phases::TypedProgramFacts
+  const :audit_request, Annotator::Phases::CapabilityAuditRequest
 end
 
 # A distinct, sequential owner for whole-program auditing.  It receives the

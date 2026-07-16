@@ -129,21 +129,10 @@ module Annotator
         params(
           resolution: ResolutionFacts,
           session: TypeAnalysisSession
-        ).returns(TypedProgramFacts)
+        ).returns(TypeAnalysisHandoff)
       end
       def self.run(resolution:, session:)
-        program = resolution.program
-        ownership_graph = session.analyze_resolution!(resolution)
-
-        inventory = AnnotationTypeInventory.scan(program)
-        inventory.verify_resolved!
-        TypedProgramFacts.new(
-          resolution: resolution,
-          body_summaries: resolution.function_registry.body_summaries,
-          typed_node_count: inventory.typed_node_count,
-          unresolved_node_count: inventory.unresolved_node_count,
-          ownership_graph: ownership_graph
-        )
+        session.execute_type_analysis!(resolution)
       end
     end
   end

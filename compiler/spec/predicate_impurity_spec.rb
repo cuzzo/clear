@@ -24,15 +24,16 @@ RSpec.describe "predicate-impurity rejection" do
       program: ast, importer: nil, source_dir: Dir.pwd, source_code: source
     )
     type_session = SemanticAnnotator.new(source_code: source)
-    typed_program = Annotator::Phases::TypeAnalysisPhase.run(
+    handoff = Annotator::Phases::TypeAnalysisPhase.run(
       resolution: resolution, session: type_session
     )
+    request = handoff.audit_request
     Annotator::Phases::CapabilityAuditSession.new(
-      typed_program: typed_program,
-      inputs: type_session.send(:release_capability_audit_inputs!),
-      source_code: source,
-      language_mode: type_session.send(:language_mode),
-      strict_test: type_session.send(:strict_test?)
+      typed_program: handoff.typed_program,
+      inputs: request.inputs,
+      source_code: request.source_code,
+      language_mode: request.language_mode,
+      strict_test: request.strict_test
     )
   end
 

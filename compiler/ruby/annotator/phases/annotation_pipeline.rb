@@ -31,21 +31,19 @@ module Annotator
           source_code: source_code
         )
         products = products.publish_resolution(resolution)
-        type_session.publish_annotation_products!(products)
 
-        typed_program = TypeAnalysisPhase.run(
+        handoff = TypeAnalysisPhase.run(
           resolution: resolution,
           session: type_session
         )
+        typed_program = handoff.typed_program
         products = products.publish_typed_program(typed_program)
-        type_session.publish_annotation_products!(products)
 
         audit = CapabilityAuditPhase.run(
           typed_program: typed_program,
-          request: type_session.release_capability_audit_request!
+          request: handoff.audit_request
         )
         products = products.publish_capability_audit(audit)
-        type_session.publish_annotation_products!(products)
         products
       end
     end

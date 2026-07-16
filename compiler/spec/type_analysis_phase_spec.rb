@@ -20,7 +20,7 @@ RSpec.describe Annotator::Phases::TypeAnalysisPhase do
     )
     session = SemanticAnnotator.new(source_code: source)
 
-    result = described_class.run(resolution: resolution, session: session)
+    result = described_class.run(resolution: resolution, session: session).typed_program
 
     expect(result.resolution).to equal(resolution)
     expect(result.typed_node_count).to eq(1)

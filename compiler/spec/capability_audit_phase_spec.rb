@@ -19,13 +19,13 @@ RSpec.describe Annotator::Phases::CapabilityAuditPhase do
       source_code: source
     )
     session = SemanticAnnotator.new(source_code: source)
-    typed_program = Annotator::Phases::TypeAnalysisPhase.run(resolution: resolution, session: session)
+    handoff = Annotator::Phases::TypeAnalysisPhase.run(resolution: resolution, session: session)
     report = described_class.run(
-      typed_program: typed_program,
-      request: session.release_capability_audit_request!
+      typed_program: handoff.typed_program,
+      request: handoff.audit_request
     )
 
-    expect(report.typed_program).to equal(typed_program)
+    expect(report.typed_program).to equal(handoff.typed_program)
     expect(report).to be_success
   end
 
