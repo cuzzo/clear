@@ -21,10 +21,38 @@ pub fn bind(comptime deps: type) type {
     return struct {
         const WaitGroup = fp.WaitGroup;
 
+        fn stripPointers(comptime T: type) type {
+            return if (@typeInfo(T) == .pointer)
+                stripPointers(@typeInfo(T).pointer.child)
+            else
+                T;
+        }
+
+        pub fn PolymorphicInner(comptime Wrapped: type) type {
+            const M = stripPointers(Wrapped);
+            if (@typeInfo(M) == .@"struct" and @hasField(M, "ctrl")) {
+                const CtrlPtr = std.meta.fieldInfo(M, .ctrl).type;
+                const Ctrl = @typeInfo(CtrlPtr).pointer.child;
+                const DataPtr = std.meta.fieldInfo(Ctrl, .data).type;
+                return PolymorphicInner(@typeInfo(DataPtr).pointer.child);
+            }
+            if (@typeInfo(M) == .@"struct" and @hasDecl(M, "Inner")) {
+                return PolymorphicInner(M.Inner);
+            }
+            if (@typeInfo(M) == .@"struct" and @hasField(M, "data") and
+                (@hasDecl(M, "acquire") or @hasDecl(M, "write")))
+            {
+                return PolymorphicInner(std.meta.fieldInfo(M, .data).type);
+            }
+            return M;
+        }
+
         pub fn MapFacts(comptime M: type) type {
-            const get_info = @typeInfo(@TypeOf(M.get)).@"fn";
+            const Storage = PolymorphicInner(M);
+            const get_info = @typeInfo(@TypeOf(Storage.get)).@"fn";
             const return_type = get_info.return_type.?;
             return struct {
+                pub const StorageType = Storage;
                 pub const Key = get_info.params[1].type.?;
                 pub const Value = @typeInfo(return_type).optional.child;
             };

@@ -976,6 +976,7 @@ pub const CheatLib = struct {
     pub const mapKeys = DataStructures.mapKeys;
     pub const mapValues = DataStructures.mapValues;
     pub const MapFacts = DataStructures.MapFacts;
+    pub const PolymorphicInner = DataStructures.PolymorphicInner;
     pub const mapProtocolGet = DataStructures.mapProtocolGet;
     pub const mapProtocolPut = DataStructures.mapProtocolPut;
     pub const mapProtocolDelete = DataStructures.mapProtocolDelete;

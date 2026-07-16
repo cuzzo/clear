@@ -171,6 +171,10 @@ module FuzzCoverageModel
       failure_proves: 'Map bounds, associated Key/Value projections, static operation dispatch, and allocator forwarding survive string/numeric representations while invalid constraints fail before Zig.',
       high_risk: true
     ),
+    generic_shared_map_capability_matrix: profile(
+      failure_proves: 'SHARED Map bounds retain caller-selected synchronization and require a typed WITH POLYMORPHIC access boundary.',
+      high_risk: true
+    ),
     escape_mechanism_matrix: profile(
       failure_proves: 'Escape-analysis entry points heap-place owned values for returns, stores, captures, and consuming calls.',
       high_risk: true

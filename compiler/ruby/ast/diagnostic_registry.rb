@@ -503,6 +503,12 @@ module DiagnosticRegistry
       summary: "A shared generic bound preserves synchronization at type formation.",
       fix_hint: "Use a shared map capability such as {String}@shared:locked Value.",
     },
+    GENERIC_SHARED_MAP_REQUIRES_WITH: {
+      severity: :error, category: :capability,
+      template: "%{type} has a caller-selected shared Map capability and cannot be accessed directly.",
+      summary: "A SHARED Map generic must cross an explicit polymorphic synchronization boundary.",
+      fix_hint: "Wrap the operation in `WITH POLYMORPHIC %{type} AS map { ... }` and access the `map` alias inside the block.",
+    },
     GENERIC_PROJECTION_UNKNOWN_OWNER: {
       severity: :error, category: :type,
       template: "Cannot resolve %{owner}::%{member}: %{owner} is not a generic parameter in this declaration.",

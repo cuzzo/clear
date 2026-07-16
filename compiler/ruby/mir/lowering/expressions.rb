@@ -1761,7 +1761,7 @@ module MIRLoweringExpressions
     }
 
     type_name = if node.type_args&.any?
-      zig_args = node.type_args.map { |a| Type.new(a.to_sym).zig_type }.join(", ")
+      zig_args = node.type_args.map { |a| Type.new(a).zig_type }.join(", ")
       "#{node.name}(#{zig_args})"
     else
       node.name.to_s

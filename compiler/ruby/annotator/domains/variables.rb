@@ -948,6 +948,7 @@ module Annotator
         target_type = index_node.target.full_type!(context: "index assignment collection")
         protocol_map = generic_parameter_has_map_bound?(target_type.resolved)
         assign_type = if protocol_map
+          require_generic_map_access_scope!(index_node.target, target_type)
           index_node.protocol_operation = :map_put
           Type.new(TypeProjectionExpression.new(owner: target_type.resolved, member: :Value))
         elsif target_type&.map?

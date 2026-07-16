@@ -776,6 +776,11 @@ module CapabilityHelper
     var_node = cap[:var_node]
     visit(var_node)
     cap[:resolved_type] = var_node.full_type!(context: "WITH resolved capability target")
+    abstract_shared_map = generic_parameter_has_shared_map_bound?(T.must(cap[:resolved_type]).resolved)
+    if abstract_shared_map
+      error!(node, :GENERIC_SHARED_MAP_REQUIRES_WITH, type: T.must(cap[:resolved_type]).resolved) unless node.polymorphic
+      node.universal_poly = true
+    end
 
 	    cap[:old_scope] = lookup_scope_for(CapabilityPlan.var_name_for(var_node))
 
@@ -799,8 +804,8 @@ module CapabilityHelper
                               (storage.nil? || storage == :local ||
                                storage == :multiowned || storage == :stack ||
                                storage == :heap)
-                           is_mut = var_node.respond_to?(:symbol) &&
-                                    var_node.symbol&.mutable
+                           root = AST.root_identifier(var_node)
+                           is_mut = cap.alias_mutable || var_node.symbol&.mutable || root&.symbol&.mutable
                            if is_mut
                              cap[:alias_mutable] = true
                              :RESTRICT

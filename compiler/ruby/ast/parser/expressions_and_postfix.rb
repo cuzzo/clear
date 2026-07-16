@@ -702,7 +702,7 @@ class ClearParser
       type_token: Lexer::Token,
       name: String,
       storage: Symbol,
-      type_args: T.nilable(T::Array[String]),
+      type_args: T.nilable(T::Array[Type]),
     ).returns(AST::StructLit)
   end
   def parse_struct_literal(type_token, name, storage, type_args = nil)
@@ -749,7 +749,7 @@ class ClearParser
         consume(:CHAR, '<')
         type_args = []
         until match?(:CHAR, '>')
-          type_args << type_annotation_source(parse_type_annotation)
+          type_args << parse_type_annotation
           match!(:CHAR, ',')
         end
         consume(:CHAR, '>')

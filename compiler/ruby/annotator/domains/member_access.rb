@@ -55,6 +55,7 @@ module Annotator
         end
 
         if generic_parameter_has_map_bound?(target_type_info.resolved)
+          require_generic_map_access_scope!(node.target, target_type_info)
           key_type = Type.new(TypeProjectionExpression.new(
             owner: target_type_info.resolved,
             member: :Key,
@@ -397,7 +398,7 @@ module Annotator
         node.storage = :stack
       end
 
-      sig { params(node: AST::StructLit).returns(T.nilable(Symbol)) }
+      sig { params(node: AST::StructLit).returns(T.nilable(T.any(Symbol, Type))) }
       def visit_StructLit(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 

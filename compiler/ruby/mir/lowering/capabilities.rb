@@ -659,7 +659,8 @@ module MIRLoweringCapabilities
       var_name = cap.target_label
       alias_name = cap.alias_name
       if cap.alias_explicit
-        alias_alloc_map[alias_name] = placement_for_node(var_node)
+        generic_inner = cap.resolved_type.resolved.to_s.match?(/\A[A-Z]\z/)
+        alias_alloc_map[alias_name] = generic_inner ? :heap : placement_for_node(var_node)
         alias_owner_map[alias_name] = var_name.to_s
       end
       case cap.capability
@@ -777,7 +778,8 @@ module MIRLoweringCapabilities
     # post-sync-wrapper) for the closure signature.
     resolved_source = cap.resolved_type
     rt_obj = Type.from_node!(resolved_source, context: "WITH polymorphic capability resolved type")
-    bare_type = rt_obj.respond_to?(:bare_data_type) ? rt_obj.bare_data_type : rt_obj
+    generic_inner = rt_obj.resolved.to_s.match?(/\A[A-Z]\z/)
+    bare_type = Type.new(generic_inner ? "CheatLib.PolymorphicInner(#{rt_obj.resolved})" : rt_obj.bare_data_type)
     # Keep the universal path on the same alias-attribution contract as the
     # concrete WITH path.  Structural operations in the callback (for example
     # a HashMap write through `cache AS writable`) must retain the original

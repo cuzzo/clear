@@ -442,6 +442,18 @@ module GenericAnalysis
   end
   private :generic_parameter_has_shared_map_bound?
 
+  sig { params(node: AST::Node, receiver: Type).void }
+  def require_generic_map_access_scope!(node, receiver)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    return unless generic_parameter_has_shared_map_bound?(receiver.resolved)
+
+    root = AST.root_identifier(node)
+    return if root&.symbol&.borrowed_alias
+
+    error!(node, :GENERIC_SHARED_MAP_REQUIRES_WITH, type: receiver.resolved)
+  end
+  private :require_generic_map_access_scope!
+
   sig { params(node: GenericCallNode, signature: FunctionSignature, actual_args: GenericCallArgs, type_params: T::Array[Symbol]).returns(NilClass) }
   def enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil

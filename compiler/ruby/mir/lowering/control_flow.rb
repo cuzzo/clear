@@ -244,7 +244,9 @@ module MIRLoweringControlFlow
   def collection_param_receiver?(target)
     T.bind(self, MIRLowering) rescue nil
 
-    target.is_a?(AST::Identifier) && current_function_collection_param?(target.name)
+    target.is_a?(AST::Identifier) &&
+      (current_function_collection_param?(target.name) ||
+       capability_state.with_alias_owner_map&.key?(target.name.to_s) == true)
   end
 
   sig do

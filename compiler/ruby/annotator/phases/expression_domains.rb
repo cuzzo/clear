@@ -84,6 +84,7 @@ module Annotator
 
         receiver = node.object.full_type!(context: "protocol method receiver")
         return false unless generic_parameter_has_map_bound?(receiver.resolved)
+        require_generic_map_access_scope!(node.object, receiver)
 
         operation = {"put" => :put, "delete" => :delete, "contains?" => :contains,
                      "count" => :count, "length" => :count,

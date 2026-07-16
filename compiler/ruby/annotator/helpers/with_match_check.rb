@@ -207,6 +207,7 @@ module WithMatchCheck
   def self.enforce_polymorphic_iff_rule!(node, bound_params, requires_map,
                                          fn, error_handler)
     return if node.view_kind || node.snapshot_mode
+    return if node.universal_poly
 
     has_poly_param = bound_params.any? { |p| poly_requires?(requires_map[p]) }
 

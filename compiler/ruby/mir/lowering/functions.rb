@@ -1545,10 +1545,9 @@ module MIRLoweringFunctions
     end
 
     # Standard UFCS call: method(object, args...)
-    receiver_type = Type.from_node!(node.object, context: "method receiver")
-    obj_mir = with_expected_type(receiver_type) { lower(node.object) }
     callee_sig = fn_sig_for(node.name)
     callee_sig ||= matched_call_signature(node)
+    obj_mir = lower_call_arg_from_facts(call_arg_facts(node.object, callee_sig, 0))
     args_mir = node.args.each_with_index.map do |a, idx|
       lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx + 1))
     end
