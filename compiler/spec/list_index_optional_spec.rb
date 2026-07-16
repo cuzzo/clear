@@ -146,7 +146,7 @@ RSpec.describe "optional @list indexing" do
   it "preserves @node on the element nested inside the optional" do
     type = Type.new(:"Node[]@list")
     type.elem_ownership = :node
-    result = FunctionReturn.variant(:OptionalOfElement).resolve(type, [], nil)
+    result = FunctionReturn.variant(:OptionalOfElement).resolve(type, [])
 
     expect(result.optional?).to be(true)
     expect(result.wrapped_type&.node?).to be(true)

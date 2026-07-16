@@ -5,9 +5,13 @@ require "spec_helper"
 
 RSpec.describe "production Ruby visibility" do
   it "does not bypass method visibility with send" do
-    root = File.expand_path("../ruby", __dir__)
+    roots = [
+      File.expand_path("../ruby", __dir__),
+      File.expand_path("../../tools/profile_pass_work.rb", __dir__)
+    ]
     bypass = /(?<!public_)(?<!__)\bsend\(|__send__\(/
-    violations = Dir.glob(File.join(root, "**", "*.rb")).sort.filter_map do |path|
+    paths = roots.flat_map { |root| File.file?(root) ? [root] : Dir.glob(File.join(root, "**", "*.rb")) }
+    violations = paths.sort.filter_map do |path|
       File.foreach(path).with_index(1).filter_map do |line, line_number|
         "#{path}:#{line_number}: #{line.strip}" if line.match?(bypass)
       end

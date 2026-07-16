@@ -359,6 +359,11 @@ module PassWorkProfiler
     end
 
     sig { returns(String) }
+    def active_stage_label
+      @stage_stack.current_label
+    end
+
+    sig { returns(String) }
     def to_csv
       CSV.generate do |csv|
         csv << [

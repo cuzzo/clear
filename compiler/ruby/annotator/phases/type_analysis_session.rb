@@ -1176,4 +1176,9 @@ private
   private :language_mode
   private :strict_test?
 
+  # Included grammar-domain modules implement this executor's internal
+  # protocol. They are not phase operations and must not become callable API
+  # merely because Ruby includes module methods as public by default.
+  private(*T.unsafe(public_instance_methods - Object.public_instance_methods - [:execute_type_analysis!]))
+
 end

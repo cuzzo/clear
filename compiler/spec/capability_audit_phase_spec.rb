@@ -10,7 +10,7 @@ RSpec.describe Annotator::Phases::CapabilityAuditPhase do
   end
 
   it "keeps mutable capability-audit state behind one explicit operation" do
-    public_operations = Annotator::Phases::CapabilityAuditSession.public_instance_methods(false) - Object.public_instance_methods
+    public_operations = Annotator::Phases::CapabilityAuditSession.public_instance_methods - Object.public_instance_methods
 
     expect(public_operations).to contain_exactly(:audit!)
   end

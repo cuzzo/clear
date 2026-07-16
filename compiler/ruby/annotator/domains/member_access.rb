@@ -42,7 +42,7 @@ module Annotator
         if op
           # Registry-driven: type and ownership from INDEX_OPS
           result_type = IntrinsicRegistry.to_return_def(op[:return_type])
-                                        .resolve(target_type_info, [], self)
+                                        .resolve(target_type_info, [])
           navigation = node.target.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
           if navigation && !result_type.optional?
             result_type = Type.optional_of(result_type)
@@ -690,53 +690,6 @@ module Annotator
         stamp_type!(node, Type.new(:"~#{base_type}[]"))
       end
 
-      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Type) }
-      def infer_element_type(args, node)
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
-
-        receiver = args.first
-        ti = receiver.is_a?(AST::Locatable) ? receiver.full_type!(context: "element receiver") : nil
-        ti&.element_type || Type.new(:Any)
-      end
-
-      # Infer return type for list.pop() — returns ?T (optional element type).
-
-      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Type) }
-      def infer_optional_element_type(args, node)
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
-
-        receiver = args.first
-        ti = receiver.is_a?(AST::Locatable) ? receiver.full_type!(context: "optional element receiver") : nil
-        elem = ti&.element_type || Type.new(:Any)
-        Type.optional_of(elem)
-      end
-
-      # Infer return type for stream/list `.toList()` — an owned heap list
-      # of the receiver's element type (unwrapping stream/promise tenses).
-
-      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Type) }
-      def infer_to_list(args, node)
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
-
-        receiver = T.must(args[0])
-        recv_t = receiver.full_type!(context: "toList receiver")
-        elem_t = if recv_t.dynamic_stream? || recv_t.promise_list?
-          recv_t.tense_type.element_type
-        elsif recv_t.bounded_stream?
-          recv_t.stream_element_type
-        elsif recv_t.inf_stream?
-          recv_t.inf_stream_element_type
-        elsif recv_t.open_stream?
-          recv_t.open_stream_element_type
-        else
-          recv_t.element_type
-        end
-        elem = T.must(elem_t)
-        list = Type.new(:"#{elem.resolved}[]", collection: :list, location: :heap)
-        list.elem_ownership = elem.ownership
-        list.elem_sync = elem.sync
-        list
-      end
     end
   end
 end

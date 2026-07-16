@@ -141,7 +141,7 @@ module Annotator
         end
 
         node.zig_pattern = method_def.intrinsic_pattern
-        stamp_type!(node, method_def.return_def.resolve(nil, node.args, self))
+        stamp_type!(node, method_def.return_def.resolve(nil, node.args))
         node.matched_stdlib_def = method_def
         node.matched_signature = method_def if node.respond_to?(:matched_signature=)
         method_allocates = method_def.emits_allocating?
@@ -181,7 +181,7 @@ module Annotator
           return
         end
 
-        stamp_type!(node, matched_def.return_def.resolve(nil, args, self))
+        stamp_type!(node, matched_def.return_def.resolve(nil, args))
 
         node.zig_pattern = matched_def.intrinsic_pattern
         node.matched_stdlib_def = matched_def

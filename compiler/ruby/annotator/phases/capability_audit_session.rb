@@ -152,6 +152,10 @@ module Annotator
 
       sig { returns(Annotator::FunctionRegistry) }
       def semantic_function_registry = @context.typed_program.resolution.function_registry
+
+      # Audit/query modules are implementation protocols of this executor.
+      # The completed audit is the only externally ordered operation.
+      private(*T.unsafe(public_instance_methods - Object.public_instance_methods - [:audit!]))
     end
   end
 end

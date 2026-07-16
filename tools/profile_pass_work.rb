@@ -180,10 +180,12 @@ module PassWorkProfilerTool
   module AnnotatorInstrumentation
     extend T::Sig
 
+    private
+
     sig { params(scope: T.untyped, block: T.untyped).returns(T.untyped) }
     def with_new_scope(scope = nil, &block)
       started = T.let(nil, T.nilable(Float))
-      stack = T.cast(T.unsafe(self).send(:scope_stack_for_helper), T::Array[T.untyped])
+      stack = T.cast(scope_stack_for_helper, T::Array[T.untyped])
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       PassWorkProfilerTool.measure_work("Scope.with_new_scope", 1) do
         super(scope, &block)
@@ -651,7 +653,7 @@ module PassWorkProfilerTool
   def self.install!
     AST.singleton_class.prepend(ASTWalkerInstrumentation)
     MIR.singleton_class.prepend(MIRWalkerInstrumentation)
-    SemanticAnnotator.prepend(AnnotatorInstrumentation)
+    Annotator::Phases::TypeAnalysisSession.prepend(AnnotatorInstrumentation)
     EscapeAnalysis.singleton_class.prepend(EscapeAnalysisInstrumentation)
     BgCaptureClassifier.singleton_class.prepend(BgCaptureInstrumentation)
     EffectInference.singleton_class.prepend(EffectInferenceInstrumentation)
@@ -675,7 +677,7 @@ module PassWorkProfilerTool
     profiler = PassWorkProfiler.current
     return nil unless profiler
 
-    T.unsafe(profiler).send(:current_label)
+    profiler.active_stage_label
   end
 
   class Runner

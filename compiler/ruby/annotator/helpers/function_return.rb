@@ -104,16 +104,11 @@ class FunctionReturn
     FunctionReturn.new(kind: kind)
   end
 
-  # Resolve to a concrete Type. receiver is the call's receiver type
-  # (for parametric shapes); args/host support the Infer variant's
-  # host-method dispatch. Always returns a Type, never nil.
-  # ruby-to-clear: skip
-  sig do
-    params(receiver: T.nilable(Type), args: T::Array[AST::Node],
-           host: T.nilable(Annotator::Phases::TypeAnalysisSession)).returns(Type)
-  end
-  # ruby-to-clear: skip
-  def resolve(receiver, args = [], host = nil)
+  # Resolve to a concrete Type. receiver is the call's receiver type and args
+  # provide the receiver expression for registry-driven inference. Always
+  # returns a Type, never nil.
+  sig { params(receiver: T.nilable(Type), args: T::Array[AST::Node]).returns(Type) }
+  def resolve(receiver, args = [])
     case kind
     when Kind::Fixed
       T.must(fixed)
@@ -143,28 +138,64 @@ class FunctionReturn
       list.elem_sync = key.sync
       list
     when Kind::Infer
-      resolve_infer(args, host)
+      resolve_infer(args)
     else
       raise "unknown FunctionReturn kind: #{kind.to_s}"
     end
   end
 
-  # ruby-to-clear: skip
-  sig { params(args: T::Array[AST::Node], host: T.nilable(Annotator::Phases::TypeAnalysisSession)).returns(Type) }
-  def resolve_infer(args, host)
-    raise "FunctionReturn infer requires a SemanticAnnotator host" unless host
-
+  sig { params(args: T::Array[AST::Node]).returns(Type) }
+  def resolve_infer(args)
     r = case T.must(infer)
     when :infer_element_type
-      T.unsafe(host).infer_element_type(args, nil)
+      infer_element_type(args)
     when :infer_optional_element_type
-      T.unsafe(host).infer_optional_element_type(args, nil)
+      infer_optional_element_type(args)
     when :infer_to_list
-      T.unsafe(host).infer_to_list(args, nil)
+      infer_to_list(args)
     else
       raise "unknown FunctionReturn infer method: #{T.must(infer).to_s}"
     end
 
     r.is_a?(Type) ? r : Type.new(r || :Any)
   end
+
+  sig { params(args: T::Array[AST::Node]).returns(Type) }
+  def infer_element_type(args)
+    receiver = args.first
+    type = receiver.is_a?(AST::Locatable) ? receiver.full_type!(context: "element receiver") : nil
+    type&.element_type || Type.new(:Any)
+  end
+
+  sig { params(args: T::Array[AST::Node]).returns(Type) }
+  def infer_optional_element_type(args)
+    Type.optional_of(infer_element_type(args))
+  end
+
+  sig { params(args: T::Array[AST::Node]).returns(Type) }
+  def infer_to_list(args)
+    receiver = T.must(args.first)
+    receiver_type = receiver.full_type!(context: "toList receiver")
+    element_type = if receiver_type.dynamic_stream? || receiver_type.promise_list?
+      receiver_type.tense_type.element_type
+    elsif receiver_type.bounded_stream?
+      receiver_type.stream_element_type
+    elsif receiver_type.inf_stream?
+      receiver_type.inf_stream_element_type
+    elsif receiver_type.open_stream?
+      receiver_type.open_stream_element_type
+    else
+      receiver_type.element_type
+    end
+    element = T.must(element_type)
+    list = Type.new(:"#{element.resolved}[]", collection: :list, location: :heap)
+    list.elem_ownership = element.ownership
+    list.elem_sync = element.sync
+    list
+  end
+
+  private :infer_element_type
+  private :infer_optional_element_type
+  private :infer_to_list
+  private :resolve_infer
 end

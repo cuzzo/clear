@@ -112,7 +112,7 @@ module MethodAnalysis
 
     # Set tag and return type
     node.public_send(:"#{tag_field}=", node.name.to_sym)
-    stamp_type!(node, defn.return_def.resolve(obj_type, [], self))
+    stamp_type!(node, defn.return_def.resolve(obj_type, []))
     node.container_borrow = defn.intrinsic_container_borrow?
 
     # Resolve zig pattern -- pick variant based on receiver type.

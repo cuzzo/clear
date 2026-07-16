@@ -345,9 +345,8 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers collection return inference across stream and list receiver shapes" do
-    ann = quiet_annotator
-
     receiver = AST::Identifier.new(token, "xs")
+    return_shape = FunctionReturn.infer(:infer_to_list)
     [
       [Type.new(:"~Int64[]"), :Int64],
       [Type.new(:"~Int64[3]"), :Int64],
@@ -356,7 +355,7 @@ RSpec.describe "annotator branch gap burndown" do
       [Type.new(:"String[]"), :String],
     ].each do |receiver_type, expected_elem|
       receiver.full_type = receiver_type
-      inferred = ann.send(:infer_to_list, [receiver], nil)
+      inferred = return_shape.resolve(nil, [receiver])
       expect(inferred.element_type.resolved).to eq(expected_elem)
       expect(inferred.list_collection?).to be(true)
       expect(inferred.location).to eq(:heap)
