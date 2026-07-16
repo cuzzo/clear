@@ -1964,6 +1964,36 @@ module AST
     def child_bodies = members.map(&:body)
   end
 
+  ConformanceDef = Struct.new(:token, :binders, :protocol_type, :owner_type, :members) do
+    extend T::Sig
+    include Locatable
+    include HasBodies
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:binders] = (self[:binders] || []).dup
+      self[:protocol_type] = Type.new(self[:protocol_type])
+      self[:owner_type] = Type.new(self[:owner_type])
+      self[:members] = (self[:members] || []).dup
+    end
+
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    def binders = self[:binders]
+
+    sig { returns(Type) }
+    def protocol_type = self[:protocol_type]
+
+    sig { returns(Type) }
+    def owner_type = self[:owner_type]
+
+    sig { returns(T::Array[AST::FunctionDef]) }
+    def members = self[:members]
+
+    sig { returns(T::Array[RawBody]) }
+    def child_bodies = members.map(&:body)
+  end
+
   class StructField
     extend T::Sig
 

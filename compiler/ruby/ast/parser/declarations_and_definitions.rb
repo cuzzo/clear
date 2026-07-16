@@ -400,11 +400,41 @@ class ClearParser
     )
   end
 
-  sig { returns(AST::ImplementationDef) }
+  sig { returns(T.any(AST::ImplementationDef, AST::ConformanceDef)) }
   def parse_implementation_def
+    conformance = conformance_implementation_header?
     token = consume(:KEYWORD, 'IMPLEMENTATION')
+    return parse_conformance_def(token) if conformance
+
     owner_token = consume(:TYPE_ID)
     binders = parse_generic_type_params
+    members = parse_implementation_members
+    AST::ImplementationDef.new(token, owner_token.text!, owner_token, binders, members)
+  end
+
+  sig { returns(T::Boolean) }
+  def conformance_implementation_header?
+    index = @pos
+    while index < @tokens.length
+      token = T.must(@tokens[index])
+      return true if token.type == :KEYWORD && token.value == 'FOR'
+      return false if token.type == :CHAR && token.value == '{'
+      index += 1
+    end
+    false
+  end
+
+  sig { params(token: Lexer::Token).returns(AST::ConformanceDef) }
+  def parse_conformance_def(token)
+    binders = match?(:CHAR, '<') ? parse_generic_type_params : []
+    protocol_type = parse_type_annotation
+    consume(:KEYWORD, 'FOR')
+    owner_type = parse_type_annotation
+    AST::ConformanceDef.new(token, binders, protocol_type, owner_type, parse_implementation_members)
+  end
+
+  sig { returns(T::Array[AST::FunctionDef]) }
+  def parse_implementation_members
     consume(:CHAR, '{')
     members = T.let([], T::Array[AST::FunctionDef])
     until match?(:CHAR, '}')
@@ -429,7 +459,7 @@ class ClearParser
       members << member
     end
     consume(:CHAR, '}')
-    AST::ImplementationDef.new(token, owner_token.text!, owner_token, binders, members)
+    members
   end
 
   sig { params(visibility: Symbol).returns(AST::EnumDef) }

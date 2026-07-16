@@ -23,6 +23,7 @@ module Annotator
       const :function_declarations, T::Array[AST::FunctionDef]
       const :extern_function_declarations, T::Array[AST::ExternFnDecl]
       const :implementation_declarations, T::Array[AST::ImplementationDef]
+      const :conformance_declarations, T::Array[AST::ConformanceDef]
       const :union_method_declarations, T::Array[AST::UnionDef]
       const :body_statements, T::Array[AST::Locatable]
       const :error_type_registrations, T::Array[ErrorTypeRegistration]
@@ -38,6 +39,7 @@ module Annotator
         function_declarations = T.let([], T::Array[AST::FunctionDef])
         extern_function_declarations = T.let([], T::Array[AST::ExternFnDecl])
         implementation_declarations = T.let([], T::Array[AST::ImplementationDef])
+        conformance_declarations = T.let([], T::Array[AST::ConformanceDef])
         union_method_declarations = T.let([], T::Array[AST::UnionDef])
         body_statements = T.let([], T::Array[AST::Locatable])
         error_type_registrations = collect_error_type_registrations(program)
@@ -58,6 +60,8 @@ module Annotator
             extern_function_declarations << stmt
           when AST::ImplementationDef
             implementation_declarations << stmt
+          when AST::ConformanceDef
+            conformance_declarations << stmt
           else
             body_statements << stmt
           end
@@ -69,6 +73,7 @@ module Annotator
           function_declarations: function_declarations,
           extern_function_declarations: extern_function_declarations,
           implementation_declarations: implementation_declarations,
+          conformance_declarations: conformance_declarations,
           union_method_declarations: union_method_declarations,
           body_statements: body_statements,
           error_type_registrations: error_type_registrations

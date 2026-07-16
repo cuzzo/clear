@@ -66,4 +66,35 @@ RSpec.describe "generic protocol declarations" do
       transpile("STRUCT Box<S: Missing> { storage: S }")
     }.to raise_error(CompilerError, /Unknown generic protocol Missing/)
   end
+
+  it "parses concrete and generic explicit conformance headers without backtracking" do
+    concrete = <<~CLEAR
+      IMPLEMENTATION Named FOR User {
+        METHOD name(self) RETURNS String -> RETURN "user"; END
+      }
+    CLEAR
+    generic = <<~CLEAR
+      IMPLEMENTATION<K, V> Lookup<K, V> FOR Store<K, V> {
+        METHOD get(self, key: K) RETURNS !?V -> RETURN NIL; END
+      }
+    CLEAR
+
+    concrete_node = ClearParser.new(Lexer.new(concrete).tokenize, concrete).parse.statements.first
+    generic_node = ClearParser.new(Lexer.new(generic).tokenize, generic).parse.statements.first
+    expect(concrete_node).to be_a(AST::ConformanceDef)
+    expect(concrete_node.protocol_type.resolved).to eq(:Named)
+    expect(concrete_node.owner_type.resolved).to eq(:User)
+    expect(generic_node.binders.map(&:name)).to eq(%w[K V])
+    expect(generic_node.protocol_type.generic_args.map(&:resolved)).to eq(%i[K V])
+    expect(generic_node.owner_type.generic_args.map(&:resolved)).to eq(%i[K V])
+    index = Annotator::Phases::DeclarationIndexer.index(AST::Program.new(nil, [concrete_node]))
+    expect(index.conformance_declarations).to eq([concrete_node])
+  end
+
+  it "diagnoses an incomplete implementation header as an inherent declaration" do
+    source = "IMPLEMENTATION"
+    expect {
+      ClearParser.new(Lexer.new(source).tokenize, source).parse
+    }.to raise_error(ParserError, /Expected TYPE_ID/)
+  end
 end
