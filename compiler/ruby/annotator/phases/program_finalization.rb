@@ -10,7 +10,14 @@ module Annotator
       extend T::Sig
 
       sig { params(program: AST::Program).void }
-      def finalize_program_semantics!(program)
+      def finalize_program_type!(program)
+        T.bind(self, SemanticAnnotator)
+
+        stamp_program_result_type!(program)
+      end
+
+      sig { params(program: AST::Program).void }
+      def finalize_program_audit!(program)
         T.bind(self, SemanticAnnotator)
 
         check_indirect_reentrancy!
@@ -34,7 +41,6 @@ module Annotator
         finalize_async_execution_shapes!(program)
 
         restamp_function_metadata!
-        stamp_program_result_type!(program)
       end
 
       sig { void }

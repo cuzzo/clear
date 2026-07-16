@@ -12,6 +12,7 @@ require_relative "../semantic/ownership_transport"
 require_relative "phases/annotation_boundary"
 require_relative "phases/body_analysis"
 require_relative "phases/builtin_environment"
+require_relative "phases/capability_audit_phase"
 require_relative "phases/declaration_index"
 require_relative "phases/auto_finalization"
 require_relative "phases/deferred_validation"
@@ -634,8 +635,10 @@ class SemanticAnnotator
     @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
     @language_mode = node.language_mode
     visit(node)
-    run_whole_program_semantics!
-    run_deferred_validations!
+    typed_program = @annotation_products.typed_program
+    raise "type analysis did not publish its product" unless typed_program
+    audit = audit_program!(typed_program)
+    @annotation_products.publish_capability_audit!(audit)
     @semantic_index = T.let(SemanticIndex.new(
       program: node,
       root_scope: semantic_root_scope,
@@ -678,10 +681,20 @@ private
     operations = Annotator::Phases::TypeAnalysisOperations.new(
       analyze_bodies: ->(declarations, program) { analyze_program_bodies!(declarations, program) },
       resolve_catches: ->(declarations) { resolve_catch_clauses_from_declarations!(declarations) },
-      finalize_program: ->(program) { finalize_program_semantics!(program) },
+      finalize_program: ->(program) { finalize_program_type!(program) },
       finalize_auto_types: ->(program) { finalize_auto_types!(program) }
     )
     Annotator::Phases::TypeAnalysisPhase.run(resolution: resolution, operations: operations)
+  end
+
+  sig { params(typed_program: Annotator::Phases::TypedProgramFacts).returns(Annotator::Phases::CapabilityAuditReport) }
+  def audit_program!(typed_program)
+    operations = Annotator::Phases::CapabilityAuditOperations.new(
+      finalize_program_audit: ->(program) { finalize_program_audit!(program) },
+      analyze_whole_program: -> { run_whole_program_semantics! },
+      run_deferred_validations: -> { run_deferred_validations! }
+    )
+    Annotator::Phases::CapabilityAuditPhase.run(typed_program: typed_program, operations: operations)
   end
 
   sig { params(node: AST::Program).returns(NilClass) }
