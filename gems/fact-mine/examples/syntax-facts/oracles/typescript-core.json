@@ -162,7 +162,7 @@
           "block": false,
           "conditional": false,
           "control": "always",
-          "function": "audit",
+          "function": "processItem",
           "line": 58,
           "message": "log",
           "owner": "TypeScriptSyntaxFactsCore",
@@ -355,6 +355,19 @@
           "visibility": "private"
         },
         {
+          "line": 58,
+          "name": "processItem",
+          "owner": "TypeScriptSyntaxFactsCore",
+          "params": [],
+          "span": [
+            58,
+            10,
+            58,
+            85
+          ],
+          "visibility": "public"
+        },
+        {
           "line": 69,
           "name": "ready",
           "owner": "TypeScriptSyntaxFactsCore",
@@ -487,7 +500,7 @@
         },
         {
           "detail": "console.log",
-          "function": "audit",
+          "function": "processItem",
           "kind": "hidden_io",
           "line": 58,
           "span": [
@@ -617,7 +630,7 @@
         },
         {
           "field": "log",
-          "function": "audit",
+          "function": "processItem",
           "line": 58,
           "owner": "TypeScriptSyntaxFactsCore",
           "receiver": "console",

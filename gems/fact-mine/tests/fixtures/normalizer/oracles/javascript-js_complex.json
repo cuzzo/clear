@@ -70,6 +70,9 @@
                         "Node": {
                           "children": [
                             {
+                              "Symbol": "fn"
+                            },
+                            {
                               "Node": {
                                 "children": [
                                   "Nil",
@@ -141,12 +144,12 @@
                               }
                             }
                           ],
-                          "first_column": 11,
+                          "first_column": 6,
                           "first_lineno": 2,
                           "last_column": 26,
                           "last_lineno": 2,
-                          "text": "(x, y) => x + y",
-                          "type": "LAMBDA"
+                          "text": "fn = (x, y) => x + y",
+                          "type": "DEFN"
                         }
                       }
                     ],
@@ -191,6 +194,9 @@
                       {
                         "Node": {
                           "children": [
+                            {
+                              "Symbol": "fn2"
+                            },
                             {
                               "Node": {
                                 "children": [
@@ -271,12 +277,12 @@
                               }
                             }
                           ],
-                          "first_column": 12,
+                          "first_column": 6,
                           "first_lineno": 3,
                           "last_column": 34,
                           "last_lineno": 3,
-                          "text": "x => { return x * 2; }",
-                          "type": "LAMBDA"
+                          "text": "fn2 = x => { return x * 2; }",
+                          "type": "DEFN"
                         }
                       }
                     ],

@@ -245,6 +245,15 @@ impl<'a> LocalFlow<'a> {
             self.collect_nested_owners(node, &next_owners, out);
         } else if METHOD_TYPES.contains(&node.r#type.as_str()) && owners.is_empty() {
             out.push(self.method_summary(node, None));
+            // A normalized DEFN is already an adapter-validated executable
+            // declaration. Continue through its body so named local
+            // functions and variable-bound callables receive the same
+            // CFG/DFG and complexity facts as top-level declarations.
+            if self.behavior.nested_function_is_local_callable(node) {
+                for child in node.children.iter().filter_map(ast::node) {
+                    self.collect_methods(child, owners, out);
+                }
+            }
         } else {
             for child in node.children.iter().filter_map(ast::node) {
                 self.collect_methods(child, owners, out);
@@ -267,7 +276,9 @@ impl<'a> LocalFlow<'a> {
                 // constructor or initializer. Preserve only declarations the
                 // language adapter positively identifies as owner methods;
                 // ordinary nested/inline declarations stay out of this pass.
-                if self.behavior.nested_function_is_owner_method(child)
+                if (self.behavior.nested_function_is_owner_method(child)
+                    || (self.behavior.nested_function_is_local_callable(child)
+                        && self.methods_by_span.contains_key(&span)))
                     && !out.iter().any(|method| method.span == span)
                 {
                     out.push(self.method_summary(child, None));

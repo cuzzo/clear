@@ -4,7 +4,7 @@ Array:
   at: constant
   length: constant
   pop: constant
-  push: constant
+  push: linear_materialize
   shift: linear_scan
   unshift: linear_scan
   includes: linear_scan
@@ -51,11 +51,14 @@ Math:
   floor: constant
   round: constant
   trunc: constant
+  log: constant
+  max: constant
 Number:
   isFinite: constant
   isInteger: constant
   isNaN: constant
   parseInt: linear_scan
+  toFixed: linear_materialize
 BigInt:
   toString: linear_materialize
 Function:
@@ -68,21 +71,49 @@ EventEmitter:
 Process:
   on: constant
   removeListener: linear_scan
+Map:
+  get: linear_scan
+  has: linear_scan
+  set: linear_scan
+  delete: linear_scan
+  clear: linear_scan
+  size: constant
+  entries: constant
+  keys: constant
+  values: constant
+WeakMap:
+  get: linear_scan
+  has: linear_scan
+  set: linear_scan
+  delete: linear_scan
+Buffer:
+  toString: linear_materialize
+BufferConstructor:
+  from: linear_materialize
+PlatformPath:
+  isAbsolute: linear_scan
+  join: linear_materialize
+  dirname: linear_materialize
+  basename: linear_materialize
+  relative: linear_materialize
+  resolve: linear_materialize
+  normalize: linear_materialize
+  parse: linear_materialize
 Module:
   createRequire: constant
 Hash:
-  get: constant
-  has: constant
-  set: constant
-  delete: constant
+  get: linear_scan
+  has: linear_scan
+  set: linear_scan
+  delete: linear_scan
   size: constant
   entries: linear_materialize
   keys: linear_materialize
   values: linear_materialize
 Set:
-  add: constant
-  has: constant
-  delete: constant
+  add: linear_scan
+  has: linear_scan
+  delete: linear_scan
   size: constant
   entries: linear_materialize
   keys: linear_materialize
@@ -115,17 +146,40 @@ String:
   endsWith: linear_scan
   charAt: constant
   length: constant
+  repeat: linear_materialize
+  toUpperCase: linear_materialize
+  toLowerCase: linear_materialize
 Intrinsic:
   "Array.isArray": constant
   "path.isAbsolute": linear_scan
   "path.join": linear_materialize
+  "PlatformPath.isAbsolute": linear_scan
+  "PlatformPath.join": linear_materialize
+  "PlatformPath.dirname": linear_materialize
+  "PlatformPath.basename": linear_materialize
+  "PlatformPath.relative": linear_materialize
+  "PlatformPath.resolve": linear_materialize
+  "PlatformPath.normalize": linear_materialize
+  "PlatformPath.parse": linear_materialize
   decodeURIComponent: linear_materialize
   isFinite: constant
   isNaN: constant
   "url.fileURLToPath": linear_materialize
 ExternalLatency:
   "fs.existsSync": linear_scan
-  "Process.cwd": constant
+  "fs.mkdirSync": linear_scan
+  "fs.readdirSync": linear_materialize
+  "fs.statSync": linear_scan
+  "fs.unlinkSync": linear_scan
+  "fs.writeFileSync": linear_scan
+  "fs/promises.mkdir": linear_scan
+  "fs/promises.readFile": linear_materialize
+  "fs/promises.writeFile": linear_scan
+  "Console.error": linear_materialize
+  "Console.log": linear_materialize
+  "MessagePort.postMessage": linear_materialize
+  "Worker.postMessage": linear_materialize
+  "Process.cwd": linear_materialize
   "Process.emitWarning": constant
   "Module.resolve": linear_scan
   "Stream.pipeline": linear_scan
@@ -140,6 +194,7 @@ SemanticSymbolParametricCost:
   'lib/`lib.es2015.core.d.ts`/Array#findIndex().': callback_linear
   'lib/`lib.es5.d.ts`/Function#apply().': callback_once
   'lib/`lib.es5.d.ts`/Function#call().': callback_once
+  'lib/`lib.es5.d.ts`/CallableFunction#call().': callback_once
   '`events.d.ts`/`"node:events"`/global/NodeJS/EventEmitter#emit().': callback_linear
   '`diagnostics_channel.d.ts`/`"node:diagnostics_channel"`/TracingChannel#traceSync().': callback_once
 Namespace:

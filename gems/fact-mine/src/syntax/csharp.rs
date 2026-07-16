@@ -196,6 +196,11 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         external_symbol_owner(symbol)
     }
 
+    fn scip_noncall_access_is_callable(&self, symbol: &str) -> bool {
+        scip_dotnet_parts(symbol)
+            .is_some_and(|(_, descriptor)| descriptor.ends_with('.') && !descriptor.ends_with(")."))
+    }
+
     fn owner_supertypes(&self, node: &Node) -> Vec<String> {
         let header = node.text.split('{').next().unwrap_or(&node.text);
         let before_constraints = header.split(" where ").next().unwrap_or(header);

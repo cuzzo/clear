@@ -436,10 +436,13 @@ impl<'source> TreeSitterNormalizer<'source> {
             normalizer.elide_implicit_nil_body(body)
         });
         let scope = self.scope(body, args, node);
+        let declaration_node = self
+            .normalization_adapter
+            .function_declaration_node(node, self.source);
         Some(self.wrap(
             "DEFN",
             vec![Child::Symbol(name), Child::Node(Box::new(scope))],
-            node,
+            declaration_node,
         ))
     }
 
@@ -6134,7 +6137,6 @@ impl<'source> TreeSitterNormalizer<'source> {
     pub(in crate::ast) fn class_like_owner_kind(&self, kind: &str) -> bool {
         self.normalization_adapter.class_like_owner_kind(kind)
     }
-
 
     pub(in crate::ast) fn if_node_kind(&self, kind: &str) -> bool {
         self.normalization_adapter.if_node_kind(kind)

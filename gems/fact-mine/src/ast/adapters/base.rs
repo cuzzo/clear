@@ -244,6 +244,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    /// Source declaration whose span owns the callable's compiler symbol.
+    /// Most languages define the symbol on the function node itself. Some
+    /// grammars represent a named callable as an anonymous expression bound
+    /// by its parent declaration.
+    fn function_declaration_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> TreeSitterNode<'tree> {
+        node
+    }
+
     /// Tree-sitter error recovery can occasionally label a malformed region
     /// as a function definition. Adapters with syntax that makes a reliable
     /// declaration check possible may reject that recovery node here.

@@ -92,6 +92,52 @@ fn declared_method_types_are_normalized_from_language_owned_syntax() -> Result<(
 }
 
 #[test]
+fn typescript_variable_bound_callables_are_emitted_as_project_methods() -> Result<()> {
+    let document = syntax::parse_file(fixture("typescript_callable.ts"), Language::TypeScript)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let methods = output
+        .methods
+        .iter()
+        .map(|method| method.name.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(methods.contains(&"double"), "methods={methods:?}");
+    assert!(methods.contains(&"increment"), "methods={methods:?}");
+    assert!(methods.contains(&"useCallable"), "methods={methods:?}");
+    let double = output
+        .methods
+        .iter()
+        .find(|method| method.name == "double")
+        .context("missing double method")?;
+    let binding_column = fs::read_to_string(fixture("typescript_callable.ts"))?
+        .lines()
+        .next()
+        .and_then(|line| line.find("double"))
+        .context("missing double binding")?;
+    assert!(
+        double.span.is_some_and(|span| span[1] <= binding_column),
+        "span={:?}, binding_column={binding_column}",
+        double.span
+    );
+    assert!(output.calls.iter().any(|call| call.message == "double"));
+    assert!(output.calls.iter().any(|call| call.message == "increment"));
+    let nested_fact = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "nested")
+        .context("missing complexity facts for nested bound callable")?;
+    assert!(
+        nested_fact
+            .call_contexts
+            .iter()
+            .any(|context| context.message == "increment"),
+        "contexts={:?}",
+        nested_fact.call_contexts
+    );
+    Ok(())
+}
+
+#[test]
 fn source_facing_fields_preserve_native_declared_type_spelling() -> Result<()> {
     for (fixture_name, language, field, expected) in [
         (
@@ -292,7 +338,10 @@ func run(value worker) {
         .context("missing Work call")?;
 
     assert_eq!(call.receiver_type.as_deref(), Some("worker"));
-    assert_eq!(call.receiver_type_origin.as_deref(), Some("declared_parameter"));
+    assert_eq!(
+        call.receiver_type_origin.as_deref(),
+        Some("declared_parameter")
+    );
     Ok(())
 }
 
@@ -333,11 +382,14 @@ func run(value error, values bundle, ch chan error) {
             .all(|call| call.receiver_type.as_deref() == Some("error")),
         "{calls:#?}"
     );
-    assert!(calls.iter().all(|call| {
-        call.known_time_complexity.as_deref() == Some("O(C)")
-            && call.complexity_bound_quality.as_deref()
-                == Some("upper_bound_parametric_callback_once")
-    }), "{calls:#?}");
+    assert!(
+        calls.iter().all(|call| {
+            call.known_time_complexity.as_deref() == Some("O(C)")
+                && call.complexity_bound_quality.as_deref()
+                    == Some("upper_bound_parametric_callback_once")
+        }),
+        "{calls:#?}"
+    );
     Ok(())
 }
 
@@ -365,12 +417,15 @@ func (w *wrapper) projected() { w.worker.fn(1) }
         .collect::<Vec<_>>();
 
     assert_eq!(calls.len(), 2, "{calls:#?}");
-    assert!(calls.iter().all(|call| {
-        call.callback_receiver
-            && call.known_time_complexity.as_deref() == Some("O(C)")
-            && call.complexity_bound_quality.as_deref()
-                == Some("upper_bound_parametric_callback_once")
-    }), "{calls:#?}");
+    assert!(
+        calls.iter().all(|call| {
+            call.callback_receiver
+                && call.known_time_complexity.as_deref() == Some("O(C)")
+                && call.complexity_bound_quality.as_deref()
+                    == Some("upper_bound_parametric_callback_once")
+        }),
+        "{calls:#?}"
+    );
     Ok(())
 }
 
@@ -903,16 +958,22 @@ fn declaration_pressure_is_normalized_for_sorbet_and_typed_python() -> Result<()
     write!(ruby, "extend T::Sig\nPayload = T.type_alias {{ T.nilable(T.any(String, Integer, Float, Symbol)) }}\n")?;
     let ruby_doc = syntax::parse_file(ruby.path().to_path_buf(), Language::Ruby)?;
     let ruby_rows = profile::extract_declaration_type_pressures(&ruby_doc);
-    let ruby_alias = ruby_rows.iter().find(|row| row.declaration_name == "Payload")
+    let ruby_alias = ruby_rows
+        .iter()
+        .find(|row| row.declaration_name == "Payload")
         .context("missing Sorbet alias pressure")?;
     assert_eq!(ruby_alias.union_width, 4);
     assert!(ruby_alias.nilable);
 
     let mut python = tempfile::Builder::new().suffix(".py").tempfile()?;
-    write!(python, "def parse(value: str | int | float | bool | None) -> object:\n    return value\n")?;
+    write!(
+        python,
+        "def parse(value: str | int | float | bool | None) -> object:\n    return value\n"
+    )?;
     let python_doc = syntax::parse_file(python.path().to_path_buf(), Language::Python)?;
     let python_rows = profile::extract_declaration_type_pressures(&python_doc);
-    let python_param = python_rows.iter()
+    let python_param = python_rows
+        .iter()
         .find(|row| row.declaration_name == "parse" && row.slot == "param:value")
         .context("missing Python parameter pressure")?;
     assert_eq!(python_param.union_width, 4);
@@ -1104,15 +1165,18 @@ end
         .find(|record| record["method"] == "nested_scope")
         .context("missing nested_scope return origin")?;
 
-    assert_eq!(origin["candidate_type"], serde_json::json!({
-        "kind": "Primitive",
-        "data": "Token",
-    }), "{origin:#}");
+    assert_eq!(
+        origin["candidate_type"],
+        serde_json::json!({
+            "kind": "Primitive",
+            "data": "Token",
+        }),
+        "{origin:#}"
+    );
     assert_eq!(origin["confidence"], "strong");
     assert_eq!(origin["blockers"], serde_json::json!([]));
     assert_eq!(
-        nested_origin["class"],
-        "Outer::Inner::Deep",
+        nested_origin["class"], "Outer::Inner::Deep",
         "nested owners must be qualified exactly once"
     );
     assert_eq!(
@@ -1146,10 +1210,9 @@ end
         "a nil default must not replace the declared nilable parameter type"
     );
     assert!(
-        output
-            .dead_nil_checks
-            .iter()
-            .all(|record| !record["code"].as_str().is_some_and(|code| code.contains("class.name"))),
+        output.dead_nil_checks.iter().all(|record| !record["code"]
+            .as_str()
+            .is_some_and(|code| code.contains("class.name"))),
         "Module#name may be nil for anonymous classes"
     );
 

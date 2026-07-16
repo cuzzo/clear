@@ -118,17 +118,38 @@ pub(crate) fn scip_global_parts<'a>(
     Some((fields.next()?, fields.next()?, fields.next()?))
 }
 
+/// Split a SCIP descriptor on structural `/` separators while preserving
+/// separators inside backtick-escaped descriptors (for example the
+/// TypeScript module descriptor `"fs/promises"`).
+pub(crate) fn scip_descriptor_segments(descriptor: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut start = 0usize;
+    let mut quoted = false;
+    for (offset, character) in descriptor.char_indices() {
+        if character == '`' {
+            quoted = !quoted;
+        } else if character == '/' && !quoted {
+            segments.push(&descriptor[start..offset]);
+            start = offset + 1;
+        }
+    }
+    segments.push(&descriptor[start..]);
+    segments
+}
+
 /// Return the nearest enclosing type/namespace descriptor. This intentionally
 /// does not infer a source-language type; adapters decide whether the returned
 /// descriptor is a class, namespace, module, or standard-library owner.
 pub(crate) fn scip_descriptor_owner(descriptor: &str) -> Option<String> {
-    let callable = descriptor.rsplit('/').next()?;
+    let segments = scip_descriptor_segments(descriptor);
+    let callable = *segments.last()?;
     if let Some((owner, _)) = callable.split_once('#') {
         return Some(owner.trim_matches('`').to_string());
     }
-    descriptor
-        .rsplit_once('/')
-        .map(|(prefix, _)| prefix.rsplit('/').next().unwrap_or(prefix))
+    segments
+        .iter()
+        .rev()
+        .nth(1)
         .map(|owner| owner.trim_matches('`').to_string())
         .filter(|owner| !owner.is_empty())
 }
@@ -668,6 +689,14 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     fn external_symbol_owner(&self, _symbol: &str) -> Option<String> {
         None
     }
+
+    /// Whether a non-call SCIP occurrence can execute source-language code.
+    /// Most field/property-shaped symbols are data access; adapters opt in
+    /// only when their language gives that syntax callable semantics.
+    fn scip_noncall_access_is_callable(&self, _symbol: &str) -> bool {
+        false
+    }
+
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         ControlFlowProfile::neutral_ref()
     }
@@ -722,6 +751,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// method on an anonymous owner rather than a lexical/local declaration.
     /// This is false unless the language's declaration model proves it.
     fn nested_function_is_owner_method(&self, _function: &Node) -> bool {
+        false
+    }
+
+    /// Whether adapter-validated DEFNs nested in an executable body are
+    /// independently callable declarations rather than syntax owned by the
+    /// enclosing method.
+    fn nested_function_is_local_callable(&self, _function: &Node) -> bool {
         false
     }
 

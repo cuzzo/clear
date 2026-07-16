@@ -85,6 +85,18 @@ pub(crate) fn external_symbol_owner(language: &str, symbol: &str) -> Option<Stri
         .and_then(|language| normalized_behavior::behavior(language).external_symbol_owner(symbol))
 }
 
+/// Whether a compiler symbol without callable descriptor punctuation denotes
+/// a source-language access that can execute user code. This is intentionally
+/// language-owned: C# properties dispatch through accessors, while an
+/// identically shaped field symbol in most languages is only data projection.
+pub(crate) fn scip_noncall_access_is_callable(language: &str, symbol: &str) -> bool {
+    Language::parse(language)
+        .map(|language| {
+            normalized_behavior::behavior(language).scip_noncall_access_is_callable(symbol)
+        })
+        .unwrap_or(false)
+}
+
 /// Shared algebra for calls whose target identity is proven but whose cost is
 /// parameterized by callback/implementation work.
 pub(crate) fn parametric_call_complexity(kind: &str) -> Option<(&'static str, &'static str)> {

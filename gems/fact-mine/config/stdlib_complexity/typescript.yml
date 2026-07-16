@@ -2,7 +2,7 @@ Array:
   at: constant
   length: constant
   pop: constant
-  push: constant
+  push: linear_materialize
   shift: linear_scan
   unshift: linear_scan
   includes: linear_scan
@@ -23,25 +23,35 @@ Array:
   reduce: linear_scan
   sort: sort
 Hash:
-  add: constant
-  delete: constant
-  get: constant
-  has: constant
-  set: constant
+  add: linear_scan
+  delete: linear_scan
+  get: linear_scan
+  has: linear_scan
+  set: linear_scan
   size: constant
   entries: linear_materialize
   keys: linear_materialize
   values: linear_materialize
 Set:
-  add: constant
-  delete: constant
-  get: constant
-  has: constant
-  set: constant
+  add: linear_scan
+  delete: linear_scan
+  get: linear_scan
+  has: linear_scan
+  set: linear_scan
   size: constant
   entries: linear_materialize
   keys: linear_materialize
   values: linear_materialize
+Map:
+  get: linear_scan
+  has: linear_scan
+  set: linear_scan
+  delete: linear_scan
+  clear: linear_scan
+  size: constant
+  entries: constant
+  keys: constant
+  values: constant
 string:
   includes: linear_scan
   indexOf: linear_scan

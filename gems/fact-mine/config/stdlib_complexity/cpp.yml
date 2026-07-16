@@ -5,7 +5,7 @@ Array:
   front: constant
   size: constant
   empty: constant
-  push_back: constant
+  push_back: linear_materialize
   pop_back: constant
   find: linear_scan
   begin: constant
@@ -13,13 +13,13 @@ Array:
   sort: sort
 Hash:
   at: constant
-  find: constant
-  contains: constant
+  find: linear_scan
+  contains: linear_scan
   size: constant
   empty: constant
 Set:
-  find: constant
-  contains: constant
+  find: linear_scan
+  contains: linear_scan
   size: constant
   empty: constant
 String:

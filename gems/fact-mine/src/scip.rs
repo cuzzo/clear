@@ -139,6 +139,12 @@ impl Occurrence {
 }
 
 #[derive(Clone, Debug)]
+struct SelectedOccurrences<'a> {
+    primary: &'a Occurrence,
+    alternatives: Vec<&'a Occurrence>,
+}
+
+#[derive(Clone, Debug)]
 struct Definition {
     method_id: Option<String>,
 }
@@ -203,10 +209,45 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
             continue;
         };
         let source = fs::read_to_string(&call.path).unwrap_or_default();
-        let Some(occurrence) = select_call_occurrence(call, document, &source, language) else {
+        let Some(selected) = select_call_occurrences(call, document, &source, language) else {
             stats.unmatched_calls += 1;
             continue;
         };
+
+        let occurrence = selected.primary;
+        let selected_symbols = selected
+            .alternatives
+            .iter()
+            .map(|candidate| candidate.symbol.as_str())
+            .collect::<BTreeSet<_>>();
+
+        let target_ids = selected
+            .alternatives
+            .iter()
+            .flat_map(|candidate| {
+                let key = definition_key(&document.relative_path, &candidate.symbol);
+                definitions.get(&key).into_iter().flatten()
+            })
+            .filter_map(|definition| definition.method_id.as_deref())
+            .collect::<BTreeSet<_>>();
+        let candidate_costs = selected
+            .alternatives
+            .iter()
+            .filter_map(|candidate| {
+                syntax::external_symbol_call_complexity(language, &candidate.symbol, &call.message)
+            })
+            .collect::<Vec<_>>();
+        let converged_cost = (selected_symbols.len() == 1
+            || (candidate_costs.len() == selected_symbols.len()
+                && candidate_costs
+                    .windows(2)
+                    .all(|pair| equivalent_external_cost(&pair[0], &pair[1]))))
+        .then(|| candidate_costs.into_iter().next())
+        .flatten();
+        if selected_symbols.len() > 1 && target_ids.is_empty() && converged_cost.is_none() {
+            stats.unmatched_calls += 1;
+            continue;
+        }
 
         stats.matched_occurrences += 1;
         call.semantic_symbol = Some(occurrence.symbol.clone());
@@ -214,13 +255,6 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
         call.candidate_targets.clear();
         call.candidate_reason = None;
 
-        let key = definition_key(&document.relative_path, &occurrence.symbol);
-        let target_ids = definitions
-            .get(&key)
-            .into_iter()
-            .flatten()
-            .filter_map(|definition| definition.method_id.as_deref())
-            .collect::<BTreeSet<_>>();
         if target_ids.len() == 1 {
             let target = target_ids.into_iter().next().unwrap().to_string();
             call.kind = "resolved_call".to_string();
@@ -243,14 +277,20 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
             call.complexity_missing_kind = Some(metadata.missing_cost_kind);
             let parametric_cost = metadata.parametric_cost;
             stats.external_symbols += 1;
-            if let Some(complexity) =
+            if let Some(complexity) = converged_cost.or_else(|| {
                 syntax::external_symbol_call_complexity(language, &occurrence.symbol, &call.message)
-            {
+            }) {
                 call.known_time_complexity = Some(complexity.time.to_string());
                 call.known_space_complexity = Some(complexity.space.to_string());
                 call.complexity_provenance = Some(complexity.provenance.to_string());
                 call.complexity_bound_quality = Some(complexity.bound_quality.to_string());
                 call.complexity_candidates = complexity.candidates;
+                if selected_symbols.len() > 1 {
+                    call.complexity_candidates
+                        .extend(selected_symbols.iter().map(|symbol| (*symbol).to_string()));
+                    call.complexity_candidates.sort();
+                    call.complexity_candidates.dedup();
+                }
                 call.complexity_assumptions = complexity.assumption.into_iter().collect();
                 call.unresolved_reason = None;
                 call.resolution_missing_proof = None;
@@ -259,10 +299,12 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
                 stats.modeled_external_symbols += 1;
             } else if let Some(parametric_cost) = parametric_cost {
                 let (time, space) = syntax::parametric_call_complexity(&parametric_cost)
-                    .ok_or_else(|| anyhow::anyhow!(
-                        "unsupported parametric external cost {parametric_cost} for {}",
-                        occurrence.symbol
-                    ))?;
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "unsupported parametric external cost {parametric_cost} for {}",
+                            occurrence.symbol
+                        )
+                    })?;
                 call.known_time_complexity = Some(time.to_string());
                 call.known_space_complexity = Some(space.to_string());
                 call.complexity_provenance = Some("parametric_external_contract".to_string());
@@ -378,6 +420,18 @@ fn compiler_proven_project_interface_call(
         })
         .count()
         == 1
+}
+
+fn equivalent_external_cost(
+    left: &crate::syntax::ExternalCallComplexity,
+    right: &crate::syntax::ExternalCallComplexity,
+) -> bool {
+    left.time == right.time
+        && left.space == right.space
+        && left.provenance == right.provenance
+        && left.bound_quality == right.bound_quality
+        && left.candidates == right.candidates
+        && left.assumption == right.assumption
 }
 
 fn implementation_targets(
@@ -608,12 +662,12 @@ fn definitions_by_symbol(
     definitions
 }
 
-fn select_call_occurrence<'a>(
+fn select_call_occurrences<'a>(
     call: &CallRecord,
     document: &'a Document,
     source: &str,
     language: &str,
-) -> Option<&'a Occurrence> {
+) -> Option<SelectedOccurrences<'a>> {
     let call_span = [
         call.span[0].saturating_sub(1),
         call.span[1],
@@ -622,7 +676,7 @@ fn select_call_occurrence<'a>(
     ];
     let message = bare_message(&call.message);
     let argument_start = first_argument_start(source, call_span);
-    let callable = document
+    let contained = document
         .occurrences
         .iter()
         .filter(|occurrence| occurrence.symbol_roles & 1 == 0)
@@ -631,21 +685,8 @@ fn select_call_occurrence<'a>(
                 .span()
                 .is_some_and(|span| contains(call_span, span))
         })
-        .filter(|occurrence| {
-            callable_symbol(&occurrence.symbol)
-                || (occurrence.symbol.starts_with("local ")
-                    && occurrence
-                        .span()
-                        .is_some_and(|span| occurrence_text(source, span) == message))
-                || (semantic_symbol(&occurrence.symbol)
-                    && occurrence.span().is_some_and(|span| {
-                        occurrence_text(source, span) == message
-                            && argument_start
-                                .is_some_and(|start| (span[2], span[3]) <= start)
-                    }))
-        })
         .collect::<Vec<_>>();
-    let mut exact = callable
+    let mut exact = contained
         .iter()
         .copied()
         .filter(|occurrence| {
@@ -674,10 +715,10 @@ fn select_call_occurrence<'a>(
             .collect::<Vec<_>>();
         if language == "java" {
             if let Some(selected) = first_semantic_occurrence(&outside_receiver) {
-                return Some(selected);
+                return selected_occurrences(&[selected]);
             }
-        } else if let Some(selected) = unambiguous_identity_occurrence(&outside_receiver) {
-            return Some(selected);
+        } else if !outside_receiver.is_empty() {
+            return selected_occurrences(&outside_receiver);
         }
     }
     // A normalized call span covers its arguments, so a nested call may
@@ -697,18 +738,141 @@ fn select_call_occurrence<'a>(
             })
             .collect::<Vec<_>>();
         if callee_occurrences.len() == 1 {
-            return Some(callee_occurrences[0]);
+            return selected_occurrences(&callee_occurrences);
         }
     }
+    let outer_selector = exact
+        .iter()
+        .copied()
+        .filter(|occurrence| {
+            occurrence
+                .span()
+                .is_some_and(|span| occurrence_is_outer_selector(source, call_span, span))
+        })
+        .collect::<Vec<_>>();
+    if !outer_selector.is_empty() {
+        let preferred = if call.preprocessor_callable {
+            let macros = outer_selector
+                .iter()
+                .copied()
+                .filter(|occurrence| occurrence.symbol.ends_with('!'))
+                .collect::<Vec<_>>();
+            (!macros.is_empty()).then_some(macros)
+        } else {
+            None
+        };
+        return selected_occurrences(preferred.as_deref().unwrap_or(&outer_selector));
+    }
+    let callable = exact
+        .iter()
+        .copied()
+        .filter(|occurrence| {
+            callable_symbol(&occurrence.symbol) || occurrence.symbol.starts_with("local ")
+        })
+        .collect::<Vec<_>>();
     if language == "java" {
-        if let Some(selected) = first_semantic_occurrence(&exact) {
-            return Some(selected);
+        if let Some(selected) = first_semantic_occurrence(&callable) {
+            return selected_occurrences(&[selected]);
         }
+    }
+    let property_accesses = exact
+        .iter()
+        .copied()
+        .filter(|occurrence| {
+            semantic_symbol(&occurrence.symbol)
+                && syntax::scip_noncall_access_is_callable(language, &occurrence.symbol)
+        })
+        .collect::<Vec<_>>();
+    if !property_accesses.is_empty() {
+        return selected_occurrences(&property_accesses);
     }
     // Never borrow the identity of a nested call when SCIP has no occurrence
     // spelling the normalized outer message. This is common for conversions
     // and other syntax-only constructs (`int(inner())`, casts, wrappers).
-    unambiguous_identity_occurrence(&exact)
+    let selected = unambiguous_identity_occurrence(&callable)?;
+    selected_occurrences(&[selected])
+}
+
+fn selected_occurrences<'a>(rows: &[&'a Occurrence]) -> Option<SelectedOccurrences<'a>> {
+    let semantic = rows
+        .iter()
+        .copied()
+        .filter(|occurrence| semantic_symbol(&occurrence.symbol))
+        .collect::<Vec<_>>();
+    let alternatives = if semantic.is_empty() {
+        rows.to_vec()
+    } else {
+        semantic
+    };
+    let primary = *alternatives.first()?;
+    Some(SelectedOccurrences {
+        primary,
+        alternatives,
+    })
+}
+
+/// A normalized call span may contain several nested calls and repeated
+/// selector spellings. Select the occurrence whose following argument list
+/// closes at the end of this call span. This is grammar-independent source
+/// position evidence and avoids reconstructing a language-specific receiver.
+fn occurrence_is_outer_selector(
+    source: &str,
+    call_span: [usize; 4],
+    occurrence_span: [usize; 4],
+) -> bool {
+    if occurrence_span[0] != occurrence_span[2] {
+        return false;
+    }
+    let lines = source.lines().collect::<Vec<_>>();
+    let Some(occurrence_end) = source_offset(&lines, occurrence_span[2], occurrence_span[3]) else {
+        return false;
+    };
+    let Some(call_end) = source_offset(&lines, call_span[2], call_span[3]) else {
+        return false;
+    };
+    let bytes = source.as_bytes();
+    let mut open = occurrence_end;
+    while open < call_end && bytes.get(open).is_some_and(u8::is_ascii_whitespace) {
+        open += 1;
+    }
+    if bytes.get(open) != Some(&b'(') {
+        return false;
+    }
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (offset, byte) in bytes[open..call_end].iter().copied().enumerate() {
+        if let Some(active) = quote {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == active {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(byte, b'\'' | b'"' | b'`') {
+            quote = Some(byte);
+            continue;
+        }
+        if byte == b'(' {
+            depth += 1;
+        } else if byte == b')' {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                let close = open + offset + 1;
+                return bytes[close..call_end].iter().all(u8::is_ascii_whitespace);
+            }
+        }
+    }
+    false
+}
+
+fn source_offset(lines: &[&str], line: usize, column: usize) -> Option<usize> {
+    let current = *lines.get(line)?;
+    (column <= current.len())
+        .then(|| lines[..line].iter().map(|row| row.len() + 1).sum::<usize>() + column)
 }
 
 fn first_argument_start(source: &str, call_span: [usize; 4]) -> Option<(usize, usize)> {
@@ -911,7 +1075,9 @@ mod tests {
             "scip-go gomod example.test/ants/v2 v1.0.0 `example.test/ants/v2`/Logger#Printf.";
 
         assert!(compiler_proven_project_interface_call(
-            &[owner], "go", symbol
+            &[owner],
+            "go",
+            symbol
         ));
     }
 
@@ -965,11 +1131,7 @@ mod tests {
         let cases = [
             ("c", "demo.c", "cxx . demo v1$ callee(abc)."),
             ("cpp", "demo.cpp", "cxx . demo v1$ Demo#callee(abc)."),
-            (
-                "csharp",
-                "Demo.cs",
-                "scip-dotnet nuget . . Demo/Callee().",
-            ),
+            ("csharp", "Demo.cs", "scip-dotnet nuget . . Demo/Callee()."),
             (
                 "typescript",
                 "demo.ts",
@@ -1041,6 +1203,20 @@ mod tests {
                 "stdlib",
             ),
             (
+                "typescript",
+                "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.collection.d.ts`/Map#get().",
+                "get",
+                "O(N)",
+                "stdlib",
+            ),
+            (
+                "csharp",
+                "scip-dotnet nuget System.Runtime 9.0.0.0 Text/StringBuilder#Append().",
+                "Append",
+                "O(N)",
+                "stdlib",
+            ),
+            (
                 "csharp",
                 "scip-dotnet nuget System.Runtime 9.0.0.0 System/Array#Sort().",
                 "Sort",
@@ -1051,14 +1227,24 @@ mod tests {
                 "typescript",
                 "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/Array#push().",
                 "push",
-                "O(1)",
+                "O(N)",
+                "stdlib",
+            ),
+            (
+                "typescript",
+                "scip-typescript npm @types/node 22.13.4 `process.d.ts`/`\"process\"`/global/NodeJS/Process#cwd().",
+                "cwd",
+                "O(N)",
                 "stdlib",
             ),
         ];
 
         for (language, symbol, message, expected_time, expected_scope) in cases {
             let dir = tempdir().unwrap();
-            let filename = format!("demo.{}", if language == "csharp" { "cs" } else { language });
+            let filename = format!(
+                "demo.{}",
+                if language == "csharp" { "cs" } else { language }
+            );
             let path = dir.path().join(&filename);
             let source = format!("function caller() {{ value.{message}(); }}\n");
             fs::write(&path, &source).unwrap();
@@ -1285,8 +1471,7 @@ mod tests {
                 "relationships": [{"symbol": interface, "is_implementation": true}]
             }]
         }]});
-        let mut implementation_method =
-            method("map-audience", &path, "GetAudience", [3, 1, 3, 34]);
+        let mut implementation_method = method("map-audience", &path, "GetAudience", [3, 1, 3, 34]);
         implementation_method.language = "go".into();
         let mut caller = method("verify", &path, "verify", [4, 1, 4, 42]);
         caller.language = "go".into();
@@ -1865,6 +2050,111 @@ mod tests {
             output.calls[0].semantic_symbol.as_deref(),
             Some("scip-java maven p Demo#pick().")
         );
+    }
+
+    #[test]
+    fn selector_syntax_selects_outer_call_without_receiver_projection() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("src/demo.ts");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let source = "function caller() { resolve(param.transform).transform(); }\nfunction transform() {}\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let property = "scip-typescript npm demo 1 src/types.ts/Param#transform.";
+        let callable = "scip-typescript npm demo 1 src/demo.ts/Transform#transform.";
+        let property_column = source.find("transform").unwrap();
+        let callable_column =
+            source[property_column + 1..].find("transform").unwrap() + property_column + 1;
+        let definition_column = source.lines().nth(1).unwrap().find("transform").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "src/demo.ts",
+            "occurrences": [
+                canonical_occurrence([0, property_column, property_column + 9], property, 0),
+                canonical_occurrence([0, callable_column, callable_column + 9], callable, 0),
+                canonical_occurrence([1, definition_column, definition_column + 9], callable, 1)
+            ]
+        }]});
+        let mut caller = method("caller", &path, "caller", [1, 0, 1, 60]);
+        let mut target = method("target", &path, "transform", [2, 0, 2, 23]);
+        caller.language = "typescript".into();
+        target.language = "typescript".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller, target];
+        output.calls = vec![call("caller", &path, "transform", [1, 20, 1, 56])];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].target.as_deref(), Some("target"));
+        assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(callable));
+    }
+
+    #[test]
+    fn equivalent_external_declarations_converge_on_one_reviewed_cost() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("src/demo.ts");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let source = "function caller(value: string) { value.split(','); }\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let column = source.find("split").unwrap();
+        let es5 = "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/String#split().";
+        let symbols = "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.symbol.wellknown.d.ts`/String#split().";
+        let index = json!({"documents": [{
+            "relative_path": "src/demo.ts",
+            "occurrences": [
+                canonical_occurrence([0, column, column + 5], es5, 0),
+                canonical_occurrence([0, column, column + 5], symbols, 0)
+            ]
+        }]});
+        let mut caller = method("caller", &path, "caller", [1, 0, 1, source.len()]);
+        caller.language = "typescript".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller];
+        output.calls = vec![call("caller", &path, "split", [1, 33, 1, 49])];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(N)")
+        );
+        assert_eq!(
+            output.calls[0].known_space_complexity.as_deref(),
+            Some("O(N)")
+        );
+        assert_eq!(output.calls[0].complexity_candidates.len(), 2);
+    }
+
+    #[test]
+    fn csharp_property_symbol_maps_to_emitted_getter() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("src/Demo.cs");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let source = "class Demo { string Name { get; } void Caller() { Items.Last().Name; } }\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let declaration_column = source.find("Name").unwrap();
+        let call_column = source.rfind("Name").unwrap();
+        let symbol = "scip-dotnet nuget . . Demo/Demo#Name.";
+        let index = json!({"documents": [{
+            "relative_path": "src/Demo.cs",
+            "occurrences": [
+                canonical_occurrence([0, declaration_column, declaration_column + 4], symbol, 1),
+                canonical_occurrence([0, call_column, call_column + 4], symbol, 0)
+            ]
+        }]});
+        let mut getter = method("getter", &path, "Name", [1, 13, 1, 33]);
+        let mut caller = method("caller", &path, "Caller", [1, 34, 1, source.len()]);
+        getter.language = "csharp".into();
+        caller.language = "csharp".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![getter, caller];
+        output.calls = vec![call("caller", &path, "Name", [1, 50, 1, call_column + 4])];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].target.as_deref(), Some("getter"));
+        assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(symbol));
     }
 
     #[test]

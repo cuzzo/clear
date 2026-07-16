@@ -16,6 +16,9 @@
                         "Node": {
                           "children": [
                             {
+                              "Symbol": "fn"
+                            },
+                            {
                               "Node": {
                                 "children": [
                                   "Nil",
@@ -87,12 +90,12 @@
                               }
                             }
                           ],
-                          "first_column": 11,
+                          "first_column": 6,
                           "first_lineno": 1,
                           "last_column": 50,
                           "last_lineno": 1,
-                          "text": "(x: number, y: number): number => x + y",
-                          "type": "LAMBDA"
+                          "text": "fn = (x: number, y: number): number => x + y",
+                          "type": "DEFN"
                         }
                       }
                     ],

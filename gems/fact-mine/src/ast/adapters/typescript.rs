@@ -29,7 +29,30 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
                 | "method_definition"
                 | "method_declaration"
                 | "method_signature"
+                | "arrow_function"
+                | "function_expression"
         )
+    }
+
+    fn custom_function_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+        typescript_bound_callable_name(node, source)
+    }
+
+    fn valid_function_definition(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        !matches!(node.kind(), "arrow_function" | "function_expression")
+            || typescript_bound_callable_name(node, source).is_some()
+    }
+
+    fn function_declaration_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> TreeSitterNode<'tree> {
+        if typescript_bound_callable_name(node, source).is_some() {
+            node.parent().unwrap_or(node)
+        } else {
+            node
+        }
     }
 
     fn explicit_alternative<'tree>(
@@ -76,12 +99,13 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
     fn lambda_target<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
-        _source: &str,
+        source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
         if matches!(
             node.kind(),
             "arrow_function" | "function_expression" | "lambda"
-        ) {
+        ) && typescript_bound_callable_name(node, source).is_none()
+        {
             Some(node)
         } else {
             None
@@ -324,4 +348,28 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
             .then(|| node.child_by_field_name("right"))
             .flatten()
     }
+}
+
+/// TypeScript represents `const f = (...) => ...` and
+/// `const f = function (...) { ... }` as anonymous callable expressions. The
+/// binding identifier is nevertheless a compiler-owned project declaration,
+/// so expose only that thin grammar fact and let the shared method/profile
+/// pipeline analyze its body normally.
+fn typescript_bound_callable_name(node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+    if !matches!(node.kind(), "arrow_function" | "function_expression") {
+        return None;
+    }
+    if let Some(name) = node.child_by_field_name("name") {
+        let text = node_text(name, source).trim();
+        if !text.is_empty() {
+            return Some(text.to_string());
+        }
+    }
+    let parent = node.parent()?;
+    if parent.kind() != "variable_declarator" || parent.child_by_field_name("value") != Some(node) {
+        return None;
+    }
+    let name = parent.child_by_field_name("name")?;
+    let text = node_text(name, source).trim();
+    (!text.is_empty()).then(|| text.to_string())
 }

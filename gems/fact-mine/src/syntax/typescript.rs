@@ -31,6 +31,10 @@ const TYPESCRIPT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct TypeScriptNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
+    fn nested_function_is_local_callable(&self, _function: &Node) -> bool {
+        true
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,
@@ -529,7 +533,7 @@ mod tests {
         );
         assert_eq!(
             b.collection_operation(&hash, "get"),
-            Some(NormalizedCollectionOperation::Constant)
+            Some(NormalizedCollectionOperation::LinearScan)
         );
         assert_eq!(
             b.collection_operation(&hash, "entries"),
@@ -537,7 +541,7 @@ mod tests {
         );
         assert_eq!(
             b.collection_operation(&set, "has"),
-            Some(NormalizedCollectionOperation::Constant)
+            Some(NormalizedCollectionOperation::LinearScan)
         );
         assert_eq!(
             b.collection_operation(&string, "search"),

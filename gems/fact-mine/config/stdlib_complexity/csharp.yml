@@ -1,7 +1,7 @@
 Array:
   get: constant
   Count: constant
-  Add: constant
+  Add: linear_materialize
   Remove: linear_scan
   Contains: linear_scan
   IndexOf: linear_scan
@@ -10,16 +10,16 @@ Array:
   OrderBy: sort
 Hash:
   get_Item: constant
-  TryGetValue: constant
-  ContainsKey: constant
-  Add: constant
+  TryGetValue: linear_scan
+  ContainsKey: linear_scan
+  Add: linear_materialize
   Count: constant
   Keys: linear_materialize
   Values: linear_materialize
 Set:
-  Add: constant
-  Remove: constant
-  Contains: constant
+  Add: linear_materialize
+  Remove: linear_scan
+  Contains: linear_scan
   Count: constant
   ToArray: linear_materialize
 String:
@@ -28,6 +28,42 @@ String:
   IndexOf: linear_scan
   Split: linear_materialize
   Substring: linear_materialize
+  Format: linear_materialize
+  StartsWith: linear_scan
+  EndsWith: linear_scan
+  Equals: linear_scan
+  Replace: linear_materialize
+  TrimStart: linear_materialize
+StringBuilder:
+  Append: linear_materialize
+  AppendLine: linear_materialize
+  ToString: linear_materialize
+  Length: constant
+List:
+  Add: linear_materialize
+  AddRange: linear_materialize
+  Remove: linear_scan
+  Contains: linear_scan
+  IndexOf: linear_scan
+  Count: constant
+Dictionary:
+  get_Item: linear_scan
+  TryGetValue: linear_scan
+  ContainsKey: linear_scan
+  Add: linear_materialize
+  Count: constant
+Type:
+  ToString: linear_materialize
+  GetGenericTypeDefinition: constant
+  MakeGenericType: linear_materialize
+  IsAssignableFrom: linear_scan
+MemberInfo:
+  Name: constant
+Object:
+  ReferenceEquals: constant
+  GetType: constant
+Int32:
+  Parse: linear_scan
 Intrinsic:
   "Array.BinarySearch": logarithmic
   "Array.Clear": linear_scan
