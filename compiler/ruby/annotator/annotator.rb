@@ -22,6 +22,7 @@ require_relative "phases/resolution_phase"
 require_relative "phases/signature_registry"
 require_relative "phases/signature_registration"
 require_relative "phases/type_registration"
+require_relative "phases/type_analysis_phase"
 require_relative "phases/whole_program_semantics"
 require_relative "function_registry"
 require_relative "domains/control_flow"
@@ -633,7 +634,6 @@ class SemanticAnnotator
     @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
     @language_mode = node.language_mode
     visit(node)
-    finalize_auto_types!(node)
     run_whole_program_semantics!
     run_deferred_validations!
     @semantic_index = T.let(SemanticIndex.new(
@@ -652,6 +652,45 @@ class SemanticAnnotator
   end
 
 private
+
+  sig { params(node: AST::Program).returns(Annotator::Phases::ResolutionFacts) }
+  def resolve_program!(node)
+    operations = Annotator::Phases::ResolutionOperations.new(
+      resolve_import: ->(stmt) { visit_RequireNode(stmt); nil },
+      register_types: ->(declarations) { register_type_declarations(declarations) },
+      register_signatures: ->(declarations) { register_program_signatures(declarations) },
+      resolve_reentrance: ->(program) { bridge_reentrance!(program) },
+      resolve_sync_policy: ->(program) { validate_and_resolve_sync_policy!(program) },
+      seed_error_types: ->(declarations) { seed_error_type_registrations!(declarations) }
+    )
+    resolution = Annotator::Phases::ResolutionPhase.run(
+      program: node,
+      root_scope: semantic_root_scope,
+      function_registry: semantic_function_registry,
+      operations: operations
+    )
+    @annotation_products.publish_resolution!(resolution)
+    resolution
+  end
+
+  sig { params(resolution: Annotator::Phases::ResolutionFacts).returns(Annotator::Phases::TypedProgramFacts) }
+  def analyze_program_types!(resolution)
+    operations = Annotator::Phases::TypeAnalysisOperations.new(
+      analyze_bodies: ->(declarations, program) { analyze_program_bodies!(declarations, program) },
+      resolve_catches: ->(declarations) { resolve_catch_clauses_from_declarations!(declarations) },
+      finalize_program: ->(program) { finalize_program_semantics!(program) },
+      finalize_auto_types: ->(program) { finalize_auto_types!(program) }
+    )
+    Annotator::Phases::TypeAnalysisPhase.run(resolution: resolution, operations: operations)
+  end
+
+  sig { params(node: AST::Program).returns(NilClass) }
+  def visit_Program(node)
+    resolution = resolve_program!(node)
+    typed_program = analyze_program_types!(resolution)
+    @annotation_products.publish_typed_program!(typed_program)
+    nil
+  end
 
   sig { void }
   def reset_compilation_state!
@@ -862,30 +901,6 @@ private
   sig { returns(T::Set[String]) }
   def outer_scope_vars
     @receiver_state.scopes.flat_map(&:visible_names).to_set
-  end
-
-  sig { params(node: AST::Program).returns(T.untyped) }
-  def visit_Program(node)
-    operations = Annotator::Phases::ResolutionOperations.new(
-      resolve_import: ->(stmt) { visit_RequireNode(stmt); nil },
-      register_types: ->(declarations) { register_type_declarations(declarations) },
-      register_signatures: ->(declarations) { register_program_signatures(declarations) },
-      resolve_reentrance: ->(program) { bridge_reentrance!(program) },
-      resolve_sync_policy: ->(program) { validate_and_resolve_sync_policy!(program) },
-      seed_error_types: ->(declarations) { seed_error_type_registrations!(declarations) }
-    )
-    resolution = Annotator::Phases::ResolutionPhase.run(
-      program: node,
-      root_scope: semantic_root_scope,
-      function_registry: semantic_function_registry,
-      operations: operations
-    )
-    @annotation_products.publish_resolution!(resolution)
-    declarations = resolution.declarations
-
-    analyze_program_bodies!(declarations, node)
-    resolve_catch_clauses_from_declarations!(declarations)
-    finalize_program_semantics!(node)
   end
 
   sig { returns(T::Array[AST::FunctionDef]) }
