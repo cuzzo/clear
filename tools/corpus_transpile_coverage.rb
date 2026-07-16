@@ -22,7 +22,7 @@ CoverageBootstrap.start('corpus-transpile')
 require_relative '../compiler/ruby/backends/transpiler'
 
 ROOT = File.expand_path('..', __dir__)
-opts = { shard: nil, strict: true }
+opts = { examples: true, benchmarks: true, exclude_prefixes: [], shard: nil, strict: true }
 
 # Historical MiniVM snapshots, retained as source/reference material. They are
 # not active programs: _bc_runner.clear is the maintained runner and exercises
@@ -35,7 +35,10 @@ REFERENCE_ONLY = %w[
 ].freeze
 
 OptionParser.new do |o|
-  o.banner = "Usage: COVERAGE=1 ruby tools/corpus_transpile_coverage.rb [--shard I/N] [--allow-failures]"
+  o.banner = "Usage: COVERAGE=1 ruby tools/corpus_transpile_coverage.rb [--examples-only|--benchmarks-only] [--exclude-prefix PATH] [--shard I/N] [--allow-failures]"
+  o.on("--examples-only") { opts[:benchmarks] = false }
+  o.on("--benchmarks-only") { opts[:examples] = false }
+  o.on("--exclude-prefix PATH") { |path| opts[:exclude_prefixes] << path.delete_suffix("/") }
   o.on("--strict") { opts[:strict] = true }
   o.on("--allow-failures") { opts[:strict] = false }
   o.on("--shard I/N") do |v|
@@ -45,10 +48,17 @@ OptionParser.new do |o|
   end
 end.parse!
 
-files = Dir.glob(File.join(ROOT, '{examples,benchmarks}', '**', '*.clear'))
+roots = []
+roots << "examples" if opts[:examples]
+roots << "benchmarks" if opts[:benchmarks]
+files = roots.flat_map { |root| Dir.glob(File.join(ROOT, root, '**', '*.clear')) }
               .reject { |f| File.basename(f).start_with?('._') }
               .reject { |f| f.split(File::SEPARATOR).include?('bench.profile') }
               .reject { |f| REFERENCE_ONLY.include?(f.sub(ROOT + '/', '')) }
+              .reject do |f|
+                relative = f.sub(ROOT + '/', '')
+                opts[:exclude_prefixes].any? { |prefix| relative == prefix || relative.start_with?("#{prefix}/") }
+              end
               .sort
 if opts[:shard]
   idx, total = opts[:shard]
