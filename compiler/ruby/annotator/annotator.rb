@@ -133,7 +133,6 @@ class Annotator::Phases::TypeAnalysisSession
     prop :conditional_depth, Integer, default: 0
     prop :smooth_depth, Integer, default: 0
     prop :body_fact_frames, T::Array[Annotator::Phases::BodyFactFrame], factory: -> { [] }
-    prop :async_body_facts, T::Array[Annotator::Phases::AsyncBodyFact], factory: -> { [] }
     prop :stream_yield_frames, T::Array[StreamYieldFrame], factory: -> { [] }
     prop :with_block_depth, Integer, default: 0
     prop :match_pattern_depth, Integer, default: 0
@@ -155,6 +154,7 @@ class Annotator::Phases::TypeAnalysisSession
       T::Array[Annotator::Phases::DeferredWithValidation],
       factory: -> { [] }
     prop :predicate_call_sites, T::Array[CapabilityHelper::PredicateCallSite], factory: -> { [] }
+    prop :async_body_facts, T::Array[Annotator::Phases::AsyncBodyFact], factory: -> { [] }
     prop :capability_audit, CapabilityAudit::BindingAuditStore, factory: -> { {} }
     prop :capture_stack, T::Array[CapabilityHelper::CaptureContext], factory: -> { [] }
     prop :capture_move_suppression_depth, Integer, default: 0
@@ -675,11 +675,16 @@ class Annotator::Phases::TypeAnalysisSession
     finalize_auto_types!(resolution.program)
   end
 
-  sig { params(typed_program: Annotator::Phases::TypedProgramFacts).void }
-  def audit_typed_program!(typed_program)
-    finalize_program_audit!(typed_program.program)
-    run_whole_program_semantics!
-    run_deferred_validations!
+  sig { returns(CapabilityAuditInputs) }
+  def release_capability_audit_inputs!
+    inputs = @audit_inputs
+    @audit_inputs = CapabilityAuditInputs.new
+    inputs
+  end
+
+  sig { params(inputs: CapabilityAuditInputs).void }
+  def install_audited_inputs!(inputs)
+    @audit_inputs = inputs
   end
 
 private
@@ -1025,6 +1030,50 @@ private
   private :current_held_lock_types
   private :semantic_function_registry
 
+end
+
+# A distinct, sequential owner for whole-program auditing.  It receives the
+# facts collected by TypeAnalysisSession after that session relinquishes them;
+# the two phases never execute against the same receiver.
+class Annotator::Phases::CapabilityAuditSession < Annotator::Phases::TypeAnalysisSession
+  extend T::Sig
+
+  sig do
+    params(
+      typed_program: Annotator::Phases::TypedProgramFacts,
+      inputs: Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs,
+      source_code: T.nilable(String),
+      language_mode: Symbol,
+      strict_test: T::Boolean
+    ).void
+  end
+  def initialize(typed_program:, inputs:, source_code:, language_mode:, strict_test:)
+    resolution = typed_program.resolution
+    @importer = T.let(nil, T.nilable(ModuleImporter))
+    @source_dir = T.let(Dir.pwd, String)
+    @strict_test = T.let(strict_test, T::Boolean)
+    @source_code = T.let(source_code, T.nilable(String))
+    @traversal_state = T.let(
+      TraversalState.new(scopes: [resolution.root_scope]),
+      TraversalState
+    )
+    @audit_inputs = T.let(inputs, CapabilityAuditInputs)
+    @function_registry = T.let(resolution.function_registry, Annotator::FunctionRegistry)
+    @semantic_index = T.let(nil, T.nilable(SemanticIndex))
+    @annotation_products = T.let(Annotator::Phases::AnnotationProducts.new, Annotator::Phases::AnnotationProducts)
+    @program = T.let(typed_program.program, T.nilable(AST::Program))
+    @language_mode = T.let(language_mode, Symbol)
+    @comptime_type_param_refinements = T.let({}, T::Hash[Symbol, Type])
+    @branch_terminated = T.let(false, T::Boolean)
+  end
+
+  sig { void }
+  def audit!
+    program = T.must(@program)
+    finalize_program_audit!(program)
+    run_whole_program_semantics!
+    run_deferred_validations!
+  end
 end
 
 # Compatibility construction boundary.  Existing callers keep using

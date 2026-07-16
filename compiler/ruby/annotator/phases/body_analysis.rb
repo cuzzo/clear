@@ -323,7 +323,7 @@ module Annotator
       sig { returns(T::Array[AsyncBodyFact]) }
       def async_body_facts
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
-        phase_traversal_state.async_body_facts
+        phase_audit_inputs.async_body_facts
       end
 
       sig { params(node: AsyncBodyNode, summary: BodyScanSummary, validation_node: AsyncValidationNode).returns(AsyncBodyFact) }

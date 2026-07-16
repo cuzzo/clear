@@ -13,11 +13,11 @@ module Annotator
       sig do
         params(
           typed_program: TypedProgramFacts,
-          session: TypeAnalysisSession
+          session: CapabilityAuditSession
         ).returns(CapabilityAuditReport)
       end
       def self.run(typed_program:, session:)
-        session.audit_typed_program!(typed_program)
+        session.audit!
 
         summaries = typed_program.body_summaries
         CapabilityAuditReport.new(
