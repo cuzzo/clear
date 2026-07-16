@@ -35,6 +35,23 @@ RSpec.describe Annotator::Phases::CapabilityAuditPhase do
     expect(report).to be_success
   end
 
+  it "fails closed when an audit executor returns with deferred validations" do
+    source = ""
+    program = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    resolution = Annotator::Phases::ResolutionPhase.run(
+      program: program, importer: nil, source_dir: Dir.pwd, source_code: source
+    )
+    type_session = Annotator::Phases::TypeAnalysisSession.new(source_code: source)
+    handoff = Annotator::Phases::TypeAnalysisPhase.run(resolution: resolution, session: type_session)
+    handoff.audit_request.inputs.deferred_with_validations << T.unsafe(Object.new)
+    audit_session = instance_double(Annotator::Phases::CapabilityAuditSession, audit!: nil)
+    allow(Annotator::Phases::CapabilityAuditSession).to receive(:new).and_return(audit_session)
+
+    expect {
+      described_class.run(typed_program: handoff.typed_program, request: handoff.audit_request)
+    }.to raise_error(RuntimeError, /left deferred validations pending/)
+  end
+
   it "publishes an audit report for real CLEAR whole-program facts" do
     source = <<~CLEAR
       FN read(value: Int64) RETURNS Int64 ->

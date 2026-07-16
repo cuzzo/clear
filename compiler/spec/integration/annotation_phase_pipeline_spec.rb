@@ -53,6 +53,7 @@ RSpec.describe "annotation phase pipeline integration" do
     expect(annotator.annotation_products.resolution).to be_nil
     expect(annotator.annotation_products.typed_program).to be_nil
     expect(annotator.semantic_index).to be_nil
+    expect { annotator.semantic_root_scope }.to raise_error(RuntimeError, /unavailable before resolution/)
   end
 
   it "routes imports through resolution before any product is published" do
@@ -77,6 +78,7 @@ RSpec.describe "annotation phase pipeline integration" do
     expect(annotator.annotation_products.typed_program).to be_nil
     expect(annotator.annotation_products.capability_audit).to be_nil
     expect(annotator.semantic_index).to be_nil
+    expect(annotator.semantic_root_scope).to equal(T.must(annotator.annotation_products.resolution).root_scope)
   end
 
   it "preserves typed facts but publishes no audit or index after a capability error" do

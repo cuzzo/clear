@@ -28,6 +28,19 @@ RSpec.describe Annotator::Phases::ResolutionPhase do
     expect(result.function_registry.nodes).to be_empty
   end
 
+  it "registers a late extern through the local-declaration operation" do
+    session = Annotator::Phases::ResolutionSession.new(
+      importer: nil, source_dir: Dir.pwd, source_code: nil, install_builtins: false
+    )
+    extern = AST::ExternFnDecl.new(nil, "native_len", [], Type.new(:Int64), "native", nil)
+
+    session.register_local_declaration!(extern)
+
+    scope = session.resolve!(AST::Program.new(nil, [])).root_scope
+    expect(scope.resolve_entry!("native_len").fn_signature&.extern).to eq(true)
+    expect(extern.full_type!.resolved).to eq(:Void)
+  end
+
   it "publishes real compiler resolution facts before body typing" do
     source = <<~CLEAR
       STRUCT Box { value: Int64 }
