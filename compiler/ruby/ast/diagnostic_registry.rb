@@ -399,6 +399,56 @@ module DiagnosticRegistry
       template: "Type Error: Type parameter '%{param}' in function '%{fn}' shadows built-in type '%{builtin}'.",
       summary:  "Generic function's type parameter shadows a built-in type name.",
     },
+    GENERIC_TYPE_PARAM_SHADOWS_NOMINAL: {
+      severity: :error, category: :type,
+      template: "Type parameter '%{param}' shadows a visible nominal type or protocol with the same name.",
+      summary:  "Generic parameter names must not hide visible type declarations.",
+      fix_hint: "Rename the parameter to a role name such as Item, ValueT, KeyT, or MapT.",
+    },
+    IMPLEMENTATION_UNKNOWN_OWNER: {
+      severity: :error, category: :type,
+      template: "Cannot implement unknown type '%{owner}'. Declare STRUCT %{owner} in this file first.",
+      summary:  "An inherent implementation names no visible nominal type.",
+    },
+    IMPLEMENTATION_NONLOCAL_OWNER: {
+      severity: :error, category: :type,
+      template: "Cannot add inherent methods to non-local type '%{owner}'. Its STRUCT must be declared in this file.",
+      summary:  "Imported, foreign, built-in, and protocol-only types cannot be reopened with inherent methods.",
+    },
+    IMPLEMENTATION_DUPLICATE: {
+      severity: :error, category: :type,
+      template: "Type '%{owner}' already has an inherent IMPLEMENTATION block.",
+      summary:  "A nominal type has at most one inherent implementation.",
+      fix_hint: "Move these methods into the existing implementation block.",
+    },
+    IMPLEMENTATION_WRONG_FILE: {
+      severity: :error, category: :type,
+      template: "Cannot implement '%{owner}' in %{implementation_file}; its STRUCT is defined in %{owner_file}.",
+      summary:  "Inherent methods must live in the exact file that defines their nominal type.",
+      fix_hint: "Move the IMPLEMENTATION block to the STRUCT's file, or keep the operation as a prefix FN.",
+    },
+    IMPLEMENTATION_BINDER_ARITY: {
+      severity: :error, category: :type,
+      template: "IMPLEMENTATION %{owner} expects %{expected} owner binder(s) (%{expected_params}), got %{got}.",
+      summary:  "An implementation must bind every generic slot declared by its owner exactly once.",
+    },
+    IMPLEMENTATION_BINDER_HAS_BOUND: {
+      severity: :error, category: :type,
+      template: "Implementation binder '%{name}' must not repeat or replace the owner's bound.",
+      summary:  "Owner constraints are inherited from the primary STRUCT declaration.",
+      fix_hint: "Remove the ': ...' bound from the IMPLEMENTATION header.",
+    },
+    IMPLEMENTATION_BINDER_DUPLICATE: {
+      severity: :error, category: :type,
+      template: "Implementation of '%{owner}' binds '%{name}' more than once.",
+      summary:  "Each owner generic slot needs a distinct local binder name.",
+    },
+    IMPLEMENTATION_BINDER_SHADOWS_TYPE: {
+      severity: :error, category: :type,
+      template: "Implementation binder '%{name}' shadows a visible type with the same name.",
+      summary:  "Implementation binders must be unambiguous type-parameter names.",
+      fix_hint: "Rename the binder to a role name such as Item, ValueT, KeyT, or MapT.",
+    },
     GENERIC_FN_CANNOT_INFER: {
       severity: :error, category: :type,
       template: "Type Error: Cannot infer type argument '%{param}' for '%{fn}' — no parameter uses type '%{type}'.",

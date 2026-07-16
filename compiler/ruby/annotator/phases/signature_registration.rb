@@ -29,6 +29,7 @@ module Annotator
       def register_function_signature(node)
         T.bind(self, ResolutionSession)
 
+        validate_type_param_list!(node, node.type_params, "function") if node.type_params.any?
         reject_duplicate_function_binding!(node)
         signature = SignatureRegistry.function_signature(
           node,

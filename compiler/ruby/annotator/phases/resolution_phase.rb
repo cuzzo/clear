@@ -10,6 +10,7 @@ require_relative "../../compiler/module_importer"
 require_relative "annotation_products"
 require_relative "builtin_environment"
 require_relative "import_resolution"
+require_relative "implementation_registration"
 require_relative "signature_registration"
 require_relative "type_registration"
 
@@ -31,6 +32,7 @@ module Annotator
       include ScopeHelper
       include BuiltinEnvironment
       include ImportResolution
+      include ImplementationRegistration
       include SignatureRegistration
       include TypeRegistration
 
@@ -58,14 +60,17 @@ module Annotator
         @root_scope = T.let(root_scope || Scope.new, Scope)
         @scope_stack = T.let([@root_scope], T::Array[Scope])
         @function_registry = T.let(function_registry || Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
+        @local_type_declaration_names = T.let(Set.new, T::Set[Symbol])
         initialize_builtin_environment! if install_builtins
       end
 
       sig { params(program: AST::Program).returns(ResolutionFacts) }
       def resolve!(program)
         declarations = DeclarationIndexer.index(program)
+        @local_type_declaration_names = declarations.type_declarations.map { |node| node.name.to_sym }.to_set
         declarations.imports.each { |node| visit_RequireNode(node) }
         register_type_declarations(declarations)
+        implementation_resolutions = resolve_implementation_declarations!(declarations)
         register_program_signatures(declarations)
 
         ResolutionFacts.new(
@@ -73,6 +78,7 @@ module Annotator
           declarations: declarations,
           root_scope: @root_scope,
           function_registry: @function_registry,
+          implementation_resolutions: implementation_resolutions,
           type_names: @root_scope.types.keys,
           function_names: resolved_function_names
         )
@@ -133,16 +139,32 @@ module Annotator
         @function_registry.add_synthetic_definition!(node)
       end
 
-      sig { params(node: T.any(AST::StructDef, AST::UnionDef), type_params: T::Array[String], kind: String).void }
+      sig { params(node: T.any(AST::FunctionDef, AST::StructDef, AST::UnionDef), type_params: T::Array[String], kind: String).void }
       def validate_type_param_list!(node, type_params, kind)
         seen = T.let(Set.new, T::Set[Symbol])
         type_params.each do |param|
           name = param.to_sym
           error!(node, :GENERIC_DUP_TYPE_PARAM_KIND, param: param, kind: kind, name: node.name) if seen.include?(name)
           error!(node, :GENERIC_TYPE_PARAM_SHADOWS, param: param) if BUILTIN_TYPE_PARAMETER_NAMES.include?(name)
+          if @local_type_declaration_names.include?(name) || current_scope.resolve_type_entry(name)
+            error!(generic_param_token(node, param), :GENERIC_TYPE_PARAM_SHADOWS_NOMINAL,
+              param: param)
+          end
           seen.add(name)
         end
       end
+
+      sig do
+        params(
+          node: T.any(AST::FunctionDef, AST::StructDef, AST::UnionDef),
+          name: String,
+        ).returns(T.any(AST::Locatable, Lexer::Token))
+      end
+      def generic_param_token(node, name)
+        param = node.generic_params.find { |candidate| candidate.name == name }
+        param&.token || node
+      end
+      private :generic_param_token
 
       sig { params(node: AST::FunctionDef).returns(T.nilable(String)) }
       def get_lifetime_path(node)

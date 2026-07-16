@@ -9,6 +9,7 @@ require_relative "../../semantic/ownership_graph"
 require_relative "../function_registry"
 require_relative "body_analysis"
 require_relative "declaration_index"
+require_relative "implementation_registration"
 
 module Annotator
   module Phases
@@ -28,6 +29,7 @@ module Annotator
           declarations: DeclarationIndexer.index(program),
           root_scope: root_scope,
           function_registry: function_registry,
+          implementation_resolutions: [],
           type_names: root_scope.types.keys,
           function_names: function_registry.names
         )
@@ -41,6 +43,8 @@ module Annotator
       attr_reader :root_scope
       sig { returns(Annotator::FunctionRegistry) }
       attr_reader :function_registry
+      sig { returns(T::Array[ImplementationResolution]) }
+      attr_reader :implementation_resolutions
       sig { returns(T::Array[Symbol]) }
       attr_reader :type_names
       sig { returns(T::Array[String]) }
@@ -53,14 +57,16 @@ module Annotator
           root_scope: Scope,
           function_registry: Annotator::FunctionRegistry,
           type_names: T::Array[Symbol],
-          function_names: T::Array[String]
+          function_names: T::Array[String],
+          implementation_resolutions: T::Array[ImplementationResolution]
         ).void
       end
-      def initialize(program:, declarations:, root_scope:, function_registry:, type_names:, function_names:)
+      def initialize(program:, declarations:, root_scope:, function_registry:, type_names:, function_names:, implementation_resolutions: [])
         @program = T.let(program, AST::Program)
         @declarations = T.let(declarations, DeclarationIndex)
         @root_scope = T.let(root_scope, Scope)
         @function_registry = T.let(function_registry, Annotator::FunctionRegistry)
+        @implementation_resolutions = T.let(implementation_resolutions.dup.freeze, T::Array[ImplementationResolution])
         @type_names = T.let(type_names.dup.freeze, T::Array[Symbol])
         @function_names = T.let(function_names.dup.freeze, T::Array[String])
         freeze
