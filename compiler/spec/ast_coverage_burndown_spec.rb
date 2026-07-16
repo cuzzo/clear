@@ -583,7 +583,7 @@ RSpec.describe ClearParser do
     it "covers capability and shape copying plus raw shape resolution" do
       caps = TypeCapabilities.new(ownership: :shared)
       expect(caps.copy.ownership).to eq(caps.ownership)
-      expect(caps.copy).not_to equal(caps)
+      expect(caps.copy).to equal(caps)
 
       shape = TypeShape.from_core("Box<Int64>")
       copy = shape.copy

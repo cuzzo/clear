@@ -15,7 +15,7 @@ end
 class TypeCapabilityUnset < T::Struct
 end
 
-class TypeCapabilities < T::Struct
+class TypeCapabilities
   extend T::Sig
 
   UNSET = T.let(TypeCapabilityUnset.new.freeze, TypeCapabilityUnset)
@@ -24,26 +24,76 @@ class TypeCapabilities < T::Struct
   MaybeBoolean = T.type_alias { T.any(TypeCapabilityUnset, T::Boolean) }
   MaybeToken = T.type_alias { T.any(TypeCapabilityUnset, Lexer::Token, NilClass) }
 
-  const :ownership, T.nilable(Symbol), default: nil
-  const :ownership_set, T::Boolean, default: false
-  const :sync, T.nilable(Symbol), default: nil
-  const :layout, T.nilable(Symbol), default: nil
-  const :lock_rank, T.nilable(Integer), default: nil
-  const :collection, T.nilable(Symbol), default: nil
-  const :shard_count, T.nilable(Integer), default: nil
-  const :soa, T::Boolean, default: false
-  const :elem_ownership, T.nilable(Symbol), default: nil
-  const :elem_sync, T.nilable(Symbol), default: nil
-  const :elem_layout, T.nilable(Symbol), default: nil
-  const :link_source, T.nilable(Symbol), default: nil
-  const :observable, T::Boolean, default: false
-  const :observable_terminal, T.nilable(Symbol), default: nil
-  const :observable_token, T.nilable(Lexer::Token), default: nil
-  const :polymorphic_shared, T::Boolean, default: false
+  sig { returns(T.nilable(Symbol)) }
+  attr_reader :ownership, :sync, :layout, :collection, :elem_ownership, :elem_sync,
+    :elem_layout, :link_source, :observable_terminal
+  sig { returns(T.nilable(Integer)) }
+  attr_reader :lock_rank, :shard_count
+  sig { returns(T::Boolean) }
+  attr_reader :ownership_set, :soa, :observable, :polymorphic_shared
+  sig { returns(T.nilable(Lexer::Token)) }
+  attr_reader :observable_token
+
+  sig do
+    params(
+      ownership: T.nilable(Symbol),
+      ownership_set: T::Boolean,
+      sync: T.nilable(Symbol),
+      layout: T.nilable(Symbol),
+      lock_rank: T.nilable(Integer),
+      collection: T.nilable(Symbol),
+      shard_count: T.nilable(Integer),
+      soa: T::Boolean,
+      elem_ownership: T.nilable(Symbol),
+      elem_sync: T.nilable(Symbol),
+      elem_layout: T.nilable(Symbol),
+      link_source: T.nilable(Symbol),
+      observable: T::Boolean,
+      observable_terminal: T.nilable(Symbol),
+      observable_token: T.nilable(Lexer::Token),
+      polymorphic_shared: T::Boolean
+    ).void
+  end
+  def initialize(
+    ownership: nil,
+    ownership_set: false,
+    sync: nil,
+    layout: nil,
+    lock_rank: nil,
+    collection: nil,
+    shard_count: nil,
+    soa: false,
+    elem_ownership: nil,
+    elem_sync: nil,
+    elem_layout: nil,
+    link_source: nil,
+    observable: false,
+    observable_terminal: nil,
+    observable_token: nil,
+    polymorphic_shared: false
+  )
+    @ownership = ownership
+    @ownership_set = ownership_set
+    @sync = sync
+    @layout = layout
+    @lock_rank = lock_rank
+    @collection = collection
+    @shard_count = shard_count
+    @soa = soa
+    @elem_ownership = elem_ownership
+    @elem_sync = elem_sync
+    @elem_layout = elem_layout
+    @link_source = link_source
+    @observable = observable
+    @observable_terminal = observable_terminal
+    @observable_token = observable_token
+    @polymorphic_shared = polymorphic_shared
+    freeze
+  end
 
   sig { returns(TypeCapabilities) }
   def copy
-    with
+    self
   end
 
   sig do
@@ -103,6 +153,14 @@ class TypeCapabilities < T::Struct
     next_observable_terminal = T.let(observable_terminal.equal?(UNSET) ? self.observable_terminal : T.cast(observable_terminal, T.nilable(Symbol)), T.nilable(Symbol))
     next_observable_token = T.let(observable_token.equal?(UNSET) ? self.observable_token : T.cast(observable_token, T.nilable(Lexer::Token)), T.nilable(Lexer::Token))
     next_polymorphic_shared = T.let(polymorphic_shared.equal?(UNSET) ? self.polymorphic_shared : T.cast(polymorphic_shared, T::Boolean), T::Boolean)
+
+    return self if next_ownership == self.ownership && next_ownership_set == self.ownership_set &&
+      next_sync == self.sync && next_layout == self.layout && next_lock_rank == self.lock_rank &&
+      next_collection == self.collection && next_shard_count == self.shard_count && next_soa == self.soa &&
+      next_elem_ownership == self.elem_ownership && next_elem_sync == self.elem_sync &&
+      next_elem_layout == self.elem_layout && next_link_source == self.link_source &&
+      next_observable == self.observable && next_observable_terminal == self.observable_terminal &&
+      next_observable_token.equal?(self.observable_token) && next_polymorphic_shared == self.polymorphic_shared
 
     TypeCapabilities.new(
       ownership: next_ownership,
@@ -237,6 +295,9 @@ class TypeShape
 
   ArrayCapacity = T.type_alias { T.nilable(T.any(Integer, Symbol)) }
   Raw = T.type_alias { T.any(Type::FunctionType, Symbol, String) }
+  CORE_CACHE_LIMIT = 4096
+  CoreCacheKey = T.type_alias { [String, T::Boolean] }
+  CORE_CACHE = T.let({}, T::Hash[CoreCacheKey, TypeShape])
 
   sig { returns(TypeExpression) }
   attr_reader :expression
@@ -269,6 +330,7 @@ class TypeShape
     end
     @expression = T.let(parsed, TypeExpression)
     @legacy_raw = T.let(render_legacy_raw(parsed), Raw)
+    @semantic_key = T.let(nil, T.nilable(String))
   end
 
   sig { params(core_str: String, auto: T::Boolean).returns(TypeShape) }
@@ -277,16 +339,25 @@ class TypeShape
       raise "Invalid type '#{core_str}': !~T (error union of tense) is not allowed - use ~!T instead"
     end
 
-    TypeShape.new(raw: core_str.to_sym, auto: auto)
+    key = T.let([core_str, auto], CoreCacheKey)
+    cached = CORE_CACHE[key]
+    return cached if cached
+
+    shape = TypeShape.new(raw: core_str.to_sym, auto: auto)
+    CORE_CACHE.shift if CORE_CACHE.length >= CORE_CACHE_LIMIT
+    CORE_CACHE[key] = shape
+    shape
   end
 
   sig { returns(TypeShape) }
   def copy
-    copy_with_auto(auto)
+    self
   end
 
   sig { params(auto_value: T::Boolean).returns(TypeShape) }
   def copy_with_auto(auto_value)
+    return self if auto_value == auto
+
     TypeShape.new(raw: raw, auto: auto_value, expression: expression)
   end
 
@@ -298,6 +369,13 @@ class TypeShape
   sig { returns(Raw) }
   def raw
     @legacy_raw
+  end
+
+  sig { returns(String) }
+  def semantic_key
+    return @semantic_key unless @semantic_key.nil?
+
+    @semantic_key = Type.surface_name_type(Type.new(expression))
   end
 
   private
@@ -4955,7 +5033,7 @@ class Type
   def semantic_shape_key
     return function_type_key if fn_type?
 
-    Type.surface_name_type(self)
+    shape.semantic_key
   end
 
   sig { returns(String) }

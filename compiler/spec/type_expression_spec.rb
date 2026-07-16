@@ -274,6 +274,15 @@ RSpec.describe TypeExpressionTree do
     expect(described_class.root_capabilities(updated_stream)).to eq(caps)
   end
 
+  it "reuses immutable capability values for copies and no-op updates" do
+    caps = TypeCapabilities.new(ownership: :shared, ownership_set: true, sync: :locked)
+
+    expect(caps.copy).to equal(caps)
+    expect(caps.with).to equal(caps)
+    expect(caps.with(ownership: :shared, sync: :locked)).to equal(caps)
+    expect(caps.with(sync: :atomic)).not_to equal(caps)
+  end
+
   it "counts function parameter and result nodes and keeps unknown variants total" do
     signature = Type::FunctionType.new(
       params: [Type::FunctionTypeParam.new(type: Type.new(:Int64))],
@@ -320,7 +329,7 @@ RSpec.describe TypeShape do
     shape = described_class.from_core("!?HashMap<Symbol,String[]>")
 
     expect(shape.expression).to be_a(FallibleTypeExpression)
-    expect(shape.instance_variables.sort).to eq([:@auto, :@expression, :@legacy_raw])
+    expect(shape.instance_variables.sort).to eq([:@auto, :@expression, :@legacy_raw, :@semantic_key])
     expect(shape.error_union).to be(true)
     expect(shape.optional).to be(true)
     expect(shape.map).to be(true)
@@ -377,6 +386,25 @@ RSpec.describe TypeShape do
     expect(function.resolved).to eq(:Any)
     expect(optional_function.wrapped_function_type_raw).to equal(signature)
     expect(optional_function.wrapped_type_raw).to be_nil
+  end
+
+  it "shares immutable shapes when copying does not change inference state" do
+    shape = described_class.from_core("{Symbol}[List]Tuple<String,Int64>")
+
+    expect(shape.copy).to equal(shape)
+    expect(shape.copy_with_auto(false)).to equal(shape)
+    expect(shape.copy_with_auto(true)).not_to equal(shape)
+    expect(shape.copy_with_auto(true).expression).to equal(shape.expression)
+  end
+
+  it "interns bounded core shapes and caches their normalized semantic projection" do
+    first = described_class.from_core("[~]Tuple<String,Int64>")
+    second = described_class.from_core("[~]Tuple<String,Int64>")
+
+    expect(second).to equal(first)
+    expect(first.semantic_key).to eq("~Tuple<String,Int64>[]")
+    expect(Type).not_to receive(:surface_name_type)
+    expect(first.semantic_key).to eq("~Tuple<String,Int64>[]")
   end
 
   it "keeps String-keyed maps non-numeric and rejects fallible futures" do
