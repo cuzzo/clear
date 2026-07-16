@@ -1657,6 +1657,18 @@ module AST
   end
   # kind: :local (REQUIRE "file.clear") or :package (REQUIRE "pkg:name")
   RequireNode  = Struct.new(:token, :path, :namespace, :kind) { include Locatable }
+
+  class GenericBoundDecl < T::Struct
+    const :token, T.nilable(Lexer::Token), default: nil
+    const :type, Type
+  end
+
+  class GenericParamDecl < T::Struct
+    const :token, T.nilable(Lexer::Token), default: nil
+    const :name, String
+    const :bounds, T::Array[GenericBoundDecl], default: []
+  end
+
   FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime,
                             :body, :catch_clauses, :default_catch, :visibility, :deferred_drops,
                             :uses_frame, :explicit_return_type, :type_params, :tail_call, :requires,
@@ -1688,6 +1700,9 @@ module AST
       self[:return_type] = Type.new(rt) unless rt.nil?
       self[:params] = self[:params] || []
       self[:type_params] = (self[:type_params] || []).dup
+      @generic_params = T.let(type_params.map do |name|
+        AST::GenericParamDecl.new(token: token, name: name)
+      end, T::Array[AST::GenericParamDecl])
       @semantic_with_blocks = T.let([], T::Array[AST::WithBlock])
     end
 
@@ -1729,6 +1744,16 @@ module AST
     sig { params(value: T::Array[String]).void }
     def type_params=(value)
       self[:type_params] = value.dup
+    end
+
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    def generic_params
+      @generic_params
+    end
+
+    sig { params(value: T::Array[AST::GenericParamDecl]).void }
+    def generic_params=(value)
+      @generic_params = value.dup
     end
 
     sig { returns(T::Boolean) }
@@ -1866,6 +1891,29 @@ module AST
     # `clear fmt`. Semantically identical to FN — same lookup, same
     # call resolution, same UFCS at call sites at the language level.
   end
+
+  ImplementationDef = Struct.new(:token, :owner_name, :owner_token, :binders, :members) do
+    extend T::Sig
+    include Locatable
+    include HasBodies
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:binders] = (self[:binders] || []).dup
+      self[:members] = (self[:members] || []).dup
+    end
+
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    def binders = self[:binders]
+
+    sig { returns(T::Array[AST::FunctionDef]) }
+    def members = self[:members]
+
+    sig { returns(T::Array[RawBody]) }
+    def child_bodies = members.map(&:body)
+  end
+
   class StructField
     extend T::Sig
 
@@ -1900,6 +1948,9 @@ module AST
     def initialize(*args)
       super
       self[:type_params] ||= []
+      @generic_params = T.let(type_params.map do |name|
+        AST::GenericParamDecl.new(token: token, name: name)
+      end, T::Array[AST::GenericParamDecl])
     end
 
     sig { returns(T::Hash[String, AST::StructField]) }
@@ -1913,6 +1964,16 @@ module AST
     sig { params(value: T::Array[String]).void }
     def type_params=(value)
       self[:type_params] = value.dup
+    end
+
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    def generic_params
+      @generic_params
+    end
+
+    sig { params(value: T::Array[AST::GenericParamDecl]).void }
+    def generic_params=(value)
+      @generic_params = value.dup
     end
   end
 	  VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
@@ -3019,11 +3080,24 @@ module AST
     def initialize(*args)
       super
       self[:type_params] = (self[:type_params] || []).dup
+      @generic_params = T.let(type_params.map do |name|
+        AST::GenericParamDecl.new(token: token, name: name)
+      end, T::Array[AST::GenericParamDecl])
     end
 
     sig { params(value: T::Array[String]).void }
     def type_params=(value)
       self[:type_params] = value.dup
+    end
+
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    def generic_params
+      @generic_params
+    end
+
+    sig { params(value: T::Array[AST::GenericParamDecl]).void }
+    def generic_params=(value)
+      @generic_params = value.dup
     end
   end
 

@@ -276,6 +276,7 @@ class ClearParser
     rule(:KEYWORD, 'IF', action: :parse_if_statement),
     rule(:KEYWORD, 'COMPTIME', action: :parse_comptime_statement),
     rule(:KEYWORD, 'STRUCT', action: :parse_struct_def),
+    rule(:KEYWORD, 'IMPLEMENTATION', action: :parse_implementation_def),
     rule(:KEYWORD, 'ENUM', action: :parse_enum_def),
     rule(:KEYWORD, 'UNION', action: :parse_union_def),
     rule(:KEYWORD, 'WHILE', action: :parse_while_loop),
@@ -506,7 +507,7 @@ class ClearParser
   private :parse_comma_seq
   private :parse_error_selector
   private :parse_error_selectors
-  private :parse_generic_type_param_names
+  private :parse_generic_type_params
   private :parse_generic_type_param_symbols
   private :parse_lock_action
   private :parse_lock_error_clause
