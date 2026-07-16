@@ -65,6 +65,10 @@ RSpec.describe "annotator completion phases" do
     expect(index.id_index.body_id_for("main")&.value).to be > 0
     expect(index.body_summaries.fetch("main").definition_id).to eq(index.id_index.definition_id_for("main"))
     expect(index.body_summaries.fetch("main").body_id).to eq(index.id_index.body_id_for("main"))
+    expect(index).to be_frozen
+    expect(index.annotation_products).to equal(annotator.annotation_products)
+    expect(index.typed_program).to equal(annotator.annotation_products.typed_program)
+    expect(index.capability_audit).to equal(annotator.annotation_products.capability_audit)
   end
 
   it "publishes typed local and call-site facts in function body summaries" do

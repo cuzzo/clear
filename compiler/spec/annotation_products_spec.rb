@@ -38,15 +38,17 @@ RSpec.describe Annotator::Phases::AnnotationProducts do
       violation_count: 0
     )
 
-    products.publish_resolution!(resolution)
-    products.publish_typed_program!(typed)
-    products.publish_capability_audit!(audit)
+    products = products.publish_resolution(resolution)
+    products = products.publish_typed_program(typed)
+    products = products.publish_capability_audit(audit)
 
     expect(products).to be_complete
+    expect(products).to be_frozen
     expect(audit).to be_success
     expect(resolution.type_names).to be_frozen
     expect(typed.body_summaries).to be_frozen
     expect(audit.checked_functions).to be_frozen
+    expect { products.publish_capability_audit(audit) }.to raise_error(/already published/)
   end
 
   it "rejects skipped, repeated, mismatched, and incomplete phase products" do
@@ -66,10 +68,10 @@ RSpec.describe Annotator::Phases::AnnotationProducts do
       unresolved_node_count: 0
     )
 
-    expect { products.publish_typed_program!(typed) }.to raise_error(/requires resolution/)
-    products.publish_resolution!(resolution)
-    expect { products.publish_resolution!(resolution) }.to raise_error(/already published/)
-    expect { products.publish_typed_program!(mismatched) }.to raise_error(/different resolution/)
+    expect { products.publish_typed_program(typed) }.to raise_error(/requires resolution/)
+    products = products.publish_resolution(resolution)
+    expect { products.publish_resolution(resolution) }.to raise_error(/already published/)
+    expect { products.publish_typed_program(mismatched) }.to raise_error(/different resolution/)
     expect {
       Annotator::Phases::TypedProgramFacts.new(
         resolution: resolution,

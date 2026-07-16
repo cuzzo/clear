@@ -10,20 +10,18 @@ require_relative "../ast/async_result_shape"
 require_relative "../semantic/ownership_graph"
 require_relative "../semantic/ownership_transport"
 require_relative "phases/annotation_boundary"
+require_relative "phases/annotation_pipeline"
 require_relative "phases/body_analysis"
 require_relative "phases/builtin_environment"
-require_relative "phases/capability_audit_phase"
 require_relative "phases/declaration_index"
 require_relative "phases/auto_finalization"
 require_relative "phases/deferred_validation"
 require_relative "phases/expression_domains"
 require_relative "phases/import_resolution"
 require_relative "phases/program_finalization"
-require_relative "phases/resolution_phase"
 require_relative "phases/signature_registry"
 require_relative "phases/signature_registration"
 require_relative "phases/type_registration"
-require_relative "phases/type_analysis_phase"
 require_relative "phases/whole_program_semantics"
 require_relative "function_registry"
 require_relative "domains/control_flow"
@@ -635,14 +633,9 @@ class SemanticAnnotator
     @program = T.let(node, T.nilable(AST::Program))  # WithMatchCheck reads node.sync_policy below.
     @language_mode = node.language_mode
     visit(node)
-    typed_program = @annotation_products.typed_program
-    raise "type analysis did not publish its product" unless typed_program
-    audit = audit_program!(typed_program)
-    @annotation_products.publish_capability_audit!(audit)
-    @semantic_index = T.let(SemanticIndex.new(
-      program: node,
-      root_scope: semantic_root_scope,
-      function_registry: semantic_function_registry,
+    raise "annotation pipeline did not publish complete products" unless @annotation_products.complete?
+    @semantic_index = T.let(SemanticIndex.from_products(
+      annotation_products: @annotation_products,
       id_index: semantic_id_index_from_body_summaries,
     ), T.nilable(SemanticIndex))
     mark_annotation_complete!(node)
@@ -656,52 +649,35 @@ class SemanticAnnotator
 
 private
 
-  sig { params(node: AST::Program).returns(Annotator::Phases::ResolutionFacts) }
-  def resolve_program!(node)
-    operations = Annotator::Phases::ResolutionOperations.new(
+  sig { returns(Annotator::Phases::AnnotationPipelineOperations) }
+  def annotation_pipeline_operations
+    Annotator::Phases::AnnotationPipelineOperations.new(
       resolve_import: ->(stmt) { visit_RequireNode(stmt); nil },
       register_types: ->(declarations) { register_type_declarations(declarations) },
       register_signatures: ->(declarations) { register_program_signatures(declarations) },
       resolve_reentrance: ->(program) { bridge_reentrance!(program) },
       resolve_sync_policy: ->(program) { validate_and_resolve_sync_policy!(program) },
-      seed_error_types: ->(declarations) { seed_error_type_registrations!(declarations) }
-    )
-    resolution = Annotator::Phases::ResolutionPhase.run(
-      program: node,
-      root_scope: semantic_root_scope,
-      function_registry: semantic_function_registry,
-      operations: operations
-    )
-    @annotation_products.publish_resolution!(resolution)
-    resolution
-  end
-
-  sig { params(resolution: Annotator::Phases::ResolutionFacts).returns(Annotator::Phases::TypedProgramFacts) }
-  def analyze_program_types!(resolution)
-    operations = Annotator::Phases::TypeAnalysisOperations.new(
+      seed_error_types: ->(declarations) { seed_error_type_registrations!(declarations) },
       analyze_bodies: ->(declarations, program) { analyze_program_bodies!(declarations, program) },
       resolve_catches: ->(declarations) { resolve_catch_clauses_from_declarations!(declarations) },
-      finalize_program: ->(program) { finalize_program_type!(program) },
-      finalize_auto_types: ->(program) { finalize_auto_types!(program) }
-    )
-    Annotator::Phases::TypeAnalysisPhase.run(resolution: resolution, operations: operations)
-  end
-
-  sig { params(typed_program: Annotator::Phases::TypedProgramFacts).returns(Annotator::Phases::CapabilityAuditReport) }
-  def audit_program!(typed_program)
-    operations = Annotator::Phases::CapabilityAuditOperations.new(
+      finalize_program_type: ->(program) { finalize_program_type!(program) },
+      finalize_auto_types: ->(program) { finalize_auto_types!(program) },
       finalize_program_audit: ->(program) { finalize_program_audit!(program) },
       analyze_whole_program: -> { run_whole_program_semantics! },
-      run_deferred_validations: -> { run_deferred_validations! }
+      run_deferred_validations: -> { run_deferred_validations! },
+      publish_products: ->(products) { @annotation_products = products; nil }
     )
-    Annotator::Phases::CapabilityAuditPhase.run(typed_program: typed_program, operations: operations)
   end
 
   sig { params(node: AST::Program).returns(NilClass) }
   def visit_Program(node)
-    resolution = resolve_program!(node)
-    typed_program = analyze_program_types!(resolution)
-    @annotation_products.publish_typed_program!(typed_program)
+    @annotation_products = Annotator::Phases::AnnotationPipeline.run(
+      program: node,
+      root_scope: semantic_root_scope,
+      function_registry: semantic_function_registry,
+      products: @annotation_products,
+      operations: annotation_pipeline_operations
+    )
     nil
   end
 

@@ -41,10 +41,10 @@ module Annotator
         ).void
       end
       def initialize(program:, declarations:, root_scope:, function_registry:, type_names:, function_names:)
-        @program = program
-        @declarations = declarations
-        @root_scope = root_scope
-        @function_registry = function_registry
+        @program = T.let(program, AST::Program)
+        @declarations = T.let(declarations, DeclarationIndex)
+        @root_scope = T.let(root_scope, Scope)
+        @function_registry = T.let(function_registry, Annotator::FunctionRegistry)
         @type_names = T.let(type_names.dup.freeze, T::Array[Symbol])
         @function_names = T.let(function_names.dup.freeze, T::Array[String])
         freeze
@@ -77,10 +77,10 @@ module Annotator
       def initialize(resolution:, body_summaries:, typed_node_count:, unresolved_node_count:)
         raise "typed program cannot publish unresolved nodes" unless unresolved_node_count.zero?
 
-        @resolution = resolution
+        @resolution = T.let(resolution, ResolutionFacts)
         @body_summaries = T.let(body_summaries.dup.freeze, BodySummaries)
-        @typed_node_count = typed_node_count
-        @unresolved_node_count = unresolved_node_count
+        @typed_node_count = T.let(typed_node_count, Integer)
+        @unresolved_node_count = T.let(unresolved_node_count, Integer)
         freeze
       end
 
@@ -112,11 +112,11 @@ module Annotator
         ).void
       end
       def initialize(typed_program:, checked_functions:, checked_call_sites:, checked_with_sites:, violation_count:)
-        @typed_program = typed_program
+        @typed_program = T.let(typed_program, TypedProgramFacts)
         @checked_functions = T.let(checked_functions.dup.freeze, T::Array[String])
-        @checked_call_sites = checked_call_sites
-        @checked_with_sites = checked_with_sites
-        @violation_count = violation_count
+        @checked_call_sites = T.let(checked_call_sites, Integer)
+        @checked_with_sites = T.let(checked_with_sites, Integer)
+        @violation_count = T.let(violation_count, Integer)
         freeze
       end
 
@@ -126,8 +126,9 @@ module Annotator
       end
     end
 
-    # Mutable pipeline ledger with fail-closed publication order. The values it
-    # publishes are immutable and retain their exact upstream product identity.
+    # Immutable pipeline ledger with fail-closed publication order. Publishing
+    # returns a new frozen snapshot, so diagnostics can retain the last complete
+    # phase without exposing a partially mutated result object.
     class AnnotationProducts
       extend T::Sig
 
@@ -138,38 +139,49 @@ module Annotator
       sig { returns(T.nilable(CapabilityAuditReport)) }
       attr_reader :capability_audit
 
-      sig { void }
-      def initialize
-        @resolution = T.let(nil, T.nilable(ResolutionFacts))
-        @typed_program = T.let(nil, T.nilable(TypedProgramFacts))
-        @capability_audit = T.let(nil, T.nilable(CapabilityAuditReport))
+      sig do
+        params(
+          resolution: T.nilable(ResolutionFacts),
+          typed_program: T.nilable(TypedProgramFacts),
+          capability_audit: T.nilable(CapabilityAuditReport)
+        ).void
+      end
+      def initialize(resolution: nil, typed_program: nil, capability_audit: nil)
+        @resolution = T.let(resolution, T.nilable(ResolutionFacts))
+        @typed_program = T.let(typed_program, T.nilable(TypedProgramFacts))
+        @capability_audit = T.let(capability_audit, T.nilable(CapabilityAuditReport))
+        freeze
       end
 
-      sig { params(facts: ResolutionFacts).void }
-      def publish_resolution!(facts)
+      sig { params(facts: ResolutionFacts).returns(AnnotationProducts) }
+      def publish_resolution(facts)
         raise "resolution facts already published" if @resolution
 
-        @resolution = facts
+        AnnotationProducts.new(resolution: facts)
       end
 
-      sig { params(facts: TypedProgramFacts).void }
-      def publish_typed_program!(facts)
+      sig { params(facts: TypedProgramFacts).returns(AnnotationProducts) }
+      def publish_typed_program(facts)
         resolution = @resolution
         raise "type analysis requires resolution facts" unless resolution
         raise "type analysis used different resolution facts" unless facts.resolution.equal?(resolution)
         raise "typed program facts already published" if @typed_program
 
-        @typed_program = facts
+        AnnotationProducts.new(resolution: resolution, typed_program: facts)
       end
 
-      sig { params(report: CapabilityAuditReport).void }
-      def publish_capability_audit!(report)
+      sig { params(report: CapabilityAuditReport).returns(AnnotationProducts) }
+      def publish_capability_audit(report)
         typed_program = @typed_program
         raise "capability audit requires typed program facts" unless typed_program
         raise "capability audit used different typed program facts" unless report.typed_program.equal?(typed_program)
         raise "capability audit report already published" if @capability_audit
 
-        @capability_audit = report
+        AnnotationProducts.new(
+          resolution: T.must(@resolution),
+          typed_program: typed_program,
+          capability_audit: report
+        )
       end
 
       sig { returns(T::Boolean) }

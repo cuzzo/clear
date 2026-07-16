@@ -10,39 +10,17 @@ module Annotator
     # The intentionally narrow compatibility surface used while registration
     # algorithms move out of SemanticAnnotator. ResolutionPhase owns ordering;
     # callers can provide only the six operations that belong to resolution.
-    class ResolutionOperations
-      extend T::Sig
-
+    class ResolutionOperations < T::Struct
       ImportResolver = T.type_alias { T.proc.params(node: AST::RequireNode).void }
       DeclarationAction = T.type_alias { T.proc.params(declarations: DeclarationIndex).void }
       ProgramAction = T.type_alias { T.proc.params(program: AST::Program).void }
 
-      sig { returns(ImportResolver) }
-      attr_reader :resolve_import
-      sig { returns(DeclarationAction) }
-      attr_reader :register_types, :register_signatures, :seed_error_types
-      sig { returns(ProgramAction) }
-      attr_reader :resolve_reentrance, :resolve_sync_policy
-
-      sig do
-        params(
-          resolve_import: ImportResolver,
-          register_types: DeclarationAction,
-          register_signatures: DeclarationAction,
-          resolve_reentrance: ProgramAction,
-          resolve_sync_policy: ProgramAction,
-          seed_error_types: DeclarationAction
-        ).void
-      end
-      def initialize(resolve_import:, register_types:, register_signatures:, resolve_reentrance:, resolve_sync_policy:, seed_error_types:)
-        @resolve_import = resolve_import
-        @register_types = register_types
-        @register_signatures = register_signatures
-        @resolve_reentrance = resolve_reentrance
-        @resolve_sync_policy = resolve_sync_policy
-        @seed_error_types = seed_error_types
-        freeze
-      end
+      const :resolve_import, ImportResolver
+      const :register_types, DeclarationAction
+      const :register_signatures, DeclarationAction
+      const :resolve_reentrance, ProgramAction
+      const :resolve_sync_policy, ProgramAction
+      const :seed_error_types, DeclarationAction
     end
 
     class ResolutionPhase

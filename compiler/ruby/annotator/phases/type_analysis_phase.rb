@@ -26,7 +26,7 @@ module Annotator
 
       sig { params(typed_node_count: Integer, violations: T::Array[Violation]).void }
       def initialize(typed_node_count:, violations:)
-        @typed_node_count = typed_node_count
+        @typed_node_count = T.let(typed_node_count, Integer)
         @violations = T.let(violations.dup.freeze, T::Array[Violation])
         freeze
       end
@@ -125,37 +125,17 @@ module Annotator
     # Narrow migration interface for the existing body/type algorithms. The
     # phase owns their ordering and product boundary; each callback will move
     # behind an explicit context as the monolithic receiver is retired.
-    class TypeAnalysisOperations
-      extend T::Sig
-
+    class TypeAnalysisOperations < T::Struct
       AnalyzeBodies = T.type_alias do
         T.proc.params(declarations: DeclarationIndex, program: AST::Program).void
       end
       ResolveCatches = T.type_alias { T.proc.params(declarations: DeclarationIndex).void }
       FinalizeProgram = T.type_alias { T.proc.params(program: AST::Program).void }
 
-      sig { returns(AnalyzeBodies) }
-      attr_reader :analyze_bodies
-      sig { returns(ResolveCatches) }
-      attr_reader :resolve_catches
-      sig { returns(FinalizeProgram) }
-      attr_reader :finalize_program, :finalize_auto_types
-
-      sig do
-        params(
-          analyze_bodies: AnalyzeBodies,
-          resolve_catches: ResolveCatches,
-          finalize_program: FinalizeProgram,
-          finalize_auto_types: FinalizeProgram
-        ).void
-      end
-      def initialize(analyze_bodies:, resolve_catches:, finalize_program:, finalize_auto_types:)
-        @analyze_bodies = analyze_bodies
-        @resolve_catches = resolve_catches
-        @finalize_program = finalize_program
-        @finalize_auto_types = finalize_auto_types
-        freeze
-      end
+      const :analyze_bodies, AnalyzeBodies
+      const :resolve_catches, ResolveCatches
+      const :finalize_program, FinalizeProgram
+      const :finalize_auto_types, FinalizeProgram
     end
 
     class TypeAnalysisPhase

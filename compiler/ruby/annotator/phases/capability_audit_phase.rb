@@ -9,30 +9,13 @@ module Annotator
   module Phases
     # Narrow migration interface for whole-program semantic checks. The phase
     # owns ordering and accepts only a completely typed program product.
-    class CapabilityAuditOperations
-      extend T::Sig
-
+    class CapabilityAuditOperations < T::Struct
       ProgramAction = T.type_alias { T.proc.params(program: AST::Program).void }
       AuditAction = T.type_alias { T.proc.void }
 
-      sig { returns(ProgramAction) }
-      attr_reader :finalize_program_audit
-      sig { returns(AuditAction) }
-      attr_reader :analyze_whole_program, :run_deferred_validations
-
-      sig do
-        params(
-          finalize_program_audit: ProgramAction,
-          analyze_whole_program: AuditAction,
-          run_deferred_validations: AuditAction
-        ).void
-      end
-      def initialize(finalize_program_audit:, analyze_whole_program:, run_deferred_validations:)
-        @finalize_program_audit = finalize_program_audit
-        @analyze_whole_program = analyze_whole_program
-        @run_deferred_validations = run_deferred_validations
-        freeze
-      end
+      const :finalize_program_audit, ProgramAction
+      const :analyze_whole_program, AuditAction
+      const :run_deferred_validations, AuditAction
     end
 
     class CapabilityAuditPhase
