@@ -18,6 +18,7 @@ require_relative "phases/deferred_validation"
 require_relative "phases/expression_domains"
 require_relative "phases/import_resolution"
 require_relative "phases/program_finalization"
+require_relative "phases/resolution_phase"
 require_relative "phases/signature_registry"
 require_relative "phases/signature_registration"
 require_relative "phases/type_registration"
@@ -586,6 +587,7 @@ class SemanticAnnotator
     @receiver_state = T.let(ReceiverState.new, ReceiverState)
     @function_registry = T.let(Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
     @semantic_index = T.let(nil, T.nilable(SemanticIndex))
+    @annotation_products = T.let(Annotator::Phases::AnnotationProducts.new, Annotator::Phases::AnnotationProducts)
     @program = T.let(nil, T.nilable(AST::Program))
     @language_mode = T.let(:default, Symbol)
     @comptime_type_param_refinements = T.let({}, T::Hash[Symbol, Type])
@@ -597,6 +599,11 @@ class SemanticAnnotator
   sig { returns(T::Boolean) }
   def strict_test?
     @strict_test
+  end
+
+  sig { returns(Annotator::Phases::AnnotationProducts) }
+  def annotation_products
+    @annotation_products
   end
 
   sig { returns(T::Boolean) }
@@ -651,6 +658,7 @@ private
     @receiver_state = ReceiverState.new
     @function_registry = Annotator::FunctionRegistry.new
     @semantic_index = nil
+    @annotation_products = Annotator::Phases::AnnotationProducts.new
     @program = nil
     @branch_terminated = false
     @comptime_type_param_refinements = {}
@@ -858,29 +866,22 @@ private
 
   sig { params(node: AST::Program).returns(T.untyped) }
   def visit_Program(node)
-    declarations = Annotator::Phases::DeclarationIndexer.index(node)
-
-    # Imports must be available before local types or functions are registered.
-    declarations.imports.each { |stmt| visit_RequireNode(stmt) }
-
-    # Types are registered before function signatures can reference them.
-    register_type_declarations(declarations)
-
-    # Function, extern, method, and synthesized union default signatures are
-    # hoisted so bodies can call later definitions.
-    register_program_signatures(declarations)
-
-    # Stamp `EFFECTS REENTRANT` metadata after @fn_nodes is populated and
-    # before function bodies are checked.
-    bridge_reentrance!(node)
-
-    # Stamps the resolved SYNC POLICY, user-written or default, so later
-    # passes read a single source of truth.
-    validate_and_resolve_sync_policy!(node)
-
-    # Error type names are whole-program declarations: later RAISE/OR_ELSE EXIT
-    # sites with an explicit kind make type-only OR_ELSE EXIT/CATCH sites valid.
-    seed_error_type_registrations!(declarations)
+    operations = Annotator::Phases::ResolutionOperations.new(
+      resolve_import: ->(stmt) { visit_RequireNode(stmt); nil },
+      register_types: ->(declarations) { register_type_declarations(declarations) },
+      register_signatures: ->(declarations) { register_program_signatures(declarations) },
+      resolve_reentrance: ->(program) { bridge_reentrance!(program) },
+      resolve_sync_policy: ->(program) { validate_and_resolve_sync_policy!(program) },
+      seed_error_types: ->(declarations) { seed_error_type_registrations!(declarations) }
+    )
+    resolution = Annotator::Phases::ResolutionPhase.run(
+      program: node,
+      root_scope: semantic_root_scope,
+      function_registry: semantic_function_registry,
+      operations: operations
+    )
+    @annotation_products.publish_resolution!(resolution)
+    declarations = resolution.declarations
 
     analyze_program_bodies!(declarations, node)
     resolve_catch_clauses_from_declarations!(declarations)
