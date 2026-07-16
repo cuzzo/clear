@@ -242,7 +242,9 @@ module MIRLoweringControlFlow
 
   sig { params(target: AST::Node).returns(T::Boolean) }
   def collection_param_receiver?(target)
-    target.is_a?(AST::Identifier) && T.unsafe(self).__send__(:current_function_collection_param?, target.name)
+    T.bind(self, MIRLowering) rescue nil
+
+    target.is_a?(AST::Identifier) && current_function_collection_param?(target.name)
   end
 
   sig do
@@ -640,9 +642,11 @@ module MIRLoweringControlFlow
 
   sig { params(mir: MIR::Node).returns(T::Boolean) }
   def for_each_owned_collection_source?(mir)
+    T.bind(self, MIRLowering) rescue nil
+
     return for_each_owned_collection_source?(mir.expr) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
     return true if mir.is_a?(MIR::Call) && mir.owned_return?
-    T.unsafe(self).__send__(:mir_allocates?, mir)
+    mir_allocates?(mir)
   end
 
   sig { params(mir: MIR::Node, type_info: Type).returns(Symbol) }

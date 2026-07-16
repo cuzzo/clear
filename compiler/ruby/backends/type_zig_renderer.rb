@@ -17,6 +17,6 @@ class TypeZigRenderer
       return "anyerror!#{render(payload, is_param: is_param, is_field: is_field, nested: true)}"
     end
 
-    T.unsafe(type).__send__(:compute_zig_type, is_param: is_param, is_field: is_field)
+    type.render_zig_type(is_param: is_param, is_field: is_field)
   end
 end

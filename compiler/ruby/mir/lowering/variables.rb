@@ -400,8 +400,10 @@ module MIRLoweringVariables
 
   sig { params(safe_name: String, node: AST::VarDecl, facts: VarDeclFacts, init: MIR::Node).returns(T.nilable(String)) }
   def var_decl_suppression(safe_name, node, facts, init)
+    T.bind(self, MIRLowering) rescue nil
+
     lowering = T.unsafe(self)
-    return nil unless T.unsafe(self).__send__(:current_function_context)
+    return nil unless current_function_context
 
     owned_cleanup_value = (facts.has_mir_drop ||
                            (lowering.mir_allocates?(init) && lowering.ownership_bearing_type?(facts.ft))) == true
@@ -1368,7 +1370,7 @@ module MIRLoweringVariables
       IntrinsicTemplateKind::Zig
     end
     resolved_allocs = indexed_assignment_allocs(op, target_node, assignment)
-    receiver_alloc = send(:placement_for_node, target_node)
+    receiver_alloc = placement_for_node(target_node)
     IndexedAssignmentDispatch.new(
       target_var: target_var,
       shard_direct: shard_direct,

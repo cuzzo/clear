@@ -573,7 +573,7 @@ module MIRLoweringExpressions
     emitter = BINARY_PLAN_EMITTERS[plan.kind]
     raise "MIRLowering: unknown binary operation plan #{plan.kind}" unless emitter
 
-    T.cast(__send__(emitter, plan), MIR::Node)
+    T.cast(public_send(emitter, plan), MIR::Node)
   end
 
   sig { params(plan: BinaryOperationPlan).returns(MIR::Call) }
@@ -715,7 +715,9 @@ module MIRLoweringExpressions
 
   sig { params(node: AST::Node).returns(MIR::Node) }
   def lower_boolean_operand(node)
-    lowered = T.cast(T.unsafe(self).__send__(:lower, node), MIR::Node)
+    T.bind(self, MIRLowering) rescue nil
+
+    lowered = T.cast(lower(node), MIR::Node)
     return lowered unless Type.from_node!(node, context: "logical operand").optional?
 
     MIR::BinOp.new("!=", lowered, MIR::Lit.new("null"))
@@ -1658,14 +1660,16 @@ module MIRLoweringExpressions
 
   sig { params(val: MIR::Node, ft: T.nilable(Type), borrowed_field: T::Boolean, sink_alloc: Symbol, ast_node: T.nilable(AST::Node)).returns(MIR::Node) }
   def aggregate_dynamic_slice_field_value(val, ft, borrowed_field, sink_alloc, ast_node = nil)
+    T.bind(self, MIRLowering) rescue nil
+
     return val unless aggregate_field_wants_dynamic_slice?(ft)
     return MIR::ItemsAccess.new(val, true) if borrowed_field
 
-    source = T.cast(T.unsafe(self).__send__(:mir_produces_owned_result?, val) && !val.is_a?(MIR::Ident) ?
-      T.unsafe(self).__send__(:hoist_alloc, val, ast_node, err_cleanup: true) : val, MIR::Node)
-    T.cast(T.unsafe(self).__send__(:with_ownership_consumption,
+    source = mir_produces_owned_result?(val) && !val.is_a?(MIR::Ident) ?
+      hoist_alloc(val, ast_node, err_cleanup: true) : val
+    T.cast(with_ownership_consumption(
       MIR::OwnedSlice.new(source, sink_alloc),
-      T.unsafe(self).__send__(:mir_ident_names, source),
+      mir_ident_names(source),
       "MIR::OwnedSlice",
       target_alloc: sink_alloc,
     ), MIR::OwnedSlice)

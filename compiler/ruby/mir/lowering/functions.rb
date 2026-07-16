@@ -563,15 +563,16 @@ module MIRLoweringFunctions
 
   sig { params(node: AST::FunctionDef).returns(T::Boolean) }
   def function_return_retains_shared_handle?(node)
+    T.bind(self, MIRLowering) rescue nil
+
     ret = node.return_type
     return false unless ret.respond_to?(:any_rc?) && ret.any_rc?
 
     found = T.let(false, T::Boolean)
     AST.each_locatable(node.body) do |child|
       next unless child.is_a?(AST::ReturnNode) && child.value
-      lowerer = T.unsafe(self)
-      found = true if lowerer.__send__(:rc_retain_needed?, child.value) &&
-        !lowerer.__send__(:return_transfers_heap_binding?, child.value)
+      found = true if rc_retain_needed?(child.value) &&
+        !return_transfers_heap_binding?(child.value)
     end
     found
   end
@@ -626,11 +627,13 @@ module MIRLoweringFunctions
 
   sig { params(body: T::Array[MIR::Node]).returns(T::Boolean) }
   def body_has_faulting_alloc?(body)
+    T.bind(self, MIRLowering) rescue nil
+
     found = T.let(false, T::Boolean)
     MIR.each_node(body) do |mir|
       next if found
       next unless mir.respond_to?(:expr?) && mir.expr?
-      found = true if T.unsafe(self).__send__(:mir_allocates?, mir) ||
+      found = true if mir_allocates?(mir) ||
         (mir.is_a?(MIR::MethodCall) && mir.method == "bind" && mir.try_wrap)
     end
     found

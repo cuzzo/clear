@@ -4605,6 +4605,11 @@ class Type
     TypeZigRenderer.render(self, is_param: is_param, is_field: is_field, nested: true)
   end
 
+  sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
+  def render_zig_type(is_param: false, is_field: false)
+    compute_zig_type(is_param: is_param, is_field: is_field)
+  end
+
   # Determines the appropriate storage location based on type characteristics and size.
   # Returns :stack for small primitives, :frame for medium-sized data, :heap for large/dynamic.
   #

@@ -9,7 +9,6 @@ require_relative "../../ast/type"
 
 module PrefixedIntRange
   extend T::Sig
-  include ErrorHelper
 
   # Called after coercion context is known for integer literals and constant-foldable
   # unary negations (e.g. -200). Errors if the value does not fit in the effective
@@ -36,7 +35,7 @@ module PrefixedIntRange
       if node.is_a?(AST::Literal)
         handle_prefixed_int_overflow!(node, literal_value, type_sym, min, max_value)
       else
-        error!(node, :INT_LITERAL_OVERFLOW,
+        T.cast(self, ErrorHelper).error!(node, :INT_LITERAL_OVERFLOW,
                val: literal_value, type: type_sym, min: min, max: max_value)
       end
     end
@@ -44,7 +43,7 @@ module PrefixedIntRange
 
   sig { params(node: AST::Literal, val: Integer, target_type: Symbol, min: Integer, max: Integer).returns(NilClass) }
   def handle_prefixed_int_overflow!(node, val, target_type, min, max)
-    error!(node, :INT_LITERAL_OVERFLOW,
+    T.cast(self, ErrorHelper).error!(node, :INT_LITERAL_OVERFLOW,
            val: val, type: target_type, min: min, max: max)
   end
 

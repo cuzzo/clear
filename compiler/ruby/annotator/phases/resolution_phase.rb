@@ -30,7 +30,7 @@ module Annotator
       include SignatureRegistration
       include TypeRegistration
 
-      sig { returns(T.nilable(String)) }
+      sig { override.returns(T.nilable(String)) }
       attr_reader :source_code
       sig { returns(Scope) }
       attr_reader :root_scope

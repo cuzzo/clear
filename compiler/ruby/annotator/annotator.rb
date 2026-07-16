@@ -586,8 +586,15 @@ class Annotator::Phases::TypeAnalysisSession
     emit_int_overflow_error!(node, val, target_type, min, max)
   end
 
-  sig { returns(T.nilable(String)) }
-  attr_accessor :source_code
+  sig { override.returns(T.nilable(String)) }
+  def source_code
+    @source_code
+  end
+
+  sig { params(value: T.nilable(String)).returns(T.nilable(String)) }
+  def source_code=(value)
+    @source_code = value
+  end
 
   sig { params(importer: T.nilable(ModuleImporter), compiler: T.nilable(ModuleImporter), source_dir: T.nilable(String), strict_test: T::Boolean, source_code: T.nilable(String)).void }
   def initialize(importer: nil, compiler: nil, source_dir: nil, strict_test: false, source_code: nil)
@@ -1412,7 +1419,7 @@ class Annotator::Phases::CapabilityAuditSession
     @context.language_mode
   end
 
-  sig { returns(T.nilable(String)) }
+  sig { override.returns(T.nilable(String)) }
   def source_code
     @context.source_code
   end

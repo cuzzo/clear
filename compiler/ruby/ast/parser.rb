@@ -166,7 +166,7 @@ class ClearParser
     )
   end
 
-  sig { returns(String) }
+  sig { override.returns(String) }
   attr_reader :source_code
 
   sig do
@@ -230,15 +230,20 @@ class ClearParser
       budget = FrontendResourceBudget.new
       tokens = Lexer.new(source, file: file, budget: budget).tokenize
       parser = new(tokens, source, budget: budget)
-      syntax = T.cast(parser.__send__(:parse_type_annotation_syntax), ParsedTypeSyntax)
-      current_token = T.cast(parser.__send__(:current), Lexer::Token)
-      unless current_token.type == :EOF
-        parser.__send__(:error!, current_token, :PARSER_EXPECTED,
-          expected: "end of type", got: current_token.value,
-          type: current_token.type, line: current_token.line)
-      end
-      syntax
+      parser.parse_type_syntax_document
     end
+  end
+
+  sig { returns(ParsedTypeSyntax) }
+  def parse_type_syntax_document
+    syntax = parse_type_annotation_syntax
+    current_token = current
+    unless current_token.type == :EOF
+      error!(current_token, :PARSER_EXPECTED,
+        expected: "end of type", got: current_token.value,
+        type: current_token.type, line: current_token.line)
+    end
+    syntax
   end
 
   sig { returns(AST::Program) }

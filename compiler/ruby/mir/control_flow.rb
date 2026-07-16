@@ -711,6 +711,16 @@ class OwnershipDataflow
     MIR::LocalBindingAnalysis.binding_decl_name(stmt) == var
   end
 
+  sig { params(node: T.nilable(AST::Node), state: OwnershipState).returns(T::Array[PlaceId]) }
+  def binding_move_places(node, state)
+    collect_binding_move_places(node, state)
+  end
+
+  sig { params(node: T.nilable(AST::Node), state: OwnershipState).returns(T::Array[PlaceId]) }
+  def explicit_move_places(node, state)
+    collect_explicit_move_places(node, state)
+  end
+
   private
 
   sig { params(stmt: AST::Node, var: String).returns(T::Boolean) }
@@ -1980,7 +1990,7 @@ class BorrowChecker
   sig { params(stmt: AST::Node, token: Lexer::Token, state: BorrowState).void }
   def check_explicit_moves(stmt, token, state)
     owner_state = synthetic_owner_state
-    transfer_collector.send(:collect_explicit_move_places, stmt, owner_state).each do |place|
+    transfer_collector.explicit_move_places(stmt, owner_state).each do |place|
       check_borrowed_move(place.path, token, state)
     end
   end
@@ -1997,7 +2007,7 @@ class BorrowChecker
   # Non-Copy identifiers in ownership-transferring positions are moves.
   sig { params(node: AST::Node).returns(T::Set[String]) }
   def collect_moved_names(node)
-    transfer_collector.send(:collect_binding_move_places, node, synthetic_owner_state).map(&:path).to_set
+    transfer_collector.binding_move_places(node, synthetic_owner_state).map(&:path).to_set
   end
 
   sig { returns(OwnershipDataflow) }

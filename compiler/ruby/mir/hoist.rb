@@ -519,13 +519,15 @@ module MIRHoistLowering
 
   sig { params(parent: AST::BinaryOp, field: Symbol).void }
   def descend(parent, field)
-    child = parent.send(field)
+    T.bind(self, MIRLowering) rescue nil
+
+    child = parent.public_send(field)
     if parent.respond_to?(:lazy_fields) && parent.lazy_fields.include?(field)
       lower_scoped do
-        T.unsafe(self).__send__(:lower, child)
+        lower(child)
       end
     else
-      T.unsafe(self).__send__(:lower, child)
+      lower(child)
     end
   end
 
@@ -607,8 +609,10 @@ module MIRHoistLowering
 
   sig { params(expr: MIR::Node).returns(MIR::Ident) }
   def hoist_evaluation_barrier(expr)
-    name = "__eval_#{T.unsafe(self).__send__(:lowering_counters).next_tmp_id}"
-    T.unsafe(self).__send__(:function_state).pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
+    T.bind(self, MIRLowering) rescue nil
+
+    name = "__eval_#{lowering_counters.next_tmp_id}"
+    function_state.pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
     MIR::Ident.new(name)
   end
 
@@ -667,13 +671,13 @@ module MIRHoistLowering
       ))
     end
     union_return_needs_hoist =
-      ast_node && send(:call_union_return_needs_hoist?, expr, ast_node)
+      ast_node && call_union_return_needs_hoist?(expr, ast_node)
     return expr unless mir_produces_owned_result?(expr) || union_return_needs_hoist
     plan = allocating_hoist_plan(
       T.cast(expr, MIR::Node),
       mutable: mutable,
       transfer_on_success: err_cleanup == true,
-      type_info: T.unsafe(self).__send__(:alloc_mark_type_info, expr, T.must(ast_node), "MIR allocating hoist"),
+      type_info: alloc_mark_type_info(expr, T.must(ast_node), "MIR allocating hoist"),
       cleanup_entry: hoist_cleanup_entry(expr, ast_node)
     )
     stamp_allocating_result_target!(expr, plan.name, alloc: plan.alloc)
@@ -684,7 +688,9 @@ module MIRHoistLowering
 
   sig { params(mir: MIR::Node, ast_node: T.nilable(AST::Node), context: String).returns(Type) }
   def mir_alloc_mark_type_info(mir, ast_node = nil, context: "MIR allocation")
-    return T.unsafe(self).__send__(:alloc_mark_type_info, mir, ast_node, context) if ast_node
+    T.bind(self, MIRLowering) rescue nil
+
+    return alloc_mark_type_info(mir, ast_node, context) if ast_node
     explicit_type = mir_explicit_result_type(mir)
     return explicit_type if explicit_type
 
@@ -867,6 +873,8 @@ module MIRHoistLowering
 
   sig { params(stmt: MIR::Node).returns(T::Array[MIR::Node]) }
   def normalize_allocating_mir_stmt!(stmt)
+    T.bind(self, MIRLowering) rescue nil
+
     prefix = T.let([], T::Array[MIR::Node])
     case stmt
     when MIR::Let
@@ -875,7 +883,7 @@ module MIRHoistLowering
       prefix.concat(normalize_used_expr_attr!(stmt, :target))
       prefix.concat(normalize_allocating_result_expr!(stmt.value))
     when MIR::ReassignWithCleanup
-      unless T.unsafe(self).__send__(:fallible_self_fallback_reassign?, stmt.name.to_s, stmt.value)
+      unless fallible_self_fallback_reassign?(stmt.name.to_s, stmt.value)
         prefix.concat(normalize_used_expr_attr!(stmt, :value))
       end
     when MIR::ExprStmt
@@ -1102,7 +1110,9 @@ module MIRHoistLowering
 
   sig { params(expr: MIR::Node).returns(T::Boolean) }
   def mir_consumes_owned_operands?(expr)
-    contract = T.unsafe(self).__send__(:ownership_contract_for_node, expr)
+    T.bind(self, MIRLowering) rescue nil
+
+    contract = ownership_contract_for_node(expr)
     return false unless contract.is_a?(MIR::OwnershipContract)
 
     contract.operands.any? { |operand| !operand.borrowed && operand.name }
