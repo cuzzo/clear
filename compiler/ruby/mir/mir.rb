@@ -4515,8 +4515,8 @@ module MIR
     def ownership_source_exprs = child_exprs
   end
 
-  # Length-checked borrowed slice constructed from a foreign pointer/count
-  # pair. The resulting slice never owns or frees the C allocation.
+  # Scoped borrowed slice constructed from a programmer-asserted foreign
+  # pointer/count pair. The resulting slice never owns or frees the C allocation.
   ForeignSliceView = Struct.new(:pointer, :count) do
     extend T::Sig
     include Expr

@@ -484,7 +484,8 @@ and C-layout type for `ABI C`.
 
 1. Header import/verification for the supported ABI subset.
 2. Synchronous non-capturing C callback function types and trampolines.
-3. Pointer/count conversion to a bounded borrowed view via `.view(count)`.
+3. Pointer/count conversion through the explicit lexical boundary
+   `WITH UNSAFE VIEW pointer LENGTH count AS values { ... }`.
 4. Target aliases inside ordinary CLEAR collections and numeric families.
 
 Still deferred: checked runtime `String` to `String@c` conversion, explicit

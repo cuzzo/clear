@@ -341,7 +341,8 @@ module AST
   end
 
   Capability = Struct.new(:capability, :var_node, :alias, :alias_mutable, :guard_expr,
-                          :snapshot_token, :view_token, :resolved_type, :old_scope,
+                          :snapshot_token, :view_token, :view_length, :as_token,
+                          :resolved_type, :old_scope,
                           keyword_init: true) do
     extend T::Sig
 
@@ -2405,7 +2406,6 @@ module AST
     attr_accessor :extern_call       # true when calling a native EXTERN method
     attr_accessor :extern_effects    # Hash of effect symbols from EXTERN FN EFFECTS declaration
     attr_accessor :extern_source
-    attr_accessor :foreign_slice_view # pointer/count C view materialization
     attr_accessor :generic_type_args # Array of inferred type symbols for generic methods
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     attr_accessor :safe_nav_chain    # implicit continuation of an earlier ?. over non-optional members
@@ -2518,7 +2518,8 @@ module AST
       @arms = value
     end
     # :view is a cheap immutable borrow on ~T@observable; :materialized_view is
-    # an owned snapshot on any ~T aggregate. nil for traditional capability blocks.
+    # an owned snapshot on any ~T aggregate; :unsafe_view is a scoped assertion
+    # that a foreign pointer contains LENGTH elements. nil for traditional blocks.
     attr_accessor :view_kind
     # Rolled-up snapshot classification used by downstream passes. Each
     # capability entry still carries the per-cell `:alias_mutable` flag.
@@ -3543,7 +3544,7 @@ module AST
   }, T::Hash[String, Symbol])
 
   # ruby-to-clear: data-api
-  CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED, :VIEW, :MATERIALIZED_VIEW, :SNAPSHOT]
+  CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED, :VIEW, :MATERIALIZED_VIEW, :UNSAFE_VIEW, :SNAPSHOT]
 end
 
 # ==========================================

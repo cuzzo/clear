@@ -1485,9 +1485,6 @@ module MIRLoweringFunctions
   sig { params(node: AST::MethodCall).returns(MIR::Node) }
   def lower_method_call(node)
     T.bind(self, MIRLowering) rescue nil
-    if node.respond_to?(:foreign_slice_view) && node.foreign_slice_view
-      return MIR::ForeignSliceView.new(lower(node.object), lower(T.must(node.args.first)))
-    end
     # Stub interception: a UFCS call `x.query(args)` lowers to `query(x, args)`,
     # so STUB query intercepts must apply here too.
     if (intercept = stub_intercept_for(node.name, node.object, node.args))

@@ -190,6 +190,8 @@ module Annotator
         # Delegate type resolution to Type class
         left_type = node.left.full_type!(context: "binary left")
         right_type = node.right.full_type!(context: "binary right")
+        reject_direct_observable_operand!(node, node.left, left_type)
+        reject_direct_observable_operand!(node, node.right, right_type)
         if node.op == :ADD && (left_type.string? || right_type.string?)
           token = node.token
           fixable!(node,
@@ -234,6 +236,17 @@ module Annotator
         end
         result.type
       end
+
+      sig { params(site: AST::BinaryOp, operand: AST::Node, operand_type: Type).void }
+      def reject_direct_observable_operand!(site, operand, operand_type)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        return unless operand_type.future? && operand_type.observable?
+        root = AST.root_identifier(operand)
+        return unless root.is_a?(AST::Identifier)
+
+        emit_direct_view_access_finding!(site, root.name, permission: "VIEW")
+      end
+      private :reject_direct_observable_operand!
 
       sig { params(operand: AST::Node, operand_type: Type, op: Symbol).void }
       def validate_logical_presence_operand!(operand, operand_type, op)

@@ -56,12 +56,15 @@ RSpec.describe Formatter do
       EXTERN FN values(handle: Handle) RETURNS ?[]@c Int64 FROM "fixture" ABI C;
       FN first(handle: Handle) RETURNS Int64 ->
         pointer = values(handle)?;
-        RETURN pointer.view(1)[0];
+        WITH UNSAFE VIEW pointer LENGTH 1 AS view {
+          RETURN view[0];
+        }
       END
     CLEAR
 
     formatted = T.must(Formatter.format(source))
     expect(formatted).to include("pointer = values(handle)?;")
+    expect(formatted).to include("WITH UNSAFE VIEW pointer LENGTH 1 AS view {")
     expect(formatted).not_to include("handle.values()")
   end
 

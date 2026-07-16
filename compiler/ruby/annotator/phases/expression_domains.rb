@@ -36,9 +36,8 @@ module Annotator
         visit(node.object)
         node.args.each { |arg| visit(arg) }
 
-        if resolve_foreign_slice_view!(node)
-          return
-        end
+        reject_legacy_foreign_slice_view!(node)
+        reject_direct_observable_method_access!(node)
 
         if resolve_collection_method(node)
           validate_indirect_collection_insertion!(node)
@@ -71,27 +70,29 @@ module Annotator
         record_call_site(node.name) if node.name.is_a?(String)
       end
 
-      sig { params(node: AST::MethodCall).returns(T::Boolean) }
-      def resolve_foreign_slice_view!(node)
+      sig { params(node: AST::MethodCall).void }
+      def reject_legacy_foreign_slice_view!(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
         receiver_type = node.object.full_type!(context: "foreign view receiver")
-        return false unless receiver_type.c_array_view? && node.name == "view"
+        return unless receiver_type.c_array_view? && node.name == "view"
 
-        if node.args.length != 1
-          error!(node, :STDLIB_METHOD_ARITY, label: "foreign pointer", method: "view", expected: 1, got: node.args.length)
-        end
-        count = T.must(node.args.first)
-        count_type = count.full_type!(context: "foreign view length")
-        error!(count, :RANK_INDEX_INTEGER, got: count_type.resolved) unless count_type.integer?
-
-        element = T.must(receiver_type.element_type)
-        view_type = Type.new(:"#{Type.surface_name(element)}[]", location: :borrow)
-        stamp_type!(node, view_type)
-        node.container_borrow = true
-        node.foreign_slice_view = true
-        true
+        error!(node, :FOREIGN_VIEW_REQUIRES_WITH)
       end
-      private :resolve_foreign_slice_view!
+      private :reject_legacy_foreign_slice_view!
+
+      sig { params(node: AST::MethodCall).void }
+      def reject_direct_observable_method_access!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        receiver_type = node.object.full_type!(context: "observable method receiver")
+        return unless receiver_type.future? && receiver_type.observable?
+        root = AST.root_identifier(node.object)
+        if root.is_a?(AST::Identifier)
+          emit_direct_view_access_finding!(node, root.name, permission: "VIEW")
+        else
+          error!(node, :DIRECT_VIEW_ACCESS_REQUIRES_WITH, name: "observable", permission: "VIEW")
+        end
+      end
+      private :reject_direct_observable_method_access!
 
       sig { params(node: AST::MethodCall).void }
       def reject_mutating_borrowed_receiver!(node)

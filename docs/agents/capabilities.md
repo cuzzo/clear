@@ -116,13 +116,13 @@ be bound and accessed, but they are not synchronization mechanisms:
 | Spelling | Meaning |
 |---|---|
 | `String@c` | Borrowed, NUL-terminated C string; not a CLEAR slice header |
-| `[]@c T` | Unbounded borrowed C data pointer; call `.view(count)` before indexing |
+| `[]@c T` | Unbounded borrowed C data pointer; open a scoped `WITH UNSAFE VIEW` before indexing |
 | `TargetUInt@size` | Target `size_t` width, still a member of `UInt`/`Number` |
 | `TargetInt@size` | Target signed pointer-difference width, still `Int`/`Number` |
 
 These capabilities add no lock and never imply ownership of foreign memory.
-For example, `pointer.view(count)` returns an ordinary bounded borrowed
-`[]T`; cleanup remains the C owner's responsibility.
+For example, `WITH UNSAFE VIEW pointer LENGTH count AS values { ... }` binds
+an ordinary bounded borrowed `[]T`; cleanup remains the C owner's responsibility.
 
 ## Interior Mutability (@alwaysMutable)
 

@@ -101,22 +101,49 @@ RSpec.describe "C ABI integration" do
     expect(zig).to include("__previous_c_callback_rt")
   end
 
-  it "bounds foreign pointer views and rejects malformed view requests" do
+  it "bounds foreign pointers only through a scoped unsafe view" do
     source = <<~CLEAR
       EXTERN STRUCT Handle {} FROM "fixture" ABI C;
       EXTERN FN values(handle: Handle) RETURNS ?[]@c Int64 FROM "fixture" ABI C;
       FN first(handle: Handle) RETURNS Int64 ->
         pointer = values(handle)?;
-        view = pointer.view(3);
-        RETURN view[0];
+        WITH UNSAFE VIEW pointer LENGTH 3 AS view {
+          RETURN view[0];
+        }
       END
     CLEAR
     expect(transpile(source)).to include("[0..@intCast(3)]")
 
-    expect { transpile(source.sub("view(3)", "view()")) }
-      .to raise_error(/requires exactly 1 argument/)
-    expect { transpile(source.sub("view(3)", 'view("three")')) }
+    expect { transpile(source.sub("LENGTH 3", 'LENGTH "three"')) }
       .to raise_error(/indices must be integers/)
+
+    legacy = source.sub(
+      "WITH UNSAFE VIEW pointer LENGTH 3 AS view {\n    RETURN view[0];\n  }",
+      "RETURN pointer.view(3)[0];"
+    )
+    expect { transpile(legacy) }.to raise_error(/do not have a `.view\(\)` method/)
+
+    direct = source.sub(
+      "WITH UNSAFE VIEW pointer LENGTH 3 AS view {\n    RETURN view[0];\n  }",
+      "RETURN pointer[0];"
+    )
+    expect { transpile(direct) }.to raise_error(/Cannot index pointer directly.*WITH UNSAFE VIEW/m)
+
+    safe_view = source.sub("WITH UNSAFE VIEW", "WITH VIEW").sub(" LENGTH 3", "")
+    expect { transpile(safe_view) }
+      .to raise_error(/Use `WITH UNSAFE VIEW pointer LENGTH count AS values/)
+  end
+
+  it "does not allow the bounded foreign view itself to escape its WITH scope" do
+    source = <<~CLEAR
+      FN leak(pointer: []@c Int64, count: TargetUInt@size) RETURNS Int64[] ->
+        WITH UNSAFE VIEW pointer LENGTH count AS bounded {
+          RETURN bounded;
+        }
+      END
+    CLEAR
+
+    expect { transpile(source) }.to raise_error(/Cannot RETURN 'bounded' from inside a WITH block/)
   end
 
   it "renders target capabilities, mutable fixed arrays, and supported C calling conventions" do

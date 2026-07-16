@@ -52,8 +52,9 @@ separate count has bounded it:
 
 ```clear
 pointer = nativeValues(handle)?;
-values = pointer.view(nativeValueCount(handle));
-ASSERT values[0] == 10;
+WITH UNSAFE VIEW pointer LENGTH nativeValueCount(handle) AS values {
+  ASSERT values[0] == 10;
+}
 ```
 
 Synchronous non-capturing callbacks use

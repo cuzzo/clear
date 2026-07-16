@@ -18,6 +18,24 @@ module Annotator
           node.target.safe_nav_chain == true
         target_type_info = T.must(target_type_info.wrapped_type) if implicit_safe_nav
 
+        if target_type_info.c_array_view?
+          root = AST.root_identifier(node.target)
+          if root.is_a?(AST::Identifier)
+            emit_foreign_index_needs_unsafe_view!(node, root.name)
+          else
+            error!(node, :FOREIGN_POINTER_DIRECT_INDEX, name: "foreign pointer")
+          end
+        end
+
+        if target_type_info.future? && target_type_info.observable?
+          root = AST.root_identifier(node.target)
+          if root.is_a?(AST::Identifier)
+            emit_direct_view_access_finding!(node, root.name, permission: "VIEW")
+          else
+            error!(node, :DIRECT_VIEW_ACCESS_REQUIRES_WITH, name: "observable", permission: "VIEW")
+          end
+        end
+
         if target_type_info.rank?
           indices = node.index.is_a?(AST::TupleLit) ? node.index.items : [node.index]
           if indices.length != target_type_info.rank
@@ -94,6 +112,14 @@ module Annotator
         emit_moved_field_path_error_if_needed!(node)
 
         target_type = node.target.full_type!(context: "field receiver")
+        if target_type.future? && target_type.observable?
+          root = AST.root_identifier(node.target)
+          if root.is_a?(AST::Identifier)
+            emit_direct_view_access_finding!(node, root.name, permission: "VIEW")
+          else
+            error!(node, :DIRECT_VIEW_ACCESS_REQUIRES_WITH, name: "observable", permission: "VIEW")
+          end
+        end
         implicit_safe_nav = target_type.optional? && node.target.respond_to?(:safe_nav_chain) &&
           node.target.safe_nav_chain == true
         if target_type.optional? && !node.target.is_a?(AST::OptionalUnwrap) && !implicit_safe_nav

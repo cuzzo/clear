@@ -270,6 +270,8 @@ module MIRLoweringCapabilities
       materialization.add_binding(restrict) unless restrict.empty?
     when :VIEW
       materialization.add_binding(view_capability_binding(context))
+    when :UNSAFE_VIEW
+      materialization.add_binding(unsafe_foreign_view_binding(context))
     when :SNAPSHOT
       snapshot = snapshot_capability_binding(context)
       materialization.add_binding(snapshot) if snapshot
@@ -462,6 +464,20 @@ module MIRLoweringCapabilities
     stmts.concat(coop_yield_mir)
     stmts << MIR::Suppress.new(safe_alias)
     stmts
+  end
+
+  sig { params(context: WithCapabilityBindingContext).returns(T::Array[MIR::Emittable]) }
+  def unsafe_foreign_view_binding(context)
+    lowerer = T.cast(self, MIRLowering)
+    length = context.cap.view_length
+    Kernel.raise "Internal: WITH UNSAFE VIEW missing LENGTH expression" unless length
+    source_mir = with_capability_source_mir(context.var_node)
+    safe_alias = safe_with_capability_alias(context.alias_name)
+    view = MIR::ForeignSliceView.new(source_mir, lowerer.lower(length))
+    [
+      MIR::Let.new(safe_alias, view, false, nil, nil),
+      MIR::Suppress.new(safe_alias),
+    ]
   end
 
   sig { returns(T::Array[MIR::Emittable]) }
@@ -1222,6 +1238,7 @@ module MIRLoweringCapabilities
   private :sorted_lock_acquire
   private :structured_with_bindings
   private :view_capability_binding
+  private :unsafe_foreign_view_binding
   private :with_binding_materialization
   private :with_block_body_stmts
   private :with_block_control_label

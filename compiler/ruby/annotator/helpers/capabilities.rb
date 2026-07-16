@@ -100,7 +100,7 @@ module CapabilityHelper
   end
 
   LOCK_CAPABILITIES = T.let(Set[:EXCLUSIVE, :write_locked_read].freeze, T::Set[Symbol])
-  VIEW_CAPABILITIES = T.let(Set[:VIEW, :MATERIALIZED_VIEW].freeze, T::Set[Symbol])
+  VIEW_CAPABILITIES = T.let(Set[:VIEW, :MATERIALIZED_VIEW, :UNSAFE_VIEW].freeze, T::Set[Symbol])
   BORROWED_STORAGE_QUALIFIERS = T.let({
     shared: "@shared",
     multiowned: "@multiowned",
@@ -213,6 +213,10 @@ module CapabilityHelper
       # VIEW requires a tense observable source; MATERIALIZED VIEW is the
       # always-correct fallback for non-observable tense aggregates.
       t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
+      if t.c_array_view?
+        emit_foreign_with_view_needs_unsafe!(node, fact)
+        return
+      end
       unless t.future? && t.observable?
         if var_node.is_a?(AST::Identifier)
           emit_view_not_observable_finding!(node, fact, t)
@@ -229,6 +233,15 @@ module CapabilityHelper
         name = fact.target_label
         emit_with_materialized_needs_tense!(node, name, t.resolved)
       end
+
+    when :UNSAFE_VIEW
+      t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
+      error!(node, :WITH_UNSAFE_VIEW_NEEDS_FOREIGN_POINTER, got: Type.surface_name(t)) unless t.c_array_view?
+      length = fact.view_length
+      Kernel.raise "Internal: WITH UNSAFE VIEW missing LENGTH expression" unless length
+      visit(length)
+      length_type = length.full_type!(context: "foreign view length")
+      error!(length, :RANK_INDEX_INTEGER, got: length_type.resolved) unless length_type.integer?
 
 	    when :SNAPSHOT
 	      # Versioned cells and indirect atomic cells share the WITH SNAPSHOT
@@ -942,7 +955,7 @@ module CapabilityHelper
     case fact.capability
     when :RESTRICT
       declare_restrict_capability!(fact)
-    when :VIEW, :MATERIALIZED_VIEW
+    when :VIEW, :MATERIALIZED_VIEW, :UNSAFE_VIEW
       declare_view_capability!(fact)
     when :SNAPSHOT
       declare_snapshot_capability!(fact)
@@ -1005,12 +1018,16 @@ module CapabilityHelper
     alias_name = fact.alias_name
     current_scope.declare(alias_name, nil, bind_type, false, false, nil, :stack)
     record_capture_local!(alias_name)
-    declare_view_borrow_constraints!(alias_name) if fact.capability == :VIEW
+    declare_view_borrow_constraints!(alias_name) if fact.capability == :VIEW || fact.capability == :UNSAFE_VIEW
     og_declare(alias_name, nil, bind_type)
   end
 
   sig { params(fact: WithCapabilityFact).returns(Type) }
   def view_capability_alias_type(fact)
+    if fact.capability == :UNSAFE_VIEW
+      element = T.must(fact.resolved_type.element_type)
+      return Type.new(:"#{Type.surface_name(element)}[]", location: :borrow)
+    end
     Type.new(fact.resolved_type).tense_type
   end
 

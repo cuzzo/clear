@@ -129,9 +129,10 @@ FN main() RETURNS Void ->
   ASSERT detail == 90;
   ASSERT applyCallback(21, doubleForC) == 42;
   values_pointer = values(handle)?;
-  borrowed_values = values_pointer.view(valueCount(handle));
-  ASSERT borrowed_values.length() == 4;
-  ASSERT borrowed_values[0] + borrowed_values[1] + borrowed_values[2] + borrowed_values[3] == 30;
+  WITH UNSAFE VIEW values_pointer LENGTH valueCount(handle) AS borrowed_values {
+    ASSERT borrowed_values.length() == 4;
+    ASSERT borrowed_values[0] + borrowed_values[1] + borrowed_values[2] + borrowed_values[3] == 30;
+  }
 
   print("C FFI scalars, structs, arrays PASS");
   print("C FFI strings, out parameters, cleanup, errors PASS");

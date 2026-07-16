@@ -988,6 +988,131 @@ module FixableHelper
       raise_in_collector: true)
   end
 
+  # `WITH VIEW ptr AS value` on an unbounded C pointer is syntactically close
+  # to the right construct, but semantically hides both the unsafe assertion
+  # and its bound. Offer a two-edit interactive conversion. LENGTH 0 is a safe
+  # scaffold: it cannot authorize any access until the developer replaces it
+  # with the count guaranteed by the C API.
+  sig { params(node: AST::WithBlock, fact: CapabilityPlan::CapabilityTransition).void }
+  def emit_foreign_with_view_needs_unsafe!(node, fact)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    name = fact.target_label
+    view_token = fact.source[:view_token]
+    as_token = fact.source[:as_token]
+    unless view_token && as_token
+      return error!(node, :WITH_VIEW_FOREIGN_NEEDS_UNSAFE, name: name)
+    end
+
+    fix = Fix.new(
+      description: fix_description(:CONVERT_FOREIGN_VIEW_TO_UNSAFE, name: name),
+      confidence: :interactive,
+      edits: [
+        Edit.new(
+          span: Span.new(file: nil, line: view_token.line, col: view_token.column, length: "VIEW".length),
+          replacement: "UNSAFE VIEW",
+        ),
+        Edit.new(
+          span: Span.new(file: nil, line: as_token.line, col: as_token.column, length: 0),
+          replacement: "LENGTH 0 ",
+        ),
+      ],
+    )
+    fixable!(node,
+      code: :WITH_VIEW_FOREIGN_NEEDS_UNSAFE,
+      name: name,
+      category: :capability,
+      level: :error,
+      fixes: [fix],
+      raise_in_collector: true)
+  end
+
+  # Direct `ptr[index]` is an unsafe-boundary error, not an unsupported-index
+  # error. The interactive fix wraps the complete source line and rewrites the
+  # pointer access to a scoped alias. A literal non-negative index supplies the
+  # minimum required length; dynamic indices deliberately get LENGTH 0 so the
+  # tool never invents an unsafe allocation claim.
+  sig { params(node: AST::GetIndex, name: String).void }
+  def emit_foreign_index_needs_unsafe_view!(node, name)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    src = source_code
+    fixes = []
+    if src
+      line_num = node.source_range.start_line
+      line_text = src.lines[line_num - 1] || ""
+      body = line_text.chomp
+      indent = body[/\A\s*/] || ""
+      inner = body.lstrip
+      index = node.index
+      length = if index.is_a?(AST::Literal) && index.value.is_a?(Integer) && index.value >= 0
+        (index.value + 1).to_s
+      else
+        "0"
+      end
+      unless inner.empty?
+        alias_name = "#{name}_view"
+        rewritten = inner.gsub(/\b#{Regexp.escape(name)}\s*(?=\[)/, alias_name)
+        replacement = "#{indent}WITH UNSAFE VIEW #{name} LENGTH #{length} AS #{alias_name} { #{rewritten} }"
+        fixes << Fix.new(
+          description: fix_description(:WRAP_FOREIGN_INDEX_UNSAFE_VIEW,
+            name: name, length: length, alias_name: alias_name),
+          confidence: :interactive,
+          edits: [Edit.new(
+            span: Span.new(file: nil, line: line_num, col: 1, length: body.length),
+            replacement: replacement,
+          )],
+        )
+      end
+    end
+    return error!(node, :FOREIGN_POINTER_DIRECT_INDEX, name: name) if fixes.empty?
+    fixable!(node,
+      code: :FOREIGN_POINTER_DIRECT_INDEX,
+      name: name,
+      category: :capability,
+      level: :error,
+      fixes: fixes,
+      raise_in_collector: true)
+  end
+
+  # Observable and other view-controlled values use the same lexical repair as
+  # capability-wrapped fields: wrap the offending line and consistently route
+  # member/index access through the alias.
+  sig { params(node: AST::Locatable, name: String, permission: String).void }
+  def emit_direct_view_access_finding!(node, name, permission:)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    src = source_code
+    fixes = []
+    if src
+      line_num = node.source_range.start_line
+      line_text = src.lines[line_num - 1] || ""
+      body = line_text.chomp
+      indent = body[/\A\s*/] || ""
+      inner = body.lstrip
+      unless inner.empty?
+        alias_name = "#{name}_view"
+        rewritten = inner.gsub(/\b#{Regexp.escape(name)}\b/, alias_name)
+        replacement = "#{indent}WITH #{permission} #{name} AS #{alias_name} { #{rewritten} }"
+        fixes << Fix.new(
+          description: fix_description(:WRAP_DIRECT_VIEW_ACCESS,
+            permission: permission, name: name, alias_name: alias_name),
+          confidence: :interactive,
+          edits: [Edit.new(
+            span: Span.new(file: nil, line: line_num, col: 1, length: body.length),
+            replacement: replacement,
+          )],
+        )
+      end
+    end
+    return error!(node, :DIRECT_VIEW_ACCESS_REQUIRES_WITH, name: name, permission: permission) if fixes.empty?
+    fixable!(node,
+      code: :DIRECT_VIEW_ACCESS_REQUIRES_WITH,
+      name: name,
+      permission: permission,
+      category: :capability,
+      level: :error,
+      fixes: fixes,
+      raise_in_collector: true)
+  end
+
   # Capability: `WITH GUARD` clause where one or more participating
   # bindings have no AS alias. :auto fix that inserts ` AS <name>`
   # right after each missing-alias var node. The proposed alias is

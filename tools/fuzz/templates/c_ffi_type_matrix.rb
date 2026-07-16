@@ -14,6 +14,10 @@ end
 C_FFI_TYPE_CELLS.concat([
   { foreign: :bounded_view, expected: :pass },
   { foreign: :direct_index, expected: :compile_error },
+  { foreign: :safe_view, expected: :compile_error },
+  { foreign: :legacy_method_view, expected: :compile_error },
+  { foreign: :invalid_length, expected: :compile_error },
+  { foreign: :escaping_view, expected: :compile_error },
 ])
 C_FFI_TYPE_CELLS.freeze
 
@@ -21,8 +25,9 @@ FuzzGenerator.register(:c_ffi_type_matrix, cells: C_FFI_TYPE_CELLS) do |p|
   if p[:foreign] == :bounded_view
     next <<~CLEAR
       FN first(values: []@c Int64, count: TargetUInt@size) RETURNS Int64 ->
-        bounded = values.view(count);
-        RETURN bounded[0_i64] OR_ELSE 0_i64;
+        WITH UNSAFE VIEW values LENGTH count AS bounded {
+          RETURN bounded[0_i64] OR_ELSE 0_i64;
+        }
       END
 
       FN main() RETURNS Void -> RETURN; END
@@ -32,6 +37,50 @@ FuzzGenerator.register(:c_ffi_type_matrix, cells: C_FFI_TYPE_CELLS) do |p|
     next <<~CLEAR
       FN invalid(values: []@c Int64) RETURNS Int64 ->
         RETURN values[0_i64] OR_ELSE 0_i64;
+      END
+
+      FN main() RETURNS Void -> RETURN; END
+    CLEAR
+  end
+  if p[:foreign] == :safe_view
+    next <<~CLEAR
+      FN invalid(values: []@c Int64) RETURNS Void ->
+        WITH VIEW values AS bounded {
+          _ = bounded.length();
+        }
+        RETURN;
+      END
+
+      FN main() RETURNS Void -> RETURN; END
+    CLEAR
+  end
+  if p[:foreign] == :legacy_method_view
+    next <<~CLEAR
+      FN invalid(values: []@c Int64, count: TargetUInt@size) RETURNS Int64 ->
+        RETURN values.view(count)[0_i64] OR_ELSE 0_i64;
+      END
+
+      FN main() RETURNS Void -> RETURN; END
+    CLEAR
+  end
+  if p[:foreign] == :invalid_length
+    next <<~CLEAR
+      FN invalid(values: []@c Int64) RETURNS Void ->
+        WITH UNSAFE VIEW values LENGTH "unknown" AS bounded {
+          _ = bounded.length();
+        }
+        RETURN;
+      END
+
+      FN main() RETURNS Void -> RETURN; END
+    CLEAR
+  end
+  if p[:foreign] == :escaping_view
+    next <<~CLEAR
+      FN invalid(values: []@c Int64, count: TargetUInt@size) RETURNS Int64[] ->
+        WITH UNSAFE VIEW values LENGTH count AS bounded {
+          RETURN bounded;
+        }
       END
 
       FN main() RETURNS Void -> RETURN; END

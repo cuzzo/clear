@@ -107,7 +107,7 @@ module FuzzCoverageModel
       high_risk: true
     ),
     capability_wrap_matrix: profile(
-      failure_proves: 'Capability wrapper construction admits valid wrappers and rejects invalid combinations.'
+      failure_proves: 'Capability wrapper construction admits valid wrappers, observable values require scoped WITH VIEW access, and invalid combinations or direct observable access are rejected.'
     ),
     cast_lowering_matrix: profile(
       failure_proves: 'Annotation-driven casts/coercions lower without losing cleanup obligations.'
@@ -137,7 +137,7 @@ module FuzzCoverageModel
       matrix_strategy: :smoke
     ),
     c_ffi_type_matrix: profile(
-      failure_proves: 'Target-resolved C integer aliases remain ordinary numeric collection elements, while foreign pointers require an explicit bounded borrowed view.'
+      failure_proves: 'Target-resolved C integer aliases remain ordinary numeric collection elements, while foreign pointers require a non-escaping WITH UNSAFE VIEW boundary with an integer length.'
     ),
     tuple_collection_composition_matrix: profile(
       failure_proves: 'Tuple composes recursively with collections, capability-bearing layers, and optional/fallible/future tenses without changing which node each tense gates.'

@@ -121,7 +121,7 @@ expected hard error is absent.
 | `nested_loop_escape`        | 48           | Loop-local list/map escape -> outer container (commit 9fa21926). `wrap_kind` axis (`:bare` / `:struct_field`) per docs/agents/bug9-forensic.md: struct-wrapped escapes fail today as designed, pass once escape-analysis walkers are unified. |
 | `collection_shape_smoke`    | 14           | Shape/admission smoke coverage for every collection form named in the surface registry, including direct `String[]@list` cleanup coverage. |
 | `tuple_collection_composition_matrix` | 19 | Recursive Tuple composition in both directions across collections and capable layers, plus optional/fallible/future tense binding on the Tuple, its fields, and nested collections. |
-| `c_ffi_type_matrix` | 50 | Target-resolved signed/unsigned C aliases across fixed arrays, lists, pools, sets, maps, and streams; foreign pointer views require explicit bounds and reject direct indexing. |
+| `c_ffi_type_matrix` | 54 | Target-resolved signed/unsigned C aliases across fixed arrays, lists, pools, sets, maps, and streams; foreign pointers require a scoped `WITH UNSAFE VIEW ... LENGTH ...` boundary and reject direct indexing, safe views, legacy method views, invalid lengths, and escaping aliases. |
 | `ownership_surface_smoke`   | 35           | Global smoke coverage for cleanup shapes, escape sinks, and MIR ownership contracts. |
 | `escape_mechanism_matrix`   | 30           | Direct AST-bound escape mechanisms: return, yield, BG/BG STREAM/DO capture, enclosing assignment, field/index stores, collection/aggregate stores, recursive aggregate returns, TAKES/GIVE, loop carry, and call-return receiver stores. |
 | `takes_move_modality`       | 48           | EVERY :cleanup_value_shapes member passed to a TAKES param via GIVE / bare(implicit) / COPY. Registry-driven (no hand-picked shapes). |
@@ -133,7 +133,7 @@ expected hard error is absent.
 | `bg_copy_param_reentrant`   | 8               | COPY of @list param into BG calling reentrant function. |
 | `infallible_signature`      | 60              | Cells exercising infallible (non-`!T`) function signature lowering. |
 | `binary_op_matrix`         | 45           | Binary operator lowering/admission combinations, including AND/OR short-circuiting and scalar/managed single-fallback `!?T` collapse. |
-| `capability_wrap_matrix`   | 21           | Capability wrapper construction/admission cells. |
+| `capability_wrap_matrix`   | 26           | Capability wrapper construction/admission cells, including observable scoped views and rejected direct observable index, operator, field, and method access. |
 | `catch_allocator_matrix`   | 20           | Error/catch paths that preserve allocator identity. |
 | `catch_reassign_matrix`    | 16           | Catch/fallback reassignment ownership cells. |
 | `destructuring_assignment_matrix` | 6      | Fixed-shape destructuring declaration, typed/mutable targets, reassignment, mixed declaration, and discard. |
