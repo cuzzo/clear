@@ -127,6 +127,8 @@ class Annotator::Phases::TypeAnalysisSession
     prop :auto_locked_assign_name, T.nilable(String), default: nil
     prop :struct_literal_call_argument_depth, Integer, default: 0
     prop :annotation_ancestors, T::Array[AST::Node], factory: -> { [] }
+    prop :comptime_type_param_refinements, T::Hash[Symbol, Type], factory: -> { {} }
+    prop :branch_terminated, T::Boolean, default: false
   end
 
   class Config < T::Struct
@@ -145,7 +147,7 @@ class Annotator::Phases::TypeAnalysisSession
 
   sig { returns(Annotator::FunctionRegistry) }
   def semantic_function_registry
-    @function_registry
+    @resolution.function_registry
   end
 
   sig { returns(T::Hash[String, AST::FunctionDef]) }
@@ -191,9 +193,9 @@ class Annotator::Phases::TypeAnalysisSession
     T.must(@traversal_state.scopes.first)
   end
 
-  sig { returns(T.nilable(AST::Program)) }
+  sig { returns(AST::Program) }
   def semantic_program
-    @program
+    @resolution.program
   end
 
   sig { returns(T::Array[HeldLockTypeEntry]) }
@@ -241,7 +243,7 @@ class Annotator::Phases::TypeAnalysisSession
     type_name = type.resolved
     return type unless current_function_type_param?(type_name)
 
-    @comptime_type_param_refinements[type_name] || type
+    @traversal_state.comptime_type_param_refinements[type_name] || type
   end
   private :refined_comptime_type_param_type
 
@@ -255,11 +257,11 @@ class Annotator::Phases::TypeAnalysisSession
       .returns(T.type_parameter(:Result))
   end
   def with_comptime_type_param_refinement(type_param, narrowed_type, &blk)
-    previous = @comptime_type_param_refinements
-    @comptime_type_param_refinements = previous.merge(type_param => Type.new(narrowed_type))
+    previous = @traversal_state.comptime_type_param_refinements
+    @traversal_state.comptime_type_param_refinements = previous.merge(type_param => Type.new(narrowed_type))
     blk.call
   ensure
-    @comptime_type_param_refinements = T.unsafe(previous)
+    @traversal_state.comptime_type_param_refinements = T.unsafe(previous)
   end
   private :with_comptime_type_param_refinement
 
@@ -565,13 +567,10 @@ class Annotator::Phases::TypeAnalysisSession
     ), Config)
     @traversal_state = T.let(TraversalState.new, TraversalState)
     @audit_inputs = T.let(CapabilityAuditInputs.new, CapabilityAuditInputs)
-    @function_registry = T.let(Annotator::FunctionRegistry.new, Annotator::FunctionRegistry)
-    @program = T.let(nil, T.nilable(AST::Program))
-    @language_mode = T.let(:default, Symbol)
-    @comptime_type_param_refinements = T.let({}, T::Hash[Symbol, Type])
-    # WITH validations on parameter bindings need caller-sync propagation first.
-    @branch_terminated = T.let(false, T::Boolean)
-    reset_compilation_state!
+    @resolution = T.let(Annotator::Phases::ResolutionFacts.empty, Annotator::Phases::ResolutionFacts)
+    @traversal_state.scopes = [@resolution.root_scope]
+    effects_init!
+    capability_audit_init!
   end
 
   sig { returns(T::Boolean) }
@@ -599,8 +598,6 @@ class Annotator::Phases::TypeAnalysisSession
   sig { params(resolution: Annotator::Phases::ResolutionFacts).returns(Annotator::Phases::TypeAnalysisHandoff) }
   def execute_type_analysis!(resolution)
     reset_compilation_state!
-    @program = resolution.program
-    @language_mode = resolution.program.language_mode
     ownership = analyze_resolution!(resolution)
     inventory = Annotator::Phases::AnnotationTypeInventory.scan(resolution.program)
     inventory.verify_resolved!
@@ -619,7 +616,7 @@ class Annotator::Phases::TypeAnalysisSession
 
   sig { returns(Symbol) }
   def language_mode
-    @language_mode
+    @resolution.program.language_mode
   end
 
   sig { params(resolution: Annotator::Phases::ResolutionFacts).returns(OwnershipGraph) }
@@ -658,18 +655,16 @@ private
   def reset_compilation_state!
     @traversal_state = TraversalState.new
     @audit_inputs = CapabilityAuditInputs.new
-    @function_registry = Annotator::FunctionRegistry.new
-    @program = nil
-    @branch_terminated = false
-    @comptime_type_param_refinements = {}
+    @resolution = Annotator::Phases::ResolutionFacts.empty
+    @traversal_state.scopes = [@resolution.root_scope]
     effects_init!
     capability_audit_init!
   end
 
   sig { params(resolution: Annotator::Phases::ResolutionFacts).void }
   def adopt_resolution_facts!(resolution)
+    @resolution = resolution
     @traversal_state.scopes = [resolution.root_scope]
-    @function_registry = resolution.function_registry
   end
 
   sig { returns(T.nilable(ModuleImporter)) }
@@ -783,54 +778,13 @@ private
     end
   end
 
+  # Keep AST routing explicit and local to the visitor. Domain modules own the
+  # actual behavior; this table only selects the visitor for a concrete node.
   sig { params(node: AST::Node).returns(T.untyped) }
   def dispatch_visit(node)
     case node
-    when AST::FunctionDef, AST::LambdaLit then dispatch_function_visit(node)
-    when AST::BlockExpr, AST::IfStatement, AST::IsA, AST::IfBind,
-         AST::MatchStatement, AST::ForRange, AST::ForEach, AST::WhileLoop,
-         AST::WhileBindLoop, AST::BreakNode, AST::ContinueNode, AST::PassStmt
-      dispatch_control_flow_visit(node)
-    when AST::SyncPolicyDecl, AST::Assert, AST::DieNode, AST::Raise,
-         AST::ReturnNode, AST::OrElseRaise, AST::OrElseBreak, AST::OrElsePass,
-         AST::OrElsePrune, AST::OrElseExit
-      dispatch_error_visit(node)
-    when AST::WithBlock, AST::DoBlock, AST::BgStreamBlock, AST::YieldExpr,
-         AST::CloseStream, AST::BgBlock, AST::ThenChain, AST::NextExpr
-      dispatch_execution_boundary_visit(node)
-    when AST::Cast, AST::CallSiteOverride, AST::UnaryOp, AST::Literal,
-         AST::DefaultLit, AST::BinaryOp, AST::Placeholder, AST::CapabilityWrap,
-         AST::OptionalUnwrap, AST::FuncCall, AST::MethodCall, AST::StaticCall
-      dispatch_expression_visit(node)
-    when AST::MoveNode, AST::CopyNode, AST::Copy, AST::LinkNode,
-         AST::ResolveNode, AST::FreezeNode, AST::CloneNode, AST::ShareNode
-      dispatch_lifetime_visit(node)
-    when AST::GetIndex, AST::GetField, AST::Slice, AST::HashLit, AST::StructLit,
-         AST::ListLit, AST::TupleLit, AST::DefaultArrayLit, AST::RangeLit
-      dispatch_member_visit(node)
-    when AST::VarDecl, AST::BindExpr, AST::Identifier, AST::Assignment
-      dispatch_variable_visit(node)
-    when AST::TestBlock, AST::WhenBlock, AST::TestThat, AST::AssertRaises,
-         AST::BenchmarkStmt, AST::SmashStmt, AST::ProfileStmt, AST::StubDecl
-      dispatch_test_visit(node)
-    when AST::DestructuringAssignment then visit_DestructuringAssignment(node)
-    when AST::UnionVariantLit then visit_UnionVariantLit(node)
-    else
-      Kernel.raise "BUG: no annotation visitor for #{node.class}"
-    end
-  end
-
-  sig { params(node: T.any(AST::FunctionDef, AST::LambdaLit)).returns(T.untyped) }
-  def dispatch_function_visit(node)
-    case node
     when AST::FunctionDef then visit_FunctionDef(node)
     when AST::LambdaLit then visit_LambdaLit(node)
-    end
-  end
-
-  sig { params(node: AST::Node).returns(T.untyped) }
-  def dispatch_control_flow_visit(node)
-    case node
     when AST::BlockExpr then visit_BlockExpr(node)
     when AST::IfStatement then visit_IfStatement(node)
     when AST::IsA then visit_IsA(node)
@@ -843,12 +797,6 @@ private
     when AST::BreakNode then visit_BreakNode(node)
     when AST::ContinueNode then visit_ContinueNode(node)
     when AST::PassStmt then visit_PassStmt(node)
-    end
-  end
-
-  sig { params(node: AST::Node).returns(T.untyped) }
-  def dispatch_error_visit(node)
-    case node
     when AST::SyncPolicyDecl then visit_SyncPolicyDecl(node)
     when AST::Assert then visit_Assert(node)
     when AST::DieNode then visit_DieNode(node)
@@ -859,12 +807,6 @@ private
     when AST::OrElsePass then visit_OrElsePass(node)
     when AST::OrElsePrune then visit_OrElsePrune(node)
     when AST::OrElseExit then visit_OrElseExit(node)
-    end
-  end
-
-  sig { params(node: AST::Node).returns(T.untyped) }
-  def dispatch_execution_boundary_visit(node)
-    case node
     when AST::WithBlock then visit_WithBlock(node)
     when AST::DoBlock then visit_DoBlock(node)
     when AST::BgStreamBlock then visit_BgStreamBlock(node)
@@ -873,12 +815,6 @@ private
     when AST::BgBlock then visit_BgBlock(node)
     when AST::ThenChain then visit_ThenChain(node)
     when AST::NextExpr then visit_NextExpr(node)
-    end
-  end
-
-  sig { params(node: AST::Node).returns(T.untyped) }
-  def dispatch_expression_visit(node)
-    case node
     when AST::Cast then visit_Cast(node)
     when AST::CallSiteOverride then visit_CallSiteOverride(node)
     when AST::UnaryOp then visit_UnaryOp(node)
@@ -891,12 +827,6 @@ private
     when AST::FuncCall then visit_FuncCall(node)
     when AST::MethodCall then visit_MethodCall(node)
     when AST::StaticCall then visit_StaticCall(node)
-    end
-  end
-
-  sig { params(node: AST::Node).returns(T.untyped) }
-  def dispatch_lifetime_visit(node)
-    case node
     when AST::MoveNode then visit_MoveNode(node)
     when AST::CopyNode then visit_CopyNode(node)
     when AST::Copy then visit_Copy(node)
@@ -905,12 +835,6 @@ private
     when AST::FreezeNode then visit_FreezeNode(node)
     when AST::CloneNode then visit_CloneNode(node)
     when AST::ShareNode then visit_ShareNode(node)
-    end
-  end
-
-  sig { params(node: AST::Node).returns(T.untyped) }
-  def dispatch_member_visit(node)
-    case node
     when AST::GetIndex then visit_GetIndex(node)
     when AST::GetField then visit_GetField(node)
     when AST::Slice then visit_Slice(node)
@@ -920,22 +844,10 @@ private
     when AST::TupleLit then visit_TupleLit(node)
     when AST::DefaultArrayLit then visit_DefaultArrayLit(node)
     when AST::RangeLit then visit_RangeLit(node)
-    end
-  end
-
-  sig { params(node: AST::Node).returns(T.untyped) }
-  def dispatch_variable_visit(node)
-    case node
     when AST::VarDecl then visit_VarDecl(node)
     when AST::BindExpr then visit_BindExpr(node)
     when AST::Identifier then visit_Identifier(node)
     when AST::Assignment then visit_Assignment(node)
-    end
-  end
-
-  sig { params(node: AST::Node).returns(T.untyped) }
-  def dispatch_test_visit(node)
-    case node
     when AST::TestBlock then visit_TestBlock(node)
     when AST::WhenBlock then visit_WhenBlock(node)
     when AST::TestThat then visit_TestThat(node)
@@ -944,6 +856,10 @@ private
     when AST::SmashStmt then visit_SmashStmt(node)
     when AST::ProfileStmt then visit_ProfileStmt(node)
     when AST::StubDecl then visit_StubDecl(node)
+    when AST::DestructuringAssignment then visit_DestructuringAssignment(node)
+    when AST::UnionVariantLit then visit_UnionVariantLit(node)
+    else
+      Kernel.raise "BUG: no annotation visitor for #{node.class}"
     end
   end
 

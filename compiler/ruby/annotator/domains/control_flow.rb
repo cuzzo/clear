@@ -84,10 +84,10 @@ module Annotator
 
         # Restore graph to pre-branch state before analyzing each branch.
         ownership_graph.restore_lightweight(og_snapshot) if og_snapshot
-        prev_terminated = @branch_terminated
+        prev_terminated = phase_traversal_state.branch_terminated
         stream_frame = current_stream_yield_frame
         prev_stream_closed = stream_frame&.closed
-        @branch_terminated = false
+        phase_traversal_state.branch_terminated = false
 
         begin
           with_new_scope(current_scope) do
@@ -98,14 +98,14 @@ module Annotator
               BranchAnalysisResult.new(
                 drops: branch_logic.call,
                 snapshot: ownership_graph.fork_lightweight,
-                terminated: @branch_terminated,
+                terminated: phase_traversal_state.branch_terminated,
               )
             ensure
               og_pop_scope if pushed_og_scope
             end
           end
         ensure
-          @branch_terminated = prev_terminated
+          phase_traversal_state.branch_terminated = prev_terminated
           stream_frame.closed = T.must(prev_stream_closed) if stream_frame && !prev_stream_closed.nil?
         end
       end

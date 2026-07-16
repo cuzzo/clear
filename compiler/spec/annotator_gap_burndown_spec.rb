@@ -39,7 +39,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   def audit_from_type_session(type_session)
-    program = type_session.send(:semantic_program) || AST::Program.new(token(:PROGRAM, "PROGRAM"), [])
+    program = type_session.send(:semantic_program)
     registry = type_session.send(:semantic_function_registry)
     resolution = Annotator::Phases::ResolutionFacts.new(
       program: program,

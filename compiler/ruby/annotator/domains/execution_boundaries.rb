@@ -783,7 +783,7 @@ module Annotator
         error!(node, :STREAM_ALREADY_CLOSED) if frame.closed
         frame.closed = true
         stamp_type!(node, :Void)
-        @branch_terminated = true
+        phase_traversal_state.branch_terminated = true
       end
 
       sig { params(node: AST::BgBlock).returns(T.nilable(T::Boolean)) }

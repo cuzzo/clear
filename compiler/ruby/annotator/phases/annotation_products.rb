@@ -18,6 +18,21 @@ module Annotator
     class ResolutionFacts
       extend T::Sig
 
+      sig { returns(ResolutionFacts) }
+      def self.empty
+        program = AST::Program.new(nil, [])
+        root_scope = Scope.new
+        function_registry = Annotator::FunctionRegistry.new
+        new(
+          program: program,
+          declarations: DeclarationIndexer.index(program),
+          root_scope: root_scope,
+          function_registry: function_registry,
+          type_names: root_scope.types.keys,
+          function_names: function_registry.names
+        )
+      end
+
       sig { returns(AST::Program) }
       attr_reader :program
       sig { returns(DeclarationIndex) }

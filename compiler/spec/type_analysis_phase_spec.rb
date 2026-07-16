@@ -70,21 +70,21 @@ RSpec.describe Annotator::Phases::TypeAnalysisPhase do
     }.to raise_error(CompilerError, /Cannot assign to 'items' because it is currently borrowed/)
   end
 
-  it "routes every rare AST family through its phase-owned visitor" do
+  it "routes every rare AST family directly to its phase-owned visitor" do
     session = Annotator::Phases::TypeAnalysisSession.new
     cases = [
-      [:dispatch_error_visit, AST::DieNode.new(token("DIE"), nil), :visit_DieNode],
-      [:dispatch_expression_visit, AST::Placeholder.new(token("_")), :visit_Placeholder],
-      [:dispatch_lifetime_visit, AST::Copy.new(token("COPY"), nil), :visit_Copy],
-      [:dispatch_member_visit, AST::DefaultArrayLit.new(token("DEFAULT"), nil, nil), :visit_DefaultArrayLit],
-      [:dispatch_test_visit, AST::WhenBlock.new(token("WHEN"), "case", [], [], []), :visit_WhenBlock],
-      [:dispatch_test_visit, AST::TestThat.new(token("THAT"), "case", []), :visit_TestThat],
-      [:dispatch_test_visit, AST::AssertRaises.new(token("ASSERT_RAISES"), :System, nil, nil), :visit_AssertRaises],
+      [AST::DieNode.new(token("DIE"), nil), :visit_DieNode],
+      [AST::Placeholder.new(token("_")), :visit_Placeholder],
+      [AST::Copy.new(token("COPY"), nil), :visit_Copy],
+      [AST::DefaultArrayLit.new(token("DEFAULT"), nil, nil), :visit_DefaultArrayLit],
+      [AST::WhenBlock.new(token("WHEN"), "case", [], [], []), :visit_WhenBlock],
+      [AST::TestThat.new(token("THAT"), "case", []), :visit_TestThat],
+      [AST::AssertRaises.new(token("ASSERT_RAISES"), :System, nil, nil), :visit_AssertRaises],
     ]
 
-    cases.each do |dispatcher, node, visitor|
+    cases.each do |node, visitor|
       expect(session).to receive(visitor).with(node)
-      session.send(dispatcher, node)
+      session.send(:dispatch_visit, node)
     end
   end
 

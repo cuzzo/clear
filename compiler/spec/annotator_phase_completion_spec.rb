@@ -178,6 +178,13 @@ RSpec.describe "annotator completion phases" do
     annotator = Annotator::Phases::TypeAnalysisSession.new
     program = AST::Program.new(tok, [])
     index = Annotator::Phases::DeclarationIndexer.index(program)
+    resolution = Annotator::Phases::ResolutionPhase.run(
+      program: program,
+      importer: nil,
+      source_dir: Dir.pwd,
+      source_code: nil
+    )
+    annotator.send(:adopt_resolution_facts!, resolution)
     synthetic = AST::FunctionDef.new(
       tok("generated"),
       "generated",

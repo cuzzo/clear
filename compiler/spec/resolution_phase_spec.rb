@@ -5,6 +5,15 @@ require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 require_relative "../ruby/annotator/phases/resolution_phase"
 
 RSpec.describe Annotator::Phases::ResolutionPhase do
+  it "provides a coherent empty resolution product" do
+    resolution = Annotator::Phases::ResolutionFacts.empty
+
+    expect(resolution.program.statements).to be_empty
+    expect(resolution.declarations.body_statements).to be_empty
+    expect(resolution.root_scope.types).to be_empty
+    expect(resolution.function_registry.names).to be_empty
+  end
+
   it "keeps the mutable resolution session behind two explicit operations" do
     public_operations = Annotator::Phases::ResolutionSession.public_instance_methods(false) - Object.public_instance_methods
 

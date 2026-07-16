@@ -173,7 +173,7 @@ module Annotator
       def synthesize_clause_from_policy(error_name)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-        handlers = @program&.sync_policy
+        handlers = semantic_program.sync_policy
         return nil unless handlers
         handlers.find { |h|
           h.selectors.any? { |s| s.form == :type && s.name == error_name }
@@ -309,7 +309,7 @@ module Annotator
         resolve_error_registration!(node, node.kind, node.error_name, node.token)
         current_fn_ctx&.mark_runtime_used!
         stamp_type!(node, :NoReturn) # Raises propagate up or are caught
-        @branch_terminated = true
+        phase_traversal_state.branch_terminated = true
       end
 
       # Unified registration for RAISE / OR_ELSE EXIT / EXIT sites that name an
@@ -387,7 +387,7 @@ module Annotator
           end
 
           stamp_type!(node, :Void)
-          @branch_terminated = true
+          phase_traversal_state.branch_terminated = true
           return # Stop here, nothing else to analyze
         end
 
@@ -502,7 +502,7 @@ module Annotator
           metatype: T.cast(value.metatype, T.nilable(Symbol)),
         )
 
-        @branch_terminated = true
+        phase_traversal_state.branch_terminated = true
       end
 
       sig { params(value: AST::Locatable).returns(Type) }
