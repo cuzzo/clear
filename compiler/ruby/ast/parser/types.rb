@@ -142,6 +142,12 @@ class ClearParser
     end
     inner = ""
 
+    if match?(:DOUBLE_COLON)
+      consume(:DOUBLE_COLON)
+      member = consume(:TYPE_ID).text!
+      return Type.new("#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}::#{member}")
+    end
+
     # Generic type arguments: Pair<Number> or Map<String, Number>.
     # Type arguments are full type annotations, so Cache<Box @shared:locked>
     # preserves the synchronization family as part of T.
@@ -370,6 +376,12 @@ class ClearParser
     end
 
     name = consume(:TYPE_ID).text!
+    if match?(:DOUBLE_COLON)
+      consume(:DOUBLE_COLON)
+      member = consume(:TYPE_ID).text!
+      expression = TypeProjectionExpression.new(owner: name.to_sym, member: member.to_sym)
+      return TypeExpressionTree.with_root_capabilities(expression, parse_inline_capabilities)
+    end
     arguments = T.let([], T::Array[TypeExpression])
     if match?(:CHAR, '<')
       consume(:CHAR, '<')

@@ -20,7 +20,7 @@ module GenericAnalysis
   BUILTIN_TYPES = %i[
     Number Bool Byte Int8 Int16 Int32 Int64 UInt8 UInt16 UInt32 UInt64
     Float32 Float64 TargetInt TargetUInt TargetLong TargetULong
-    TargetLongLong TargetULongLong String Any Void Range
+    TargetLongLong TargetULongLong String Any Void Range Map
   ].freeze
   DeclarationNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
   TypeShape = T.type_alias { T.any(Type, Symbol, String) }
@@ -217,6 +217,10 @@ module GenericAnalysis
 
   sig { params(facts: TypeAnnotationFacts).void }
   def validate_generic_annotation!(facts)
+    if facts.inner.projection?
+      validate_associated_projection!(facts.node, facts.inner)
+      return
+    end
     if facts.inner.generic_instance?
       validate_generic_instance_annotation!(facts)
     else
@@ -243,6 +247,12 @@ module GenericAnalysis
     actual = inner.generic_args.length
     error!(facts.node, :GENERIC_WRONG_ARG_COUNT, type: base_name, expected: expected, got: actual) if actual != expected
     inner.generic_args.each { |arg| validate_generic_type_arg!(facts, arg) }
+    if schema.is_a?(Schemas::StructSchema)
+      schema.generic_params.zip(inner.generic_args).each do |param, argument|
+        next unless param && argument
+        validate_generic_argument_bounds!(facts.node, param, argument)
+      end
+    end
   end
 
   sig { params(facts: TypeAnnotationFacts, arg: Type).void }
@@ -255,6 +265,10 @@ module GenericAnalysis
     end
     if arg.array?
       validate_generic_type_arg!(facts, T.must(arg.element_type))
+      return
+    end
+    if arg.projection?
+      validate_associated_projection!(facts.node, arg)
       return
     end
     # HashMap is a built-in composite type rather than a registered generic
@@ -362,9 +376,71 @@ module GenericAnalysis
       unless subst.key?(tp)
         error!(node, :GENERIC_FN_CANNOT_INFER, param: tp, fn: node.name, type: tp)
       end
+      validate_bound_types!(node, tp, Type.new(T.must(subst[tp])), signature.generic_bounds[tp] || [])
     end
     subst
   end
+
+  sig { params(node: AnnotationNode, param: AST::GenericParamDecl, argument: Type).void }
+  def validate_generic_argument_bounds!(node, param, argument)
+    validate_bound_types!(node, param.name.to_sym, argument, param.bounds.map(&:type))
+  end
+  private :validate_generic_argument_bounds!
+
+  sig { params(node: AnnotationNode, parameter: Symbol, argument: Type, bounds: T::Array[Type]).void }
+  def validate_bound_types!(node, parameter, argument, bounds)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    bounds.each do |bound|
+      next unless bound.resolved == :Map
+      next if argument.map? || generic_parameter_has_map_bound?(argument.resolved)
+
+      error!(node, :GENERIC_PROTOCOL_BOUND_FAILED,
+        parameter: parameter, actual: Type.surface_name(argument), protocol: "Map")
+    end
+    shared = bounds.any?(&:polymorphic_shared?)
+    if shared && !argument.shared? && !generic_parameter_has_shared_map_bound?(argument.resolved)
+      error!(node, :GENERIC_SHARED_BOUND_FAILED,
+        parameter: parameter, actual: Type.surface_name(argument), protocol: "Map")
+    end
+  end
+  private :validate_bound_types!
+
+  sig { params(node: AnnotationNode, projection: Type).void }
+  def validate_associated_projection!(node, projection)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    owner = T.must(projection.projection_owner)
+    member = T.must(projection.projection_member)
+    unless current_function_type_params.include?(owner)
+      error!(node, :GENERIC_PROJECTION_UNKNOWN_OWNER, owner: owner, member: member)
+    end
+    unless generic_parameter_has_map_bound?(owner)
+      error!(node, :GENERIC_PROJECTION_NEEDS_PROTOCOL,
+        owner: owner, member: member, protocol: "Map")
+    end
+    return if %i[Key Value].include?(member)
+
+    error!(node, :GENERIC_UNKNOWN_ASSOCIATED_TYPE,
+      owner: owner, member: member, protocol: "Map", available: "Key, Value")
+  end
+  private :validate_associated_projection!
+
+  sig { params(name: Symbol).returns(T::Boolean) }
+  def generic_parameter_has_map_bound?(name)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    param = current_function_generic_params.find { |candidate| candidate.name.to_sym == name }
+    param&.bounds&.any? { |bound| bound.type.resolved == :Map } == true
+  end
+  private :generic_parameter_has_map_bound?
+
+  sig { params(name: Symbol).returns(T::Boolean) }
+  def generic_parameter_has_shared_map_bound?(name)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    param = current_function_generic_params.find { |candidate| candidate.name.to_sym == name }
+    param&.bounds&.any? do |bound|
+      bound.type.resolved == :Map && bound.type.polymorphic_shared?
+    end == true
+  end
+  private :generic_parameter_has_shared_map_bound?
 
   sig { params(node: GenericCallNode, signature: FunctionSignature, actual_args: GenericCallArgs, type_params: T::Array[Symbol]).returns(NilClass) }
   def enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
@@ -480,6 +556,21 @@ module GenericAnalysis
         name: expression.name,
         arguments: expression.arguments.map { |argument| apply_expression_subst(argument, subst) },
         capabilities: expression.capabilities
+      )
+    when TypeProjectionExpression
+      binding = subst[expression.owner]
+      return expression unless binding
+
+      concrete = Type.new(binding)
+      projected = case expression.member
+      when :Key then concrete.key_type if concrete.map?
+      when :Value then concrete.value_type if concrete.map?
+      end
+      return expression unless projected
+
+      TypeExpressionTree.with_root_capabilities(
+        projected.shape.expression,
+        expression.capabilities,
       )
     when FunctionTypeExpression
       signature = expression.signature

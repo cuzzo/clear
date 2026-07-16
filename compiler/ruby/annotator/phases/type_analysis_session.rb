@@ -230,6 +230,12 @@ class Annotator::Phases::TypeAnalysisSession
   end
   private :current_function_type_params
 
+  sig { returns(T::Array[AST::GenericParamDecl]) }
+  def current_function_generic_params
+    current_fn_ctx&.generic_params || []
+  end
+  private :current_function_generic_params
+
   sig { params(type_name: T.nilable(Symbol)).returns(T::Boolean) }
   def current_function_type_param?(type_name)
     return false unless type_name

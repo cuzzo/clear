@@ -946,7 +946,11 @@ module Annotator
         end
 
         target_type = index_node.target.full_type!(context: "index assignment collection")
-        assign_type = if target_type&.map?
+        protocol_map = generic_parameter_has_map_bound?(target_type.resolved)
+        assign_type = if protocol_map
+          index_node.protocol_operation = :map_put
+          Type.new(TypeProjectionExpression.new(owner: target_type.resolved, member: :Value))
+        elsif target_type&.map?
           # Map reads return ?V because the key may be absent, but map writes
           # store the declared value type V. If V itself is optional, preserve it.
           target_type.value_type
@@ -966,11 +970,14 @@ module Annotator
 
         validate_assignment_type(assignment_node, assign_type, assignment_node.value.resolved_type)
 
+        consume_generic_map_value!(assignment_node.value, T.must(assign_type)) if protocol_map
+
         stamp_type!(assignment_node, T.must(assign_type))
 
         # HashMap put may allocate, so needs_rt must propagate.
-        if target_type&.map?
+        if target_type&.map? || protocol_map
           current_fn_ctx&.record_heap_use!
+          current_fn_ctx&.record_alloc_use!
           record_effect(EffectTracker::HEAP)
         end
       end

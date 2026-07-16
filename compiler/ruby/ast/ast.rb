@@ -2488,6 +2488,14 @@ module AST
     attr_accessor :generic_type_args # Array of inferred type symbols for generic methods
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     attr_accessor :safe_nav_chain    # implicit continuation of an earlier ?. over non-optional members
+    sig { returns(T.nilable(Symbol)) }
+    def protocol_operation
+      @protocol_operation = T.let(@protocol_operation, T.nilable(Symbol))
+    end
+    sig { params(value: Symbol).void }
+    def protocol_operation=(value)
+      @protocol_operation = value
+    end
     sig { returns(T.nilable(String)) }
     def source_method_name
       @source_method_name = T.let(@source_method_name, T.nilable(String))
@@ -2535,6 +2543,14 @@ module AST
     extend T::Sig
     include Locatable
     attr_accessor :safe_nav_chain
+    sig { returns(T.nilable(Symbol)) }
+    def protocol_operation
+      @protocol_operation = T.let(@protocol_operation, T.nilable(Symbol))
+    end
+    sig { params(value: Symbol).void }
+    def protocol_operation=(value)
+      @protocol_operation = value
+    end
     sig { returns(String) }
     def name; target.name end
   end

@@ -54,6 +54,26 @@ module Annotator
           error!(node, :TUPLE_INDEX_SYNTAX)
         end
 
+        if generic_parameter_has_map_bound?(target_type_info.resolved)
+          key_type = Type.new(TypeProjectionExpression.new(
+            owner: target_type_info.resolved,
+            member: :Key,
+          ))
+          index_type = node.index.full_type!(context: "Map protocol index key")
+          unless key_type.accepts?(index_type)
+            error!(node, :GENERIC_MAP_KEY_MISMATCH,
+              expected: Type.surface_name(key_type), actual: Type.surface_name(index_type))
+          end
+          value_type = Type.new(TypeProjectionExpression.new(
+            owner: target_type_info.resolved,
+            member: :Value,
+          ))
+          stamp_type!(node, Type.optional_of(value_type))
+          node.protocol_operation = :map_get
+          node.container_borrow = true
+          return
+        end
+
         # Look up index operation from the registry
         op = resolve_index_op(target_type_info, :get)
 

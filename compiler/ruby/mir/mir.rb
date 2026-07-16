@@ -3872,6 +3872,15 @@ module MIR
     def child_exprs = compact_child_exprs([object, index])
   end
 
+  # A statically witnessed protocol operation. The protocol and operation are
+  # semantic identifiers; static calls carry no runtime witness table.
+  ProtocolCall = Struct.new(:protocol, :operation, :receiver, :args) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([receiver] + args)
+  end
+
   # Binary operation.
   # Zig: left op right
   # op is the Zig operator string: "+", "-", "==", "and", "or", etc.

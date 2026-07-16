@@ -25,6 +25,7 @@ module MIRLoweringFunctions
     const :mutable_scalar, T::Boolean
     const :collection_param, T::Boolean
     const :pointer_passed, T::Boolean
+    const :protocol_map, T::Boolean
 
     sig { returns(MIR::Param) }
     def to_mir_param
@@ -151,6 +152,7 @@ module MIRLoweringFunctions
     const :bindings, CleanupBindingMap
     const :binding_types, BindingTypeMap
     const :collection_params, NameSet
+    const :protocol_map_allocators, T::Hash[String, String]
     const :mutable_scalar_params, NameSet
     const :param_names, NameSet
     const :takes_param_names, NameSet
@@ -349,12 +351,18 @@ module MIRLoweringFunctions
     # incorrectly received the `_m_` rename. The rename then masked the
     # original name from MIR-level checks (notably the new
     # INV-CROSS-FRAME-PARAM-ALLOC verifier in mir_checker.rb).
-    param_facts = function_param_facts(node.params)
+    param_facts = function_param_facts(node.params, node.generic_params)
     context = function_lowering_context(node, final_type, ret_type, fn_needs_rt, param_facts)
     activate_function_context(context)
 
     # Build param list
-    params_mir = T.let(param_facts.map(&:to_mir_param), T::Array[MIR::Param])
+    params_mir = T.let(param_facts.flat_map do |fact|
+      params = [fact.to_mir_param]
+      if fact.protocol_map
+        params << MIR::Param.new(protocol_map_allocator_name(fact.name), "std.mem.Allocator", false)
+      end
+      params
+    end, T::Array[MIR::Param])
 
     # Prepend rt param
     if fn_needs_rt
@@ -391,7 +399,10 @@ module MIRLoweringFunctions
     prologue = entry_plan.prologue
     takes_mir = entry_plan.takes_mir
 
-    pointer_param_mir = []
+    # Zig treats unused parameters as compile errors. The discard is harmless
+    # when a protocol operation later consumes the hidden allocator and keeps
+    # read-only constrained functions free of special cases.
+    pointer_param_mir = context.protocol_map_allocators.values.map { |name| MIR::Suppress.new(name) }
 
     # Lower body (track snapshot types for catch blocks)
     catch_clauses = function_catch_clauses(node)
@@ -532,9 +543,11 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     mutable_scalar_params = T.let(Set.new, NameSet)
     collection_params = T.let(Set.new, NameSet)
+    protocol_map_allocators = T.let({}, T::Hash[String, String])
     param_facts.each do |fact|
       mutable_scalar_params << fact.name if fact.mutable_scalar
       collection_params << fact.name if fact.collection_param
+      protocol_map_allocators[fact.name] = protocol_map_allocator_name(fact.name) if fact.protocol_map
     end
     bindings = T.let((node.cleanup_bindings || {}).dup, CleanupBindingMap)
     collection_params.each do |name|
@@ -548,6 +561,7 @@ module MIRLoweringFunctions
       bindings: bindings,
       binding_types: {},
       collection_params: collection_params,
+      protocol_map_allocators: protocol_map_allocators,
       mutable_scalar_params: mutable_scalar_params,
       param_names: node.params.map { |p| p.name.to_s }.to_set,
       takes_param_names: node.params.select(&:takes).map { |p| p.name.to_s }.to_set,
@@ -607,23 +621,29 @@ module MIRLoweringFunctions
     found
   end
 
-  sig { params(params: T::Array[AST::Param]).returns(T::Array[FunctionParamFact]) }
-  def function_param_facts(params)
-    params.map { |param| function_param_fact(param) }
+  sig { params(params: T::Array[AST::Param], generic_params: T::Array[AST::GenericParamDecl]).returns(T::Array[FunctionParamFact]) }
+  def function_param_facts(params, generic_params)
+    params.map { |param| function_param_fact(param, generic_params) }
   end
 
-  sig { params(param: AST::Param).returns(FunctionParamFact) }
-  def function_param_fact(param)
+  sig { params(param: AST::Param, generic_params: T::Array[AST::GenericParamDecl]).returns(FunctionParamFact) }
+  def function_param_fact(param, generic_params)
     T.bind(self, MIRLowering) rescue nil
     type_info = param.type
     base_zig = transpile_type(param.type, is_param: true)
+    protocol_map_param = generic_params.any? do |generic_param|
+      generic_param.name.to_sym == type_info.resolved &&
+        generic_param.bounds.any? { |bound| bound.type.resolved == :Map }
+    end
     collection_param = !!(type_info.needs_pointer_passing? ||
-                          (param.mutable && type_info.list_collection?))
+                          (param.mutable && type_info.list_collection?) ||
+                          protocol_map_param)
     mutable_scalar = !!(param.mutable &&
+                     !protocol_map_param &&
                      !type_info.collection? &&
                      !type_info.needs_pointer_passing? &&
                      !base_zig.start_with?("[]", "*"))
-    zig_type = function_param_zig_type(param, type_info, base_zig)
+    zig_type = protocol_map_param ? "*#{base_zig}" : function_param_zig_type(param, type_info, base_zig)
     zig_type = "*#{zig_type}" if mutable_scalar && zig_type != "anytype"
 
     FunctionParamFact.new(
@@ -634,7 +654,13 @@ module MIRLoweringFunctions
       mutable_scalar: mutable_scalar,
       collection_param: collection_param,
       pointer_passed: collection_param || mutable_scalar,
+      protocol_map: protocol_map_param,
     )
+  end
+
+  sig { params(name: String).returns(String) }
+  def protocol_map_allocator_name(name)
+    "__clear_map_alloc_#{name}"
   end
 
   sig { params(param: AST::Param, type_info: Type, base_zig: String).returns(String) }
@@ -1469,7 +1495,8 @@ module MIRLoweringFunctions
     end
 
     rt_args = needs_rt ? [MIR::Ident.new(runtime_binding_name)] : []
-    all_args = type_args + rt_args + args_mir
+    runtime_args = inject_protocol_map_allocator_args(callee_sig, node.args, args_mir)
+    all_args = type_args + rt_args + runtime_args
     fn_zig = "#{mod_prefix}#{zig_safe_name(node.name)}"
 
     owned_return = call_owned_return?(node)
@@ -1489,6 +1516,20 @@ module MIRLoweringFunctions
     # so STUB query intercepts must apply here too.
     if (intercept = stub_intercept_for(node.name, node.object, node.args))
       return intercept
+    end
+
+    if node.protocol_operation
+      if node.protocol_operation == :put
+        return lower_protocol_map_put_call(node.object, T.must(node.args[0]), T.must(node.args[1]))
+      end
+
+      receiver = T.cast(lower(node.object), MIR::Node)
+      receiver = MIR::AddressOf.new(receiver) unless collection_param_receiver?(node.object)
+      arguments = node.args.map { |argument| T.cast(lower(argument), MIR::Node) }
+      if node.protocol_operation == :delete
+        arguments << protocol_map_allocator_for(node.object)
+      end
+      return MIR::ProtocolCall.new(:Map, T.must(node.protocol_operation), receiver, arguments)
     end
 
     # Intrinsic pattern: already resolved by annotator
@@ -1524,7 +1565,10 @@ module MIRLoweringFunctions
     end
 
     rt_args = needs_rt ? [MIR::Ident.new(runtime_binding_name)] : []
-    all_args = type_args + rt_args + [obj_mir] + args_mir
+    ast_args = [node.object] + node.args
+    mir_args = [obj_mir] + args_mir
+    runtime_args = inject_protocol_map_allocator_args(callee_sig, ast_args, mir_args)
+    all_args = type_args + rt_args + runtime_args
     fn_zig = "#{mod_prefix}#{zig_safe_name(node.name)}"
 
     owned_return = call_owned_return?(node)
@@ -1534,6 +1578,73 @@ module MIRLoweringFunctions
       callable_contract_for_lowered_args(callee_sig, [node.object] + node.args, [obj_mir] + args_mir),
       [node.object] + node.args,
       [obj_mir] + args_mir,
+    )
+  end
+
+  sig do
+    params(
+      signature: T.nilable(FunctionSignature),
+      ast_args: T::Array[AST::Node],
+      mir_args: T::Array[MIR::Node]
+    ).returns(T::Array[MIR::Node])
+  end
+  def inject_protocol_map_allocator_args(signature, ast_args, mir_args)
+    return mir_args unless signature
+
+    mir_args.each_with_index.flat_map do |argument, index|
+      param = signature.params[index]
+      next [argument] unless param && protocol_map_signature_param?(signature, param)
+
+      [argument, protocol_map_allocator_for(ast_args.fetch(index))]
+    end
+  end
+
+  sig { params(signature: FunctionSignature, param: AST::Param).returns(T::Boolean) }
+  def protocol_map_signature_param?(signature, param)
+    bounds = signature.generic_bounds[param.type.resolved]
+    !!(bounds && bounds.any? { |bound| bound.resolved == :Map })
+  end
+
+  sig { params(node: AST::Node).returns(MIR::Node) }
+  def protocol_map_allocator_for(node)
+    T.bind(self, MIRLowering) rescue nil
+    root = root_receiver_node(node)
+    if root
+      hidden = current_function_protocol_map_allocator(root.name)
+      return MIR::Ident.new(hidden) if hidden
+    end
+
+    MIR::AllocatorRef.new(placement_for_node(node))
+  end
+
+  sig { params(receiver_node: AST::Node, key_node: AST::Node, value_node: AST::Node).returns(MIR::Node) }
+  def lower_protocol_map_put_call(receiver_node, key_node, value_node)
+    T.bind(self, MIRLowering) rescue nil
+    receiver = T.cast(lower(receiver_node), MIR::Node)
+    receiver = MIR::AddressOf.new(receiver) unless collection_param_receiver?(receiver_node)
+    sink_alloc = placement_for_node(receiver_node)
+    sink_type = TypeProjectionExpression.new(
+      owner: receiver_node.full_type!(context: "Map protocol put receiver").resolved,
+      member: :Value,
+    )
+    value = with_sink_type(Type.new(sink_type)) do
+      with_decl_alloc(sink_alloc) { T.cast(lower(value_node), MIR::Node) }
+    end
+    value = materialize_owned_sink_value(value, value_node, sink_alloc, Type.new(sink_type))
+    value = hoist_alloc(value, value_node, err_cleanup: true) if mir_allocates?(value)
+    allocator = protocol_map_allocator_for(receiver_node)
+    call = MIR::ProtocolCall.new(
+      :Map,
+      :put,
+      receiver,
+      [T.cast(lower(key_node), MIR::Node), value, allocator, allocator],
+    )
+    with_ownership_consumption_for_value(
+      call,
+      value,
+      value_node,
+      "Map protocol put",
+      target_alloc: sink_alloc,
     )
   end
 
@@ -2243,6 +2354,11 @@ module MIRLoweringFunctions
   private :function_param_fact
   private :function_param_facts
   private :function_param_zig_type
+  private :inject_protocol_map_allocator_args
+  private :protocol_map_allocator_for
+  private :protocol_map_allocator_name
+  private :protocol_map_signature_param?
+  private :lower_protocol_map_put_call
   private :function_return_retains_shared_handle?
   private :has_default_catch?
   private :infer_catch_value_allocator

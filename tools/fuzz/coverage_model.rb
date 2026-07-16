@@ -167,6 +167,10 @@ module FuzzCoverageModel
       failure_proves: 'Error paths clean or transfer owned values under OR_ELSE PASS, RAISE, and DEFAULT.',
       high_risk: true
     ),
+    generic_map_protocol_matrix: profile(
+      failure_proves: 'Map bounds, associated Key/Value projections, static operation dispatch, and allocator forwarding survive string/numeric representations while invalid constraints fail before Zig.',
+      high_risk: true
+    ),
     escape_mechanism_matrix: profile(
       failure_proves: 'Escape-analysis entry points heap-place owned values for returns, stores, captures, and consuming calls.',
       high_risk: true

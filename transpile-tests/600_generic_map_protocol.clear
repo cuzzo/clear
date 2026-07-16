@@ -1,0 +1,56 @@
+# Intrinsic Map constraints are statically specialized for both string and
+# numeric maps. Calls carry allocator provenance invisibly so mutation and
+# cleanup always use the same backing allocator.
+FN store!<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+  map[key] = value;
+END
+
+FN replace!<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+  map.put(key, value);
+END
+
+FN copyStore!<M: Map>(MUTABLE map: M, key: M::Key, value: M::Value) RETURNS !Void ->
+  map[key] = COPY value;
+END
+
+FN hasOne<M: Map>(map: M, key: M::Key) RETURNS Bool ->
+  RETURN map.contains?(key) AND map.any?() AND map.count() == 1;
+END
+
+FN assertPresent<M: Map>(map: M, key: M::Key) RETURNS Void ->
+  IF map[key] EXISTS AS value THEN
+    PASS
+  ELSE
+    ASSERT FALSE, "generic map lookup should find the key";
+  END
+END
+
+FN erase!<M: Map>(MUTABLE map: M, key: M::Key) RETURNS Void ->
+  map.delete(key);
+  ASSERT map.empty?();
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE words: {String}Int64 = {};
+  store!(words, "answer", 41_i64);
+  replace!(words, "answer", 42_i64);
+  ASSERT hasOne(words, "answer");
+  assertPresent(words, "answer");
+  ASSERT words["answer"] OR_ELSE 0 == 42_i64;
+  erase!(words, "answer");
+
+  MUTABLE numbers: {Int64}Int64 = {};
+  store!(numbers, 7_i64, 70_i64);
+  replace!(numbers, 7_i64, 71_i64);
+  ASSERT hasOne(numbers, 7_i64);
+  assertPresent(numbers, 7_i64);
+  ASSERT numbers[7_i64] OR_ELSE 0 == 71_i64;
+  erase!(numbers, 7_i64);
+
+  # The generic definition cannot assume M::Value is copyable. Explicit COPY
+  # remains a comptime-specialized deep copy for cleanup-bearing values.
+  MUTABLE labels: {String}String = {};
+  copyStore!(labels, "status", "ready");
+  ASSERT labels["status"] OR_ELSE "" == "ready";
+  erase!(labels, "status");
+END

@@ -226,6 +226,7 @@ class MIREmitter
     when MIR::InlineBc         then emit_inline_bc_as_zig(node)
     when MIR::ShardedMapPut    then emit_sharded_map_put(node)
     when MIR::ShardedMapGet    then emit_sharded_map_get(node)
+    when MIR::ProtocolCall     then emit_protocol_call(node)
 
     else
       raise "MIREmitter: unknown node type #{node.class}"
@@ -501,6 +502,34 @@ class MIREmitter
       .gsub("{target}", emit(node.target))
       .gsub("{index}", emit(node.key))
     sharded_map_substitute_common(pattern, node)
+  end
+
+  sig { params(node: MIR::ProtocolCall).returns(String) }
+  def emit_protocol_call(node)
+    unless node.protocol == :Map
+      raise "unsupported protocol call #{node.protocol}.#{node.operation}"
+    end
+
+    receiver = emit(node.receiver)
+    arguments = node.args.map { |argument| emit(argument) }
+    case node.operation
+    when :get
+      "CheatLib.mapProtocolGet(#{receiver}, #{arguments.fetch(0)})"
+    when :put
+      "try CheatLib.mapProtocolPut(#{receiver}, #{arguments.fetch(2)}, #{arguments.fetch(3)}, #{arguments.fetch(0)}, #{arguments.fetch(1)})"
+    when :delete
+      "CheatLib.mapProtocolDelete(#{receiver}, #{arguments.fetch(1)}, #{arguments.fetch(0)})"
+    when :contains
+      "CheatLib.mapProtocolContains(#{receiver}, #{arguments.fetch(0)})"
+    when :count
+      "CheatLib.mapProtocolCount(#{receiver})"
+    when :empty
+      "(CheatLib.mapProtocolCount(#{receiver}) == 0)"
+    when :any
+      "(CheatLib.mapProtocolCount(#{receiver}) > 0)"
+    else
+      raise "unsupported Map protocol operation #{node.operation}"
+    end
   end
 
   # Pick the Zig template the lowering committed to. template_kind is

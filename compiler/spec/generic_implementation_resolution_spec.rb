@@ -111,7 +111,7 @@ RSpec.describe "generic implementation resolution" do
     expect {
       resolve(<<~CLEAR)
         STRUCT Cache<M: Map> { value: M }
-        STRUCT Cache<L: List> { value: L }
+        STRUCT Cache<L: SHARED Map> { value: L }
       CLEAR
     }.to raise_error(CompilerError, /Duplicate type declaration 'Cache'/)
   end

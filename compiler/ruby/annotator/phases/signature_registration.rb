@@ -33,6 +33,7 @@ module Annotator
           error!(node, :TOP_LEVEL_METHOD_REQUIRES_IMPLEMENTATION, name: node.source_name)
         end
         validate_type_param_list!(node, node.type_params, "function") if node.type_params.any?
+        validate_generic_bounds!(node.generic_params)
         reject_duplicate_function_binding!(node)
         signature = SignatureRegistry.function_signature(
           node,

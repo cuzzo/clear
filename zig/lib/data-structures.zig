@@ -21,6 +21,47 @@ pub fn bind(comptime deps: type) type {
     return struct {
         const WaitGroup = fp.WaitGroup;
 
+        pub fn MapFacts(comptime M: type) type {
+            const get_info = @typeInfo(@TypeOf(M.get)).@"fn";
+            const return_type = get_info.return_type.?;
+            return struct {
+                pub const Key = get_info.params[1].type.?;
+                pub const Value = @typeInfo(return_type).optional.child;
+            };
+        }
+
+        pub fn mapProtocolGet(map: anytype, key: MapFacts(@typeInfo(@TypeOf(map)).pointer.child).Key) ?MapFacts(@typeInfo(@TypeOf(map)).pointer.child).Value {
+            return map.get(key);
+        }
+
+        pub fn mapProtocolPut(map: anytype, key_alloc: std.mem.Allocator, value_alloc: std.mem.Allocator, key: MapFacts(@typeInfo(@TypeOf(map)).pointer.child).Key, value: MapFacts(@typeInfo(@TypeOf(map)).pointer.child).Value) !void {
+            const M = @typeInfo(@TypeOf(map)).pointer.child;
+            const put_info = @typeInfo(@TypeOf(M.put)).@"fn";
+            if (comptime put_info.params.len == 5) {
+                try map.put(key_alloc, value_alloc, key, value);
+            } else {
+                try map.put(value_alloc, key, value);
+            }
+        }
+
+        pub fn mapProtocolDelete(map: anytype, alloc: std.mem.Allocator, key: MapFacts(@typeInfo(@TypeOf(map)).pointer.child).Key) void {
+            const M = @typeInfo(@TypeOf(map)).pointer.child;
+            const remove_info = @typeInfo(@TypeOf(M.remove)).@"fn";
+            if (comptime remove_info.params.len == 3) {
+                map.remove(alloc, key);
+            } else {
+                _ = map.remove(key);
+            }
+        }
+
+        pub fn mapProtocolContains(map: anytype, key: MapFacts(@typeInfo(@TypeOf(map)).pointer.child).Key) bool {
+            return map.contains(key);
+        }
+
+        pub fn mapProtocolCount(map: anytype) i64 {
+            return @intCast(map.count());
+        }
+
         /// A finite stream step keeps producer completion separate from the
         /// item payload. In particular, `StreamStep(?T).Item = null` is a
         /// yielded optional value; `.Closed` is end-of-stream.

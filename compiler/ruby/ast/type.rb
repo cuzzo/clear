@@ -3461,6 +3461,23 @@ class Type
     shape.generic_instance
   end
 
+  sig { returns(T::Boolean) }
+  def projection?
+    shape.expression.is_a?(TypeProjectionExpression)
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def projection_owner
+    expression = shape.expression
+    expression.is_a?(TypeProjectionExpression) ? expression.owner : nil
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def projection_member
+    expression = shape.expression
+    expression.is_a?(TypeProjectionExpression) ? expression.member : nil
+  end
+
   # The base type name of a generic instance: :"Pair<Number>" → :Pair
   sig { returns(Symbol) }
   def generic_base
@@ -5283,6 +5300,10 @@ class Type
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
   # ruby-to-clear: effects reentrant
   def compute_zig_type(is_param: false, is_field: false)
+    if projection?
+      return "CheatLib.MapFacts(#{T.must(projection_owner)}).#{T.must(projection_member)}"
+    end
+
     # 0. Handle Tense types:
     #    ~T[N]              -> CheatLib.BoundedStream(T, N)
     #    ~T@shared          -> CheatLib.SharedPromise(T)

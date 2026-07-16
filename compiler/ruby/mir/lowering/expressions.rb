@@ -1361,6 +1361,16 @@ module MIRLoweringExpressions
   sig { params(node: AST::GetIndex).returns(MIR::Node) }
   def lower_get_index(node)
     T.bind(self, MIRLowering) rescue nil
+    if node.protocol_operation == :map_get
+      receiver = T.cast(lower(node.target), MIR::Node)
+      receiver = MIR::AddressOf.new(receiver) unless collection_param_receiver?(node.target)
+      return MIR::ProtocolCall.new(
+        :Map,
+        :get,
+        receiver,
+        [T.cast(lower(node.index), MIR::Node)],
+      )
+    end
     plan = index_access_plan(node)
     value = index_access_value(plan)
     if plan.optional?
@@ -2212,6 +2222,12 @@ module MIRLoweringExpressions
       MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc)
     elsif ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup))
       MIR::DeepCopy.new(source, bare_zig_type(ti), nil, :full_value, alloc)
+    elsif ti.projection?
+      # Associated types are concrete after Zig specialization, not while the
+      # Ruby frontend checks the generic body. Preserve COPY semantically and
+      # let dupeValue's comptime cleanup predicate choose deep-copy vs value
+      # copy for the selected M::Value.
+      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     else
       copy_zig = if dst_ti.collection? && !dst_ti.string?
                    dst_ti.zig_type

@@ -367,6 +367,11 @@ class MIRLowering
     current_function_context&.collection_params&.include?(name) == true
   end
 
+  sig { params(name: String).returns(T.nilable(String)) }
+  def current_function_protocol_map_allocator(name)
+    current_function_context&.protocol_map_allocators&.[](name)
+  end
+
   sig { params(name: String).returns(T::Boolean) }
   def current_function_mutable_scalar_param?(name)
     current_function_context&.mutable_scalar_params&.include?(name) == true
@@ -4227,6 +4232,7 @@ class MIRLowering
   private :cleanup_entry_moved_guard?
   private :construct_lowered_body
   private :current_function_collection_param?
+  private :current_function_protocol_map_allocator
   private :current_function_heap_carry_return?
   private :current_function_param_name?
   private :destination_keep_plan

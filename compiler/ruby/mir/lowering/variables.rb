@@ -1117,6 +1117,12 @@ module MIRLoweringVariables
   sig { params(node: AST::Assignment).returns(MIR::Node) }
   def lower_indexed_assignment(node)
     T.bind(self, MIRLowering) rescue nil
+    if node.name.protocol_operation == :map_put
+      call = lower_protocol_map_put_call(node.name.target, node.name.index, node.value)
+      return MIR::ExprStmt.new(call, false)
+    end
+
+    T.bind(self, MIRLowering) rescue nil
     target_node = node.name.target
     ti = target_node.full_type!(context: "indexed assignment target")
 

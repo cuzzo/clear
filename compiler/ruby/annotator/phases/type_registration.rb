@@ -221,6 +221,7 @@ module Annotator
       def register_struct_declaration(node)
         T.bind(self, ResolutionSession)
         validate_type_param_list!(node, node.type_params, "struct") if node.type_params.any?
+        validate_generic_bounds!(node.generic_params)
         node.field_decls.each_value do |field|
           error!(node, :COLLECTION_HINT_VALUE_ONLY) if field.type.preallocation_hint?
         end
@@ -229,10 +230,25 @@ module Annotator
         declare_type_schema!(node, node.name.to_sym, Schemas::StructSchema.new(
           fields: node.field_decls,
           type_params: type_params(node.type_params),
+          generic_params: node.generic_params,
           visibility: node.visibility || :package,
         ))
         stamp_type!(node, :Void)
       end
+
+      sig { params(params: T::Array[AST::GenericParamDecl]).void }
+      def validate_generic_bounds!(params)
+        T.bind(self, ResolutionSession)
+
+        params.each do |param|
+          param.bounds.each do |bound|
+            next if bound.type.resolved == :Map
+            error!(bound.token || param.token, :GENERIC_UNKNOWN_PROTOCOL,
+              protocol: Type.surface_name(bound.type))
+          end
+        end
+      end
+      private :validate_generic_bounds!
 
       sig { params(node: AST::EnumDef).void }
       def register_enum_declaration(node)

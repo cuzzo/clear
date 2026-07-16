@@ -19,6 +19,7 @@ class FunctionSignature
   LifetimeSource = T.type_alias { T.any(String, Symbol) }
   LifetimeInput = T.type_alias { T.nilable(T.any(LifetimeSource, T::Array[LifetimeSource])) }
   RequiresMap = T.type_alias { T::Hash[String, T::Set[Symbol]] }
+  GenericBounds = T.type_alias { T::Hash[Symbol, T::Array[Type]] }
   ExternEffectValue = T.type_alias { T.any(Symbol, TrueClass) }
   ExternEffects = T.type_alias { T::Hash[Symbol, ExternEffectValue] }
   EffectSet = T.type_alias { T::Set[Symbol] }
@@ -145,6 +146,9 @@ class FunctionSignature
 
   sig { returns(T::Array[Symbol]) }
   def type_params = @contract.type_params
+
+  sig { returns(GenericBounds) }
+  attr_reader :generic_bounds
 
   sig { returns(T::Boolean) }
   def reentrant = @contract.reentrant
@@ -387,6 +391,7 @@ class FunctionSignature
       return_lifetime: LifetimeInput,
       visibility: T.nilable(Symbol),
       type_params: T::Array[Symbol],
+      generic_bounds: GenericBounds,
       reentrant: T::Boolean,
       extern: T::Boolean,
       module_alias: T.nilable(String),
@@ -414,7 +419,7 @@ class FunctionSignature
     ).void
   end
   def initialize(params:, return_type: nil, return_lifetime: nil, visibility: nil,
-                 type_params: [], reentrant: false, extern: false,
+                 type_params: [], generic_bounds: {}, reentrant: false, extern: false,
                  module_alias: nil, extern_effects: nil, extern_source: nil,
                  fn_type_params: [], owner_type: nil, owner_type_params: [],
                  intrinsic: false, needs_rt: nil, can_fail: nil,
@@ -439,6 +444,10 @@ class FunctionSignature
         intrinsic: intrinsic
       ),
       Contract
+    )
+    @generic_bounds = T.let(
+      generic_bounds.transform_values { |bounds| bounds.map { |bound| Type.new(bound) } },
+      GenericBounds,
     )
     @facts = T.let(
       AnalysisFacts.new(
@@ -656,6 +665,7 @@ class FunctionSignature
       return_lifetime: @contract.return_lifetime,
       visibility: @contract.visibility,
       type_params: @contract.type_params,
+      generic_bounds: @generic_bounds,
       reentrant: @contract.reentrant,
       extern: @contract.extern,
       module_alias: @contract.module_alias,

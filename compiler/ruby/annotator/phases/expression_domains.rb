@@ -39,6 +39,10 @@ module Annotator
         reject_legacy_foreign_slice_view!(node)
         reject_direct_observable_method_access!(node)
 
+        if resolve_protocol_method_call!(node)
+          return
+        end
+
         if resolve_collection_method(node)
           validate_indirect_collection_insertion!(node)
           receiver_type = node.object.full_type!(context: "@node collection receiver")
@@ -73,6 +77,65 @@ module Annotator
         error!(node, :UNKNOWN_INHERENT_METHOD,
           name: node.name, type: Type.surface_name(node.object.full_type!(context: "method receiver")))
       end
+
+      sig { params(node: AST::MethodCall).returns(T::Boolean) }
+      def resolve_protocol_method_call!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        receiver = node.object.full_type!(context: "protocol method receiver")
+        return false unless generic_parameter_has_map_bound?(receiver.resolved)
+
+        operation = {"put" => :put, "delete" => :delete, "contains?" => :contains,
+                     "count" => :count, "length" => :count,
+                     "empty?" => :empty, "any?" => :any}[node.name]
+        unless operation
+          error!(node, :GENERIC_MAP_METHOD_UNKNOWN,
+            name: node.name, available: "put, delete, contains?, count, length, empty?, any?")
+        end
+        operation = T.must(operation)
+        expected_arity = %i[count empty any].include?(operation) ? 0 : (operation == :put ? 2 : 1)
+        if node.args.length != expected_arity
+          error!(node, :GENERIC_MAP_METHOD_ARITY,
+            name: node.name, expected: expected_arity, actual: node.args.length)
+        end
+
+        key_type = Type.new(TypeProjectionExpression.new(owner: receiver.resolved, member: :Key))
+        value_type = Type.new(TypeProjectionExpression.new(owner: receiver.resolved, member: :Value))
+        verify_protocol_method_argument!(node, 0, key_type) if expected_arity.positive?
+        verify_protocol_method_argument!(node, 1, value_type) if operation == :put
+
+        consume_generic_map_value!(T.must(node.args[1]), value_type) if operation == :put
+
+        result = case operation
+        when :contains, :empty, :any then Type.new(:Bool)
+        when :count then Type.new(:Int64)
+        else Type.new(:Void)
+        end
+        node.protocol_operation = operation
+        stamp_type!(node, result)
+        if operation == :put
+          current_fn_ctx&.record_heap_use!
+          current_fn_ctx&.record_alloc_use!
+          record_effect(EffectTracker::HEAP)
+          node.can_fail = true
+        end
+        true
+      end
+      private :resolve_protocol_method_call!
+
+      sig { params(node: AST::MethodCall, index: Integer, expected: Type).void }
+      def verify_protocol_method_argument!(node, index, expected)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        argument = T.must(node.args[index])
+        actual = argument.full_type!(context: "Map protocol method argument")
+        return if expected.accepts?(actual)
+
+        error!(argument, :GENERIC_MAP_METHOD_ARGUMENT,
+          name: node.name, position: index + 1,
+          expected: Type.surface_name(expected), actual: Type.surface_name(actual))
+      end
+      private :verify_protocol_method_argument!
 
       sig { params(node: AST::MethodCall).returns(T::Boolean) }
       def resolve_inherent_method_call!(node)

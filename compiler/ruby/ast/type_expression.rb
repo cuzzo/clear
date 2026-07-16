@@ -20,6 +20,17 @@ class NamedTypeExpression < T::Struct
   const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
 end
 
+# A protocol-associated type selected from a generic type parameter, such as
+# M::Key or M::Value.  This remains symbolic while a generic body is checked
+# and is replaced from the concrete conformance witness at instantiation.
+class TypeProjectionExpression < T::Struct
+  include TypeExpression
+
+  const :owner, Symbol
+  const :member, Symbol
+  const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
+end
+
 class FunctionTypeExpression < T::Struct
   include TypeExpression
 
@@ -122,6 +133,8 @@ class TypeExpressionTree
       FutureTypeExpression.new(inner: expression.inner, capabilities: capabilities)
     when NamedTypeExpression
       NamedTypeExpression.new(name: expression.name, arguments: expression.arguments, capabilities: capabilities)
+    when TypeProjectionExpression
+      TypeProjectionExpression.new(owner: expression.owner, member: expression.member, capabilities: capabilities)
     when FunctionTypeExpression
       FunctionTypeExpression.new(signature: expression.signature, capabilities: capabilities)
     when TupleTypeExpression
@@ -300,6 +313,7 @@ class TypeExpressionTree
   def self.children(expression)
     case expression
     when NamedTypeExpression then expression.arguments
+    when TypeProjectionExpression then []
     when FunctionTypeExpression
       expression.signature.params.map { |param| param.type.shape.expression } +
         [expression.signature.return_type.shape.expression]
@@ -425,6 +439,13 @@ class TypeExpressionParser
 
   sig { params(source: String).returns(TypeExpression) }
   def self.parse_generic_or_named_source(source)
+    if (projection = /\A([A-Z]\w*)::([A-Z]\w*)\z/.match(source))
+      return TypeProjectionExpression.new(
+        owner: T.must(projection[1]).to_sym,
+        member: T.must(projection[2]).to_sym,
+      )
+    end
+
     generic = split_generic(source)
     unless generic.nil?
       arguments = generic.arguments.map { |argument| parse_source(argument) }
@@ -607,6 +628,8 @@ class TypeExpressionPrinter
       end
 
       "#{base}#{capability_suffix(expression.capabilities)}"
+    when TypeProjectionExpression
+      "#{expression.owner}::#{expression.member}#{capability_suffix(expression.capabilities)}"
     when FunctionTypeExpression
       "FN(#{expression.signature.params.map { |param| legacy(TypeExpressionParser.parse(param.type.raw)) }.join(",")}) -> #{legacy(TypeExpressionParser.parse(expression.signature.return_type.raw))}#{capability_suffix(expression.capabilities)}"
     when TupleTypeExpression
@@ -657,6 +680,8 @@ class TypeExpressionPrinter
       end
 
       "#{base}#{capability_suffix(expression.capabilities)}"
+    when TypeProjectionExpression
+      "#{expression.owner}::#{expression.member}#{capability_suffix(expression.capabilities)}"
     when FunctionTypeExpression
       "FN(#{expression.signature.params.map { |param| inline(TypeExpressionParser.parse(param.type.raw)) }.join(", ")}) -> #{inline(TypeExpressionParser.parse(expression.signature.return_type.raw))}#{capability_suffix(expression.capabilities)}"
     when TupleTypeExpression

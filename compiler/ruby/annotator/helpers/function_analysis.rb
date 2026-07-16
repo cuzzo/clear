@@ -259,7 +259,8 @@ module FunctionAnalysis
     fn_type_params = node.type_params.map(&:to_sym)
     fn_ctx = FunctionContext.new(
       name: node.name, return_type: node.annotation_return_type,
-      lifetime: lifetime_paths, type_params: fn_type_params
+      lifetime: lifetime_paths, type_params: fn_type_params,
+      generic_params: node.generic_params,
     )
     push_function_context!(fn_ctx)
     begin
@@ -283,6 +284,9 @@ module FunctionAnalysis
         return_type: node.annotation_return_type, return_lifetime: lifetime_paths,
         visibility: node.visibility,
         type_params: fn_type_params,
+        generic_bounds: node.generic_params.each_with_object({}) do |param, bounds|
+          bounds[param.name.to_sym] = param.bounds.map(&:type)
+        end,
         reentrant: node.declared_plain_reentrant?,
         requires: node.requires
       )

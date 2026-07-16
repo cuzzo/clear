@@ -18,6 +18,9 @@ class FunctionContext
   sig { returns(T::Array[Symbol]) }
   attr_reader :type_params
 
+  sig { returns(T::Array[AST::GenericParamDecl]) }
+  attr_reader :generic_params
+
   sig { returns(T::Array[AST::ReturnFact]) }
   attr_accessor :returns
 
@@ -84,13 +87,14 @@ class FunctionContext
     self.conditional_depth -= 1
   end
 
-  sig { params(name: String, return_type: T.nilable(Type::TypeInput), lifetime: T::Array[LifetimeSource], type_params: T::Array[Symbol]).void }
-  def initialize(name:, return_type: nil, lifetime: [], type_params: [])
+  sig { params(name: String, return_type: T.nilable(Type::TypeInput), lifetime: T::Array[LifetimeSource], type_params: T::Array[Symbol], generic_params: T::Array[AST::GenericParamDecl]).void }
+  def initialize(name:, return_type: nil, lifetime: [], type_params: [], generic_params: [])
     @name = name
     @return_type = T.let(Type.new(:Void), Type)
     self.return_type = return_type
     @lifetime = T.let(lifetime, T::Array[LifetimeSource])
     @type_params = T.let(type_params.dup, T::Array[Symbol])
+    @generic_params = T.let(generic_params.dup, T::Array[AST::GenericParamDecl])
     @frame_count = T.let(0, Integer)
     @heap_count = T.let(0, Integer)
     @alloc_count = T.let(0, Integer)
