@@ -1623,7 +1623,9 @@ module MIRLoweringFunctions
     mir_args = ast_args.each_with_index.map do |argument, index|
       lower_call_arg_from_facts(call_arg_facts(argument, signature, index))
     end
-    type_arg = MIR::Ident.new(generic_type_arg_zig(receiver_type))
+    receiver_index = node.is_a?(AST::FuncCall) ? (node.protocol_receiver_index || 0) : 0
+    receiver = ast_args.fetch(receiver_index)
+    type_arg = MIR::Ident.new(user_protocol_receiver_type_arg(receiver, receiver_type))
     all_args = [type_arg, MIR::Ident.new(runtime_binding_name)] + mir_args
     fn_zig = "__clearProtocol_#{T.must(node.protocol_name)}_#{zig_safe_name(T.must(node.protocol_operation).to_s)}"
     can_fail = signature.return_type.error_union?
@@ -1640,6 +1642,16 @@ module MIRLoweringFunctions
     )
   end
   private :lower_user_protocol_call
+
+  sig { params(receiver: AST::Node, receiver_type: Type).returns(String) }
+  def user_protocol_receiver_type_arg(receiver, receiver_type)
+    T.bind(self, MIRLowering) rescue nil
+
+    root = AST.root_identifier(receiver)
+    polymorphic_type = root && capability_state.polymorphic_alias_type_map&.[](root.name.to_s)
+    polymorphic_type || generic_type_arg_zig(receiver_type)
+  end
+  private :user_protocol_receiver_type_arg
 
   sig do
     params(

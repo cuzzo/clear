@@ -108,6 +108,7 @@ class MIRLoweringCapabilityState < T::Struct
   prop :rc_unwrap_map, T.nilable(MIRLoweringCapabilities::RcUnwrapMap), default: nil
   prop :with_alias_alloc_map, T.nilable(MIRLoweringCapabilities::AliasAllocMap), default: nil
   prop :with_alias_owner_map, T.nilable(MIRLoweringCapabilities::AliasOwnerMap), default: nil
+  prop :polymorphic_alias_type_map, T.nilable(MIRLoweringCapabilities::PolymorphicAliasTypeMap), default: nil
   # IF ... EXISTS AS aliases over collection lookups are physically *T in
   # Zig (getAt returns ?*T), unlike ordinary optional captures which are T.
   # Carry that representation fact through the lexical lowering context so

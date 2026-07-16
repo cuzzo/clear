@@ -540,7 +540,7 @@ module GenericAnalysis
       end
       return substitutions
     end
-    return {} if pattern.semantic_type_key == concrete.semantic_type_key
+    return {} if pattern.bare_data_type.semantic_type_key == concrete.bare_data_type.semantic_type_key
 
     nil
   end

@@ -14,6 +14,7 @@ GENERIC_MAP_PROTOCOL_CELLS = [
   { shape: :user_protocol_declaration },
   { shape: :concrete_user_protocol_conformance },
   { shape: :generic_user_protocol_conformance },
+  { shape: :shared_user_protocol_conformance },
   { shape: :duplicate_user_protocol_requirement, expected: :compile_error },
   { shape: :user_protocol_conformance_mismatch, expected: :compile_error },
   { shape: :associated_storage_wrong_key, expected: :compile_error },
@@ -167,6 +168,22 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
         store = Store<String, Int64>{ last_key: NIL, fallback: NIL, marker: 1_i64 };
         ASSERT lookup(store, "missing") == NIL;
         ASSERT same(store, Store<String, Int64>{ last_key: NIL, fallback: NIL, marker: 1_i64 });
+      END
+    CLEAR
+  when :shared_user_protocol_conformance
+    <<~CLEAR
+      PROTOCOL Sized { METHOD size(self: Self) RETURNS Int64; }
+      STRUCT Box { value: Int64 }
+      IMPLEMENTATION Sized FOR Box {
+        METHOD size(self) RETURNS Int64 -> RETURN self.value; END
+      }
+      FN measured!<S: SHARED Sized>(MUTABLE value: S) RETURNS !Int64 ->
+        WITH POLYMORPHIC value AS view { RETURN view.size(); }
+        RETURN 0_i64;
+      END
+      FN main() RETURNS !Void ->
+        MUTABLE value = Box{ value: 8_i64 } @shared:locked;
+        ASSERT measured!(value) == 8_i64;
       END
     CLEAR
   when :duplicate_user_protocol_requirement

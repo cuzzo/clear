@@ -633,6 +633,7 @@ module MIRLoweringCapabilities
   RcUnwrapMap = T.type_alias { T::Hash[String, String] }
   AliasAllocMap = T.type_alias { T::Hash[String, T.nilable(Symbol)] }
   AliasOwnerMap = T.type_alias { T::Hash[String, String] }
+  PolymorphicAliasTypeMap = T.type_alias { T::Hash[String, String] }
 
   sig do
     type_parameters(:Result)
@@ -645,14 +646,17 @@ module MIRLoweringCapabilities
     prev_rc = capability_state.rc_unwrap_map
     prev_alias_alloc = capability_state.with_alias_alloc_map
     prev_alias_owner = capability_state.with_alias_owner_map
+    prev_polymorphic_types = capability_state.polymorphic_alias_type_map
     locked_map = T.let((prev_locked || {}).dup, LockedUnwrapMap)
     rc_map = T.let((prev_rc || {}).dup, RcUnwrapMap)
     alias_alloc_map = T.let((prev_alias_alloc || {}).dup, AliasAllocMap)
     alias_owner_map = T.let((prev_alias_owner || {}).dup, AliasOwnerMap)
+    polymorphic_types = T.let((prev_polymorphic_types || {}).dup, PolymorphicAliasTypeMap)
     capability_state.locked_unwrap_map = locked_map
     capability_state.rc_unwrap_map = rc_map
     capability_state.with_alias_alloc_map = alias_alloc_map
     capability_state.with_alias_owner_map = alias_owner_map
+    capability_state.polymorphic_alias_type_map = polymorphic_types
 
     with_capability_specs(node).each do |cap|
       var_node = T.cast(cap.var_node, CapabilityVarNode)
@@ -662,6 +666,9 @@ module MIRLoweringCapabilities
         generic_inner = cap.resolved_type.resolved.to_s.match?(/\A[A-Z]\z/)
         alias_alloc_map[alias_name] = generic_inner ? :heap : placement_for_node(var_node)
         alias_owner_map[alias_name] = var_name.to_s
+        if node.universal_poly && generic_inner
+          polymorphic_types[alias_name] = "CheatLib.PolymorphicInner(#{cap.resolved_type.resolved})"
+        end
       end
       case cap.capability
       when :EXCLUSIVE, :write_locked_read
@@ -681,6 +688,7 @@ module MIRLoweringCapabilities
     capability_state.rc_unwrap_map = prev_rc
     capability_state.with_alias_alloc_map = prev_alias_alloc
     capability_state.with_alias_owner_map = prev_alias_owner
+    capability_state.polymorphic_alias_type_map = prev_polymorphic_types
   end
 
   # Structured representation of a fallible-acquire clause for the BC

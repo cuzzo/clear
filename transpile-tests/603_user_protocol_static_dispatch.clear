@@ -50,6 +50,11 @@ FN checked<S: Sized>(value: S) RETURNS !Int64 ->
   RETURN value.checkedSize();
 END
 
+FN measuredShared!<S: SHARED Sized>(MUTABLE value: S) RETURNS !Int64 ->
+  WITH POLYMORPHIC value AS view { RETURN view.size(); }
+  RETURN 0_i64;
+END
+
 FN roundTrip<S: Identity>(store: S, TAKES value: S::Value) RETURNS S::Value ->
   RETURN store.identity(value);
 END
@@ -68,6 +73,9 @@ FN main() RETURNS !Void ->
   ASSERT measured(box) == 7_i64;
   ASSERT box.size() == 7_i64;
   ASSERT checked(box) == 7_i64;
+
+  MUTABLE sharedBox = Box{ value: 9_i64 } @shared:locked;
+  ASSERT measuredShared!(sharedBox) == 9_i64;
 
   store = Store<Int64>{ marker: 1_i64 };
   ASSERT roundTrip(store, 42_i64) == 42_i64;

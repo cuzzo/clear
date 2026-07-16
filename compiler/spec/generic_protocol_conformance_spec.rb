@@ -130,6 +130,26 @@ RSpec.describe "explicit generic protocol conformances" do
     CLEAR
   end
 
+  it "preserves nominal conformance through capability wrappers" do
+    expect {
+      annotate(<<~CLEAR)
+        PROTOCOL Sized { METHOD size(self: Self) RETURNS Int64; }
+        STRUCT Box { value: Int64 }
+        IMPLEMENTATION Sized FOR Box {
+          METHOD size(self) RETURNS Int64 -> RETURN self.value; END
+        }
+        FN measured!<T: SHARED Sized>(MUTABLE value: T) RETURNS !Int64 ->
+          WITH POLYMORPHIC value AS view { RETURN view.size(); }
+          RETURN 0_i64;
+        END
+        FN main() RETURNS Void ->
+          MUTABLE box = Box{ value: 7_i64 } @shared:locked;
+          ASSERT measured!(box) OR_ELSE RAISE == 7_i64;
+        END
+      CLEAR
+    }.not_to raise_error
+  end
+
   it "enforces conditional conformance binder bounds at the concrete owner" do
     source = <<~CLEAR
       PROTOCOL Hashable { METHOD hash(self: Self) RETURNS Int64; }
