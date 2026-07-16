@@ -1266,7 +1266,13 @@ module Annotator
         else
           false
         end
-        error!(node, node.is_a?(AST::GetIndex) ? :TAKES_NEEDS_OWNED_INDEX : :TAKES_NEEDS_OWNED_BORROW) if borrowed
+        if borrowed
+          if node.is_a?(AST::GetIndex)
+            error!(node, :TAKES_NEEDS_OWNED_INDEX)
+          else
+            error!(node, :TAKES_NEEDS_OWNED_BORROW)
+          end
+        end
         move_if_takes_ownership!(node, action: :takes, consumer_param_type: value_type)
       end
 

@@ -30,6 +30,7 @@ RSpec.describe MIRLowering do
       bindings: {},
       binding_types: {},
       collection_params: Set.new,
+      protocol_map_allocators: {},
       mutable_scalar_params: Set.new,
       param_names: Set.new,
       takes_param_names: Set.new,

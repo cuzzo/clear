@@ -2201,7 +2201,12 @@ module MIRLoweringExpressions
     # with_decl_alloc. Only a context-free explicit COPY defaults to heap.
     alloc = function_state.current_decl_alloc || node.alloc || :heap
 
-    if ti.optional? && ti.wrapped_type&.any_rc?
+    if ti.id_handle?
+      # Id<T> is an integer handle owned by its Pool, never an owning copy of
+      # T. Generic specialization must not turn COPY of the handle into a deep
+      # copy merely because its type argument may require cleanup.
+      MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
+    elsif ti.optional? && ti.wrapped_type&.any_rc?
       wrapped = T.must(ti.wrapped_type)
       capture = "__copy_rc_#{lowering_counters.next_tmp_id}"
       func = wrapped.shared? ? "arcRetain" : "rcRetain"

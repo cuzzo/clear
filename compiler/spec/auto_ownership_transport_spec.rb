@@ -192,9 +192,11 @@ RSpec.describe "automatic ownership transport" do
 
     user_source = <<~CLEAR
       STRUCT User { id: Int64, name: String }
-      FN replaceId!(MUTABLE user: User, id: Int64) RETURNS Void ->
-        user.id = id;
-      END
+      IMPLEMENTATION User {
+        METHOD replaceId!(MUTABLE self, id: Int64) RETURNS Void ->
+          self.id = id;
+        END
+      }
       FN main() RETURNS Void ->
         MUTABLE x = User{ id: 1, name: "Ada" };
         y = x;
@@ -206,7 +208,9 @@ RSpec.describe "automatic ownership transport" do
 
     readonly_source = <<~CLEAR
       STRUCT User { id: Int64 }
-      FN readId(user: User) RETURNS Int64 -> RETURN user.id; END
+      IMPLEMENTATION User {
+        METHOD readId(self) RETURNS Int64 -> RETURN self.id; END
+      }
       FN main() RETURNS Void ->
         x = User{ id: 1 };
         y = x;

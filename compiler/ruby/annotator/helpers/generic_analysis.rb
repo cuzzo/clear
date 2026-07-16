@@ -17,6 +17,7 @@ require_relative "../protocol_projection_resolver"
 #
 module GenericAnalysis
     extend T::Sig
+  include Annotator::ProtocolProjectionIssueEmission
 
   BUILTIN_TYPES = %i[
     Number Bool Byte Int8 Int16 Int32 Int64 UInt8 UInt16 UInt32 UInt64
@@ -429,7 +430,7 @@ module GenericAnalysis
       current_function_generic_params,
     )
     issue = result.issues.first
-    error!(node, issue.code, **issue.arguments) if issue
+    emit_protocol_projection_issue!(node, issue) if issue
     type.replace_shape!(type.shape.with_expression(result.expression))
   end
   private :resolve_associated_projection_protocols!

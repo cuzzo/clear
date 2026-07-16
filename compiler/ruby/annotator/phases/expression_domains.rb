@@ -579,7 +579,13 @@ module Annotator
 
         ufcs_args = [resolution_receiver] + node.args
         matched_def = find_matching_intrinsic(method_overloads, ufcs_args)
-        return false unless matched_def
+        unless matched_def
+          sigs = method_overloads.map(&:intrinsic_args_label).join(" or ")
+          arg_types = ufcs_args.map { |arg| arg.resolved_type }.join(", ")
+          error!(node, :INTRINSIC_NO_OVERLOAD,
+            name: node.name, args: arg_types, candidates: sigs)
+          return true
+        end
 
         visit_IntrinsicFunc(node, ufcs_args, matched_def: matched_def)
         navigation = node.object.is_a?(AST::OptionalUnwrap) || implicit_safe_nav

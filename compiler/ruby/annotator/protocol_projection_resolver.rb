@@ -16,6 +16,40 @@ module Annotator
     const :issues, T::Array[ProtocolProjectionIssue]
   end
 
+  # Keeps projection diagnostics statically tied to the registry. Both
+  # declaration registration and body analysis use this seam, so adding a new
+  # resolver issue requires adding its explicit diagnostic contract here.
+  module ProtocolProjectionIssueEmission
+    extend T::Sig
+
+    sig { params(node: T.any(AST::Locatable, Struct), issue: ProtocolProjectionIssue).void }
+    def emit_protocol_projection_issue!(node, issue)
+      T.bind(self, T.any(Annotator::Phases::ResolutionSession,
+        Annotator::Phases::TypeAnalysisSession))
+      arguments = issue.arguments
+      case issue.code
+      when :GENERIC_PROJECTION_UNKNOWN_OWNER
+        error!(node, :GENERIC_PROJECTION_UNKNOWN_OWNER,
+          owner: T.must(arguments[:owner]), member: T.must(arguments[:member]))
+      when :GENERIC_PROJECTION_NEEDS_PROTOCOL
+        error!(node, :GENERIC_PROJECTION_NEEDS_PROTOCOL,
+          owner: T.must(arguments[:owner]), member: T.must(arguments[:member]),
+          protocol: T.must(arguments[:protocol]))
+      when :GENERIC_UNKNOWN_ASSOCIATED_TYPE
+        error!(node, :GENERIC_UNKNOWN_ASSOCIATED_TYPE,
+          owner: T.must(arguments[:owner]), member: T.must(arguments[:member]),
+          protocol: T.must(arguments[:protocol]), available: T.must(arguments[:available]))
+      when :GENERIC_AMBIGUOUS_ASSOCIATED_TYPE
+        error!(node, :GENERIC_AMBIGUOUS_ASSOCIATED_TYPE,
+          owner: T.must(arguments[:owner]), member: T.must(arguments[:member]),
+          protocols: T.must(arguments[:protocols]))
+      else
+        Kernel.raise ArgumentError, "Unhandled protocol projection issue #{issue.code}"
+      end
+    end
+    private :emit_protocol_projection_issue!
+  end
+
   # Resolves `T::Item` against T's declared protocol bounds without depending
   # on a traversal session. Declaration registration and function-body typing
   # therefore use exactly the same ambiguity and availability rules.

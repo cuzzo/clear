@@ -2061,8 +2061,7 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
-  describe "Method Calls / Unified Call Syntax (visit_MethodCall)" do
-    # Define a Point struct and functions that operate on it
+  describe "inherent method calls (visit_MethodCall)" do
     let(:base_funcs) {
       <<~FLUX
         STRUCT Point {
@@ -2070,61 +2069,59 @@ RSpec.describe SemanticAnnotator do
           y: Float64
         }
 
-        # "Method" to add two points: add(p1, p2)
-        FN add(a: Point, b: Point) RETURNS Point ->
-          RETURN Point{ x: a.x + b.x, y: a.y + b.y };
-        END
+        IMPLEMENTATION Point {
+          METHOD add(self, b: Point) RETURNS Point ->
+            RETURN Point{ x: self.x + b.x, y: self.y + b.y };
+          END
 
-        # "Method" to get X coordinate: get_x(p)
-        FN get_x(p: Point) RETURNS Float64 ->
-          RETURN p.x;
-        END
+          METHOD get_x(self) RETURNS Float64 ->
+            RETURN self.x;
+          END
+        }
 
-        # "Method" to convert Float64 to List: to_list(n)
         FN to_list(n: Float64) RETURNS !Float64[] ->
           RETURN [n];
         END
       FLUX
     }
 
-    context "Unified Call Syntax (UCS)" do
-      context "Simple Transformation: p.add(p2) -> add(p, p2)" do
+    context "inherent calls" do
+      context "simple transformation: p.add(p2)" do
         let(:code) {
           base_funcs + <<~FLUX
             p1 = Point{ x: 1, y: 2 };
             p2 = Point{ x: 3, y: 4 };
 
-            # Should resolve to add(p1, p2)
             res = p1.add(p2);
           FLUX
         }
 
-        it "resolves correctly using the global function signature" do
+        it "resolves against the owner's implementation" do
           expect { ast }.not_to raise_error
-          expect(result).to eq(:Point)
+          binding = ast.statements.find { |node| node.is_a?(AST::BindExpr) && node.name == "res" }
+          expect(binding&.value&.resolved_type).to eq(:Point)
         end
       end
 
-      context "Chained Calls: p.add(p2).get_x().to_list()" do
+      context "chained calls: p.add(p2).get_x()" do
         let(:code) {
           base_funcs + <<~FLUX
             p1 = Point{ x: 1, y: 2 };
             p2 = Point{ x: 3, y: 4 };
 
-            # 1. p1.add(p2)    -> Point
-            # 2. .get_x()      -> Float64
-            # 3. .to_list()    -> Float64[]
-            res = p1.add(p2).get_x().to_list();
+            # User methods remain chainable. Free functions stay explicit.
+            res = to_list(p1.add(p2).get_x());
           FLUX
         }
 
-        it "resolves chains by propagating types" do
+        it "propagates types through method chains into a free function" do
           expect { ast }.not_to raise_error
           # Post-#338: to_list is fallible (frame alloc), but auto-propagate
           # strips the leading `!` from a call's expression type so the chain
           # binds `res: Float64[]`. The error union flows implicitly through
           # the enclosing fn (or to_list's caller), not into the binding.
-          expect(result).to eq(:"Float64[]")  # to_list returns dynamic array, always of size 1
+          binding = ast.statements.find { |node| node.is_a?(AST::BindExpr) && node.name == "res" }
+          expect(binding&.value&.resolved_type).to eq(:"Float64[]")
         end
       end
     end
@@ -2137,16 +2134,15 @@ RSpec.describe SemanticAnnotator do
             p.unknown_method();
           FLUX
         }
-        it "raises error if the function does not exist globally" do
-          expect { ast }.to raise_error(/Undefined function 'unknown_method'/)
+        it "raises an owner-specific error" do
+          expect { ast }.to raise_error(/Type Point has no inherent METHOD named 'unknown_method'/)
         end
       end
 
-      context "Type Mismatch (UCS Argument)" do
+      context "type mismatch" do
         let(:code) {
           base_funcs + <<~FLUX
             p1 = Point{ x: 1, y: 2 };
-            # add expects (Point, Point). We pass (Point, Float64)
             p1.add(5);
           FLUX
         }
@@ -2159,12 +2155,10 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           base_funcs + <<~FLUX
             p1 = Point{ x: 1, y: 2 };
-            # add expects 2 args (Point, Point). We provide only 1 (self) via dot syntax.
             p1.add();
           FLUX
         }
         it "raises arity mismatch considering the implicit first argument" do
-          # Expects 2, got 1 (the object p1)
           expect { ast }.to raise_error(/Function 'add' expects 2 arguments, got 1/i)
         end
       end

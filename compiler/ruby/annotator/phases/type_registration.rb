@@ -10,6 +10,7 @@ module Annotator
   module Phases
     module TypeRegistration
       extend T::Sig
+      include Annotator::ProtocolProjectionIssueEmission
 
       sig { params(declarations: DeclarationIndex).void }
       def register_type_declarations(declarations)
@@ -302,7 +303,7 @@ module Annotator
           parameters,
         )
         issue = result.issues.first
-        error!(node, issue.code, **issue.arguments) if issue
+        emit_protocol_projection_issue!(node, issue) if issue
         type.replace_shape!(type.shape.with_expression(result.expression))
       end
       private :resolve_declaration_projections!

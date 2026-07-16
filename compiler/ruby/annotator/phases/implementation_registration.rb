@@ -40,9 +40,13 @@ module Annotator
         declarations.implementation_declarations.map do |implementation|
           owner = local_structs[implementation.owner_name]
           unless owner
-            code = current_scope.resolve_type_entry(implementation.owner_name.to_sym) ?
-              :IMPLEMENTATION_NONLOCAL_OWNER : :IMPLEMENTATION_UNKNOWN_OWNER
-            error!(implementation.owner_token, code, owner: implementation.owner_name)
+            if current_scope.resolve_type_entry(implementation.owner_name.to_sym)
+              error!(implementation.owner_token, :IMPLEMENTATION_NONLOCAL_OWNER,
+                owner: implementation.owner_name)
+            else
+              error!(implementation.owner_token, :IMPLEMENTATION_UNKNOWN_OWNER,
+                owner: implementation.owner_name)
+            end
           end
           previous = seen[implementation.owner_name]
           error!(implementation.owner_token, :IMPLEMENTATION_DUPLICATE,

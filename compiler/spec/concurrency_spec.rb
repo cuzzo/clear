@@ -1253,7 +1253,7 @@ RSpec.describe SemanticAnnotator do
       CLEAR
       out = transpile_fn(src)
       expect(out).to include("CheatLib.concurrentListSelect")
-      expect(out).to include("return mayFail(__item)")
+      expect(out).to include("return try mayFail(__item)")
     end
 
     # -------------------------------------------------------------------------

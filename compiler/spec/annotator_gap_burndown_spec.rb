@@ -647,21 +647,21 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "reports returning indexed WITH-scoped borrows" do
     ann = quiet_annotator
-    entry = symbol_entry(type: Type.array_of(:Int64), storage: :borrow)
+    entry = symbol_entry(type: Type.array_of(:String), storage: :borrow)
     entry.mark_non_escaping!
     target = AST::Identifier.new(token, "items")
     target.symbol = entry
     value = AST::GetIndex.new(token, target, AST::Literal.new(token(:INT64, "0"), :INT64, 0, :stack))
-    value.full_type = Type.new(:Int64)
+    value.full_type = Type.new(:String)
     ann.send(:phase_traversal_state).with_block_depth = 1
     ann.define_singleton_method(:visit) { |_node| nil }
     ann.define_singleton_method(:collect_bg_sources_in_expr) { |_node| [] }
     ann.define_singleton_method(:verify_return) { |_node| nil }
     ann.define_singleton_method(:verify_tied_return!) { |_node| nil }
-    ann.define_singleton_method(:return_value_type) { |_node| Type.new(:Int64) }
+    ann.define_singleton_method(:return_value_type) { |_node| Type.new(:String) }
     ann.define_singleton_method(:return_type_compatible?) { |_actual, _expected| true }
 
-    with_function_context(ann, return_type: Type.new(:Int64)) do
+    with_function_context(ann, return_type: Type.new(:String)) do
       ann.send(:visit_ReturnNode, AST::ReturnNode.new(token(:RETURN, "RETURN"), value))
     end
 

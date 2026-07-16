@@ -609,9 +609,14 @@ module FunctionAnalysis
   sig { params(node: CallNode, args: T.nilable(CallArgList)).returns(CallSignatureSite) }
   def call_signature_site(node, args = nil)
     args ||= node.args
+    source_name = if node.is_a?(AST::MethodCall) && node.source_method_name
+      T.must(node.source_method_name)
+    else
+      node.name.to_s
+    end
     CallSignatureSite.new(
       node: node,
-      name: node.name.to_s,
+      name: source_name,
       args: args,
     )
   end
