@@ -32,6 +32,7 @@ module Annotator
           extern: true,
           module_alias: node.from_module,
           extern_effects: extern_effects(node),
+          extern_source: node.extern_source,
           fn_type_params: fn_type_params(node),
           type_params: fn_type_params(node),
           owner_type: node.owner_type,

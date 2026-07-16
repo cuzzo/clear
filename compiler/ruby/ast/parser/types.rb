@@ -25,10 +25,18 @@ class ClearParser
     consume(:CHAR, ')')
     consume(:ARROW, '->')
     return_type = parse_type_annotation(migration_root: false)
+    abi = T.let(:clear, Symbol)
+    if match!(:KEYWORD, 'CALLCONV')
+      abi_token = current
+      consume(abi_token.type)
+      abi = abi_token.text!.downcase.to_sym
+      error!(abi_token, :PARSER_EXPECTED, expected: "C", got: abi_token.value,
+        type: abi_token.type, line: abi_token.line) unless abi == :c
+    end
     if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
       error!(current, :PARSER_EXPECTED, expected: "supported function type annotation", got: current.value, type: current.type, line: current.line)
     end
-    Type.function_type_from_parts(param_types, T.unsafe(return_type), false, nil)
+    Type.function_type_from_parts(param_types, T.unsafe(return_type), false, nil, abi)
   end
 
   sig { params(migration_root: T::Boolean).returns(Type) }

@@ -170,7 +170,7 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
   # current escape-hatch declaration so divergence is visible.
   describe "capability declarative axis (default-deny)" do
     it "SYNC_DOES_NOT_BIND_CAPTURE lists exactly the data-access modes" do
-      expect(SemanticAnnotator::SYNC_DOES_NOT_BIND_CAPTURE).to eq(Set[:raw, :symbol])
+      expect(SemanticAnnotator::SYNC_DOES_NOT_BIND_CAPTURE).to eq(Set[:raw, :symbol, :c, :size])
     end
 
     it "STORAGE_OUTLIVES_DECLARING_SCOPE lists exactly :shared and :heap" do

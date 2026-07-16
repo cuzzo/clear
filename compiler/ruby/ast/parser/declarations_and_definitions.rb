@@ -224,11 +224,17 @@ class ClearParser
     #                Do NOT use for filesystem I/O or deep-stack functions.
     effects = parse_extern_effects
 
+    native_name = T.let(name, String)
+    if match!(:KEYWORD, 'AS')
+      native_name = consume(:STRING).text!
+    end
+
     consume(:KEYWORD, 'FROM')
     from_module = consume(:STRING).text!
+    source = parse_extern_source(from_module, native_name)
     match!(:CHAR, ';')
     AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects.to_h,
-                          owner_type, owner_type_params, fn_type_params)
+                          owner_type, owner_type_params, fn_type_params, source)
   end
 
   sig { returns(ParsedExternEffects) }
@@ -299,9 +305,44 @@ class ClearParser
     if match!(:KEYWORD, 'FROM')
       from_module = consume(:STRING).text!
     end
+    source = parse_extern_source(from_module || "", as_type || name)
     match!(:CHAR, ';')
     AST::ExternStructDecl.new(extern_tok, name, fields, from_module,
-                              type_params, close_method, as_type)
+                              type_params, close_method, as_type, source)
+  end
+
+  sig { params(dependency: String, native_name: String).returns(Schemas::ExternSource) }
+  def parse_extern_source(dependency, native_name)
+    abi = T.let(:zig, Symbol)
+    callconv = T.let(:c, Symbol)
+    header = T.let(nil, T.nilable(String))
+
+    if match!(:KEYWORD, 'ABI')
+      abi_token = current
+      consume(abi_token.type)
+      abi = abi_token.text!.downcase.to_sym
+      error!(abi_token, :PARSER_EXPECTED, expected: "C or ZIG", got: abi_token.value,
+        type: abi_token.type, line: abi_token.line) unless %i[c zig].include?(abi)
+    end
+    if match!(:KEYWORD, 'CALLCONV')
+      callconv_token = current
+      consume(callconv_token.type)
+      callconv = callconv_token.text!.downcase.to_sym
+      error!(callconv_token, :PARSER_EXPECTED, expected: "C, SYSTEM, or WINAPI",
+        got: callconv_token.value, type: callconv_token.type,
+        line: callconv_token.line) unless %i[c system winapi].include?(callconv)
+    end
+    if match!(:KEYWORD, 'HEADER')
+      header = consume(:STRING).text!
+    end
+
+    Schemas::ExternSource.new(
+      dependency: dependency,
+      abi: abi,
+      symbol: native_name,
+      callconv: callconv,
+      header: header
+    )
   end
 
   sig { params(visibility: Symbol).returns(AST::StructDef) }

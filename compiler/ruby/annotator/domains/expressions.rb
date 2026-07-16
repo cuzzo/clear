@@ -424,6 +424,11 @@ module Annotator
         result = Type.new(T.must(unwrapped))
         result.merge_capabilities_from!(type, include_affine_ownership: true)
         stamp_type!(node, result)
+        # A nullable foreign pointer remains a borrow after the null check.
+        # Unwrapping proves presence; it must not manufacture ownership or a
+        # scope-exit cleanup for storage that is still owned by C.
+        node.container_borrow = true if result.c_array_view? || AST.container_borrow?(node.target)
+        result
       end
 
       # Returns the Type of the last value-producing expression in a branch body,

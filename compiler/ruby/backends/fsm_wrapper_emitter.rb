@@ -598,16 +598,16 @@ module FsmWrapperEmitter
 
   sig { params(stmts: T::Array[MIR::Emittable], mir_emitter: MIREmitter).returns(T::Array[String]) }
   def self.render_body_items(stmts, mir_emitter)
-    stmts.filter_map do |stmt|
+    stmts.each do |stmt|
       unless stmt.is_a?(MIR::Emittable)
         Kernel.raise ArgumentError, "FSM body item must be structural MIR, got #{stmt.class}"
       end
-
-      out = mir_emitter.emit(stmt)
-      next nil if out.nil? || out.strip.empty?
-
-      out
     end
+    # Use the ordinary body renderer so expression-shaped statements such as
+    # ShardedMapPut receive the same terminating semicolon inside an FSM/BG
+    # segment that they receive in a normal function body.
+    rendered = mir_emitter.emit_statements(stmts)
+    rendered.empty? ? [] : [rendered]
   end
 
   sig { params(expr: MIR::Emittable).returns(String) }

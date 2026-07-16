@@ -21,6 +21,7 @@ require_relative "../mir/control_flow"
 require_relative "../mir/pre_mir_type_check"
 require_relative "../mir/lowering/schema_registry"
 require_relative "../mir/lowering/state"
+require_relative "../ffi/c_header_importer"
 
 class CompilerFrontend
     extend T::Sig
@@ -42,6 +43,7 @@ class CompilerFrontend
   # needed by either the old transpiler or the MIR lowering path.
   sig { params(cheat_code: String, importer: ModuleImporter, source_dir: String, strict_test: T::Boolean, ownership_mode: Symbol).returns(T.nilable(CompilerFrontend::Result)) }
   def self.compile(cheat_code, importer:, source_dir:, strict_test: false, ownership_mode: :default)
+    cheat_code = CHeaderImporter.expand(cheat_code, source_dir: source_dir)
     budget = FrontendResourceBudget.new
     tokens = Lexer.new(cheat_code, budget: budget).tokenize
     ast = ClearParser.new(tokens, cheat_code, gradual: ownership_mode == :easy, budget: budget).parse

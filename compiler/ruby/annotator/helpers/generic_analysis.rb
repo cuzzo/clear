@@ -17,7 +17,11 @@ require_relative "../../ast/ast"
 module GenericAnalysis
     extend T::Sig
 
-  BUILTIN_TYPES = %i[Number Bool Byte Int64 Float64 String Any Void Range].freeze
+  BUILTIN_TYPES = %i[
+    Number Bool Byte Int8 Int16 Int32 Int64 UInt8 UInt16 UInt32 UInt64
+    Float32 Float64 TargetInt TargetUInt TargetLong TargetULong
+    TargetLongLong TargetULongLong String Any Void Range
+  ].freeze
   DeclarationNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
   TypeShape = T.type_alias { T.any(Type, Symbol, String) }
   GenericSchema = T.type_alias { T.any(Schemas::EnumSchema, Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
@@ -143,7 +147,7 @@ module GenericAnalysis
     type_obj = facts.type_obj
     has_ownership_cap = %i[multiowned split].include?(type_obj.ownership)
     primitive_atomic_param = type_obj.atomic? && type_obj.primitive?
-    has_sync_cap = type_obj.sync && !primitive_atomic_param && !%i[raw symbol].include?(type_obj.sync)
+    has_sync_cap = type_obj.sync && !primitive_atomic_param && !%i[raw symbol c size].include?(type_obj.sync)
     error!(facts.node, :FN_PARAM_NO_CAPABILITY) if has_ownership_cap || has_sync_cap
   end
 
@@ -172,7 +176,7 @@ module GenericAnalysis
     type_obj = facts.type_obj
     return unless type_obj.tense? && type_obj.observable?
 
-    offending_sync = type_obj.sync if type_obj.sync && !%i[raw symbol].include?(type_obj.sync)
+    offending_sync = type_obj.sync if type_obj.sync && !%i[raw symbol c size].include?(type_obj.sync)
     offending_own = type_obj.ownership if %i[multiowned shared split].include?(type_obj.ownership)
     return unless offending_sync || offending_own
 
@@ -450,7 +454,8 @@ module GenericAnalysis
         params: params,
         return_type: apply_type_subst(fn_type.return_type, subst),
         reentrant: fn_type.reentrant,
-        source_signature: fn_type.source_signature
+        source_signature: fn_type.source_signature,
+        abi: fn_type.abi,
       ))
     else
       Type.new(apply_expression_subst(t.shape.expression, subst))
@@ -485,7 +490,8 @@ module GenericAnalysis
           end,
           return_type: apply_type_subst(signature.return_type, subst),
           reentrant: signature.reentrant,
-          source_signature: signature.source_signature
+          source_signature: signature.source_signature,
+          abi: signature.abi,
         ),
         capabilities: expression.capabilities
       )

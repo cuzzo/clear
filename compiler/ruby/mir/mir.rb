@@ -1015,6 +1015,19 @@ module MIR
     include Stmt
   end
 
+  # Linker-visible C ABI declarations. These remain structural so MIR checks
+  # can validate every parameter and result before the Zig backend renders
+  # them.
+  CExternFnDecl = Struct.new(:name, :params, :return_type, :library, :callconv) do
+    include NamedEmittable
+    include Stmt
+  end
+
+  CExternStructDef = Struct.new(:name, :fields) do
+    include NamedEmittable
+    include Stmt
+  end
+
   # Inline module namespace for local/stdlib REQUIRE.
   # Zig: const Name = struct { ... };
   # The body is structural MIR, not pre-rendered Zig text, so imported function
@@ -4490,6 +4503,27 @@ module MIR
     end
   end
 
+  # Optional resource handle produced by a mutable C ABI out parameter. This
+  # has the same representation as OptionalUnwrap, but unlike an ordinary
+  # optional projection it creates the ownership consumed by CLOSE cleanup.
+  ForeignOwnedUnwrap = Struct.new(:expr) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
+  end
+
+  # Length-checked borrowed slice constructed from a foreign pointer/count
+  # pair. The resulting slice never owns or frees the C allocation.
+  ForeignSliceView = Struct.new(:pointer, :count) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([pointer, count])
+  end
+
   # Range literal.
   # Zig: CheatLib.IntRange{ .start = s, .end = e } or CheatLib.Range{ .start = s, .end = e }
   RangeLit = Struct.new(:start, :end_val, :elem_type) do
@@ -4779,6 +4813,20 @@ module MIR
   class ExternTrampolineArg < T::Struct
     const :expr, Emittable
     const :field_type, T.nilable(Type), default: nil
+    const :field_zig_type, T.nilable(String), default: nil
+  end
+
+  # Synchronous adapter from a normal CLEAR function value
+  # (*Runtime + error channel) to a C callback pointer.
+  class CFunctionAdapter < T::Struct
+    extend T::Sig
+    include Expr
+
+    const :clear_function, Emittable
+    const :signature, Type::FunctionType
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([clear_function])
   end
 
   class ExternTrampoline < T::Struct

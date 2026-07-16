@@ -136,6 +136,9 @@ module FuzzCoverageModel
       failure_proves: 'Every registered collection/container shape remains syntactically admitted or intentionally rejected.',
       matrix_strategy: :smoke
     ),
+    c_ffi_type_matrix: profile(
+      failure_proves: 'Target-resolved C integer aliases remain ordinary numeric collection elements, while foreign pointers require an explicit bounded borrowed view.'
+    ),
     tuple_collection_composition_matrix: profile(
       failure_proves: 'Tuple composes recursively with collections, capability-bearing layers, and optional/fallible/future tenses without changing which node each tense gates.'
     ),

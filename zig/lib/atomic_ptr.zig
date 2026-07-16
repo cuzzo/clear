@@ -227,7 +227,8 @@ pub fn AtomicPtr(comptime T: type) type {
                 // user-supplied `func` must be idempotent on identical
                 // input; this is true for any pure mutator.
                 new_ptr.* = old_ptr.*;
-                @call(.auto, func, .{new_ptr} ++ args);
+                const callback_result = @call(.auto, func, .{new_ptr} ++ args);
+                if (comptime @typeInfo(@TypeOf(callback_result)) == .error_union) try callback_result;
 
                 if (self.ptr.cmpxchgWeak(old_ptr, new_ptr, .release, .acquire)) |_| {
                     // Failure: another writer published first. Spin

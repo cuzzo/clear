@@ -36,6 +36,10 @@ module Annotator
         visit(node.object)
         node.args.each { |arg| visit(arg) }
 
+        if resolve_foreign_slice_view!(node)
+          return
+        end
+
         if resolve_collection_method(node)
           validate_indirect_collection_insertion!(node)
           receiver_type = node.object.full_type!(context: "@node collection receiver")
@@ -66,6 +70,28 @@ module Annotator
         record_predicate_call_site!(node)
         record_call_site(node.name) if node.name.is_a?(String)
       end
+
+      sig { params(node: AST::MethodCall).returns(T::Boolean) }
+      def resolve_foreign_slice_view!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        receiver_type = node.object.full_type!(context: "foreign view receiver")
+        return false unless receiver_type.c_array_view? && node.name == "view"
+
+        if node.args.length != 1
+          error!(node, :STDLIB_METHOD_ARITY, label: "foreign pointer", method: "view", expected: 1, got: node.args.length)
+        end
+        count = T.must(node.args.first)
+        count_type = count.full_type!(context: "foreign view length")
+        error!(count, :RANK_INDEX_INTEGER, got: count_type.resolved) unless count_type.integer?
+
+        element = T.must(receiver_type.element_type)
+        view_type = Type.new(:"#{Type.surface_name(element)}[]", location: :borrow)
+        stamp_type!(node, view_type)
+        node.container_borrow = true
+        node.foreign_slice_view = true
+        true
+      end
+      private :resolve_foreign_slice_view!
 
       sig { params(node: AST::MethodCall).void }
       def reject_mutating_borrowed_receiver!(node)
@@ -261,6 +287,7 @@ module Annotator
         method_sig = type_schema.methods[node.name]
         node.extern_call = true
         node.extern_effects = method_sig.extern_effects if method_sig.extern_effects
+        node.extern_source = method_sig.extern_source if node.respond_to?(:extern_source=)
         stamp_type!(node, method_sig.return_type)
         record_effect(EffectTracker::EXTERN)
         record_extern_method_alloc!(method_sig)

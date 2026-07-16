@@ -45,6 +45,8 @@ class FunctionSignature
     attr_accessor :module_alias
     sig { returns(ExternEffects) }
     attr_accessor :extern_effects
+    sig { returns(T.nilable(Schemas::ExternSource)) }
+    attr_reader :extern_source
     sig { returns(T::Array[Symbol]) }
     attr_accessor :fn_type_params
     sig { returns(T.nilable(String)) }
@@ -63,6 +65,7 @@ class FunctionSignature
         extern: T::Boolean,
         module_alias: T.nilable(String),
         extern_effects: ExternEffects,
+        extern_source: T.nilable(Schemas::ExternSource),
         fn_type_params: T::Array[Symbol],
         owner_type: T.nilable(String),
         owner_type_params: T::Array[Symbol],
@@ -70,7 +73,7 @@ class FunctionSignature
       ).void
     end
     def initialize(params:, visibility: nil, type_params: [], reentrant: false,
-                   extern: false, module_alias: nil, extern_effects: {},
+                   extern: false, module_alias: nil, extern_effects: {}, extern_source: nil,
                    fn_type_params: [], owner_type: nil, owner_type_params: [],
                    intrinsic: false)
       @params = T.let(params, T::Array[AST::Param])
@@ -82,6 +85,7 @@ class FunctionSignature
       @extern = T.let(extern, T::Boolean)
       @module_alias = T.let(module_alias, T.nilable(String))
       @extern_effects = T.let(extern_effects, ExternEffects)
+      @extern_source = T.let(extern_source, T.nilable(Schemas::ExternSource))
       @fn_type_params = T.let(fn_type_params.dup, T::Array[Symbol])
       @owner_type = T.let(owner_type, T.nilable(String))
       @owner_type_params = T.let(owner_type_params.dup, T::Array[Symbol])
@@ -171,6 +175,9 @@ class FunctionSignature
 
   sig { returns(ExternEffects) }
   def extern_effects = @contract.extern_effects
+
+  sig { returns(T.nilable(Schemas::ExternSource)) }
+  def extern_source = @contract.extern_source
 
   sig { returns(T::Array[Symbol]) }
   def fn_type_params = @contract.fn_type_params
@@ -384,6 +391,7 @@ class FunctionSignature
       extern: T::Boolean,
       module_alias: T.nilable(String),
       extern_effects: T.nilable(ExternEffects),
+      extern_source: T.nilable(Schemas::ExternSource),
       fn_type_params: T::Array[Symbol],
       owner_type: T.nilable(String),
       owner_type_params: T::Array[Symbol],
@@ -407,7 +415,7 @@ class FunctionSignature
   end
   def initialize(params:, return_type: nil, return_lifetime: nil, visibility: nil,
                  type_params: [], reentrant: false, extern: false,
-                 module_alias: nil, extern_effects: nil,
+                 module_alias: nil, extern_effects: nil, extern_source: nil,
                  fn_type_params: [], owner_type: nil, owner_type_params: [],
                  intrinsic: false, needs_rt: nil, can_fail: nil,
                  alloc_fault: nil, error_fallible: nil, effects: nil,
@@ -424,6 +432,7 @@ class FunctionSignature
         extern: extern,
         module_alias: module_alias,
         extern_effects: extern_effects || {},
+        extern_source: extern_source,
         fn_type_params: fn_type_params,
         owner_type: owner_type,
         owner_type_params: owner_type_params,
@@ -651,6 +660,7 @@ class FunctionSignature
       extern: @contract.extern,
       module_alias: @contract.module_alias,
       extern_effects: @contract.extern_effects,
+      extern_source: @contract.extern_source,
       fn_type_params: @contract.fn_type_params,
       owner_type: @contract.owner_type,
       owner_type_params: @contract.owner_type_params,

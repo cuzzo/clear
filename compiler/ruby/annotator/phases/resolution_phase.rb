@@ -21,7 +21,11 @@ module Annotator
     class ResolutionSession
       extend T::Sig
 
-      BUILTIN_TYPE_PARAMETER_NAMES = %i[Number Bool Byte Int64 Float64 String Any Void Range].freeze
+      BUILTIN_TYPE_PARAMETER_NAMES = %i[
+        Number Bool Byte Int8 Int16 Int32 Int64 UInt8 UInt16 UInt32 UInt64
+        Float32 Float64 TargetInt TargetUInt TargetLong TargetULong
+        TargetLongLong TargetULongLong String Any Void Range
+      ].freeze
 
       include ErrorHelper
       include ScopeHelper

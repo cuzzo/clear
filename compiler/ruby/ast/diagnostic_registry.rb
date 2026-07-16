@@ -2792,6 +2792,11 @@ module DiagnosticRegistry
       template: "@soa collections cannot be passed to EXTERN FN — SOA memory layout is incompatible with C ABI. Materialize to a regular array first.",
       summary:  "@soa collections have a structure-of-arrays layout that's incompatible with C ABI.",
     },
+    C_EXTERN_UNSUPPORTED_TYPE: {
+      severity: :error, category: :type,
+      template: "Unsupported ABI C %{position} type %{type}: %{reason}.",
+      summary:  "The declaration uses a CLEAR representation that has no sound C ABI lowering.",
+    },
     NOT_A_FUNCTION: {
       severity: :error, category: :type,
       template: "Cannot call '%{name}' - not a function",

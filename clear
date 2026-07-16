@@ -134,6 +134,55 @@ def error(msg)
   exit 1
 end
 
+# Return the native libraries named by explicit C ABI declarations. Zig-backed
+# EXTERN declarations use the same FROM spelling, so ABI C is deliberately
+# required before a dependency is treated as a linker input.
+def c_ffi_libraries(source_text)
+  explicit = source_text.scan(/FROM\s+"([^"]+)"(?:(?!;).)*?\bABI\s+C\b/im).flatten
+  header_imports = source_text.scan(
+    /EXTERN\s+FROM\s+HEADER\s+"[^"]+"(?:(?!;).)*?\bLINK\s+"([^"]+)"(?:(?!;).)*?\bABI\s+C\b/im
+  ).flatten
+  (explicit + header_imports).uniq
+end
+
+def zig_ffi_modules(source_text)
+  c_libraries = c_ffi_libraries(source_text).to_set
+  source_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq.reject { |name| c_libraries.include?(name) }
+end
+
+def c_ffi_link_flags(libraries, build_dir, cleanup_paths)
+  configured_dirs = ENV.fetch('CLEAR_EXTRA_LINK_DIRS', '').split(File::PATH_SEPARATOR).reject(&:empty?)
+  configured_dirs.each do |dir|
+    error "C ABI link directory does not exist: #{dir}" unless Dir.exist?(dir)
+  end
+  search_dirs = [
+    *configured_dirs,
+    '/usr/local/lib', '/usr/lib', '/lib', '/usr/lib64', '/lib64',
+    *Dir.glob('/usr/lib/*-linux-gnu'), *Dir.glob('/lib/*-linux-gnu')
+  ].uniq
+  flags = configured_dirs.flat_map do |dir|
+    absolute = File.expand_path(dir)
+    ["-L#{absolute}", "-rpath", absolute]
+  end
+  libraries.each do |library|
+    error "Invalid C ABI library name: #{library}" unless library.match?(/\A[A-Za-z0-9_.+\-]+\z/)
+    unversioned = search_dirs.any? do |dir|
+      File.exist?(File.join(dir, "lib#{library}.so")) || File.exist?(File.join(dir, "lib#{library}.a"))
+    end
+    unless unversioned
+      versioned = search_dirs.flat_map { |dir| Dir.glob(File.join(dir, "lib#{library}.so.*")) }.sort.first
+      if versioned
+        local_link = File.join(build_dir, "lib#{library}.so")
+        FileUtils.ln_sf(versioned, local_link)
+        cleanup_paths << local_link
+        flags << "-L#{build_dir}"
+      end
+    end
+    flags << "-l#{library}"
+  end
+  flags.uniq
+end
+
 def find_project_build_zig(source)
   return nil if ENV['CLEAR_DISABLE_BUILD_ZIG'] == '1'
 
@@ -341,7 +390,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   ffi_scan_text = ffi_dependency_paths.map { |path| File.exist?(path) ? File.read(path) : "" }.join("\n")
   extra_native_dirs = ENV.fetch('CLEAR_EXTRA_NATIVE_DIRS', '').split(File::PATH_SEPARATOR).reject(&:empty?)
   ffi_search_dirs = ([source_dir] + ffi_dependency_paths.map { |path| File.dirname(path) } + extra_native_dirs).map { |dir| File.expand_path(dir) }.uniq
-  extern_modules = ffi_scan_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
+  c_libraries = c_ffi_libraries(ffi_scan_text)
+  extern_modules = zig_ffi_modules(ffi_scan_text)
   ffi_modules = extern_modules.filter_map do |m|
     next if m.start_with?('std.')
 
@@ -439,6 +489,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     error "Invalid CLEAR_EXTRA_LINK_LIBS entry: #{lib}" unless lib.match?(/\A[A-Za-z0-9_.+\-]+\z/)
     cmd_parts << "-l#{lib}"
   end
+  cmd_parts.concat(c_ffi_link_flags(c_libraries, build_dir, cleanup_paths))
 
   unless module_mode
     bin_name = "#{File.basename(output)}-#{$$}"
@@ -1061,7 +1112,8 @@ when 'test'
     ffi_scan_text = ffi_dependency_paths.map { |path| File.exist?(path) ? File.read(path) : "" }.join("\n")
     extra_native_dirs = ENV.fetch('CLEAR_EXTRA_NATIVE_DIRS', '').split(File::PATH_SEPARATOR).reject(&:empty?)
     ffi_search_dirs = ([source_dir] + ffi_dependency_paths.map { |path| File.dirname(path) } + extra_native_dirs).map { |dir| File.expand_path(dir) }.uniq
-    extern_modules = ffi_scan_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
+    c_libraries = c_ffi_libraries(ffi_scan_text)
+    extern_modules = zig_ffi_modules(ffi_scan_text)
     ffi_modules = extern_modules.filter_map do |m|
       next if m.start_with?('std.')
 
@@ -1097,6 +1149,7 @@ when 'test'
     cmd_parts += ['--global-cache-dir', File.join(build_dir, '.zig-global-cache')]
     cmd_parts += [tmp_name, 'runtime/switch.S', 'runtime/onRoot.S']
     cmd_parts += ['-lc']
+    cmd_parts.concat(c_ffi_link_flags(c_libraries, build_dir, cleanup_paths))
     if tag_filters.empty?
       cmd_parts += ['--test-filter', File.basename(source)]
     else

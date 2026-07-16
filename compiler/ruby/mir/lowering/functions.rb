@@ -81,7 +81,9 @@ module MIRLoweringFunctions
     extend T::Sig
 
     COERCIBLE_PRIMITIVES = T.let(
-      Set[:Int64, :Float64, :Int32, :Int16, :Int8, :UInt64, :UInt32, :UInt16, :UInt8, :Bool].freeze,
+      Set[:Int64, :Float64, :Int32, :Int16, :Int8, :UInt64, :UInt32, :UInt16, :UInt8,
+          :TargetInt, :TargetUInt, :TargetLong, :TargetULong, :TargetLongLong,
+          :TargetULongLong, :Bool].freeze,
       T::Set[Symbol],
     )
 
@@ -245,6 +247,20 @@ module MIRLoweringFunctions
   sig { params(node: AST::ExternFnDecl).returns(MIR::Node) }
   def lower_extern_fn(node)
     T.bind(self, MIRLowering) rescue nil
+    source = node.extern_source
+    if source&.abi == :c
+      params = node.params.map do |param|
+        zig_type = c_abi_param_zig_type(param)
+        MIR::Param.new(param.name, zig_type, param.mutable || false)
+      end
+      return MIR::CExternFnDecl.new(
+        source.symbol || node.name,
+        params,
+        node.annotation_return_type.zig_type,
+        source.dependency,
+        source.callconv
+      )
+    end
     mod = node.from_module
     if program_state.emitted_extern_modules.add?(mod)
       mod_parts = mod.split(".")
@@ -262,6 +278,20 @@ module MIRLoweringFunctions
   sig { params(node: AST::ExternStructDecl).returns(T.any(MIR::Node, T::Array[MIR::Node])) }
   def lower_extern_struct(node)
     T.bind(self, MIRLowering) rescue nil
+    source = node.extern_source
+    if source&.abi == :c
+      if node.field_decls.empty?
+        opaque_name = "#{node.name}__opaque"
+        return [
+          MIR::TypeAlias.new(opaque_name, "opaque {}"),
+          MIR::TypeAlias.new(node.name, "*#{opaque_name}")
+        ]
+      end
+      fields = node.field_decls.map do |name, field|
+        MIR::FieldDef.new(name.to_s, field.type.zig_type(is_field: true), nil)
+      end
+      return MIR::CExternStructDef.new(node.name, fields)
+    end
     if (mod = node.from_module)
       mod_parts = mod.split(".")
       mod_alias = mod.gsub(".", "_")
@@ -612,6 +642,12 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     type_sym = param.type.resolved
     is_user_struct = struct_schemas.key?(type_sym)
+    # A mutable generic aggregate may arrive wrapped in any of the bind-time
+    # synchronization families handled by WITH POLYMORPHIC. Keep that one
+    # boundary structural; concrete generic parameters retain their precise
+    # monomorphized Zig type.
+    polymorphic_generic_struct = param.mutable && type_info.generic_instance? &&
+      struct_schemas.key?(type_info.generic_base)
     sym = param.symbol
     atomic_sync = if sym
                     families = sym.sync_families
@@ -620,7 +656,7 @@ module MIRLoweringFunctions
                     false
                   end
     return "CheatLib.Arc(#{type_info.resolved})" if type_info.shared? && type_info.generic_type_parameter?
-    return "anytype" if is_user_struct || type_info.collection? || atomic_sync
+    return "anytype" if is_user_struct || polymorphic_generic_struct || type_info.collection? || atomic_sync
 
     base_zig
   end
@@ -1449,6 +1485,9 @@ module MIRLoweringFunctions
   sig { params(node: AST::MethodCall).returns(MIR::Node) }
   def lower_method_call(node)
     T.bind(self, MIRLowering) rescue nil
+    if node.respond_to?(:foreign_slice_view) && node.foreign_slice_view
+      return MIR::ForeignSliceView.new(lower(node.object), lower(T.must(node.args.first)))
+    end
     # Stub interception: a UFCS call `x.query(args)` lowers to `query(x, args)`,
     # so STUB query intercepts must apply here too.
     if (intercept = stub_intercept_for(node.name, node.object, node.args))
@@ -1962,7 +2001,13 @@ module MIRLoweringFunctions
   sig { params(node: AST::FuncCall).returns(MIR::Call) }
   def lower_extern_direct_call(node)
     T.bind(self, MIRLowering) rescue nil
-    args = node.args.map { |a| lower(a) }
+    sig = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
+    source = node.respond_to?(:extern_source) ? node.extern_source : nil
+    args = node.args.each_with_index.map do |arg, index|
+      param = sig&.params&.[](index)
+      lowered = lower_c_abi_callback_arg(arg, param, source)
+      source&.abi == :c && c_abi_param_uses_address?(param) ? MIR::AddressOf.new(lowered) : lowered
+    end
     if node.respond_to?(:extern_effects) && (alloc_kind = node.extern_effects&.dig(:alloc))
       rt = MIR::Ident.new(runtime_binding_name)
       alloc_call = alloc_kind == :heap \
@@ -1972,9 +2017,10 @@ module MIRLoweringFunctions
       args = T.must(args[0, n_comptime]) + [alloc_call] + T.must(args[n_comptime..])
     end
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
+    mod_alias = nil if source&.abi == :c
     mod_prefix = mod_alias ? "#{mod_alias.gsub('.', '_')}." : ""
-    sig = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
-    MIR::Call.new("#{mod_prefix}#{node.name}", args, false, false, callable_contract_for(sig, node.args))
+    callee_name = source&.symbol || node.name
+    MIR::Call.new("#{mod_prefix}#{callee_name}", args, false, false, callable_contract_for(sig, node.args))
   end
 
   sig { params(node: AST::MethodCall).returns(MIR::MethodCall) }
@@ -2008,6 +2054,8 @@ module MIRLoweringFunctions
     id = lowering_counters.next_extern_id
     alloc_kind = node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
+    source = node.respond_to?(:extern_source) ? node.extern_source : nil
+    mod_alias = nil if source&.abi == :c
 
     # Separate comptime type args (full_type == :Type) from runtime args.
     # Comptime args can't be struct fields; the emitter renders them directly
@@ -2015,18 +2063,25 @@ module MIRLoweringFunctions
     comptime_args, runtime_ast_args = node.args.partition { |a| a.full_type! == :Type }
     comptime_mir = comptime_args.map { |a| lower_extern_arg(a) }
 
-    args = runtime_ast_args.map { |a| lower_extern_arg(a) }
+    sig = fn_sig_for(node.name)
+    sig_params = sig ? sig.params.reject { |p| p.comptime } : []
+    args = runtime_ast_args.each_with_index.map do |arg, index|
+      param = sig_params[index]
+      lowered = lower_c_abi_callback_arg(arg, param, source)
+      source&.abi == :c && c_abi_param_uses_address?(param) ? MIR::AddressOf.new(lowered) : lowered
+    end
 
     # Use declared scalar param types for struct fields to avoid comptime_int
     # (e.g. @TypeOf(19876)). For module externs, keep non-scalars inferred:
     # their CLEAR types (e.g. String -> []const u8) may differ from the actual
     # Zig/C types (e.g. [*:0]const u8), breaking implicit coercions.
-    sig = fn_sig_for(node.name)
-    sig_params = sig ? sig.params.reject { |p| p.comptime } : []
     args_with_types = args.each_with_index.map do |arg, i|
       p = sig_params[i]
       field_type = nil
-      if p
+      field_zig_type = nil
+      if p && source&.abi == :c
+        field_zig_type = c_abi_param_zig_type(p)
+      elsif p
         pt = p.type
         type_obj = pt.is_a?(Type) ? pt : Type.new(pt)
         if sig&.module_alias
@@ -2035,12 +2090,12 @@ module MIRLoweringFunctions
         end
         field_type = type_obj if type_obj
       end
-      MIR::ExternTrampolineArg.new(expr: arg, field_type: field_type)
+      MIR::ExternTrampolineArg.new(expr: arg, field_type: field_type, field_zig_type: field_zig_type)
     end
 
     MIR::ExternTrampoline.new(
       id: id.value,
-      callee_name: node.name.to_s,
+      callee_name: (source&.symbol || node.name).to_s,
       module_alias: mod_alias,
       comptime_args: comptime_mir,
       runtime_args: args_with_types,
@@ -2072,10 +2127,43 @@ module MIRLoweringFunctions
   def extern_trampoline_stdlib_def(return_type, alloc_kind, ast_node)
     payload_t = return_type.error_union? ? T.must(return_type.payload_type) : return_type
     ast_symbol = ast_node.respond_to?(:symbol) ? ast_node.public_send(:symbol) : nil
-    is_heap = alloc_kind == :heap ||
-      (ast_symbol&.heap_storage? == true) ||
+    is_heap = !payload_t.c_string? && (
+      alloc_kind == :heap ||
+      ast_symbol&.heap_storage? == true ||
       payload_t.heap?
+    )
     is_heap ? FunctionSignature.allocating_intrinsic : FunctionSignature.borrowing_intrinsic
+  end
+
+  sig { params(param: T.nilable(AST::Param)).returns(T::Boolean) }
+  def c_abi_param_uses_address?(param)
+    return false unless param
+
+    type = Type.new(param.type)
+    param.mutable == true || (type.array? && type.fixed? == true && !type.string?)
+  end
+
+  sig { params(param: AST::Param).returns(String) }
+  def c_abi_param_zig_type(param)
+    type = Type.new(param.type)
+    zig_type = type.zig_type(is_param: true)
+    if type.array? && type.fixed? && !type.string?
+      return "#{param.mutable ? "*" : "*const "}#{zig_type}"
+    end
+    param.mutable ? "*#{zig_type}" : zig_type
+  end
+
+  sig { params(arg: AST::Node, param: T.nilable(AST::Param), source: T.nilable(Schemas::ExternSource)).returns(MIR::Node) }
+  def lower_c_abi_callback_arg(arg, param, source)
+    lowered = lower_extern_arg(arg)
+    return lowered unless source&.abi == :c && param
+
+    type = Type.new(param.type)
+    signature = type.function_type
+    return lowered unless signature&.abi == :c
+
+    clear_function = lowered.is_a?(MIR::AddressOf) ? lowered.expr : lowered
+    MIR::CFunctionAdapter.new(clear_function: clear_function, signature: T.must(signature))
   end
   # ================================================================
   # Lambda
@@ -2143,6 +2231,8 @@ module MIRLoweringFunctions
   private :call_never_returns_success?
   private :call_owned_return_from_args?
   private :call_type_owned_return?
+  private :c_abi_param_uses_address?
+  private :c_abi_param_zig_type
   private :concrete_call_type_owned_return?
   private :cross_boundary_arg
   private :empty_stdlib_call_facts
@@ -2166,6 +2256,7 @@ module MIRLoweringFunctions
   private :lower_extern_direct_call
   private :lower_extern_direct_method
   private :lower_extern_method
+  private :lower_c_abi_callback_arg
   private :lower_intrinsic
   private :lower_safe_nav_method_call
   private :materialize_stdlib_arguments

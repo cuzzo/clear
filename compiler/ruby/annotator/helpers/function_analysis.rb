@@ -431,6 +431,7 @@ module FunctionAnalysis
       if node.respond_to?(:extern_call=) && signature.extern
         T.unsafe(node).extern_call = true
         T.unsafe(node).extern_effects = signature.extern_effects
+        T.unsafe(node).extern_source = signature.extern_source if node.respond_to?(:extern_source=)
         record_effect(EffectTracker::EXTERN)
         # EXTERN FN with EFFECTS :alloc needs rt for allocator injection.
         alloc_kind = signature.extern_effects&.dig(:alloc)
@@ -450,6 +451,7 @@ module FunctionAnalysis
             error!(arg, :SOA_TO_EXTERN_FN)
           end
         end
+        mark_owned_c_out_parameters!(signature, args)
         # Comptime params: extract type args from arguments in comptime positions.
         # The argument is a TYPE_ID Identifier (e.g., MyDoc) — set it as a generic_type_arg.
         comptime_type_args = []
@@ -529,6 +531,28 @@ module FunctionAnalysis
 
     nil
   end
+
+  sig { params(signature: FunctionSignature, args: CallArgList).void }
+  def mark_owned_c_out_parameters!(signature, args)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    return unless signature.extern_source&.abi == :c
+
+    signature.params.zip(args).each do |param, arg|
+      next unless param&.mutable
+      next unless arg.is_a?(AST::Identifier)
+
+      param_type = Type.new(param.type)
+      payload = param_type.optional? ? param_type.wrapped_type : nil
+      next unless payload
+      schema = lookup_type_schema(payload.resolved)
+      next unless schema.is_a?(Schemas::ResourceSchema)
+
+      symbol = arg.symbol
+      symbol.foreign_out_owner = true if symbol
+    end
+  end
+
+  private :mark_owned_c_out_parameters!
 
   # Single point: what allocator does the receiver/container of this call use?
   # For MethodCall on a list/struct/etc, the receiver's binding storage tells

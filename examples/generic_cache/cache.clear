@@ -1,0 +1,66 @@
+# Generic cache with bind-time synchronization.
+#
+# One put! implementation is monomorphized for local, mutex, read/write-lock,
+# and MVCC-backed bindings. ShardedCache is deliberately separate: sharding
+# is a storage topology, not another outer synchronization policy.
+
+STRUCT Cache<T> {
+  values: {String}T,
+}
+
+FN put!<T>(MUTABLE cache: Cache<T>, key: String, value: T) RETURNS !Void ->
+  WITH POLYMORPHIC cache AS writable {
+    writable.values[key] = value;
+  }
+END
+
+FN main() RETURNS Void ->
+  MUTABLE localCache = Cache<Int64>{ values: {} } @local;
+  MUTABLE lockedCache = Cache<Int64>{ values: {} } @shared:locked;
+  MUTABLE rwCache = Cache<Int64>{ values: {} } @shared:writeLocked;
+  MUTABLE versionedCache = Cache<Int64>{ values: {} } @shared:versioned;
+
+  put!(localCache, "answer", 39_i64) OR_ELSE RAISE;
+  put!(lockedCache, "answer", 40_i64) OR_ELSE RAISE;
+  put!(rwCache, "answer", 41_i64) OR_ELSE RAISE;
+  put!(versionedCache, "answer", 42_i64) OR_ELSE RAISE;
+
+  ASSERT localCache.values["answer"] == 39_i64, "local cache";
+  WITH lockedCache AS readable {
+    ASSERT readable.values["answer"] == 40_i64, "mutex cache";
+  }
+  WITH rwCache AS readable {
+    ASSERT readable.values["answer"] == 41_i64, "read/write-lock cache";
+  }
+  WITH SNAPSHOT versionedCache AS readable {
+    ASSERT readable.values["answer"] == 42_i64, "versioned cache";
+  }
+
+  MUTABLE sharded: {String}@shared:sharded(4):writeLocked Int64 = {};
+  a = BG {
+    sharded["alpha"] = 10_i64;
+    RETURN;
+  };
+  b = BG {
+    sharded["beta"] = 20_i64;
+    RETURN;
+  };
+  c = BG {
+    sharded["gamma"] = 30_i64;
+    RETURN;
+  };
+  NEXT a;
+  NEXT b;
+  NEXT c;
+  ASSERT sharded["alpha"] == 10_i64, "shard alpha";
+  ASSERT sharded["beta"] == 20_i64, "shard beta";
+  ASSERT sharded["gamma"] == 30_i64, "shard gamma";
+
+  MUTABLE flags = Cache<Bool>{ values: {} } @shared:locked;
+  put!(flags, "ready", TRUE) OR_ELSE RAISE;
+  WITH flags AS readable {
+    ASSERT readable.values["ready"] == TRUE, "generic Bool cache";
+  }
+  print("generic-cache: 4 capability policies PASS");
+  print("generic-cache: sharded concurrency PASS");
+END

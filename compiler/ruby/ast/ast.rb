@@ -504,6 +504,7 @@ module AST
   def self.container_borrow?(node)
     return false unless node
     return true if node.respond_to?(:container_borrow) && T.unsafe(node).container_borrow == true
+    return container_borrow?(node.target) if node.is_a?(AST::OptionalUnwrap)
     return false unless node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_ELSE)
 
     container_borrow?(node.left)
@@ -2369,6 +2370,7 @@ module AST
     attr_accessor :module_alias
     attr_accessor :extern_call       # true when calling a native EXTERN FN (no rt, no try)
     attr_accessor :extern_effects    # Set of effect symbols (:Alloc, etc.) from EXTERN FN EFFECTS declaration
+    attr_accessor :extern_source
     attr_accessor :generic_type_args # Array of inferred type symbols for generic fns, e.g. [:Number]
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
     attr_accessor :pipe_lhs           # original LHS AST node when rewritten from pipeline (for CATCH snapshot)
@@ -2402,6 +2404,8 @@ module AST
     attr_accessor :map_method     # :delete, :contains, :count, :keys, :values — set by annotator for HashMap dispatch
     attr_accessor :extern_call       # true when calling a native EXTERN method
     attr_accessor :extern_effects    # Hash of effect symbols from EXTERN FN EFFECTS declaration
+    attr_accessor :extern_source
+    attr_accessor :foreign_slice_view # pointer/count C view materialization
     attr_accessor :generic_type_args # Array of inferred type symbols for generic methods
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     attr_accessor :safe_nav_chain    # implicit continuation of an earlier ?. over non-optional members
@@ -2873,7 +2877,7 @@ module AST
   # Or method:    EXTERN FN TypeName<T>.method(params) RETURNS type FROM "module"
   # Declares a native Zig/C function importable via @import("module").
   ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects,
-                                :owner_type, :owner_type_params, :fn_type_params) do
+                                :owner_type, :owner_type_params, :fn_type_params, :extern_source) do
     # ruby-to-clear: field-type return_type=?Type
     # ruby-to-clear: field-type owner_type=?String
     # ruby-to-clear: field-type owner_type_params=String[]@symbol
@@ -2900,6 +2904,10 @@ module AST
       self[:return_type] = Type.new(rt) unless rt.nil?
       self[:owner_type_params] = (self[:owner_type_params] || []).dup
       self[:fn_type_params] = (self[:fn_type_params] || []).dup
+      self[:extern_source] ||= Schemas::ExternSource.new(
+        dependency: self[:from_module] || "",
+        symbol: self[:name]
+      )
     end
 
     sig { params(value: T::Array[Symbol]).void }
@@ -2931,7 +2939,7 @@ module AST
   # Declares a native Zig/C struct type for CLEAR type-checking purposes.
   # CLOSE registers the type as a resource with auto-defer cleanup (RAII).
   ExternStructDecl = Struct.new(:token, :name, :field_decls, :from_module,
-                                :type_params, :close_method, :as_type) do
+                                :type_params, :close_method, :as_type, :extern_source) do
     # ruby-to-clear: field-type from_module=?String
     # ruby-to-clear: field-type type_params=String[]@symbol
     # ruby-to-clear: field-type close_method=?String
@@ -2948,6 +2956,10 @@ module AST
     def initialize(*args)
       super
       self[:type_params] = (self[:type_params] || []).dup
+      self[:extern_source] ||= Schemas::ExternSource.new(
+        dependency: self[:from_module] || "",
+        symbol: self[:as_type] || self[:name]
+      )
     end
 
     sig { params(value: T::Array[Symbol]).void }
@@ -3457,7 +3469,8 @@ module AST
   PRIMITIVE_TYPES = [:Number, :Bool, :Byte, :Int64, :Float64,
                      :Int8, :Int16, :Int32,
                      :UInt8, :UInt16, :UInt32, :UInt64,
-                     :Float32]
+                     :Float32, :TargetInt, :TargetUInt, :TargetLong,
+                     :TargetULong, :TargetLongLong, :TargetULongLong]
 
   # ruby-to-clear: data-api
   sig { params(ops: T::Array[String], assoc: Symbol).returns(PrecedenceInfo) }

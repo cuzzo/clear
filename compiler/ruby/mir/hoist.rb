@@ -209,6 +209,10 @@ module Hoist
 
     return false unless node.is_a?(AST::Locatable)
     ti = node.full_type!(context: "hoist allocation candidate")
+    # String@c is a borrowed NUL-terminated pointer. The C owner controls its
+    # lifetime; hoisting it through CLEAR's owned-slice duplication would both
+    # change representation and fabricate ownership.
+    return false if ti.c_string?
     ti.heap_ptr? || ti.needs_explicit_cleanup?(:heap, T.unsafe(schema_lookup))
   end
 

@@ -164,6 +164,11 @@ module FuzzSurfaceRegistry
   # this metadata next to each template; keeping it centralized first gives us
   # a useful coverage report without changing every renderer at once.
   TEMPLATE_COVERAGE = {
+    c_ffi_type_matrix: {
+      cleanup_value_shapes: [],
+      collection_shapes: [:fixed_array, :list, :set, :hash_map],
+      mir_ownership_contracts: [:alias_non_escape],
+    },
     escape_via_return: {
       cleanup_value_shapes: [:heap_list],
       escape_sources: [:frame_local],

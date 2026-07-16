@@ -41,6 +41,7 @@ module Annotator
       def register_extern_function_signature(node)
         T.bind(self, ResolutionSession)
 
+        validate_c_extern_signature!(node) if node.extern_source.abi == :c
         signature = SignatureRegistry.extern_function_signature(node)
         if node.owner_type
           type_schema = current_scope.resolve_type_definition(node.owner_type.to_sym)
@@ -54,6 +55,58 @@ module Annotator
         end
         stamp_type!(node, :Void)
       end
+
+      sig { params(node: AST::ExternFnDecl).void }
+      def validate_c_extern_signature!(node)
+        T.bind(self, ResolutionSession)
+
+        unless node.return_type
+          error!(node, :C_EXTERN_UNSUPPORTED_TYPE,
+            position: "return", type: "implicit Any", reason: "C functions require an explicit ABI return type")
+        end
+        validate_c_boundary_type!(node, node.return_type, "return", return_position: true)
+        node.params.each do |param|
+          validate_c_boundary_type!(node, param.type, "parameter #{param.name}", return_position: false)
+        end
+      end
+      private :validate_c_extern_signature!
+
+      sig { params(node: AST::ExternFnDecl, type: Type, position: String, return_position: T::Boolean).void }
+      def validate_c_boundary_type!(node, type, position, return_position:)
+        T.bind(self, ResolutionSession)
+
+        reason = c_boundary_rejection(type, return_position: return_position)
+        return unless reason
+        error!(node, :C_EXTERN_UNSUPPORTED_TYPE,
+          position: position, type: Type.surface_name(type), reason: reason)
+      end
+      private :validate_c_boundary_type!
+
+      sig { params(type: Type, return_position: T::Boolean).returns(T.nilable(String)) }
+      def c_boundary_rejection(type, return_position:)
+        return "CLEAR error unions do not have a C ABI; return a status code explicitly" if type.error_union?
+        return "futures and streams cannot cross a synchronous C ABI" if type.future? || type.stream?
+        return "abstract Any/Number values have no fixed C representation" if type.any? || type.resolved == :Number
+        return "ordinary String is a slice header; use String@c" if type.string? && !type.c_string?
+        return "maps, Tuples, and managed collections have no portable C ABI" if type.map? || type.tuple? ||
+          (type.array? && !type.fixed? && !type.c_array_view?)
+        return "C cannot return an array by value; return a pointer plus a count" if return_position && type.fixed?
+        if type.fn_type?
+          fn = type.function_type
+          return "callback function types must use CALLCONV C" unless fn&.abi == :c
+          return nil
+        end
+        if type.optional?
+          inner = T.must(type.wrapped_type)
+          return nil if inner.c_string? || inner.c_array_view? || (!inner.primitive? && !inner.array? && !inner.map?)
+          return "nullable scalar values are not C pointers; use an explicit status/out contract"
+        end
+        return "ownership, synchronization, and boxed wrappers change the declared C layout" if
+          !type.layout.nil? || ![nil, :affine].include?(type.ownership) || type.any_sync?
+
+        nil
+      end
+      private :c_boundary_rejection
 
       sig { params(declarations: DeclarationIndex).void }
       def reject_duplicate_program_signatures!(declarations)

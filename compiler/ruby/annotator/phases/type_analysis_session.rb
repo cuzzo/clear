@@ -1002,7 +1002,7 @@ private
   # `sync` values that DON'T wrap the underlying data in a
   # reference-bound layer. :raw / :symbol are pure data-access modes
   # (not locks), so they don't bind the capture's lifetime.
-  SYNC_DOES_NOT_BIND_CAPTURE = T.let(Set[:raw, :symbol].freeze, T.untyped)
+  SYNC_DOES_NOT_BIND_CAPTURE = T.let(Set[:raw, :symbol, :c, :size].freeze, T.untyped)
 
   # `storage` values whose memory has its own lifetime mechanism
   # independent of the declaring scope. `:shared` means Arc — own

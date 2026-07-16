@@ -762,7 +762,12 @@ module MIRLoweringCapabilities
     resolved_source = cap.resolved_type
     rt_obj = Type.from_node!(resolved_source, context: "WITH polymorphic capability resolved type")
     bare_type = rt_obj.respond_to?(:bare_data_type) ? rt_obj.bare_data_type : rt_obj
-    body_mir = lower_body(node.body)
+    # Keep the universal path on the same alias-attribution contract as the
+    # concrete WITH path.  Structural operations in the callback (for example
+    # a HashMap write through `cache AS writable`) must retain the original
+    # parameter as their allocator owner; attributing them to the callback-only
+    # alias leaves MIRChecker with no parameter or AllocMark to validate.
+    body_mir = with_capability_alias_maps(node) { lower_body(node.body) }
     guard_cond = combined_guard_cond(node)
     if polymorphic_flow_required?(node)
       guard_fail = guard_cond ? guard_fail_flow_body(node) : []

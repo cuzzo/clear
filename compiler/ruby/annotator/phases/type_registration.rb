@@ -186,8 +186,13 @@ module Annotator
       def register_extern_struct_declaration(node)
         T.bind(self, ResolutionSession)
         schema = if node.close_method && node.from_module
+          close_plan = if node.extern_source.abi == :c
+            Schemas::ResourceClosePlan.c_function(node.close_method)
+          else
+            Schemas::ResourceClosePlan.method(node.close_method)
+          end
           Schemas::ResourceSchema.new(
-            close_plan: Schemas::ResourceClosePlan.method(node.close_method),
+            close_plan: close_plan,
             fields: node.field_decls,
             type_params: type_params(node.type_params),
             extern_module: node.from_module,

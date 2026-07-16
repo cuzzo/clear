@@ -202,6 +202,10 @@ class AST::FuncCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def extern_effects=(value); end
   sig { returns(T.untyped) }
+  def extern_source; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def extern_source=(value); end
+  sig { returns(T.untyped) }
   def fn_var_call; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def fn_var_call=(value); end
@@ -421,6 +425,14 @@ class AST::MethodCall
   def extern_effects; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def extern_effects=(value); end
+  sig { returns(T.untyped) }
+  def extern_source; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def extern_source=(value); end
+  sig { returns(T.untyped) }
+  def foreign_slice_view; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def foreign_slice_view=(value); end
   sig { returns(T.untyped) }
   def generic_type_args; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -973,6 +985,10 @@ class FuncCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def extern_effects=(value); end
   sig { returns(T.untyped) }
+  def extern_source; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def extern_source=(value); end
+  sig { returns(T.untyped) }
   def fn_var_call; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def fn_var_call=(value); end
@@ -1159,6 +1175,8 @@ class FunctionSignature::Contract
   def extern_effects; end
   sig { params(value: FunctionSignature::ExternEffects).returns(FunctionSignature::ExternEffects) }
   def extern_effects=(value); end
+  sig { returns(T.nilable(Schemas::ExternSource)) }
+  def extern_source; end
   sig { returns(T::Array[Symbol]) }
   def fn_type_params; end
   sig { params(value: T::Array[Symbol]).returns(T::Array[Symbol]) }
@@ -1438,6 +1456,14 @@ class MethodCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def extern_effects=(value); end
   sig { returns(T.untyped) }
+  def extern_source; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def extern_source=(value); end
+  sig { returns(T.untyped) }
+  def foreign_slice_view; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def foreign_slice_view=(value); end
+  sig { returns(T.untyped) }
   def generic_type_args; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def generic_type_args=(value); end
@@ -1639,6 +1665,10 @@ class SymbolEntry
   def close_plan; end
   sig { params(value: T.nilable(Schemas::ResourceClosePlan)).returns(T.nilable(Schemas::ResourceClosePlan)) }
   def close_plan=(value); end
+  sig { returns(T::Boolean) }
+  def foreign_out_owner; end
+  sig { params(value: T::Boolean).returns(T::Boolean) }
+  def foreign_out_owner=(value); end
   sig { returns(T::Boolean) }
   def init_contents_heap; end
   sig { returns(T.nilable(String)) }

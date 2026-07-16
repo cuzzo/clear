@@ -13,6 +13,14 @@ require_relative "struct_field"
 module Schemas
     extend T::Sig
 
+  class ExternSource < T::Struct
+    const :dependency, String
+    const :abi, Symbol, default: :zig
+    const :symbol, T.nilable(String), default: nil
+    const :callconv, Symbol, default: :c
+    const :header, T.nilable(String), default: nil
+  end
+
   # Plain classes (not Data.define) so Sorbet's 4010 doesn't fire on
   # the kwarg-only initialize signatures we need for default values.
   # Frozen at the end of initialize so callers see immutable shapes
@@ -60,6 +68,7 @@ module Schemas
     enums do
       Method = new("method")
       Function = new("function")
+      CFunction = new("c_function")
     end
   end
 
@@ -105,6 +114,16 @@ module Schemas
           call_kind: ResourceCloseCallKind::Function,
           name: name,
           runtime_heap_alloc_args: runtime_heap_alloc_args,
+        ),
+      ])
+    end
+
+    sig { params(name: String).returns(ResourceClosePlan) }
+    def self.c_function(name)
+      new(actions: [
+        ResourceCloseAction.new(
+          call_kind: ResourceCloseCallKind::CFunction,
+          name: name,
         ),
       ])
     end

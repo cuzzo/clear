@@ -3438,13 +3438,16 @@ pub const CheatLib = struct {
         } else if (comptime @hasDecl(Inner, "write")) {
             var g = inner.*.write();
             defer g.release();
-            @call(.auto, body, .{g.get()} ++ args);
+            const result = @call(.auto, body, .{g.get()} ++ args);
+            if (comptime @typeInfo(@TypeOf(result)) == .error_union) try result;
         } else if (comptime @hasDecl(Inner, "acquire")) {
             var g = inner.*.acquire();
             defer g.release();
-            @call(.auto, body, .{g.get()} ++ args);
+            const result = @call(.auto, body, .{g.get()} ++ args);
+            if (comptime @typeInfo(@TypeOf(result)) == .error_union) try result;
         } else {
-            @call(.auto, body, .{@constCast(inner)} ++ args);
+            const result = @call(.auto, body, .{@constCast(inner)} ++ args);
+            if (comptime @typeInfo(@TypeOf(result)) == .error_union) try result;
         }
     }
 

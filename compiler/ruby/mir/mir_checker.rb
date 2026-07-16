@@ -112,7 +112,8 @@ class MIRChecker
     MIR::ExprStmt, MIR::FallibleLockBinding, MIR::FieldCleanupMark, MIR::FnDef, MIR::ForStmt,
     MIR::FrameRestore, MIR::FrameSave, MIR::FsmB1Body, MIR::FsmGenericBody,
     MIR::FsmIoBody, MIR::IfBindStmt, MIR::IfChain, MIR::IfStmt,
-    MIR::Import, MIR::IndexInsert, MIR::Let, MIR::ModuleNamespace, MIR::MoveMark,
+    MIR::Import, MIR::CExternFnDecl, MIR::CExternStructDef,
+    MIR::IndexInsert, MIR::Let, MIR::ModuleNamespace, MIR::MoveMark,
     MIR::MutualThunkTrampoline, MIR::Noop, MIR::OwnedBorrow,
     MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedReturn,
     MIR::OwnedStore, MIR::OwnedTransfer, MIR::Panic, MIR::Pipeline,
@@ -729,7 +730,8 @@ class MIRChecker
     when MIR::FsmGenericBody, MIR::FsmIoBody
       nil
     when MIR::Comment, MIR::ContinueStmt, MIR::EnumDef, MIR::FrameRestore,
-         MIR::FrameSave, MIR::Import, MIR::MutualThunkTrampoline, MIR::Noop,
+         MIR::FrameSave, MIR::Import, MIR::CExternFnDecl, MIR::CExternStructDef,
+         MIR::MutualThunkTrampoline, MIR::Noop,
          MIR::PubConst, MIR::Suppress, MIR::ThunkTrampoline, MIR::TypeAlias,
          MIR::TestPreamble, MIR::UnionTypeDef
       nil
@@ -1398,6 +1400,7 @@ class MIRChecker
     return true if cleanup.cleanup_entry.match_as?
     return true if allocating_expr?(init)
     return true if value_constructor_expr?(init)
+    return true if init.is_a?(MIR::ForeignOwnedUnwrap)
     return true if MIR::OwnershipEffect.of(init).produces_owned
     return true if owned_return_init?(init)
     return true if expr_owned_result_alloc(init)
@@ -2142,7 +2145,15 @@ class MIRChecker
   # container becomes a dangling pointer after frame rewind.
   sig { params(metadata_nodes: T::Array[MIR::Node], allocs: AllocMarksByName, fn_def: MIR::FnDef).void }
   def verify_allocator_metadata_contracts!(metadata_nodes, allocs, fn_def)
-    param_names = T.let(fn_def.params.map { |param| param.name.to_s }.to_set, T::Set[String])
+    param_names = T.let(fn_def.params.each_with_object(Set.new) do |param, names|
+      name = param.name.to_s
+      names << name
+      # Mutable by-value parameters lower as a pointer named `_m_<name>` plus
+      # a local shadow named `<name>`. Structural operations are attributed to
+      # that source-level shadow, which is still parameter-owned and therefore
+      # does not require a local AllocMark.
+      names << name.delete_prefix("_m_") if name.start_with?("_m_")
+    end, T::Set[String])
     metadata_nodes.each do |node|
       alloc_metadata = allocator_metadata_for(node)
       next unless alloc_metadata && !alloc_metadata.empty?

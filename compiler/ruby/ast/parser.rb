@@ -427,7 +427,7 @@ class ClearParser
 
   ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @node @locked @writeLocked @link @boxed @indirect].freeze
   ELEMENT_SYNC_TOKENS = %w[@locked @writeLocked locked writeLocked].freeze
-  CAPABILITY_TOKENS = %w[@multiowned @shared @node @split @locked @writeLocked @local @versioned @atomic @boxed @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
+  CAPABILITY_TOKENS = %w[@multiowned @shared @node @split @locked @writeLocked @local @versioned @atomic @boxed @indirect @link @raw @symbol @c @size @list @pool @set @soa @sharded @observable].freeze
   CAPABILITY_OWNERSHIP_VALUES = T.let({
     "@multiowned" => :multiowned,
     "@shared" => :shared,
@@ -443,6 +443,8 @@ class ClearParser
     "@atomic" => :atomic,
     "@raw" => :raw,
     "@symbol" => :symbol,
+    "@c" => :c,
+    "@size" => :size,
   }.freeze, T::Hash[String, Symbol])
   CAPABILITY_COLLECTION_VALUES = T.let({
     "@list" => :list,

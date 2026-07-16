@@ -331,8 +331,10 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       # Codegen contract: one shared body, one helper call -- the
       # comptime dispatch lives inside CheatLib.polymorphicMutate.
       expect(zig).to include("CheatLib.polymorphicMutate(")
-      # The body becomes a no-capture closure with the matching signature.
-      expect(zig).to match(/fn run\(x: \*Counter\) void/)
+      # The body becomes a callback with an explicit capture tuple. Keeping the
+      # runtime in that tuple lets generic bodies allocate without reaching
+      # through Zig's forbidden nested-function lexical scope.
+      expect(zig).to match(/fn run\(x: \*Counter, __captures: anytype\) !void/)
       # No per-family duplication: only ONE tick fn in the output.
       expect(zig.scan(/^fn tick\b/m).length).to eq(1)
     end

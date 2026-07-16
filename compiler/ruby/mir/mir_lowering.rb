@@ -1172,7 +1172,11 @@ class MIRLowering
     when AST::StringConcat      then lower_string_concat(node)
     when AST::BlockExpr         then lower_block_expr(node)
     when AST::RangeLit          then lower_range_lit(node)
-    when AST::OptionalUnwrap    then MIR::OptionalUnwrap.new(lower(node.target))
+    when AST::OptionalUnwrap
+      target = lower(node.target)
+      owns_foreign_resource = node.target.is_a?(AST::Identifier) &&
+        node.target.symbol&.foreign_out_owner == true
+      owns_foreign_resource ? MIR::ForeignOwnedUnwrap.new(target) : MIR::OptionalUnwrap.new(target)
     when AST::Assert            then lower_assert(node)
     when AST::Raise             then lower_raise(node)
     when AST::Cast              then lower_cast(node)
