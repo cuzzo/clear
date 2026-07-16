@@ -1561,6 +1561,21 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("onRootStack")
       expect(zig).to include(".makePath")
     end
+
+    it "preserves a fallible foreign ABI after OR_ELSE unwraps the CLEAR expression" do
+      zig = transpile(<<~CLEAR)
+        EXTERN STRUCT Parsed {} FROM "native";
+        EXTERN FN parse(content: String) RETURNS !Parsed FROM "native";
+        FN main() RETURNS Void ->
+          parsed = parse("{}") OR_ELSE RAISE;
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("err: ?anyerror = null")
+      expect(zig).to include("native.parse(f.a0) catch |err|")
+      expect(zig).to include("if (__ext1_frame.err) |e| return e")
+    end
   end
 
   describe "Interior mutability: string field overwrite frees old value" do

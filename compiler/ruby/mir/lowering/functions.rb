@@ -2273,6 +2273,7 @@ module MIRLoweringFunctions
       MIR::ExternTrampolineArg.new(expr: arg, field_type: field_type, field_zig_type: field_zig_type)
     end
 
+    return_type = extern_trampoline_return_type(node, sig)
     MIR::ExternTrampoline.new(
       id: id.value,
       callee_name: (source&.symbol || node.name).to_s,
@@ -2280,8 +2281,8 @@ module MIRLoweringFunctions
       comptime_args: comptime_mir,
       runtime_args: args_with_types,
       alloc_kind: alloc_kind,
-      return_type: node.full_type!,
-      stdlib_def: extern_trampoline_stdlib_def(node.full_type!, alloc_kind, node),
+      return_type: return_type,
+      stdlib_def: extern_trampoline_stdlib_def(return_type, alloc_kind, node),
     )
   end
 
@@ -2291,6 +2292,8 @@ module MIRLoweringFunctions
     id = lowering_counters.next_extern_id
     obj = T.cast(lower(node.object), MIR::Emittable)
     args = node.args.map { |a| MIR::ExternTrampolineArg.new(expr: lower_extern_arg(a)) }
+    signature = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
+    return_type = extern_trampoline_return_type(node, signature)
     MIR::ExternTrampoline.new(
       id: id.value,
       callee_name: node.name.to_s,
@@ -2298,9 +2301,20 @@ module MIRLoweringFunctions
       receiver: obj,
       runtime_args: args,
       alloc_kind: node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil,
-      return_type: node.full_type!,
-      stdlib_def: extern_trampoline_stdlib_def(node.full_type!, node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil, node),
+      return_type: return_type,
+      stdlib_def: extern_trampoline_stdlib_def(return_type, node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil, node),
     )
+  end
+
+  sig { params(node: AST::Node, signature: T.nilable(FunctionSignature)).returns(Type) }
+  def extern_trampoline_return_type(node, signature)
+    expression_type = node.full_type!
+    return expression_type unless signature&.return_type&.error_union?
+    return expression_type if expression_type.error_union?
+
+    # OR_ELSE/RAISE unwraps the expression for its CLEAR consumer, but the
+    # root-stack trampoline still calls the original fallible foreign ABI.
+    Type.error_union_of(expression_type)
   end
 
   sig { params(return_type: Type, alloc_kind: T.nilable(Symbol), ast_node: AST::Node).returns(FunctionSignature) }
@@ -2413,6 +2427,7 @@ module MIRLoweringFunctions
   private :call_type_owned_return?
   private :c_abi_param_uses_address?
   private :c_abi_param_zig_type
+  private :extern_trampoline_return_type
   private :concrete_call_type_owned_return?
   private :cross_boundary_arg
   private :empty_stdlib_call_facts
