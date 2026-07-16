@@ -1,66 +1,153 @@
-# Generic cache with bind-time synchronization.
-#
-# One put! implementation is monomorphized for local, mutex, read/write-lock,
-# and MVCC-backed bindings. ShardedCache is deliberately separate: sharding
-# is a storage topology, not another outer synchronization policy.
+# Exact O(1) generic LRU cache with bind-time synchronization.
 
-STRUCT Cache<T> {
-  values: {String}T,
+STRUCT LruNode<K> {
+  key: K,
+  previous: ?K,
+  next: ?K,
 }
 
-FN put!<T>(MUTABLE cache: Cache<T>, key: String, value: T) RETURNS !Void ->
-  WITH POLYMORPHIC cache AS writable {
-    writable.values[key] = value;
-  }
+STRUCT Cache<M: Map> {
+  values: M,
+  recency: {M::Key}LruNode<M::Key>,
+  head: ?M::Key,
+  tail: ?M::Key,
+  capacity: Int64,
+}
+
+IMPLEMENTATION Cache<M> {
+  METHOD detach!(MUTABLE self, key: M::Key) RETURNS Void ->
+    maybeNode = COPY self.recency[key];
+    IF maybeNode EXISTS AS node THEN
+      IF node.previous EXISTS AS previousKey THEN
+        maybePrevious = COPY self.recency[previousKey];
+        IF maybePrevious EXISTS AS previousNode THEN
+          MUTABLE previous = COPY previousNode;
+          previous.next = COPY node.next;
+          self.recency[previousKey] = previous;
+        END
+      ELSE
+        self.head = COPY node.next;
+      END
+      IF node.next EXISTS AS nextKey THEN
+        maybeNext = COPY self.recency[nextKey];
+        IF maybeNext EXISTS AS nextNode THEN
+          MUTABLE next = COPY nextNode;
+          next.previous = COPY node.previous;
+          self.recency[nextKey] = next;
+        END
+      ELSE
+        self.tail = COPY node.previous;
+      END
+    END
+  END
+
+  METHOD promote!(MUTABLE self, key: M::Key) RETURNS Void ->
+    self.detach!(key);
+    oldHead = COPY self.head;
+    self.recency[key] = LruNode<M::Key>{
+      key: COPY key,
+      previous: NIL,
+      next: oldHead,
+    };
+    IF oldHead EXISTS AS oldHeadKey THEN
+      maybeHead = COPY self.recency[oldHeadKey];
+      IF maybeHead EXISTS AS ownedHead THEN
+        MUTABLE headNode = COPY ownedHead;
+        headNode.previous = COPY key;
+        self.recency[oldHeadKey] = headNode;
+      END
+    ELSE
+      self.tail = COPY key;
+    END
+    self.head = COPY key;
+  END
+
+  METHOD evictTail!(MUTABLE self) RETURNS Void ->
+    oldTail = COPY self.tail;
+    IF oldTail EXISTS AS tailKey THEN
+      self.detach!(tailKey);
+      self.values.delete(tailKey);
+      self.recency.delete(tailKey);
+    END
+  END
+
+  METHOD put!(MUTABLE self, key: M::Key, value: M::Value) RETURNS Void ->
+    existing = COPY self.values[key];
+    IF existing EXISTS AS unused THEN
+      self.values[key] = COPY value;
+      self.promote!(key);
+      RETURN;
+    END
+    IF self.values.count() >= self.capacity THEN self.evictTail!(); END
+    self.values[key] = COPY value;
+    self.promote!(key);
+  END
+
+  METHOD get!(MUTABLE self, key: M::Key) RETURNS !?M::Value ->
+    existing = COPY self.values[key];
+    IF existing EXISTS AS value THEN
+      result = COPY value;
+      self.promote!(key);
+      RETURN result;
+    END
+    RETURN NIL;
+  END
+
+  METHOD delete!(MUTABLE self, key: M::Key) RETURNS Void ->
+    existing = COPY self.values[key];
+    IF existing EXISTS AS unused THEN
+      self.detach!(key);
+      self.values.delete(key);
+      self.recency.delete(key);
+    END
+  END
+
+  METHOD length(self) RETURNS Int64 -> RETURN self.values.count(); END
+}
+
+FN put!<M: Map>(MUTABLE cache: Cache<M>, key: M::Key, value: M::Value) RETURNS !Void ->
+  WITH POLYMORPHIC cache AS state { state.put!(key, value); }
+END
+
+FN get!<M: Map>(MUTABLE cache: Cache<M>, key: M::Key) RETURNS !?M::Value ->
+  WITH POLYMORPHIC cache AS state { RETURN state.get!(key); }
+  RETURN NIL;
+END
+
+FN length!<M: Map>(MUTABLE cache: Cache<M>) RETURNS !Int64 ->
+  WITH POLYMORPHIC cache AS state { RETURN state.length(); }
+  RETURN 0_i64;
 END
 
 FN main() RETURNS Void ->
-  MUTABLE localCache = Cache<Int64>{ values: {} } @local;
-  MUTABLE lockedCache = Cache<Int64>{ values: {} } @shared:locked;
-  MUTABLE rwCache = Cache<Int64>{ values: {} } @shared:writeLocked;
-  MUTABLE versionedCache = Cache<Int64>{ values: {} } @shared:versioned;
+  MUTABLE local = Cache<{String}Int64>{ values: {}, recency: {}, head: NIL, tail: NIL, capacity: 2_i64 };
+  put!(local, "a", 1_i64) OR_ELSE RAISE;
+  put!(local, "b", 2_i64) OR_ELSE RAISE;
+  ASSERT get!(local, "a") OR_ELSE RAISE OR_ELSE 0_i64 == 1_i64;
+  put!(local, "c", 3_i64) OR_ELSE RAISE;
+  ASSERT get!(local, "b") OR_ELSE RAISE == NIL, "least-recently-used key was evicted";
+  ASSERT get!(local, "a") OR_ELSE RAISE OR_ELSE 0_i64 == 1_i64;
+  ASSERT get!(local, "c") OR_ELSE RAISE OR_ELSE 0_i64 == 3_i64;
 
-  put!(localCache, "answer", 39_i64) OR_ELSE RAISE;
-  put!(lockedCache, "answer", 40_i64) OR_ELSE RAISE;
-  put!(rwCache, "answer", 41_i64) OR_ELSE RAISE;
-  put!(versionedCache, "answer", 42_i64) OR_ELSE RAISE;
+  MUTABLE locked = Cache<{Int64}Bool>{ values: {}, recency: {}, head: NIL, tail: NIL, capacity: 2_i64 } @shared:locked;
+  put!(locked, 1_i64, TRUE) OR_ELSE RAISE;
+  put!(locked, 2_i64, FALSE) OR_ELSE RAISE;
+  ASSERT get!(locked, 1_i64) OR_ELSE RAISE OR_ELSE FALSE;
+  put!(locked, 3_i64, TRUE) OR_ELSE RAISE;
+  ASSERT get!(locked, 2_i64) OR_ELSE RAISE == NIL, "locked cache evicts in O(1)";
+  first = BG { put!(locked, 4_i64, TRUE) OR_ELSE RAISE; RETURN; };
+  second = BG { put!(locked, 5_i64, TRUE) OR_ELSE RAISE; RETURN; };
+  NEXT first;
+  NEXT second;
+  ASSERT length!(locked) OR_ELSE RAISE == 2_i64, "concurrent writes preserve capacity";
 
-  ASSERT localCache.values["answer"] == 39_i64, "local cache";
-  WITH lockedCache AS readable {
-    ASSERT readable.values["answer"] == 40_i64, "mutex cache";
-  }
-  WITH rwCache AS readable {
-    ASSERT readable.values["answer"] == 41_i64, "read/write-lock cache";
-  }
-  WITH SNAPSHOT versionedCache AS readable {
-    ASSERT readable.values["answer"] == 42_i64, "versioned cache";
-  }
+  MUTABLE rw = Cache<{String}Int64>{ values: {}, recency: {}, head: NIL, tail: NIL, capacity: 1_i64 } @shared:writeLocked;
+  put!(rw, "rw", 4_i64) OR_ELSE RAISE;
+  ASSERT get!(rw, "rw") OR_ELSE RAISE OR_ELSE 0_i64 == 4_i64;
 
-  MUTABLE sharded: {String}@shared:sharded(4):writeLocked Int64 = {};
-  a = BG {
-    sharded["alpha"] = 10_i64;
-    RETURN;
-  };
-  b = BG {
-    sharded["beta"] = 20_i64;
-    RETURN;
-  };
-  c = BG {
-    sharded["gamma"] = 30_i64;
-    RETURN;
-  };
-  NEXT a;
-  NEXT b;
-  NEXT c;
-  ASSERT sharded["alpha"] == 10_i64, "shard alpha";
-  ASSERT sharded["beta"] == 20_i64, "shard beta";
-  ASSERT sharded["gamma"] == 30_i64, "shard gamma";
+  MUTABLE versioned = Cache<{String}Int64>{ values: {}, recency: {}, head: NIL, tail: NIL, capacity: 1_i64 } @shared:versioned;
+  put!(versioned, "mvcc", 5_i64) OR_ELSE RAISE;
+  ASSERT get!(versioned, "mvcc") OR_ELSE RAISE OR_ELSE 0_i64 == 5_i64;
 
-  MUTABLE flags = Cache<Bool>{ values: {} } @shared:locked;
-  put!(flags, "ready", TRUE) OR_ELSE RAISE;
-  WITH flags AS readable {
-    ASSERT readable.values["ready"] == TRUE, "generic Bool cache";
-  }
-  print("generic-cache: 4 capability policies PASS");
-  print("generic-cache: sharded concurrency PASS");
+  print("generic-cache: exact O(1) LRU across 4 policies PASS");
 END

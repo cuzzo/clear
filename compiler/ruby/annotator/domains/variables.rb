@@ -781,6 +781,7 @@ module Annotator
         entry = scope.entry_for_write(name)
         return unless entry
         entry.mark_mutated!(touch_declaration: true)
+        audit_mark_mutated(name)
       end
 
       # Mark a binding as mutated INDIRECTLY (e.g. via a function call that
@@ -803,6 +804,7 @@ module Annotator
         entry = scope.entry_for_write(name)
         return unless entry
         entry.mark_mutated_via_reference!
+        audit_mark_mutated(name)
       end
 
       # Walk a chained access expression (GetField/GetIndex chain rooted at an
@@ -946,11 +948,11 @@ module Annotator
         end
 
         target_type = index_node.target.full_type!(context: "index assignment collection")
-        protocol_map = generic_parameter_has_map_bound?(target_type.resolved)
+        protocol_map = map_requires_protocol_lowering?(target_type)
         assign_type = if protocol_map
           require_generic_map_access_scope!(index_node.target, target_type)
           index_node.protocol_operation = :map_put
-          Type.new(TypeProjectionExpression.new(owner: target_type.resolved, member: :Value))
+          protocol_map_associated_type(target_type, :Value)
         elsif target_type&.map?
           # Map reads return ?V because the key may be absent, but map writes
           # store the declared value type V. If V itself is optional, preserve it.

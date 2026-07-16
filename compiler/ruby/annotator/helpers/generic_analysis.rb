@@ -432,6 +432,21 @@ module GenericAnalysis
   end
   private :generic_parameter_has_map_bound?
 
+  sig { params(type: Type).returns(T::Boolean) }
+  def map_requires_protocol_lowering?(type)
+    generic_parameter_has_map_bound?(type.resolved) ||
+      (type.map? && type.key_type.projection?)
+  end
+  private :map_requires_protocol_lowering?
+
+  sig { params(type: Type, member: Symbol).returns(Type) }
+  def protocol_map_associated_type(type, member)
+    return member == :Key ? type.key_type : type.value_type if type.map?
+
+    Type.new(TypeProjectionExpression.new(owner: type.resolved, member: member))
+  end
+  private :protocol_map_associated_type
+
   sig { params(name: Symbol).returns(T::Boolean) }
   def generic_parameter_has_shared_map_bound?(name)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)

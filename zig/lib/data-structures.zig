@@ -387,6 +387,13 @@ pub fn bind(comptime deps: type) type {
         return std.AutoHashMapUnmanaged(K, V);
     }
 
+    /// Select the ordinary CLEAR map representation after a generic
+    /// associated key type becomes concrete. String keys retain StringMap's
+    /// owned-key behavior; numeric keys use NumericMapType.
+    pub fn MapType(comptime K: type, comptime V: type) type {
+        return if (K == []const u8) StringMap(V) else NumericMapType(K, V);
+    }
+
     pub fn numericMapPut(comptime K: type, comptime V: type, alloc: std.mem.Allocator, map: *NumericMapType(K, V), key: K, value: V) !void {
         const gop = try map.getOrPut(alloc, key);
         if (gop.found_existing) {

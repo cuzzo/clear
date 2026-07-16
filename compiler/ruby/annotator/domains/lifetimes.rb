@@ -18,6 +18,10 @@ module Annotator
           error!(node, :MOVE_NEEDS_IDENTIFIER)
         end
 
+        if node.value.symbol&.owned_optional_capture
+          error!(node, :MOVE_OWNED_OPTIONAL_CAPTURE, name: node.value.name)
+        end
+
         ti = node.value.full_type!(context: "MOVE value")
 
         # Check if the identifier is a resource

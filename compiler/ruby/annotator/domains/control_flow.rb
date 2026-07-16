@@ -534,6 +534,7 @@ module Annotator
               current_scope.declare(b.name, nil, unwrapped, mutable_list_alias, false, nil, :stack)
               entry = current_scope.local_entry!(b.name)
               b.symbol = entry
+              entry.mark_owned_optional_capture! if AST.capture_expr_owns_result?(b.expr)
               # Propagate non_escaping when the source is borrow-derived from a
               # non_escaping binding (a WITH alias or another transitive borrow
               # of one). IF-AS on `p[i]` / `p.field` where `p` is the alias

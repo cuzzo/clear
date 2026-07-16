@@ -845,9 +845,13 @@ module CapabilityHelper
       end
     end
 
-    # Capability audit: mark variable as mutated if EXCLUSIVE access is used.
-    if fact.capability == :EXCLUSIVE && var_node.is_a?(AST::Identifier)
-      audit_mark_mutated(var_node.name)
+    # Capability audit: explicit EXCLUSIVE and a mutable POLYMORPHIC alias
+    # both establish a write boundary. Attribute field aliases to their root
+    # binding so capability-specialized code is not reported as lock-only
+    # overhead merely because the concrete family is chosen at bind time.
+    audit_root = AST.root_identifier(var_node)
+    if audit_root && (fact.capability == :EXCLUSIVE || (node.polymorphic && cap.alias_mutable))
+      audit_mark_mutated(audit_root.name)
     end
 
     # Handle Wildcard Borrow: WITH RESTRICT node.* { ... }

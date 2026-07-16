@@ -54,21 +54,15 @@ module Annotator
           error!(node, :TUPLE_INDEX_SYNTAX)
         end
 
-        if generic_parameter_has_map_bound?(target_type_info.resolved)
+        if map_requires_protocol_lowering?(target_type_info)
           require_generic_map_access_scope!(node.target, target_type_info)
-          key_type = Type.new(TypeProjectionExpression.new(
-            owner: target_type_info.resolved,
-            member: :Key,
-          ))
+          key_type = protocol_map_associated_type(target_type_info, :Key)
           index_type = node.index.full_type!(context: "Map protocol index key")
           unless key_type.accepts?(index_type)
             error!(node, :GENERIC_MAP_KEY_MISMATCH,
               expected: Type.surface_name(key_type), actual: Type.surface_name(index_type))
           end
-          value_type = Type.new(TypeProjectionExpression.new(
-            owner: target_type_info.resolved,
-            member: :Value,
-          ))
+          value_type = protocol_map_associated_type(target_type_info, :Value)
           stamp_type!(node, Type.optional_of(value_type))
           node.protocol_operation = :map_get
           node.container_borrow = true

@@ -264,7 +264,8 @@ pub fn AtomicPtr(comptime T: type) type {
                 const old_ptr = self.ptr.load(.acquire) orelse unreachable;
 
                 new_ptr.* = old_ptr.*;
-                @call(.auto, func, .{new_ptr} ++ args);
+                const result = @call(.auto, func, .{new_ptr} ++ args);
+                if (comptime @typeInfo(@TypeOf(result)) == .error_union) try result;
 
                 const flow_ptr = args[0];
                 switch (flow_ptr.kind) {

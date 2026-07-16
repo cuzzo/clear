@@ -1146,7 +1146,7 @@ class MIREmitter
       };
       var __poly_flow = __PolyFlow{ .kind = .cont_commit };
       try CheatLib.polymorphicMutateFlow(#{cell_zig}, #{node.rt}, struct {
-          fn run(#{node.alias_name}: *#{node.bare_type.zig_type}, __flow: *__PolyFlow#{capture_param}) void {
+          fn run(#{node.alias_name}: *#{node.bare_type.zig_type}, __flow: *__PolyFlow#{capture_param}) !void {
               _ = &#{node.alias_name};
               #{capture_suppress}
               #{guard_block}

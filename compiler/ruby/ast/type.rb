@@ -3466,6 +3466,17 @@ class Type
     shape.expression.is_a?(TypeProjectionExpression)
   end
 
+  # Generic projections and aggregates cannot settle their cleanup shape
+  # until Zig specializes the enclosing function. Treat them as potentially
+  # owning so COPY/field replacement emits comptime cleanup rather than a
+  # shallow value move that is only sound for primitive instantiations.
+  sig { returns(T::Boolean) }
+  def specialization_may_need_cleanup?
+    return true if projection? || generic_instance?
+
+    (optional? || error_union?) && wrapped_type&.specialization_may_need_cleanup? == true
+  end
+
   sig { returns(T.nilable(Symbol)) }
   def projection_owner
     expression = shape.expression
@@ -5269,6 +5280,9 @@ class Type
   # ruby-to-clear: effects reentrant
   def map_zig_type
     val_zig = value_type.nested_zig_type
+    if key_type.projection?
+      return "CheatLib.MapType(#{key_type.zig_type}, #{val_zig})"
+    end
     if striped?
       current_shard_count = T.must(shard_count)
       if numeric_map?

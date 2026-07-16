@@ -83,7 +83,7 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         receiver = node.object.full_type!(context: "protocol method receiver")
-        return false unless generic_parameter_has_map_bound?(receiver.resolved)
+        return false unless map_requires_protocol_lowering?(receiver)
         require_generic_map_access_scope!(node.object, receiver)
 
         operation = {"put" => :put, "delete" => :delete, "contains?" => :contains,
@@ -100,8 +100,8 @@ module Annotator
             name: node.name, expected: expected_arity, actual: node.args.length)
         end
 
-        key_type = Type.new(TypeProjectionExpression.new(owner: receiver.resolved, member: :Key))
-        value_type = Type.new(TypeProjectionExpression.new(owner: receiver.resolved, member: :Value))
+        key_type = protocol_map_associated_type(receiver, :Key)
+        value_type = protocol_map_associated_type(receiver, :Value)
         verify_protocol_method_argument!(node, 0, key_type) if expected_arity.positive?
         verify_protocol_method_argument!(node, 1, value_type) if operation == :put
 

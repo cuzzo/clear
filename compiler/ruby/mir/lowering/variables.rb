@@ -1089,6 +1089,7 @@ module MIRLoweringVariables
     if field.safe_nav_chain == true && field_type.optional?
       field_type = T.must(field_type.wrapped_type)
     end
+    return true if field_type.specialization_may_need_cleanup?
     return true if field_type.needs_cleanup?(T.unsafe(mir_schema_lookup))
     return false unless field_type.string?
 

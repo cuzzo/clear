@@ -2213,7 +2213,8 @@ module MIRLoweringExpressions
       func = ti.shared? ? "arcRetain" : "rcRetain"
       MIR::RcRetain.new(source, rc_payload_zig_type(ti), func)
     elsif ti.optional? && (ti.needs_cleanup?(T.unsafe(mir_schema_lookup)) ||
-                           ti.wrapped_type&.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)))
+                           ti.wrapped_type&.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) ||
+                           ti.specialization_may_need_cleanup?)
       MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.string?
       MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
@@ -2222,7 +2223,7 @@ module MIRLoweringExpressions
       MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc)
     elsif ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup))
       MIR::DeepCopy.new(source, bare_zig_type(ti), nil, :full_value, alloc)
-    elsif ti.projection?
+    elsif ti.specialization_may_need_cleanup?
       # Associated types are concrete after Zig specialization, not while the
       # Ruby frontend checks the generic body. Preserve COPY semantically and
       # let dupeValue's comptime cleanup predicate choose deep-copy vs value

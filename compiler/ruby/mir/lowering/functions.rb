@@ -1135,6 +1135,11 @@ module MIRLoweringFunctions
       return MIR::ItemsAccess.new(arg, true)
     end
 
+    if with_alias_pointer_shaped?(a) && callee_param && !callee_param.mutable &&
+        !callee_param_type.needs_pointer_passing?
+      return MIR::Deref.new(arg)
+    end
+
     return arg unless wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)
     return arg if arg_already_pointer_shaped?(a)
     MIR::AddressOf.new(arg)
@@ -1443,7 +1448,17 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     return false unless a.is_a?(AST::Identifier)
     !!(current_function_collection_param?(a.name) ||
+       with_alias_pointer_shaped?(a) ||
        capture_state.current_bg_pointer_captures&.include?(a.name))
+  end
+
+  sig { params(a: AST::Node).returns(T::Boolean) }
+  private def with_alias_pointer_shaped?(a)
+    T.bind(self, MIRLowering) rescue nil
+    a.is_a?(AST::Identifier) &&
+      capability_state.with_alias_owner_map&.key?(a.name.to_s) == true &&
+      (a.symbol&.borrowed_alias == true ||
+       capability_state.if_bind_pointer_aliases.include?(a.name.to_s))
   end
 
   sig { params(node: AST::FuncCall).returns(MIR::Node) }

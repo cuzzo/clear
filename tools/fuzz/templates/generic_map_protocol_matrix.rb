@@ -8,6 +8,10 @@ GENERIC_MAP_PROTOCOL_CELLS = [
   { shape: :generic_forwarding },
   { shape: :cleanup_value_copy },
   { shape: :nested_projection },
+  { shape: :associated_storage_string },
+  { shape: :associated_storage_numeric },
+  { shape: :optional_capture_method_boundary },
+  { shape: :associated_storage_wrong_key, expected: :compile_error },
   { shape: :borrowed_value, expected: :compile_error },
   { shape: :non_map_argument, expected: :compile_error },
   { shape: :non_shared_argument, expected: :compile_error },
@@ -73,6 +77,51 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
         RETURN keys.length() + values.length();
       END
       FN main() RETURNS Void -> PASS END
+    CLEAR
+  when :associated_storage_string, :associated_storage_numeric
+    key_type = p[:shape] == :associated_storage_string ? "String" : "Int64"
+    key = p[:shape] == :associated_storage_string ? '"key"' : "7_i64"
+    <<~CLEAR
+      STRUCT Index<M: Map> { entries: {M::Key}M::Value }
+      IMPLEMENTATION Index<M> {
+        METHOD store!(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
+          self.entries[key] = COPY value;
+        END
+        METHOD load(self, key: M::Key) RETURNS !?M::Value ->
+          RETURN COPY self.entries[key];
+        END
+      }
+      FN main() RETURNS !Void ->
+        MUTABLE index = Index<{#{key_type}}String>{ entries: {} };
+        index.store!(#{key}, "value");
+        ASSERT index.load(#{key}) OR_ELSE RAISE OR_ELSE "" == "value";
+      END
+    CLEAR
+  when :associated_storage_wrong_key
+    {
+      source: <<~CLEAR,
+        STRUCT Index<M: Map> { entries: {M::Key}Int64 }
+        IMPLEMENTATION Index<M> {
+          METHOD bad(self) RETURNS ?Int64 -> RETURN self.entries[TRUE]; END
+        }
+      CLEAR
+      error_code: :TYPE_MISMATCH_ASSIGN,
+    }
+  when :optional_capture_method_boundary
+    <<~CLEAR
+      STRUCT Holder { key: ?String }
+      IMPLEMENTATION Holder {
+        METHOD identity(self, key: String) RETURNS String -> RETURN COPY key; END
+        METHOD copied(self) RETURNS !?String ->
+          current = COPY self.key;
+          IF current EXISTS AS key THEN RETURN self.identity(key); END
+          RETURN NIL;
+        END
+      }
+      FN main() RETURNS Void ->
+        holder = Holder{ key: COPY "key" };
+        ASSERT holder.copied() OR_ELSE RAISE OR_ELSE "" == "key";
+      END
     CLEAR
   when :non_map_argument
     {

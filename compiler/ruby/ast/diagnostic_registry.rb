@@ -2157,6 +2157,13 @@ module DiagnosticRegistry
       template: "MOVE can only be applied to a variable identifier",
       summary:  "`MOVE expr` requires `expr` to be a bare binding name.",
     },
+    MOVE_OWNED_OPTIONAL_CAPTURE: {
+      severity: :error, category: :ownership,
+      template: "Cannot MOVE owned optional capture '%{name}' yet; its enclosing optional still owns the payload.",
+      summary: "Moving an owned IF-AS payload would currently leave two cleanup paths for one value.",
+      cause: "Zig optional value captures copy the payload out without a writable source slot. Until CLEAR lowers consuming captures through a guarded pointer capture, MOVE would double-free cleanup-bearing fields.",
+      fix_hint: "Use COPY %{name} for an independent owned value, or consume the optional before entering IF-AS.",
+    },
     GIVE_ON_COPY_TYPE: {
       severity: :error, category: :ownership,
       template: "GIVE cannot be applied to Copy types (%{type} is implicitly copyable)",
