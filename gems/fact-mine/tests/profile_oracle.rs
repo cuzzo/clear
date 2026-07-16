@@ -55,6 +55,94 @@ fn python_profile_canonicalizes_and_projects_state_reads() -> Result<()> {
 }
 
 #[test]
+fn declared_method_types_are_normalized_from_language_owned_syntax() -> Result<()> {
+    let python = syntax::parse_file(fixture("declared_types.py"), Language::Python)?;
+    let python = profile::extract(&python, Profile::NilKill);
+    let call = python
+        .type_definitions
+        .iter()
+        .find(|definition| definition.kind == "method_signature" && definition.name == "call")
+        .context("missing Python call signature")?;
+    assert_eq!(
+        call.return_type.as_ref().map(ToString::to_string).as_deref(),
+        Some("str")
+    );
+    assert!(call.params.iter().any(|parameter| {
+        parameter.get("name") == Some(&json!("reason"))
+            && parameter
+                .get("type")
+                .and_then(|value| value.get("data"))
+                == Some(&json!("str"))
+    }));
+
+    let typescript =
+        syntax::parse_file(fixture("typescript_interface.ts"), Language::TypeScript)?;
+    let typescript = profile::extract(&typescript, Profile::NilKill);
+    let interface_method = typescript
+        .type_definitions
+        .iter()
+        .find(|definition| {
+            definition.kind == "method_signature"
+                && definition.owner == "Client"
+                && definition.name == "fetch"
+        })
+        .context("missing TypeScript interface method signature")?;
+    assert_eq!(
+        interface_method
+            .return_type
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("T.nilable(string)")
+    );
+    Ok(())
+}
+
+#[test]
+fn source_facing_fields_preserve_native_declared_type_spelling() -> Result<()> {
+    for (fixture_name, language, field, expected) in [
+        (
+            "native_field_types.rs",
+            Language::Rust,
+            "items",
+            "Vec<String>",
+        ),
+        (
+            "native_field_types.hpp",
+            Language::Cpp,
+            "name",
+            "std::string",
+        ),
+        (
+            "native_field_types.cs",
+            Language::CSharp,
+            "Name",
+            "string",
+        ),
+    ] {
+        let document = syntax::parse_file(fixture(fixture_name), language)?;
+        let output = profile::extract(&document, Profile::NilKill);
+        let record = output
+            .fields
+            .iter()
+            .find(|record| record.name == field)
+            .with_context(|| format!("missing {fixture_name} field {field}"))?;
+        assert_eq!(record.declared_type.as_deref(), Some(expected), "{fixture_name}");
+        let definition = output
+            .type_definitions
+            .iter()
+            .find(|definition| definition.kind == "state_field" && definition.name == field)
+            .with_context(|| format!("missing {fixture_name} state-field definition {field}"))?;
+        assert_eq!(
+            definition.declared_type.as_deref(),
+            Some(expected),
+            "{fixture_name}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn go_short_declaration_does_not_reuse_outer_non_nil_proof() -> Result<()> {
     let document = syntax::parse_file(fixture("go_shadowing.go"), Language::Go)?;
     assert!(document.redundant_nil_guards.is_empty());

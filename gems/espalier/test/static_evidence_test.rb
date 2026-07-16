@@ -334,9 +334,9 @@ class StaticEvidenceTest < Minitest::Test
       "facts" => {
         "calls" => [
           { "source" => "source-run", "receiver" => "Target", "receiver_kind" => "type",
-            "message" => "build", "line" => 3 },
+            "message" => "build", "target" => "target-build", "line" => 3 },
           { "source" => "source-run", "receiver" => "target", "receiver_kind" => "value",
-            "message" => "work", "line" => 4 }
+            "message" => "work", "target" => "target-work", "line" => 4 }
         ],
         "flow_local_types" => [
           { "file" => "source.rb", "owner" => "Source", "function" => "run", "name" => "target",
@@ -353,6 +353,8 @@ class StaticEvidenceTest < Minitest::Test
 
     assert_equal ["Target", "self.build"], [static_call[:target_owner], static_call[:target_method]]
     assert_equal ["Target", "work"], [typed_call[:target_owner], typed_call[:target_method]]
+    assert_equal "target-build", static_call[:target_id]
+    assert_equal "target-work", typed_call[:target_id]
     assert_equal "high", static_call[:confidence]
     assert_equal "high", typed_call[:confidence]
   end
@@ -407,7 +409,7 @@ class StaticEvidenceTest < Minitest::Test
       "facts" => {
         "calls" => [
           { "source" => "source-run", "receiver" => "Record", "receiver_kind" => "type",
-            "message" => "new", "constructor_target" => "initialize", "line" => 3 },
+            "message" => "new", "constructor_target" => "initialize", "target" => "record-init", "line" => 3 },
           { "source" => "source-run", "receiver" => "Generated", "receiver_kind" => "type",
             "message" => "new", "constructor_target" => "initialize", "line" => 4 },
           { "source" => "source-run", "receiver" => "self", "receiver_kind" => "value",

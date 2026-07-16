@@ -104,6 +104,30 @@ const JAVA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct JavaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
+    fn function_dispatch_kind_from_node(
+        &self,
+        _name: &str,
+        node: &Node,
+        owner: &str,
+    ) -> String {
+        if owner.is_empty() {
+            return "top".to_string();
+        }
+        // Java's `static` modifier is declaration syntax. Inspect only the
+        // declaration header; a nested class or string in the body must not
+        // change the enclosing method's dispatch kind.
+        let header = node.text.split('{').next().unwrap_or(node.text.as_str());
+        if header
+            .split(|character: char| !(character == '_' || character.is_ascii_alphanumeric()))
+            .any(|token| token == "static")
+        {
+            "class"
+        } else {
+            "instance"
+        }
+        .to_string()
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("java")
     }
@@ -215,6 +239,13 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
             return false;
         }
         false
+    }
+
+    fn preserve_constant_receiver_call(&self, _call: &NormalizedCallProjection) -> bool {
+        // Java's adapter creates CALL only from a tree-sitter
+        // `method_invocation`; zero-argument `Type.method()` is therefore
+        // already syntactically proven to be a call, not a property read.
+        true
     }
 
     fn structural_semantic_effects(

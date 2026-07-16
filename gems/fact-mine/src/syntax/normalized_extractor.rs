@@ -210,6 +210,9 @@ impl<'a> Extractor<'a> {
             file: self.file.clone(),
             name: name.clone(),
             owner: owner.clone(),
+            dispatch_kind: self
+                .behavior
+                .function_dispatch_kind_from_node(&name, node, &owner),
             line: node.first_lineno,
             span: span(node),
             body,

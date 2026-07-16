@@ -162,6 +162,8 @@ pub struct Document {
     #[serde(default)]
     pub source_digest: String,
     #[serde(default)]
+    pub symbol_scope: SymbolScope,
+    #[serde(default)]
     pub function_defs: Vec<FunctionDef>,
     #[serde(default)]
     pub owner_defs: Vec<OwnerDef>,
@@ -237,11 +239,25 @@ pub struct Document {
     pub state_param_origins: Vec<StateParamOrigin>,
 }
 
+/// Minimal, adapter-proven facts needed to canonicalize source symbols.
+/// Consumers must leave cross-file targets unknown when these facts do not
+/// establish an identity.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct SymbolScope {
+    pub canonical: bool,
+    pub namespace: String,
+    pub explicit_imports: BTreeMap<String, String>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct FunctionDef {
     pub file: String,
     pub name: String,
     pub owner: String,
+    /// Adapter-proven dispatch domain. This is syntax knowledge: the generic
+    /// profile must not infer static/free/instance semantics from owner text.
+    #[serde(default)]
+    pub dispatch_kind: String,
     pub line: usize,
     pub span: Span,
     pub(crate) body: RawNode,

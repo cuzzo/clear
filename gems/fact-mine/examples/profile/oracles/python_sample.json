@@ -2,10 +2,7 @@
   "array_shapes": [],
   "fields": [
     {
-      "declared_type": {
-        "data": "int",
-        "kind": "Primitive"
-      },
+      "declared_type": "int",
       "id": "state:ac29136eabc706a4",
       "language": "python",
       "line": 5,

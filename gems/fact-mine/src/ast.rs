@@ -129,6 +129,14 @@ pub fn normalize_tree(root: TreeSitterNode<'_>, source: &str, language: Language
     TreeSitterNormalizer::new(source, language).normalize(root)
 }
 
+pub(crate) fn symbol_scope(
+    root: TreeSitterNode<'_>,
+    source: &str,
+    language: Language,
+) -> (String, Vec<(String, String)>) {
+    adapters::normalization_adapter(language).symbol_scope(root, source)
+}
+
 pub fn node(child: &Child) -> Option<&Node> {
     match child {
         Child::Node(node) => Some(node),

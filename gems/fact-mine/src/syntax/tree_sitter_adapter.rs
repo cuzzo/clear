@@ -1,5 +1,6 @@
 use super::{
     normalized_behavior, parser_grammar::grammar_for_language, passes, Document, Language,
+    SymbolScope,
 };
 use crate::ast::normalize_tree;
 use anyhow::{Context, Result};
@@ -41,6 +42,8 @@ fn parse_normalized_file(
 ) -> Result<Document> {
     let started = Instant::now();
     let normalized_root = normalize_tree(parsed.tree.root_node(), &parsed.source, language);
+    let (namespace, explicit_imports) =
+        crate::ast::symbol_scope(parsed.tree.root_node(), &parsed.source, language);
     profile_parse_phase(profile, file_label, "normalized_root", started.elapsed());
 
     let lines = parsed
@@ -71,6 +74,11 @@ fn parse_normalized_file(
         file: parsed.file.to_string_lossy().to_string(),
         language,
         source_digest: format!("sha256:{:x}", Sha256::digest(parsed.source.as_bytes())),
+        symbol_scope: SymbolScope {
+            canonical: language == Language::Java,
+            namespace,
+            explicit_imports: explicit_imports.into_iter().collect(),
+        },
         function_defs: facts.function_defs,
         owner_defs: facts.owner_defs,
         call_sites: facts.call_sites,

@@ -149,6 +149,9 @@ pub struct CallRecord {
     pub function: String,
     pub receiver: String,
     pub receiver_kind: String,
+    /// Adapter-proven canonical receiver type for cross-file resolution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver_symbol: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub constructor_target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -210,6 +213,11 @@ pub struct MethodRecord {
     pub owner_id: String,
     pub key: Vec<String>,
     pub owner: String,
+    /// Adapter-proven canonical owner identity. A missing value means the
+    /// source language has not supplied enough scope facts for cross-file
+    /// identity; consumers must not substitute a short-name guess.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol_owner: Option<String>,
     pub name: String,
     pub dispatch_name: String,
     pub kind: String,
@@ -245,7 +253,10 @@ pub struct FieldRecord {
     pub name: String,
     pub line: usize,
     pub span: Option<[usize; 4]>,
-    pub declared_type: Option<TypeExpr>,
+    /// Exact declaration spelling supplied by the language adapter. Semantic
+    /// analysis uses `state_type_records`; this source-facing projection must
+    /// not reverse-render a normalized `TypeExpr` and lose native syntax.
+    pub declared_type: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub type_references: Vec<serde_json::Value>,
     pub static_origin: String,
@@ -309,7 +320,10 @@ pub struct TypeDefinition {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub declared_type: Option<TypeExpr>,
+    /// Exact source spelling for declared slots. Method parameter and return
+    /// types remain normalized `TypeExpr` values because those fields are
+    /// explicitly semantic projections.
+    pub declared_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -482,8 +496,8 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         );
     }
     let state_type_edges = extract_state_type_edges(document, &language, &path);
-    let call_graph_edges = extract_call_graph_edges(document);
     let calls = extract_calls(document, &language, &path);
+    let call_graph_edges = extract_call_graph_edges(&calls);
     let state_accesses = extract_state_accesses(document, &language, &path);
     let complexity_facts = syntax::complexity_facts::facts(document);
 
@@ -874,6 +888,8 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         .map(|(k, v)| (k, v.into_iter().collect()))
         .collect();
 
+    resolve_project_calls(&methods, &mut calls);
+
     owners.sort_by(|a, b| a.id.cmp(&b.id));
     owners.dedup_by(|a, b| a.id == b.id);
     call_graph_edges.sort_by(|a, b| {
@@ -933,6 +949,48 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         tuple_arrays,
         struct_field_hash_shapes,
         struct_field_array_shapes,
+    }
+}
+
+fn resolve_project_calls(methods: &[MethodRecord], calls: &mut [CallRecord]) {
+    let mut by_dispatch: BTreeMap<(&str, &str, &str), Vec<&MethodRecord>> = BTreeMap::new();
+    for method in methods {
+        let Some(owner) = method.symbol_owner.as_deref() else {
+            continue;
+        };
+        by_dispatch
+            .entry((owner, method.dispatch_name.as_str(), method.kind.as_str()))
+            .or_default()
+            .push(method);
+    }
+
+    for call in calls.iter_mut().filter(|call| call.target.is_none()) {
+        let Some(owner) = call.receiver_symbol.as_deref() else {
+            continue;
+        };
+        let dispatch = if call.constructor_target.is_some() {
+            "instance"
+        } else if call.receiver_kind == "type" {
+            "class"
+        } else if call.receiver_symbol.is_some() {
+            "instance"
+        } else {
+            continue;
+        };
+        let message = call
+            .constructor_target
+            .as_deref()
+            .unwrap_or(call.message.as_str());
+        let candidates = by_dispatch
+            .get(&(owner, message, dispatch))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if candidates.len() == 1 {
+            call.target = Some(candidates[0].id.clone());
+            call.kind = "resolved_call".to_string();
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+        }
     }
 }
 
@@ -1410,7 +1468,11 @@ fn extract_methods(
             let owner = fn_def.owner.clone();
             let name = fn_def.name.clone();
             let dispatch_name = behavior.function_dispatch_name(&name);
-            let kind = behavior.function_dispatch_kind(&name, &owner);
+            let kind = if fn_def.dispatch_kind.is_empty() {
+                behavior.function_dispatch_kind(&name, &owner)
+            } else {
+                fn_def.dispatch_kind.clone()
+            };
             let signature = method_signature(lines, fn_def, language);
             let source = method_source(&signature, language);
             let raw_source = source_for_span(lines, fn_def.span);
@@ -1423,6 +1485,7 @@ fn extract_methods(
                 id: function_id(language, path, fn_def),
                 owner_id: owner_id(language, path, &owner, owner_span(document, &owner)),
                 key: vec![owner.clone(), name.clone(), kind.clone()],
+                symbol_owner: canonical_symbol_owner(document, &owner),
                 owner,
                 name,
                 dispatch_name,
@@ -1731,7 +1794,7 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
             name,
             line: state.line,
             span: Some(state.span),
-            declared_type: state.r#type.as_ref().map(|t| TypeExpr::parse(t, language)),
+            declared_type: state.r#type.clone(),
             type_references: Vec::new(),
             static_origin: "state_declaration".to_string(),
             source: "syntax".to_string(),
@@ -2129,7 +2192,7 @@ fn extract_type_definitions(
             signature: None,
             return_type: None,
             params: Vec::new(),
-            declared_type: Some(TypeExpr::parse(&type_text, language)),
+            declared_type: Some(type_text),
             target: None,
             source: Some("syntax".to_string()),
         });
@@ -3231,44 +3294,25 @@ fn extract_array_shapes(lines: &[String], language: &str, path: &str) -> Vec<Arr
 // Call-graph edges (Phase 2d)
 // ---------------------------------------------------------------------------
 
-fn extract_call_graph_edges(document: &Document) -> Vec<CallGraphEdge> {
+fn extract_call_graph_edges(calls: &[CallRecord]) -> Vec<CallGraphEdge> {
     let mut edges = Vec::new();
 
-    // Build function name index per owner
-    let fn_by_owner: BTreeMap<String, BTreeSet<String>> =
-        document
-            .function_defs
-            .iter()
-            .fold(BTreeMap::new(), |mut acc, f| {
-                acc.entry(f.owner.clone())
-                    .or_default()
-                    .insert(f.name.clone());
-                acc
-            });
-
-    for call in &document.call_sites {
-        let receiver = call.receiver.as_str();
-        // Internal call: self/this receiver or implicit self (empty)
-        if receiver == "self" || receiver == "this" || receiver.is_empty() {
-            let owner_fns = match fn_by_owner.get(&call.owner) {
-                Some(fns) => fns,
-                None => continue,
-            };
-            if owner_fns.contains(&call.message) {
-                edges.push(CallGraphEdge {
-                    source: format!("fn:{}#{}", call.owner, call.function),
-                    target: format!("fn:{}#{}", call.owner, call.message),
-                    kind: "internal_call".to_string(),
-                    label: if call.conditional {
-                        "conditional internal".to_string()
-                    } else {
-                        "internal".to_string()
-                    },
-                    conditional: call.conditional,
-                    weight: 1,
-                });
-            }
-        }
+    // This is a compatibility projection for older graph consumers. Target
+    // discovery belongs exclusively to `extract_calls`; graph construction
+    // must never grow a second resolver with weaker identity semantics.
+    for call in calls.iter().filter(|call| call.kind == "internal_call") {
+        edges.push(CallGraphEdge {
+            source: format!("fn:{}#{}", call.owner, call.function),
+            target: format!("fn:{}#{}", call.owner, call.message),
+            kind: "internal_call".to_string(),
+            label: if call.conditional {
+                "conditional internal".to_string()
+            } else {
+                "internal".to_string()
+            },
+            conditional: call.conditional,
+            weight: 1,
+        });
     }
 
     // Deduplicate and aggregate weights
@@ -3299,19 +3343,126 @@ fn source_function_id(
     function: &str,
     line: usize,
 ) -> String {
+    source_function(document, owner, function, line)
+        .map(|row| function_id(language, path, row))
+        .unwrap_or_else(|| stable_id("fn", &[language, path, owner, function]))
+}
+
+fn canonical_symbol_owner(document: &Document, owner: &str) -> Option<String> {
+    if !document.symbol_scope.canonical || owner.is_empty() {
+        return None;
+    }
+    let owner = owner.replace("::", ".");
+    if document.symbol_scope.namespace.is_empty() {
+        Some(owner)
+    } else {
+        Some(format!("{}.{}", document.symbol_scope.namespace, owner))
+    }
+}
+
+fn canonical_receiver_symbol(document: &Document, receiver: &str) -> Option<String> {
+    if !document.symbol_scope.canonical || receiver.is_empty() {
+        return None;
+    }
+    if let Some(imported) = document.symbol_scope.explicit_imports.get(receiver) {
+        return Some(imported.clone());
+    }
+    document
+        .owner_defs
+        .iter()
+        .find(|owner| owner.name == receiver)
+        .and_then(|owner| canonical_symbol_owner(document, &owner.name))
+}
+
+fn canonical_declared_type(document: &Document, name: &str) -> Option<String> {
+    let name = name.strip_prefix("declared:").unwrap_or(name);
+    document
+        .symbol_scope
+        .explicit_imports
+        .get(name)
+        .cloned()
+        .or_else(|| {
+            document
+                .owner_defs
+                .iter()
+                .find(|candidate| candidate.name == name)
+                .and_then(|candidate| canonical_symbol_owner(document, &candidate.name))
+        })
+}
+
+fn declared_receiver_symbol(
+    document: &Document,
+    definition: Option<&syntax::FunctionDef>,
+    receiver: &str,
+) -> Option<String> {
+    let definition = definition?;
+    let key = format!("{}\0{}\0{}", definition.owner, definition.name, definition.line);
+    document
+        .method_param_types
+        .get(&key)
+        .and_then(|parameters| parameters.get(receiver))
+        .and_then(|name| canonical_declared_type(document, name))
+}
+
+fn flow_receiver_symbol(
+    document: &Document,
+    owner: &str,
+    function: &str,
+    receiver: &str,
+    call_span: [usize; 4],
+) -> Option<String> {
+    if !document.symbol_scope.canonical {
+        return None;
+    }
+    let place_ids = document
+        .places
+        .iter()
+        .filter(|place| {
+            place.owner == owner && place.function == function && place.name == receiver
+        })
+        .map(|place| place.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let node_ids = document
+        .control_flow_nodes
+        .iter()
+        .filter(|node| {
+            node.owner == owner
+                && node.function == function
+                && node.span[0] <= call_span[0]
+                && call_span[2] <= node.span[2]
+        })
+        .map(|node| node.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let types = document
+        .flow_types
+        .iter()
+        .filter(|fact| {
+            fact.complete
+                && place_ids.contains(fact.place_id.as_str())
+                && node_ids.contains(fact.node_id.as_str())
+        })
+        .flat_map(|fact| fact.types.iter())
+        .filter_map(|name| canonical_declared_type(document, name))
+        .collect::<BTreeSet<_>>();
+    (types.len() == 1).then(|| types.into_iter().next()).flatten()
+}
+
+fn source_function<'a>(
+    document: &'a Document,
+    owner: &str,
+    function: &str,
+    line: usize,
+) -> Option<&'a syntax::FunctionDef> {
     let candidates = document
         .function_defs
         .iter()
         .filter(|row| row.owner == owner && row.name == function)
         .collect::<Vec<_>>();
-    let selected = candidates
+    candidates
         .iter()
         .copied()
         .find(|row| row.span[0] <= line && line <= row.span[2])
-        .or_else(|| candidates.first().copied());
-    selected
-        .map(|row| function_id(language, path, row))
-        .unwrap_or_else(|| stable_id("fn", &[language, path, owner, function]))
+        .or_else(|| candidates.first().copied())
 }
 
 fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRecord> {
@@ -3332,17 +3483,78 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 &call.function,
                 call.line,
             );
+            let source_definition =
+                source_function(document, &call.owner, &call.function, call.line);
             let implicit =
                 call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this";
-            let target_def = implicit
+            // A type receiver is a normalized fact only when the language
+            // adapter proves it or this document declares that exact owner.
+            // Capitalization is never used as a shared type heuristic.
+            let static_receiver_symbol = canonical_receiver_symbol(document, &call.receiver);
+            let receiver_is_type = static_receiver_symbol.is_some()
+                || behavior.receiver_is_type_reference(&call.receiver)
+                || document
+                    .owner_defs
+                    .iter()
+                    .any(|owner| owner.name == call.receiver);
+            let declared_receiver_symbol = (!receiver_is_type)
+                .then(|| declared_receiver_symbol(document, source_definition, &call.receiver))
+                .flatten();
+            let flow_receiver_symbol = (!receiver_is_type && declared_receiver_symbol.is_none())
                 .then(|| {
-                    document
-                        .function_defs
-                        .iter()
-                        .find(|row| row.owner == call.owner && row.name == call.message)
+                    flow_receiver_symbol(
+                        document,
+                        &call.owner,
+                        &call.function,
+                        &call.receiver,
+                        call.span,
+                    )
                 })
                 .flatten();
+            let instance_receiver_symbol = declared_receiver_symbol.or(flow_receiver_symbol);
+            let receiver_symbol = static_receiver_symbol.or(instance_receiver_symbol.clone());
+            let source_dispatch = source_definition
+                .map(|definition| definition.dispatch_kind.as_str())
+                .filter(|kind| !kind.is_empty())
+                .unwrap_or_else(|| {
+                    if call.owner.is_empty() {
+                        "top"
+                    } else {
+                        "instance"
+                    }
+                });
+            let target_candidates = document
+                .function_defs
+                .iter()
+                .filter(|definition| {
+                    if definition.name != call.message {
+                        return false;
+                    }
+                    let dispatch = if definition.dispatch_kind.is_empty() {
+                        if definition.owner.is_empty() { "top" } else { "instance" }
+                    } else {
+                        definition.dispatch_kind.as_str()
+                    };
+                    if implicit && source_dispatch == "top" {
+                        dispatch == "top"
+                    } else if implicit {
+                        definition.owner == call.owner && dispatch == source_dispatch
+                    } else if receiver_is_type {
+                        definition.owner == call.receiver && dispatch == "class"
+                    } else if let Some(receiver_owner) = instance_receiver_symbol.as_deref() {
+                        canonical_symbol_owner(document, &definition.owner).as_deref()
+                            == Some(receiver_owner)
+                            && dispatch == "instance"
+                    } else {
+                        false
+                    }
+                })
+                .collect::<Vec<_>>();
+            // Overload selection requires argument/type semantics. Preserve
+            // ambiguity instead of choosing declaration order.
+            let target_def = (target_candidates.len() == 1).then(|| target_candidates[0]);
             let target = target_def.map(|row| function_id(language, path, row));
+            let resolved = target.is_some();
             let state_receiver = document.state_declarations.iter().any(|row| {
                 call.receiver == row.field
                     || call.receiver.trim_start_matches('@') == row.field.trim_start_matches('@')
@@ -3351,8 +3563,12 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     || call.receiver.strip_prefix("this.")
                         == Some(row.field.trim_start_matches('@'))
             });
-            let kind = if target.is_some() {
+            let kind = if target_def.is_some_and(|definition| {
+                implicit && definition.owner == call.owner
+            }) {
                 "internal_call"
+            } else if target.is_some() {
+                "resolved_call"
             } else if state_receiver {
                 "delegation"
             } else if implicit {
@@ -3380,12 +3596,13 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 owner: call.owner.clone(),
                 function: call.function.clone(),
                 receiver: call.receiver.clone(),
-                receiver_kind: if behavior.receiver_is_type_reference(&call.receiver) {
+                receiver_kind: if receiver_is_type {
                     "type"
                 } else {
                     "value"
                 }
                 .to_string(),
+                receiver_symbol,
                 constructor_target: behavior
                     .constructor_dispatch_name(&call.receiver, &call.message),
                 known_time_complexity: intrinsic.map(|cost| cost.time.to_string()),
@@ -3395,7 +3612,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 line: call.line,
                 span: call.span,
                 conditional: call.conditional,
-                confidence: if kind == "internal_call" {
+                confidence: if resolved {
                     "high"
                 } else {
                     "partial"
@@ -3517,10 +3734,12 @@ pub(crate) mod tests {
             file: "test.rb".to_string(),
             language: Language::Ruby,
             source_digest: String::new(),
+            symbol_scope: syntax::SymbolScope::default(),
             function_defs: vec![syntax::FunctionDef {
                 file: "test.rb".to_string(),
                 name: "hello".to_string(),
                 owner: "Greeter".to_string(),
+                dispatch_kind: "instance".to_string(),
                 line: 1,
                 span: [1, 0, 1, 10],
                 body: crate::ast::RawNode {
@@ -3747,6 +3966,7 @@ def py_fn(a: int) -> str:
             file: file_path.clone(),
             name: "typed_method".to_string(),
             owner: "Greeter".to_string(),
+            dispatch_kind: "instance".to_string(),
             line: 11, // def typed_method line
             span: [11, 0, 11, 19],
             body: crate::ast::RawNode {
@@ -3768,6 +3988,7 @@ def py_fn(a: int) -> str:
             file: file_path.clone(),
             name: "explicit_method".to_string(),
             owner: "Greeter".to_string(),
+            dispatch_kind: "instance".to_string(),
             line: 12,
             span: [12, 0, 12, 19],
             body: crate::ast::RawNode {
@@ -3789,6 +4010,7 @@ def py_fn(a: int) -> str:
             file: file_path.clone(),
             name: "top_level_fn".to_string(),
             owner: "".to_string(),
+            dispatch_kind: "top".to_string(),
             line: 13,
             span: [13, 0, 13, 19],
             body: crate::ast::RawNode {
@@ -4159,6 +4381,7 @@ def py_fn(a: int) -> str:
             file: file_path.clone(),
             name: "py_fn".to_string(),
             owner: "PyClass".to_string(),
+            dispatch_kind: "instance".to_string(),
             line: 19,
             span: [19, 0, 19, 19],
             body: crate::ast::RawNode {
@@ -4257,6 +4480,7 @@ def py_fn(a: int) -> str:
             file: "test.py".to_string(),
             name: "foo".to_string(),
             owner: "".to_string(),
+            dispatch_kind: "top".to_string(),
             line: 1,
             span: [1, 0, 1, 10],
             body: crate::ast::RawNode {
@@ -4397,7 +4621,8 @@ def py_fn(a: int) -> str:
             ]
         });
         let doc_edges: Document = serde_json::from_value(doc_edges_json).unwrap();
-        let edges = extract_call_graph_edges(&doc_edges);
+        let calls = extract_calls(&doc_edges, "ruby", "test.rb");
+        let edges = extract_call_graph_edges(&calls);
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].weight, 2);
 
@@ -4504,6 +4729,7 @@ def py_fn(a: int) -> str:
             path: "demo.rb".into(),
             line: 2,
             receiver_kind: "value".into(),
+            receiver_symbol: None,
             constructor_target: None,
             known_time_complexity: None,
             known_space_complexity: None,

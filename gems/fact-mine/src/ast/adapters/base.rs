@@ -30,6 +30,18 @@ pub(crate) struct ConditionalBranchParts<'tree> {
 
 use super::super::TreeSitterNormalizer;
 pub(crate) trait AstNormalizationAdapter: Sync {
+    /// Language-native namespace and explicit-import facts used to form
+    /// canonical symbol identities. The empty default deliberately means
+    /// "not proven", rather than treating a filename or short owner as a
+    /// namespace.
+    fn symbol_scope(
+        &self,
+        _root: TreeSitterNode<'_>,
+        _source: &str,
+    ) -> (String, Vec<(String, String)>) {
+        (String::new(), Vec::new())
+    }
+
     fn scope_locals(
         &self,
         _node: TreeSitterNode<'_>,

@@ -746,6 +746,19 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         if owner.is_empty() { "top" } else { "instance" }.to_string()
     }
 
+    /// Project a function declaration's native dispatch form while the
+    /// normalized declaration node is still available. Most languages use
+    /// the ordinary owner/name contract; adapters override this only where a
+    /// declaration modifier or receiver changes dispatch semantics.
+    fn function_dispatch_kind_from_node(
+        &self,
+        name: &str,
+        _node: &Node,
+        owner: &str,
+    ) -> String {
+        self.function_dispatch_kind(name, owner)
+    }
+
     fn receiver_is_type_reference(&self, _receiver: &str) -> bool {
         false
     }

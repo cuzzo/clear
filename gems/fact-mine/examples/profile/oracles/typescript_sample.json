@@ -2,10 +2,7 @@
   "array_shapes": [],
   "fields": [
     {
-      "declared_type": {
-        "data": "public port: number = 5432",
-        "kind": "Primitive"
-      },
+      "declared_type": "public port: number = 5432",
       "id": "state:a93cdf3c47ad143a",
       "language": "typescript",
       "line": 4,
@@ -23,10 +20,7 @@
       "static_origin": "state_declaration"
     },
     {
-      "declared_type": {
-        "data": "Database",
-        "kind": "Primitive"
-      },
+      "declared_type": "Database",
       "id": "state:1e0c9f18052b6f45",
       "language": "typescript",
       "line": 8,

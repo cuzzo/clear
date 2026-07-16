@@ -1,10 +1,48 @@
-use super::super::named_children;
+use super::super::{named_children, node_text};
 use super::base::AstNormalizationAdapter;
 use tree_sitter::Node as TreeSitterNode;
 
 pub(crate) struct JavaAstAdapter;
 
 impl AstNormalizationAdapter for JavaAstAdapter {
+    fn symbol_scope(
+        &self,
+        root: TreeSitterNode<'_>,
+        source: &str,
+    ) -> (String, Vec<(String, String)>) {
+        let mut namespace = String::new();
+        let mut imports = Vec::new();
+        for child in named_children(root) {
+            let text = node_text(child, source).trim();
+            match child.kind() {
+                "package_declaration" => {
+                    namespace = text
+                        .strip_prefix("package")
+                        .unwrap_or(text)
+                        .trim()
+                        .trim_end_matches(';')
+                        .trim()
+                        .to_string();
+                }
+                "import_declaration" if !text.starts_with("import static ") => {
+                    let qualified = text
+                        .strip_prefix("import")
+                        .unwrap_or(text)
+                        .trim()
+                        .trim_end_matches(';')
+                        .trim();
+                    if !qualified.ends_with(".*") {
+                        if let Some(short) = qualified.rsplit('.').next() {
+                            imports.push((short.to_string(), qualified.to_string()));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        (namespace, imports)
+    }
+
     fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
         matches!(node.kind(), "method_invocation")
     }

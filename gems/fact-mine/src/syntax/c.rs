@@ -54,6 +54,18 @@ const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
+    fn function_dispatch_kind_from_node(
+        &self,
+        _name: &str,
+        _node: &Node,
+        _owner: &str,
+    ) -> String {
+        // C functions are lexical/file-scope symbols. Some existing state
+        // projections assign a synthetic struct owner to receiver-style APIs;
+        // that owner is not an instance-dispatch fact.
+        "top".to_string()
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("c")
     }

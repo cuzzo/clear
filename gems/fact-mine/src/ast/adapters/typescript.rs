@@ -20,6 +20,18 @@ const TYPESCRIPT_TERNARY_KINDS: &[&str] = &[
 pub(crate) struct TypeScriptAstAdapter;
 
 impl AstNormalizationAdapter for TypeScriptAstAdapter {
+    fn function_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "method"
+                | "function_definition"
+                | "function_declaration"
+                | "method_definition"
+                | "method_declaration"
+                | "method_signature"
+        )
+    }
+
     fn explicit_alternative<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
