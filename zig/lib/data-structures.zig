@@ -8,8 +8,9 @@ const paged_slot_map = @import("paged-slot-map.zig");
 
 // Comptime atomic type selection for fields exercised by the loom suite.
 // Mirrors queues.zig: when the test root exports SimAtomic
-// (parking-lot-loom-test.zig), Stream/InfStream `closed` field accesses
-// become yield points so loom can observe close vs push/next races.
+// (parking-lot-loom-test.zig), Stream/InfStream metadata locks and `closed`
+// field accesses become yield points so loom can observe close vs push/next
+// races.
 // Falls through to std.atomic.Value for normal builds.
 const Atomic = blk: {
     const root = @import("root");
@@ -843,7 +844,7 @@ pub fn bind(comptime deps: type) type {
                 buf:           [BUF_SIZE]T = undefined,
                 head:          std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
                 tail:          std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
-                lock:          std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+                lock:          Atomic(u32) = Atomic(u32).init(0),
                 consumer_task: ?*Task = null,
                 consumer_sched: ?*fp.Scheduler = null,
                 producer_task: ?*Task = null,
