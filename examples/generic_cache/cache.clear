@@ -83,7 +83,7 @@ IMPLEMENTATION Cache<M> {
     self.promote!(key);
   END
 
-  METHOD get!(MUTABLE self, key: M::Key) RETURNS !?M::Value ->
+  METHOD get!(MUTABLE self, key: M::Key) RETURNS ?M::Value ->
     existing = COPY self.values[key];
     IF existing EXISTS AS value THEN
       result = COPY value;

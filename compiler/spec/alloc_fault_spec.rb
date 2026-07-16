@@ -42,6 +42,16 @@ RSpec.describe "alloc_fault (allocation FAULT axis)" do
     expect(fn(ast, "build").alloc_fault).to eq(true)
   end
 
+  it "is true for an explicit deep COPY" do
+    ast = annotate(<<~CLEAR)
+      FN duplicate(value: String) RETURNS String ->
+        RETURN COPY value;
+      END
+    CLEAR
+    expect(fn(ast, "duplicate").alloc_fault).to eq(true)
+    expect(fn(ast, "duplicate").error_fallible).to eq(false)
+  end
+
   it "propagates transitively through a bare (non-absorbed) call" do
     ast = annotate(<<~CLEAR)
       FN build() RETURNS []Int64 ->

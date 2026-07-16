@@ -163,6 +163,7 @@ module Annotator
           ti.mark_heap_allocated! if ti.is_a?(Type)
           node.storage = :heap
           current_fn_ctx&.record_heap_use!
+          current_fn_ctx&.record_alloc_use!
         end
 
         deep_copy = collection_copy_deep_copy_required(node)
