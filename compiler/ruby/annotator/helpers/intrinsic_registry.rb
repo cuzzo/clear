@@ -257,6 +257,15 @@ module IntrinsicRegistry
     i = T.let(0, Integer)
     while i < names.length
       name = T.unsafe(names.fetch(i))
+      return name if T.must(registries[name]).equal?(target)
+      i += 1
+    end
+
+    # Compatibility path for callers that provide an equivalent registry
+    # object rather than one of the canonical frozen registry constants.
+    i = 0
+    while i < names.length
+      name = T.unsafe(names.fetch(i))
       return name if registry_matches?(T.must(registries[name]), target)
       i += 1
     end

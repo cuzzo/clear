@@ -230,8 +230,10 @@ class FunctionSignature
 
   sig { returns(IntrinsicContract) }
   def intrinsic_contract
-    emit = @facts.emit
-    emit ? IntrinsicContract.from_emit(emit, @contract.params) : IntrinsicContract.empty
+    @intrinsic_contract ||= begin
+      emit = @facts.emit
+      emit ? IntrinsicContract.from_emit(emit, @contract.params) : IntrinsicContract.empty
+    end
   end
   sig { returns(RequiresMap) }
   def requires = @facts.requires
@@ -460,6 +462,7 @@ class FunctionSignature
     )
     @contract.return_type = coerce_return_type(return_type)
     @contract.return_lifetime = normalize_lifetime(return_lifetime)
+    @intrinsic_contract = T.let(nil, T.nilable(IntrinsicContract))
   end
 
   sig { params(return_type: T.nilable(Type::TypeInput)).returns(FunctionSignature) }
@@ -481,6 +484,7 @@ class FunctionSignature
     else
       @facts.emit = nil
     end
+    @intrinsic_contract = nil
     self
   end
 
