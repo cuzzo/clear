@@ -1,17 +1,46 @@
 # Generic Constraints, Protocols, and Existentials
 
-Status: proposed design; no syntax in this document is implemented unless it
-is identified as existing CLEAR syntax
+Status: static generics/protocol milestone implemented on `examples-hardening`;
+opaque `some` and existential `any` remain proposed follow-up work
 
 Core domain: constrained generics, protocols, associated types, opaque types,
 heterogeneous values, capability preservation, Zig comptime lowering, and
 diagnostics
 
+## Implementation Status (2026-07-16)
+
+The zero-cost/static portion of this design is implemented and executable:
+
+- inline bounds (`T: Protocol`, intersections, and `SHARED Protocol`);
+- owner-scoped inherent `IMPLEMENTATION Owner<T>` blocks with checked METHOD
+  lookup and file/arity/coherence diagnostics;
+- the intrinsic `Map` protocol, `M::Key`/`M::Value`, indexing, and its stable
+  operation set;
+- user `PROTOCOL` declarations, inferred conformance headers such as
+  `IMPLEMENTATION Lookup<K, V> FOR Store`, conditional conformance binders,
+  associated projections, METHOD/FN requirements, and effect checking;
+- compile-time adapters with no runtime witness object or existential
+  allocation;
+- capability-preserving conformance and dispatch through
+  `WITH POLYMORPHIC`, including shared wrapper families;
+- the self-checking O(1) generic LRU in `examples/generic_cache/`.
+
+The following parts of the broader design are deliberately not claimed as
+implemented:
+
+- the expanded `REQUIRES T IS_A P` and general `COMPTIME_REQUIRES` surface;
+- opaque `some Protocol` return/parameter types;
+- runtime-erased `any Protocol` values and heterogeneous protocol lists;
+- exported cross-package conformance metadata and protocol default methods.
+
+Therefore, the implemented milestone is a complete local static-protocol
+milestone, not yet a replacement for Rust `dyn Trait`, Swift `any Protocol`,
+or Go interface values. A bare protocol name never silently erases a value.
+
 ## Executive Decision
 
-CLEAR should add a small protocol system whose default execution model is
-static specialization. This is the language's trait/interface system; it must
-not be introduced as a map-specific parser exception.
+CLEAR's protocol system uses static specialization by default. This is the
+language's trait/interface system, not a map-specific parser exception.
 
 The design has three deliberately distinct abstractions:
 
@@ -129,9 +158,9 @@ In priority order:
 - Hiding the cost or error family of synchronization behind an unannotated
   conversion.
 
-## Current CLEAR Baseline
+## Baseline Before This Implementation
 
-Current generics already provide useful foundations:
+The branch began with these useful foundations:
 
 - structs, unions, and functions accept named type parameters;
 - call-site inference recursively binds parameters such as `Cache<T>`;
@@ -142,8 +171,7 @@ Current generics already provide useful foundations:
 - `SHARED T`, `REQUIRES`, and `WITH POLYMORPHIC` carry concrete call-site
   synchronization into a generic body.
 
-Two superficially related spellings are not implemented as the needed model
-yet:
+Two superficially related spellings did not provide the needed model:
 
 - current `REQUIRES` parses parameter capability/reentrance families, but not
   type conformance, and `COMPTIME_REQUIRES` is not present on this branch;
@@ -152,7 +180,8 @@ yet:
   function type parameters, which is a useful AST precedent but not an
   implementation-block feature.
 
-The important gaps are:
+The work was scoped around the following gaps. The static entries are closed;
+the opaque/existential entries are the explicitly deferred roadmap:
 
 - type parameters have names but no declared constraints;
 - a body cannot prove that unconstrained `T` supports indexing or map methods;
@@ -405,7 +434,7 @@ may use only the stated protocol surface.
 different concrete types. It contains ownership/cleanup metadata and a witness
 table. It is the only protocol form that enables a heterogeneous list.
 
-## Proposed Surface Syntax
+## Surface Syntax and Deferred Extensions
 
 ### Declaring a protocol
 
@@ -600,6 +629,12 @@ IMPLEMENTATION Map<K, V> FOR SmallMap {
 }
 ```
 
+The protocol-side arguments infer the owner's slots, so binders are not
+repeated before `Map`: `IMPLEMENTATION<K, V> Map<K, V> FOR SmallMap<K, V>` is
+not canonical CLEAR. A leading binder list is used only when it introduces an
+additional conditional constraint that cannot be inferred from the protocol
+application, for example `IMPLEMENTATION<T: Hashable> Sized FOR Box`.
+
 The compiler resolves the declared methods and reports the complete missing or
 incompatible requirement set at this declaration. A later adapter form may
 support an existing or external type:
@@ -635,7 +670,7 @@ generic function: the declaration does not say that `put!` belongs to
 `Cache`, does not place Cache's constraints in lexical scope, and does not give
 the compiler a clean method-coherence boundary.
 
-CLEAR should therefore add an owner-scoped implementation block:
+CLEAR therefore uses an owner-scoped implementation block:
 
 ```clear
 STRUCT Cache<M: SHARED Map> {
@@ -784,11 +819,9 @@ Rules:
 - method names are keyed by `(owner nominal ID, method name)`, not by one
   global function-name table.
 
-The current compiler is looser than this target: after intrinsic and extern
-resolution, an `AST::MethodCall` falls through to ordinary `resolve_call`, so
-`value.foo()` may currently invoke `FN foo(value)`. Meanwhile, `METHOD` is
-primarily a formatter flag. Implementing this design requires removing that
-fallback and making method eligibility a checked semantic fact.
+The implementation removes the former arbitrary MethodCall-to-FN fallback.
+`METHOD` eligibility is now a checked semantic fact, while free `FN`
+declarations remain prefix/pipeline-only.
 
 Required diagnostics include:
 
@@ -1326,7 +1359,7 @@ analysis, code size, or pathological-instantiation concerns.
 
 ## Implementation Phases
 
-### Phase 1: Constraint representation and grammar
+### Phase 1: Constraint representation and grammar — implemented for inline bounds
 
 - Replace `type_params: String[]` with typed generic parameter declarations.
 - Parse inline `T: P & Q` bounds as sugar for declaration contracts; extend
@@ -1343,7 +1376,7 @@ analysis, code size, or pathological-instantiation concerns.
 - Preserve source ranges for every constraint and projection.
 - Do not change runtime lowering yet.
 
-### Phase 2: Intrinsic Map protocol
+### Phase 2: Intrinsic Map protocol — implemented
 
 - Register language-defined `Map<Key, Value>`.
 - Derive intrinsic witnesses from `MapTypeExpression`.
@@ -1357,7 +1390,7 @@ analysis, code size, or pathological-instantiation concerns.
 
 This phase proves the design without requiring arbitrary user protocols.
 
-### Phase 3: Static witness lowering
+### Phase 3: Static witness lowering — implemented
 
 - Carry resolved witnesses into typed facts and MIR.
 - Add `ProtocolCall` and canonical adapter lowering.
@@ -1365,7 +1398,7 @@ This phase proves the design without requiring arbitrary user protocols.
 - Compare emitted Zig for constrained versus concrete map functions.
 - Require no runtime witness table in this phase.
 
-### Phase 4: Nested capability polymorphism
+### Phase 4: Nested capability polymorphism — implemented for static protocols
 
 - Recognize a constrained field such as `cache.values` as originating from `M`.
 - Preserve M's exact nested capability chain at instantiation.
@@ -1373,7 +1406,7 @@ This phase proves the design without requiring arbitrary user protocols.
 - Handle sharded operation-level access without synthesizing a global lock.
 - Add capability-loss and compound-state diagnostics.
 
-### Phase 5: LRU proving example
+### Phase 5: LRU proving example — implemented
 
 - Implement the O(1) LRU described above.
 - Exercise local, locked, write-locked, and versioned outer policies through
@@ -1382,7 +1415,7 @@ This phase proves the design without requiring arbitrary user protocols.
 - Add deterministic examples, transpile tests, and fuzz matrices.
 - Benchmark against a concrete specialized implementation.
 
-### Phase 6: User protocols and explicit conformance
+### Phase 6: User protocols and explicit conformance — implemented locally
 
 - Parse `PROTOCOL` and conformance `IMPLEMENTATION P FOR T` blocks on top of
   the already working inherent implementation representation.
@@ -1392,14 +1425,14 @@ This phase proves the design without requiring arbitrary user protocols.
 - Add default methods only after requirement dispatch is stable.
 - Keep implicit conformance limited to compiler-owned structural types.
 
-### Phase 7: Opaque `some`
+### Phase 7: Opaque `some` — deferred
 
 - Permit parameter/return positions where one concrete identity is provable.
 - Require the same concrete return type on every path.
 - Preserve cross-module opaque identity.
 - Prove zero allocation and static dispatch in generated Zig.
 
-### Phase 8: Existential `any`
+### Phase 8: Existential `any` — deferred
 
 - Implement explicit local existential containers and ownership witnesses.
 - Support heterogeneous `[]any P`.
@@ -1492,7 +1525,12 @@ Cross at minimum:
 - Mutants removing a requirement, witness, capability, cleanup action, or
   equality check must be killed.
 
-## Acceptance Criteria
+## Full-Roadmap Acceptance Criteria
+
+The implemented static milestone satisfies the zero-cost items below through
+the generic cache, protocol transpile tests, and bounded fuzz matrices. Items
+that mention `some`, `any`, heterogeneous values, or cross-package witnesses
+remain acceptance criteria for the explicitly deferred phases 7 and 8.
 
 The design is ready to implement fully when all of these are true:
 
