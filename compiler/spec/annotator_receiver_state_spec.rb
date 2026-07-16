@@ -44,12 +44,12 @@ RSpec.describe "annotator receiver state boundaries" do
     expect do
       ann.send(:push_function_context!, ctx)
       ann.send(:with_loop_context) do
-        ann.with_conditional_context do
+        ann.send(:with_conditional_context) do
           ann.send(:with_smooth_context) do
             expect(ann.send(:current_fn_ctx)).to eq(ctx)
-            expect(ann.current_loop_depth).to eq(1)
-            expect(ann.current_conditional_depth).to eq(1)
-            expect(ann.smooth_depth).to eq(1)
+            expect(ann.send(:current_loop_depth)).to eq(1)
+            expect(ann.send(:current_conditional_depth)).to eq(1)
+            expect(ann.send(:smooth_depth)).to eq(1)
             raise "force unwind"
           end
         end
@@ -58,15 +58,15 @@ RSpec.describe "annotator receiver state boundaries" do
 
     expect(ctx.loop_depth).to eq(0)
     expect(ctx.conditional_depth).to eq(0)
-    expect(ann.smooth_depth).to eq(0)
+    expect(ann.send(:smooth_depth)).to eq(0)
     expect(ann.send(:pop_function_context!)).to eq(ctx)
     expect(ann.send(:current_fn_ctx)).to be_nil
 
-    ann.with_conditional_context do
-      expect(ann.current_conditional_depth).to eq(1)
+    ann.send(:with_conditional_context) do
+      expect(ann.send(:current_conditional_depth)).to eq(1)
     end
 
-    expect(ann.current_conditional_depth).to eq(0)
+    expect(ann.send(:current_conditional_depth)).to eq(0)
   end
 
   it "restores held lock state around nested WITH analysis" do
@@ -107,15 +107,15 @@ RSpec.describe "annotator receiver state boundaries" do
 
     expect do
       ann.send(:with_predicate_context, ctx) do
-        expect(ann.current_predicate_context).to eq(ctx)
+        expect(ann.send(:current_predicate_context)).to eq(ctx)
         ann.send(:record_predicate_call_site!, call)
         raise "force unwind"
       end
     end.to raise_error("force unwind")
 
-    expect(ann.current_predicate_context).to be_nil
-    expect(ann.predicate_call_sites.map(&:callee)).to eq(["check"])
-    expect(ann.capability_audit).to be_empty
+    expect(ann.send(:current_predicate_context)).to be_nil
+    expect(ann.send(:predicate_call_sites).map(&:callee)).to eq(["check"])
+    expect(ann.send(:capability_audit)).to be_empty
   end
 
   it "restores auto-locked assignment context when RHS analysis raises" do

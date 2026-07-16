@@ -296,7 +296,7 @@ class FunctionSignature
       )
     end
 
-    sync_signature_from_function_def!(sig, fn)
+    sig.sync_from_function_def!(fn)
   end
 
   # ruby-to-clear: skip
@@ -371,13 +371,6 @@ class FunctionSignature
   sig { returns(FunctionSignature) }
   def self.borrowing_intrinsic
     intrinsic_signature(borrows: :all)
-  end
-
-  # ruby-to-clear: skip
-  sig { params(sig: FunctionSignature, fn: SyncSource).returns(FunctionSignature) }
-  # ruby-to-clear: skip
-  def self.sync_signature_from_function_def!(sig, fn)
-    T.cast(sig.send(:sync_from_function_def!, fn), FunctionSignature)
   end
 
   sig do
@@ -663,7 +656,7 @@ class FunctionSignature
       owner_type_params: @contract.owner_type_params,
       intrinsic: @contract.intrinsic
     )
-    copy.__send__(:replace_analysis_storage!, @facts.copy)
+    copy.replace_analysis_storage!(@facts.copy)
     copy
   end
 
@@ -721,7 +714,7 @@ class FunctionSignature
     @facts.heap_carry_return_vars = source.heap_carry_return_vars if fn.respond_to?(:heap_carry_return_vars)
     self
   end
-  protected :sync_from_function_def!
+  public :sync_from_function_def!
 
   sig { params(requires: T.nilable(RequiresMap)).void }
   def replace_requires_storage!(requires)
@@ -729,11 +722,14 @@ class FunctionSignature
     @facts.requires = copied_requires
   end
 
+  protected
+
   sig { params(facts: AnalysisFacts).void }
   def replace_analysis_storage!(facts)
     @facts = facts
   end
-  protected :replace_analysis_storage!
+
+  private
 
   sig { params(val: LifetimeInput).returns(T::Array[LifetimeSource]) }
   def normalize_lifetime(val)

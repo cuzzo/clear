@@ -57,7 +57,7 @@ module Annotator
         initialize_builtin_environment! if install_builtins
       end
 
-      sig { returns(T::Array[Scope]) }
+      sig { override.returns(T::Array[Scope]) }
       def scope_stack
         @scope_stack
       end

@@ -402,22 +402,26 @@ module Annotator
           .returns(T.type_parameter(:Result))
       end
       def with_comptime_is_a_then_refinement(condition, &blk)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
         refinement = comptime_is_a_type_param_refinement(condition)
         return blk.call unless refinement
 
         type_param = T.cast(refinement[0], Symbol)
         narrowed_type = T.cast(refinement[1], Type)
-        T.unsafe(self).__send__(:with_comptime_type_param_refinement, type_param, narrowed_type) { blk.call }
+        with_comptime_type_param_refinement(type_param, narrowed_type) { blk.call }
       end
 
       sig { params(condition: AST::Node).returns(T.nilable(T::Array[T.untyped])) }
       def comptime_is_a_type_param_refinement(condition)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
         return nil unless condition.is_a?(AST::IsA)
         left = condition.left
         return nil unless left.is_a?(AST::Identifier)
 
         type_param = left.name.to_sym
-        return nil unless T.unsafe(self).__send__(:current_function_type_param?, type_param)
+        return nil unless current_function_type_param?(type_param)
 
         narrowed_type = static_is_a_target_type(condition.right)
         narrowed_type ? [type_param, narrowed_type] : nil
@@ -439,6 +443,8 @@ module Annotator
 
       sig { params(node: AST::IfStatement).void }
       def emit_is_a_needs_comptime_fix!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
         fix = Fix.new(
           description: DiagnosticRegistry.fix_description(:INSERT_COMPTIME_BEFORE_IF),
           confidence: :auto,
@@ -449,7 +455,7 @@ module Annotator
             )
           ],
         )
-        T.unsafe(self).__send__(:fixable!,
+        fixable!(
           node,
           category: :type,
           level: :error,
@@ -461,6 +467,8 @@ module Annotator
 
       sig { params(condition: AST::Node).void }
       def declare_is_a_binding!(condition)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
         return unless condition.is_a?(AST::IsA)
         binding = condition.binding
         return unless binding
@@ -469,15 +477,15 @@ module Annotator
           payload_type = condition.runtime_payload_type
           return unless payload_type
 
-          scope = T.unsafe(self).__send__(:current_scope)
+          scope = current_scope
           scope.declare(binding, nil, payload_type, false, false, nil, :stack)
-          T.unsafe(self).__send__(:og_declare, binding, nil, payload_type)
-          T.unsafe(self).__send__(:classify_ownership!, scope.local_entry!(binding))
+          og_declare(binding, nil, payload_type)
+          classify_ownership!(scope.local_entry!(binding))
           borrow_match_payload_binding!(binding)
           return
         end
 
-        T.unsafe(self).__send__(:current_scope).declare(binding, nil, Type.new(:Type), false, false, nil, :stack)
+        current_scope.declare(binding, nil, Type.new(:Type), false, false, nil, :stack)
       end
 
       sig { params(node: AST::IfBind).returns(Symbol) }

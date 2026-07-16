@@ -260,7 +260,7 @@ class ModuleImporter
       entry = annotator.semantic_root_scope.resolve_entry(stmt.name)
       sig = entry&.fn_signature
       next unless sig
-      FunctionSignature.sync_signature_from_function_def!(sig, stmt)
+      sig.sync_from_function_def!(stmt)
     end
     nil
   end

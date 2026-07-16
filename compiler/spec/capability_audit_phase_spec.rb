@@ -22,10 +22,7 @@ RSpec.describe Annotator::Phases::CapabilityAuditPhase do
     typed_program = Annotator::Phases::TypeAnalysisPhase.run(resolution: resolution, session: session)
     report = described_class.run(
       typed_program: typed_program,
-      inputs: session.release_capability_audit_inputs!,
-      source_code: source,
-      language_mode: session.language_mode,
-      strict_test: session.strict_test?
+      request: session.release_capability_audit_request!
     )
 
     expect(report.typed_program).to equal(typed_program)

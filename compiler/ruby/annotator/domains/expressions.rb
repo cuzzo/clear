@@ -237,6 +237,8 @@ module Annotator
 
       sig { params(operand: AST::Node, operand_type: Type, op: Symbol).void }
       def validate_logical_presence_operand!(operand, operand_type, op)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
         ti = Type.new(operand_type)
         return unless ti.optional?
         return unless T.must(ti.wrapped_type).resolved == :Bool
@@ -256,7 +258,7 @@ module Annotator
             edits: [Edit.new(span: span, replacement: "(#{operand.name} OR_ELSE FALSE)")]
           )
         end
-        T.unsafe(self).__send__(:fixable!, operand,
+        fixable!(operand,
           code: :AMBIGUOUS_OPTIONAL_BOOL_LOGIC,
           op: op,
           category: :type,

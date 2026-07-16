@@ -13,19 +13,16 @@ module Annotator
       sig do
         params(
           typed_program: TypedProgramFacts,
-          inputs: TypeAnalysisSession::CapabilityAuditInputs,
-          source_code: T.nilable(String),
-          language_mode: Symbol,
-          strict_test: T::Boolean
+          request: CapabilityAuditRequest
         ).returns(CapabilityAuditReport)
       end
-      def self.run(typed_program:, inputs:, source_code:, language_mode:, strict_test:)
+      def self.run(typed_program:, request:)
         session = CapabilityAuditSession.new(
           typed_program: typed_program,
-          inputs: inputs,
-          source_code: source_code,
-          language_mode: language_mode,
-          strict_test: strict_test
+          inputs: request.inputs,
+          source_code: request.source_code,
+          language_mode: request.language_mode,
+          strict_test: request.strict_test
         )
         session.audit!
 

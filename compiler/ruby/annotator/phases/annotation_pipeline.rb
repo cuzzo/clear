@@ -42,10 +42,7 @@ module Annotator
 
         audit = CapabilityAuditPhase.run(
           typed_program: typed_program,
-          inputs: type_session.release_capability_audit_inputs!,
-          source_code: source_code,
-          language_mode: type_session.language_mode,
-          strict_test: type_session.strict_test?
+          request: type_session.release_capability_audit_request!
         )
         products = products.publish_capability_audit(audit)
         type_session.publish_annotation_products!(products)

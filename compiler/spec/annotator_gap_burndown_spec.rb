@@ -39,7 +39,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   def audit_from_type_session(type_session)
-    program = type_session.semantic_program || AST::Program.new(token(:PROGRAM, "PROGRAM"), [])
+    program = type_session.send(:semantic_program) || AST::Program.new(token(:PROGRAM, "PROGRAM"), [])
     registry = type_session.send(:semantic_function_registry)
     resolution = Annotator::Phases::ResolutionFacts.new(
       program: program,
@@ -60,8 +60,8 @@ RSpec.describe "annotator branch gap burndown" do
       typed_program: typed_program,
       inputs: type_session.send(:phase_audit_inputs),
       source_code: type_session.source_code,
-      language_mode: type_session.language_mode,
-      strict_test: type_session.strict_test?
+      language_mode: type_session.send(:language_mode),
+      strict_test: type_session.send(:strict_test?)
     )
     errors = direct_errors(type_session)
     audit.instance_variable_set(:@direct_errors, errors)
@@ -1698,7 +1698,7 @@ RSpec.describe "annotator branch gap burndown" do
     )
     expect(atomic_cap[:capability]).to eq(:ATOMIC)
     expect(unknown_cap[:capability]).to eq(:unknown)
-    expect(cap_ann.pending_deferred_validation_count).to be > 0
+    expect(cap_ann.send(:pending_deferred_validation_count)).to be > 0
 
     bad_param_ann = SemanticAnnotator.new(source_code: "")
     bad_fn = AST::FunctionDef.new(token, "bad_default", [
@@ -1954,7 +1954,7 @@ RSpec.describe "annotator branch gap burndown" do
     )
 
     source_fn_requires = T.must(fn.requires)
-    FunctionSignature.sync_signature_from_function_def!(sig, fn)
+    sig.sync_from_function_def!(fn)
     expect(source_fn_requires).to eq("lock" => Set[:LOCKED])
     expect(sig.needs_rt).to eq(true)
     expect(sig.can_fail).to eq(true)
@@ -1969,7 +1969,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(sig.heap_carry_return_vars).to eq(Set["tmp"])
 
     unchanged = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
-    FunctionSignature.sync_signature_from_function_def!(unchanged, Struct.new(:unused).new(nil))
+    unchanged.sync_from_function_def!(Struct.new(:unused).new(nil))
     expect(unchanged.return_type.raw).to eq(:Int64)
     expect(unchanged.needs_rt).to be_nil
   end

@@ -436,10 +436,17 @@ end
 # Include in classes that provide a `scope_stack` method.
 module ScopeHelper
     extend T::Sig
+    extend T::Helpers
+
+  abstract!
+
+  sig { abstract.returns(T::Array[Scope]) }
+  def scope_stack; end
+  private :scope_stack
 
   sig { returns(T::Array[Scope]) }
   def scope_stack_for_helper
-    T.cast(T.unsafe(self).__send__(:scope_stack), T::Array[Scope])
+    scope_stack
   end
 
   sig { returns(Scope) }

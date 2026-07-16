@@ -27,10 +27,10 @@ RSpec.describe "annotator completion phases" do
   def audit_session_for(type_session, typed_program, source = "")
     Annotator::Phases::CapabilityAuditSession.new(
       typed_program: typed_program,
-      inputs: type_session.release_capability_audit_inputs!,
+      inputs: type_session.send(:release_capability_audit_inputs!),
       source_code: source,
-      language_mode: type_session.language_mode,
-      strict_test: type_session.strict_test?
+      language_mode: type_session.send(:language_mode),
+      strict_test: type_session.send(:strict_test?)
     )
   end
 
@@ -83,7 +83,7 @@ RSpec.describe "annotator completion phases" do
 
     expect(index.program).to eq(program)
     expect(index.root_scope).to eq(annotator.semantic_root_scope)
-    expect(index.function_node("main")).to eq(annotator.function_node_for("main"))
+    expect(index.function_node("main")).to eq(annotator.send(:function_node_for, "main"))
     expect(index.function_nodes.keys).to include("main")
     expect(index.id_index.definition_id_for("main")&.value).to be > 0
     expect(index.id_index.body_id_for("main")&.value).to be > 0
@@ -137,7 +137,7 @@ RSpec.describe "annotator completion phases" do
     expect {
       annotator.annotate!(second)
     }.to raise_error(CompilerError, /undefined|unknown/i)
-    expect(annotator.semantic_function_nodes).not_to have_key("stale")
+    expect(annotator.send(:semantic_function_nodes)).not_to have_key("stale")
   end
 
   it "appends synthesized functions during body analysis" do
@@ -163,7 +163,7 @@ RSpec.describe "annotator completion phases" do
     annotator.analyze_program_bodies!(index, program)
 
     expect(program.statements).to eq([synthetic])
-    expect(annotator.semantic_function_nodes.fetch("generated")).to eq(synthetic)
+    expect(annotator.send(:semantic_function_nodes).fetch("generated")).to eq(synthetic)
   end
 
   it "skips non-signature function metadata while finalizing summaries" do
@@ -252,7 +252,7 @@ RSpec.describe "annotator completion phases" do
     program = AST::Program.new(tok, [fn])
     program.full_type = Type.new(:Void)
     annotator = SemanticAnnotator.new
-    annotator.semantic_function_nodes["identity"] = fn
+    annotator.send(:semantic_function_nodes)["identity"] = fn
 
     expect {
       annotator.mark_annotation_complete!(program)
@@ -265,7 +265,7 @@ RSpec.describe "annotator completion phases" do
     fn = AST::FunctionDef.new(tok("bad"), "bad", [], [], Type.new(:Void), nil, [], [], nil, :pub, [], false)
     program.full_type = Type.new(:Void)
     fn.full_type = Type.new(:Void)
-    annotator.semantic_function_nodes["bad"] = fn
+    annotator.send(:semantic_function_nodes)["bad"] = fn
 
     expect {
       annotator.mark_annotation_complete!(program)

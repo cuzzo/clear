@@ -111,7 +111,7 @@ module MethodAnalysis
     end
 
     # Set tag and return type
-    node.send(:"#{tag_field}=", node.name.to_sym)
+    node.public_send(:"#{tag_field}=", node.name.to_sym)
     stamp_type!(node, defn.return_def.resolve(obj_type, [], self))
     node.container_borrow = defn.intrinsic_container_borrow?
 

@@ -69,12 +69,14 @@ module Annotator
 
       sig { params(node: AST::MethodCall).void }
       def reject_mutating_borrowed_receiver!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
         return unless node.mutates_receiver
 
-        root = T.unsafe(self).__send__(:root_variable_name, node.object)
+        root = root_variable_name(node.object)
         return unless root
-        return if T.unsafe(self).__send__(:ownership_graph).can_write?(root)
-        T.unsafe(self).__send__(:error!, node, :ASSIGN_WHILE_BORROWED, name: root)
+        return if ownership_graph.can_write?(root)
+        error!(node, :ASSIGN_WHILE_BORROWED, name: root)
       end
 
       sig { params(node: AST::StaticCall).void }

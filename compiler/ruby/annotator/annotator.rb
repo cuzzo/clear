@@ -209,7 +209,7 @@ class Annotator::Phases::TypeAnalysisSession
     semantic_function_registry.register!(node)
   end
 
-  sig { returns(T::Array[Scope]) }
+  sig { override.returns(T::Array[Scope]) }
   def scope_stack
     @traversal_state.scopes
   end
@@ -684,6 +684,16 @@ class Annotator::Phases::TypeAnalysisSession
     inputs
   end
 
+  sig { returns(Annotator::Phases::CapabilityAuditRequest) }
+  def release_capability_audit_request!
+    Annotator::Phases::CapabilityAuditRequest.new(
+      inputs: release_capability_audit_inputs!,
+      source_code: @source_code,
+      language_mode: language_mode,
+      strict_test: strict_test?
+    )
+  end
+
 private
 
   sig { params(node: AST::Program).returns(NilClass) }
@@ -830,8 +840,7 @@ private
         local_resolution_session.register_local_extern_declaration(node)
         nil
       else
-        method_name = "visit_#{node.class.name.split('::').last}"
-        send(method_name, node)
+        dispatch_visit(node)
       end
       record_body_fact_node!(node)
       record_ownership_transport_fact!(node)
@@ -839,6 +848,171 @@ private
     ensure
       popped = @traversal_state.annotation_ancestors.pop
       Kernel.raise "BUG: annotation ancestor stack mismatch" unless popped.equal?(node)
+    end
+  end
+
+  sig { params(node: AST::Node).returns(T.untyped) }
+  def dispatch_visit(node)
+    case node
+    when AST::Program then visit_Program(node)
+    when AST::FunctionDef, AST::LambdaLit then dispatch_function_visit(node)
+    when AST::BlockExpr, AST::IfStatement, AST::IsA, AST::IfBind,
+         AST::MatchStatement, AST::ForRange, AST::ForEach, AST::WhileLoop,
+         AST::WhileBindLoop, AST::BreakNode, AST::ContinueNode, AST::PassStmt
+      dispatch_control_flow_visit(node)
+    when AST::SyncPolicyDecl, AST::Assert, AST::DieNode, AST::Raise,
+         AST::ReturnNode, AST::OrElseRaise, AST::OrElseBreak, AST::OrElsePass,
+         AST::OrElsePrune, AST::OrElseExit
+      dispatch_error_visit(node)
+    when AST::WithBlock, AST::DoBlock, AST::BgStreamBlock, AST::YieldExpr,
+         AST::CloseStream, AST::BgBlock, AST::ThenChain, AST::NextExpr
+      dispatch_execution_boundary_visit(node)
+    when AST::Cast, AST::CallSiteOverride, AST::UnaryOp, AST::Literal,
+         AST::DefaultLit, AST::BinaryOp, AST::Placeholder, AST::CapabilityWrap,
+         AST::OptionalUnwrap, AST::FuncCall, AST::MethodCall, AST::StaticCall
+      dispatch_expression_visit(node)
+    when AST::MoveNode, AST::CopyNode, AST::Copy, AST::LinkNode,
+         AST::ResolveNode, AST::FreezeNode, AST::CloneNode, AST::ShareNode
+      dispatch_lifetime_visit(node)
+    when AST::GetIndex, AST::GetField, AST::Slice, AST::HashLit, AST::StructLit,
+         AST::ListLit, AST::TupleLit, AST::DefaultArrayLit, AST::RangeLit
+      dispatch_member_visit(node)
+    when AST::VarDecl, AST::BindExpr, AST::Identifier, AST::Assignment
+      dispatch_variable_visit(node)
+    when AST::TestBlock, AST::WhenBlock, AST::TestThat, AST::AssertRaises,
+         AST::BenchmarkStmt, AST::SmashStmt, AST::ProfileStmt, AST::StubDecl
+      dispatch_test_visit(node)
+    when AST::DestructuringAssignment then visit_DestructuringAssignment(node)
+    when AST::UnionVariantLit then visit_UnionVariantLit(node)
+    else
+      Kernel.raise "BUG: no annotation visitor for #{node.class}"
+    end
+  end
+
+  sig { params(node: T.any(AST::FunctionDef, AST::LambdaLit)).returns(T.untyped) }
+  def dispatch_function_visit(node)
+    case node
+    when AST::FunctionDef then visit_FunctionDef(node)
+    when AST::LambdaLit then visit_LambdaLit(node)
+    end
+  end
+
+  sig { params(node: AST::Node).returns(T.untyped) }
+  def dispatch_control_flow_visit(node)
+    case node
+    when AST::BlockExpr then visit_BlockExpr(node)
+    when AST::IfStatement then visit_IfStatement(node)
+    when AST::IsA then visit_IsA(node)
+    when AST::IfBind then visit_IfBind(node)
+    when AST::MatchStatement then visit_MatchStatement(node)
+    when AST::ForRange then visit_ForRange(node)
+    when AST::ForEach then visit_ForEach(node)
+    when AST::WhileLoop then visit_WhileLoop(node)
+    when AST::WhileBindLoop then visit_WhileBindLoop(node)
+    when AST::BreakNode then visit_BreakNode(node)
+    when AST::ContinueNode then visit_ContinueNode(node)
+    when AST::PassStmt then visit_PassStmt(node)
+    end
+  end
+
+  sig { params(node: AST::Node).returns(T.untyped) }
+  def dispatch_error_visit(node)
+    case node
+    when AST::SyncPolicyDecl then visit_SyncPolicyDecl(node)
+    when AST::Assert then visit_Assert(node)
+    when AST::DieNode then visit_DieNode(node)
+    when AST::Raise then visit_Raise(node)
+    when AST::ReturnNode then visit_ReturnNode(node)
+    when AST::OrElseRaise then visit_OrElseRaise(node)
+    when AST::OrElseBreak then visit_OrElseBreak(node)
+    when AST::OrElsePass then visit_OrElsePass(node)
+    when AST::OrElsePrune then visit_OrElsePrune(node)
+    when AST::OrElseExit then visit_OrElseExit(node)
+    end
+  end
+
+  sig { params(node: AST::Node).returns(T.untyped) }
+  def dispatch_execution_boundary_visit(node)
+    case node
+    when AST::WithBlock then visit_WithBlock(node)
+    when AST::DoBlock then visit_DoBlock(node)
+    when AST::BgStreamBlock then visit_BgStreamBlock(node)
+    when AST::YieldExpr then visit_YieldExpr(node)
+    when AST::CloseStream then visit_CloseStream(node)
+    when AST::BgBlock then visit_BgBlock(node)
+    when AST::ThenChain then visit_ThenChain(node)
+    when AST::NextExpr then visit_NextExpr(node)
+    end
+  end
+
+  sig { params(node: AST::Node).returns(T.untyped) }
+  def dispatch_expression_visit(node)
+    case node
+    when AST::Cast then visit_Cast(node)
+    when AST::CallSiteOverride then visit_CallSiteOverride(node)
+    when AST::UnaryOp then visit_UnaryOp(node)
+    when AST::Literal then visit_Literal(node)
+    when AST::DefaultLit then visit_DefaultLit(node)
+    when AST::BinaryOp then visit_BinaryOp(node)
+    when AST::Placeholder then visit_Placeholder(node)
+    when AST::CapabilityWrap then visit_CapabilityWrap(node)
+    when AST::OptionalUnwrap then visit_OptionalUnwrap(node)
+    when AST::FuncCall then visit_FuncCall(node)
+    when AST::MethodCall then visit_MethodCall(node)
+    when AST::StaticCall then visit_StaticCall(node)
+    end
+  end
+
+  sig { params(node: AST::Node).returns(T.untyped) }
+  def dispatch_lifetime_visit(node)
+    case node
+    when AST::MoveNode then visit_MoveNode(node)
+    when AST::CopyNode then visit_CopyNode(node)
+    when AST::Copy then visit_Copy(node)
+    when AST::LinkNode then visit_LinkNode(node)
+    when AST::ResolveNode then visit_ResolveNode(node)
+    when AST::FreezeNode then visit_FreezeNode(node)
+    when AST::CloneNode then visit_CloneNode(node)
+    when AST::ShareNode then visit_ShareNode(node)
+    end
+  end
+
+  sig { params(node: AST::Node).returns(T.untyped) }
+  def dispatch_member_visit(node)
+    case node
+    when AST::GetIndex then visit_GetIndex(node)
+    when AST::GetField then visit_GetField(node)
+    when AST::Slice then visit_Slice(node)
+    when AST::HashLit then visit_HashLit(node)
+    when AST::StructLit then visit_StructLit(node)
+    when AST::ListLit then visit_ListLit(node)
+    when AST::TupleLit then visit_TupleLit(node)
+    when AST::DefaultArrayLit then visit_DefaultArrayLit(node)
+    when AST::RangeLit then visit_RangeLit(node)
+    end
+  end
+
+  sig { params(node: AST::Node).returns(T.untyped) }
+  def dispatch_variable_visit(node)
+    case node
+    when AST::VarDecl then visit_VarDecl(node)
+    when AST::BindExpr then visit_BindExpr(node)
+    when AST::Identifier then visit_Identifier(node)
+    when AST::Assignment then visit_Assignment(node)
+    end
+  end
+
+  sig { params(node: AST::Node).returns(T.untyped) }
+  def dispatch_test_visit(node)
+    case node
+    when AST::TestBlock then visit_TestBlock(node)
+    when AST::WhenBlock then visit_WhenBlock(node)
+    when AST::TestThat then visit_TestThat(node)
+    when AST::AssertRaises then visit_AssertRaises(node)
+    when AST::BenchmarkStmt then visit_BenchmarkStmt(node)
+    when AST::SmashStmt then visit_SmashStmt(node)
+    when AST::ProfileStmt then visit_ProfileStmt(node)
+    when AST::StubDecl then visit_StubDecl(node)
     end
   end
 
@@ -1026,7 +1200,51 @@ private
   private :current_fn_ctx
   private :current_held_lock_types
   private :semantic_function_registry
+  private :capability_audit
+  private :current_conditional_depth
+  private :current_fn_ctx!
+  private :current_held_locks
+  private :current_loop_depth
+  private :current_predicate_context
+  private :current_stream_yield_frame
+  private :deferred_with_validations
+  private :function_node_for
+  private :function_node_map
+  private :handle_prefixed_int_overflow!
+  private :inside_match_pattern_context?
+  private :inside_with_block?
+  private :pending_deferred_validation_count
+  private :predicate_call_sites
+  private :release_capability_audit_inputs!
+  private :record_snapshot_txn_violation!
+  private :register_function_node!
+  private :semantic_function_nodes
+  private :semantic_held_lock_types
+  private :semantic_lock_type_ranks
+  private :semantic_program
+  private :smooth_depth
+  private :stamp_type!
+  private :with_conditional_context
+  private :with_held_locks
+  private :with_match_family_effects
+  private :with_match_pattern_context
+  private :with_predicate_context
+  private :with_smooth_context
+  private :with_snapshot_transaction_body
+  private :with_stream_yield_frame
+  private :language_mode
+  private :strict_test?
 
+end
+
+# Complete handoff from body typing to whole-program capability auditing.
+# Callers cannot accidentally mix facts from one session with configuration
+# from another, or invoke the audit before the type session relinquishes them.
+class Annotator::Phases::CapabilityAuditRequest < T::Struct
+  const :inputs, Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs
+  const :source_code, T.nilable(String)
+  const :language_mode, Symbol
+  const :strict_test, T::Boolean
 end
 
 # A distinct, sequential owner for whole-program auditing.  It receives the
@@ -1117,7 +1335,7 @@ class Annotator::Phases::CapabilityAuditSession
     phase_audit_inputs.lock_analysis.type_ranks
   end
 
-  sig { returns(T::Array[Scope]) }
+  sig { override.returns(T::Array[Scope]) }
   def scope_stack
     [semantic_root_scope]
   end

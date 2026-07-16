@@ -8,7 +8,7 @@ RSpec.describe "Stack Tier Recommendations" do
     ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
-    fn_nodes = annotator.semantic_function_nodes
+    fn_nodes = T.must(annotator.semantic_index).function_nodes
     [ast, fn_nodes]
   end
 

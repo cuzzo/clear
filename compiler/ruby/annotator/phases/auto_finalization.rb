@@ -105,7 +105,7 @@ module Annotator
           type_params: fn.type_params.map(&:to_sym),
           reentrant: fn.declared_plain_reentrant?
         )
-        FunctionSignature.sync_signature_from_function_def!(signature, fn)
+        signature.sync_from_function_def!(fn)
         stamp_type!(fn, signature)
         entry = semantic_root_scope.local_entry(fn.name)
         entry.type = Type.from_function_signature(signature) if entry

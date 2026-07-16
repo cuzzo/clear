@@ -29,10 +29,10 @@ RSpec.describe "predicate-impurity rejection" do
     )
     Annotator::Phases::CapabilityAuditSession.new(
       typed_program: typed_program,
-      inputs: type_session.release_capability_audit_inputs!,
+      inputs: type_session.send(:release_capability_audit_inputs!),
       source_code: source,
-      language_mode: type_session.language_mode,
-      strict_test: type_session.strict_test?
+      language_mode: type_session.send(:language_mode),
+      strict_test: type_session.send(:strict_test?)
     )
   end
 
