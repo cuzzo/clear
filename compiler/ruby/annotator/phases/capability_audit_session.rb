@@ -122,13 +122,6 @@ module Annotator
       sig { params(node: AST::FunctionDef).returns(T::Boolean) }
       def function_has_default_catch?(node) = node.default_catch.is_a?(Array) && node.default_catch.any?
 
-      sig { params(node: AST::FunctionDef).returns(T::Boolean) }
-      def runtime_error_clause?(node)
-        function_has_pre_clauses?(node) ||
-          function_has_catch_clauses?(node) ||
-          function_has_default_catch?(node)
-      end
-
       sig { returns(T::Array[DeferredWithValidation]) }
       def deferred_with_validations = phase_audit_inputs.deferred_with_validations
 

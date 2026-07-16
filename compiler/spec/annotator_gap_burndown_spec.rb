@@ -2752,8 +2752,19 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "covers union method and schema validation branch matrix directly" do
     ann = quiet_annotator
+    resolution = Annotator::Phases::ResolutionSession.new(
+      importer: nil,
+      source_dir: Dir.pwd,
+      source_code: "",
+      install_builtins: false,
+    )
+    errors = direct_errors(ann)
+    resolution.define_singleton_method(:error!) do |node, code, *args, **kwargs|
+      errors << [node, code, args, kwargs]
+      nil
+    end
     scope = Scope.new
-    ann.define_singleton_method(:lookup_scope_for) { |_name| scope }
+    resolution.define_singleton_method(:lookup_scope_for) { |_name| scope }
 
     scope.install_entry("not_a_function", SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: false, storage: :stack))
     short_sig = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
@@ -2774,7 +2785,7 @@ RSpec.describe "annotator branch gap burndown" do
       AST::UnionMethodRequirement.new(token: token(:VAR_ID, "no_return"), name: "no_return", params: [], return_type: nil),
     ]
 
-    ann.send(:validate_union_methods!, union)
+    resolution.send(:validate_union_methods!, union)
 
     lit_token = token(:LBRACE, "{")
     lit_token.column = 20

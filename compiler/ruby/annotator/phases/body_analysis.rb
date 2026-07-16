@@ -148,24 +148,6 @@ module Annotator
         semantic_function_registry.call_graph
       end
 
-      sig { returns(T::Hash[String, T::Set[String]]) }
-      def function_propagating_callees
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
-        semantic_function_registry.propagating_callees
-      end
-
-      sig { params(name: String).returns(T::Boolean) }
-      def function_has_fnptr_call?(name)
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
-        semantic_function_registry.fnptr_call?(name)
-      end
-
-      sig { params(name: String).returns(T::Boolean) }
-      def function_raises_directly?(name)
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
-        semantic_function_registry.raises_directly?(name)
-      end
-
       sig { returns(T::Array[BodyFactFrame]) }
       def body_fact_frames
         T.bind(self, Annotator::Phases::TypeAnalysisSession)

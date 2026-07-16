@@ -199,6 +199,27 @@ RSpec.describe EscapeAnalysis do
     }.to raise_error(RuntimeError, /missing_escape_handler!, unknown_sink/)
   end
 
+  it "fails explicitly if an invalid sink reaches escape dispatch" do
+    function = fn([], name: "main")
+    context = EscapeAnalysis::EscapeContext.new(
+      fn: function,
+      facts: nil,
+      fn_nodes: { "main" => function },
+      facts_by_name: {},
+      bg_heap: Set.new,
+      schema_lookup: nil,
+    )
+    sink = EscapeAnalysis::EscapeSink.new(
+      name: :invalid,
+      node_classes: [AST::Identifier],
+      handler: :invalid_handler,
+    )
+
+    expect {
+      EscapeAnalysis.send(:apply_escape_sink!, sink, id("value"), context)
+    }.to raise_error(RuntimeError, /unknown escape sink invalid_handler/)
+  end
+
   it "apply! forwards inputs and returns the legacy heap tuple" do
     fn_nodes = { "main" => fn([]) }
     schema_lookup = proc { nil }

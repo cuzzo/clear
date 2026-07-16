@@ -196,11 +196,6 @@ class Annotator::Phases::TypeAnalysisSession
     @program
   end
 
-  sig { returns(T::Hash[Symbol, Integer]) }
-  def semantic_lock_type_ranks
-    @audit_inputs.lock_analysis.type_ranks
-  end
-
   sig { returns(T::Array[HeldLockTypeEntry]) }
   def semantic_held_lock_types
     current_held_lock_types
@@ -1044,16 +1039,6 @@ private
     semantic_function_registry.synthetic_definitions
   end
 
-  sig { void }
-  def clear_synthetic_function_definitions!
-    semantic_function_registry.clear_synthetic_definitions!
-  end
-
-  sig { params(node: AST::FunctionDef).returns(AST::FunctionDef) }
-  def queue_synthetic_function!(node)
-    semantic_function_registry.add_synthetic_definition!(node)
-  end
-
   # Unifies analysis for callables (Functions and Lambdas).
   # Handles scope entry, parameter/capture declaration, body analysis, 
   # cleanup generation, and return-type inference.
@@ -1158,7 +1143,6 @@ private
   private :register_function_node!
   private :semantic_function_nodes
   private :semantic_held_lock_types
-  private :semantic_lock_type_ranks
   private :semantic_program
   private :semantic_root_scope
   private :scope_stack

@@ -75,6 +75,22 @@ RSpec.describe Annotator::Phases::CapabilityAuditPhase do
     expect(T.must(report).checked_call_sites).to be >= 1
   end
 
+  it "audits a function whose runtime contract is introduced by PRE" do
+    source = <<~CLEAR
+      FN positive(value: Int64) RETURNS !Int64
+        PRE: value > 0
+      ->
+        RETURN value;
+      END
+    CLEAR
+    ast = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    annotator = SemanticAnnotator.new(source_code: source)
+
+    annotator.annotate!(ast)
+
+    expect(T.must(annotator.annotation_products.capability_audit).checked_functions).to contain_exactly("positive")
+  end
+
   it "does not publish an audit report when a typed program fails capability validation" do
     source = <<~CLEAR
       FN consume(value: Int64) RETURNS Void REQUIRES value: ATOMIC ->

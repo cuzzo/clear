@@ -41,6 +41,17 @@ RSpec.describe Annotator::Phases::ResolutionPhase do
     expect(extern.full_type!.resolved).to eq(:Void)
   end
 
+  it "fails rather than publishing a missing resolution stamp" do
+    session = Annotator::Phases::ResolutionSession.new(
+      importer: nil, source_dir: Dir.pwd, source_code: nil, install_builtins: false
+    )
+    identifier = AST::Identifier.new(nil, "value")
+
+    expect {
+      session.send(:stamp_type!, identifier, nil)
+    }.to raise_error(RuntimeError, /resolution stamp missing type for AST::Identifier/)
+  end
+
   it "publishes real compiler resolution facts before body typing" do
     source = <<~CLEAR
       STRUCT Box { value: Int64 }

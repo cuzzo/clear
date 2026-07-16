@@ -170,16 +170,6 @@ module Annotator
         requirements.each { |requirement| validate_union_method!(node, requirement) }
       end
 
-      sig { params(node: TypeDeclaration).void }
-      def register_local_type_declaration(node)
-        register_type_declaration(node)
-      end
-
-      sig { params(node: AST::ExternFnDecl).void }
-      def register_local_extern_declaration(node)
-        register_extern_function_signature(node)
-      end
-
       private
 
       sig { returns(T::Array[String]) }
@@ -201,10 +191,14 @@ module Annotator
             return
           end
           error!(requirement.token, :UNION_METHOD_MISSING, union: node.name, method: requirement.name, fn: requirement.name)
+          return
         end
 
         signature = FunctionSignature.unwrap(entry.type)
-        error!(requirement.token, :UNION_METHOD_MISSING, union: node.name, method: requirement.name, fn: requirement.name) unless signature
+        unless signature
+          error!(requirement.token, :UNION_METHOD_MISSING, union: node.name, method: requirement.name, fn: requirement.name)
+          return
+        end
         validate_union_method_visibility!(node, requirement, signature)
         if requirement.params.length != signature.params.length
           error!(requirement.token, :UNION_METHOD_WRONG_ARITY, union: node.name, method: requirement.name,
@@ -259,8 +253,6 @@ module Annotator
       private :lookup_type_schema
       private :note!
       private :queue_synthetic_function!
-      private :register_local_extern_declaration
-      private :register_local_type_declaration
       private :register_program_signatures
       private :register_type_declarations
       private :resolve_variable_scope
