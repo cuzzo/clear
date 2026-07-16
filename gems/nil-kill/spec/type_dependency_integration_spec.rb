@@ -41,6 +41,8 @@ RSpec.describe "FactMine type dependency prioritization" do
 
       expect(evidence.dig("facts", "type_dependencies")).not_to be_empty
       expect(store.facts["type_dependencies"]).to eq(evidence.dig("facts", "type_dependencies"))
+      expect(evidence.fetch("facts")).to have_key("call_resolution_coverage")
+      expect(store.facts["call_resolution_coverage"]).to eq(evidence.dig("facts", "call_resolution_coverage"))
       expect(source).not_to be_nil
       expect(source.dig("candidate_data", "candidate_kind")).to eq("parameter")
       expect(source.dig("counts", "flow_read")).to be >= 2

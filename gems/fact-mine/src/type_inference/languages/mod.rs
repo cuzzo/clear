@@ -99,17 +99,32 @@ mod tests {
 
     #[test]
     fn delegates_native_collection_spellings_to_language_adapters() {
-        assert!(matches!(parse("ArrayList<String>", "java"), TypeExpr::Array(_)));
+        assert!(matches!(
+            parse("ArrayList<String>", "java"),
+            TypeExpr::Array(_)
+        ));
         assert_eq!(
             parse("List<String>", "java"),
             TypeExpr::Primitive("List<String>".into())
         );
-        assert!(matches!(parse("List<string>", "csharp"), TypeExpr::Array(_)));
-        assert!(matches!(parse("std::vector<int>", "cpp"), TypeExpr::Array(_)));
-        assert!(matches!(parse("ArrayList<String>", "kotlin"), TypeExpr::Array(_)));
+        assert!(matches!(
+            parse("List<string>", "csharp"),
+            TypeExpr::Array(_)
+        ));
+        assert!(matches!(
+            parse("std::vector<int>", "cpp"),
+            TypeExpr::Array(_)
+        ));
+        assert!(matches!(
+            parse("ArrayList<String>", "kotlin"),
+            TypeExpr::Array(_)
+        ));
         assert!(matches!(parse("[String]", "swift"), TypeExpr::Array(_)));
         assert!(matches!(parse("Vec<String>", "rust"), TypeExpr::Array(_)));
-        assert!(matches!(parse("std.ArrayList(u8)", "zig"), TypeExpr::Array(_)));
+        assert!(matches!(
+            parse("std.ArrayList(u8)", "zig"),
+            TypeExpr::Array(_)
+        ));
         assert!(matches!(parse("array", "php"), TypeExpr::Array(_)));
     }
 }

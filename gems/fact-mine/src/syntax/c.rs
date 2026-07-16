@@ -4,11 +4,12 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    configured_intrinsic_call_complexity, eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallComplexity, NormalizedCallParts,
+    configured_intrinsic_call_complexity, eliminable_guard_from_call, nil_guard_from_predicates,
+    scip_descriptor_owner, scip_global_parts, NormalizedCallComplexity, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
     NormalizedSemanticEffect,
 };
-use super::CallSite;
+use super::{CallSite, ExternalSymbolMetadata};
 use crate::ast::{Node, Span};
 use std::collections::BTreeMap;
 
@@ -44,6 +45,34 @@ const C_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
 const C_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const C_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+fn scip_clang_parts(symbol: &str) -> Option<(&str, &str)> {
+    let (package, _version, descriptor) = scip_global_parts(symbol, "cxx", ".")?;
+    Some((package, descriptor))
+}
+
+pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
+    let Some((package, _descriptor)) = scip_clang_parts(symbol) else {
+        return ExternalSymbolMetadata {
+            scope: "dynamic",
+            missing_cost_kind: "callback_or_function_value_origin_unknown".to_string(),
+            parametric_cost: None,
+        };
+    };
+    // Clang's SCIP symbols intentionally do not claim that an un-packaged C
+    // global came from libc rather than a project header. Preserve that
+    // uncertainty instead of turning a familiar spelling into fake proof.
+    ExternalSymbolMetadata {
+        scope: if package == "." { "external" } else { "dependency" },
+        missing_cost_kind: "dependency_cost_model_missing".to_string(),
+        parametric_cost: None,
+    }
+}
+
+pub(crate) fn external_symbol_owner(symbol: &str) -> Option<String> {
+    let (_package, descriptor) = scip_clang_parts(symbol)?;
+    scip_descriptor_owner(descriptor)
+}
+
 // CFG-SPECIFIC START: C control-flow vocabulary.
 const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
     iterator_messages: &[],
@@ -54,12 +83,15 @@ const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
-    fn function_dispatch_kind_from_node(
-        &self,
-        _name: &str,
-        _node: &Node,
-        _owner: &str,
-    ) -> String {
+    fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
+        external_symbol_metadata(symbol)
+    }
+
+    fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
+        external_symbol_owner(symbol)
+    }
+
+    fn function_dispatch_kind_from_node(&self, _name: &str, _node: &Node, _owner: &str) -> String {
         // C functions are lexical/file-scope symbols. Some existing state
         // projections assign a synthetic struct owner to receiver-style APIs;
         // that owner is not an instance-dispatch fact.
@@ -105,7 +137,9 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     }
 
     fn state_identity(&self, owner: &str, field: &str) -> String {
-        (!owner.is_empty()).then(|| format!("{owner}::{field}")).unwrap_or_default()
+        (!owner.is_empty())
+            .then(|| format!("{owner}::{field}"))
+            .unwrap_or_default()
     }
 
     fn suppress_state_read_for_call(

@@ -4,8 +4,9 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    configured_collection_operation, eliminable_guard_from_call, nil_guard_from_predicates, CardinalityCallSemantics, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedCollectionOperation, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    configured_collection_operation, eliminable_guard_from_call, nil_guard_from_predicates,
+    CardinalityCallSemantics, NormalizedCallParts, NormalizedCallProjection,
+    NormalizedCollectionOperation, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedSemanticEffect, NormalizedStateRead,
 };
 use super::CallSite;
@@ -76,6 +77,26 @@ const PYTHON_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct PythonNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
+    fn owner_supertypes(&self, node: &Node) -> Vec<String> {
+        let header = node.text.lines().next().unwrap_or(&node.text);
+        let Some(open) = header.find('(') else {
+            return Vec::new();
+        };
+        let Some(close) = header.rfind(')') else {
+            return Vec::new();
+        };
+        (open < close)
+            .then(|| {
+                super::normalized_behavior::split_declared_supertypes(&header[open + 1..close])
+            })
+            .map(|rows| rows.into_iter().filter(|row| !row.contains('=')).collect())
+            .unwrap_or_default()
+    }
+
+    fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
+        super::normalized_behavior::type_after_local_colon(source, name)
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("python")
     }
@@ -107,7 +128,11 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
     }
 
     fn iteration_bound_argument(&self, message: &str, argument_count: usize) -> Option<usize> {
-        (message == "range" && argument_count > 0).then_some(if argument_count == 1 { 0 } else { 1 })
+        (message == "range" && argument_count > 0).then_some(if argument_count == 1 {
+            0
+        } else {
+            1
+        })
     }
     fn self_member_receiver(&self, message: &str) -> String {
         format!("self.{message}")
@@ -170,7 +195,19 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
     }
 
     fn mutating_receiver_message(&self, message: &str) -> bool {
-        matches!(message, "append" | "clear" | "discard" | "extend" | "insert" | "pop" | "remove" | "reverse" | "sort" | "update")
+        matches!(
+            message,
+            "append"
+                | "clear"
+                | "discard"
+                | "extend"
+                | "insert"
+                | "pop"
+                | "remove"
+                | "reverse"
+                | "sort"
+                | "update"
+        )
     }
 
     fn state_read_uses_access_span(&self, _call: &NormalizedCallProjection) -> bool {
@@ -318,6 +355,7 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
                         field: name.to_string(),
                         owner: String::new(),
                         r#type: Some(type_text),
+                        immutable: false,
                         file: String::new(),
                         line: node.first_lineno,
                         span: span(node),
@@ -343,6 +381,7 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
                         field: name.to_string(),
                         owner: String::new(),
                         r#type: Some(type_text),
+                        immutable: false,
                         file: String::new(),
                         line: node.first_lineno,
                         span: span(node),
@@ -366,7 +405,8 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None" {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None"
+        {
             return type_text.to_string();
         }
         if type_text.starts_with("Optional[") {
@@ -522,12 +562,21 @@ mod tests {
 
         // 5. function_visibility
         assert_eq!(b.function_visibility("_foo", &node("", ""), &[]), "private");
-        assert_eq!(b.function_visibility("__foo__", &node("", ""), &[]), "public");
+        assert_eq!(
+            b.function_visibility("__foo__", &node("", ""), &[]),
+            "public"
+        );
         assert_eq!(b.function_visibility("foo", &node("", ""), &[]), "public");
 
         // 6. parameter_name_from_signature
-        assert_eq!(b.parameter_name_from_signature("*args"), Some("args".to_string()));
-        assert_eq!(b.parameter_name_from_signature("x: int = 1"), Some("x".to_string()));
+        assert_eq!(
+            b.parameter_name_from_signature("*args"),
+            Some("args".to_string())
+        );
+        assert_eq!(
+            b.parameter_name_from_signature("x: int = 1"),
+            Some("x".to_string())
+        );
 
         // 7. state_read_uses_access_span
         assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
@@ -539,48 +588,64 @@ mod tests {
         }));
 
         // 8. suppress_state_read_for_call
-        assert!(!b.suppress_state_read_for_call(&NormalizedCallProjection {
-            receiver: "self".to_string(),
-            message: "callback".to_string(),
-            arguments: Vec::new(),
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }, ""));
-        assert!(!b.suppress_state_read_for_call(&NormalizedCallProjection {
-            receiver: "self".to_string(),
-            message: "render".to_string(),
-            arguments: vec!["value".to_string()],
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }, "self.render(value)"));
-        assert!(!b.suppress_state_read_for_call(&NormalizedCallProjection {
-            receiver: "self".to_string(),
-            message: "theme".to_string(),
-            arguments: Vec::new(),
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }, "self.theme"));
-        assert!(b.suppress_method_call_state_read(&NormalizedCallProjection {
-            receiver: "self".to_string(),
-            message: "render".to_string(),
-            arguments: vec!["value".to_string()],
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }));
-        assert!(!b.suppress_method_call_state_read(&NormalizedCallProjection {
-            receiver: "service".to_string(),
-            message: "render".to_string(),
-            arguments: vec!["value".to_string()],
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }));
+        assert!(!b.suppress_state_read_for_call(
+            &NormalizedCallProjection {
+                receiver: "self".to_string(),
+                message: "callback".to_string(),
+                arguments: Vec::new(),
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            },
+            ""
+        ));
+        assert!(!b.suppress_state_read_for_call(
+            &NormalizedCallProjection {
+                receiver: "self".to_string(),
+                message: "render".to_string(),
+                arguments: vec!["value".to_string()],
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            },
+            "self.render(value)"
+        ));
+        assert!(!b.suppress_state_read_for_call(
+            &NormalizedCallProjection {
+                receiver: "self".to_string(),
+                message: "theme".to_string(),
+                arguments: Vec::new(),
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            },
+            "self.theme"
+        ));
+        assert!(
+            b.suppress_method_call_state_read(&NormalizedCallProjection {
+                receiver: "self".to_string(),
+                message: "render".to_string(),
+                arguments: vec!["value".to_string()],
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            })
+        );
+        assert!(
+            !b.suppress_method_call_state_read(&NormalizedCallProjection {
+                receiver: "service".to_string(),
+                message: "render".to_string(),
+                arguments: vec!["value".to_string()],
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            })
+        );
 
         // 9. property_read_call
-        assert!(b.property_read_call(&node("CALL", "(x.y)"), &NormalizedCallParts {
-            receiver: "x".to_string(),
-            message: "y".to_string(),
-            arguments: Vec::new(),
-        }));
+        assert!(b.property_read_call(
+            &node("CALL", "(x.y)"),
+            &NormalizedCallParts {
+                receiver: "x".to_string(),
+                message: "y".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
 
         // 10. embedded_member_reads
         let reads = b.embedded_member_reads(&node("", "self.field_lock"));
@@ -601,7 +666,9 @@ mod tests {
         let reads_node = b.node_state_reads(&node("EXPRESSION_STATEMENT", "self.x = self.y"));
         assert_eq!(reads_node.len(), 1);
         assert_eq!(reads_node[0].field, "y");
-        assert!(b.node_state_reads(&node("EXPRESSION_STATEMENT", "self.x = y")).is_empty());
+        assert!(b
+            .node_state_reads(&node("EXPRESSION_STATEMENT", "self.x = y"))
+            .is_empty());
         // Cover line 339 (contains = but not .)
         let reads_no_dots = b.node_state_reads(&node("EXPRESSION_STATEMENT", "x = y"));
         assert!(reads_no_dots.is_empty());
@@ -615,32 +682,39 @@ mod tests {
         assert!(!b.wrap_branch_predicate(&node("", "")));
 
         // 14. owner_name_span
-        assert!(b.owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4]).is_some());
+        assert!(b
+            .owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4])
+            .is_some());
 
         // 15. nil_guard_fact
         assert!(b.nil_guard_fact("is_none", "x").is_some());
 
         // 16. semantic_effect_for_call
-        assert!(b.semantic_effect_for_call(&CallSite {
-            receiver: "x".to_string(),
-            message: "is_none".to_string(),
-            file: "".to_string(),
-            function: "".to_string(),
-            owner: "".to_string(),
-            line: 1,
-            span: [1, 2, 3, 4],
-            conditional: false,
-            arguments: Vec::new(),
-            control: None,
-            safe_navigation: false,
-            block: false,
-        }).is_some());
+        assert!(b
+            .semantic_effect_for_call(&CallSite {
+                receiver: "x".to_string(),
+                message: "is_none".to_string(),
+                file: "".to_string(),
+                function: "".to_string(),
+                owner: "".to_string(),
+                line: 1,
+                span: [1, 2, 3, 4],
+                conditional: false,
+                arguments: Vec::new(),
+                control: None,
+                safe_navigation: false,
+                block: false,
+            })
+            .is_some());
 
         // 17. local_flow_declaration_keyword
         assert!(!b.local_flow_declaration_keyword("int"));
 
         // 18. local_flow_keyword
-        for kw in &["as", "break", "class", "continue", "else", "False", "false", "for", "if", "in", "None", "return", "self", "True", "true", "while"] {
+        for kw in &[
+            "as", "break", "class", "continue", "else", "False", "false", "for", "if", "in",
+            "None", "return", "self", "True", "true", "while",
+        ] {
             assert!(b.local_flow_keyword(kw));
         }
         assert!(!b.local_flow_keyword("not_a_keyword"));
@@ -650,27 +724,44 @@ mod tests {
         let child1 = node("identifier", "self.myField");
         let child2 = node("type", "int");
         let mut decl_node = node("annotated_assignment", "self.myField: int");
-        decl_node.children = vec![
-            Child::Node(Box::new(child1)),
-            Child::Node(Box::new(child2)),
-        ];
-        let decl = b.state_declaration_from_node(&decl_node, "MyClass", false).unwrap();
+        decl_node.children = vec![Child::Node(Box::new(child1)), Child::Node(Box::new(child2))];
+        let decl = b
+            .state_declaration_from_node(&decl_node, "MyClass", false)
+            .unwrap();
         assert_eq!(decl.field, "myField");
         assert_eq!(decl.r#type, Some("int".to_string()));
 
         // Text-based fallback branch
         let field_node = node("annotated_assignment", "self.myField: int = 123");
-        let decl_fallback = b.state_declaration_from_node(&field_node, "MyClass", false).unwrap();
+        let decl_fallback = b
+            .state_declaration_from_node(&field_node, "MyClass", false)
+            .unwrap();
         assert_eq!(decl_fallback.field, "myField");
         assert_eq!(decl_fallback.r#type, Some("int".to_string()));
 
         // None branches
-        assert!(b.state_declaration_from_node(&node("annotated_assignment", "no_colon"), "MyClass", false).is_none());
-        assert!(b.state_declaration_from_node(&node("other", "self.x: int"), "MyClass", false).is_none());
+        assert!(b
+            .state_declaration_from_node(
+                &node("annotated_assignment", "no_colon"),
+                "MyClass",
+                false
+            )
+            .is_none());
+        assert!(b
+            .state_declaration_from_node(&node("other", "self.x: int"), "MyClass", false)
+            .is_none());
         let field_node_no_self = node("annotated_assignment", "myField: int = 123");
-        assert!(b.state_declaration_from_node(&field_node_no_self, "MyClass", true).is_none());
+        assert!(b
+            .state_declaration_from_node(&field_node_no_self, "MyClass", true)
+            .is_none());
         // Cover line 283 (empty type_text after colon)
-        assert!(b.state_declaration_from_node(&node("annotated_assignment", "self.myField:"), "MyClass", false).is_none());
+        assert!(b
+            .state_declaration_from_node(
+                &node("annotated_assignment", "self.myField:"),
+                "MyClass",
+                false
+            )
+            .is_none());
 
         // 20-26. formatting
         assert_eq!(b.format_array_type("Int"), "List[Int]");

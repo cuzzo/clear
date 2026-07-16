@@ -5,12 +5,13 @@ use super::cfg::ControlFlowProfile;
 use super::effects::effect_from_call_with_lexicon;
 use super::javascript;
 use super::normalized_behavior::{
-    configured_collection_operation, configured_intrinsic_call_complexity, eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    configured_collection_operation, configured_intrinsic_call_complexity,
+    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedCollectionOperation, NormalizedLanguageBehavior,
     NormalizedNilGuardFact, NormalizedSemanticEffect,
 };
 use super::CallSite;
-use super::StateDeclaration;
+use super::{ExternalCallComplexity, StateDeclaration};
 use crate::ast::Child;
 use crate::ast::{Node, Span};
 
@@ -30,6 +31,45 @@ const TYPESCRIPT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct TypeScriptNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
+    fn external_symbol_call_complexity(
+        &self,
+        symbol: &str,
+        message: &str,
+    ) -> Option<ExternalCallComplexity> {
+        javascript::external_symbol_call_complexity_for("typescript", symbol, message)
+    }
+
+    fn external_symbol_metadata(&self, symbol: &str) -> super::ExternalSymbolMetadata {
+        javascript::external_symbol_metadata_for("typescript", symbol)
+    }
+
+    fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
+        javascript::external_symbol_owner(symbol)
+    }
+
+    fn owner_supertypes(&self, node: &Node) -> Vec<String> {
+        let header = node.text.split('{').next().unwrap_or(&node.text);
+        let mut rows = super::normalized_behavior::declared_supertype_clause(
+            header,
+            "extends",
+            &["implements"],
+        )
+        .map(super::normalized_behavior::split_declared_supertypes)
+        .unwrap_or_default();
+        if let Some(clause) =
+            super::normalized_behavior::declared_supertype_clause(header, "implements", &[])
+        {
+            rows.extend(super::normalized_behavior::split_declared_supertypes(
+                clause,
+            ));
+        }
+        rows
+    }
+
+    fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
+        super::normalized_behavior::type_after_local_colon(source, name)
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("typescript")
     }
@@ -86,7 +126,19 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
     }
 
     fn mutating_receiver_message(&self, message: &str) -> bool {
-        matches!(message, "add" | "delete" | "pop" | "push" | "reverse" | "set" | "shift" | "sort" | "splice" | "unshift")
+        matches!(
+            message,
+            "add"
+                | "delete"
+                | "pop"
+                | "push"
+                | "reverse"
+                | "set"
+                | "shift"
+                | "sort"
+                | "splice"
+                | "unshift"
+        )
     }
 
     fn wrap_branch_predicate(&self, branch: &Node) -> bool {
@@ -257,6 +309,7 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
                         field: name.to_string(),
                         owner: String::new(),
                         r#type: Some(type_text),
+                        immutable: false,
                         file: String::new(),
                         line: node.first_lineno,
                         span: span(node),
@@ -306,6 +359,7 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
                         field: name.to_string(),
                         owner: String::new(),
                         r#type: Some(type_text),
+                        immutable: false,
                         file: String::new(),
                         line: node.first_lineno,
                         span: span(node),
@@ -446,23 +500,57 @@ mod tests {
             crate::type_inference::TypeExpr::Primitive("string".to_string()),
         ));
         let hash = crate::type_inference::TypeExpr::Hash {
-            key: Box::new(crate::type_inference::TypeExpr::Primitive("string".to_string())),
-            value: Box::new(crate::type_inference::TypeExpr::Primitive("number".to_string())),
+            key: Box::new(crate::type_inference::TypeExpr::Primitive(
+                "string".to_string(),
+            )),
+            value: Box::new(crate::type_inference::TypeExpr::Primitive(
+                "number".to_string(),
+            )),
         };
         let set = crate::type_inference::TypeExpr::Set(Box::new(
             crate::type_inference::TypeExpr::Primitive("string".to_string()),
         ));
         let string = crate::type_inference::TypeExpr::Primitive("string".to_string());
-        assert_eq!(b.collection_operation(&array, "at"), Some(NormalizedCollectionOperation::Constant));
-        assert_eq!(b.collection_operation(&array, "includes"), Some(NormalizedCollectionOperation::LinearScan));
-        assert_eq!(b.collection_operation(&array, "map"), Some(NormalizedCollectionOperation::LinearMaterialize));
-        assert_eq!(b.collection_operation(&array, "sort"), Some(NormalizedCollectionOperation::Sort));
-        assert_eq!(b.collection_operation(&hash, "get"), Some(NormalizedCollectionOperation::Constant));
-        assert_eq!(b.collection_operation(&hash, "entries"), Some(NormalizedCollectionOperation::LinearMaterialize));
-        assert_eq!(b.collection_operation(&set, "has"), Some(NormalizedCollectionOperation::Constant));
-        assert_eq!(b.collection_operation(&string, "search"), Some(NormalizedCollectionOperation::LinearScan));
-        assert_eq!(b.collection_operation(&string, "split"), Some(NormalizedCollectionOperation::LinearMaterialize));
-        assert_eq!(b.collection_operation(&string, "length"), Some(NormalizedCollectionOperation::Constant));
+        assert_eq!(
+            b.collection_operation(&array, "at"),
+            Some(NormalizedCollectionOperation::Constant)
+        );
+        assert_eq!(
+            b.collection_operation(&array, "includes"),
+            Some(NormalizedCollectionOperation::LinearScan)
+        );
+        assert_eq!(
+            b.collection_operation(&array, "map"),
+            Some(NormalizedCollectionOperation::LinearMaterialize)
+        );
+        assert_eq!(
+            b.collection_operation(&array, "sort"),
+            Some(NormalizedCollectionOperation::Sort)
+        );
+        assert_eq!(
+            b.collection_operation(&hash, "get"),
+            Some(NormalizedCollectionOperation::Constant)
+        );
+        assert_eq!(
+            b.collection_operation(&hash, "entries"),
+            Some(NormalizedCollectionOperation::LinearMaterialize)
+        );
+        assert_eq!(
+            b.collection_operation(&set, "has"),
+            Some(NormalizedCollectionOperation::Constant)
+        );
+        assert_eq!(
+            b.collection_operation(&string, "search"),
+            Some(NormalizedCollectionOperation::LinearScan)
+        );
+        assert_eq!(
+            b.collection_operation(&string, "split"),
+            Some(NormalizedCollectionOperation::LinearMaterialize)
+        );
+        assert_eq!(
+            b.collection_operation(&string, "length"),
+            Some(NormalizedCollectionOperation::Constant)
+        );
         assert_eq!(b.collection_operation(&array, "unknown"), None);
 
         assert!(b.wrap_branch_predicate(&node("IF", "")));

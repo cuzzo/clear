@@ -62,3 +62,9 @@ Intrinsic:
   "String.IsNullOrEmpty": constant
   "String.IsNullOrWhiteSpace": linear_scan
   "String.Join": linear_materialize
+Namespace:
+  System: declaration
+NonCallConstruct:
+  nameof: declaration
+  sizeof: declaration
+  typeof: declaration

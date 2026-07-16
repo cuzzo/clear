@@ -100,7 +100,9 @@ const KOTLIN_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
 // CFG-SPECIFIC START: Kotlin control-flow vocabulary.
 const KOTLIN_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
-    iterator_messages: &["all", "any", "filter", "flatMap", "fold", "forEach", "map", "none", "reduce"],
+    iterator_messages: &[
+        "all", "any", "filter", "flatMap", "fold", "forEach", "map", "none", "reduce",
+    ],
     ignored_callback_body_sources: &[],
 };
 // CFG-SPECIFIC END
@@ -108,6 +110,10 @@ const KOTLIN_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct KotlinNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
+    fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
+        super::normalized_behavior::type_after_local_colon(source, name)
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("kotlin")
     }
@@ -260,6 +266,7 @@ impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
                     field: name.to_string(),
                     owner: String::new(),
                     r#type: Some(type_part.to_string()),
+                    immutable: false,
                     file: String::new(),
                     line: node.first_lineno,
                     span: span(node),
@@ -381,23 +388,40 @@ mod tests {
         let b = KotlinNormalizedBehavior;
 
         // 1. owner_name_span
-        assert!(b.owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4]).is_some());
+        assert!(b
+            .owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4])
+            .is_some());
 
         // 2. function_visibility
-        assert_eq!(b.function_visibility("foo", &node("FUN", "private fun foo()"), &[]), "private");
-        assert_eq!(b.function_visibility("foo", &node("FUN", "fun foo()"), &[]), "public");
+        assert_eq!(
+            b.function_visibility("foo", &node("FUN", "private fun foo()"), &[]),
+            "private"
+        );
+        assert_eq!(
+            b.function_visibility("foo", &node("FUN", "fun foo()"), &[]),
+            "public"
+        );
 
         // 3. parameter_name_from_signature
-        assert_eq!(b.parameter_name_from_signature("vararg items: String"), Some("items".to_string()));
-        assert_eq!(b.parameter_name_from_signature("items: String"), Some("items".to_string()));
+        assert_eq!(
+            b.parameter_name_from_signature("vararg items: String"),
+            Some("items".to_string())
+        );
+        assert_eq!(
+            b.parameter_name_from_signature("items: String"),
+            Some("items".to_string())
+        );
         assert_eq!(b.parameter_name_from_signature("invalid signature"), None);
 
         // 4. property_read_call
-        assert!(b.property_read_call(&node("CALL", "x.y"), &NormalizedCallParts {
-            receiver: "x".to_string(),
-            message: "y".to_string(),
-            arguments: Vec::new(),
-        }));
+        assert!(b.property_read_call(
+            &node("CALL", "x.y"),
+            &NormalizedCallParts {
+                receiver: "x".to_string(),
+                message: "y".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
 
         // 5. state_read_uses_access_span
         assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
@@ -409,19 +433,26 @@ mod tests {
         }));
 
         // 6. suppress_state_read_for_call
-        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
-            receiver: "self".to_string(),
-            message: "callback".to_string(),
-            arguments: Vec::new(),
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }, ""));
+        assert!(b.suppress_state_read_for_call(
+            &NormalizedCallProjection {
+                receiver: "self".to_string(),
+                message: "callback".to_string(),
+                arguments: Vec::new(),
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            },
+            ""
+        ));
 
         // 7. call_site_span
         assert_eq!(
             b.call_site_span(
                 &node("CALL", ""),
-                &NormalizedCallParts { receiver: "self".to_string(), message: "defaultCase".to_string(), arguments: Vec::new() },
+                &NormalizedCallParts {
+                    receiver: "self".to_string(),
+                    message: "defaultCase".to_string(),
+                    arguments: Vec::new()
+                },
                 [1, 2, 3, 4],
                 [5, 6, 7, 8],
                 "process"
@@ -431,7 +462,11 @@ mod tests {
         assert_eq!(
             b.call_site_span(
                 &node("CALL", ""),
-                &NormalizedCallParts { receiver: "item".to_string(), message: "children".to_string(), arguments: Vec::new() },
+                &NormalizedCallParts {
+                    receiver: "item".to_string(),
+                    message: "children".to_string(),
+                    arguments: Vec::new()
+                },
                 [1, 2, 3, 4],
                 [5, 6, 7, 8],
                 "foo"
@@ -441,7 +476,11 @@ mod tests {
         assert_eq!(
             b.call_site_span(
                 &node("CALL", ""),
-                &NormalizedCallParts { receiver: "other".to_string(), message: "foo".to_string(), arguments: Vec::new() },
+                &NormalizedCallParts {
+                    receiver: "other".to_string(),
+                    message: "foo".to_string(),
+                    arguments: Vec::new()
+                },
                 [1, 2, 3, 4],
                 [5, 6, 7, 8],
                 "foo"
@@ -459,27 +498,48 @@ mod tests {
         assert!(b.terminating_call_message("TODO"));
 
         // 11. semantic_effect_for_call
-        assert!(b.semantic_effect_for_call(&CallSite {
-            receiver: "x".to_string(),
-            message: "isNull".to_string(),
-            file: "".to_string(),
-            function: "".to_string(),
-            owner: "".to_string(),
-            line: 1,
-            span: [1, 2, 3, 4],
-            conditional: false,
-            arguments: Vec::new(),
-            control: None,
-            safe_navigation: false,
-            block: false,
-        }).is_some());
+        assert!(b
+            .semantic_effect_for_call(&CallSite {
+                receiver: "x".to_string(),
+                message: "isNull".to_string(),
+                file: "".to_string(),
+                function: "".to_string(),
+                owner: "".to_string(),
+                line: 1,
+                span: [1, 2, 3, 4],
+                conditional: false,
+                arguments: Vec::new(),
+                control: None,
+                safe_navigation: false,
+                block: false,
+            })
+            .is_some());
 
         // 12. local_flow_declaration_keyword
         assert!(b.local_flow_declaration_keyword("val"));
 
         // 13. local_flow_keyword
         assert!(b.local_flow_keyword("val"));
-        for kw in &["as", "break", "class", "continue", "else", "false", "for", "fun", "if", "in", "null", "private", "protected", "public", "return", "this", "true", "while"] {
+        for kw in &[
+            "as",
+            "break",
+            "class",
+            "continue",
+            "else",
+            "false",
+            "for",
+            "fun",
+            "if",
+            "in",
+            "null",
+            "private",
+            "protected",
+            "public",
+            "return",
+            "this",
+            "true",
+            "while",
+        ] {
             assert!(b.local_flow_keyword(kw));
         }
         assert!(!b.local_flow_keyword("not_a_keyword"));
@@ -493,7 +553,9 @@ mod tests {
         assert!(decl.is_some());
         assert_eq!(decl.as_ref().unwrap().field, "myProperty");
         assert_eq!(decl.as_ref().unwrap().r#type, Some("String".to_string()));
-        assert!(b.state_declaration_from_node(&prop_node, "MyClass", true).is_none());
+        assert!(b
+            .state_declaration_from_node(&prop_node, "MyClass", true)
+            .is_none());
 
         // 16-20. formatting
         assert_eq!(b.format_array_type("Int"), "List<Int>");

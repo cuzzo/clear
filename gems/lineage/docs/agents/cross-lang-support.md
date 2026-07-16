@@ -70,6 +70,9 @@ This is a validation corpus, not a benchmark leaderboard.  A tool finding
 little in a repository is not a success by itself: reviewers must also inspect
 the deliberately chosen challenge surfaces below and record missed findings.
 
+Current exact-target and unresolved-call measurements for this corpus are
+recorded in [`call-resolution-mini-corpus.md`](call-resolution-mini-corpus.md).
+
 ### Sizing and Snapshot Rule
 
 Counts below were measured on 2026-07-15 from shallow checkouts with:

@@ -29,6 +29,18 @@ Array:
   empty?: constant
   push: constant
   pop: constant
+  fetch: constant
+  uniq: linear_materialize
+  reverse: linear_materialize
+  zip: linear_materialize
+  drop: linear_materialize
+  shift: linear_scan
+  unshift: linear_scan
+  count: linear_scan
+  sum: linear_scan
+  delete: linear_scan
+  insert: linear_scan
+  clear: linear_scan
   freeze: constant
   sort: sort
   sort_by: sort
@@ -43,6 +55,13 @@ Hash:
   length: constant
   size: constant
   empty?: constant
+  fetch: constant
+  dig: constant
+  delete: constant
+  merge!: linear_scan
+  replace: linear_scan
+  clear: linear_scan
+  inspect: linear_materialize
   each: linear_scan
   each_key: linear_scan
   each_value: linear_scan
@@ -65,6 +84,12 @@ Set:
   size: constant
   empty?: constant
   add: constant
+  delete: constant
+  add?: constant
+  merge: linear_scan
+  replace: linear_scan
+  intersection: pairwise
+  clear: linear_scan
   insert: constant
   each: linear_scan
   map: linear_materialize
@@ -73,20 +98,197 @@ Set:
   to_a: linear_materialize
 String:
   empty?: constant
-  length: linear_scan
-  size: linear_scan
+  length: constant
+  size: constant
   "[]": linear_materialize
   scan: linear_materialize
   gsub: linear_materialize
   split: linear_materialize
   "+": linear_materialize
+  to_s: constant
+  to_sym: linear_materialize
+  strip: linear_materialize
+  rstrip: linear_materialize
+  chomp: linear_materialize
+  sub: linear_materialize
+  lines: linear_materialize
+  include?: linear_scan
+  start_with?: linear_scan
+  end_with?: linear_scan
+  index: linear_scan
+  rindex: linear_scan
+  match: linear_scan
+  match?: linear_scan
+  bytesize: constant
+  byteslice: linear_materialize
+  delete_prefix: linear_materialize
+  delete_suffix: linear_materialize
+  downcase: linear_materialize
+  inspect: linear_materialize
+  reverse: linear_materialize
+  lstrip: linear_materialize
+  count: linear_scan
+  each_char: linear_scan
+  each_line: linear_scan
+  bytes: linear_materialize
+  getbyte: constant
+  ord: constant
+  to_i: linear_scan
+  to_f: linear_scan
+  tr: linear_materialize
+Symbol:
+  to_s: linear_materialize
+  inspect: linear_materialize
+  to_sym: constant
+  upcase: linear_materialize
+Kernel:
+  is_a?: constant
+  nil?: constant
+  respond_to?: constant
+  object_id: constant
+  freeze: constant
+  dup: linear_materialize
+  to_s: linear_materialize
+  class: constant
+  lambda: constant
+  proc: constant
+  binding: constant
+  methods: linear_materialize
+  hash: linear_scan
+BasicObject:
+  equal?: constant
+Integer:
+  positive?: constant
+  zero?: constant
+  abs: constant
+  to_s: linear_materialize
+  to_f: constant
+  chr: constant
+Float:
+  to_i: constant
+T:
+  must: constant
+  unsafe: constant
+  nilable: constant
+File:
+  join: linear_materialize
+  basename: linear_materialize
+  dirname: linear_materialize
+  expand_path: linear_materialize
+  path: constant
+Regexp:
+  source: constant
+  match: linear_scan
+MatchData:
+  begin: constant
+Class:
+  name: constant
+Time:
+  strftime: linear_materialize
+Enumerable:
+  to_a: linear_materialize
+  count: linear_scan
+  first: constant
+  include?: linear_scan
 StringScanner:
   "[]": constant
   eos?: constant
   scan: linear_scan
   scan_until: linear_scan
-Integer:
-  positive?: constant
 Intrinsic:
   "Array.new": linear_materialize
   "Hash.new": constant
+ExternalLatency:
+  "File.exist?": linear_scan
+  "File.read": linear_materialize
+  "File.write": linear_materialize
+  "Kernel.puts": linear_scan
+  "Kernel.raise": constant
+  "IO.read": linear_materialize
+  "IO.readlines": linear_materialize
+  "IO.write": linear_materialize
+  "IO.flush": constant
+  "IO.popen": linear_scan
+  "IO.foreach": linear_scan
+  "File.mtime": constant
+  "File.delete": linear_scan
+  "File.file?": linear_scan
+  "File.symlink?": linear_scan
+  "File.symlink": linear_scan
+  "File.readlink": linear_materialize
+  "Dir.exist?": linear_scan
+  "Dir.glob": linear_materialize
+  "Dir.pwd": linear_materialize
+  "Kernel.printf": linear_scan
+  "Kernel.warn": linear_scan
+  "Kernel.exit": constant
+  "Kernel.system": linear_scan
+SemanticSymbolParametricCost:
+  'Class#new().': reflective_once
+  'Proc0#call().': callback_once
+  'Proc1#call().': callback_once
+  'Proc2#call().': callback_once
+  'Proc3#call().': callback_once
+  'Proc4#call().': callback_once
+  'Proc5#call().': callback_once
+  'Proc6#call().': callback_once
+  'Proc7#call().': callback_once
+  'Proc#call().': callback_once
+  'BasicObject#__send__().': reflective_once
+  'Kernel#send().': reflective_once
+  'Kernel#public_send().': reflective_once
+  'Kernel#format().': reflective_once
+  'Kernel#inspect().': reflective_once
+  'Kernel#Array().': reflective_once
+  'Kernel#loop().': callback_linear
+  'Range#each().': callback_linear
+  'Array#each().': callback_linear
+  'Array#each_with_index().': callback_linear
+  'Array#map().': callback_linear
+  'Array#select().': callback_linear
+  'Array#reject().': callback_linear
+  'Array#filter().': callback_linear
+  'Array#filter_map().': callback_linear
+  'Hash#each().': callback_linear
+  'Hash#each_key().': callback_linear
+  'Hash#each_value().': callback_linear
+  'Hash#each_pair().': callback_linear
+  'Set#each().': callback_linear
+  'Enumerable#`any?`().': callback_linear
+  'Enumerable#`all?`().': callback_linear
+  'Enumerable#filter_map().': callback_linear
+  'Enumerable#flat_map().': callback_linear
+  'Enumerable#find().': callback_linear
+  'Enumerable#map().': callback_linear
+  'Enumerable#each().': callback_linear
+  'Enumerable#each_with_object().': callback_linear
+  'Enumerable#select().': callback_linear
+  'Enumerable#reduce().': callback_linear
+  'Enumerable#group_by().': callback_linear
+  'Enumerable#find_index().': callback_linear
+  'Enumerable#`none?`().': callback_linear
+Namespace:
+  Array: declaration
+  BasicObject: declaration
+  Class: declaration
+  Dir: declaration
+  Enumerable: declaration
+  Enumerator: declaration
+  File: declaration
+  Float: declaration
+  Hash: declaration
+  IO: declaration
+  Integer: declaration
+  Kernel: declaration
+  MatchData: declaration
+  Module: declaration
+  Object: declaration
+  Pathname: declaration
+  Proc: declaration
+  Range: declaration
+  Regexp: declaration
+  Set: declaration
+  String: declaration
+  Symbol: declaration
+  T: declaration
+  Time: declaration

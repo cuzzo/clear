@@ -26,6 +26,7 @@ struct RawEffect {
     write_type_hints: BTreeMap<String, String>,
     write_value_hints: BTreeMap<String, String>,
     write_sources: BTreeMap<String, String>,
+    write_call_sources: BTreeMap<String, Span>,
     unknown_call: bool,
     complete: bool,
     unknown_reasons: Vec<String>,
@@ -99,6 +100,25 @@ pub(crate) fn extract(
                 Some(syntax_node) => {
                     let target = effect_target(syntax_node, &node.role, profile);
                     collect(target, &mut raw);
+                    let declared_candidates = raw
+                        .writes
+                        .iter()
+                        .chain(raw.reads.iter())
+                        .cloned()
+                        .collect::<BTreeSet<_>>();
+                    for name in declared_candidates {
+                        if raw.write_type_hints.contains_key(&name) {
+                            continue;
+                        }
+                        if let Some(type_name) = behavior.declared_local_type(&target.text, &name) {
+                            if behavior.declared_type_hint_complete(&type_name) {
+                                raw.writes.insert(name.clone());
+                                raw.record_place(name.clone(), "local");
+                                raw.write_type_hints
+                                    .insert(name, format!("declared:{type_name}"));
+                            }
+                        }
+                    }
                     collect_control_bindings(syntax_node, &node.role, &mut raw);
                 }
                 None => {
@@ -187,6 +207,11 @@ pub(crate) fn extract(
                 .write_sources
                 .into_iter()
                 .map(|(target, source)| (id_for(&target), id_for(&source)))
+                .collect(),
+            write_call_sources: raw
+                .write_call_sources
+                .into_iter()
+                .map(|(target, producer_span)| (id_for(&target), producer_span))
                 .collect(),
             unknown_call: raw.unknown_call,
             complete: raw.complete,
@@ -327,6 +352,8 @@ fn collect(node: &Node, effect: &mut RawEffect) {
                     }
                 } else if let Some(source) = direct_read_name(rhs) {
                     effect.write_sources.insert(name, source);
+                } else if let Some(producer_span) = direct_call_result_span(rhs) {
+                    effect.write_call_sources.insert(name, producer_span);
                 }
                 collect(rhs, effect);
             }
@@ -363,6 +390,28 @@ fn literal_value_hint(node: &Node) -> Option<String> {
             Some(Child::Symbol(value)) => Some(format!("symbol:{value}")),
             _ => None,
         },
+        _ => None,
+    }
+}
+
+/// Return a direct normalized call expression through transparent grouping
+/// only. Operations, containers, and member projections are not type-
+/// preserving assignment edges.
+fn direct_call_result_span(node: &Node) -> Option<Span> {
+    match node.r#type.as_str() {
+        "PAREN" | "BEGIN" | "EXPRESSION_LIST" => {
+            let mut children = node.children.iter().filter_map(ast::node);
+            let only = children.next()?;
+            (children.next().is_none())
+                .then(|| direct_call_result_span(only))
+                .flatten()
+        }
+        "CALL" | "QCALL" | "FCALL" | "VCALL" => Some([
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ]),
         _ => None,
     }
 }

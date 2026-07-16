@@ -5759,6 +5759,13 @@ impl<'source> TreeSitterNormalizer<'source> {
             return self.call_block(target);
         }
 
+        if let Some(block) = self
+            .normalization_adapter
+            .call_block_argument(node, self.source)
+        {
+            return Some(block);
+        }
+
         self.named_children(node).into_iter().find(|child| {
             self.normalization_adapter
                 .check_node_role(*child, "block_or_do_block")
@@ -6127,6 +6134,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     pub(in crate::ast) fn class_like_owner_kind(&self, kind: &str) -> bool {
         self.normalization_adapter.class_like_owner_kind(kind)
     }
+
 
     pub(in crate::ast) fn if_node_kind(&self, kind: &str) -> bool {
         self.normalization_adapter.if_node_kind(kind)

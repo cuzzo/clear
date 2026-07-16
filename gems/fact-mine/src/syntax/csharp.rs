@@ -4,11 +4,14 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    configured_collection_operation, eliminable_guard_from_call, nil_guard_from_predicates, type_before_parameter_name, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
-    NormalizedSemanticEffect,
+    configured_collection_operation, configured_intrinsic_call_complexity,
+    configured_semantic_symbol_call_complexity, configured_semantic_symbol_kind,
+    configured_semantic_symbol_parametric_cost, eliminable_guard_from_call,
+    nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
+    type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
+    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
 };
-use super::{CallSite, StateDeclaration};
+use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata, StateDeclaration};
 use crate::ast::{Node, Span};
 use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
 use crate::type_inference::TypeExpr;
@@ -28,6 +31,88 @@ const CSHARP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
 
 pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     nominal::parse(source, &CSHARP_NOMINAL_TYPE_SYNTAX)
+}
+
+fn scip_dotnet_parts(symbol: &str) -> Option<(&str, &str)> {
+    let (package, _version, descriptor) = scip_global_parts(symbol, "scip-dotnet", "nuget")?;
+    Some((package, descriptor))
+}
+
+fn dotnet_framework_package(package: &str) -> bool {
+    package == "Microsoft.CSharp"
+        || package == "Microsoft.VisualBasic.Core"
+        || package.starts_with("System.")
+}
+
+fn descriptor_owner(descriptor: &str) -> Option<String> {
+    scip_descriptor_owner(descriptor).map(|owner| {
+        owner
+            .trim_end_matches("Attribute")
+            .trim_matches('`')
+            .to_string()
+    })
+}
+
+pub(crate) fn external_symbol_call_complexity(
+    symbol: &str,
+    message: &str,
+) -> Option<ExternalCallComplexity> {
+    let (package, descriptor) = scip_dotnet_parts(symbol)?;
+    if !dotnet_framework_package(package)
+        || configured_semantic_symbol_parametric_cost("csharp", descriptor).is_some()
+    {
+        return None;
+    }
+    let owner = descriptor_owner(descriptor);
+    let complexity = configured_semantic_symbol_call_complexity("csharp", descriptor)
+        .or_else(|| {
+            owner.as_deref().and_then(|owner| {
+                configured_intrinsic_call_complexity("csharp", Some(owner), message)
+            })
+        })
+        .or_else(|| {
+            owner.as_deref().and_then(|owner| {
+                CSharpNormalizedBehavior
+                    .call_complexity(&TypeExpr::Primitive(owner.to_string()), message)
+            })
+        })?;
+    Some(ExternalCallComplexity {
+        time: complexity.time,
+        space: complexity.space,
+        provenance: "csharp_scip_symbol_registry",
+        bound_quality: "upper_bound_exact_target",
+        candidates: Vec::new(),
+        assumption: None,
+    })
+}
+
+pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
+    let Some((package, descriptor)) = scip_dotnet_parts(symbol) else {
+        return ExternalSymbolMetadata {
+            scope: "dynamic",
+            missing_cost_kind: "callback_or_function_value_origin_unknown".to_string(),
+            parametric_cost: None,
+        };
+    };
+    if dotnet_framework_package(package) {
+        ExternalSymbolMetadata {
+            scope: "stdlib",
+            missing_cost_kind: configured_semantic_symbol_kind("csharp", descriptor)
+                .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
+            parametric_cost: configured_semantic_symbol_parametric_cost("csharp", descriptor),
+        }
+    } else {
+        ExternalSymbolMetadata {
+            scope: "dependency",
+            missing_cost_kind: "dependency_cost_model_missing".to_string(),
+            parametric_cost: None,
+        }
+    }
+}
+
+pub(crate) fn external_symbol_owner(symbol: &str) -> Option<String> {
+    let (_package, descriptor) = scip_dotnet_parts(symbol)?;
+    descriptor_owner(descriptor)
 }
 
 const CSHARP_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
@@ -95,6 +180,35 @@ const CSHARP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct CSharpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
+    fn external_symbol_call_complexity(
+        &self,
+        symbol: &str,
+        message: &str,
+    ) -> Option<ExternalCallComplexity> {
+        external_symbol_call_complexity(symbol, message)
+    }
+
+    fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
+        external_symbol_metadata(symbol)
+    }
+
+    fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
+        external_symbol_owner(symbol)
+    }
+
+    fn owner_supertypes(&self, node: &Node) -> Vec<String> {
+        let header = node.text.split('{').next().unwrap_or(&node.text);
+        let before_constraints = header.split(" where ").next().unwrap_or(header);
+        before_constraints
+            .split_once(" : ")
+            .map(|(_, clause)| super::normalized_behavior::split_declared_supertypes(clause))
+            .unwrap_or_default()
+    }
+
+    fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
+        super::normalized_behavior::type_before_local_name(source, name)
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("csharp")
     }
@@ -113,19 +227,30 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         format!("this.{message}")
     }
 
-    fn initializer_writes(&self, node: &Node, _source_text: &str, span: Span) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
+    fn initializer_writes(
+        &self,
+        node: &Node,
+        _source_text: &str,
+        span: Span,
+    ) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
         let mut writes = Vec::new();
         if node.r#type == "OBJECT_CREATION_EXPRESSION" {
             let mut type_name = ".literal".to_string();
             for child in &node.children {
                 if let crate::ast::Child::Node(child) = child {
-                    if child.r#type == "IDENTIFIER" || child.r#type == "TYPE_IDENTIFIER" || child.r#type == "LVAR" {
+                    if child.r#type == "IDENTIFIER"
+                        || child.r#type == "TYPE_IDENTIFIER"
+                        || child.r#type == "LVAR"
+                    {
                         type_name = child.text.clone();
                     }
                     if child.r#type == "INITIALIZER_EXPRESSION" {
                         for grand_child in &child.children {
                             if let crate::ast::Child::Node(grand_child) = grand_child {
-                                if grand_child.r#type == "LASGN" || grand_child.r#type == "ASSIGNMENT_EXPRESSION" || grand_child.r#type == "ASSIGNMENT" {
+                                if grand_child.r#type == "LASGN"
+                                    || grand_child.r#type == "ASSIGNMENT_EXPRESSION"
+                                    || grand_child.r#type == "ASSIGNMENT"
+                                {
                                     for key in &grand_child.children {
                                         if let crate::ast::Child::String(key_text) = key {
                                             writes.push(crate::syntax::normalized_behavior::NormalizedStateWrite {
@@ -252,6 +377,7 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
             field,
             owner: owner.to_string(),
             r#type: Some(r#type),
+            immutable: false,
             file: String::new(),
             line: 0,
             span: [0, 0, 0, 0],
@@ -392,8 +518,13 @@ mod tests {
     fn test_csharp_behavior_comprehensive() {
         let b = CSharpNormalizedBehavior;
         assert_eq!(b.self_member_receiver("Foo"), "Foo");
-        assert_eq!(b.explicit_self_state_ref(&node("LVAR", "x"), "Foo"), "this.Foo");
-        assert!(b.initializer_writes(&node("LVAR", "x"), "", [1, 2, 3, 4]).is_empty());
+        assert_eq!(
+            b.explicit_self_state_ref(&node("LVAR", "x"), "Foo"),
+            "this.Foo"
+        );
+        assert!(b
+            .initializer_writes(&node("LVAR", "x"), "", [1, 2, 3, 4])
+            .is_empty());
 
         // Test initializer_writes with nested children representing OBJECT_CREATION_EXPRESSION
         let mut child1 = node("IDENTIFIER", "MyClass");
@@ -449,20 +580,35 @@ mod tests {
         assert_eq!(writes[1].receiver, "MyClass");
         assert_eq!(writes[1].field, "MyField");
 
-        assert_eq!(b.function_visibility("Foo", &node("DEFN", "public void Foo()"), &[]), "public");
-        assert_eq!(b.function_visibility("Foo", &node("DEFN", "protected void Foo()"), &[]), "protected");
-        assert_eq!(b.function_visibility("Foo", &node("DEFN", "void Foo()"), &[]), "private");
+        assert_eq!(
+            b.function_visibility("Foo", &node("DEFN", "public void Foo()"), &[]),
+            "public"
+        );
+        assert_eq!(
+            b.function_visibility("Foo", &node("DEFN", "protected void Foo()"), &[]),
+            "protected"
+        );
+        assert_eq!(
+            b.function_visibility("Foo", &node("DEFN", "void Foo()"), &[]),
+            "private"
+        );
 
-        assert!(b.property_read_call(&node("CALL", "x.Foo"), &NormalizedCallParts {
-            receiver: "x".to_string(),
-            message: "Foo".to_string(),
-            arguments: Vec::new(),
-        }));
-        assert!(!b.property_read_call(&node("VCALL", "Foo"), &NormalizedCallParts {
-            receiver: "".to_string(),
-            message: "Foo".to_string(),
-            arguments: Vec::new(),
-        }));
+        assert!(b.property_read_call(
+            &node("CALL", "x.Foo"),
+            &NormalizedCallParts {
+                receiver: "x".to_string(),
+                message: "Foo".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
+        assert!(!b.property_read_call(
+            &node("VCALL", "Foo"),
+            &NormalizedCallParts {
+                receiver: "".to_string(),
+                message: "Foo".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
 
         assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
             receiver: "x".to_string(),
@@ -472,18 +618,24 @@ mod tests {
             span: [1, 2, 3, 4],
         }));
 
-        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
-            receiver: "self".to_string(),
-            message: "Foo".to_string(),
-            arguments: vec!["a".to_string()],
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }, ""));
+        assert!(b.suppress_state_read_for_call(
+            &NormalizedCallProjection {
+                receiver: "self".to_string(),
+                message: "Foo".to_string(),
+                arguments: vec!["a".to_string()],
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            },
+            ""
+        ));
 
         assert!(b.implicit_owner_fields());
 
         let field_node = node("FIELD_DECLARATION", "private int _myField;");
-        assert_eq!(b.field_name_from_declaration(&field_node), Some("_myField".to_string()));
+        assert_eq!(
+            b.field_name_from_declaration(&field_node),
+            Some("_myField".to_string())
+        );
         assert_eq!(b.field_name_from_declaration(&node("LVAR", "x")), None);
         let property = b
             .state_declaration_from_function(
@@ -501,7 +653,9 @@ mod tests {
             .is_none());
 
         assert!(!b.wrap_branch_predicate(&node("IF", "if (a)")));
-        assert!(b.owner_name_span("A", &node("CLASS", "class A"), [1, 2, 3, 4]).is_some());
+        assert!(b
+            .owner_name_span("A", &node("CLASS", "class A"), [1, 2, 3, 4])
+            .is_some());
 
         assert!(b.nil_guard_fact("isNull", "x").is_some());
 
@@ -509,20 +663,22 @@ mod tests {
         assert!(b.terminating_call_message("Exit"));
         assert!(!b.terminating_call_message("Foo"));
 
-        assert!(b.semantic_effect_for_call(&CallSite {
-            receiver: "x".to_string(),
-            message: "isNull".to_string(),
-            file: "".to_string(),
-            function: "".to_string(),
-            owner: "".to_string(),
-            line: 1,
-            span: [1, 2, 3, 4],
-            conditional: false,
-            arguments: Vec::new(),
-            control: None,
-            safe_navigation: false,
-            block: false,
-        }).is_some());
+        assert!(b
+            .semantic_effect_for_call(&CallSite {
+                receiver: "x".to_string(),
+                message: "isNull".to_string(),
+                file: "".to_string(),
+                function: "".to_string(),
+                owner: "".to_string(),
+                line: 1,
+                span: [1, 2, 3, 4],
+                conditional: false,
+                arguments: Vec::new(),
+                control: None,
+                safe_navigation: false,
+                block: false,
+            })
+            .is_some());
 
         assert!(b.local_flow_declaration_keyword("int"));
         assert!(b.local_flow_keyword("int"));
@@ -533,7 +689,10 @@ mod tests {
         assert!(!b.predicate_body_language_signal("foo"));
 
         assert_eq!(b.format_array_type("int"), "List<int>");
-        assert_eq!(b.format_hash_type("string", "int"), "Dictionary<string, int>");
+        assert_eq!(
+            b.format_hash_type("string", "int"),
+            "Dictionary<string, int>"
+        );
         assert_eq!(b.format_set_type("int"), "HashSet<int>");
 
         assert_eq!(b.format_nilable_type(""), "");

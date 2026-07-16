@@ -594,7 +594,11 @@ mod tests {
         assert_eq!(
             b.call_site_span(
                 &node("CALL", "self:escalate()"),
-                &NormalizedCallParts { receiver: "self".to_string(), message: "escalate".to_string(), arguments: Vec::new() },
+                &NormalizedCallParts {
+                    receiver: "self".to_string(),
+                    message: "escalate".to_string(),
+                    arguments: Vec::new()
+                },
                 [1, 2, 3, 4],
                 [5, 6, 7, 8],
                 "foo"
@@ -604,7 +608,11 @@ mod tests {
         assert_eq!(
             b.call_site_span(
                 &node("CALL", "other()"),
-                &NormalizedCallParts { receiver: "other".to_string(), message: "other".to_string(), arguments: Vec::new() },
+                &NormalizedCallParts {
+                    receiver: "other".to_string(),
+                    message: "other".to_string(),
+                    arguments: Vec::new()
+                },
                 [1, 2, 3, 4],
                 [5, 6, 7, 8],
                 "foo"
@@ -613,20 +621,26 @@ mod tests {
         );
 
         // 6. suppress_state_read_for_call
-        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
-            receiver: "self".to_string(),
-            message: "callback".to_string(),
-            arguments: Vec::new(),
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }, ""));
+        assert!(b.suppress_state_read_for_call(
+            &NormalizedCallProjection {
+                receiver: "self".to_string(),
+                message: "callback".to_string(),
+                arguments: Vec::new(),
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            },
+            ""
+        ));
 
         // 7. property_read_call
-        assert!(b.property_read_call(&node("CALL", "x.y"), &NormalizedCallParts {
-            receiver: "x".to_string(),
-            message: "y".to_string(),
-            arguments: Vec::new(),
-        }));
+        assert!(b.property_read_call(
+            &node("CALL", "x.y"),
+            &NormalizedCallParts {
+                receiver: "x".to_string(),
+                message: "y".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
 
         // 8. embedded_member_reads & node_state_reads
         let reads = b.node_state_reads(&node("DOT_INDEX_EXPRESSION", "self.x"));
@@ -638,12 +652,33 @@ mod tests {
         assert_eq!(b.function_visibility("foo", &node("", ""), &[]), "public");
 
         // 10. owner_for_function & lua_function_owner
-        assert_eq!(b.owner_for_function("foo", &node("FN", "function MyTable:foo()"), "current", "file"), "MyTable");
-        assert_eq!(b.owner_for_function("foo", &node("FN", "function foo()"), "current", "file"), "current");
-        assert_eq!(b.owner_for_function("foo", &node("FN", "function MyTable:foo"), "current", "file"), "MyTable");
+        assert_eq!(
+            b.owner_for_function(
+                "foo",
+                &node("FN", "function MyTable:foo()"),
+                "current",
+                "file"
+            ),
+            "MyTable"
+        );
+        assert_eq!(
+            b.owner_for_function("foo", &node("FN", "function foo()"), "current", "file"),
+            "current"
+        );
+        assert_eq!(
+            b.owner_for_function(
+                "foo",
+                &node("FN", "function MyTable:foo"),
+                "current",
+                "file"
+            ),
+            "MyTable"
+        );
 
         // 11. owner_name_span
-        assert!(b.owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4]).is_some());
+        assert!(b
+            .owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4])
+            .is_some());
 
         // 12. suppress_branch_decision
         assert!(b.suppress_branch_decision(&node("", "elseif x then")));
@@ -655,33 +690,42 @@ mod tests {
         assert!(b.terminating_call_message("error"));
 
         // 15. semantic_effect_for_call
-        assert!(b.semantic_effect_for_call(&CallSite {
-            receiver: "x".to_string(),
-            message: "isNull".to_string(),
-            file: "".to_string(),
-            function: "".to_string(),
-            owner: "".to_string(),
-            line: 1,
-            span: [1, 2, 3, 4],
-            conditional: false,
-            arguments: Vec::new(),
-            control: None,
-            safe_navigation: false,
-            block: false,
-        }).is_some());
+        assert!(b
+            .semantic_effect_for_call(&CallSite {
+                receiver: "x".to_string(),
+                message: "isNull".to_string(),
+                file: "".to_string(),
+                function: "".to_string(),
+                owner: "".to_string(),
+                line: 1,
+                span: [1, 2, 3, 4],
+                conditional: false,
+                arguments: Vec::new(),
+                control: None,
+                safe_navigation: false,
+                block: false,
+            })
+            .is_some());
 
         // 16. local_assignment_writes
-        assert!(b.local_assignment_writes(None, &node("", ""), [1, 2, 3, 4]).is_empty());
+        assert!(b
+            .local_assignment_writes(None, &node("", ""), [1, 2, 3, 4])
+            .is_empty());
         let writes = b.local_assignment_writes(Some("self.field[1]"), &node("", ""), [1, 2, 3, 4]);
         assert_eq!(writes.len(), 1);
         assert_eq!(writes[0].receiver, "self");
         assert_eq!(writes[0].field, "field");
 
-        assert!(b.local_assignment_writes(Some("invalid"), &node("", ""), [1, 2, 3, 4]).is_empty());
+        assert!(b
+            .local_assignment_writes(Some("invalid"), &node("", ""), [1, 2, 3, 4])
+            .is_empty());
 
         // 17. local_flow_declaration_keyword & local_flow_keyword
         assert!(b.local_flow_declaration_keyword("local"));
-        for kw in &["and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in", "nil", "return", "then", "true", "while"] {
+        for kw in &[
+            "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in",
+            "nil", "return", "then", "true", "while",
+        ] {
             assert!(b.local_flow_keyword(kw));
         }
         assert!(!b.local_flow_keyword("not_a_keyword"));
@@ -693,7 +737,9 @@ mod tests {
         assert!(b.predicate_body_language_signal("nil"));
 
         // 20. state_declaration_from_node
-        assert!(b.state_declaration_from_node(&node("", ""), "", false).is_none());
+        assert!(b
+            .state_declaration_from_node(&node("", ""), "", false)
+            .is_none());
 
         // 21-25. formatting
         assert_eq!(b.format_array_type("Int"), "Int[]");

@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     normalized_behavior::{
-        method_parameter_type_key, BlockCallSemantics, CardinalityCallSemantics, CollectionAllocationSemantics,
-        NormalizedCollectionOperation, NormalizedLanguageBehavior,
+        method_parameter_type_key, BlockCallSemantics, CardinalityCallSemantics,
+        CollectionAllocationSemantics, NormalizedCollectionOperation, NormalizedLanguageBehavior,
     },
     Document,
 };
@@ -428,6 +428,9 @@ pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
                 &scoped_type_aliases,
                 document.language.as_str(),
                 behavior,
+                definition.is_none_or(|row| {
+                    row.dispatch_kind == "top" || behavior.supports_implicit_owner_dispatch()
+                }),
             )
         })
         .collect()
@@ -542,6 +545,7 @@ fn fact_for_method(
     type_aliases: &BTreeMap<String, String>,
     language: &str,
     behavior: &dyn NormalizedLanguageBehavior,
+    bare_self_calls_are_recursive: bool,
 ) -> Option<MethodComplexityFacts> {
     let mut domain_registry = DomainRegistry::new(path, owner, function, span);
     for parameter in params {
@@ -607,6 +611,7 @@ fn fact_for_method(
         &visited_guards,
         &mut recursion,
         behavior,
+        bare_self_calls_are_recursive,
     );
     recursion.unknown_progress_calls = recursion.calls.saturating_sub(
         recursion.shrinking_calls + recursion.halving_calls + recursion.visited_guarded_calls,
@@ -1077,13 +1082,11 @@ fn collect_allocations(
                 domain_expression: domain_expression.into_iter().collect(),
                 cardinality_relation: relation.to_string(),
                 bound_classification: bound.to_string(),
-                evidence_gap: (relation == "unknown").then_some(
-                    if receiver_is_call {
-                        "unresolved_materialization_size".to_string()
-                    } else {
-                        "unresolved_allocation_cardinality".to_string()
-                    },
-                ),
+                evidence_gap: (relation == "unknown").then_some(if receiver_is_call {
+                    "unresolved_materialization_size".to_string()
+                } else {
+                    "unresolved_allocation_cardinality".to_string()
+                }),
                 symbolic_size: None,
                 receiver_is_call,
             });
@@ -1376,9 +1379,13 @@ fn visit_loops(
             let domain_id = if domains.len() == 1 {
                 domains.into_iter().next().unwrap()
             } else {
-                if domains.len() > 1 {
-                    symbolic_complete = false;
-                }
+                // A loop may be bounded by a relationship between several
+                // input sizes (for example `left <= right`). Preserve that
+                // relationship as one named composite domain instead of
+                // discarding an otherwise valid upper bound merely because
+                // it cannot be attributed to one parameter. Consumers expose
+                // the domain expression, so O(N) here means O(size(left,
+                // right)), not an unjustified choice of either argument.
                 domain_registry.local_loop(
                     &domain_names,
                     [
@@ -1631,14 +1638,14 @@ fn visit_loops(
                 behavior,
             );
             let known_call_complexity = receiver_type
-            .as_ref()
-            .and_then(|receiver_type| behavior.call_complexity(receiver_type, message))
-            .or_else(|| {
-                behavior.intrinsic_call_complexity(
-                    call_receiver(node).map(|receiver| receiver.text.trim()),
-                    message,
-                )
-            });
+                .as_ref()
+                .and_then(|receiver_type| behavior.call_complexity(receiver_type, message))
+                .or_else(|| {
+                    behavior.intrinsic_call_complexity(
+                        call_receiver(node).map(|receiver| receiver.text.trim()),
+                        message,
+                    )
+                });
             let evidence_gap = known_call_complexity.is_none().then(|| {
                 if behavior.callback_invocation_message(message) {
                     "callback_dispatch".to_string()
@@ -1856,8 +1863,7 @@ fn collect_assignments(
                         .any(|symbol| matches!(symbol.as_str(), "/" | ">>")),
                     empty_collection: rhs
                         .is_some_and(|value| empty_collection_expression(value, behavior)),
-                    fixed_collection: rhs
-                        .is_some_and(fixed_collection_expression),
+                    fixed_collection: rhs.is_some_and(fixed_collection_expression),
                 });
         }
     }
@@ -1874,8 +1880,7 @@ fn collect_collection_mutations(
     if deferred_block(node, behavior) {
         return;
     }
-    if direct_call_message(node)
-        .is_some_and(|message| behavior.mutating_receiver_message(message))
+    if direct_call_message(node).is_some_and(|message| behavior.mutating_receiver_message(message))
     {
         if let Some(receiver) = call_receiver(node) {
             for name in local_names(receiver) {
@@ -2216,12 +2221,13 @@ fn collect_recursion(
     visited_guards: &BTreeSet<String>,
     out: &mut RecursionFacts,
     behavior: &dyn NormalizedLanguageBehavior,
+    bare_self_calls_are_recursive: bool,
 ) {
     if deferred_block(node, behavior) {
         return;
     }
     let now_inside = inside_loop || loop_node(node, behavior);
-    if recursive_self_call(node, function) {
+    if recursive_self_call(node, function, bare_self_calls_are_recursive) {
         out.calls += 1;
         let guarded = !local_names(node).is_disjoint(visited_guards);
         let symbols = descendant_symbols(node);
@@ -2259,6 +2265,7 @@ fn collect_recursion(
             visited_guards,
             out,
             behavior,
+            bare_self_calls_are_recursive,
         );
     }
 }
@@ -2303,12 +2310,12 @@ fn visited_guard_parameters(
     membership.intersection(&insertion).cloned().collect()
 }
 
-fn recursive_self_call(node: &Node, function: &str) -> bool {
+fn recursive_self_call(node: &Node, function: &str, bare_self_calls_are_recursive: bool) -> bool {
     if direct_call_message(node) != Some(function) {
         return false;
     }
     match node.r#type.as_str() {
-        "VCALL" | "FCALL" => true,
+        "VCALL" | "FCALL" => bare_self_calls_are_recursive,
         "CALL" => call_receiver(node).is_some_and(|receiver| receiver.r#type == "SELF"),
         _ => false,
     }
@@ -2688,6 +2695,61 @@ class Cursor:
         language_facts(source, Language::Python, ".py")
     }
 
+    fn java_facts(source: &str) -> Vec<MethodComplexityFacts> {
+        let mut file = tempfile::Builder::new().suffix(".java").tempfile().unwrap();
+        file.write_all(source.as_bytes()).unwrap();
+        let document = syntax::parse_file(file.path().to_path_buf(), Language::Java).unwrap();
+        facts(&document)
+    }
+
+    #[test]
+    fn java_anonymous_owner_methods_emit_complexity_facts() {
+        let rows = java_facts(
+            r#"
+class Example {
+  Comparator<Item> comparator = new Comparator<Item>() {
+    public int compare(Item left, Item right) {
+      return left.value().compareTo(right.value());
+    }
+  };
+}
+"#,
+        );
+
+        let compare = rows.iter().find(|row| row.function == "compare").unwrap();
+        assert_eq!(compare.owner, "Example");
+        assert_eq!(compare.parameters, ["left", "right"]);
+        assert!(compare
+            .call_contexts
+            .iter()
+            .any(|context| context.message == "compareTo"));
+    }
+
+    #[test]
+    fn java_foreach_lambda_multiplies_callback_body_cost() {
+        let rows = java_facts(
+            r#"
+class Example {
+  void apply(java.util.List<Item> items) {
+    items.forEach(item -> consume(item));
+  }
+}
+"#,
+        );
+
+        let apply = rows.iter().find(|row| row.function == "apply").unwrap();
+        assert_eq!(apply.iterations.len(), 1);
+        assert_eq!(apply.iterations[0].execution_multiplicity, "O(N)");
+        let consume = apply
+            .call_contexts
+            .iter()
+            .filter(|context| context.message == "consume")
+            .max_by_key(|context| context.power)
+            .unwrap();
+        assert_eq!(consume.execution_multiplicity, "O(N)");
+        assert_eq!(consume.power, 1);
+    }
+
     fn complexity(rows: &[MethodComplexityFacts], name: &str) -> Option<String> {
         let row = rows.iter().find(|row| row.function == name)?;
         let recursion = &row.recursion;
@@ -2742,6 +2804,31 @@ class Cursor:
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn multi_parameter_loop_bound_uses_a_complete_composite_size_domain() {
+        let rows = language_facts(
+            r#"
+package sample
+
+func search(left, right int) int {
+    for left <= right {
+        left++
+    }
+    return right
+}
+"#,
+            Language::Go,
+            ".go",
+        );
+        let search = rows.iter().find(|row| row.function == "search").unwrap();
+        let iteration = search.iterations.first().unwrap();
+
+        assert_eq!(iteration.execution_multiplicity, "O(N)");
+        assert_eq!(iteration.evidence_gap, None);
+        assert!(iteration.symbolic_time.as_ref().unwrap().complete);
+        assert_eq!(symbolic_factors(&rows, "search"), [("left + right".to_string(), 1)]);
     }
 
     #[test]

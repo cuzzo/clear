@@ -3,11 +3,13 @@
 #[cfg(test)]
 mod architecture_test;
 mod ast;
+pub mod external_summary;
 pub mod parallel;
 pub mod profile;
-pub mod type_inference;
+pub mod scip;
 pub mod syntax;
 pub mod syntax_oracle;
+pub mod type_inference;
 
 pub mod test_helpers {
     pub fn run_all() {

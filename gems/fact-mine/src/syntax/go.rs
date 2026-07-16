@@ -4,12 +4,133 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    configured_collection_operation, configured_intrinsic_call_complexity, eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    configured_collection_operation, configured_external_latency_bound,
+    configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
+    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
+    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
-    NormalizedSemanticEffect, NormalizedStateRead, NormalizedStateWrite,
+    method_param_types_from_signatures, NormalizedSemanticEffect, NormalizedStateRead,
+    NormalizedStateWrite, SyntaxMetadata,
 };
-use super::CallSite;
+use super::{CallSite, ExternalCallComplexity, FunctionDef};
 use crate::ast::{Node, Span};
+use crate::type_inference::TypeExpr;
+use regex::Regex;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::OnceLock;
+
+fn scip_go_parts(symbol: &str) -> Option<(&str, &str)> {
+    let rest = symbol.strip_prefix("scip-go gomod ")?;
+    let mut fields = rest.splitn(3, ' ');
+    let module = fields.next()?;
+    fields.next()?; // module version
+    Some((module, fields.next()?))
+}
+
+fn go_stdlib_module(module: &str) -> bool {
+    module == "github.com/golang/go/src"
+}
+
+fn go_semantic_conversion(descriptor: &str, message: &str) -> bool {
+    !message.is_empty() && descriptor.ends_with(&format!("/{message}#"))
+}
+
+fn go_descriptor_package(descriptor: &str) -> Option<&str> {
+    descriptor
+        .rsplit_once('/')
+        .map(|(package, _)| package.trim_matches('`'))
+        .map(|package| package.rsplit('/').next().unwrap_or(package))
+}
+
+fn go_descriptor_owner(descriptor: &str) -> Option<String> {
+    let package = go_descriptor_package(descriptor)?;
+    let callable = descriptor.rsplit('/').next()?;
+    callable
+        .split_once('#')
+        .map(|(owner, _)| format!("{package}.{}", owner.trim_matches('`')))
+        .or_else(|| Some(package.to_string()))
+}
+
+pub(crate) fn external_symbol_call_complexity(
+    symbol: &str,
+    message: &str,
+) -> Option<ExternalCallComplexity> {
+    let (module, descriptor) = scip_go_parts(symbol)?;
+    // scip-go emits named type conversions as exact term symbols such as
+    // `time/Duration#`. The occurrence plus normalized call syntax proves a
+    // representation-preserving conversion; argument work is independent.
+    if go_semantic_conversion(descriptor, message) {
+        return Some(ExternalCallComplexity {
+            time: "O(1)",
+            space: "O(1)",
+            provenance: "go_semantic_conversion",
+            bound_quality: "upper_bound_exact_target",
+            candidates: Vec::new(),
+            assumption: None,
+        });
+    }
+    if !go_stdlib_module(module)
+        || configured_semantic_symbol_parametric_cost("go", descriptor).is_some()
+    {
+        return None;
+    }
+    let behavior = GoNormalizedBehavior;
+    let package = go_descriptor_package(descriptor);
+    let owner = go_descriptor_owner(descriptor);
+    let complexity = configured_semantic_symbol_call_complexity("go", descriptor)
+        .or_else(|| {
+            owner.as_deref().and_then(|owner| {
+                behavior.call_complexity(&TypeExpr::Primitive(owner.to_string()), message)
+            })
+        })
+        .or_else(|| behavior.intrinsic_call_complexity(package, message));
+    if let Some(complexity) = complexity {
+        return Some(ExternalCallComplexity {
+            time: complexity.time,
+            space: complexity.space,
+            provenance: "go_stdlib_registry",
+            bound_quality: "upper_bound_exact_target",
+            candidates: Vec::new(),
+            assumption: None,
+        });
+    }
+    let complexity = configured_external_latency_bound("go", owner.as_deref()?, message)?;
+    Some(ExternalCallComplexity {
+        time: complexity.time,
+        space: complexity.space,
+        provenance: "go_external_effect_registry",
+        bound_quality: "upper_bound_external_latency_excluded",
+        candidates: Vec::new(),
+        assumption: Some(
+            "computational Big-O only; filesystem, network, scheduler, or stream latency is excluded"
+                .to_string(),
+        ),
+    })
+}
+
+pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMetadata {
+    let Some((module, descriptor)) = scip_go_parts(symbol) else {
+        return super::ExternalSymbolMetadata {
+            scope: "dynamic",
+            missing_cost_kind: "callback_or_function_value_origin_unknown".to_string(),
+            parametric_cost: None,
+        };
+    };
+    if go_stdlib_module(module) {
+        super::ExternalSymbolMetadata {
+            scope: "stdlib",
+            missing_cost_kind: configured_semantic_symbol_kind("go", descriptor)
+                .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
+            parametric_cost: configured_semantic_symbol_parametric_cost("go", descriptor),
+        }
+    } else {
+        super::ExternalSymbolMetadata {
+            scope: "dependency",
+            missing_cost_kind: "dependency_cost_model_missing".to_string(),
+            parametric_cost: None,
+        }
+    }
+}
 
 const GO_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     ("time", &["Now", "Since", "Until"]),
@@ -69,6 +190,58 @@ const GO_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct GoNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for GoNormalizedBehavior {
+    fn external_symbol_call_complexity(
+        &self,
+        symbol: &str,
+        message: &str,
+    ) -> Option<ExternalCallComplexity> {
+        external_symbol_call_complexity(symbol, message)
+    }
+
+    fn external_symbol_metadata(&self, symbol: &str) -> super::ExternalSymbolMetadata {
+        external_symbol_metadata(symbol)
+    }
+
+    fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
+        let (_module, descriptor) = scip_go_parts(symbol)?;
+        go_descriptor_owner(descriptor)
+    }
+
+    fn owner_supertypes(&self, node: &Node) -> Vec<String> {
+        let Some((_, body)) = node.text.split_once('{') else {
+            return Vec::new();
+        };
+        let body = body.rsplit_once('}').map(|(body, _)| body).unwrap_or(body);
+        body.lines()
+            .flat_map(|line| line.split(';'))
+            .filter_map(|declaration| {
+                let declaration = declaration
+                    .split("//")
+                    .next()
+                    .unwrap_or(declaration)
+                    .trim()
+                    .trim_start_matches('*');
+                if declaration.is_empty()
+                    || declaration.contains(char::is_whitespace)
+                    || declaration.contains(['(', ')', '|', '~', '`'])
+                {
+                    return None;
+                }
+                declaration
+                    .chars()
+                    .all(|character| {
+                        character.is_alphanumeric()
+                            || matches!(character, '_' | '.' | '[' | ']' | ',' | '*')
+                    })
+                    .then(|| declaration.to_string())
+            })
+            .collect()
+    }
+
+    fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
+        super::normalized_behavior::type_after_go_local_name(source, name)
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("go")
     }
@@ -101,6 +274,32 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             .collect()
     }
 
+    fn suppress_call_site(&self, node: &Node, call: &NormalizedCallProjection) -> bool {
+        let receiver = call.receiver.trim_start();
+        if call.message == "call"
+            && (receiver.starts_with("func(") || receiver.starts_with('*'))
+        {
+            // Immediately-invoked function bodies and conversion arguments are
+            // visited independently. The synthetic wrapper is not another
+            // dynamically dispatched call.
+            return true;
+        }
+
+        // A selector is not a call unless its selected member is followed by
+        // an argument list. A nested receiver call can otherwise make
+        // `x.make().field` look callable to the shared projection.
+        let source = node.text.trim_end();
+        let selector = format!(".{}", call.message);
+        source
+            .rfind(&selector)
+            .map(|offset| {
+                !source[(offset + selector.len())..]
+                    .trim_start()
+                    .starts_with('(')
+            })
+            .unwrap_or(false)
+    }
+
     fn self_member_receiver(&self, message: &str) -> String {
         format!("self.{message}")
     }
@@ -111,7 +310,11 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         }
         type_name(&node.text).map(|name| NormalizedOwner {
             name,
-            kind: "owner".to_string(),
+            kind: if node.text.contains(" interface") || node.text.contains("interface {") {
+                "interface".to_string()
+            } else {
+                "owner".to_string()
+            },
         })
     }
 
@@ -139,6 +342,7 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             field: name,
             owner: String::new(),
             r#type: Some(ty),
+            immutable: false,
             file: String::new(),
             line: node.first_lineno,
             span: span(node),
@@ -250,6 +454,37 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         (!type_name.is_empty()).then_some(type_name)
     }
 
+    fn syntax_metadata(&self, source: &str, functions: &[FunctionDef]) -> SyntaxMetadata {
+        let method_param_types = method_param_types_from_signatures(self, source, functions);
+        let method_local_types = go_method_local_types(source, functions, &method_param_types);
+        let (type_aliases, type_alias_lines) = go_callable_type_aliases(source);
+        SyntaxMetadata {
+            type_aliases,
+            type_alias_lines,
+            method_param_types,
+            method_local_types,
+            ..SyntaxMetadata::default()
+        }
+    }
+
+    fn declared_callable_cost(&self, declared_type: &str) -> Option<String> {
+        declared_type
+            .trim()
+            .starts_with("func(")
+            .then(|| "callback_once".to_string())
+            .or_else(|| {
+                super::normalized_behavior::configured_callable_type_cost("go", declared_type)
+            })
+    }
+
+    fn owner_kind(&self, node: &Node, default_kind: &str) -> String {
+        if node.text.contains(" interface") || node.text.contains("interface {") {
+            "interface".to_string()
+        } else {
+            default_kind.to_string()
+        }
+    }
+
     fn collection_operation(
         &self,
         receiver_type: &crate::type_inference::TypeExpr,
@@ -264,6 +499,10 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         message: &str,
     ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
         configured_intrinsic_call_complexity("go", receiver, message)
+    }
+
+    fn supports_implicit_owner_dispatch(&self) -> bool {
+        false
     }
 
     fn split_case_source(&self, source: &str) -> Vec<String> {
@@ -314,22 +553,33 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             .unwrap_or_else(|| message.to_string())
     }
 
-    fn initializer_writes(&self, node: &Node, _source_text: &str, span: Span) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
+    fn initializer_writes(
+        &self,
+        node: &Node,
+        _source_text: &str,
+        span: Span,
+    ) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
         let mut writes = Vec::new();
         if node.r#type == "COMPOSITE_LITERAL" {
             let mut type_name = ".literal".to_string();
             let mut is_collection = false;
-            
+
             for child in &node.children {
                 if let crate::ast::Child::Node(child) = child {
-                    if child.r#type == "TYPE_IDENTIFIER" || child.r#type == "IDENTIFIER" || child.r#type == "CONST" {
+                    if child.r#type == "TYPE_IDENTIFIER"
+                        || child.r#type == "IDENTIFIER"
+                        || child.r#type == "CONST"
+                    {
                         type_name = child.text.clone();
-                    } else if child.r#type == "MAP_TYPE" || child.r#type == "SLICE_TYPE" || child.r#type == "ARRAY_TYPE" {
+                    } else if child.r#type == "MAP_TYPE"
+                        || child.r#type == "SLICE_TYPE"
+                        || child.r#type == "ARRAY_TYPE"
+                    {
                         is_collection = true;
                     }
                 }
             }
-            
+
             if !is_collection {
                 for child in &node.children {
                     if let crate::ast::Child::Node(child) = child {
@@ -459,6 +709,185 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     }
 }
 
+fn go_callable_type_aliases(source: &str) -> (BTreeMap<String, String>, BTreeMap<String, usize>) {
+    let mut aliases = BTreeMap::new();
+    let mut lines = BTreeMap::new();
+    for (line_index, line) in source.lines().enumerate() {
+        let Some(declaration) = line.trim().strip_prefix("type ") else {
+            continue;
+        };
+        let name_end = declaration
+            .find(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+            .unwrap_or(declaration.len());
+        let name = &declaration[..name_end];
+        if name.is_empty() {
+            continue;
+        }
+        let mut target = declaration[name_end..].trim_start();
+        if target.starts_with('[') {
+            let mut depth = 0usize;
+            let mut close = None;
+            for (index, character) in target.char_indices() {
+                match character {
+                    '[' => depth += 1,
+                    ']' => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            close = Some(index);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let Some(close) = close else { continue };
+            target = target[(close + 1)..].trim_start();
+        }
+        target = target.strip_prefix('=').unwrap_or(target).trim_start();
+        if !target.starts_with("func(") {
+            continue;
+        }
+        aliases.insert(name.to_string(), target.to_string());
+        lines.insert(name.to_string(), line_index + 1);
+    }
+    (aliases, lines)
+}
+
+fn go_method_local_types(
+    source: &str,
+    functions: &[FunctionDef],
+    param_types: &BTreeMap<String, BTreeMap<String, String>>,
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    static VAR: OnceLock<Regex> = OnceLock::new();
+    static MAKE_CHAN: OnceLock<Regex> = OnceLock::new();
+    static RECEIVE: OnceLock<Regex> = OnceLock::new();
+    static TYPE_SWITCH: OnceLock<Regex> = OnceLock::new();
+    static RANGE: OnceLock<Regex> = OnceLock::new();
+    static STRUCT: OnceLock<Regex> = OnceLock::new();
+    static FIELD: OnceLock<Regex> = OnceLock::new();
+    let var = VAR.get_or_init(|| {
+        Regex::new(r"\bvar\s+([A-Za-z_][A-Za-z0-9_]*)\s+([^\s=;,){}]+)")
+            .expect("valid Go var declaration regex")
+    });
+    let make_chan = MAKE_CHAN.get_or_init(|| {
+        Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*make\s*\(\s*chan\s+([^\s,)]+)")
+            .expect("valid Go channel construction regex")
+    });
+    let receive = RECEIVE.get_or_init(|| {
+        Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*<-\s*([A-Za-z_][A-Za-z0-9_]*)")
+            .expect("valid Go channel receive regex")
+    });
+    let type_switch = TYPE_SWITCH.get_or_init(|| {
+        Regex::new(r"switch\s+([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*([A-Za-z_][A-Za-z0-9_]*)\.\(type\)")
+            .expect("valid Go type switch regex")
+    });
+    let range = RANGE.get_or_init(|| {
+        Regex::new(r"for\s+(?:_|[A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*range\s+([A-Za-z_][A-Za-z0-9_]*)(?:\.([A-Za-z_][A-Za-z0-9_]*))?")
+            .expect("valid Go range declaration regex")
+    });
+    let struct_body = STRUCT.get_or_init(|| {
+        Regex::new(r"(?s)type\s+[A-Za-z_][A-Za-z0-9_]*\s+struct\s*\{(.*?)\}")
+            .expect("valid Go struct regex")
+    });
+    let field = FIELD.get_or_init(|| {
+        Regex::new(r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s+([^\s`]+)")
+            .expect("valid Go field regex")
+    });
+
+    let mut field_types = BTreeMap::<String, BTreeSet<String>>::new();
+    for body in struct_body.captures_iter(source).filter_map(|row| row.get(1)) {
+        for capture in field.captures_iter(body.as_str()) {
+            field_types
+                .entry(capture[1].to_string())
+                .or_default()
+                .insert(capture[2].to_string());
+        }
+    }
+    let stable_fields = field_types
+        .into_iter()
+        .filter_map(|(name, types)| {
+            (types.len() == 1).then(|| (name, types.into_iter().next().unwrap()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let lines = source.lines().collect::<Vec<_>>();
+
+    functions
+        .iter()
+        .filter_map(|function| {
+            let key = super::normalized_behavior::method_parameter_type_key(
+                &function.owner,
+                &function.name,
+                function.line,
+            );
+            let parameters = param_types.get(&key).cloned().unwrap_or_default();
+            let start = function.span[0].saturating_sub(1).min(lines.len());
+            let end = function.span[2].min(lines.len());
+            let body = lines.get(start..end)?.join("\n");
+            let mut candidates = BTreeMap::<String, BTreeSet<String>>::new();
+            let mut known = parameters.clone();
+
+            for capture in var.captures_iter(&body) {
+                candidates
+                    .entry(capture[1].to_string())
+                    .or_default()
+                    .insert(capture[2].to_string());
+                known.insert(capture[1].to_string(), capture[2].to_string());
+            }
+            let mut channel_elements = BTreeMap::new();
+            for capture in make_chan.captures_iter(&body) {
+                let name = capture[1].to_string();
+                let element = capture[2].to_string();
+                channel_elements.insert(name.clone(), element.clone());
+                known.insert(name, format!("chan {element}"));
+            }
+            for capture in receive.captures_iter(&body) {
+                let element = channel_elements
+                    .get(&capture[2])
+                    .map(String::as_str)
+                    .or_else(|| known.get(&capture[2]).and_then(|value| value.strip_prefix("chan ")));
+                if let Some(element) = element {
+                    candidates
+                        .entry(capture[1].to_string())
+                        .or_default()
+                        .insert(element.to_string());
+                }
+            }
+            for capture in type_switch.captures_iter(&body) {
+                if let Some(type_name) = known.get(&capture[2]) {
+                    candidates
+                        .entry(capture[1].to_string())
+                        .or_default()
+                        .insert(type_name.clone());
+                }
+            }
+            for capture in range.captures_iter(&body) {
+                let collection_type = capture
+                    .get(3)
+                    .and_then(|field| stable_fields.get(field.as_str()))
+                    .or_else(|| known.get(&capture[2]));
+                if let Some(element) = collection_type.and_then(|type_name| {
+                    type_name
+                        .strip_prefix("[]")
+                        .or_else(|| type_name.strip_prefix("..."))
+                }) {
+                    candidates
+                        .entry(capture[1].to_string())
+                        .or_default()
+                        .insert(element.to_string());
+                }
+            }
+
+            let stable = candidates
+                .into_iter()
+                .filter_map(|(name, types)| {
+                    (types.len() == 1).then(|| (name, types.into_iter().next().unwrap()))
+                })
+                .collect::<BTreeMap<_, _>>();
+            (!stable.is_empty()).then_some((key, stable))
+        })
+        .collect()
+}
+
 static BEHAVIOR: GoNormalizedBehavior = GoNormalizedBehavior;
 
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
@@ -499,10 +928,18 @@ fn type_name(text: &str) -> Option<String> {
 fn receiver_owner_from_go_function(source: &str) -> Option<String> {
     let source = source.trim_start();
     let receiver = source.strip_prefix('(')?.split_once(')')?.0;
-    receiver
-        .split_whitespace()
-        .next_back()
-        .map(|value| value.trim_start_matches('*').to_string())
+    let receiver = receiver.trim();
+    let mut parts = receiver.splitn(2, char::is_whitespace);
+    let first = parts.next()?;
+    let value = parts.next().unwrap_or(first).trim();
+    Some(
+        value
+            .trim_start_matches('*')
+            .split('[')
+            .next()
+            .unwrap_or(value)
+            .to_string(),
+    )
         .filter(|value| !value.is_empty())
 }
 
@@ -628,7 +1065,10 @@ mod tests {
 
         // format_array_type etc
         assert_eq!(behavior.format_array_type("int"), "[]int");
-        assert_eq!(behavior.format_hash_type("string", "int"), "map[string]value_type");
+        assert_eq!(
+            behavior.format_hash_type("string", "int"),
+            "map[string]value_type"
+        );
         assert_eq!(behavior.format_set_type("string"), "map[string]struct{}");
         assert_eq!(behavior.untyped_array_type(), "[]any");
         assert_eq!(behavior.untyped_hash_type(), "map[string]any");
@@ -640,8 +1080,12 @@ mod tests {
 
         // state_declaration_from_node
         let field_decl = node("FIELD_DECLARATION", "Value int");
-        assert!(behavior.state_declaration_from_node(&field_decl, "Widget", true).is_none());
-        assert!(behavior.state_declaration_from_node(&node("OTHER", "Value int"), "Widget", false).is_none());
+        assert!(behavior
+            .state_declaration_from_node(&field_decl, "Widget", true)
+            .is_none());
+        assert!(behavior
+            .state_declaration_from_node(&node("OTHER", "Value int"), "Widget", false)
+            .is_none());
 
         // embedded_member_reads
         let multiline_node = Node {
@@ -671,22 +1115,54 @@ mod tests {
 
         // owner_for_function
         let fn_node = node("FUNCTION", "func (r *Receiver) MyMethod() {}");
-        assert_eq!(behavior.owner_for_function("MyMethod", &fn_node, "Receiver", "File"), "Receiver");
-        assert_eq!(behavior.owner_for_function("MyMethod", &fn_node, "File", "File"), "Receiver");
+        assert_eq!(
+            behavior.owner_for_function("MyMethod", &fn_node, "Receiver", "File"),
+            "Receiver"
+        );
+        assert_eq!(
+            behavior.owner_for_function("MyMethod", &fn_node, "File", "File"),
+            "Receiver"
+        );
+        let generic_fn = node("FUNCTION", "func (c *LRU[K, V]) Add(key K, value V) {}");
+        assert_eq!(
+            behavior.owner_for_function("Add", &generic_fn, "File", "File"),
+            "LRU"
+        );
 
         // function_name_from_text
-        assert_eq!(behavior.function_name_from_text("func (r *Receiver) MyMethod()"), Some("MyMethod".to_string()));
-        assert_eq!(behavior.function_name_from_text("func MyFunction()"), Some("MyFunction".to_string()));
+        assert_eq!(
+            behavior.function_name_from_text("func (r *Receiver) MyMethod()"),
+            Some("MyMethod".to_string())
+        );
+        assert_eq!(
+            behavior.function_name_from_text("func MyFunction()"),
+            Some("MyFunction".to_string())
+        );
         assert_eq!(behavior.function_name_from_text("invalid"), None);
 
         // parameter_list_source
-        assert_eq!(behavior.parameter_list_source("func (r *Receiver) MyMethod(a int, b string)"), "a int, b string");
-        assert_eq!(behavior.parameter_list_source("func MyMethod(a int)"), "a int");
-        assert_eq!(behavior.parameter_list_source("func (r *Receiver) MyMethod("), "");
+        assert_eq!(
+            behavior.parameter_list_source("func (r *Receiver) MyMethod(a int, b string)"),
+            "a int, b string"
+        );
+        assert_eq!(
+            behavior.parameter_list_source("func MyMethod(a int)"),
+            "a int"
+        );
+        assert_eq!(
+            behavior.parameter_list_source("func (r *Receiver) MyMethod("),
+            ""
+        );
         assert_eq!(behavior.parameter_list_source("func MyMethod("), "");
         assert_eq!(behavior.parameter_list_source("func MyMethod"), "");
-        assert_eq!(behavior.parameter_list_source("func (r *Receiver MyMethod()"), "");
-        assert_eq!(behavior.parameter_list_source("func (r *Receiver) MyMethod"), "");
+        assert_eq!(
+            behavior.parameter_list_source("func (r *Receiver MyMethod()"),
+            ""
+        );
+        assert_eq!(
+            behavior.parameter_list_source("func (r *Receiver) MyMethod"),
+            ""
+        );
 
         // keywords
         assert!(behavior.local_flow_declaration_keyword("int"));
@@ -701,7 +1177,7 @@ mod tests {
         // initializer_writes
         let mut key_node = node("IDENTIFIER", "x");
         key_node.children = vec![Child::Integer(123)];
-        
+
         let mut keyed_node = node("KEYED_ELEMENT", "x: 1");
         keyed_node.children = vec![Child::Integer(123), Child::Node(Box::new(key_node))];
 
@@ -732,7 +1208,132 @@ mod tests {
         let mut invalid_lvar = node("LVAR", "x");
         invalid_lvar.children = vec![Child::Integer(123)];
         let mut invalid_field_decl = node("FIELD_DECLARATION", "Value int");
-        invalid_field_decl.children = vec![Child::Node(Box::new(invalid_lvar)), Child::Integer(123)];
-        assert!(behavior.state_declaration_from_node(&invalid_field_decl, "Widget", false).is_none());
+        invalid_field_decl.children =
+            vec![Child::Node(Box::new(invalid_lvar)), Child::Integer(123)];
+        assert!(behavior
+            .state_declaration_from_node(&invalid_field_decl, "Widget", false)
+            .is_none());
+    }
+
+    #[test]
+    fn scip_go_symbols_use_proven_stdlib_identity() {
+        let value_type = "scip-go gomod github.com/golang/go/src go1.22 reflect/Value#Type().";
+        let atomic = "scip-go gomod github.com/golang/go/src go1.22 `sync/atomic`/LoadInt32().";
+        let dependency = "scip-go gomod golang.org/x/sync v0.10.0 singleflight/Group#Do().";
+
+        assert_eq!(
+            external_symbol_call_complexity(value_type, "Type").map(|complexity| complexity.time),
+            Some("O(1)")
+        );
+        assert_eq!(
+            external_symbol_call_complexity(atomic, "LoadInt32").map(|complexity| complexity.time),
+            Some("O(1)")
+        );
+        assert_eq!(external_symbol_metadata(value_type).scope, "stdlib");
+        assert_eq!(external_symbol_metadata(dependency).scope, "dependency");
+        assert!(external_symbol_call_complexity(dependency, "Do").is_none());
+    }
+
+    #[test]
+    fn go_callback_contracts_remain_parametric() {
+        let once = "scip-go gomod github.com/golang/go/src go1.22 sync/Once#Do().";
+        let metadata = external_symbol_metadata(once);
+
+        assert_eq!(metadata.parametric_cost.as_deref(), Some("callback_once"));
+        assert!(external_symbol_call_complexity(once, "Do").is_none());
+
+        let sort = "scip-go gomod github.com/golang/go/src go1.22 sort/Sort().";
+        assert_eq!(
+            external_symbol_metadata(sort).parametric_cost.as_deref(),
+            Some("callback_sort")
+        );
+
+        for symbol in [
+            "scip-go gomod github.com/golang/go/src go1.22 `crypto/elliptic`/Curve#Params().",
+            "scip-go gomod github.com/golang/go/src go1.22 crypto/Signer#Sign().",
+            "scip-go gomod github.com/golang/go/src go1.22 flag/Usage.",
+        ] {
+            assert_eq!(
+                external_symbol_metadata(symbol).parametric_cost.as_deref(),
+                Some("callback_once"),
+                "{symbol}"
+            );
+        }
+
+        for symbol in [
+            "scip-go gomod github.com/golang/go/src go1.22 `crypto/rsa`/VerifyPKCS1v15().",
+            "scip-go gomod github.com/golang/go/src go1.22 `crypto/rsa`/VerifyPSS().",
+        ] {
+            assert_eq!(
+                external_symbol_call_complexity(symbol, "verify")
+                    .map(|complexity| complexity.time),
+                Some("O(N^3)"),
+                "{symbol}"
+            );
+        }
+    }
+
+    #[test]
+    fn go_suppresses_synthetic_wrappers_and_selector_projections() {
+        let behavior = GoNormalizedBehavior;
+        let projection = |receiver: &str, message: &str| NormalizedCallProjection {
+            receiver: receiver.to_string(),
+            message: message.to_string(),
+            arguments: Vec::new(),
+            access_span: [10, 2, 10, 6],
+            span: [10, 2, 10, 8],
+        };
+
+        assert!(behavior.suppress_call_site(
+            &node("CALL", "func() { work() }()"),
+            &projection("func() { work() }", "call")
+        ));
+        assert!(behavior.suppress_call_site(
+            &node("CALL", "(*uint32)(value)"),
+            &projection("*uint32", "call")
+        ));
+        assert!(!behavior.suppress_call_site(
+            &node("CALL", "fn()"),
+            &projection("fn", "call")
+        ));
+        assert!(behavior.suppress_call_site(
+            &node("CALL", "ecdsaKey.Curve.Params().BitSize"),
+            &projection("ecdsaKey.Curve.Params()", "BitSize")
+        ));
+        assert!(!behavior.suppress_call_site(
+            &node("CALL", "err.Error()"),
+            &projection("err", "Error")
+        ));
+    }
+
+    #[test]
+    fn scip_go_term_symbols_prove_constant_named_type_conversions() {
+        let stdlib = "scip-go gomod github.com/golang/go/src go1.22 time/Duration#";
+        let dependency = "scip-go gomod example.com/demo v1.0.0 demo/ClaimStrings#";
+
+        for (symbol, message) in [(stdlib, "Duration"), (dependency, "ClaimStrings")] {
+            let complexity = external_symbol_call_complexity(symbol, message).unwrap();
+            assert_eq!(complexity.time, "O(1)");
+            assert_eq!(complexity.space, "O(1)");
+            assert_eq!(complexity.provenance, "go_semantic_conversion");
+            assert_eq!(complexity.bound_quality, "upper_bound_exact_target");
+        }
+    }
+
+    #[test]
+    fn named_generic_function_types_normalize_to_callable_aliases() {
+        let source = "type EvictCallback[K comparable, V any] func(key K, value V)\n";
+        let (aliases, lines) = go_callable_type_aliases(source);
+        assert_eq!(
+            aliases.get("EvictCallback").map(String::as_str),
+            Some("func(key K, value V)")
+        );
+        assert_eq!(lines.get("EvictCallback"), Some(&1));
+        assert_eq!(
+            GoNormalizedBehavior.declared_callable_cost(
+                aliases.get("EvictCallback").unwrap()
+            ),
+            Some("callback_once".to_string())
+        );
     }
 }

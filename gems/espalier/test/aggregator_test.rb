@@ -326,6 +326,65 @@ class AggregatorTest < Minitest::Test
     refute fn[:quality_metrics].key?(:big_o_unknowns)
   end
 
+  def test_big_o_joins_same_line_calls_by_exact_span
+    method = {
+      id: "caller", name: "run", line: 2,
+      complexity_facts: [{
+        "collection_parameters" => [], "size_domains" => [],
+        "call_contexts" => [{
+          "line" => 3, "span" => [3, 4, 3, 18], "message" => "add",
+          "execution_multiplicity" => "O(1)", "power" => 0,
+          "known_time_complexity" => "O(1)"
+        }, {
+          "line" => 3, "span" => [3, 22, 3, 39], "message" => "add",
+          "execution_multiplicity" => "O(1)", "power" => 0,
+          "known_time_complexity" => "O(N)"
+        }]
+      }],
+      delegations: [{
+        call_id: "first", receiver: "left", message: "add", line: 3,
+        span: [3, 4, 3, 18]
+      }, {
+        call_id: "second", receiver: "right", message: "add", line: 3,
+        span: [3, 22, 3, 39]
+      }]
+    }
+    mod = { name: "Source", file: "source.java", methods: [method] }
+
+    nodes = Espalier::Aggregator.new.send(:big_o_nodes_for, mod, method)
+
+    assert_equal "O(1)", nodes.find { |node| node[:call_id] == "first" }[:known_time_complexity]
+    assert_equal "O(N)", nodes.find { |node| node[:call_id] == "second" }[:known_time_complexity]
+  end
+
+  def test_canonical_call_cost_outranks_earlier_context_cost_and_gap
+    method = {
+      id: "caller", name: "run", line: 2,
+      complexity_facts: [{
+        "collection_parameters" => [], "size_domains" => [],
+        "call_contexts" => [{
+          "line" => 3, "span" => [3, 4, 3, 18], "message" => "format",
+          "execution_multiplicity" => "O(1)", "power" => 0,
+          "known_time_complexity" => "O(1)",
+          "known_space_complexity" => "O(1)",
+          "evidence_gap" => "unmodeled_typed_operation"
+        }]
+      }],
+      delegations: [{
+        call_id: "format", receiver: "String", message: "format", line: 3,
+        span: [3, 4, 3, 18], known_time_complexity: "O(N)",
+        known_space_complexity: "O(N)"
+      }]
+    }
+    mod = { name: "Source", file: "Source.java", methods: [method] }
+
+    node = Espalier::Aggregator.new.send(:big_o_nodes_for, mod, method).first
+
+    assert_equal "O(N)", node[:known_time_complexity]
+    assert_equal "O(N)", node[:known_space_complexity]
+    refute node.key?(:evidence_gap)
+  end
+
   def test_big_o_detects_fixpoint_loop_over_collection
     Dir.mktmpdir("espalier-big-o") do |dir|
       file = File.join(dir, "worker.rb")
@@ -970,6 +1029,119 @@ class AggregatorTest < Minitest::Test
     refute_includes Array(caller[:quality_metrics][:big_o_unknowns]), "Target#work"
   end
 
+  def test_big_o_uses_exact_target_id_when_overloads_share_owner_and_name
+    caller_fact = {
+      "line" => 2, "parameters" => [], "collection_parameters" => [],
+      "iterations" => [], "allocations" => [], "size_domains" => [],
+      "recursion" => { "calls" => 0 },
+      "call_contexts" => [{
+        "line" => 3, "message" => "work", "execution_multiplicity" => "O(1)",
+        "argument_cardinality_relation" => "same", "power" => 0
+      }]
+    }
+    linear_fact = {
+      "line" => 10, "parameters" => ["items"], "collection_parameters" => ["items"],
+      "iterations" => [{
+        "line" => 11, "power" => 1, "execution_multiplicity" => "O(N)",
+        "cardinality_relation" => "independent_of", "bound_classification" => "input"
+      }],
+      "allocations" => [], "call_contexts" => [], "size_domains" => [],
+      "recursion" => { "calls" => 0 }
+    }
+    constant_fact = linear_fact.merge(
+      "line" => 20,
+      "iterations" => []
+    )
+    modules = [{
+      type: :class, name: "Caller", file: "caller.java", states: Set.new,
+      methods: [{
+        id: "caller", name: "run", signature: "void run()", parameters: [],
+        visibility: :public, line: 2, span: [2, 0, 4, 1],
+        effects: { reads: Set.new, writes: Set.new }, complexity_facts: [caller_fact],
+        delegations: [{
+          receiver: "Target", message: "work", line: 3, type: :always,
+          target_owner: "Target", target_method: "work", target_id: "work-linear",
+          target_provenance: "scip"
+        }]
+      }]
+    }, {
+      type: :class, name: "Target", file: "target.java", states: Set.new,
+      methods: [{
+        id: "work-linear", name: "work", signature: "void work(List items)", parameters: ["items"],
+        visibility: :public, line: 10, span: [10, 0, 13, 1],
+        effects: { reads: Set.new, writes: Set.new }, complexity_facts: [linear_fact], delegations: []
+      }, {
+        id: "work-constant", name: "work", signature: "void work(int value)", parameters: ["value"],
+        visibility: :public, line: 20, span: [20, 0, 22, 1],
+        effects: { reads: Set.new, writes: Set.new }, complexity_facts: [constant_fact], delegations: []
+      }]
+    }]
+
+    caller = Espalier::Aggregator.new.aggregate(modules).find { |mod| mod[:module] == "Caller" }[:functions].first
+    assert_equal "O(N)", caller[:quality_metrics][:big_o]
+    assert caller[:quality_metrics][:big_o_complete]
+  end
+
+  def test_scip_complete_call_graph_rejects_false_overload_recursion
+    fact = {
+      "line" => 2, "parameters" => ["value"], "collection_parameters" => [],
+      "iterations" => [], "allocations" => [], "size_domains" => [],
+      "recursion" => { "calls" => 1, "unknown_progress_calls" => 1 },
+      "call_contexts" => [{
+        "line" => 3, "message" => "visit", "execution_multiplicity" => "O(1)",
+        "argument_cardinality_relation" => "same", "power" => 0
+      }]
+    }
+    modules = [{
+      type: :class, name: "Visitor", file: "visitor.java", states: Set.new,
+      methods: [{
+        id: "visit-int", name: "visit", signature: "void visit(int value)", parameters: ["value"],
+        semantic_call_identity_complete: true,
+        visibility: :public, line: 2, span: [2, 0, 4, 1],
+        effects: { reads: Set.new, writes: Set.new }, complexity_facts: [fact],
+        delegations: [{
+          receiver: "this", message: "visit", line: 3, type: :always,
+          target_owner: "Visitor", target_method: "visit", target_id: "visit-string",
+          target_provenance: "scip"
+        }]
+      }, {
+        id: "visit-string", name: "visit", signature: "void visit(String value)", parameters: ["value"],
+        visibility: :public, line: 6, span: [6, 0, 7, 1],
+        effects: { reads: Set.new, writes: Set.new }, complexity_facts: [], delegations: []
+      }]
+    }]
+
+    function = Espalier::Aggregator.new.aggregate(modules).first[:functions].find { |row| row[:line] == 2 }
+    assert_equal "O(1)", function[:quality_metrics][:big_o]
+    assert function[:quality_metrics][:big_o_complete]
+    refute_includes Array(function[:quality_metrics][:big_o_evidence_gaps]), "unresolved_recursive_progress"
+  end
+
+  def test_empty_exact_fact_set_does_not_fall_back_to_an_overload
+    recursive_fact = {
+      "line" => 10, "parameters" => [], "collection_parameters" => [],
+      "iterations" => [], "allocations" => [], "size_domains" => [], "call_contexts" => [],
+      "recursion" => { "calls" => 1, "unknown_progress_calls" => 1 }
+    }
+    modules = [{
+      type: :class, name: "Factory", file: "factory.java", states: Set.new,
+      methods: [{
+        id: "create-constant", name: "create", signature: "create(int value)", parameters: ["value"],
+        visibility: :public, line: 2, span: [2, 0, 3, 1], effects: { reads: Set.new, writes: Set.new },
+        complexity_facts: [], delegations: []
+      }, {
+        id: "create-recursive", name: "create", signature: "create(String value)", parameters: ["value"],
+        visibility: :public, line: 10, span: [10, 0, 12, 1], effects: { reads: Set.new, writes: Set.new },
+        complexity_facts: [recursive_fact], delegations: []
+      }]
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+    constant = functions.find { |function| function[:line] == 2 }
+    assert_equal "O(1)", constant[:quality_metrics][:big_o]
+    assert constant[:quality_metrics][:big_o_complete]
+  end
+
   def test_big_o_consumes_normalized_constant_call_cost_without_source_guessing
     modules = [{
       type: :class, name: "Source", file: "source.rb", states: Set.new,
@@ -1040,6 +1212,99 @@ class AggregatorTest < Minitest::Test
     refute recursive[["Chain", "m2499", "Chain", "m2500"]]
     assert recursive[["Chain", "m2500", "Chain", "m2501"]]
     assert recursive[["Chain", "m4999", "Chain", "m2500"]]
+  end
+
+  def test_big_o_closure_reaches_beyond_eight_resolved_call_edges
+    chain_length = 12
+    methods = Array.new(chain_length) do |index|
+      line = index * 3 + 1
+      target = index + 1
+      fact = {
+        "line" => line, "parameters" => [], "collection_parameters" => [],
+        "allocations" => [], "size_domains" => [], "recursion" => { "calls" => 0 },
+        "iterations" => target == chain_length ? [{
+          "line" => line + 1, "power" => 1, "execution_multiplicity" => "O(N)",
+          "cardinality_relation" => "independent_of", "bound_classification" => "input"
+        }] : [],
+        "call_contexts" => target < chain_length ? [{
+          "line" => line + 1, "message" => "m#{target}",
+          "execution_multiplicity" => "O(1)", "argument_cardinality_relation" => "same",
+          "power" => 0
+        }] : []
+      }
+      {
+        id: "m#{index}", name: "m#{index}", signature: "m#{index}()", parameters: [],
+        visibility: :public, line: line, span: [line, 0, line + 2, 1],
+        effects: { reads: Set.new, writes: Set.new }, complexity_facts: [fact],
+        delegations: target < chain_length ? [{
+          receiver: "Chain", message: "m#{target}", line: line + 1, type: :always,
+          target_owner: "Chain", target_method: "m#{target}", target_id: "m#{target}",
+          target_provenance: "scip"
+        }] : []
+      }
+    end
+    modules = [{
+      type: :class, name: "Chain", file: "chain.rb", states: Set.new,
+      methods: methods
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+    root = functions.find { |function| function[:id] == "m0" }
+
+    assert_equal "O(N)", root[:quality_metrics][:big_o]
+    assert root[:quality_metrics][:big_o_complete]
+  end
+
+  def test_big_o_joins_compiler_implementation_candidates_as_a_modeled_upper_bound
+    constant_fact = {
+      "line" => 10, "parameters" => [], "collection_parameters" => [],
+      "iterations" => [], "allocations" => [], "call_contexts" => [],
+      "size_domains" => [], "recursion" => { "calls" => 0 }
+    }
+    linear_fact = constant_fact.merge(
+      "line" => 20,
+      "iterations" => [{
+        "line" => 21, "power" => 1, "execution_multiplicity" => "O(N)",
+        "cardinality_relation" => "independent_of", "bound_classification" => "input"
+      }]
+    )
+    caller_fact = constant_fact.merge(
+      "line" => 2,
+      "call_contexts" => [{
+        "line" => 3, "message" => "work", "execution_multiplicity" => "O(1)",
+        "argument_cardinality_relation" => "same", "power" => 0
+      }]
+    )
+    modules = [{
+      type: :class, name: "Caller", file: "caller.go", states: Set.new,
+      methods: [{
+        id: "caller", name: "run", signature: "run()", parameters: [],
+        visibility: :public, line: 2, span: [2, 0, 4, 1],
+        effects: { reads: Set.new, writes: Set.new }, complexity_facts: [caller_fact],
+        delegations: [{
+          receiver: "worker", message: "work", line: 3, type: :always,
+          candidate_target_ids: %w[fast slow], candidate_reason: "scip_implementation_set"
+        }]
+      }]
+    }, {
+      type: :class, name: "Workers", file: "workers.go", states: Set.new,
+      methods: [{
+        id: "fast", name: "work", signature: "work()", parameters: [], visibility: :public,
+        line: 10, span: [10, 0, 12, 1], effects: { reads: Set.new, writes: Set.new },
+        complexity_facts: [constant_fact], delegations: []
+      }, {
+        id: "slow", name: "work", signature: "work()", parameters: [], visibility: :public,
+        line: 20, span: [20, 0, 22, 1], effects: { reads: Set.new, writes: Set.new },
+        complexity_facts: [linear_fact], delegations: []
+      }]
+    }]
+
+    caller = Espalier::Aggregator.new.aggregate(modules).first[:functions].first
+
+    assert_equal "O(N)", caller[:quality_metrics][:big_o]
+    assert caller[:quality_metrics][:big_o_complete]
+    assert_includes caller[:quality_metrics][:big_o_bound_qualities], "upper_bound_closed_candidate_max"
+    assert_includes caller[:quality_metrics][:big_o_assumptions].first, "implementation set is closed"
   end
 
 end

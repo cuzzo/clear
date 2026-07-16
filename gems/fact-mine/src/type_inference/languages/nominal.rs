@@ -19,7 +19,10 @@ pub(crate) struct NominalTypeSyntax {
 pub(crate) fn parse(source: &str, syntax: &NominalTypeSyntax) -> TypeExpr {
     let source = strip_decorators(source, syntax);
     if syntax.bracket_array {
-        if let Some(inner) = source.strip_prefix('[').and_then(|value| value.strip_suffix(']')) {
+        if let Some(inner) = source
+            .strip_prefix('[')
+            .and_then(|value| value.strip_suffix(']'))
+        {
             return TypeExpr::Array(Box::new(parse(inner, syntax)));
         }
     }
@@ -143,17 +146,35 @@ mod tests {
 
     #[test]
     fn parses_adapter_supplied_normalized_families_only() {
-        assert!(matches!(parse("Dense<Text>", &TEST_SYNTAX), TypeExpr::Array(_)));
-        assert!(matches!(parse("Table<Text, Dense<int>>", &TEST_SYNTAX), TypeExpr::Hash { .. }));
-        assert!(matches!(parse("Unique<int>", &TEST_SYNTAX), TypeExpr::Set(_)));
+        assert!(matches!(
+            parse("Dense<Text>", &TEST_SYNTAX),
+            TypeExpr::Array(_)
+        ));
+        assert!(matches!(
+            parse("Table<Text, Dense<int>>", &TEST_SYNTAX),
+            TypeExpr::Hash { .. }
+        ));
+        assert!(matches!(
+            parse("Unique<int>", &TEST_SYNTAX),
+            TypeExpr::Set(_)
+        ));
         assert!(matches!(parse("[Text]", &TEST_SYNTAX), TypeExpr::Array(_)));
-        assert!(matches!(parse("sequence", &TEST_SYNTAX), TypeExpr::Array(_)));
-        assert_eq!(parse("Widget", &TEST_SYNTAX), TypeExpr::Primitive("Widget".to_string()));
+        assert!(matches!(
+            parse("sequence", &TEST_SYNTAX),
+            TypeExpr::Array(_)
+        ));
+        assert_eq!(
+            parse("Widget", &TEST_SYNTAX),
+            TypeExpr::Primitive("Widget".to_string())
+        );
     }
 
     #[test]
     fn malformed_generic_order_is_not_sliced_or_guessed() {
         let source = "value > other < \u{00e9}";
-        assert_eq!(parse(source, &TEST_SYNTAX), TypeExpr::Primitive(source.to_string()));
+        assert_eq!(
+            parse(source, &TEST_SYNTAX),
+            TypeExpr::Primitive(source.to_string())
+        );
     }
 }

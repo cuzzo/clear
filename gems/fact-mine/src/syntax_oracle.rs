@@ -456,10 +456,12 @@ mod tests {
             file: "gems/fact-mine/examples/test.rb".to_string(),
             language: Language::Ruby,
             source_digest: String::new(),
+            raw_call_spans: Vec::new(),
             symbol_scope: crate::syntax::SymbolScope::default(),
             function_defs: Vec::new(),
             owner_defs: Vec::new(),
             call_sites: Vec::new(),
+            call_receiver_projections: Vec::new(),
             state_declarations: Vec::new(),
             state_reads: Vec::new(),
             state_writes: Vec::new(),
@@ -493,6 +495,7 @@ mod tests {
             type_aliases: BTreeMap::new(),
             type_alias_lines: BTreeMap::new(),
             method_param_types: BTreeMap::new(),
+            method_local_types: BTreeMap::new(),
             state_param_origins: Vec::new(),
         };
         let projected = project_document(&doc);
@@ -505,10 +508,12 @@ mod tests {
             file: "foo.rb".to_string(),
             language: Language::Ruby,
             source_digest: String::new(),
+            raw_call_spans: Vec::new(),
             symbol_scope: crate::syntax::SymbolScope::default(),
             function_defs: Vec::new(),
             owner_defs: Vec::new(),
             call_sites: Vec::new(),
+            call_receiver_projections: Vec::new(),
             state_declarations: Vec::new(),
             state_reads: Vec::new(),
             state_writes: Vec::new(),
@@ -565,6 +570,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            method_local_types: BTreeMap::new(),
             state_param_origins: Vec::new(),
         };
 

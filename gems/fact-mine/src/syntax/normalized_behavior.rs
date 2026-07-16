@@ -15,6 +15,7 @@ pub(crate) struct SyntaxMetadata {
     pub(crate) type_aliases: BTreeMap<String, String>,
     pub(crate) type_alias_lines: BTreeMap<String, usize>,
     pub(crate) method_param_types: BTreeMap<String, BTreeMap<String, String>>,
+    pub(crate) method_local_types: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -102,6 +103,36 @@ pub(crate) struct NormalizedCallComplexity {
     pub(crate) space: &'static str,
 }
 
+/// Split the package coordinate from a global SCIP symbol while leaving the
+/// language-owned descriptor opaque. SCIP standardizes the four leading
+/// fields; only the descriptor grammar and package classification belong in
+/// an adapter.
+pub(crate) fn scip_global_parts<'a>(
+    symbol: &'a str,
+    scheme: &str,
+    manager: &str,
+) -> Option<(&'a str, &'a str, &'a str)> {
+    let prefix = format!("{scheme} {manager} ");
+    let rest = symbol.strip_prefix(&prefix)?;
+    let mut fields = rest.splitn(3, ' ');
+    Some((fields.next()?, fields.next()?, fields.next()?))
+}
+
+/// Return the nearest enclosing type/namespace descriptor. This intentionally
+/// does not infer a source-language type; adapters decide whether the returned
+/// descriptor is a class, namespace, module, or standard-library owner.
+pub(crate) fn scip_descriptor_owner(descriptor: &str) -> Option<String> {
+    let callable = descriptor.rsplit('/').next()?;
+    if let Some((owner, _)) = callable.split_once('#') {
+        return Some(owner.trim_matches('`').to_string());
+    }
+    descriptor
+        .rsplit_once('/')
+        .map(|(prefix, _)| prefix.rsplit('/').next().unwrap_or(prefix))
+        .map(|owner| owner.trim_matches('`').to_string())
+        .filter(|owner| !owner.is_empty())
+}
+
 /// Fact-Mine's language registry maps a native collection API spelling to one
 /// of these operations. The common operation algebra deliberately lives here,
 /// rather than in an analyzer: all downstream facts describe the same
@@ -114,6 +145,8 @@ pub(crate) enum NormalizedCollectionOperation {
     LinearMaterialize,
     Sort,
     Pairwise,
+    Cubic,
+    Exponential,
 }
 
 impl NormalizedCollectionOperation {
@@ -143,44 +176,42 @@ impl NormalizedCollectionOperation {
                 time: "O(N * M)",
                 space: "O(N)",
             },
+            Self::Cubic => NormalizedCallComplexity {
+                time: "O(N^3)",
+                space: "O(N)",
+            },
+            Self::Exponential => NormalizedCallComplexity {
+                time: "O(2^N)",
+                space: "O(N)",
+            },
         }
     }
 }
 
 type StdlibOperationMap = BTreeMap<String, BTreeMap<String, String>>;
 
-const RUBY_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/ruby.yml");
-const PYTHON_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/python.yml");
+const RUBY_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/ruby.yml");
+const PYTHON_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/python.yml");
 const TYPESCRIPT_STDLIB_OPERATIONS: &str =
     include_str!("../../config/stdlib_complexity/typescript.yml");
-const JAVA_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/java.yml");
-const CSHARP_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/csharp.yml");
-const GO_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/go.yml");
-const CPP_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/cpp.yml");
-const C_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/c.yml");
+const JAVA_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/java.yml");
+const CSHARP_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/csharp.yml");
+const GO_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/go.yml");
+const CPP_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/cpp.yml");
+const C_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/c.yml");
 const JAVASCRIPT_STDLIB_OPERATIONS: &str =
     include_str!("../../config/stdlib_complexity/javascript.yml");
-const KOTLIN_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/kotlin.yml");
-const LUA_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/lua.yml");
-const PHP_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/php.yml");
-const RUST_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/rust.yml");
-const SWIFT_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/swift.yml");
-const ZIG_STDLIB_OPERATIONS: &str =
-    include_str!("../../config/stdlib_complexity/zig.yml");
+const KOTLIN_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/kotlin.yml");
+const LUA_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/lua.yml");
+const PHP_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/php.yml");
+const RUST_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/rust.yml");
+const SWIFT_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/swift.yml");
+const ZIG_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/zig.yml");
 
-fn parsed_stdlib_operations(source: &'static str, cache: &'static OnceLock<StdlibOperationMap>) -> &'static StdlibOperationMap {
+fn parsed_stdlib_operations(
+    source: &'static str,
+    cache: &'static OnceLock<StdlibOperationMap>,
+) -> &'static StdlibOperationMap {
     cache.get_or_init(|| {
         serde_yaml::from_str(source)
             .expect("Fact-Mine stdlib complexity configuration must be valid YAML")
@@ -207,8 +238,14 @@ fn stdlib_operations(language: &str) -> Option<&'static StdlibOperationMap> {
     match language {
         "ruby" => Some(parsed_stdlib_operations(RUBY_STDLIB_OPERATIONS, &RUBY)),
         "python" => Some(parsed_stdlib_operations(PYTHON_STDLIB_OPERATIONS, &PYTHON)),
-        "typescript" => Some(parsed_stdlib_operations(TYPESCRIPT_STDLIB_OPERATIONS, &TYPESCRIPT)),
-        "javascript" => Some(parsed_stdlib_operations(JAVASCRIPT_STDLIB_OPERATIONS, &JAVASCRIPT)),
+        "typescript" => Some(parsed_stdlib_operations(
+            TYPESCRIPT_STDLIB_OPERATIONS,
+            &TYPESCRIPT,
+        )),
+        "javascript" => Some(parsed_stdlib_operations(
+            JAVASCRIPT_STDLIB_OPERATIONS,
+            &JAVASCRIPT,
+        )),
         "java" => Some(parsed_stdlib_operations(JAVA_STDLIB_OPERATIONS, &JAVA)),
         "csharp" => Some(parsed_stdlib_operations(CSHARP_STDLIB_OPERATIONS, &CSHARP)),
         "go" => Some(parsed_stdlib_operations(GO_STDLIB_OPERATIONS, &GO)),
@@ -224,6 +261,152 @@ fn stdlib_operations(language: &str) -> Option<&'static StdlibOperationMap> {
     }
 }
 
+/// Whether a declared receiver spelling is owned by the reviewed standard-
+/// library registry for this language. This deliberately proves identity only;
+/// the absence of a method model remains distinct from an unknown receiver.
+pub(crate) fn configured_stdlib_type(language: &str, receiver_type: &TypeExpr) -> bool {
+    let receiver = receiver_type.strip_nilable();
+    let names = match &receiver {
+        TypeExpr::Array(_) => vec!["Array".to_string()],
+        TypeExpr::Hash { .. } => vec!["Hash".to_string()],
+        TypeExpr::Set(_) => vec!["Set".to_string()],
+        TypeExpr::Primitive(name) => {
+            let unqualified = name
+                .rsplit([':', '.'])
+                .find(|part| !part.is_empty())
+                .unwrap_or(name);
+            vec![name.clone(), unqualified.to_string()]
+        }
+        _ => return false,
+    };
+    stdlib_operations(language)
+        .is_some_and(|operations| names.into_iter().any(|name| operations.contains_key(&name)))
+}
+
+/// Whether a free/static call identity belongs to a reviewed language runtime
+/// or standard-library declaration surface. `declaration` entries intentionally
+/// carry no complexity model; this function is for provenance classification,
+/// not cost inference.
+pub(crate) fn configured_stdlib_call_identity(
+    language: &str,
+    lexical_symbol: Option<&str>,
+    receiver_symbol: Option<&str>,
+    message: &str,
+) -> bool {
+    let Some(operations) = stdlib_operations(language) else {
+        return false;
+    };
+    let bare_message = message
+        .split('<')
+        .next()
+        .unwrap_or(message)
+        .trim_start_matches("::");
+    if operations
+        .get("Intrinsic")
+        .is_some_and(|intrinsics| intrinsics.contains_key(bare_message))
+    {
+        return true;
+    }
+    let symbols = lexical_symbol.into_iter().chain(receiver_symbol);
+    let Some(namespaces) = operations.get("Namespace") else {
+        return false;
+    };
+    symbols.into_iter().any(|symbol| {
+        let normalized = symbol
+            .trim()
+            .trim_matches(['\'', '"'])
+            .trim_start_matches("const ")
+            .trim_start_matches("readonly ")
+            .trim_start_matches(['*', '&'])
+            .trim_start_matches("::");
+        namespaces.keys().any(|namespace| {
+            normalized == namespace.as_str()
+                || normalized.starts_with(&format!("{namespace}::"))
+                || normalized.starts_with(&format!("{namespace}."))
+        })
+    })
+}
+
+pub(crate) fn configured_non_call_construct(language: &str, message: &str) -> bool {
+    let Some(operations) = stdlib_operations(language) else {
+        return false;
+    };
+    let message = message.trim();
+    operations
+        .get("NonCallConstruct")
+        .is_some_and(|constructs| constructs.contains_key(message))
+        || operations
+            .get("NonCallPrefix")
+            .is_some_and(|constructs| constructs.keys().any(|prefix| message.starts_with(prefix)))
+}
+
+pub(crate) fn configured_dynamic_global_binding(language: &str) -> bool {
+    stdlib_operations(language)
+        .and_then(|operations| operations.get("DynamicGlobalBinding"))
+        .is_some_and(|configuration| configuration.contains_key("enabled"))
+}
+
+/// Split a language-selected base/interface clause without breaking generic
+/// arguments. Selecting the clause remains language-specific; this helper only
+/// normalizes the resulting nominal list.
+pub(crate) fn split_declared_supertypes(source: &str) -> Vec<String> {
+    let mut rows = Vec::new();
+    let mut start = 0;
+    let mut depth = 0usize;
+    for (index, character) in source.char_indices() {
+        match character {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                rows.push(&source[start..index]);
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    rows.push(&source[start..]);
+    rows.into_iter()
+        .filter_map(|row| {
+            let mut words = row.split_whitespace().collect::<Vec<_>>();
+            words.retain(|word| !matches!(*word, "public" | "protected" | "private" | "virtual"));
+            let value = words.join(" ");
+            let value = value.trim().trim_end_matches(['{', ':']).trim();
+            (!value.is_empty()).then(|| value.to_string())
+        })
+        .collect()
+}
+
+pub(crate) fn declared_supertype_clause<'a>(
+    header: &'a str,
+    marker: &str,
+    stops: &[&str],
+) -> Option<&'a str> {
+    let marker = format!(" {marker} ");
+    let marker_start = top_level_marker(header, &marker)?;
+    let tail = &header[marker_start + marker.len()..];
+    let end = stops
+        .iter()
+        .filter_map(|stop| top_level_marker(tail, &format!(" {stop} ")))
+        .min()
+        .unwrap_or(tail.len());
+    Some(tail[..end].trim())
+}
+
+fn top_level_marker(source: &str, marker: &str) -> Option<usize> {
+    let mut angle_depth = 0usize;
+    for (index, character) in source.char_indices() {
+        match character {
+            '<' => angle_depth += 1,
+            '>' => angle_depth = angle_depth.saturating_sub(1),
+            _ if angle_depth == 0 && source[index..].starts_with(marker) => {
+                return Some(index);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 fn operation_from_config(value: &str) -> Option<NormalizedCollectionOperation> {
     match value {
         "constant" => Some(NormalizedCollectionOperation::Constant),
@@ -232,6 +415,8 @@ fn operation_from_config(value: &str) -> Option<NormalizedCollectionOperation> {
         "linear_materialize" => Some(NormalizedCollectionOperation::LinearMaterialize),
         "sort" => Some(NormalizedCollectionOperation::Sort),
         "pairwise" => Some(NormalizedCollectionOperation::Pairwise),
+        "cubic" => Some(NormalizedCollectionOperation::Cubic),
+        "exponential" => Some(NormalizedCollectionOperation::Exponential),
         _ => None,
     }
 }
@@ -262,6 +447,158 @@ pub(crate) fn configured_intrinsic_call_complexity(
     message: &str,
 ) -> Option<NormalizedCallComplexity> {
     configured_intrinsic_operation(language, receiver, message)
+        .map(NormalizedCollectionOperation::complexity)
+}
+
+/// Resolve an opaque compiler symbol discriminator when the registry has been
+/// reviewed against that exact semantic scheme. This is preferable to
+/// guessing an overload from argument text, and deliberately has no fallback
+/// to owner/method spelling.
+pub(crate) fn configured_semantic_symbol_call_complexity(
+    language: &str,
+    descriptor: &str,
+) -> Option<NormalizedCallComplexity> {
+    stdlib_operations(language)?
+        .get("SemanticSymbol")?
+        .get(descriptor)
+        .and_then(|value| operation_from_config(value))
+        .map(NormalizedCollectionOperation::complexity)
+}
+
+/// Return a language-owned semantic role for an exact compiler symbol.
+/// Roles are diagnostic/proof obligations only; they never select a target or
+/// supply a cost. Keeping them in YAML avoids embedding a language's standard
+/// library vocabulary in shared SCIP or reporting code.
+pub(crate) fn configured_semantic_symbol_kind(language: &str, descriptor: &str) -> Option<String> {
+    stdlib_operations(language)?
+        .get("SemanticSymbolKind")?
+        .get(descriptor)
+        .cloned()
+}
+
+pub(crate) fn configured_semantic_symbol_parametric_cost(
+    language: &str,
+    descriptor: &str,
+) -> Option<String> {
+    stdlib_operations(language)?
+        .get("SemanticSymbolParametricCost")?
+        .get(descriptor)
+        .cloned()
+}
+
+/// Resolve a parametric contract from a proven declared receiver type. This
+/// complements compiler-symbol contracts for producers that omit occurrences
+/// on builtin interface methods (notably Go's predeclared `error`).
+pub(crate) fn configured_parametric_call_cost(
+    language: &str,
+    receiver_type: &TypeExpr,
+    message: &str,
+) -> Option<String> {
+    let TypeExpr::Primitive(name) = receiver_type.strip_nilable() else {
+        return None;
+    };
+    let unqualified = name
+        .rsplit([':', '.'])
+        .find(|part| !part.is_empty())
+        .unwrap_or(&name);
+    let operations = stdlib_operations(language)?;
+    let contracts = operations.get("ParametricCall")?;
+    let result = [name.as_str(), unqualified].into_iter().find_map(|owner| {
+        contracts.get(&format!("{owner}.{message}")).cloned()
+    });
+    result
+}
+
+pub(crate) fn configured_callable_type_cost(language: &str, declared_type: &str) -> Option<String> {
+    let normalized = declared_type.trim().trim_start_matches('*');
+    let unqualified = normalized
+        .rsplit([':', '.'])
+        .find(|part| !part.is_empty())
+        .unwrap_or(normalized);
+    let contracts = stdlib_operations(language)?.get("CallableType")?;
+    contracts
+        .get(normalized)
+        .or_else(|| contracts.get(unqualified))
+        .cloned()
+}
+
+/// Return a reviewed modeled-world bound for an exact compiler symbol. The
+/// symbol proves API identity; the configured candidates and assumption make
+/// explicit that dynamic callbacks/overrides are bounded only within a finite
+/// reviewed universe rather than across arbitrary third-party code.
+pub(crate) fn configured_semantic_symbol_upper_bound(
+    language: &str,
+    descriptor: &str,
+) -> Option<(NormalizedCallComplexity, Vec<String>, Option<String>)> {
+    let operations = stdlib_operations(language)?;
+    let operation = operations
+        .get("SemanticSymbolUpperBound")?
+        .get(descriptor)
+        .and_then(|value| operation_from_config(value))?;
+    let candidates = operations
+        .get("SemanticSymbolCandidates")
+        .and_then(|rows| rows.get(descriptor))
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|candidate| !candidate.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let assumption = operations
+        .get("SemanticSymbolAssumptions")
+        .and_then(|rows| rows.get(descriptor))
+        .cloned();
+    Some((operation.complexity(), candidates, assumption))
+}
+
+/// Return a reviewed worst-case operation for an interface over a configured
+/// implementation universe. This is deliberately separate from ordinary
+/// declaration models: the result is a closed/modelled-world upper bound, not
+/// proof that arbitrary third-party implementations share the same cost.
+pub(crate) fn configured_interface_upper_bound(
+    language: &str,
+    owner: &str,
+    message: &str,
+) -> Option<(NormalizedCallComplexity, Vec<String>)> {
+    let operations = stdlib_operations(language)?;
+    let key = format!("{}.{}", owner.trim(), message);
+    let operation = operations
+        .get("InterfaceUpperBound")?
+        .get(&key)
+        .and_then(|value| operation_from_config(value))?;
+    let candidates = operations
+        .get("InterfaceCandidates")
+        .and_then(|rows| rows.get(owner.trim()))
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|candidate| !candidate.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Some((operation.complexity(), candidates))
+}
+
+/// Computational bound for an API whose wall-clock latency depends on an
+/// external device, filesystem, process, or stream. Consumers must preserve
+/// the returned assumption instead of presenting it as an end-to-end latency
+/// bound.
+pub(crate) fn configured_external_latency_bound(
+    language: &str,
+    owner: &str,
+    message: &str,
+) -> Option<NormalizedCallComplexity> {
+    let operations = stdlib_operations(language)?;
+    let key = format!("{}.{}", owner.trim(), message);
+    operations
+        .get("ExternalLatency")?
+        .get(&key)
+        .and_then(|value| operation_from_config(value))
         .map(NormalizedCollectionOperation::complexity)
 }
 
@@ -305,12 +642,46 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     fn stdlib_language(&self) -> Option<&'static str> {
         None
     }
+
+    /// Interpret a compiler symbol only at the owning language boundary. The
+    /// shared SCIP importer asks through this normalized interface and never
+    /// contains a language-specific symbol grammar.
+    fn external_symbol_call_complexity(
+        &self,
+        _symbol: &str,
+        _message: &str,
+    ) -> Option<super::ExternalCallComplexity> {
+        None
+    }
+
+    fn external_symbol_metadata(&self, _symbol: &str) -> super::ExternalSymbolMetadata {
+        super::ExternalSymbolMetadata {
+            scope: "external",
+            missing_cost_kind: "external_cost_model_missing".to_string(),
+            parametric_cost: None,
+        }
+    }
+
+    /// Native owner identity encoded in a compiler symbol. Shared SCIP logic
+    /// uses this only to match an already-normalized project interface; the
+    /// symbol grammar remains confined to the language adapter.
+    fn external_symbol_owner(&self, _symbol: &str) -> Option<String> {
+        None
+    }
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         ControlFlowProfile::neutral_ref()
     }
 
     fn declared_type_hint_complete(&self, _type_name: &str) -> bool {
         true
+    }
+
+    /// Return the declared type of one local binding when the native syntax
+    /// proves it. Adapters opt into a small shared declaration parser; type
+    /// inference (`var`, `auto`, `let`, and similar forms) deliberately does
+    /// not enter this contract.
+    fn declared_local_type(&self, _source: &str, _name: &str) -> Option<String> {
+        None
     }
 
     fn collection_allocation_semantics(&self, _message: &str) -> CollectionAllocationSemantics {
@@ -344,6 +715,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// Whether a function nested inside another function is a lexical closure
     /// rather than an owner method.
     fn nested_function_is_lexical(&self, _function: &Node) -> bool {
+        false
+    }
+
+    /// Whether a declaration nested below another method body represents a
+    /// method on an anonymous owner rather than a lexical/local declaration.
+    /// This is false unless the language's declaration model proves it.
+    fn nested_function_is_owner_method(&self, _function: &Node) -> bool {
         false
     }
 
@@ -404,6 +782,21 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
             .map(NormalizedCollectionOperation::complexity)
     }
 
+    fn parametric_call_cost(&self, receiver_type: &TypeExpr, message: &str) -> Option<String> {
+        self.stdlib_language().and_then(|language| {
+            configured_parametric_call_cost(language, receiver_type, message)
+        })
+    }
+
+    /// Classify a language-owned declared function/callable type. The shared
+    /// profile follows field projections; adapters only recognize native type
+    /// grammar or reviewed named callable aliases.
+    fn declared_callable_cost(&self, declared_type: &str) -> Option<String> {
+        self.stdlib_language().and_then(|language| {
+            configured_callable_type_cost(language, declared_type)
+        })
+    }
+
     /// Return a cost only when the adapter recognizes a language/runtime
     /// intrinsic without guessing the receiver's type. This keeps spellings in
     /// language adapters while downstream complexity analysis stays generic.
@@ -414,6 +807,16 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     ) -> Option<NormalizedCallComplexity> {
         self.stdlib_language()
             .and_then(|language| configured_intrinsic_call_complexity(language, receiver, message))
+    }
+
+    /// Whether an unqualified call inside an instance method may dispatch to
+    /// another method on the implicit current receiver. Languages such as Go
+    /// require an explicit receiver (`x.f()`), while Ruby/Java-style method
+    /// lookup permits a bare `f()`. This language-owned syntax rule prevents
+    /// the shared resolver from confusing a predeclared function such as
+    /// Go's `len` with an unrelated same-named method.
+    fn supports_implicit_owner_dispatch(&self) -> bool {
+        true
     }
 
     fn literal_receiver_type(&self, _node: &Node) -> Option<TypeExpr> {
@@ -699,6 +1102,12 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         default_kind.to_string()
     }
 
+    /// Direct native base/interface spellings owned by this language's
+    /// declaration grammar. Shared consumers canonicalize and traverse them.
+    fn owner_supertypes(&self, _node: &Node) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Whether an owner declaration may extend a prior declaration with the
     /// same name. This is normalized evidence for downstream detectors; the
     /// language rule itself belongs in the language behavior.
@@ -750,12 +1159,7 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// normalized declaration node is still available. Most languages use
     /// the ordinary owner/name contract; adapters override this only where a
     /// declaration modifier or receiver changes dispatch semantics.
-    fn function_dispatch_kind_from_node(
-        &self,
-        name: &str,
-        _node: &Node,
-        owner: &str,
-    ) -> String {
+    fn function_dispatch_kind_from_node(&self, name: &str, _node: &Node, owner: &str) -> String {
         self.function_dispatch_kind(name, owner)
     }
 
@@ -1104,7 +1508,7 @@ pub(crate) fn matching_paren_index(source: &str, open_index: usize) -> Option<us
     None
 }
 
-fn method_param_types_from_signatures<B: NormalizedLanguageBehavior + ?Sized>(
+pub(crate) fn method_param_types_from_signatures<B: NormalizedLanguageBehavior + ?Sized>(
     behavior: &B,
     source: &str,
     functions: &[FunctionDef],
@@ -1112,25 +1516,55 @@ fn method_param_types_from_signatures<B: NormalizedLanguageBehavior + ?Sized>(
     functions
         .iter()
         .filter_map(|function| {
-            let declaration = source
+            let parse = |declaration: &str| {
+                let params = behavior.parameter_list_source(declaration);
+                split_signature_parameters(&params)
+                    .into_iter()
+                    .filter_map(|parameter| {
+                        let name = behavior.parameter_name_from_signature(&parameter)?;
+                        let type_name = behavior.parameter_type_from_signature(&parameter)?;
+                        (!type_name.trim().is_empty()).then_some((name, type_name))
+                    })
+                    .collect::<BTreeMap<_, _>>()
+            };
+            // Preserve the established single-line interpretation. Only
+            // annotations and genuinely multiline declarations need the
+            // source-span fallback.
+            let first_line = source
                 .lines()
                 .nth(function.line.saturating_sub(1))
                 .unwrap_or_default();
-            let params = behavior.parameter_list_source(declaration);
-            let param_types = split_signature_parameters(&params)
-                .into_iter()
-                .filter_map(|parameter| {
-                    let name = behavior.parameter_name_from_signature(&parameter)?;
-                    let type_name = behavior.parameter_type_from_signature(&parameter)?;
-                    (!type_name.trim().is_empty()).then_some((name, type_name))
-                })
-                .collect::<BTreeMap<_, _>>();
+            let mut param_types = parse(first_line);
+            if param_types.is_empty() {
+                param_types = parse(&function_declaration_source(source, function)?);
+            }
             (!param_types.is_empty()).then_some((
                 method_parameter_type_key(&function.owner, &function.name, function.line),
                 param_types,
             ))
         })
         .collect()
+}
+
+fn function_declaration_source(source: &str, function: &FunctionDef) -> Option<String> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let start = function.line.saturating_sub(1).min(lines.len());
+    let end = function.span[2].min(lines.len());
+    let declaration_and_body = lines.get(start..end)?.join("\n");
+    let name_start = declaration_and_body
+        .match_indices(function.name.as_str())
+        .find_map(|(index, _)| {
+            let before = declaration_and_body[..index].chars().next_back();
+            let after_index = index + function.name.len();
+            let after = declaration_and_body[after_index..].chars().next();
+            let identifier = |character: char| character == '_' || character.is_alphanumeric();
+            if before.is_some_and(identifier) || after.is_some_and(identifier) {
+                return None;
+            }
+            let suffix = declaration_and_body[after_index..].trim_start();
+            (suffix.starts_with('(') || suffix.starts_with('<')).then_some(index)
+        })?;
+    Some(declaration_and_body[name_start..].to_string())
 }
 
 pub(crate) fn method_parameter_type_key(owner: &str, name: &str, line: usize) -> String {
@@ -1191,6 +1625,92 @@ pub(crate) fn type_after_parameter_colon(parameter: &str) -> Option<String> {
     let (_, type_name) = declaration.split_once(':')?;
     let type_name = type_name.trim();
     (!type_name.is_empty()).then(|| type_name.to_string())
+}
+
+fn usable_declared_local_type(type_name: &str) -> Option<String> {
+    let type_name = type_name.trim();
+    let lower = type_name.to_ascii_lowercase();
+    (!type_name.is_empty()
+        && !matches!(
+            lower.as_str(),
+            "any" | "auto" | "def" | "dynamic" | "let" | "unknown" | "var"
+        ))
+    .then(|| type_name.to_string())
+}
+
+/// Shared parser for declarations whose type precedes the local name, such
+/// as Java/C#/C++ `final Service client = ...`. Languages opt in explicitly.
+pub(crate) fn type_before_local_name(source: &str, name: &str) -> Option<String> {
+    let name_start = source.match_indices(name).find_map(|(index, _)| {
+        let before = source[..index].chars().next_back();
+        let after = source[index + name.len()..].chars().next();
+        let boundary = |character: Option<char>| {
+            character.is_none_or(|character| !character.is_alphanumeric() && character != '_')
+        };
+        (boundary(before) && boundary(after)).then_some(index)
+    })?;
+    let mut prefix = source[..name_start]
+        .rsplit([';', '{', '}'])
+        .next()
+        .unwrap_or_default()
+        .trim();
+    for control in ["for (", "foreach ("] {
+        prefix = prefix.rsplit(control).next().unwrap_or(prefix).trim();
+    }
+    loop {
+        let previous = prefix;
+        for modifier in [
+            "const ",
+            "final ",
+            "fixed ",
+            "late ",
+            "readonly ",
+            "ref ",
+            "scoped ",
+            "static ",
+            "using ",
+            "volatile ",
+        ] {
+            prefix = prefix.strip_prefix(modifier).unwrap_or(prefix).trim();
+        }
+        if prefix == previous {
+            break;
+        }
+    }
+    usable_declared_local_type(prefix)
+}
+
+/// Shared parser for Python/TypeScript-style `name: Type` local annotations.
+pub(crate) fn type_after_local_colon(source: &str, name: &str) -> Option<String> {
+    let name_start = source.match_indices(name).find_map(|(index, _)| {
+        let before = source[..index].chars().next_back();
+        let after = source[index + name.len()..].chars().next();
+        let boundary = |character: Option<char>| {
+            character.is_none_or(|character| !character.is_alphanumeric() && character != '_')
+        };
+        (boundary(before) && boundary(after)).then_some(index)
+    })?;
+    let suffix = source[name_start + name.len()..].trim_start();
+    let type_name = suffix.strip_prefix(':')?.trim_start();
+    let type_name = type_name
+        .split(['=', ';'])
+        .next()
+        .unwrap_or_default()
+        .trim();
+    usable_declared_local_type(type_name)
+}
+
+/// Shared parser for Go `var name Type` declarations. Short declarations are
+/// inferred values and intentionally remain outside the declared-type fact.
+pub(crate) fn type_after_go_local_name(source: &str, name: &str) -> Option<String> {
+    let declaration = source.trim().strip_prefix("var ")?.trim();
+    let suffix = declaration.strip_prefix(name)?.trim_start();
+    let boundary = declaration[name.len()..].chars().next();
+    if boundary.is_some_and(|character| character.is_alphanumeric() || character == '_') {
+        return None;
+    }
+    let type_name = suffix.split(['=', ';']).next().unwrap_or_default().trim();
+    usable_declared_local_type(type_name)
 }
 
 #[cfg(test)]
@@ -1281,18 +1801,73 @@ mod tests {
         let string = TypeExpr::Primitive("String".to_string());
 
         for (language, receiver, message, expected) in [
-            ("ruby", &array, "include?", NormalizedCollectionOperation::LinearScan),
-            ("python", &array, "append", NormalizedCollectionOperation::Constant),
-            ("javascript", &array, "shift", NormalizedCollectionOperation::LinearScan),
-            ("typescript", &array, "shift", NormalizedCollectionOperation::LinearScan),
-            ("java", &array, "contains", NormalizedCollectionOperation::LinearScan),
-            ("csharp", &array, "Remove", NormalizedCollectionOperation::LinearScan),
+            (
+                "ruby",
+                &array,
+                "include?",
+                NormalizedCollectionOperation::LinearScan,
+            ),
+            (
+                "python",
+                &array,
+                "append",
+                NormalizedCollectionOperation::Constant,
+            ),
+            (
+                "javascript",
+                &array,
+                "shift",
+                NormalizedCollectionOperation::LinearScan,
+            ),
+            (
+                "typescript",
+                &array,
+                "shift",
+                NormalizedCollectionOperation::LinearScan,
+            ),
+            (
+                "java",
+                &array,
+                "contains",
+                NormalizedCollectionOperation::LinearScan,
+            ),
+            (
+                "csharp",
+                &array,
+                "Remove",
+                NormalizedCollectionOperation::LinearScan,
+            ),
             ("go", &array, "len", NormalizedCollectionOperation::Constant),
-            ("cpp", &array, "find", NormalizedCollectionOperation::LinearScan),
-            ("kotlin", &array, "contains", NormalizedCollectionOperation::LinearScan),
-            ("rust", &array, "binary_search", NormalizedCollectionOperation::Logarithmic),
-            ("swift", &array, "sorted", NormalizedCollectionOperation::Sort),
-            ("zig", &array, "append", NormalizedCollectionOperation::Constant),
+            (
+                "cpp",
+                &array,
+                "find",
+                NormalizedCollectionOperation::LinearScan,
+            ),
+            (
+                "kotlin",
+                &array,
+                "contains",
+                NormalizedCollectionOperation::LinearScan,
+            ),
+            (
+                "rust",
+                &array,
+                "binary_search",
+                NormalizedCollectionOperation::Logarithmic,
+            ),
+            (
+                "swift",
+                &array,
+                "sorted",
+                NormalizedCollectionOperation::Sort,
+            ),
+            (
+                "zig",
+                &array,
+                "append",
+                NormalizedCollectionOperation::Constant,
+            ),
         ] {
             assert_eq!(
                 configured_collection_operation(language, receiver, message),
@@ -1313,20 +1888,85 @@ mod tests {
             Some(NormalizedCollectionOperation::LinearScan)
         );
         for (language, receiver, message, expected) in [
-            ("c", None, "strlen", NormalizedCollectionOperation::LinearScan),
-            ("c", None, "strcmp", NormalizedCollectionOperation::LinearScan),
+            (
+                "c",
+                None,
+                "strlen",
+                NormalizedCollectionOperation::LinearScan,
+            ),
+            (
+                "c",
+                None,
+                "strcmp",
+                NormalizedCollectionOperation::LinearScan,
+            ),
             ("go", None, "len", NormalizedCollectionOperation::Constant),
-            ("go", Some("strings"), "HasPrefix", NormalizedCollectionOperation::LinearScan),
-            ("go", Some("slices"), "BinarySearch", NormalizedCollectionOperation::Logarithmic),
-            ("go", Some("maps"), "Clone", NormalizedCollectionOperation::LinearMaterialize),
-            ("go", Some("atomic"), "LoadInt64", NormalizedCollectionOperation::Constant),
-            ("php", None, "array_map", NormalizedCollectionOperation::LinearMaterialize),
-            ("lua", Some("table"), "sort", NormalizedCollectionOperation::Sort),
-            ("java", Some("Collections"), "binarySearch", NormalizedCollectionOperation::Logarithmic),
-            ("java", Some("Arrays"), "copyOf", NormalizedCollectionOperation::LinearMaterialize),
-            ("java", Some("Math"), "sqrt", NormalizedCollectionOperation::Constant),
-            ("csharp", Some("Array"), "BinarySearch", NormalizedCollectionOperation::Logarithmic),
-            ("csharp", Some("Math"), "Sqrt", NormalizedCollectionOperation::Constant),
+            (
+                "go",
+                Some("strings"),
+                "HasPrefix",
+                NormalizedCollectionOperation::LinearScan,
+            ),
+            (
+                "go",
+                Some("slices"),
+                "BinarySearch",
+                NormalizedCollectionOperation::Logarithmic,
+            ),
+            (
+                "go",
+                Some("maps"),
+                "Clone",
+                NormalizedCollectionOperation::LinearMaterialize,
+            ),
+            (
+                "go",
+                Some("atomic"),
+                "LoadInt64",
+                NormalizedCollectionOperation::Constant,
+            ),
+            (
+                "php",
+                None,
+                "array_map",
+                NormalizedCollectionOperation::LinearMaterialize,
+            ),
+            (
+                "lua",
+                Some("table"),
+                "sort",
+                NormalizedCollectionOperation::Sort,
+            ),
+            (
+                "java",
+                Some("Collections"),
+                "binarySearch",
+                NormalizedCollectionOperation::Logarithmic,
+            ),
+            (
+                "java",
+                Some("Arrays"),
+                "copyOf",
+                NormalizedCollectionOperation::LinearMaterialize,
+            ),
+            (
+                "java",
+                Some("Math"),
+                "sqrt",
+                NormalizedCollectionOperation::Constant,
+            ),
+            (
+                "csharp",
+                Some("Array"),
+                "BinarySearch",
+                NormalizedCollectionOperation::Logarithmic,
+            ),
+            (
+                "csharp",
+                Some("Math"),
+                "Sqrt",
+                NormalizedCollectionOperation::Constant,
+            ),
         ] {
             assert_eq!(
                 configured_intrinsic_operation(language, receiver, message),
@@ -1334,7 +1974,10 @@ mod tests {
                 "{language} {receiver:?}.{message}"
             );
         }
-        assert_eq!(configured_intrinsic_operation("c", Some("project"), "strlen"), None);
+        assert_eq!(
+            configured_intrinsic_operation("c", Some("project"), "strlen"),
+            None
+        );
         assert_eq!(
             configured_intrinsic_operation("javascript", Some("Object"), "keys"),
             None,

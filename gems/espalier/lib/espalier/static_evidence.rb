@@ -24,8 +24,8 @@ module Espalier
       File.join(Espalier::ROOT, "gems", "fact-mine", "target", "release", "fact-mine-rust")
     ).freeze
 
-    def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true)
-      new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations).build
+    def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [])
+      new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations, scip_indexes: scip_indexes).build
     end
 
     def self.project_modules(evidence, source_roles: ["production"])
@@ -164,14 +164,32 @@ module Espalier
           type: call["conditional"] ? :conditional : :always,
           confidence: call["confidence"],
           unresolved_reason: (target || known_time || known_space) ? nil : call["unresolved_reason"],
+          call_id: call["id"],
           target_id: target && target[:id],
           target_owner: target && target[:projected_owner],
           target_method: target && target[:name],
+          semantic_symbol: call["semantic_symbol"],
+          target_provenance: call["target_provenance"],
+          candidate_target_ids: Array(call["candidate_targets"]),
+          candidate_reason: call["candidate_reason"],
+          complexity_provenance: call["complexity_provenance"],
+          complexity_bound_quality: call["complexity_bound_quality"],
+          complexity_candidates: Array(call["complexity_candidates"]),
+          complexity_assumptions: Array(call["complexity_assumptions"]),
+          state_receiver: call["state_receiver"] == true,
           known_time_complexity: known_time,
           known_space_complexity: known_space
         }
         if target
           source[:delegations].last[:confidence] = "high"
+        end
+      end
+
+      calls_by_source = Array(evidence.dig("facts", "calls")).group_by { |call| call["source"].to_s }
+      methods_by_id.each do |method_id, method|
+        calls = Array(calls_by_source[method_id.to_s])
+        method[:semantic_call_identity_complete] = calls.any? && calls.all? do |call|
+          call["target_provenance"] == "scip" && !call["semantic_symbol"].to_s.empty?
         end
       end
 
@@ -184,8 +202,29 @@ module Espalier
 
         owner_key = resolve_owner.call(p_owner, record["path"], record["language"])
         meths = methods_by_owner[owner_key] || []
-        meth = meths.find { |m_item| m_item[:name] == func }
+        candidates = meths.select { |m_item| m_item[:name] == func }
+        record_line = record["line"].to_i
+        meth = candidates.find do |candidate|
+          span = candidate[:span]
+          span.is_a?(Array) && record_line >= span[0].to_i && record_line <= span[2].to_i
+        end
+        meth ||= candidates.first if candidates.one?
         if meth
+          duplicate = Array(meth[:delegations]).any? do |delegation|
+            same_span = delegation[:span].is_a?(Array) && record["span"].is_a?(Array) &&
+              delegation[:span].map(&:to_i) == record["span"].map(&:to_i)
+            receiver = delegation[:receiver].to_s
+            canonical_receiver = if delegation[:state_receiver]
+                                   receiver.split(".").last.to_s.delete_prefix("@")
+                                 else
+                                   receiver
+                                 end
+            delegation[:message].to_s == proto.to_s &&
+              (same_span || (canonical_receiver == field.to_s.delete_prefix("@") &&
+                delegation[:line].to_i == record_line))
+          end
+          next if duplicate
+
           meth[:delegations] << {
             receiver: field,
             message: proto,
@@ -202,7 +241,13 @@ module Espalier
 
         owner_key = resolve_owner.call(o_owner, record["path"], record["language"])
         meths = methods_by_owner[owner_key] || []
-        meth = meths.find { |m_item| m_item[:name] == func }
+        candidates = meths.select { |m_item| m_item[:name] == func }
+        record_line = record["line"].to_i
+        meth = candidates.find do |candidate|
+          span = candidate[:span]
+          span.is_a?(Array) && record_line >= span[0].to_i && record_line <= span[2].to_i
+        end
+        meth ||= candidates.first if candidates.one?
         meth # parameter origin is metadata, not proof of a write
       end
 
@@ -298,12 +343,13 @@ module Espalier
     end
 
 
-    def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true)
+    def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [])
       @targets = Array(targets).compact
       @root = root
       @language = normalize_language(language)
       @vcs = normalize_vcs(vcs)
       @include_annotations = include_annotations
+      @scip_indexes = Array(scip_indexes).compact
     end
 
     def build
@@ -321,6 +367,7 @@ module Espalier
 
       args = [FACT_MINE_RUST_BINARY, "profile", profile, "--output", tmp.path]
       args.concat(["--language", @language.to_s]) if @language
+      @scip_indexes.each { |index| args.concat(["--scip-index", index.to_s]) }
       args.concat(files)
       ok = system(*args)
       raise "fact-mine-rust failed with exit status #{$?.exitstatus}" unless ok
@@ -391,6 +438,7 @@ module Espalier
       state_types = facts["state_types"] || {}
       signatures = facts["signatures"] || {}
       calls = Array(facts["calls"])
+      call_resolution_coverage = Hash(facts["call_resolution_coverage"])
       state_accesses = Array(facts["state_accesses"])
       call_graph_edges = Array(facts["call_graph_edges"])
       state_type_edges = Array(facts["state_type_edges"])
@@ -487,6 +535,7 @@ module Espalier
         "methods" => methods.sort_by { |method| [method["path"], method["owner"], method["line"].to_i, method["name"]] },
         "facts" => {
           "calls" => calls.sort_by { |call| [call["path"].to_s, call["line"].to_i, call["id"].to_s] },
+          "call_resolution_coverage" => call_resolution_coverage,
           "state_accesses" => state_accesses.sort_by { |access| [access["path"].to_s, access["line"].to_i, access["id"].to_s] },
           "complexity_facts" => complexity_facts.sort_by { |fact| [fact["path"].to_s, fact["line"].to_i, fact["function"].to_s] },
           "flow_local_types" => flow_local_types.sort_by do |fact|
@@ -536,6 +585,7 @@ module Espalier
           "methods" => methods.size,
           "fields" => fields.uniq { |field| field["id"] }.size,
           "calls" => calls.size,
+          "call_resolution_coverage" => call_resolution_coverage,
           "state_accesses" => state_accesses.size,
           "flow_local_types" => flow_local_types.size,
           "type_dependencies" => type_dependencies.size,

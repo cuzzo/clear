@@ -5,6 +5,10 @@ use tree_sitter::Node as TreeSitterNode;
 pub(crate) struct JavaAstAdapter;
 
 impl AstNormalizationAdapter for JavaAstAdapter {
+    fn unqualified_types_use_current_namespace(&self) -> bool {
+        true
+    }
+
     fn symbol_scope(
         &self,
         root: TreeSitterNode<'_>,
@@ -45,6 +49,28 @@ impl AstNormalizationAdapter for JavaAstAdapter {
 
     fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
         matches!(node.kind(), "method_invocation")
+    }
+
+    fn call_block_argument<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() != "method_invocation" {
+            return None;
+        }
+        let name = node.child_by_field_name("name")?;
+        if !matches!(node_text(name, source), "forEach" | "forEachRemaining") {
+            return None;
+        }
+        let arguments = node.child_by_field_name("arguments").or_else(|| {
+            named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "argument_list")
+        })?;
+        named_children(arguments)
+            .into_iter()
+            .find(|argument| argument.kind() == "lambda_expression")
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {

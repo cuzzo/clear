@@ -39,6 +39,52 @@ const PYTHON_BODY_FIELD_KINDS: &[&str] = &[
 pub(crate) struct PythonAstAdapter;
 
 impl AstNormalizationAdapter for PythonAstAdapter {
+    fn symbol_scope(
+        &self,
+        root: TreeSitterNode<'_>,
+        source: &str,
+    ) -> (String, Vec<(String, String)>) {
+        let mut imports = Vec::new();
+        for child in named_children(root) {
+            let text = node_text(child, source).trim();
+            match child.kind() {
+                "import_statement" => {
+                    let tail = text.strip_prefix("import ").unwrap_or(text);
+                    for entry in tail.split(',').map(str::trim) {
+                        let (target, local) = entry
+                            .split_once(" as ")
+                            .map(|(target, local)| (target.trim(), local.trim()))
+                            .unwrap_or_else(|| (entry, entry.split('.').next().unwrap_or(entry)));
+                        if !local.is_empty() && !target.is_empty() {
+                            imports.push((local.to_string(), target.to_string()));
+                        }
+                    }
+                }
+                "import_from_statement" => {
+                    let Some((module, names)) = text
+                        .strip_prefix("from ")
+                        .and_then(|tail| tail.split_once(" import "))
+                    else {
+                        continue;
+                    };
+                    let names = names.trim().trim_start_matches('(').trim_end_matches(')');
+                    for entry in names.split(',').map(str::trim) {
+                        if entry.is_empty() || entry == "*" {
+                            continue;
+                        }
+                        let (name, local) = entry
+                            .split_once(" as ")
+                            .map(|(name, local)| (name.trim(), local.trim()))
+                            .unwrap_or((entry, entry));
+                        imports.push((local.to_string(), format!("{}.{}", module.trim(), name)));
+                    }
+                }
+                _ => {}
+            }
+        }
+        (String::new(), imports)
+    }
+
     fn state_field_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
         if node.kind() != "attribute" {
             return None;

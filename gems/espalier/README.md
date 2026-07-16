@@ -133,6 +133,7 @@ combining structural facts with sibling-gem evidence:
 - `--risk FILE`: Boobytrap/SlopCop churn, coverage, and risk evidence.
 - `--manifest FILE`: a previously generated Espalier YAML manifest.
 - `--fact-mine FILE`: a previously generated `fact-mine.json` static facts file (also honors `ENV["FACT_MINE_FACTS_FILE"]` environment variable to bypass fact extraction runs).
+- `--scip-index FILE`: import compiler-proven call identity from a `.scip` file or `scip print --json` export; repeat for multiple build roots. Binary indexes require `scip` on `PATH` (or `SCIP_BINARY`).
 
 Nil-kill evidence is the most important external input today because it
 helps Espalier distinguish broad untyped surfaces from intentional typed

@@ -6,6 +6,22 @@ require_relative "../lib/espalier/big_o_analyzer"
 require_relative "../lib/espalier/structural_big_o"
 
 class BigOTest < Minitest::Test
+  def test_symbolic_complexity_renders_callback_cost_as_a_distinct_parameter
+    expression = Espalier::SymbolicComplexity.parameterized_cost(
+      id: "cost:call-1",
+      name: "predicate.apply",
+      source_kind: "callback_cost",
+      multiplicity_domain: "param:items",
+      domains: [{
+        "id" => "param:items", "name" => "items", "source_kind" => "parameter"
+      }]
+    )
+
+    rendered, variables = Espalier::SymbolicComplexity.render(expression)
+    assert_equal "O(N*C)", rendered
+    assert_equal ["parameter", "callback_cost"], variables.map { |row| row[:source_kind] }
+  end
+
   def test_language_neutral_nested_independent_domains_render_a_product
     fixture = JSON.parse(File.read(File.join(__dir__, "fixtures", "big_o", "nested_independent_domains.json")))
     consumer = Espalier::StructuralBigO.new(
@@ -249,9 +265,12 @@ class BigOTest < Minitest::Test
     assert_equal "O(N)", consumer.send(:propagated_call_complexity, {
       "execution_multiplicity" => "O(N)", "argument_cardinality_relation" => "partition_of"
     }, "O(N)")
-    assert_equal "unknown", consumer.send(:propagated_call_complexity, {
+    assert_equal "O(N^2)", consumer.send(:propagated_call_complexity, {
       "execution_multiplicity" => "O(N)", "argument_cardinality_relation" => "unknown"
     }, "O(N)")
+    assert_equal "O(N)", consumer.send(:propagated_call_complexity, {
+      "execution_multiplicity" => "O(N)", "argument_cardinality_relation" => "unknown"
+    }, "O(1)")
 
     recursive_consumer = Espalier::StructuralBigO.new(
       facts_by_method: facts,
@@ -438,6 +457,15 @@ class BigOTest < Minitest::Test
     assert_equal "O(1)", propagated[:space]
     assert propagated[:time_complete]
     assert propagated[:space_complete]
+    assert_same hints, consumer.hints_for(nil, { name: "run", line: 2 }, "Caller")
+
+    consumer.apply_summary_delta!(nil, "Target", "work", {
+      time: "O(N^2)", space: "O(1)", time_complete: true, space_complete: true,
+      symbolic_time: nil, bound_qualities: [], assumptions: []
+    })
+    changed_hints = consumer.hints_for(nil, { name: "run", line: 2 }, "Caller")
+    refute_same hints, changed_hints
+    assert_equal "O(N^2)", changed_hints.find { |hint| hint[:operation] == "work" }[:complexity]
 
     recursive = Espalier::StructuralBigO.new(
       facts_by_method: facts,
@@ -446,10 +474,12 @@ class BigOTest < Minitest::Test
       resolved_recursive_edges: { ["Caller", "run", "Target", "work"] => true }
     ).hints_for(nil, { name: "run", line: 2 }, "Caller")
       .find { |hint| hint[:operation] == "work" }
-    assert_equal "unknown", recursive[:complexity]
-    assert_equal "unknown", recursive[:space]
-    refute recursive[:time_complete]
-    refute recursive[:space_complete]
+    assert_equal "O(2^N)", recursive[:complexity]
+    assert_equal "O(N)", recursive[:space]
+    assert recursive[:time_complete]
+    assert recursive[:space_complete]
+    assert_equal "upper_bound_acyclic_project_scc", recursive[:complexity_bound_quality]
+    assert recursive[:complexity_assumptions].first.include?("finite and acyclic")
   end
 
   def test_remaining_complexity_lattice_and_type_resolution_paths

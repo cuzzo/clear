@@ -6,6 +6,36 @@ use tree_sitter::Node as TreeSitterNode;
 pub(crate) struct CSharpAstAdapter;
 
 impl AstNormalizationAdapter for CSharpAstAdapter {
+    fn symbol_scope(
+        &self,
+        root: TreeSitterNode<'_>,
+        source: &str,
+    ) -> (String, Vec<(String, String)>) {
+        let namespace = named_children(root)
+            .into_iter()
+            .find(|child| {
+                matches!(
+                    child.kind(),
+                    "namespace_declaration" | "file_scoped_namespace_declaration"
+                )
+            })
+            .and_then(|declaration| {
+                declaration
+                    .child_by_field_name("name")
+                    .map(|name| node_text(name, source).trim().to_string())
+                    .or_else(|| {
+                        let text = node_text(declaration, source).trim();
+                        text.strip_prefix("namespace ")
+                            .and_then(|tail| tail.split(['{', ';']).next())
+                            .map(str::trim)
+                            .filter(|name| !name.is_empty())
+                            .map(str::to_string)
+                    })
+            })
+            .unwrap_or_default();
+        (namespace, Vec::new())
+    }
+
     fn tracks_dynamic_local_scope(&self) -> bool {
         true
     }
@@ -168,5 +198,29 @@ fn collect_csharp_scope_locals(
     }
     for child in normalizer.named_children(node) {
         collect_csharp_scope_locals(normalizer, child, locals, false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    #[test]
+    fn extracts_block_and_file_scoped_namespaces() {
+        let adapter = CSharpAstAdapter;
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_c_sharp::LANGUAGE.into())
+            .unwrap();
+        for source in [
+            "namespace Demo.Core { class Item {} }",
+            "namespace Demo.Core; class Item {}",
+        ] {
+            let tree = parser.parse(source, None).unwrap();
+            let (namespace, imports) = adapter.symbol_scope(tree.root_node(), source);
+            assert_eq!(namespace, "Demo.Core");
+            assert!(imports.is_empty());
+        }
     }
 }

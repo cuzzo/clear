@@ -42,6 +42,26 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         (String::new(), Vec::new())
     }
 
+    /// Canonical namespace identities keyed by native declaration span.
+    /// This remains empty unless the language grammar proves the scope.
+    fn declaration_namespaces(
+        &self,
+        _root: TreeSitterNode<'_>,
+        _source: &str,
+    ) -> Vec<([usize; 4], String)> {
+        Vec::new()
+    }
+
+    /// Whether an unqualified declared type with no explicit import is owned
+    /// by the current namespace according to native language rules.
+    fn unqualified_types_use_current_namespace(&self) -> bool {
+        false
+    }
+
+    fn preprocessor_callable_names(&self, _root: TreeSitterNode<'_>, _source: &str) -> Vec<String> {
+        Vec::new()
+    }
+
     fn scope_locals(
         &self,
         _node: TreeSitterNode<'_>,
@@ -1042,6 +1062,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         _function: Option<TreeSitterNode<'tree>>,
         _source: &str,
     ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        None
+    }
+
+    /// Return a callback expression that is syntactically carried as a call
+    /// argument. Languages with trailing-block syntax use `call_block`
+    /// directly; adapters only override this for native lambda-argument
+    /// forms whose body is available in the source AST.
+    fn call_block_argument<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
         None
     }
 

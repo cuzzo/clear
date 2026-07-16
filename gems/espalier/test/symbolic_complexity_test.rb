@@ -4,6 +4,9 @@ require "minitest/autorun"
 require_relative "../lib/espalier/symbolic_complexity"
 
 class SymbolicComplexityTest < Minitest::Test
+  def setup
+    Espalier::SymbolicComplexity.reset_intern_pool!
+  end
   def domain(id, name, line)
     { "id" => id, "name" => name, "source_kind" => "parameter", "path" => "sample.rb", "span" => [line, 0, line, 4] }
   end
@@ -95,5 +98,18 @@ class SymbolicComplexityTest < Minitest::Test
       domains: [sorted]
     )
     assert_equal "O(log N)", Espalier::SymbolicComplexity.render(logarithmic).first
+  end
+
+
+  def test_canonical_dag_interns_equivalent_expressions
+    xs = domain("param:f:xs", "xs", 1)
+    first = expression({ xs["id"] => 2 }, [xs])
+    second = expression({ xs["id"] => 2 }, [xs.dup])
+
+    assert_same first, second
+    assert_same first[:terms].first, second[:terms].first
+    assert first.frozen?
+    assert first[:terms].first[:factors].frozen?
+    assert first[:domains].frozen?
   end
 end

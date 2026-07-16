@@ -9,7 +9,10 @@ fn test_cli_error_paths_and_variations() {
     let bin_path = env!("CARGO_BIN_EXE_fact-mine-rust");
 
     // 1. Invalid command
-    let out = Command::new(bin_path).arg("invalid-command").output().unwrap();
+    let out = Command::new(bin_path)
+        .arg("invalid-command")
+        .output()
+        .unwrap();
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("usage: fact-mine-rust"));
@@ -21,31 +24,46 @@ fn test_cli_error_paths_and_variations() {
     assert!(stderr.contains("requires at least one file"));
 
     // 3. profile requires at least one file
-    let out = Command::new(bin_path).args(&["profile", "espalier"]).output().unwrap();
+    let out = Command::new(bin_path)
+        .args(&["profile", "espalier"])
+        .output()
+        .unwrap();
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("requires at least one file"));
 
     // 4. unsupported profile
-    let out = Command::new(bin_path).args(&["profile", "invalid-profile", "Cargo.toml"]).output().unwrap();
+    let out = Command::new(bin_path)
+        .args(&["profile", "invalid-profile", "Cargo.toml"])
+        .output()
+        .unwrap();
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("unsupported profile:"));
 
     // 5. unsupported option in syntax-facts
-    let out = Command::new(bin_path).args(&["syntax-facts", "--invalid-flag", "Cargo.toml"]).output().unwrap();
+    let out = Command::new(bin_path)
+        .args(&["syntax-facts", "--invalid-flag", "Cargo.toml"])
+        .output()
+        .unwrap();
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("unsupported option:"));
 
     // 6. unsupported option in profile
-    let out = Command::new(bin_path).args(&["profile", "espalier", "--invalid-flag", "Cargo.toml"]).output().unwrap();
+    let out = Command::new(bin_path)
+        .args(&["profile", "espalier", "--invalid-flag", "Cargo.toml"])
+        .output()
+        .unwrap();
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("unsupported option:"));
 
     // 7. run profile to stdout (no --output flag)
-    let out = Command::new(bin_path).args(&["profile", "espalier", "src/lib.rs"]).output().unwrap();
+    let out = Command::new(bin_path)
+        .args(&["profile", "espalier", "src/lib.rs"])
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("\"methods\""));
@@ -79,6 +97,33 @@ fn test_cli_error_paths_and_variations() {
         .output()
         .unwrap();
     assert!(!out.status.success());
+
+    // 11. call-resolution exposes both machine-readable and human reports
+    let out = Command::new(bin_path)
+        .args(&["call-resolution", "--format=json", "src/lib.rs"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let coverage: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(coverage.get("eligible_call_sites").is_some());
+    assert!(coverage.get("unresolved_by_reason").is_some());
+
+    let out = Command::new(bin_path)
+        .args(&["call-resolution", "src/lib.rs"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Call resolution coverage"));
+    assert!(stdout.contains("Denominator: call sites inside emitted executable methods"));
+
+    // 12. call-resolution requires files
+    let out = Command::new(bin_path)
+        .arg("call-resolution")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("requires at least one file"));
 }
 
 #[test]

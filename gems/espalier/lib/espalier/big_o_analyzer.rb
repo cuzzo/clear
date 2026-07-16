@@ -41,6 +41,8 @@ module Espalier
       end
       warnings = []
       evidence_gaps = []
+      bound_qualities = []
+      complexity_assumptions = []
 
       # Lower bound calculation
       # For a prototype, we just scan for the most complex operation in the flat AST.
@@ -54,6 +56,9 @@ module Espalier
           next if node[:internal_call]
 
           if node[:known_time_complexity]
+            bound_qualities << node[:complexity_bound_quality] if node[:complexity_bound_quality]
+            bound_qualities.concat(Array(node[:complexity_bound_qualities]))
+            complexity_assumptions.concat(Array(node[:complexity_assumptions]))
             known_complexity = node[:known_time_complexity].to_s
             if node[:symbolic_time]
               symbolic_time = Espalier::SymbolicComplexity.sum(symbolic_time, node[:symbolic_time])
@@ -97,6 +102,9 @@ module Espalier
           complexity = max_complexity(complexity, "O(N)")
           is_dynamic = true
         elsif node[:type] == :structural
+          bound_qualities << node[:complexity_bound_quality] if node[:complexity_bound_quality]
+          bound_qualities.concat(Array(node[:complexity_bound_qualities]))
+          complexity_assumptions.concat(Array(node[:complexity_assumptions]))
           structural_complexity = node[:complexity].to_s
           if node[:symbolic_time]
             symbolic_time = Espalier::SymbolicComplexity.sum(symbolic_time, node[:symbolic_time])
@@ -150,6 +158,8 @@ module Espalier
           entry.merge("evidence_gaps" => entry.fetch("evidence_gaps").sort.to_h)
         end,
         evidence_gaps: evidence_gaps.compact.uniq.sort,
+        bound_qualities: bound_qualities.compact.uniq.sort,
+        complexity_assumptions: complexity_assumptions.compact.uniq.sort,
         warnings: warnings.uniq
       }
     ensure

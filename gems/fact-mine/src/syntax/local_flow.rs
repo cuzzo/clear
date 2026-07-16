@@ -253,13 +253,26 @@ impl<'a> LocalFlow<'a> {
     }
 
     fn collect_nested_owners(&self, node: &Node, owners: &[String], out: &mut Vec<MethodSummary>) {
-        if METHOD_TYPES.contains(&node.r#type.as_str()) {
-            return;
-        }
-
         for child in node.children.iter().filter_map(ast::node) {
             if OWNER_TYPES.contains(&child.r#type.as_str()) {
                 self.collect_methods(child, owners, out);
+            } else if METHOD_TYPES.contains(&child.r#type.as_str()) {
+                let span = [
+                    child.first_lineno,
+                    child.first_column,
+                    child.last_lineno,
+                    child.last_column,
+                ];
+                // Java anonymous classes contain owner methods below a
+                // constructor or initializer. Preserve only declarations the
+                // language adapter positively identifies as owner methods;
+                // ordinary nested/inline declarations stay out of this pass.
+                if self.behavior.nested_function_is_owner_method(child)
+                    && !out.iter().any(|method| method.span == span)
+                {
+                    out.push(self.method_summary(child, None));
+                }
+                self.collect_nested_owners(child, owners, out);
             } else {
                 self.collect_nested_owners(child, owners, out);
             }

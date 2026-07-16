@@ -75,6 +75,11 @@ pub struct NodeEffect {
     /// Direct value-flow edges for assignments such as `destination = source`.
     /// Calls and compound expressions are intentionally excluded.
     pub write_sources: BTreeMap<String, String>,
+    /// Direct `target = call(...)` assignments keyed by target place. The
+    /// span identifies the normalized producer call without reconstructing
+    /// receiver text or guessing its return type in the CFG layer.
+    #[serde(default)]
+    pub write_call_sources: BTreeMap<String, Span>,
     pub unknown_call: bool,
     pub complete: bool,
     pub unknown_reasons: Vec<String>,

@@ -49,6 +49,10 @@ module NilKill
       Hash(store.facts["ivar_param_origins"])
     end
 
+    def call_resolution_coverage
+      Hash(store.facts["call_resolution_coverage"])
+    end
+
     FACT_LISTS.each do |name|
       define_method(name) { Array(store.facts[name]) }
     end

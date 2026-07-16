@@ -66,3 +66,15 @@ String:
   substring: linear_materialize
   trim: linear_materialize
   length: constant
+Namespace:
+  Array: declaration
+  Date: declaration
+  JSON: declaration
+  Math: declaration
+  Object: declaration
+  Promise: declaration
+  Reflect: declaration
+  RegExp: declaration
+  String: declaration
+DynamicGlobalBinding:
+  enabled: declaration

@@ -16,6 +16,7 @@ pub(crate) struct NormalizedFacts {
     pub(crate) function_defs: Vec<FunctionDef>,
     pub(crate) owner_defs: Vec<OwnerDef>,
     pub(crate) call_sites: Vec<CallSite>,
+    pub(crate) call_receiver_projections: Vec<super::CallReceiverProjection>,
     pub(crate) state_declarations: Vec<StateDeclaration>,
     pub(crate) state_reads: Vec<StateRead>,
     pub(crate) state_writes: Vec<StateWrite>,
@@ -100,6 +101,10 @@ impl<'a> Extractor<'a> {
             &mut self.facts.dispatch_sites,
         );
         dedupe_decision_sites(&mut self.facts.decision_sites);
+        self.facts
+            .call_receiver_projections
+            .sort_by_key(|projection| (projection.outer_span, projection.receiver_call_span));
+        self.facts.call_receiver_projections.dedup();
         self.facts.semantic_effect_sites.sort_by_key(effect_key);
         self.facts
     }
@@ -147,8 +152,10 @@ impl<'a> Extractor<'a> {
     }
 
     fn scan_owner(&mut self, node: &Node) {
-        let name = owner_name(node)
-            .or_else(|| self.behavior.owner_name_from_text(node))
+        let name = self
+            .behavior
+            .owner_name_from_text(node)
+            .or_else(|| owner_name(node))
             .or_else(|| owner_name_from_text(node))
             .unwrap_or_else(|| "(anonymous)".to_string());
         let qualified = if self.owners.is_empty() {
@@ -184,6 +191,7 @@ impl<'a> Extractor<'a> {
             name: name.to_string(),
             kind: kind.to_string(),
             reopenable: self.behavior.reopenable_owner(node),
+            supertypes: self.behavior.owner_supertypes(node),
             line: owner_span[0],
             span: owner_span,
         }
@@ -229,10 +237,7 @@ impl<'a> Extractor<'a> {
             callback_params: self.behavior.callback_parameter_names(node),
             signature: String::new(),
         });
-        if let Some(mut declaration) = self
-            .behavior
-            .state_declaration_from_function(node, &owner)
-        {
+        if let Some(mut declaration) = self.behavior.state_declaration_from_function(node, &owner) {
             declaration.field = self.behavior.clean_identifier(&declaration.field);
             declaration.file = self.file.clone();
             declaration.owner = owner.clone();
@@ -616,6 +621,7 @@ impl<'a> Extractor<'a> {
             self.scan_children(node);
             return;
         };
+        let receiver_call_span = parts.receiver_node.and_then(direct_receiver_call_span);
         if let Some(receiver) = parts.receiver_node {
             self.scan(receiver);
         }
@@ -682,6 +688,14 @@ impl<'a> Extractor<'a> {
             call.span,
         );
         if self.seen_calls.insert(key) {
+            if let Some(receiver_call_span) = receiver_call_span {
+                self.facts
+                    .call_receiver_projections
+                    .push(super::CallReceiverProjection {
+                        outer_span: call.span,
+                        receiver_call_span,
+                    });
+            }
             if self.behavior.record_method_calls_as_state_reads()
                 && !self.behavior.suppress_method_call_state_read(&projected)
             {
@@ -737,8 +751,22 @@ impl<'a> Extractor<'a> {
             call.span,
         );
         if self.seen_calls.insert(key) {
+            self.record_call_receiver_projection(node, call.span);
             self.facts.call_sites.push(call);
         }
+    }
+
+    fn record_call_receiver_projection(&mut self, node: &Node, outer_span: Span) {
+        let Some(receiver_call_span) = child_node(node, 0).and_then(direct_receiver_call_span)
+        else {
+            return;
+        };
+        self.facts
+            .call_receiver_projections
+            .push(super::CallReceiverProjection {
+                outer_span,
+                receiver_call_span,
+            });
     }
 
     fn record_state_write(&mut self, node: &Node) {
@@ -1336,6 +1364,7 @@ impl<'a> Extractor<'a> {
                         field: name,
                         owner: owner.to_string(),
                         r#type: Some(ty),
+                        immutable: false,
                         file: self.file.clone(),
                         line: node.first_lineno,
                         span: span(node),
@@ -2169,6 +2198,17 @@ fn state_receiver_field(receiver: &str) -> Option<String> {
         return simple_identifier(field).then(|| field.to_string());
     }
     None
+}
+
+fn direct_receiver_call_span(node: &Node) -> Option<Span> {
+    if matches!(node.r#type.as_str(), "CALL" | "FCALL" | "QCALL" | "VCALL") {
+        return Some(span(node));
+    }
+    let children = child_nodes(node);
+    if children.len() != 1 {
+        return None;
+    }
+    direct_receiver_call_span(children[0])
 }
 
 fn target_name_span(name: &str, node: &Node) -> Span {

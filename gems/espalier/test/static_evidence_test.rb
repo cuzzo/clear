@@ -59,6 +59,9 @@ class StaticEvidenceTest < Minitest::Test
       # State protocols include the field call, but never the explicit
       # owner-method call (`self.helper`).
       assert_equal ["fetch"], evidence.dig("facts", "state_protocols", "ClientUser\u0000@client")
+      coverage = evidence.dig("facts", "call_resolution_coverage")
+      assert_operator coverage.fetch("eligible_call_sites"), :>, 0
+      assert_equal coverage, evidence.dig("summary", "call_resolution_coverage")
       assert_equal false, evidence.dig("language_capabilities", "ruby", "runtime_tracing")
       assert_equal nil_kill_features, loaded_nil_kill_features
     end
@@ -357,6 +360,83 @@ class StaticEvidenceTest < Minitest::Test
     assert_equal "target-work", typed_call[:target_id]
     assert_equal "high", static_call[:confidence]
     assert_equal "high", typed_call[:confidence]
+  end
+
+  def test_project_modules_preserves_scip_identity_and_deduplicates_protocol_projection
+    evidence = {
+      "methods" => [{
+        "id" => "source-run", "owner" => "Source", "name" => "run",
+        "kind" => "instance", "path" => "source.java", "line" => 2,
+        "language" => "java"
+      }],
+      "facts" => {
+        "calls" => [{
+          "source" => "source-run", "receiver" => "this.items", "state_receiver" => true,
+          "message" => "size",
+          "line" => 3, "semantic_symbol" => "scip-java maven jdk 21 java/util/List#size().",
+          "target_provenance" => "scip", "known_time_complexity" => "O(1)"
+        }],
+        "state_protocol_records" => [{
+          "owner" => "Source", "function" => "run", "field" => "items",
+          "protocol" => "size", "line" => 3, "path" => "source.java", "language" => "java"
+        }]
+      }
+    }
+
+    run = Espalier::StaticEvidence.project_modules(evidence).first[:methods].first
+    assert_equal 1, run[:delegations].count { |call| call[:message] == "size" && call[:line] == 3 }
+    assert_equal "scip", run[:delegations].first[:target_provenance]
+    assert_match(/java\/util\/List/, run[:delegations].first[:semantic_symbol])
+  end
+
+  def test_protocol_projection_deduplicates_canonical_call_by_exact_span
+    evidence = {
+      "methods" => [{
+        "id" => "source-run", "owner" => "Source", "name" => "run",
+        "kind" => "instance", "path" => "source.java", "line" => 2,
+        "span" => [2, 0, 5, 1], "language" => "java"
+      }],
+      "facts" => {
+        "calls" => [{
+          "id" => "call-add", "source" => "source-run", "receiver" => "builder.items",
+          "message" => "addAll", "line" => 3, "span" => [3, 4, 3, 31],
+          "semantic_symbol" => "scip-java maven jdk 21 java/util/List#addAll().",
+          "target_provenance" => "scip", "known_time_complexity" => "O(N)"
+        }],
+        "state_protocol_records" => [{
+          "owner" => "Source", "function" => "run", "field" => "builder",
+          "protocol" => "addAll", "line" => 3, "span" => [3, 4, 3, 31],
+          "path" => "source.java", "language" => "java"
+        }]
+      }
+    }
+
+    run = Espalier::StaticEvidence.project_modules(evidence).first[:methods].first
+    assert_equal 1, run[:delegations].count { |call| call[:message] == "addAll" }
+    assert_equal "call-add", run[:delegations].first[:call_id]
+    assert_equal "O(N)", run[:delegations].first[:known_time_complexity]
+  end
+
+  def test_protocol_projection_uses_the_containing_overload
+    evidence = {
+      "methods" => [{
+        "id" => "first", "owner" => "Source", "name" => "run", "kind" => "instance",
+        "path" => "source.java", "line" => 2, "span" => [2, 0, 4, 1], "language" => "java"
+      }, {
+        "id" => "second", "owner" => "Source", "name" => "run", "kind" => "instance",
+        "path" => "source.java", "line" => 7, "span" => [7, 0, 10, 1], "language" => "java"
+      }],
+      "facts" => {
+        "state_protocol_records" => [{
+          "owner" => "Source", "function" => "run", "field" => "items",
+          "protocol" => "size", "line" => 8, "path" => "source.java", "language" => "java"
+        }]
+      }
+    }
+
+    methods = Espalier::StaticEvidence.project_modules(evidence).first[:methods]
+    assert_empty methods.find { |method| method[:id] == "first" }[:delegations]
+    assert_equal ["size"], methods.find { |method| method[:id] == "second" }[:delegations].map { |call| call[:message] }
   end
 
   def test_project_modules_does_not_guess_ambiguous_or_incomplete_targets

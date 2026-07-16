@@ -88,3 +88,56 @@ bytes:
   split: linear_materialize
   startswith: linear_scan
   strip: linear_materialize
+Intrinsic:
+  len: constant
+  isinstance: declaration
+  issubclass: declaration
+  super: declaration
+  range: declaration
+  enumerate: declaration
+  zip: declaration
+  filter: declaration
+  map: declaration
+  next: declaration
+  iter: declaration
+  open: declaration
+  print: declaration
+  repr: declaration
+  sorted: sort
+  sum: linear_scan
+  min: linear_scan
+  max: linear_scan
+  all: linear_scan
+  any: linear_scan
+  abs: constant
+  bool: declaration
+  bytes: declaration
+  dict: declaration
+  float: declaration
+  int: declaration
+  list: declaration
+  object: declaration
+  set: declaration
+  str: declaration
+  tuple: declaration
+  type: declaration
+Namespace:
+  builtins: declaration
+  collections: declaration
+  contextlib: declaration
+  dataclasses: declaration
+  enum: declaration
+  functools: declaration
+  importlib: declaration
+  inspect: declaration
+  io: declaration
+  itertools: declaration
+  json: declaration
+  os: declaration
+  pathlib: declaration
+  re: declaration
+  sys: declaration
+  typing: declaration
+  warnings: declaration
+DynamicGlobalBinding:
+  enabled: declaration

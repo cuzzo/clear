@@ -24,6 +24,52 @@ Array:
   some: linear_scan
   reduce: linear_scan
   sort: sort
+  join: linear_materialize
+Object:
+  assign: linear_materialize
+  create: constant
+  defineProperty: constant
+  defineProperties: linear_scan
+  entries: linear_materialize
+  keys: linear_materialize
+  values: linear_materialize
+  getPrototypeOf: constant
+  setPrototypeOf: linear_scan
+  getOwnPropertySymbols: linear_materialize
+JSON:
+  parse: linear_materialize
+  stringify: linear_materialize
+Date:
+  getTime: constant
+  getTimezoneOffset: constant
+  toISOString: constant
+RegExp:
+  exec: linear_scan
+  test: linear_scan
+Math:
+  ceil: constant
+  floor: constant
+  round: constant
+  trunc: constant
+Number:
+  isFinite: constant
+  isInteger: constant
+  isNaN: constant
+  parseInt: linear_scan
+BigInt:
+  toString: linear_materialize
+Function:
+  bind: constant
+Symbol:
+  for: constant
+EventEmitter:
+  on: constant
+  removeListener: linear_scan
+Process:
+  on: constant
+  removeListener: linear_scan
+Module:
+  createRequire: constant
 Hash:
   get: constant
   has: constant
@@ -51,6 +97,9 @@ string:
   slice: linear_materialize
   substring: linear_materialize
   trim: linear_materialize
+  startsWith: linear_scan
+  endsWith: linear_scan
+  charAt: constant
   length: constant
 String:
   includes: linear_scan
@@ -62,6 +111,46 @@ String:
   slice: linear_materialize
   substring: linear_materialize
   trim: linear_materialize
+  startsWith: linear_scan
+  endsWith: linear_scan
+  charAt: constant
   length: constant
 Intrinsic:
   "Array.isArray": constant
+  "path.isAbsolute": linear_scan
+  "path.join": linear_materialize
+  decodeURIComponent: linear_materialize
+  isFinite: constant
+  isNaN: constant
+  "url.fileURLToPath": linear_materialize
+ExternalLatency:
+  "fs.existsSync": linear_scan
+  "Process.cwd": constant
+  "Process.emitWarning": constant
+  "Module.resolve": linear_scan
+  "Stream.pipeline": linear_scan
+SemanticSymbolParametricCost:
+  'lib/`lib.es5.d.ts`/Array#every().': callback_linear
+  'lib/`lib.es5.d.ts`/Array#filter().': callback_linear
+  'lib/`lib.es5.d.ts`/Array#forEach().': callback_linear
+  'lib/`lib.es5.d.ts`/Array#map().': callback_linear
+  'lib/`lib.es5.d.ts`/Array#reduce().': callback_linear
+  'lib/`lib.es5.d.ts`/Array#some().': callback_linear
+  'lib/`lib.es2015.core.d.ts`/Array#find().': callback_linear
+  'lib/`lib.es2015.core.d.ts`/Array#findIndex().': callback_linear
+  'lib/`lib.es5.d.ts`/Function#apply().': callback_once
+  'lib/`lib.es5.d.ts`/Function#call().': callback_once
+  '`events.d.ts`/`"node:events"`/global/NodeJS/EventEmitter#emit().': callback_linear
+  '`diagnostics_channel.d.ts`/`"node:diagnostics_channel"`/TracingChannel#traceSync().': callback_once
+Namespace:
+  Array: declaration
+  Date: declaration
+  JSON: declaration
+  Math: declaration
+  Object: declaration
+  Promise: declaration
+  Reflect: declaration
+  RegExp: declaration
+  String: declaration
+DynamicGlobalBinding:
+  enabled: declaration

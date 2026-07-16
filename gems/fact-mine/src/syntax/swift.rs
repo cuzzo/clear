@@ -110,6 +110,10 @@ const SWIFT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct SwiftNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
+    fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
+        super::normalized_behavior::type_after_local_colon(source, name)
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("swift")
     }
@@ -312,6 +316,7 @@ impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
                     field: name.to_string(),
                     owner: String::new(),
                     r#type: Some(type_part.to_string()),
+                    immutable: false,
                     file: String::new(),
                     line: node.first_lineno,
                     span: span(node),
