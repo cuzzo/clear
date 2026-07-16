@@ -238,6 +238,80 @@ module EffectTracker
     effect_call_site_arg_families_for(fn_ctx.name, callee_name) << arg_family_sets
   end
 
+end
+
+
+# Whole-program propagation over facts collected by EffectTracker. Keeping the
+# fixed-point algorithms off the typing mixin prevents the body visitor from
+# becoming the permanent owner of call-graph results.
+module EffectAudit
+  extend T::Sig
+
+  EffectSetMap = T.type_alias { EffectTracker::EffectSetMap }
+  CallContext = T.type_alias { EffectTracker::CallContext }
+  CallSiteContextMap = T.type_alias { EffectTracker::CallSiteContextMap }
+  CallSiteArgFamilyMap = T.type_alias { EffectTracker::CallSiteArgFamilyMap }
+  AstScanInput = T.type_alias { EffectTracker::AstScanInput }
+  AsyncSpawnNode = T.type_alias { EffectTracker::AsyncSpawnNode }
+  AsyncStackTarget = T.type_alias { EffectTracker::AsyncStackTarget }
+  AsyncValidationNode = T.type_alias { EffectTracker::AsyncValidationNode }
+  CallLikeNode = T.type_alias { EffectTracker::CallLikeNode }
+  TightLoopNode = T.type_alias { EffectTracker::TightLoopNode }
+  TightScanNode = T.type_alias { EffectTracker::TightScanNode }
+
+  HEAP = EffectTracker::HEAP
+  BLOCKING = EffectTracker::BLOCKING
+  REENTRANT = EffectTracker::REENTRANT
+  LOOP_UNBOUND = EffectTracker::LOOP_UNBOUND
+  EXTERN = EffectTracker::EXTERN
+  YIELD = EffectTracker::YIELD
+  IO = EffectTracker::IO
+  CONTENTION = EffectTracker::CONTENTION
+  CONTENTION_MAYBE = EffectTracker::CONTENTION_MAYBE
+  BLOCKING_MAYBE = EffectTracker::BLOCKING_MAYBE
+  SUSPENDS = EffectTracker::SUSPENDS
+  SUSPENDS_CONDITIONAL = EffectTracker::SUSPENDS_CONDITIONAL
+  SUSPENDS_LOOP = EffectTracker::SUSPENDS_LOOP
+  SUSPENDS_FAMILY = EffectTracker::SUSPENDS_FAMILY
+
+  sig { returns(EffectTracker::EffectState) }
+  def effect_state
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
+    T.must(phase_audit_inputs.effect_state)
+  end
+
+  sig { returns(EffectSetMap) }
+  def effect_direct_effects
+    effect_state.direct_effects
+  end
+
+  sig { params(fn_name: String).returns(T::Set[Symbol]) }
+  def effect_direct_effects_for(fn_name)
+    effect_direct_effects[fn_name] ||= Set.new
+  end
+
+  sig { returns(CallSiteContextMap) }
+  def effect_call_site_context
+    effect_state.call_site_context
+  end
+
+  sig { returns(CallSiteArgFamilyMap) }
+  def effect_call_site_arg_families
+    effect_state.call_site_arg_families
+  end
+
+  sig { params(caller_name: String, callee_name: String).returns(CallContext) }
+  def effect_call_site_context_for(caller_name, callee_name)
+    caller_context = effect_call_site_context[caller_name] ||= {}
+    caller_context[callee_name] ||= { loop: false, cond: false }
+  end
+
+  sig { params(caller_name: String, callee_name: String).returns(T::Array[EffectTracker::ArgFamilySets]) }
+  def effect_call_site_arg_families_for(caller_name, callee_name)
+    caller_families = effect_call_site_arg_families[caller_name] ||= {}
+    caller_families[callee_name] ||= []
+  end
+
   # --- Phase 2: Transitive propagation ---
 
   # Fixed-point propagation through function_call_graph.
@@ -248,7 +322,7 @@ module EffectTracker
   # bar's own variant. Non-SUSPENDS effects inherit verbatim.
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_effects!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     direct_effects = effect_direct_effects
     # Seed from direct effects.
@@ -312,7 +386,7 @@ module EffectTracker
   # Effects orthogonal to the contention axis pass through unchanged.
   sig { params(callee_set: T::Set[Symbol], caller_name: String, callee_name: String).returns(T::Set[Symbol]) }
   def resolve_maybe_effects(callee_set, caller_name, callee_name)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     has_block_maybe = callee_set.include?(BLOCKING_MAYBE)
     has_cont_maybe  = callee_set.include?(CONTENTION_MAYBE)
     return callee_set unless has_block_maybe || has_cont_maybe
@@ -373,7 +447,7 @@ module EffectTracker
   # SUSPENDS promotion based on the call site's loop/cond bits.
   sig { params(caller_set: T::Set[Symbol], callee_set: T::Set[Symbol], site_ctx: CallContext).returns(T::Set[Symbol]) }
   def inherit_effects_from_callee(caller_set, callee_set, site_ctx)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue {}
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     in_loop = site_ctx[:loop]
     in_cond = site_ctx[:cond]
     callee_set.each do |eff|
@@ -400,7 +474,7 @@ module EffectTracker
   # the boolean stamp, not a returned hash, so the method is void.
   sig { void }
   def compute_needs_rt!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     fn_nodes = function_node_map
     needs_rt = initial_needs_rt_map(fn_nodes)
@@ -415,7 +489,7 @@ module EffectTracker
 
   sig { params(fn_nodes: T::Hash[String, AST::FunctionDef]).returns(T::Hash[String, T::Boolean]) }
   def initial_needs_rt_map(fn_nodes)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     needs_rt = T.let({}, T::Hash[String, T::Boolean])
     fn_nodes.each do |name, fn_node|
@@ -427,7 +501,7 @@ module EffectTracker
 
   sig { params(name: String, fn_node: AST::FunctionDef).returns(T::Boolean) }
   def function_needs_runtime_directly?(name, fn_node)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     fsig = FunctionSignature.unwrap(fn_node.full_type!(context: "needs_rt function signature"))
     ret_type = fsig&.return_type
@@ -456,7 +530,7 @@ module EffectTracker
 
   sig { params(needs_rt: T::Hash[String, T::Boolean]).void }
   def seed_imported_needs_rt!(needs_rt)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     # Seed imported (cross-module) functions: if a callee is not a local function
     # but is imported with needs_rt=true, include it so propagation works.
@@ -474,7 +548,7 @@ module EffectTracker
 
   sig { params(needs_rt: T::Hash[String, T::Boolean]).void }
   def propagate_needs_rt!(needs_rt)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     changed = T.let(true, T::Boolean)
     while changed
@@ -497,7 +571,7 @@ module EffectTracker
   # are excluded from propagation — they don't use CLEAR's error union convention.
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_can_fail!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     # `error_fallible` = GENUINE error fallibility ONLY (RAISE / PRE /
     # guarded reentrance / BG-spawn / declared `!T` / transitive ERROR
@@ -664,7 +738,7 @@ module EffectTracker
   #     change them.
   sig { void }
   def enforce_fallible_returns!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     # Enforcement is gated because migrating every fallible `RETURNS T` to
     # `RETURNS !T` is a tree-wide source change. Keep the scaffolding in place
@@ -749,7 +823,7 @@ module EffectTracker
   # or names a fallible callee (transitive fallibility).
   sig { params(name: String).returns(String) }
   def fallibility_hint_for(name)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     return "raises directly via RAISE" if function_raises_directly?(name)
     callees = function_call_graph[name] || []
@@ -763,7 +837,7 @@ module EffectTracker
   # convention (*Runtime, params) !return — mark it needs_rt=true and can_fail=true.
   sig { void }
   def mark_fn_value_references!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     function_body_summaries.each_value do |summary|
       summary.escape_nodes.each do |node|
@@ -801,7 +875,7 @@ module EffectTracker
   # LOOP_UNBOUND is not disqualifying: SUSPENDS_LOOP is designed for it.
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def compute_fsm_eligibility!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     fn_nodes.each do |_name, fn_node|
       effs = fn_node.effects || Set.new
@@ -834,7 +908,7 @@ module EffectTracker
   # Does not descend into nested FunctionDef bodies.
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def enumerate_fsm_suspend_points!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     summaries = function_body_summaries
     fn_nodes.each do |_name, fn_node|
@@ -842,6 +916,15 @@ module EffectTracker
       fn_node.fsm_suspend_points = summaries.fetch(fn_node.name).suspend_points
     end
   end
+
+end
+
+
+module EffectQueries
+  extend T::Sig
+
+  CallLikeNode = T.type_alias { EffectTracker::CallLikeNode }
+  SUSPENDS_FAMILY = EffectTracker::SUSPENDS_FAMILY
 
   # A WithBlock suspends if any of its captures acquires an exclusive /
   # write-locked-read capability. Mirrors visit_WithBlock's test for
@@ -865,13 +948,19 @@ module EffectTracker
     !!(effs && effs.any? { |e| SUSPENDS_FAMILY.include?(e) })
   end
 
+end
+
+
+module EffectAudit
+  extend T::Sig
+
   # --- Async execution-shape finalization ---
   #
   # One post-effect traversal finalizes all call-graph-derived async facts:
   # BG spawn form, BG suspend points, and BG/DO stack tier requirements.
   sig { params(program_node: AST::Program).void }
   def finalize_async_execution_shapes!(program_node)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     _ = program_node
     async_body_facts.each do |fact|
       node = fact.node
@@ -891,7 +980,7 @@ module EffectTracker
 
   sig { params(node: AsyncSpawnNode, body_scan: Annotator::Phases::BodyScanSummary).void }
   def assign_bg_spawn_shape!(node, body_scan)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     if node.respond_to?(:stack_size) && node.stack_size
       node.spawn_form = :stackful
@@ -915,7 +1004,7 @@ module EffectTracker
     ).void
   end
   def assign_async_stack_tier!(target, calls, user_size, can_smash, validation_node)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     raw = T.let(max_tier_for_calls(calls), Symbol)
     T.unsafe(target).computed_stack_tier = (raw == :unbounded) ? :service : raw
@@ -926,7 +1015,7 @@ module EffectTracker
   # Returns a typed decision; reason is non-nil only for :stackful.
   sig { params(callee_names: T::Set[String], has_fnptr: T::Boolean).returns(Annotator::Phases::BgSpawnDecision) }
   def bg_spawn_form_for(callee_names, has_fnptr)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     return Annotator::Phases::BgSpawnDecision.new(spawn_form: :stackful, reason: :fn_pointer) if has_fnptr
     visited = Set.new
@@ -980,13 +1069,13 @@ module EffectTracker
   # have needs_rt=true so callers thread `rt`.
   sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
   def recursion_yield_needed?(fn_node)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     AST.recursion_yield_needed?(fn_node)
   end
 
   sig { returns(NilClass) }
   def compute_stack_tiers!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     assign_base_stack_tiers!(fn_nodes)
     propagate_unbounded_stack_tiers!(fn_nodes)
@@ -995,7 +1084,7 @@ module EffectTracker
 
   sig { params(fn_nodes: T::Hash[String, AST::FunctionDef]).void }
   def assign_base_stack_tiers!(fn_nodes)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     # Phase 1: assign base tier per function from its own effects.
     # Reentrance variants (Phase 4g):
@@ -1074,7 +1163,7 @@ module EffectTracker
 
   sig { params(fn_nodes: T::Hash[String, AST::FunctionDef]).void }
   def propagate_unbounded_stack_tiers!(fn_nodes)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     # Phase 2: propagate :unbounded through call graph.
     # Any function that transitively calls an :unbounded function is also :unbounded.
@@ -1102,7 +1191,7 @@ module EffectTracker
   # interleaved per-fn counters.
   sig { params(start: String).returns(T::Boolean) }
   def mutually_recursive_in_call_graph?(start)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     (function_call_graph[start] || Set.new).any? do |callee|
       next false if callee == start
       reachable_in_call_graph?(callee, start)
@@ -1111,7 +1200,7 @@ module EffectTracker
 
   sig { params(from_name: String, target: String).returns(T::Boolean) }
   def reachable_in_call_graph?(from_name, target)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     visited = Set.new
     queue = [from_name]
     until queue.empty?
@@ -1130,7 +1219,7 @@ module EffectTracker
 
   sig { params(fn_names: T::Set[String]).returns(Symbol) }
   def max_tier_for_calls(fn_names)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     visited = Set.new
     max = T.let(:micro, Symbol)
@@ -1153,6 +1242,17 @@ module EffectTracker
   end
 
   # --- TIGHT loop validation ---
+
+end
+
+
+module EffectTracker
+  extend T::Sig
+
+  FALLIBLE_RETURNS_ENFORCE = EffectAudit::FALLIBLE_RETURNS_ENFORCE
+  STACK_TIER_BUDGET = EffectAudit::STACK_TIER_BUDGET
+  RECURSION_YIELD_BUDGET = EffectAudit::RECURSION_YIELD_BUDGET
+  TIER_ORDER = EffectAudit::TIER_ORDER
 
   # Deep validation for TIGHT loops: walks the full AST subtree looking for
   # calls to plain EFFECTS REENTRANT or EXTERN FN functions. Stops at FunctionDef boundaries.
@@ -1200,12 +1300,20 @@ module EffectTracker
     end
   end
 
+  private :validate_tight_node!
+
+end
+
+
+module EffectAudit
+  extend T::Sig
+
   # Post-pass: detect indirect mutual recursion in the call graph.
   # DFS reachability: for each function F, walk F's callees transitively
   # and report an error if F is reachable from itself.
   sig { void }
   def check_indirect_reentrancy!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     direct_effects = effect_direct_effects
     function_call_graph.each_key do |fn_name|
@@ -1261,9 +1369,7 @@ module EffectTracker
   private :inherit_effects_from_callee
   private :max_tier_for_calls
   private :mutually_recursive_in_call_graph?
-  private :promote_suspends_for_current_context
   private :reachable_in_call_graph?
   private :resolve_maybe_effects
-  private :validate_tight_node!
 
 end

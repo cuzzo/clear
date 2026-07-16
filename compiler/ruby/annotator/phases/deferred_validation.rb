@@ -23,9 +23,14 @@ module Annotator
         )
       end
 
+    end
+
+    module DeferredCapabilityAudit
+      extend T::Sig
+
       sig { void }
       def run_deferred_validations!
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
         flush_deferred_with_validations!
         finalize_capability_audit!
@@ -35,7 +40,7 @@ module Annotator
       # had a chance to populate entry.sync.
       sig { returns(T::Array[DeferredWithValidation]) }
       def flush_deferred_with_validations!
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
         deferred_with_validations.each do |d|
           fact = d.fact

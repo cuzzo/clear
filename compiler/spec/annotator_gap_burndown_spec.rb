@@ -38,6 +38,33 @@ RSpec.describe "annotator branch gap burndown" do
     ann
   end
 
+  def audit_from_type_session(type_session)
+    audit = Annotator::Phases::CapabilityAuditSession.allocate
+    audit.instance_variable_set(:@typed_program, Struct.new(:body_summaries).new(type_session.function_body_summaries))
+    audit.instance_variable_set(:@strict_test, type_session.strict_test?)
+    audit.instance_variable_set(:@source_code, type_session.source_code)
+    audit.instance_variable_set(:@scope_stack, type_session.send(:scope_stack).dup)
+    audit.instance_variable_set(:@audit_inputs, type_session.send(:phase_audit_inputs))
+    audit.instance_variable_set(:@function_registry, type_session.send(:semantic_function_registry))
+    audit.instance_variable_set(:@program, type_session.semantic_program || AST::Program.new(token(:PROGRAM, "PROGRAM"), []))
+    audit.instance_variable_set(:@language_mode, type_session.language_mode)
+    errors = direct_errors(type_session)
+    audit.instance_variable_set(:@direct_errors, errors)
+    audit.define_singleton_method(:error!) do |node, code, *args, **kwargs|
+      errors << [node, code, args, kwargs]
+      nil
+    end
+    audit.define_singleton_method(:fixable!) do |node, **kwargs|
+      errors << [node, :fixable, [], kwargs]
+      nil
+    end
+    audit
+  end
+
+  def quiet_audit
+    audit_from_type_session(quiet_annotator)
+  end
+
   def parse_source(source)
     ClearParser.new(Lexer.new(source).tokenize, source).parse
   end
@@ -257,13 +284,18 @@ RSpec.describe "annotator branch gap burndown" do
     graph.each do |name, callees|
       callee_set = callees.to_set
       prop_set = (propagating.key?(name) ? propagating.fetch(name) : callee_set).to_set
-      ann.send(:record_function_body_summary!, Annotator::Phases::FunctionBodySummary.new(
+      summary = Annotator::Phases::FunctionBodySummary.new(
         name: name,
         callees: callee_set,
         propagating_callees: prop_set,
         has_fnptr_call: fnptr.include?(name),
         raises_directly: raises.include?(name)
-      ))
+      )
+      if ann.is_a?(Annotator::Phases::CapabilityAuditSession)
+        ann.instance_variable_get(:@function_registry).record_body_summary!(summary)
+      else
+        ann.send(:record_function_body_summary!, summary)
+      end
     end
   end
 
@@ -2146,7 +2178,7 @@ RSpec.describe "annotator branch gap burndown" do
       propagating: { "caller" => ["callee"] },
       raises: Set["callee"]
     )
-    effects_ann.send(:compute_can_fail!)
+    audit_from_type_session(effects_ann).send(:compute_can_fail!)
     expect(caller.can_fail).to eq(true)
     expect(nil_return.alloc_fault).to eq(false)
     expect(bad_return.can_fail).to eq(false)
@@ -2212,7 +2244,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers effect maybe-resolution branch matrix directly" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = quiet_audit
     families = ann.send(:effect_call_site_arg_families)
     families.clear
 
@@ -2244,7 +2276,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers reentrance validation and mutual thunk fix branches directly" do
-    ann = quiet_annotator
+    ann = quiet_audit
     direct = function_from(<<~CHT, "direct")
       FN direct(n: Int64) RETURNS !Int64
         EFFECTS REENTRANT:NOT_LOGICAL ->
@@ -2366,7 +2398,7 @@ RSpec.describe "annotator branch gap burndown" do
 
     no_arrow = function_def("no_arrow")
     no_arrow.arrow_token = nil
-    cycle_ann = quiet_annotator
+    cycle_ann = quiet_audit
     cycle_ann.semantic_function_nodes.replace({ "no_arrow" => no_arrow })
     cycle_ann.send(:effect_direct_effects).replace({ "no_arrow" => Set.new })
     record_body_summaries(cycle_ann, { "no_arrow" => Set["no_arrow"] })
@@ -2375,7 +2407,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers reentrance defensive edit fallback branches directly" do
-    max_ann = quiet_annotator
+    max_ann = quiet_audit
     no_fix = function_def("no_fix")
     no_fix.reentrance_kind = :reentrant_max_depth
     no_fix.max_depth_n = 4
@@ -2391,7 +2423,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(max_depth_finding).not_to be_nil
     expect(max_depth_finding[3][:fixes]).to eq([])
 
-    direct_ann = quiet_annotator
+    direct_ann = quiet_audit
     direct_thunk = function_from(<<~CHT, "direct_thunk")
       FN direct_thunk(n: Int64) RETURNS Int64
         EFFECTS REENTRANT:THUNK ->
@@ -2406,7 +2438,7 @@ RSpec.describe "annotator branch gap burndown" do
 
     expect(direct_errors(direct_ann)).to be_empty
 
-    token_ann = quiet_annotator
+    token_ann = quiet_audit
     missing_rt_a = function_from(<<~CHT, "missing_rt_a")
       FN missing_rt_a(n: Int64) RETURNS Int64
         EFFECTS REENTRANT:THUNK ->
@@ -2989,7 +3021,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers lock handler reachability branch matrix directly" do
-    ann = quiet_annotator
+    ann = quiet_audit
 
     self_loop_node = AST::WithBlock.new(token(:WITH, "WITH"), [
       AST::Capability.new(capability: :EXCLUSIVE, var_node: AST::Identifier.new(token, "looped"))
@@ -3003,7 +3035,7 @@ RSpec.describe "annotator branch gap burndown" do
         AST::ErrorSelector.new(form: :type, name: :Deadlock, token: token(:TYPE_ID, "Deadlock")),
       ],
     )
-    ann.instance_variable_set(:@lock_direct_edges, {
+    ann.send(:phase_audit_inputs).lock_analysis.direct_edges.replace({
       "self_loop" => [
         LockHelper::LockEdge.new(
           held: :Counter,
@@ -3014,7 +3046,7 @@ RSpec.describe "annotator branch gap burndown" do
         )
       ]
     })
-    ann.instance_variable_set(:@lock_clause_sites, [
+    ann.send(:phase_audit_inputs).lock_analysis.clause_sites.replace([
       LockHelper::LockClauseSite.new(node: self_loop_node, cap_types: [:Counter])
     ])
     ann.send(:check_lock_handler_reachability!)
@@ -3088,7 +3120,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers stack tier escalation and propagation branch matrix directly" do
-    ann = quiet_annotator
+    ann = quiet_audit
     mk = lambda do |name|
       fn = function_from("FN #{name}() RETURNS Void -> RETURN; END", name)
       fn.effects = Set.new
@@ -3153,7 +3185,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "returns after reporting a quiet mutual MAX_DEPTH stack-size violation" do
-    ann = quiet_annotator
+    ann = quiet_audit
     caller = function_def("caller")
     a = function_def("a")
     b = function_def("b")
@@ -3174,7 +3206,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "walks transitive calls while finding mutual MAX_DEPTH callees" do
-    ann = quiet_annotator
+    ann = quiet_audit
     caller = function_def("caller")
     wrapper = function_def("wrapper")
     a = function_def("a")
@@ -3193,7 +3225,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "returns typed BG spawn decisions for opaque and unsafe call graphs" do
-    ann = quiet_annotator
+    ann = quiet_audit
     reentrant = function_def("reentrant_callee")
     reentrant.effects = Set[EffectTracker::REENTRANT]
     native = function_def("native_callee")
@@ -3218,16 +3250,17 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "finalizes BG, BG STREAM, and DO execution shapes in one async pass" do
-    ann = quiet_annotator
+    type_session = quiet_annotator
     bg = AST::BgBlock.new(token(:BG, "BG"), [], [], nil, false, false, nil, false)
     stream = AST::BgStreamBlock.new(token(:BG_STREAM, "BG STREAM"), [], [], nil)
     branch = AST::DoBranch.new(body: [], stack_size: nil, can_smash: false)
     do_block = AST::DoBlock.new(token(:DO, "DO"), [branch])
     program = AST::Program.new(token(:PROGRAM, "PROGRAM"), [bg, stream, do_block])
 
-    ann.send(:record_async_body_fact!, bg, empty_body_summary, bg)
-    ann.send(:record_async_body_fact!, stream, empty_body_summary, stream)
-    ann.send(:record_async_body_fact!, branch, empty_body_summary, do_block)
+    type_session.send(:record_async_body_fact!, bg, empty_body_summary, bg)
+    type_session.send(:record_async_body_fact!, stream, empty_body_summary, stream)
+    type_session.send(:record_async_body_fact!, branch, empty_body_summary, do_block)
+    ann = audit_from_type_session(type_session)
     ann.send(:finalize_async_execution_shapes!, program)
 
     expect(bg.spawn_form).to eq(:fsm)
@@ -3608,7 +3641,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers fallible return enforcement branches directly" do
-    ann = quiet_annotator
+    ann = quiet_audit
     good = function_from("FN good() RETURNS !Int64 -> RETURN 1_i64; END", "good")
     good.error_fallible = true
     good.explicit_return_type = true
@@ -3655,19 +3688,20 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "covers remaining helper guard and fallback branch matrix directly" do
     ann = quiet_annotator
+    audit = audit_from_type_session(ann)
 
-    families = ann.send(:effect_call_site_arg_families)
+    families = audit.send(:effect_call_site_arg_families)
     families.clear
     maybe = Set[EffectTracker::BLOCKING_MAYBE, EffectTracker::CONTENTION_MAYBE]
     families["caller"]["poly_sync"] << [Set[:ATOMIC, :VERSIONED]]
-    poly_sync = ann.send(:resolve_maybe_effects, maybe, "caller", "poly_sync")
+    poly_sync = audit.send(:resolve_maybe_effects, maybe, "caller", "poly_sync")
     expect(poly_sync).to include(EffectTracker::BLOCKING_MAYBE, EffectTracker::CONTENTION_MAYBE)
     families["caller"]["plain_family"] << [Set[:LOCAL]]
-    plain_family = ann.send(:resolve_maybe_effects, maybe, "caller", "plain_family")
+    plain_family = audit.send(:resolve_maybe_effects, maybe, "caller", "plain_family")
     expect(plain_family).to include(EffectTracker::BLOCKING_MAYBE)
     expect(plain_family).not_to include(EffectTracker::CONTENTION_MAYBE)
     families["caller"]["contention_only"] << [Set[:VERSIONED]]
-    contention_only = ann.send(:resolve_maybe_effects, Set[EffectTracker::CONTENTION_MAYBE], "caller", "contention_only")
+    contention_only = audit.send(:resolve_maybe_effects, Set[EffectTracker::CONTENTION_MAYBE], "caller", "contention_only")
     expect(contention_only).to include(EffectTracker::CONTENTION)
 
     expect(ann.send(:sum_result_clear_type, :UInt16)).to eq(:UInt64)
@@ -3993,23 +4027,24 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers deferred WITH validation replay diagnostics directly" do
-    ann = quiet_annotator
+    type_session = quiet_annotator
     with_node = AST::WithBlock.new(token(:WITH, "WITH"), [], [])
     unknown = AST::Identifier.new(token(:IDENTIFIER, "unknown"), "unknown")
     read_lock = AST::Identifier.new(token(:IDENTIFIER, "reader"), "reader")
     read_lock.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: true, storage: :heap, sync: :atomic)
 
-    ann.send(:record_deferred_with_validation!, with_node, capability_transition(
+    type_session.send(:record_deferred_with_validation!, with_node, capability_transition(
       AST::Capability.new(capability: :EXCLUSIVE, var_node: unknown)
     ))
-    ann.send(:record_deferred_with_validation!, with_node, capability_transition(
+    type_session.send(:record_deferred_with_validation!, with_node, capability_transition(
       AST::Capability.new(capability: :write_locked_read, var_node: read_lock)
     ))
+    ann = audit_from_type_session(type_session)
     ann.send(:flush_deferred_with_validations!)
 
     codes = direct_errors(ann).map { |e| e[1] }
     expect(codes).to include(:WITH_EXCLUSIVE_NEEDS_LOCK_GOT, :WITH_READ_NEEDS_WRITE_LOCK_NAME)
-    expect(ann.pending_deferred_validation_count).to eq(0)
+    expect(ann.deferred_with_validations).to be_empty
   end
 
   it "covers expression phase dispatcher recovery branches directly" do
@@ -4183,7 +4218,7 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   it "covers whole-program schema lookup fallback directly" do
-    ann = SemanticAnnotator.new(source_code: "")
+    ann = audit_from_type_session(SemanticAnnotator.new(source_code: ""))
 
     allow(EscapeAnalysis).to receive(:propagate_caller_sync!)
     allow(BgCaptureClassifier).to receive(:classify_all!) do |_fn_nodes, schema_lookup:|
@@ -4349,7 +4384,8 @@ RSpec.describe "annotator branch gap burndown" do
     impure.effects = Set[EffectTracker::BLOCKING]
     ann.semantic_function_nodes.replace({ "impure" => impure })
     call = AST::FuncCall.new(token(:VAR_ID, "impure"), "impure", [])
-    expect(ann.send(:predicate_impurity_reason, call, "impure")).to include("BLOCKING")
+    audit = audit_from_type_session(ann)
+    expect(audit.send(:predicate_impurity_reason, call, "impure")).to include("BLOCKING")
 
     loop = AST::WhileLoop.new(
       token(:WHILE, "WHILE"),

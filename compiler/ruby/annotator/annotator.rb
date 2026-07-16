@@ -73,7 +73,9 @@ class Annotator::Phases::TypeAnalysisSession
   include PrefixedIntRange
   include GenericAnalysis
   include EffectTracker
+  include EffectQueries
   include ReentranceBridge
+  include ReentranceQueries
   include CapabilityHelper
   include CapabilityAudit
   include AllocHelper
@@ -87,7 +89,6 @@ class Annotator::Phases::TypeAnalysisSession
   include Annotator::Phases::DeferredValidation
   include Annotator::Phases::ExpressionDomains
   include Annotator::Phases::ProgramFinalization
-  include Annotator::Phases::WholeProgramSemantics
   include Annotator::Domains::ControlFlow
   include Annotator::Domains::Variables
   include Annotator::Domains::Destructuring
@@ -1035,8 +1036,22 @@ end
 # A distinct, sequential owner for whole-program auditing.  It receives the
 # facts collected by TypeAnalysisSession after that session relinquishes them;
 # the two phases never execute against the same receiver.
-class Annotator::Phases::CapabilityAuditSession < Annotator::Phases::TypeAnalysisSession
+class Annotator::Phases::CapabilityAuditSession
   extend T::Sig
+
+  include ErrorHelper
+  include FixableHelper
+  include ScopeHelper
+  include EffectAudit
+  include EffectQueries
+  include ReentranceAudit
+  include ReentranceQueries
+  include PredicateAudit
+  include CapabilityUsageAudit
+  include LockAudit
+  include Annotator::Phases::DeferredCapabilityAudit
+  include Annotator::Phases::ProgramCapabilityAudit
+  include Annotator::Phases::WholeProgramSemantics
 
   sig do
     params(
@@ -1049,30 +1064,136 @@ class Annotator::Phases::CapabilityAuditSession < Annotator::Phases::TypeAnalysi
   end
   def initialize(typed_program:, inputs:, source_code:, language_mode:, strict_test:)
     resolution = typed_program.resolution
-    @importer = T.let(nil, T.nilable(ModuleImporter))
-    @source_dir = T.let(Dir.pwd, String)
+    @typed_program = T.let(typed_program, Annotator::Phases::TypedProgramFacts)
     @strict_test = T.let(strict_test, T::Boolean)
     @source_code = T.let(source_code, T.nilable(String))
-    @traversal_state = T.let(
-      TraversalState.new(scopes: [resolution.root_scope]),
-      TraversalState
-    )
-    @audit_inputs = T.let(inputs, CapabilityAuditInputs)
+    @scope_stack = T.let([resolution.root_scope], T::Array[Scope])
+    @audit_inputs = T.let(inputs, Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs)
     @function_registry = T.let(resolution.function_registry, Annotator::FunctionRegistry)
-    @semantic_index = T.let(nil, T.nilable(SemanticIndex))
-    @annotation_products = T.let(Annotator::Phases::AnnotationProducts.new, Annotator::Phases::AnnotationProducts)
-    @program = T.let(typed_program.program, T.nilable(AST::Program))
+    @program = T.let(typed_program.program, AST::Program)
     @language_mode = T.let(language_mode, Symbol)
-    @comptime_type_param_refinements = T.let({}, T::Hash[Symbol, Type])
-    @branch_terminated = T.let(false, T::Boolean)
   end
 
   sig { void }
   def audit!
-    program = T.must(@program)
-    finalize_program_audit!(program)
+    finalize_program_audit!(@program)
     run_whole_program_semantics!
     run_deferred_validations!
+  end
+
+  sig { returns(Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs) }
+  def phase_audit_inputs
+    @audit_inputs
+  end
+
+  sig { returns(T::Hash[String, AST::FunctionDef]) }
+  def semantic_function_nodes
+    @function_registry.nodes
+  end
+
+  alias_method :function_node_map, :semantic_function_nodes
+
+  sig { params(name: T.nilable(String)).returns(T.nilable(AST::FunctionDef)) }
+  def function_node_for(name)
+    @function_registry.fetch(name)
+  end
+
+  sig { returns(Scope) }
+  def semantic_root_scope
+    T.must(@scope_stack.first)
+  end
+
+  sig { returns(AST::Program) }
+  def semantic_program
+    @program
+  end
+
+  sig { returns(T::Hash[Symbol, Integer]) }
+  def semantic_lock_type_ranks
+    @audit_inputs.lock_analysis.type_ranks
+  end
+
+  sig { returns(T::Array[Scope]) }
+  def scope_stack
+    @scope_stack
+  end
+
+  sig { returns(T::Hash[String, Annotator::Phases::FunctionBodySummary]) }
+  def function_body_summaries
+    @typed_program.body_summaries
+  end
+
+  sig { returns(T::Hash[String, T::Set[String]]) }
+  def function_call_graph
+    @function_registry.call_graph
+  end
+
+  sig { returns(T::Hash[String, T::Set[String]]) }
+  def function_propagating_callees
+    @function_registry.propagating_callees
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def function_has_fnptr_call?(name)
+    @function_registry.fnptr_call?(name)
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def function_raises_directly?(name)
+    @function_registry.raises_directly?(name)
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def function_has_pre_clauses?(node)
+    node.pre_clauses.is_a?(Array) && node.pre_clauses.any?
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def function_has_catch_clauses?(node)
+    node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def function_has_default_catch?(node)
+    node.default_catch.is_a?(Array) && node.default_catch.any?
+  end
+
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def runtime_error_clause?(node)
+    function_has_pre_clauses?(node) ||
+      function_has_catch_clauses?(node) ||
+      function_has_default_catch?(node)
+  end
+
+  sig { returns(T::Array[Annotator::Phases::DeferredWithValidation]) }
+  def deferred_with_validations
+    @audit_inputs.deferred_with_validations
+  end
+
+  sig { returns(CapabilityAudit::BindingAuditStore) }
+  def capability_audit
+    @audit_inputs.capability_audit
+  end
+
+  sig { returns(T::Array[CapabilityHelper::PredicateCallSite]) }
+  def predicate_call_sites
+    @audit_inputs.predicate_call_sites
+  end
+
+  sig { returns(T::Array[Annotator::Phases::AsyncBodyFact]) }
+  def async_body_facts
+    @audit_inputs.async_body_facts
+  end
+
+  sig { returns(Symbol) }
+  attr_reader :language_mode
+
+  sig { returns(T.nilable(String)) }
+  attr_reader :source_code
+
+  sig { returns(T::Boolean) }
+  def strict_test?
+    @strict_test
   end
 end
 

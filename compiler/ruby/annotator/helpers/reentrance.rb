@@ -199,11 +199,19 @@ module ReentranceBridge
     end
   end
 
+end
+
+
+# Post-type reentrancy and stack-safety validation. It runs only after the
+# complete call graph and body summaries exist.
+module ReentranceAudit
+  extend T::Sig
+
   # Plain `EFFECTS REENTRANT` callees require explicit `@service` on the
   # spawn site so OS-thread cost is an explicit user choice.
   sig { params(node: EffectTracker::AsyncValidationNode, call_names: T::Set[String], user_size: T.nilable(Symbol), can_smash: T::Boolean).void }
   def validate_fiber_stack!(node, call_names, user_size, can_smash)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     if can_smash
       emit_can_smash_unsupported_error!(node)
       return
@@ -246,7 +254,7 @@ module ReentranceBridge
   # plain `EFFECTS REENTRANT` callee. Bounded variants do not force @service.
   sig { params(call_names: T::Set[String]).returns(T.nilable(String)) }
   def find_plain_reentrant_callee(call_names)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     visited = T.let(Set.new, T::Set[String])
     queue = T.let(call_names.to_a.dup, T::Array[String])
     until queue.empty?
@@ -264,7 +272,7 @@ module ReentranceBridge
   # such functions force spawn sites to @service until SCC depth products exist.
   sig { params(call_names: T::Set[String]).returns(T.nilable(String)) }
   def find_mutual_max_depth_callee(call_names)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     visited = T.let(Set.new, T::Set[String])
     queue = T.let(call_names.to_a.dup, T::Array[String])
     until queue.empty?
@@ -282,7 +290,7 @@ module ReentranceBridge
   # DO branches fall back to a plain error because their span is ambiguous.
   sig { params(node: EffectTracker::AsyncValidationNode, reentrant_fn: String, user_size: T.nilable(Symbol)).void }
   def emit_service_required_error!(node, reentrant_fn, user_size)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fix = service_required_fix(node, user_size)
 
     return error!(node, :STACK_NEEDS_SERVICE_FIXABLE, reentrant_fn: reentrant_fn) unless fix
@@ -294,7 +302,7 @@ module ReentranceBridge
 
   sig { params(node: EffectTracker::AsyncValidationNode, user_size: T.nilable(Symbol)).returns(T.nilable(Fix)) }
   def service_required_fix(node, user_size)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     return nil unless node.is_a?(AST::BgBlock)
 
     prefix_token = node.prefix_token
@@ -356,7 +364,7 @@ module ReentranceBridge
   # call-graph is settled and transitive cycles are visible.
   sig { void }
   def validate_not_logical_recursion!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_not_logical
@@ -389,7 +397,7 @@ module ReentranceBridge
   # exactly. Only the cross-fn cycle case demotes.
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def validate_max_depth_mutual_cycle!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_max_depth
@@ -426,7 +434,7 @@ module ReentranceBridge
 
   sig { void }
   def validate_thunk_recursion!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     fn_nodes.each do |name, fn_node|
       next unless fn_node.reentrance_kind == :reentrant_thunk
@@ -468,7 +476,7 @@ module ReentranceBridge
   # precise error).
   sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
   def try_stamp_mutual_thunk_plan!(fn_node)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     cycle_names = thunk_cycle_members(fn_node.name)
     return false if cycle_names.size < 2
@@ -527,7 +535,7 @@ module ReentranceBridge
   # UnexpectedRecursion if violated.
   sig { params(fn_node: AST::FunctionDef).void }
   def emit_mutual_thunk_unsupported!(fn_node)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     fn_nodes = function_node_map
     name = fn_node.name
     cycle_names = thunk_cycle_members(name)
@@ -624,6 +632,23 @@ module ReentranceBridge
              fixes: fixes, raise_in_collector: false)
   end
 
+  private :emit_mutual_thunk_unsupported!
+  private :emit_service_required_error!
+  private :find_mutual_max_depth_callee
+  private :find_plain_reentrant_callee
+  private :insert_service_after_open_brace_fix
+  private :replace_stack_sigil_with_service_fix
+  private :service_required_fix
+  private :try_stamp_mutual_thunk_plan!
+
+end
+
+
+# Source/AST queries shared by the type-time reentrance bridge and the
+# whole-program audit. They hold no phase state.
+module ReentranceQueries
+  extend T::Sig
+
   # Build the Edit(s) that replace the entire `EFFECTS REENTRANT[:VARIANT]`
   # clause text on a function with `replacement`. Uses the parser-saved
   # effects_span tokens. Returns [] when the span is missing or crosses
@@ -644,13 +669,21 @@ module ReentranceBridge
     )]
   end
 
+  private :effects_clause_edits
+
+end
+
+
+module ReentranceAudit
+  extend T::Sig
+
   # Strongly-connected component containing `start` in function_call_graph
   # (intersection of forward- and backward-reachable sets, plus
   # `start` itself when start is on a cycle). Used by Phase 4f.1
   # to enumerate cycle members for tagged-union frame codegen.
   sig { params(start: String).returns(T::Array[String]) }
   def thunk_cycle_members(start)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     start_s = start.to_s
     forward = compute_reachable(function_call_graph, start_s)
     reverse_graph = {}
@@ -665,7 +698,7 @@ module ReentranceBridge
 
   sig { params(graph: T::Hash[String, T::Set[String]], start: String).returns(T::Set[String]) }
   def compute_reachable(graph, start)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     seen = Set.new
     queue = (graph[start] || Set.new).to_a
     until queue.empty?
@@ -683,7 +716,7 @@ module ReentranceBridge
   # self-call edge.)
   sig { params(start: String).returns(T::Boolean) }
   def reachable_from_self?(start)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     visited = Set.new
     queue   = (function_call_graph[start] || Set.new).to_a
     until queue.empty?
@@ -695,6 +728,16 @@ module ReentranceBridge
     end
     false
   end
+
+  private :compute_reachable
+  private :reachable_from_self?
+  private :thunk_cycle_members
+
+end
+
+
+module ReentranceQueries
+  extend T::Sig
 
   # Yes/no version of the strict TAIL_CALL check (Phase 3's
   # validate_tail_call! errors -- this returns true/false). Used by
@@ -717,6 +760,14 @@ module ReentranceBridge
     blessed_ids = blessed.map(&:object_id).to_set
     all.all? { |c| blessed_ids.include?(c.object_id) }
   end
+
+  private :thunk_all_self_calls_in_tail_position?
+
+end
+
+
+module ReentranceBridge
+  extend T::Sig
 
   sig { params(fn_node: AST::FunctionDef).returns(T.nilable(Symbol)) }
   def canonical_reentrance_kind(fn_node)
@@ -824,20 +875,8 @@ module ReentranceBridge
     end
   end
 
-  private :emit_mutual_thunk_unsupported!
   private :canonical_reentrance_kind
-  private :compute_reachable
-  private :emit_service_required_error!
-  private :find_mutual_max_depth_callee
-  private :find_plain_reentrant_callee
-  private :insert_service_after_open_brace_fix
   private :offer_unconstrained_fn_param_fix!
-  private :reachable_from_self?
-  private :replace_stack_sigil_with_service_fix
-  private :service_required_fix
-  private :thunk_all_self_calls_in_tail_position?
-  private :thunk_cycle_members
-  private :try_stamp_mutual_thunk_plan!
   private :validate_not_logical_return!
   private :validate_requires_clauses!
 

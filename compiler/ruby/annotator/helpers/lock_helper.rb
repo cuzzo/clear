@@ -3,9 +3,9 @@ require "sorbet-runtime"
 require "set"
 require_relative "../../semantic/capability_plan"
 
-# All lock-safety analysis lives here. Two layers in one module so they share
-# typed held-lock state and the lock-edge accumulator without cross-file
-# surgery:
+# Lock-safety fact collection. Whole-program graph construction and SCC
+# validation live in LockAudit below so typing and auditing do not share an
+# executor merely to share these immutable fact types.
 #
 #   Phase 1 — lexical same-name nested-WITH check
 #     Catches `WITH EXCLUSIVE c { WITH EXCLUSIVE c { ... } }` (and the
@@ -216,13 +216,28 @@ module LockHelper
     end
   end
 
+  private :rank_of_cap
+
+end
+
+# Whole-program lock graph audit. This module is installed only on the
+# capability-audit executor; it consumes LockAnalysisState after body typing.
+module LockAudit
+  extend T::Sig
+
+  LockEdge = LockHelper::LockEdge
+  LockGraph = LockHelper::LockGraph
+  LockSccFrame = LockHelper::LockSccFrame
+  LockClauseSite = LockHelper::LockClauseSite
+  TransitiveAcquires = T.type_alias { LockHelper::TransitiveAcquires }
+
   # Fixed-point propagate direct_acquires through function_call_graph so every
   # fn's "transitive acquires" set contains every lock type it or any
   # transitive callee takes. Mirrors compute_needs_rt! / compute_can_fail!
   # structure.
   sig { returns(T::Hash[String, T::Set[Symbol]]) }
   def propagate_lock_acquires!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     transitive = T.let({}, TransitiveAcquires)
     phase_audit_inputs.lock_analysis.direct_acquires.each { |fn, set| transitive[fn] = set.dup }
     function_call_graph.each_key { |fn| transitive[fn] ||= Set.new }
@@ -248,7 +263,7 @@ module LockHelper
 
   sig { params(transitive_acquires: TransitiveAcquires).void }
   def resolve_held_calls!(transitive_acquires)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     state = phase_audit_inputs.lock_analysis
     state.held_calls.each do |fn, sites|
       sites.each do |site|
@@ -271,7 +286,7 @@ module LockHelper
   # runtime, so ON :LockCycle handlers reaching them are live).
   sig { params(include_opted_out: T::Boolean).returns(LockGraph) }
   def build_lock_graph(include_opted_out: false)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     adj = T.let(Hash.new { |h, k| h[k] = Set.new }, T::Hash[Symbol, T::Set[Symbol]])
     nodes = T.let(Set.new, T::Set[Symbol])
     live = T.let([], T::Array[LockEdge])
@@ -341,7 +356,7 @@ module LockHelper
   # Called as a post-pass once function_call_graph is complete.
   sig { void }
   def check_lock_cycles!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     transitive_acquires = propagate_lock_acquires!
     resolve_held_calls!(transitive_acquires)
 
@@ -361,7 +376,7 @@ module LockHelper
 
   sig { void }
   def check_lock_handler_reachability!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     clause_sites = phase_audit_inputs.lock_analysis.clause_sites
     return if clause_sites.empty?
 
@@ -394,7 +409,7 @@ module LockHelper
   # set. A selector that expands to the empty set here is dead code.
   sig { params(site: LockClauseSite, types_in_cycle: T::Set[Symbol], types_with_self: T::Set[Symbol]).void }
   def verify_handler_reachability!(site, types_in_cycle, types_with_self)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     node    = site.node
     clause  = node.lock_error_clause
     return unless clause
@@ -441,7 +456,7 @@ module LockHelper
 
   sig { params(scc: T::Array[Symbol], adj: T::Hash[Symbol, T::Set[Symbol]]).returns(T::Boolean) }
   def scc_is_cyclic?(scc, adj)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     return true if scc.length > 1
     node = T.must(scc.first)
     T.must(adj[node]).include?(node)
@@ -449,7 +464,7 @@ module LockHelper
 
   sig { params(scc: T::Array[Symbol], edges: T::Array[LockEdge]).returns(T.noreturn) }
   def report_lock_cycle!(scc, edges)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     scc_set = scc.to_set
     participating = edges.select { |e| scc_set.include?(e.held) && scc_set.include?(e.acquired) }
     sample = participating.first
@@ -467,7 +482,6 @@ module LockHelper
   private :check_lock_handler_reachability!
   private :build_lock_graph
   private :propagate_lock_acquires!
-  private :rank_of_cap
   private :report_lock_cycle!
   private :resolve_held_calls!
   private :scc_is_cyclic?

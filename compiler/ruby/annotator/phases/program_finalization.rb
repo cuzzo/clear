@@ -16,9 +16,14 @@ module Annotator
         stamp_program_result_type!(program)
       end
 
+    end
+
+    module ProgramCapabilityAudit
+      extend T::Sig
+
       sig { params(program: AST::Program).void }
       def finalize_program_audit!(program)
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
         check_indirect_reentrancy!
         validate_not_logical_recursion!
@@ -45,7 +50,7 @@ module Annotator
 
       sig { void }
       def restamp_function_metadata!
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
         semantic_function_nodes.each_value do |fn|
           signature = FunctionSignature.unwrap(fn.full_type!(context: "program function signature"))
@@ -55,6 +60,11 @@ module Annotator
         end
       end
       private :restamp_function_metadata!
+
+    end
+
+    module ProgramFinalization
+      extend T::Sig
 
       sig { params(program: AST::Program).void }
       def stamp_program_result_type!(program)

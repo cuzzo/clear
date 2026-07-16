@@ -423,7 +423,7 @@ module CapabilityHelper
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     ctx = current_predicate_context
     return unless ctx
-    predicate_call_sites_store << PredicateCallSite.new(
+    predicate_call_sites << PredicateCallSite.new(
       kind: ctx.kind,
       with_node: ctx.with_node,
       fn_node: ctx.fn_node,
@@ -433,9 +433,19 @@ module CapabilityHelper
     )
   end
 
+end
+
+# Deferred predicate purity validation. Predicate call sites are collected by
+# CapabilityHelper while expressions are typed, then checked only after effect
+# and fallibility propagation has reached a fixed point.
+module PredicateAudit
+  extend T::Sig
+
+  PredicateCallSite = CapabilityHelper::PredicateCallSite
+
   sig { void }
   def validate_predicate_purity!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     predicate_call_sites_store.each do |site|
       call = site.call
       callee = site.callee
@@ -459,14 +469,14 @@ module CapabilityHelper
 
   sig { returns(T::Array[PredicateCallSite]) }
   def predicate_call_sites_store
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     predicate_call_sites
   end
   private :predicate_call_sites_store
 
   sig { params(call: T.any(AST::FuncCall, AST::MethodCall), callee: String).returns(T.nilable(String)) }
   def predicate_impurity_reason(call, callee)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     call_declared_impurity_reason(call) ||
       matched_stdlib_impurity_reason(call) ||
       semantic_function_impurity_reason(callee)
@@ -474,7 +484,7 @@ module CapabilityHelper
 
   sig { params(call: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(String)) }
   def call_declared_impurity_reason(call)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     return "is an extern call" if call.extern_call
     extern_effects = call.extern_effects
@@ -487,7 +497,7 @@ module CapabilityHelper
 
   sig { params(call: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(String)) }
   def matched_stdlib_impurity_reason(call)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     return nil unless call.matched_stdlib_def
 
@@ -503,7 +513,7 @@ module CapabilityHelper
 
   sig { params(callee: String).returns(T.nilable(String)) }
   def semantic_function_impurity_reason(callee)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     fn_nodes = function_node_map
     fn = fn_nodes[callee]
@@ -514,6 +524,12 @@ module CapabilityHelper
     "has effects #{effects.map { |e| EffectTracker.display(e) }.sort.join(', ')}"
   end
   private :semantic_function_impurity_reason
+
+end
+
+
+module CapabilityHelper
+  extend T::Sig
 
   sig { params(node: AST::WithBlock).void }
   def validate_and_visit_with_guards!(node)
@@ -1303,7 +1319,6 @@ module CapabilityHelper
   private :emit_view_not_observable_finding!
   private :new_capture_analysis
   private :non_escaping_fiber_capture?
-  private :predicate_impurity_reason
   private :record_capture_move!
   private :set_capture_close_plan_when
   private :unwrapped_capability_alias_type
@@ -1414,10 +1429,20 @@ module CapabilityAudit
     record&.mark_captured!(parallel: parallel)
   end
 
+end
+
+
+# Final capability-usage advisory pass. It consumes the binding records built
+# during type analysis but owns no scope or traversal state.
+module CapabilityUsageAudit
+  extend T::Sig
+
+  BindingAuditStore = T.type_alias { CapabilityAudit::BindingAuditStore }
+
   sig { returns(BindingAuditStore) }
   def finalize_capability_audit!
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    capability_audit_store.each_value do |info|
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
+    capability_audit.each_value do |info|
       loc = info.line ? " (line #{info.line})" : ""
       sync = info.sync
       own  = info.ownership
@@ -1437,6 +1462,12 @@ module CapabilityAudit
       end
     end
   end
+
+end
+
+
+module CapabilityAudit
+  extend T::Sig
 
   sig { returns(BindingAuditStore) }
   def capability_audit_store

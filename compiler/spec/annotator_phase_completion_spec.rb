@@ -12,6 +12,28 @@ RSpec.describe "annotator completion phases" do
     ClearParser.new(Lexer.new(source).tokenize, source).parse
   end
 
+  def typed_phase(source = "")
+    program = parse(source)
+    resolution = Annotator::Phases::ResolutionPhase.run(
+      program: program, importer: nil, source_dir: Dir.pwd, source_code: source
+    )
+    session = SemanticAnnotator.new(source_code: source)
+    typed_program = Annotator::Phases::TypeAnalysisPhase.run(
+      resolution: resolution, session: session
+    )
+    [session, typed_program]
+  end
+
+  def audit_session_for(type_session, typed_program, source = "")
+    Annotator::Phases::CapabilityAuditSession.new(
+      typed_program: typed_program,
+      inputs: type_session.release_capability_audit_inputs!,
+      source_code: source,
+      language_mode: type_session.language_mode,
+      strict_test: type_session.strict_test?
+    )
+  end
+
   it "initializes builtin environment inside the resolution phase" do
     scope = Annotator::Phases::ResolutionSession.new(
       importer: nil, source_dir: Dir.pwd, source_code: nil
@@ -145,7 +167,8 @@ RSpec.describe "annotator completion phases" do
   end
 
   it "skips non-signature function metadata while finalizing summaries" do
-    annotator = SemanticAnnotator.new
+    type_session, typed_program = typed_phase
+    annotator = audit_session_for(type_session, typed_program)
     fn = AST::FunctionDef.new(tok("helper"), "helper", [], [], Type.new(:Void), nil, [], [], nil, :pub, [], false)
     fn.full_type = Type.new(:Void)
     annotator.semantic_function_nodes["helper"] = fn
@@ -173,16 +196,17 @@ RSpec.describe "annotator completion phases" do
   end
 
   it "flushes deferred ATOMIC validations instead of dropping them" do
-    annotator = SemanticAnnotator.new(source_code: "")
+    type_session, typed_program = typed_phase
     with_node = AST::WithBlock.new(tok("WITH"), [], [], [])
     var_node = AST::Identifier.new(tok("cell"), "cell")
     var_node.full_type = Type.new(:Int64)
     var_node.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: true, storage: :stack)
     var_node.symbol.is_param = true
-    annotator.record_deferred_with_validation!(
+    type_session.record_deferred_with_validation!(
       with_node,
       capability_transition(AST::Capability.new(capability: :ATOMIC, var_node: var_node))
     )
+    annotator = audit_session_for(type_session, typed_program)
 
     expect {
       annotator.run_deferred_validations!

@@ -24,10 +24,10 @@ RSpec.describe LockHelper do
     end
   end
 
-  # Host class so we can mix in the module without standing up the full
-  # SemanticAnnotator. Only the SCC methods are exercised here.
+  # Use the real audit executor boundary while replacing diagnostics and state
+  # with deterministic fixtures for the graph algorithm tests.
   let(:host) {
-    Class.new do
+    Class.new(Annotator::Phases::CapabilityAuditSession) do
       include LockHelper
 
       attr_reader :phase_audit_inputs, :errors, :notes

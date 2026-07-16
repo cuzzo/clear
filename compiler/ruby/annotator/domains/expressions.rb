@@ -187,8 +187,6 @@ module Annotator
         promote_to_expr_match!(node, node.left) if node.left.is_a?(AST::MatchStatement)
         promote_to_expr_if!(node, node.right) if node.right.is_a?(AST::IfStatement)
         promote_to_expr_match!(node, node.right) if node.right.is_a?(AST::MatchStatement)
-        validate_predicate_purity! if current_predicate_context
-
         # Delegate type resolution to Type class
         left_type = node.left.full_type!(context: "binary left")
         right_type = node.right.full_type!(context: "binary right")
