@@ -62,13 +62,38 @@ module Annotator
           reject_mutating_borrowed_receiver!(node)
           return
         end
+        if resolve_inherent_method_call!(node)
+          reject_mutating_borrowed_receiver!(node)
+          return
+        end
 
-        # Fall through to UFCS: obj.method(args) -> method(obj, args).
+        if semantic_root_scope.resolve_entry(node.name)
+          error!(node, :DOT_CALL_REQUIRES_METHOD, name: node.name)
+        end
+        error!(node, :UNKNOWN_INHERENT_METHOD,
+          name: node.name, type: Type.surface_name(node.object.full_type!(context: "method receiver")))
+      end
+
+      sig { params(node: AST::MethodCall).returns(T::Boolean) }
+      def resolve_inherent_method_call!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        receiver_type = node.object.full_type!(context: "inherent method receiver")
+        owner = receiver_type.generic_instance? ? receiver_type.generic_base : receiver_type.resolved
+        schema = lookup_type_schema(owner)
+        return false unless Schemas.struct?(schema)
+        return false unless schema.methods.key?(node.name)
+
+        source_name = node.name
+        node.source_method_name = source_name
+        node[:name] = ImplementationRegistration.function_name(owner.to_s, source_name)
         resolve_call(node, [node.object] + node.args)
         reject_mutating_borrowed_receiver!(node)
         record_predicate_call_site!(node)
-        record_call_site(node.name) if node.name.is_a?(String)
+        record_call_site(node.name)
+        true
       end
+      private :resolve_inherent_method_call!
 
       sig { params(node: AST::MethodCall).void }
       def reject_legacy_foreign_slice_view!(node)
@@ -122,6 +147,11 @@ module Annotator
 
         unless schema
           error!(node, :STATIC_UNKNOWN_TYPE, type: type_name)
+          return
+        end
+
+        if Schemas.struct?(schema) && schema.static_methods.key?(node.method_name)
+          resolve_inherent_static_call!(node, type_name)
           return
         end
 
@@ -179,6 +209,23 @@ module Annotator
         node.error_type = method_def.intrinsic_error_type
         current_fn_ctx&.record_alloc_use! if method_allocates || method_def.can_fail
       end
+
+      sig { params(node: AST::StaticCall, owner: Symbol).void }
+      def resolve_inherent_static_call!(node, owner)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        call = AST::FuncCall.new(
+          node.token,
+          ImplementationRegistration.function_name(owner.to_s, node.method_name),
+          node.args,
+        )
+        resolve_call(call, node.args)
+        AST.copy_pipeline_rewrite_metadata!(call, node, include_call_metadata: true)
+        node.inherent_call = call
+        record_predicate_call_site!(call)
+        record_named_call_site!(call)
+      end
+      private :resolve_inherent_static_call!
 
       sig { params(node: T.any(AST::FuncCall, AST::MethodCall), args: T::Array[AST::Node], matched_def: T.nilable(FunctionSignature)).returns(T.nilable(Type)) }
       def visit_IntrinsicFunc(node, args, matched_def: nil)
@@ -286,6 +333,7 @@ module Annotator
         return false unless (Schemas.struct?(type_schema) || Schemas.resource?(type_schema)) && type_schema.methods&.key?(node.name)
 
         method_sig = type_schema.methods[node.name]
+        return false unless method_sig.extern
         node.extern_call = true
         node.extern_effects = method_sig.extern_effects if method_sig.extern_effects
         node.extern_source = method_sig.extern_source if node.respond_to?(:extern_source=)

@@ -29,14 +29,30 @@ module Annotator
       def register_function_signature(node)
         T.bind(self, ResolutionSession)
 
+        if node.is_method && node.implementation_owner.nil?
+          error!(node, :TOP_LEVEL_METHOD_REQUIRES_IMPLEMENTATION, name: node.source_name)
+        end
         validate_type_param_list!(node, node.type_params, "function") if node.type_params.any?
         reject_duplicate_function_binding!(node)
         signature = SignatureRegistry.function_signature(
           node,
           return_lifetime: get_lifetime_path(node)
         )
-        current_scope.declare(node.name, nil, signature, false, false, nil, :static)
+        entry = current_scope.declare(node.name, nil, signature, false, false, nil, :static)
+        register_implementation_member_signature!(node, signature) if node.implementation_owner
+        entry
       end
+
+      sig { params(node: AST::FunctionDef, signature: FunctionSignature).void }
+      def register_implementation_member_signature!(node, signature)
+        T.bind(self, ResolutionSession)
+
+        owner_name = T.must(node.implementation_owner)
+        schema = T.cast(current_scope.resolve_type_definition(owner_name.to_sym), Schemas::StructSchema)
+        members = node.is_method ? schema.methods : schema.static_methods
+        members[node.source_name] = signature
+      end
+      private :register_implementation_member_signature!
 
       sig { params(node: AST::ExternFnDecl).void }
       def register_extern_function_signature(node)

@@ -1704,6 +1704,8 @@ module AST
         AST::GenericParamDecl.new(token: token, name: name)
       end, T::Array[AST::GenericParamDecl])
       @semantic_with_blocks = T.let([], T::Array[AST::WithBlock])
+      @implementation_owner = T.let(nil, T.nilable(String))
+      @source_name = T.let(name, String)
     end
 
     sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
@@ -1759,6 +1761,22 @@ module AST
     sig { returns(T::Boolean) }
     def generic?
       !type_params.empty?
+    end
+
+    sig { returns(T.nilable(String)) }
+    def implementation_owner = @implementation_owner
+
+    sig { params(value: T.nilable(String)).void }
+    def implementation_owner=(value)
+      @implementation_owner = value
+    end
+
+    sig { returns(String) }
+    def source_name = @source_name
+
+    sig { params(value: String).void }
+    def source_name=(value)
+      @source_name = value
     end
 
     # True when the user wrote RETURNS explicitly; fallible-signature checks
@@ -2470,6 +2488,15 @@ module AST
     attr_accessor :generic_type_args # Array of inferred type symbols for generic methods
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     attr_accessor :safe_nav_chain    # implicit continuation of an earlier ?. over non-optional members
+    sig { returns(T.nilable(String)) }
+    def source_method_name
+      @source_method_name = T.let(@source_method_name, T.nilable(String))
+    end
+
+    sig { params(value: String).void }
+    def source_method_name=(value)
+      @source_method_name = value
+    end
     sig { returns(FalseClass) }
     def wildcard?; false end
     sig { returns(String) }
@@ -3110,7 +3137,18 @@ module AST
   # StaticCall: TypeName::method(args) — type-level static method call.
   # type_name: AST::Identifier (the type), method_name: String, args: Array of ASTNode
   StaticCall        = Struct.new(:token, :type_name, :method_name, :args) do
+    extend T::Sig
     include Locatable
+
+    sig { returns(T.nilable(AST::FuncCall)) }
+    def inherent_call
+      @inherent_call = T.let(@inherent_call, T.nilable(AST::FuncCall))
+    end
+
+    sig { params(value: AST::FuncCall).void }
+    def inherent_call=(value)
+      @inherent_call = value
+    end
   end
 
   class DoBranch < T::Struct

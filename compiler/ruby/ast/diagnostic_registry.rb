@@ -449,6 +449,42 @@ module DiagnosticRegistry
       summary:  "Implementation binders must be unambiguous type-parameter names.",
       fix_hint: "Rename the binder to a role name such as Item, ValueT, KeyT, or MapT.",
     },
+    IMPLEMENTATION_DUPLICATE_MEMBER: {
+      severity: :error, category: :type,
+      template: "IMPLEMENTATION %{owner} declares '%{name}' more than once.",
+      summary: "An inherent implementation cannot contain duplicate member names.",
+      fix_hint: "Keep one member, or rename the operations so every owner/member pair is unique.",
+    },
+    IMPLEMENTATION_MEMBER_SHADOWS_OWNER: {
+      severity: :error, category: :type,
+      template: "Member '%{member}' in IMPLEMENTATION %{owner} redeclares owner parameter '%{name}'.",
+      summary: "Method-local generics cannot shadow generic parameters inherited from their owner.",
+      fix_hint: "Remove the repeated parameter from the METHOD, or give the method-local parameter a different role name.",
+    },
+    IMPLEMENTATION_METHOD_NEEDS_SELF: {
+      severity: :error, category: :type,
+      template: "METHOD '%{name}' in IMPLEMENTATION %{owner} must declare self as its first parameter.",
+      summary: "Inherent methods require an explicit receiver ownership parameter.",
+      fix_hint: "Start the parameter list with self, MUTABLE self, or TAKES self. Its owner type is inferred.",
+    },
+    TOP_LEVEL_METHOD_REQUIRES_IMPLEMENTATION: {
+      severity: :error, category: :type,
+      template: "METHOD '%{name}' must be inside IMPLEMENTATION Owner { ... }; top-level METHOD declarations are not owner-safe.",
+      summary: "User methods belong to the nominal type's same-file implementation block.",
+      fix_hint: "Move this declaration beside its STRUCT and wrap it in IMPLEMENTATION Owner<...> { ... }. Keep it as FN if it should remain a free prefix function.",
+    },
+    DOT_CALL_REQUIRES_METHOD: {
+      severity: :error, category: :type,
+      template: "'%{name}' is a free FN, not a METHOD. Call %{name}(value, ...) or declare a same-file METHOD in the owner's IMPLEMENTATION block.",
+      summary: "Dot syntax never falls through to an unrelated free function.",
+      fix_hint: "Use prefix or pipeline syntax for FN, or declare an inherent METHOD on the receiver's nominal type.",
+    },
+    UNKNOWN_INHERENT_METHOD: {
+      severity: :error, category: :type,
+      template: "Type %{type} has no inherent METHOD named '%{name}'.",
+      summary: "Dot lookup found no intrinsic, extern, or owner-declared method.",
+      fix_hint: "Check the method name, use prefix syntax for a free FN, or add the METHOD to the type's defining-file IMPLEMENTATION block.",
+    },
     GENERIC_FN_CANNOT_INFER: {
       severity: :error, category: :type,
       template: "Type Error: Cannot infer type argument '%{param}' for '%{fn}' — no parameter uses type '%{type}'.",

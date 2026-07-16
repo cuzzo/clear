@@ -1097,6 +1097,7 @@ class MIRLowering
 
     # --- Top-level ---
     when AST::Program           then lower_program(node)
+    when AST::ImplementationDef then nil
 
     # --- Marker nodes from MIRPass ---
     when MIR::Drop              then lower_drop(node)
@@ -3395,8 +3396,11 @@ class MIRLowering
   # These helpers paper over the difference for the lowering loop.
 
   # User-visible name of the bound entity — used for naming guard vars.
-  sig { params(node: AST::StaticCall).returns(T.any(MIR::InlineBc, MIR::RegistryCall)) }
+  sig { params(node: AST::StaticCall).returns(MIR::Node) }
   def lower_static_call(node)
+    inherent_call = node.inherent_call
+    return lower_func_call(inherent_call) if inherent_call
+
     # Structural MIR::InlineBc when the matched stdlib_def opts in via
     # bc:true. Both backends consume the same node: Zig emits via
     # emit_inline_bc_as_zig (substituting {0}, {1}, ... from stdlib_def[:zig]),

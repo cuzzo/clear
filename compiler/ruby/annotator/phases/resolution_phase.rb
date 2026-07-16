@@ -71,6 +71,7 @@ module Annotator
         declarations.imports.each { |node| visit_RequireNode(node) }
         register_type_declarations(declarations)
         implementation_resolutions = resolve_implementation_declarations!(declarations)
+        prepare_implementation_members!(declarations, implementation_resolutions, program)
         register_program_signatures(declarations)
 
         ResolutionFacts.new(

@@ -2,6 +2,7 @@
 require "rspec"
 require_relative "../ruby/annotator/phases/resolution_phase"
 require_relative "../ruby/annotator/annotator"
+require_relative "../ruby/backends/transpiler"
 
 RSpec.describe "generic implementation resolution" do
   def parse(source, file: "cache.clear")
@@ -124,5 +125,131 @@ RSpec.describe "generic implementation resolution" do
     expect {
       SemanticAnnotator.new.annotate!(parse(source))
     }.to raise_error(CompilerError, /'Cache' expects 1 type argument.*got 2/)
+  end
+
+  it "types inherent methods through owner-qualified dot dispatch and infers self" do
+    source = <<~CLEAR
+      STRUCT User { id: Int64 }
+      IMPLEMENTATION User {
+        METHOD identifier(self) RETURNS Int64 -> RETURN self.id; END
+      }
+      FN read(user: User) RETURNS Int64 -> RETURN user.identifier(); END
+    CLEAR
+
+    program = parse(source)
+    SemanticAnnotator.new.annotate!(program)
+    implementation = program.statements.grep(AST::ImplementationDef).first
+    method = implementation.members.first
+    call = program.statements.grep(AST::FunctionDef).find { |fn| fn.source_name == "read" }.body.first.value
+
+    expect(method.params.first.type.resolved).to eq(:User)
+    expect(method.name).to eq("__inherent_User_identifier")
+    expect(call.name).to eq("__inherent_User_identifier")
+    expect(call.source_method_name).to eq("identifier")
+    expect(call.full_type!.resolved).to eq(:Int64)
+  end
+
+  it "keys equal method names by owner rather than one global function name" do
+    source = <<~CLEAR
+      STRUCT User { id: Int64 }
+      STRUCT Order { id: Int64 }
+      IMPLEMENTATION User { METHOD identifier(self) RETURNS Int64 -> RETURN self.id; END }
+      IMPLEMENTATION Order { METHOD identifier(self) RETURNS Int64 -> RETURN self.id; END }
+      FN userId(user: User) RETURNS Int64 -> RETURN user.identifier(); END
+      FN orderId(order: Order) RETURNS Int64 -> RETURN order.identifier(); END
+    CLEAR
+
+    program = parse(source)
+    SemanticAnnotator.new.annotate!(program)
+    names = program.statements.grep(AST::FunctionDef).map(&:name)
+    expect(names).to include("__inherent_User_identifier", "__inherent_Order_identifier")
+  end
+
+  it "rejects top-level METHOD and FN-through-dot with actionable alternatives" do
+    expect {
+      SemanticAnnotator.new.annotate!(parse(<<~CLEAR))
+        STRUCT User { id: Int64 }
+        METHOD identifier(self: User) RETURNS Int64 -> RETURN self.id; END
+      CLEAR
+    }.to raise_error(CompilerError, /METHOD 'identifier' must be inside IMPLEMENTATION Owner/)
+
+    expect {
+      SemanticAnnotator.new.annotate!(parse(<<~CLEAR))
+        STRUCT User { id: Int64 }
+        FN identifier(user: User) RETURNS Int64 -> RETURN user.id; END
+        FN read(user: User) RETURNS Int64 -> RETURN user.identifier(); END
+      CLEAR
+    }.to raise_error(CompilerError, /'identifier' is a free FN, not a METHOD/)
+
+    expect {
+      SemanticAnnotator.new.annotate!(parse(<<~CLEAR))
+        STRUCT User { id: Int64 }
+        FN read(user: User) RETURNS Int64 -> RETURN user.missing(); END
+      CLEAR
+    }.to raise_error(CompilerError, /Type User has no inherent METHOD named 'missing'/)
+  end
+
+  it "lowers implementation FN as an owner-qualified static operation" do
+    source = <<~CLEAR
+      STRUCT User { id: Int64 }
+      IMPLEMENTATION User {
+        FN create(id: Int64) RETURNS User -> RETURN User{ id: id }; END
+        METHOD identifier(self) RETURNS Int64 -> RETURN self.id; END
+      }
+      FN main() RETURNS Int64 ->
+        user = User::create(7_i64);
+        RETURN user.identifier();
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new.transpile(source)
+    expect(zig).to include("fn __inherent_User_create")
+    expect(zig).to include("__inherent_User_create(7)")
+    expect(zig).to include("__inherent_User_identifier(user)")
+  end
+
+  it "rejects invalid implementation member scopes before body analysis" do
+    expect {
+      resolve("STRUCT User { id: Int64 } IMPLEMENTATION User { METHOD id() RETURNS Int64 -> RETURN 1; END }")
+    }.to raise_error(CompilerError, /METHOD 'id'.*must declare self as its first parameter/)
+
+    expect {
+      resolve(<<~CLEAR)
+        STRUCT Cache<M> { value: M }
+        IMPLEMENTATION Cache<M> {
+          METHOD replace<M>(self, value: M) RETURNS M -> RETURN value; END
+        }
+      CLEAR
+    }.to raise_error(CompilerError, /Member 'replace'.*redeclares owner parameter 'M'/)
+
+    expect {
+      resolve(<<~CLEAR)
+        STRUCT User { id: Int64 }
+        IMPLEMENTATION User {
+          METHOD id(self) RETURNS Int64 -> RETURN self.id; END
+          METHOD id(self) RETURNS Int64 -> RETURN self.id; END
+        }
+      CLEAR
+    }.to raise_error(CompilerError, /IMPLEMENTATION User declares 'id' more than once/)
+  end
+
+  it "rejects a type name that was not supplied by the implementation header" do
+    expect {
+      SemanticAnnotator.new.annotate!(parse(<<~CLEAR))
+        STRUCT Cache<M> { value: M }
+        IMPLEMENTATION Cache<M> {
+          METHOD wrong(self, value: T) RETURNS T -> RETURN value; END
+        }
+      CLEAR
+    }.to raise_error(CompilerError, /Unknown type argument 'T'/)
+
+    expect {
+      SemanticAnnotator.new.annotate!(parse(<<~CLEAR))
+        STRUCT Cache<M> { value: M }
+        IMPLEMENTATION Cache<M> {
+          METHOD wrong(self, values: {M}T) RETURNS Void -> PASS END
+        }
+      CLEAR
+    }.to raise_error(CompilerError, /Unknown type argument 'T'/)
   end
 end

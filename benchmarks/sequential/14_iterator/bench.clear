@@ -14,17 +14,19 @@ STRUCT SliceIter {
   len: Int64
 }
 
-METHOD hasNext(iter: SliceIter) RETURNS Bool ->
-  RETURN iter.pos < iter.len;
-END
+IMPLEMENTATION SliceIter {
+  METHOD hasNext(self) RETURNS Bool ->
+    RETURN self.pos < self.len;
+  END
 
-METHOD currentVal(iter: SliceIter) RETURNS Int64 ->
-  RETURN iter.source[iter.pos];
-END
+  METHOD currentVal(self) RETURNS Int64 ->
+    RETURN self.source[self.pos];
+  END
 
-METHOD advance(iter: SliceIter) RETURNS SliceIter ->
-  RETURN SliceIter{ source: iter.source, pos: iter.pos + 1, len: iter.len };
-END
+  METHOD advance(self) RETURNS SliceIter ->
+    RETURN SliceIter{ source: self.source, pos: self.pos + 1, len: self.len };
+  END
+}
 
 # Benchmark 1: Borrowed iterator (zero-copy)
 FN benchBorrowed(data: Int64[], n: Int64, iters: Int64) RETURNS Int64 ->

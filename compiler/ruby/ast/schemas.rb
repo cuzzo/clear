@@ -405,11 +405,14 @@ module Schemas
     MethodsMap = T.type_alias { T::Hash[T.any(Symbol, String), FunctionSignature] }
 
     attr_reader :fields, :type_params, :methods, :visibility, :extern_module, :as_type
-    sig { params(fields: FieldInputMap, type_params: T::Array[Symbol], methods: MethodsMap, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
-    def initialize(fields: {}, type_params: [], methods: {}, visibility: :package, extern_module: nil, as_type: nil)
+    sig { returns(MethodsMap) }
+    attr_reader :static_methods
+    sig { params(fields: FieldInputMap, type_params: T::Array[Symbol], methods: MethodsMap, static_methods: MethodsMap, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
+    def initialize(fields: {}, type_params: [], methods: {}, static_methods: {}, visibility: :package, extern_module: nil, as_type: nil)
       @fields = T.let(normalize_fields(fields), T::Hash[String, AST::StructField])
       @type_params = T.let(type_params.dup, T::Array[Symbol])
       @methods = T.let(methods, MethodsMap)
+      @static_methods = T.let(static_methods, MethodsMap)
       @visibility = T.let(visibility, Symbol)
       @extern_module = T.let(extern_module, T.nilable(String))
       @as_type = T.let(as_type, T.nilable(String))
