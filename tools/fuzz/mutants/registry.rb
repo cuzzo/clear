@@ -25,6 +25,22 @@ module FuzzMutants
 
   REGISTRY = T.let([
     Mutant.new(
+      name: :protocol_conformance_signature,
+      description: 'Accept incompatible protocol member signatures. A concrete implementation must match the declared return and parameter contracts.',
+      invariant: :protocol_conformance_signature,
+      patch: File.join(PATCH_DIR, 'protocol_conformance_signature.patch'),
+      templates: [:generic_map_protocol_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :generic_shared_map_access_scope,
+      description: 'Allow direct access to SHARED Map generic parameters. Index and method operations must require a WITH POLYMORPHIC view.',
+      invariant: :generic_shared_map_access_scope,
+      patch: File.join(PATCH_DIR, 'generic_shared_map_access_scope.patch'),
+      templates: [:generic_shared_map_capability_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
       name: :allow_inferred_alias_call_mutation,
       description: 'Disable inferred-alias rejection after resolved mutable calls. User and stdlib MUTABLE contracts must still reject mutation while an inferred alias is live.',
       invariant: :inferred_alias_mutation,

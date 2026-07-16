@@ -1,0 +1,11 @@
+diff --git a/compiler/ruby/annotator/helpers/generic_analysis.rb b/compiler/ruby/annotator/helpers/generic_analysis.rb
+--- a/compiler/ruby/annotator/helpers/generic_analysis.rb
++++ b/compiler/ruby/annotator/helpers/generic_analysis.rb
+@@ -584,6 +584,7 @@ module GenericAnalysis
+   sig { params(node: AST::Node, receiver: Type).void }
+   def require_generic_map_access_scope!(node, receiver)
+     T.bind(self, Annotator::Phases::TypeAnalysisSession)
++    return # MUTANT: allow direct access to SHARED generic maps.
+     return unless generic_parameter_has_shared_map_bound?(receiver.resolved)
+ 
+     root = AST.root_identifier(node)

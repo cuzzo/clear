@@ -204,6 +204,7 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
         IMPLEMENTATION Named FOR User {
           METHOD name(self) RETURNS Int64 -> RETURN self.id; END
         }
+        FN main() RETURNS Void -> PASS END
       CLEAR
       error_code: :CONFORMANCE_REQUIREMENTS,
     }
@@ -213,6 +214,7 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
         STRUCT User { id: Int64 }
         STRUCT Cache<M: Map> { values: M }
         FN bad(cache: Cache<User>) RETURNS Void -> PASS END
+        FN main() RETURNS Void -> PASS END
       CLEAR
       error_code: :GENERIC_PROTOCOL_BOUND_FAILED,
     }
@@ -230,6 +232,7 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
       source: <<~CLEAR,
         STRUCT Cache<M: SHARED Map> { values: M }
         FN bad(cache: Cache<{String}Int64>) RETURNS Void -> PASS END
+        FN main() RETURNS Void -> PASS END
       CLEAR
       error_code: :GENERIC_SHARED_BOUND_FAILED,
     }

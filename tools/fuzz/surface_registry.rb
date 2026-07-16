@@ -164,6 +164,8 @@ module FuzzSurfaceRegistry
   # this metadata next to each template; keeping it centralized first gives us
   # a useful coverage report without changing every renderer at once.
   TEMPLATE_COVERAGE = {
+    # Semantic dispatch coverage; it does not claim an ownership surface.
+    inherent_method_matrix: {},
     c_ffi_type_matrix: {
       cleanup_value_shapes: [],
       collection_shapes: [:fixed_array, :list, :set, :hash_map],

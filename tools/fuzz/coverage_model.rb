@@ -175,6 +175,9 @@ module FuzzCoverageModel
       failure_proves: 'SHARED Map bounds retain caller-selected synchronization and require a typed WITH POLYMORPHIC access boundary.',
       high_risk: true
     ),
+    inherent_method_matrix: profile(
+      failure_proves: 'Owner-scoped METHOD lookup, owner and method generic binders, static owner functions, and free-function dot-call rejection remain coherent.'
+    ),
     escape_mechanism_matrix: profile(
       failure_proves: 'Escape-analysis entry points heap-place owned values for returns, stores, captures, and consuming calls.',
       high_risk: true

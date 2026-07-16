@@ -38,15 +38,25 @@ FuzzGenerator.register(:generic_shared_map_capability_matrix, cells: GENERIC_SHA
   else
     source = case cell[:family]
     when :direct_index
-      "FN bad<M: SHARED Map>(map: M, key: M::Key) RETURNS ?M::Value -> RETURN map[key]; END"
+      <<~CLEAR
+        FN bad<M: SHARED Map>(map: M, key: M::Key) RETURNS ?M::Value -> RETURN COPY map[key]; END
+        FN main() RETURNS Void -> PASS END
+      CLEAR
     when :direct_method
-      "FN bad<M: SHARED Map>(map: M, key: M::Key) RETURNS Bool -> RETURN map.contains?(key); END"
+      <<~CLEAR
+        FN bad<M: SHARED Map>(map: M, key: M::Key) RETURNS Bool -> RETURN map.contains?(key); END
+        FN main() RETURNS Void -> PASS END
+      CLEAR
     when :plain_with
-      "FN bad<M: SHARED Map>(map: M) RETURNS Void -> WITH map AS view { PASS } END"
+      <<~CLEAR
+        FN bad<M: SHARED Map>(map: M) RETURNS Void -> WITH map AS view { PASS } END
+        FN main() RETURNS Void -> PASS END
+      CLEAR
     when :unshared
       <<~CLEAR
         STRUCT Cache<M: SHARED Map> { values: M }
         FN bad(cache: Cache<{String}Int64>) RETURNS Void -> PASS END
+        FN main() RETURNS Void -> PASS END
       CLEAR
     end
     {
