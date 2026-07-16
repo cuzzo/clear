@@ -287,9 +287,9 @@ RSpec.describe "annotator branch gap burndown" do
     )
 
     index = Annotator::Phases::DeclarationIndexer.index(AST::Program.new(token(:PROGRAM, "program"), [extern_fn]))
-    session.register_program_signatures(index)
+    session.send(:register_program_signatures, index)
 
-    signature = FunctionSignature.unwrap(session.root_scope.resolve_entry!("native_len").type)
+    signature = FunctionSignature.unwrap(session.send(:root_scope).resolve_entry!("native_len").type)
     expect(signature.extern).to eq(true)
     expect(signature.return_type.resolved).to eq(:Int64)
     expect(extern_fn.full_type!.resolved).to eq(:Void)

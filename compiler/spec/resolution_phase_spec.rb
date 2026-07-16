@@ -5,6 +5,12 @@ require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 require_relative "../ruby/annotator/phases/resolution_phase"
 
 RSpec.describe Annotator::Phases::ResolutionPhase do
+  it "keeps the mutable resolution session behind two explicit operations" do
+    public_operations = Annotator::Phases::ResolutionSession.public_instance_methods(false) - Object.public_instance_methods
+
+    expect(public_operations).to contain_exactly(:resolve!, :register_local_declaration!)
+  end
+
   it "owns resolution ordering without traversing function bodies" do
     source = <<~CLEAR
       STRUCT Box { value: Int64 }

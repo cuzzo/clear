@@ -46,7 +46,7 @@ RSpec.describe "annotator import resolution boundaries" do
       importer: importer, source_dir: source_dir, source_code: nil
     )
     annotator.send(:visit_RequireNode, AST::RequireNode.new(tok, "helper.clear", "helper", kind))
-    annotator.root_scope
+    annotator.send(:root_scope)
   end
 
   it "imports function signatures as isolated semantic copies" do

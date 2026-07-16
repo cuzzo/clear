@@ -9,6 +9,12 @@ RSpec.describe Annotator::Phases::TypeAnalysisPhase do
     Lexer::Token.new(:VAR_ID, value, 1, 1)
   end
 
+  it "keeps mutable type-analysis state behind one explicit operation" do
+    public_operations = Annotator::Phases::TypeAnalysisSession.public_instance_methods(false) - Object.public_instance_methods
+
+    expect(public_operations).to contain_exactly(:execute_type_analysis!)
+  end
+
   it "runs directly on a phase-owned session and rejects unresolved output" do
     source = ""
     program = ClearParser.new(Lexer.new(source).tokenize, source).parse

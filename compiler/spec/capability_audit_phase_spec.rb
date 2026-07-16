@@ -9,6 +9,12 @@ RSpec.describe Annotator::Phases::CapabilityAuditPhase do
     Lexer::Token.new(:VAR_ID, value, 1, 1)
   end
 
+  it "keeps mutable capability-audit state behind one explicit operation" do
+    public_operations = Annotator::Phases::CapabilityAuditSession.public_instance_methods(false) - Object.public_instance_methods
+
+    expect(public_operations).to contain_exactly(:audit!)
+  end
+
   it "runs directly on the typed session and preserves the exact typed-program input" do
     source = ""
     program = ClearParser.new(Lexer.new(source).tokenize, source).parse

@@ -14,7 +14,7 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     annotator = resolution_session
     program = AST::Program.new(tok("program"), nodes)
     index = Annotator::Phases::DeclarationIndexer.index(program)
-    annotator.register_type_declarations(index)
+    annotator.send(:register_type_declarations, index)
     [annotator, program]
   end
 
@@ -39,7 +39,7 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     resource.close_method = "close"
 
     annotator, = register(struct, enum, native, resource)
-    scope = annotator.root_scope
+    scope = annotator.send(:root_scope)
 
     box_schema = scope.types.fetch(:Box).schema
     expect(box_schema).to be_a(Schemas::StructSchema)
@@ -78,7 +78,7 @@ RSpec.describe Annotator::Phases::TypeRegistration do
 
   it "allows identical imported extern struct declarations to be re-declared locally" do
     annotator = resolution_session
-    annotator.root_scope.declare_type(
+    annotator.send(:root_scope).declare_type(
       :CompilerRegex,
       Schemas::StructSchema.new(fields: {}, extern_module: "compiler_regex")
     )
@@ -86,14 +86,14 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     index = Annotator::Phases::DeclarationIndexer.index(AST::Program.new(tok("program"), [native]))
 
     expect {
-      annotator.register_type_declarations(index)
+      annotator.send(:register_type_declarations, index)
     }.not_to raise_error
     expect(native.full_type!.resolved).to eq(:Void)
   end
 
   it "rejects imported extern struct declarations with incompatible shapes" do
     annotator = resolution_session
-    annotator.root_scope.declare_type(
+    annotator.send(:root_scope).declare_type(
       :CompilerRegex,
       Schemas::StructSchema.new(fields: {}, extern_module: "compiler_regex")
     )
@@ -106,7 +106,7 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     index = Annotator::Phases::DeclarationIndexer.index(AST::Program.new(tok("program"), [native]))
 
     expect {
-      annotator.register_type_declarations(index)
+      annotator.send(:register_type_declarations, index)
     }.to raise_error(CompilerError, /Duplicate type declaration 'CompilerRegex'/)
   end
 
@@ -130,7 +130,7 @@ RSpec.describe Annotator::Phases::TypeRegistration do
     union = AST::UnionDef.new(tok("Value"), "Value", { Data: inline, Empty: nil }, :package)
 
     annotator, = register(union)
-    scope = annotator.root_scope
+    scope = annotator.send(:root_scope)
 
     union_schema = scope.types.fetch(:Value).schema
     expect(union_schema).to be_a(Schemas::UnionSchema)

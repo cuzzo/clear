@@ -32,10 +32,10 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
     extern_fn = AST::ExternFnDecl.new(tok("puts"), "puts", [param("msg", Type.new(:String))], Type.new(:Void), "c", nil)
     annotator = resolution_session
 
-    annotator.register_program_signatures(index_for(fn, extern_fn))
+    annotator.send(:register_program_signatures, index_for(fn, extern_fn))
 
-    main_sig = FunctionSignature.unwrap(annotator.root_scope.resolve_entry!("main").type)
-    puts_sig = FunctionSignature.unwrap(annotator.root_scope.resolve_entry!("puts").type)
+    main_sig = FunctionSignature.unwrap(annotator.send(:root_scope).resolve_entry!("main").type)
+    puts_sig = FunctionSignature.unwrap(annotator.send(:root_scope).resolve_entry!("puts").type)
     expect(main_sig.return_type.resolved).to eq(:Int64)
     expect(main_sig.params.map(&:name)).to eq(["x"])
     expect(puts_sig.extern).to eq(true)
@@ -47,7 +47,7 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
     annotator = resolution_session
 
     expect {
-      annotator.register_program_signatures(index_for(
+      annotator.send(:register_program_signatures, index_for(
         function_def("main"),
         function_def("main")
       ))
@@ -60,16 +60,16 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
     annotator = resolution_session
 
     expect {
-      annotator.register_program_signatures(index_for(first, second))
+      annotator.send(:register_program_signatures, index_for(first, second))
     }.to raise_error(CompilerError, /Duplicate function declaration 'puts'/)
   end
 
   it "allows local functions to shadow stdlib intrinsic names" do
     annotator = resolution_session
 
-    annotator.register_program_signatures(index_for(function_def("positive?")))
+    annotator.send(:register_program_signatures, index_for(function_def("positive?")))
 
-    signature = FunctionSignature.unwrap(annotator.root_scope.resolve_entry!("positive?").type)
+    signature = FunctionSignature.unwrap(annotator.send(:root_scope).resolve_entry!("positive?").type)
     expect(signature).to be_a(FunctionSignature)
     expect(signature&.intrinsic).to eq(false)
   end
@@ -82,10 +82,10 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
       visibility: :pub,
       module_alias: "dep"
     )
-    annotator.root_scope.declare("helper", nil, imported, false, false, nil, :static)
+    annotator.send(:root_scope).declare("helper", nil, imported, false, false, nil, :static)
 
     expect {
-      annotator.register_program_signatures(index_for(function_def("helper")))
+      annotator.send(:register_program_signatures, index_for(function_def("helper")))
     }.to raise_error(CompilerError, /Duplicate function declaration 'helper'/)
   end
 
@@ -98,10 +98,10 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
       module_alias: "dep"
     )
     extern_fn = AST::ExternFnDecl.new(tok("helper"), "helper", [], Type.new(:Void), "native", nil)
-    annotator.root_scope.declare("helper", nil, imported, false, false, nil, :static)
+    annotator.send(:root_scope).declare("helper", nil, imported, false, false, nil, :static)
 
     expect {
-      annotator.register_program_signatures(index_for(extern_fn))
+      annotator.send(:register_program_signatures, index_for(extern_fn))
     }.to raise_error(CompilerError, /Duplicate function declaration 'helper'/)
   end
 
@@ -114,13 +114,13 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
     annotator = resolution_session
 
     index = index_for(struct, known, unknown)
-    annotator.register_type_declarations(index)
-    annotator.register_program_signatures(index)
+    annotator.send(:register_type_declarations, index)
+    annotator.send(:register_program_signatures, index)
 
-    parser_schema = annotator.root_scope.types.fetch(:ClearParser).schema
+    parser_schema = annotator.send(:root_scope).types.fetch(:ClearParser).schema
     expect(parser_schema.methods.fetch("parse")).to be_a(FunctionSignature)
-    expect(annotator.root_scope.entry?("parse")).to eq(false)
-    expect(annotator.root_scope.entry?("skip")).to eq(false)
+    expect(annotator.send(:root_scope).entry?("parse")).to eq(false)
+    expect(annotator.send(:root_scope).entry?("skip")).to eq(false)
     expect(known.full_type!.resolved).to eq(:Void)
     expect(unknown.full_type!.resolved).to eq(:Void)
   end
@@ -134,10 +134,10 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
     annotator = resolution_session
     index = index_for(struct, first, second)
 
-    annotator.register_type_declarations(index)
+    annotator.send(:register_type_declarations, index)
 
     expect {
-      annotator.register_program_signatures(index)
+      annotator.send(:register_program_signatures, index)
     }.to raise_error(CompilerError, /Duplicate extern method declaration 'ClearParser.parse'/)
   end
 
@@ -147,12 +147,12 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
     method.owner_type = "ClearParser"
     annotator = resolution_session
     index = index_for(struct)
-    annotator.register_type_declarations(index)
-    parser_schema = annotator.root_scope.types.fetch(:ClearParser).schema
+    annotator.send(:register_type_declarations, index)
+    parser_schema = annotator.send(:root_scope).types.fetch(:ClearParser).schema
     parser_schema.methods["parse"] = FunctionSignature.new(params: [], return_type: Type.new(:Bool))
 
     expect {
-      annotator.register_program_signatures(index_for(method))
+      annotator.send(:register_program_signatures, index_for(method))
     }.to raise_error(CompilerError, /Duplicate extern method declaration 'ClearParser.parse'/)
   end
 
@@ -170,10 +170,10 @@ RSpec.describe Annotator::Phases::SignatureRegistration do
     union.methods = [req]
     annotator = resolution_session
 
-    annotator.register_program_signatures(index_for(union))
+    annotator.send(:register_program_signatures, index_for(union))
 
-    synthetic = annotator.synthetic_function_definitions.fetch(0)
-    sig = FunctionSignature.unwrap(annotator.root_scope.resolve_entry!("describe").type)
+    synthetic = annotator.send(:synthetic_function_definitions).fetch(0)
+    sig = FunctionSignature.unwrap(annotator.send(:root_scope).resolve_entry!("describe").type)
     expect(synthetic.name).to eq("describe")
     expect(synthetic.body.length).to eq(1)
     expect(sig.return_type.resolved).to eq(:String)

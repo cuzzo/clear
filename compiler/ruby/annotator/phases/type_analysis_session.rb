@@ -773,10 +773,8 @@ private
     @traversal_state.annotation_ancestors << node
     begin
       result = case node
-      when AST::StructDef, AST::ExternStructDecl, AST::EnumDef, AST::UnionDef
-        local_resolution_session.register_local_type_declaration(node)
-      when AST::ExternFnDecl
-        local_resolution_session.register_local_extern_declaration(node)
+      when AST::StructDef, AST::ExternStructDecl, AST::EnumDef, AST::UnionDef, AST::ExternFnDecl
+        local_resolution_session.register_local_declaration!(node)
         nil
       else
         dispatch_visit(node)
