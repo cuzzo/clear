@@ -480,11 +480,13 @@ module LockAudit
   end
 
   private :check_lock_handler_reachability!
+  private :check_lock_cycles!
   private :build_lock_graph
   private :propagate_lock_acquires!
   private :report_lock_cycle!
   private :resolve_held_calls!
   private :scc_is_cyclic?
+  private :tarjan_scc
   private :verify_handler_reachability!
 
 end

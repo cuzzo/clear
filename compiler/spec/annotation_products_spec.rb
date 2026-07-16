@@ -28,7 +28,8 @@ RSpec.describe Annotator::Phases::AnnotationProducts do
       resolution: resolution,
       body_summaries: {},
       typed_node_count: 1,
-      unresolved_node_count: 0
+      unresolved_node_count: 0,
+      ownership_graph: OwnershipGraph.new
     )
     audit = Annotator::Phases::CapabilityAuditReport.new(
       typed_program: typed,
@@ -59,13 +60,15 @@ RSpec.describe Annotator::Phases::AnnotationProducts do
       resolution: resolution,
       body_summaries: {},
       typed_node_count: 0,
-      unresolved_node_count: 0
+      unresolved_node_count: 0,
+      ownership_graph: OwnershipGraph.new
     )
     mismatched = Annotator::Phases::TypedProgramFacts.new(
       resolution: other_resolution,
       body_summaries: {},
       typed_node_count: 0,
-      unresolved_node_count: 0
+      unresolved_node_count: 0,
+      ownership_graph: OwnershipGraph.new
     )
 
     expect { products.publish_typed_program(typed) }.to raise_error(/requires resolution/)
@@ -77,7 +80,8 @@ RSpec.describe Annotator::Phases::AnnotationProducts do
         resolution: resolution,
         body_summaries: {},
         typed_node_count: 1,
-        unresolved_node_count: 1
+        unresolved_node_count: 1,
+        ownership_graph: OwnershipGraph.new
       )
     }.to raise_error(/unresolved nodes/)
   end

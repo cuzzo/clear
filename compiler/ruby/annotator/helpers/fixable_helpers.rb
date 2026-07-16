@@ -678,8 +678,9 @@ module FixableHelper
     line = info.line
     fixes = []
 
-    if @source_code && line
-      src_line = @source_code.lines[line - 1] || ''
+    source = source_code
+    if source && line
+      src_line = source.lines[line - 1] || ''
       # Search from the decl-name column so a prior @local on the same
       # line (a different binding) isn't picked.
       idx = src_line.index('@local', (info.column || 1) - 1)

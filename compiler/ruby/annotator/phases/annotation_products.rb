@@ -5,6 +5,7 @@ require "sorbet-runtime"
 
 require_relative "../../ast/ast"
 require_relative "../../ast/scope"
+require_relative "../../semantic/ownership_graph"
 require_relative "../function_registry"
 require_relative "body_analysis"
 require_relative "declaration_index"
@@ -65,22 +66,26 @@ module Annotator
       attr_reader :typed_node_count
       sig { returns(Integer) }
       attr_reader :unresolved_node_count
+      sig { returns(OwnershipGraph) }
+      attr_reader :ownership_graph
 
       sig do
         params(
           resolution: ResolutionFacts,
           body_summaries: BodySummaries,
           typed_node_count: Integer,
-          unresolved_node_count: Integer
+          unresolved_node_count: Integer,
+          ownership_graph: OwnershipGraph
         ).void
       end
-      def initialize(resolution:, body_summaries:, typed_node_count:, unresolved_node_count:)
+      def initialize(resolution:, body_summaries:, typed_node_count:, unresolved_node_count:, ownership_graph:)
         raise "typed program cannot publish unresolved nodes" unless unresolved_node_count.zero?
 
         @resolution = T.let(resolution, ResolutionFacts)
         @body_summaries = T.let(body_summaries.dup.freeze, BodySummaries)
         @typed_node_count = T.let(typed_node_count, Integer)
         @unresolved_node_count = T.let(unresolved_node_count, Integer)
+        @ownership_graph = T.let(ownership_graph, OwnershipGraph)
         freeze
       end
 

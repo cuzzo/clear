@@ -133,7 +133,7 @@ module Annotator
       end
       def self.run(resolution:, session:)
         program = resolution.program
-        session.analyze_resolution!(resolution)
+        ownership_graph = session.analyze_resolution!(resolution)
 
         inventory = AnnotationTypeInventory.scan(program)
         inventory.verify_resolved!
@@ -141,7 +141,8 @@ module Annotator
           resolution: resolution,
           body_summaries: resolution.function_registry.body_summaries,
           typed_node_count: inventory.typed_node_count,
-          unresolved_node_count: inventory.unresolved_node_count
+          unresolved_node_count: inventory.unresolved_node_count,
+          ownership_graph: ownership_graph
         )
       end
     end

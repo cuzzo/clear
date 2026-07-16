@@ -195,7 +195,7 @@ class Annotator::Phases::TypeAnalysisSession
 
   sig { returns(OwnershipGraph) }
   def ownership_graph
-    @audit_inputs.ownership_graph
+    @annotation_products.typed_program&.ownership_graph || @audit_inputs.ownership_graph
   end
   private :ownership_graph
 
@@ -664,7 +664,7 @@ class Annotator::Phases::TypeAnalysisSession
     @annotation_products = products
   end
 
-  sig { params(resolution: Annotator::Phases::ResolutionFacts).void }
+  sig { params(resolution: Annotator::Phases::ResolutionFacts).returns(OwnershipGraph) }
   def analyze_resolution!(resolution)
     adopt_resolution_facts!(resolution)
     bridge_reentrance!(resolution.program)
@@ -674,6 +674,7 @@ class Annotator::Phases::TypeAnalysisSession
     resolve_catch_clauses_from_declarations!(resolution.declarations)
     finalize_program_type!(resolution.program)
     finalize_auto_types!(resolution.program)
+    ownership_graph
   end
 
   sig { returns(CapabilityAuditInputs) }
@@ -681,11 +682,6 @@ class Annotator::Phases::TypeAnalysisSession
     inputs = @audit_inputs
     @audit_inputs = CapabilityAuditInputs.new
     inputs
-  end
-
-  sig { params(inputs: CapabilityAuditInputs).void }
-  def install_audited_inputs!(inputs)
-    @audit_inputs = inputs
   end
 
 private
@@ -1039,6 +1035,14 @@ end
 class Annotator::Phases::CapabilityAuditSession
   extend T::Sig
 
+  class Context < T::Struct
+    const :typed_program, Annotator::Phases::TypedProgramFacts
+    const :inputs, Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs
+    const :source_code, T.nilable(String)
+    const :language_mode, Symbol
+    const :strict_test, T::Boolean
+  end
+
   include ErrorHelper
   include FixableHelper
   include ScopeHelper
@@ -1063,84 +1067,84 @@ class Annotator::Phases::CapabilityAuditSession
     ).void
   end
   def initialize(typed_program:, inputs:, source_code:, language_mode:, strict_test:)
-    resolution = typed_program.resolution
-    @typed_program = T.let(typed_program, Annotator::Phases::TypedProgramFacts)
-    @strict_test = T.let(strict_test, T::Boolean)
-    @source_code = T.let(source_code, T.nilable(String))
-    @scope_stack = T.let([resolution.root_scope], T::Array[Scope])
-    @audit_inputs = T.let(inputs, Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs)
-    @function_registry = T.let(resolution.function_registry, Annotator::FunctionRegistry)
-    @program = T.let(typed_program.program, AST::Program)
-    @language_mode = T.let(language_mode, Symbol)
+    @context = T.let(Context.new(
+      typed_program: typed_program,
+      inputs: inputs,
+      source_code: source_code,
+      language_mode: language_mode,
+      strict_test: strict_test
+    ), Context)
   end
 
   sig { void }
   def audit!
-    finalize_program_audit!(@program)
+    finalize_program_audit!(semantic_program)
     run_whole_program_semantics!
     run_deferred_validations!
   end
 
+  private
+
   sig { returns(Annotator::Phases::TypeAnalysisSession::CapabilityAuditInputs) }
   def phase_audit_inputs
-    @audit_inputs
+    @context.inputs
   end
 
   sig { returns(T::Hash[String, AST::FunctionDef]) }
   def semantic_function_nodes
-    @function_registry.nodes
+    semantic_function_registry.nodes
   end
 
   alias_method :function_node_map, :semantic_function_nodes
 
   sig { params(name: T.nilable(String)).returns(T.nilable(AST::FunctionDef)) }
   def function_node_for(name)
-    @function_registry.fetch(name)
+    semantic_function_registry.fetch(name)
   end
 
   sig { returns(Scope) }
   def semantic_root_scope
-    T.must(@scope_stack.first)
+    @context.typed_program.resolution.root_scope
   end
 
   sig { returns(AST::Program) }
   def semantic_program
-    @program
+    @context.typed_program.program
   end
 
   sig { returns(T::Hash[Symbol, Integer]) }
   def semantic_lock_type_ranks
-    @audit_inputs.lock_analysis.type_ranks
+    phase_audit_inputs.lock_analysis.type_ranks
   end
 
   sig { returns(T::Array[Scope]) }
   def scope_stack
-    @scope_stack
+    [semantic_root_scope]
   end
 
   sig { returns(T::Hash[String, Annotator::Phases::FunctionBodySummary]) }
   def function_body_summaries
-    @typed_program.body_summaries
+    @context.typed_program.body_summaries
   end
 
   sig { returns(T::Hash[String, T::Set[String]]) }
   def function_call_graph
-    @function_registry.call_graph
+    semantic_function_registry.call_graph
   end
 
   sig { returns(T::Hash[String, T::Set[String]]) }
   def function_propagating_callees
-    @function_registry.propagating_callees
+    semantic_function_registry.propagating_callees
   end
 
   sig { params(name: String).returns(T::Boolean) }
   def function_has_fnptr_call?(name)
-    @function_registry.fnptr_call?(name)
+    semantic_function_registry.fnptr_call?(name)
   end
 
   sig { params(name: String).returns(T::Boolean) }
   def function_raises_directly?(name)
-    @function_registry.raises_directly?(name)
+    semantic_function_registry.raises_directly?(name)
   end
 
   sig { params(node: AST::FunctionDef).returns(T::Boolean) }
@@ -1167,33 +1171,42 @@ class Annotator::Phases::CapabilityAuditSession
 
   sig { returns(T::Array[Annotator::Phases::DeferredWithValidation]) }
   def deferred_with_validations
-    @audit_inputs.deferred_with_validations
+    phase_audit_inputs.deferred_with_validations
   end
 
   sig { returns(CapabilityAudit::BindingAuditStore) }
   def capability_audit
-    @audit_inputs.capability_audit
+    phase_audit_inputs.capability_audit
   end
 
   sig { returns(T::Array[CapabilityHelper::PredicateCallSite]) }
   def predicate_call_sites
-    @audit_inputs.predicate_call_sites
+    phase_audit_inputs.predicate_call_sites
   end
 
   sig { returns(T::Array[Annotator::Phases::AsyncBodyFact]) }
   def async_body_facts
-    @audit_inputs.async_body_facts
+    phase_audit_inputs.async_body_facts
   end
 
   sig { returns(Symbol) }
-  attr_reader :language_mode
+  def language_mode
+    @context.language_mode
+  end
 
   sig { returns(T.nilable(String)) }
-  attr_reader :source_code
+  def source_code
+    @context.source_code
+  end
 
   sig { returns(T::Boolean) }
   def strict_test?
-    @strict_test
+    @context.strict_test
+  end
+
+  sig { returns(Annotator::FunctionRegistry) }
+  def semantic_function_registry
+    @context.typed_program.resolution.function_registry
   end
 end
 

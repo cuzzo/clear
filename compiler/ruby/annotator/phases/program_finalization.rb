@@ -47,6 +47,7 @@ module Annotator
 
         restamp_function_metadata!
       end
+      private :finalize_program_audit!
 
       sig { void }
       def restamp_function_metadata!

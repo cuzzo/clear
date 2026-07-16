@@ -35,6 +35,7 @@ module Annotator
         flush_deferred_with_validations!
         finalize_capability_audit!
       end
+      private :run_deferred_validations!
 
       # Replay deferred WITH-on-param checks after caller-sync propagation has
       # had a chance to populate entry.sync.
@@ -63,8 +64,8 @@ module Annotator
         end
         deferred_with_validations.clear
       end
-          private :flush_deferred_with_validations!
+      private :flush_deferred_with_validations!
 
-end
+    end
   end
 end

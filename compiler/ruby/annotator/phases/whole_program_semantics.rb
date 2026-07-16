@@ -80,6 +80,7 @@ module Annotator
           lock_ranks: whole_program_lock_type_ranks
         )
       end
+      private :run_whole_program_semantics!
 
       sig { void }
       def restamp_requires_on_signatures!

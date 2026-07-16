@@ -39,15 +39,30 @@ RSpec.describe "annotator branch gap burndown" do
   end
 
   def audit_from_type_session(type_session)
-    audit = Annotator::Phases::CapabilityAuditSession.allocate
-    audit.instance_variable_set(:@typed_program, Struct.new(:body_summaries).new(type_session.function_body_summaries))
-    audit.instance_variable_set(:@strict_test, type_session.strict_test?)
-    audit.instance_variable_set(:@source_code, type_session.source_code)
-    audit.instance_variable_set(:@scope_stack, type_session.send(:scope_stack).dup)
-    audit.instance_variable_set(:@audit_inputs, type_session.send(:phase_audit_inputs))
-    audit.instance_variable_set(:@function_registry, type_session.send(:semantic_function_registry))
-    audit.instance_variable_set(:@program, type_session.semantic_program || AST::Program.new(token(:PROGRAM, "PROGRAM"), []))
-    audit.instance_variable_set(:@language_mode, type_session.language_mode)
+    program = type_session.semantic_program || AST::Program.new(token(:PROGRAM, "PROGRAM"), [])
+    registry = type_session.send(:semantic_function_registry)
+    resolution = Annotator::Phases::ResolutionFacts.new(
+      program: program,
+      declarations: Annotator::Phases::DeclarationIndexer.index(program),
+      root_scope: type_session.semantic_root_scope,
+      function_registry: registry,
+      type_names: [],
+      function_names: registry.names
+    )
+    typed_program = Annotator::Phases::TypedProgramFacts.new(
+      resolution: resolution,
+      body_summaries: registry.body_summaries,
+      typed_node_count: 0,
+      unresolved_node_count: 0,
+      ownership_graph: type_session.send(:ownership_graph)
+    )
+    audit = Annotator::Phases::CapabilityAuditSession.new(
+      typed_program: typed_program,
+      inputs: type_session.send(:phase_audit_inputs),
+      source_code: type_session.source_code,
+      language_mode: type_session.language_mode,
+      strict_test: type_session.strict_test?
+    )
     errors = direct_errors(type_session)
     audit.instance_variable_set(:@direct_errors, errors)
     audit.define_singleton_method(:error!) do |node, code, *args, **kwargs|
@@ -292,7 +307,7 @@ RSpec.describe "annotator branch gap burndown" do
         raises_directly: raises.include?(name)
       )
       if ann.is_a?(Annotator::Phases::CapabilityAuditSession)
-        ann.instance_variable_get(:@function_registry).record_body_summary!(summary)
+        ann.send(:semantic_function_registry).record_body_summary!(summary)
       else
         ann.send(:record_function_body_summary!, summary)
       end
@@ -848,7 +863,7 @@ RSpec.describe "annotator branch gap burndown" do
     source = symbol_entry(type: Type.new(:String), storage: :stack)
     param = AST::Param.new(name: "arg", type: Type.new(:String), default: nil, mutable: false, takes: false, symbol: source)
     fn = function_def("source_name", params: [param])
-    ann.semantic_function_nodes.replace({ "source_name" => fn })
+    ann.send(:semantic_function_nodes).replace({ "source_name" => fn })
 
     expect(ann.send(:lookup_source_name, source)).to eq("arg")
   end
@@ -1738,7 +1753,7 @@ RSpec.describe "annotator branch gap burndown" do
 
   it "covers function analysis call, capture, TAKES, and return lifetime branches directly" do
     missing_call_ann = quiet_annotator
-    missing_call_ann.semantic_function_nodes.replace({})
+    missing_call_ann.send(:semantic_function_nodes).replace({})
     missing_call = AST::FuncCall.new(token(:VAR_ID, "missing_fn"), "missing_fn", [])
     missing_call_ann.send(:resolve_call, missing_call, missing_call.args)
 
@@ -2166,7 +2181,7 @@ RSpec.describe "annotator branch gap burndown" do
     nil_return = AST::FunctionDef.new(token, "nil_return", [], [], nil, nil, [], [], nil, :package)
     bad_return = function_def("bad_return")
     bad_return.define_singleton_method(:return_type) { raise StandardError, "broken return type" }
-    effects_ann.semantic_function_nodes.replace({
+    effects_ann.send(:semantic_function_nodes).replace({
       "caller" => caller,
       "callee" => callee,
       "nil_return" => nil_return,
@@ -2199,7 +2214,7 @@ RSpec.describe "annotator branch gap burndown" do
     returned_sym = SymbolEntry.new(reg: nil, type: Type.new(:String), mutable: false, storage: :stack)
     returned_sym.instance_variable_set(:@lifetime, [source_sym])
     tied_ann.send(:current_scope).install_entry("source", source_sym)
-    tied_ann.semantic_function_nodes.replace({
+    tied_ann.send(:semantic_function_nodes).replace({
       "tied" => AST::FunctionDef.new(token, "tied", [], [], Type.new(:String), nil, [], [], nil, :package)
     })
     with_function_context(tied_ann, return_type: Type.new(:String)) do
@@ -2298,7 +2313,7 @@ RSpec.describe "annotator branch gap burndown" do
     direct.reentrance_kind = :reentrant_not_logical
     mutual.reentrance_kind = :reentrant_not_logical
     other.reentrance_kind = :reentrant
-    ann.semantic_function_nodes.replace({ "direct" => direct, "mutual" => mutual, "other" => other })
+    ann.send(:semantic_function_nodes).replace({ "direct" => direct, "mutual" => mutual, "other" => other })
     ann.send(:effect_direct_effects).replace({ "direct" => Set[EffectTracker::REENTRANT], "mutual" => Set.new, "other" => Set.new })
     record_body_summaries(ann, { "direct" => Set.new, "mutual" => Set["other"], "other" => Set["mutual"] })
 
@@ -2320,7 +2335,7 @@ RSpec.describe "annotator branch gap burndown" do
     max_depth.reentrance_kind = :reentrant_max_depth
     max_depth.max_depth_n = 8
     partner.reentrance_kind = :reentrant
-    ann.semantic_function_nodes.replace({ "bounded" => max_depth, "partner" => partner })
+    ann.send(:semantic_function_nodes).replace({ "bounded" => max_depth, "partner" => partner })
     ann.send(:effect_direct_effects).replace({ "bounded" => Set.new, "partner" => Set.new })
     record_body_summaries(ann, { "bounded" => Set["partner"], "partner" => Set["bounded"] })
     ann.send(:validate_max_depth_mutual_cycle!)
@@ -2333,7 +2348,7 @@ RSpec.describe "annotator branch gap burndown" do
       END
     CHT
     lonely.reentrance_kind = :reentrant_thunk
-    ann.semantic_function_nodes.replace({ "lonely" => lonely })
+    ann.send(:semantic_function_nodes).replace({ "lonely" => lonely })
     record_body_summaries(ann, { "lonely" => Set.new })
     expect(ann.send(:try_stamp_mutual_thunk_plan!, lonely)).to eq(false)
 
@@ -2351,7 +2366,7 @@ RSpec.describe "annotator branch gap burndown" do
     CHT
     a.reentrance_kind = :reentrant_thunk
     b.reentrance_kind = :reentrant_thunk
-    ann.semantic_function_nodes.replace({ "a" => a, "b" => b })
+    ann.send(:semantic_function_nodes).replace({ "a" => a, "b" => b })
     record_body_summaries(ann, { "a" => Set["b"], "b" => Set["a"] })
     expect(ann.send(:try_stamp_mutual_thunk_plan!, a)).to eq(false)
 
@@ -2369,7 +2384,7 @@ RSpec.describe "annotator branch gap burndown" do
     CHT
     c.reentrance_kind = :reentrant_thunk
     d.reentrance_kind = :reentrant_thunk
-    ann.semantic_function_nodes.replace({ "c" => c, "d" => d })
+    ann.send(:semantic_function_nodes).replace({ "c" => c, "d" => d })
     record_body_summaries(ann, { "c" => Set["d"], "d" => Set["c"] })
     ann.send(:emit_mutual_thunk_unsupported!, c)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:fixable)
@@ -2391,7 +2406,7 @@ RSpec.describe "annotator branch gap burndown" do
       fn.effects_span = nil
       fn.return_type_token = nil
     end
-    ann.semantic_function_nodes.replace({ "no_span" => no_span, "no_edit" => no_edit })
+    ann.send(:semantic_function_nodes).replace({ "no_span" => no_span, "no_edit" => no_edit })
     record_body_summaries(ann, { "no_span" => Set["no_edit"], "no_edit" => Set["no_span"] })
     ann.send(:emit_mutual_thunk_unsupported!, no_span)
     expect(direct_errors(ann).map { |e| e[1] }).to include(:REENTRANT_MUTUAL_THUNK_UNSUPPORTED)
@@ -2399,7 +2414,7 @@ RSpec.describe "annotator branch gap burndown" do
     no_arrow = function_def("no_arrow")
     no_arrow.arrow_token = nil
     cycle_ann = quiet_audit
-    cycle_ann.semantic_function_nodes.replace({ "no_arrow" => no_arrow })
+    cycle_ann.send(:semantic_function_nodes).replace({ "no_arrow" => no_arrow })
     cycle_ann.send(:effect_direct_effects).replace({ "no_arrow" => Set.new })
     record_body_summaries(cycle_ann, { "no_arrow" => Set["no_arrow"] })
     cycle_ann.send(:check_indirect_reentrancy!)
@@ -2413,7 +2428,7 @@ RSpec.describe "annotator branch gap burndown" do
     no_fix.max_depth_n = 4
     no_fix_partner = function_def("no_fix_partner")
     no_fix_partner.reentrance_kind = :reentrant
-    max_ann.semantic_function_nodes.replace({ "no_fix" => no_fix, "no_fix_partner" => no_fix_partner })
+    max_ann.send(:semantic_function_nodes).replace({ "no_fix" => no_fix, "no_fix_partner" => no_fix_partner })
     max_ann.send(:effect_direct_effects).replace({ "no_fix" => Set.new, "no_fix_partner" => Set.new })
     record_body_summaries(max_ann, { "no_fix" => Set["no_fix_partner"], "no_fix_partner" => Set["no_fix"] })
 
@@ -2431,7 +2446,7 @@ RSpec.describe "annotator branch gap burndown" do
       END
     CHT
     direct_thunk.reentrance_kind = :reentrant_thunk
-    direct_ann.semantic_function_nodes.replace({ "direct_thunk" => direct_thunk })
+    direct_ann.send(:semantic_function_nodes).replace({ "direct_thunk" => direct_thunk })
     record_body_summaries(direct_ann, { "direct_thunk" => Set["direct_thunk"] })
 
     direct_ann.send(:validate_thunk_recursion!)
@@ -2455,7 +2470,7 @@ RSpec.describe "annotator branch gap burndown" do
       fn.reentrance_kind = :reentrant_thunk
       fn.return_type_token = nil
     end
-    token_ann.semantic_function_nodes.replace({ "missing_rt_a" => missing_rt_a, "missing_rt_b" => missing_rt_b })
+    token_ann.send(:semantic_function_nodes).replace({ "missing_rt_a" => missing_rt_a, "missing_rt_b" => missing_rt_b })
     record_body_summaries(token_ann, { "missing_rt_a" => Set["missing_rt_b"], "missing_rt_b" => Set["missing_rt_a"] })
 
     token_ann.send(:emit_mutual_thunk_unsupported!, missing_rt_a)
@@ -3147,7 +3162,7 @@ RSpec.describe "annotator branch gap burndown" do
     caller = mk.call("caller")
     missing_caller = mk.call("missing_caller")
 
-    ann.semantic_function_nodes.replace({
+    ann.send(:semantic_function_nodes).replace({
       "micro" => micro,
       "standard" => standard,
       "large" => large,
@@ -3193,7 +3208,7 @@ RSpec.describe "annotator branch gap burndown" do
     b.reentrance_kind = :reentrant_max_depth
     a.stack_tier = :unbounded
     b.stack_tier = :unbounded
-    ann.semantic_function_nodes.replace({ "caller" => caller, "a" => a, "b" => b })
+    ann.send(:semantic_function_nodes).replace({ "caller" => caller, "a" => a, "b" => b })
     record_body_summaries(ann, {
       "caller" => Set["a"],
       "a" => Set["b"],
@@ -3213,7 +3228,7 @@ RSpec.describe "annotator branch gap burndown" do
     b = function_def("b")
     a.reentrance_kind = :reentrant_max_depth
     b.reentrance_kind = :reentrant_max_depth
-    ann.semantic_function_nodes.replace({ "caller" => caller, "wrapper" => wrapper, "a" => a, "b" => b })
+    ann.send(:semantic_function_nodes).replace({ "caller" => caller, "wrapper" => wrapper, "a" => a, "b" => b })
     record_body_summaries(ann, {
       "caller" => Set["wrapper"],
       "wrapper" => Set["a"],
@@ -3230,7 +3245,7 @@ RSpec.describe "annotator branch gap burndown" do
     reentrant.effects = Set[EffectTracker::REENTRANT]
     native = function_def("native_callee")
     native.effects = Set[EffectTracker::EXTERN]
-    ann.semantic_function_nodes.replace({
+    ann.send(:semantic_function_nodes).replace({
       "reentrant_callee" => reentrant,
       "native_callee" => native,
     })
@@ -3549,7 +3564,7 @@ RSpec.describe "annotator branch gap burndown" do
     entry = function_def("entry")
     blocking = function_def("blocking_fn")
     blocking.effects = Set[:BLOCKING]
-    ann.semantic_function_nodes.replace({ "entry" => entry, "blocking_fn" => blocking })
+    ann.send(:semantic_function_nodes).replace({ "entry" => entry, "blocking_fn" => blocking })
     record_body_summaries(ann, {
       "entry" => Set["readFile", "blocking_fn"],
       "blocking_fn" => Set.new,
@@ -3671,7 +3686,7 @@ RSpec.describe "annotator branch gap burndown" do
     main.error_fallible = true
     main.explicit_return_type = true
 
-    ann.semantic_function_nodes.replace({
+    ann.send(:semantic_function_nodes).replace({
       "good" => good,
       "caught" => caught,
       "no_ret" => no_ret,
@@ -4044,7 +4059,7 @@ RSpec.describe "annotator branch gap burndown" do
 
     codes = direct_errors(ann).map { |e| e[1] }
     expect(codes).to include(:WITH_EXCLUSIVE_NEEDS_LOCK_GOT, :WITH_READ_NEEDS_WRITE_LOCK_NAME)
-    expect(ann.deferred_with_validations).to be_empty
+    expect(ann.send(:deferred_with_validations)).to be_empty
   end
 
   it "covers expression phase dispatcher recovery branches directly" do
@@ -4367,7 +4382,7 @@ RSpec.describe "annotator branch gap burndown" do
     with_node.polymorphic = true
     attach_capability_plan!(with_node)
     fn = function_def("owner")
-    ann.semantic_function_nodes.replace({ "owner" => fn })
+    ann.send(:semantic_function_nodes).replace({ "owner" => fn })
     ctx = FunctionContext.new(name: "owner", return_type: Type.new(:Void))
 
     ann.send(:mark_unrequired_polymorphic_with_runtime!, with_node, ctx)
@@ -4382,7 +4397,7 @@ RSpec.describe "annotator branch gap burndown" do
 
     impure = function_def("impure")
     impure.effects = Set[EffectTracker::BLOCKING]
-    ann.semantic_function_nodes.replace({ "impure" => impure })
+    ann.send(:semantic_function_nodes).replace({ "impure" => impure })
     call = AST::FuncCall.new(token(:VAR_ID, "impure"), "impure", [])
     audit = audit_from_type_session(ann)
     expect(audit.send(:predicate_impurity_reason, call, "impure")).to include("BLOCKING")

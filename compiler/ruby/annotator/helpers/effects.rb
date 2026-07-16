@@ -948,6 +948,9 @@ module EffectQueries
     !!(effs && effs.any? { |e| SUSPENDS_FAMILY.include?(e) })
   end
 
+  private :func_call_suspends?
+  private :with_block_suspends?
+
 end
 
 
@@ -1360,16 +1363,30 @@ module EffectAudit
 
   private :assign_bg_spawn_shape!
   private :bg_spawn_form_for
+  private :check_indirect_reentrancy!
+  private :compute_can_fail!
+  private :compute_effects!
+  private :compute_fsm_eligibility!
+  private :compute_needs_rt!
+  private :compute_stack_tiers!
   private :effect_call_site_arg_families
+  private :effect_call_site_arg_families_for
   private :effect_call_site_context
+  private :effect_call_site_context_for
   private :effect_direct_effects
   private :effect_direct_effects_for
+  private :effect_state
+  private :enforce_fallible_returns!
+  private :enumerate_fsm_suspend_points!
   private :fallibility_hint_for
+  private :finalize_async_execution_shapes!
   private :function_value_reference?
   private :inherit_effects_from_callee
+  private :mark_fn_value_references!
   private :max_tier_for_calls
   private :mutually_recursive_in_call_graph?
   private :reachable_in_call_graph?
+  private :recursion_yield_needed?
   private :resolve_maybe_effects
 
 end

@@ -171,7 +171,7 @@ RSpec.describe "annotator completion phases" do
     annotator = audit_session_for(type_session, typed_program)
     fn = AST::FunctionDef.new(tok("helper"), "helper", [], [], Type.new(:Void), nil, [], [], nil, :pub, [], false)
     fn.full_type = Type.new(:Void)
-    annotator.semantic_function_nodes["helper"] = fn
+    annotator.send(:semantic_function_nodes)["helper"] = fn
 
     expect {
       annotator.send(:restamp_function_metadata!)
@@ -208,9 +208,9 @@ RSpec.describe "annotator completion phases" do
     )
     annotator = audit_session_for(type_session, typed_program)
 
-    expect {
-      annotator.run_deferred_validations!
-    }.to raise_error(CompilerError, /WITH ATOMIC requires/)
+      expect {
+        annotator.send(:run_deferred_validations!)
+      }.to raise_error(CompilerError, /WITH ATOMIC requires/)
   end
 
   it "rejects annotation completion if the program remains unstamped" do

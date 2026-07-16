@@ -452,7 +452,7 @@ RSpec.describe LockHelper do
       host.function_call_graph = { "caller" => Set["callee"], "callee" => Set.new }
 
       expect {
-        host.check_lock_cycles!
+        host.send(:check_lock_cycles!)
       }.to raise_error(LockHelperSpecError) { |err|
         expect(err.code).to eq(:LOCK_CYCLE_DETECTED)
         expect(err.payload[:sites]).to include("caller")

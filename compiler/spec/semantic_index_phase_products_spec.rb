@@ -23,7 +23,8 @@ RSpec.describe SemanticIndex do
       resolution: resolution,
       body_summaries: {},
       typed_node_count: 1,
-      unresolved_node_count: 0
+      unresolved_node_count: 0,
+      ownership_graph: OwnershipGraph.new
     )
     audit = Annotator::Phases::CapabilityAuditReport.new(
       typed_program: typed,

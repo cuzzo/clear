@@ -524,6 +524,8 @@ module PredicateAudit
     "has effects #{effects.map { |e| EffectTracker.display(e) }.sort.join(', ')}"
   end
   private :semantic_function_impurity_reason
+  private :predicate_impurity_reason
+  private :validate_predicate_purity!
 
 end
 
@@ -1462,6 +1464,7 @@ module CapabilityUsageAudit
       end
     end
   end
+  private :finalize_capability_audit!
 
 end
 

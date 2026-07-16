@@ -732,6 +732,10 @@ module ReentranceAudit
   private :compute_reachable
   private :reachable_from_self?
   private :thunk_cycle_members
+  private :validate_fiber_stack!
+  private :validate_max_depth_mutual_cycle!
+  private :validate_not_logical_recursion!
+  private :validate_thunk_recursion!
 
 end
 
