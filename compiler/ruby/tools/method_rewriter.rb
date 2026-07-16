@@ -72,6 +72,11 @@ module MethodRewriter
         fns << node.name
       end
       walk_collect_user_decls(node.body, methods, fns) if node.body
+    when AST::ExternFnDecl
+      # Native functions shadow same-named stdlib METHOD entries exactly like
+      # CLEAR FN declarations. Rewriting `values(handle)` to
+      # `handle.values()` changes which ABI function the program calls.
+      fns << node.name
     when Array
       node.each { |n| walk_collect_user_decls(n, methods, fns) }
     else

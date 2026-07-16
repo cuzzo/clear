@@ -5,6 +5,7 @@
 #   clear build foo.clear [-o output] [--release|--safe]
 #   clear run foo.clear [-- args...]
 #   clear test foo.clear
+#   clear c-ffi header.h bindings.ffi.clear --link library
 #
 # See docs/clear-man.md for full documentation.
 
@@ -1408,6 +1409,60 @@ when 'fix', 'autofix'
     error e.message
   end
 
+when 'c-ffi'
+  require_relative 'compiler/ruby/tools/c_ffi_generator'
+
+  args = ARGV[1..] || []
+  library = nil
+  check_only = false
+  force = false
+  positional = []
+  i = 0
+  while i < args.length
+    arg = args[i]
+    case arg
+    when '--link'
+      library = args[i + 1]
+      error "--link requires a C library name" unless library
+      i += 2
+    when /\A--link=(.+)\z/
+      library = Regexp.last_match(1)
+      i += 1
+    when '--check'
+      check_only = true
+      i += 1
+    when '--force'
+      force = true
+      i += 1
+    when /\A-/
+      error "Unknown flag for c-ffi: #{arg}"
+    else
+      positional << arg
+      i += 1
+    end
+  end
+
+  usage = "Usage: clear c-ffi <header.h> <output.ffi.clear> --link <library> [--check|--force]"
+  error usage unless positional.length == 2 && library && !library.empty?
+  error "--check and --force cannot be used together" if check_only && force
+
+  header, output = positional
+  begin
+    content = CFFIGenerator.generate(header: header, output: output, library: library)
+    if check_only
+      unless CFFIGenerator.current?(output: output, content: content)
+        warn "#{output}: generated C FFI declarations are stale or missing"
+        exit 1
+      end
+      puts "#{output}: up to date"
+    else
+      result = CFFIGenerator.write(output: output, content: content, force: force)
+      puts(result == :written ? output : "#{output}: unchanged")
+    end
+  rescue CFFIGenerator::Error, CHeaderImporter::Error, Formatter::Error => e
+    error e.message
+  end
+
 when 'fmt', 'format'
   require_relative 'compiler/ruby/tools/formatter'
 
@@ -1649,6 +1704,8 @@ when 'help', '--help', '-h', nil
       clear fix --dry-run <file>    Show findings and chosen fixes, do not write
       clear fix --yes <file>        Take the first fix for every finding
       clear fix --only=lint,... <f> Restrict to categories (lint, ownership, ...)
+      clear c-ffi <h> <out> --link <lib>  Generate formatted CLEAR C declarations
+      clear c-ffi <h> <out> --link <lib> --check  Fail when generated declarations are stale
       clear fmt <file|dir>...       Format CLEAR source in place
       clear fmt --check <path>...   Exit 1 if any file is not formatted
       clear fmt --stdout <file>     Print formatted output, do not write
@@ -1663,6 +1720,7 @@ when 'help', '--help', '-h', nil
       test     Build and run tests (uses test harness with leak detection)
       profile  Build with allocation tracking, run with perf (if available)
       doctor   Analyze .profile/ directory, print actionable optimization advice
+      c-ffi    Generate portable CLEAR declarations from a C header
       fmt      Format CLEAR source files (see docs/agents/fmt.md)
 
     Build flags:

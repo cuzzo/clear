@@ -5,8 +5,15 @@ EXTERN STRUCT Statement {} CLOSE "sqlite3_finalize" FROM "sqlite3" ABI C HEADER 
 
 EXTERN FN sqlite3_open(path: String@c, MUTABLE database: ?Database) RETURNS TargetInt FROM "sqlite3" ABI C;
 EXTERN FN sqlite3_close(database: Database) RETURNS TargetInt FROM "sqlite3" ABI C;
-EXTERN FN sqlite3_prepare_v2(database: Database, sql: String@c, bytes: TargetInt,
-                             MUTABLE statement: ?Statement, tail: ?String@c) RETURNS TargetInt FROM "sqlite3" ABI C;
+EXTERN FN sqlite3_prepare_v2(
+  database: Database,
+  sql: String@c,
+  bytes: TargetInt,
+  MUTABLE statement: ?Statement,
+  tail: ?String@c
+) RETURNS TargetInt
+  FROM "sqlite3"
+  ABI C;
 EXTERN FN sqlite3_step(statement: Statement) RETURNS TargetInt FROM "sqlite3" ABI C;
 EXTERN FN sqlite3_finalize(statement: Statement) RETURNS TargetInt FROM "sqlite3" ABI C;
 EXTERN FN sqlite3_column_int64(statement: Statement, column: TargetInt) RETURNS Int64 FROM "sqlite3" ABI C;
@@ -20,23 +27,35 @@ FN main() RETURNS Void ->
   database = database_out?;
 
   MUTABLE schema_out: ?Statement = NIL;
-  ASSERT sqlite3_prepare_v2(database,
+  ASSERT sqlite3_prepare_v2(
+    database,
     "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT NOT NULL, score INTEGER NOT NULL)",
-    -1, schema_out, NIL) == 0, "prepare schema";
+    -1,
+    schema_out,
+    NIL
+  ) == 0, "prepare schema";
   schema = schema_out?;
   ASSERT sqlite3_step(schema) == 101, "create schema";
 
   MUTABLE insert_out: ?Statement = NIL;
-  ASSERT sqlite3_prepare_v2(database,
+  ASSERT sqlite3_prepare_v2(
+    database,
     "INSERT INTO users VALUES(1, 'Ada', 95), (2, 'Grace', 88)",
-    -1, insert_out, NIL) == 0, "prepare insert";
+    -1,
+    insert_out,
+    NIL
+  ) == 0, "prepare insert";
   insert = insert_out?;
   ASSERT sqlite3_step(insert) == 101, "insert rows";
 
   MUTABLE query_out: ?Statement = NIL;
-  ASSERT sqlite3_prepare_v2(database,
+  ASSERT sqlite3_prepare_v2(
+    database,
     "SELECT name, score FROM users WHERE score >= 90 ORDER BY score DESC",
-    -1, query_out, NIL) == 0, "prepare query";
+    -1,
+    query_out,
+    NIL
+  ) == 0, "prepare query";
   query = query_out?;
   ASSERT sqlite3_step(query) == 100, "query returns a row";
   ASSERT sqlite3_stricmp(sqlite3_column_text(query, 0), "Ada") == 0, "query name";
@@ -44,13 +63,17 @@ FN main() RETURNS Void ->
   ASSERT sqlite3_step(query) == 101, "query is exhausted";
 
   MUTABLE bad_out: ?Statement = NIL;
-  ASSERT sqlite3_prepare_v2(database,
+  ASSERT sqlite3_prepare_v2(
+    database,
     "INSERT INTO users VALUES(1, 'Duplicate', 0)",
-    -1, bad_out, NIL) == 0, "prepare constraint error";
+    -1,
+    bad_out,
+    NIL
+  ) == 0, "prepare constraint error";
   bad = bad_out?;
   ASSERT sqlite3_step(bad) == 19, "constraint error is reported";
   ASSERT sqlite3_stricmp(sqlite3_errmsg(database), "UNIQUE constraint failed: users.id") == 0,
-    "SQLite diagnostic is available";
+  "SQLite diagnostic is available";
 
   print("sqlite: C ABI prepared statements PASS");
   print("sqlite: C ABI cleanup and errors PASS");

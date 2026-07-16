@@ -18,6 +18,53 @@ RSpec.describe Formatter do
     expect(Formatter.format(source)).to include("[]{String}[2]Tuple<Int64, String>")
   end
 
+  it "formats header imports without invoking Zig or rejecting the frontend directive" do
+    source = <<~CLEAR
+      EXTERN FROM HEADER "fixture.h" LINK "fixture" ABI C;
+      FN main() RETURNS Void -> RETURN; END
+    CLEAR
+
+    formatted = Formatter.format(source)
+    expect(formatted).to start_with(<<~CLEAR)
+      EXTERN FROM HEADER "fixture.h"
+        LINK "fixture"
+        ABI C;
+    CLEAR
+    expect(Formatter.format(T.must(formatted))).to eq(formatted)
+  end
+
+  it "keeps generated C declarations readable, bounded, and idempotent" do
+    source = <<~CLEAR
+      EXTERN STRUCT FixtureRecord { id: TargetInt, weight: Float64 } AS "fixture_record" FROM "fixture" ABI C HEADER "fixture.h";
+      EXTERN STRUCT FixtureHandle {} AS "fixture_handle" FROM "fixture" ABI C HEADER "fixture.h";
+      EXTERN STRUCT LocalWideRecord { first: Int64, second: Int64, third: Int64, fourth: Int64, fifth: Int64, sixth: Int64, seventh: Int64, eighth: Int64 };
+      EXTERN FN fixture_apply(value: TargetInt, callback: FN(TargetInt) -> TargetInt CALLCONV C) RETURNS TargetInt AS "fixture_apply" FROM "fixture" ABI C HEADER "fixture.h";
+      EXTERN FN fixture_values(handle: FixtureHandle) RETURNS ?[]@c Int64 AS "fixture_values" FROM "fixture" ABI C HEADER "fixture.h";
+    CLEAR
+
+    formatted = T.must(Formatter.format(source))
+    expect(formatted).to include("EXTERN STRUCT FixtureHandle {}")
+    expect(formatted).to include("callback: FN(TargetInt) -> TargetInt CALLCONV C")
+    expect(formatted).to include("RETURNS ?[]@c Int64")
+    expect(formatted.lines.map { |line| line.chomp.length }.max).to be <= 120
+    expect(Formatter.format(formatted)).to eq(formatted)
+  end
+
+  it "does not rewrite an EXTERN function that shadows a stdlib METHOD" do
+    source = <<~CLEAR
+      EXTERN STRUCT Handle {} FROM "fixture" ABI C;
+      EXTERN FN values(handle: Handle) RETURNS ?[]@c Int64 FROM "fixture" ABI C;
+      FN first(handle: Handle) RETURNS Int64 ->
+        pointer = values(handle)?;
+        RETURN pointer.view(1)[0];
+      END
+    CLEAR
+
+    formatted = T.must(Formatter.format(source))
+    expect(formatted).to include("pointer = values(handle)?;")
+    expect(formatted).not_to include("handle.values()")
+  end
+
   # Mirrors the CLI's behaviour from `clear` (case 'fmt'):
   #   - default:  format every file in place; emit path on change
   #   - --stdout: print formatted output for the file

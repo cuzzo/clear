@@ -27,6 +27,20 @@ EXTERN FROM HEADER "fixture.h"
   ABI C;
 ```
 
+For reviewable or checked-in bindings, generate the equivalent declarations:
+
+```bash
+clear c-ffi fixture.h fixture.ffi.clear --link fixture
+clear c-ffi fixture.h fixture.ffi.clear --link fixture --check
+```
+
+The generator uses the same `clear fmt` engine as ordinary source formatting;
+it does not maintain a second FFI pretty-printer. Generated files record the
+source path, direct-header SHA-256, and link name. Existing edited output is
+protected unless `--force` is supplied, while `--check` fails when output is
+missing or stale. `clear fmt` also formats the inline header directive and
+handwritten/generated `EXTERN` declarations idempotently.
+
 Target-dependent C integers are transparent numeric-family members:
 `TargetInt`, `TargetUInt`, `TargetLong`, `TargetULong`, `TargetLongLong`, and
 `TargetULongLong`. `TargetUInt@size` maps `size_t`; `TargetInt@size` maps a

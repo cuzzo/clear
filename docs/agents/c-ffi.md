@@ -362,6 +362,19 @@ EXTERN FROM HEADER "sqlite3.h"
   ABI C;
 ```
 
+The reviewable generated form uses the same importer and formatter:
+
+```bash
+clear c-ffi sqlite3.h sqlite3.ffi.clear --link sqlite3
+clear c-ffi sqlite3.h sqlite3.ffi.clear --link sqlite3 --check
+```
+
+Generation deliberately delegates layout to `clear fmt`, so generated and
+handwritten declarations have one canonical style. The output carries the
+relative source header, direct-header SHA-256, and link name. It is written
+atomically, is not overwritten after edits without `--force`, and can be
+checked for staleness in CI with `--check`.
+
 The compiler invokes Zig's C translator for the selected target and expands
 supported declarations into the same typed `EXTERN` contracts used by manual
 declarations. It imports functions, target/exact-width scalars, C-layout

@@ -1,19 +1,39 @@
 # Cross-language C ABI fixture. The implementation is ordinary C; every
 # declaration below crosses the same CLEAR EXTERN path used by SQLite.
 
-EXTERN STRUCT FixtureRecord { id: Int64, weight: Float64, samples: [4]Int64 }
-  FROM "clear_c_fixture" ABI C HEADER "fixture.h";
+EXTERN STRUCT FixtureRecord {
+  id: Int64,
+  weight: Float64,
+  samples: [4]Int64
+}
+  FROM "clear_c_fixture"
+  ABI C
+  HEADER "fixture.h";
 EXTERN STRUCT FixtureHandle {} CLOSE "clear_fixture_close"
-  FROM "clear_c_fixture" ABI C HEADER "fixture.h";
+  FROM "clear_c_fixture"
+  ABI C
+  HEADER "fixture.h";
 
 EXTERN FN echoInt(value: TargetInt) RETURNS TargetInt AS "clear_fixture_echo_int" FROM "clear_c_fixture" ABI C;
 EXTERN FN echoUInt(value: TargetUInt) RETURNS TargetUInt AS "clear_fixture_echo_uint" FROM "clear_c_fixture" ABI C;
 EXTERN FN echoLong(value: TargetLong) RETURNS TargetLong AS "clear_fixture_echo_long" FROM "clear_c_fixture" ABI C;
 EXTERN FN echoULong(value: TargetULong) RETURNS TargetULong AS "clear_fixture_echo_ulong" FROM "clear_c_fixture" ABI C;
-EXTERN FN echoLongLong(value: TargetLongLong) RETURNS TargetLongLong AS "clear_fixture_echo_long_long" FROM "clear_c_fixture" ABI C;
-EXTERN FN echoULongLong(value: TargetULongLong) RETURNS TargetULongLong AS "clear_fixture_echo_ulong_long" FROM "clear_c_fixture" ABI C;
-EXTERN FN echoSize(value: TargetUInt@size) RETURNS TargetUInt@size AS "clear_fixture_echo_size" FROM "clear_c_fixture" ABI C;
-EXTERN FN echoPtrdiff(value: TargetInt@size) RETURNS TargetInt@size AS "clear_fixture_echo_ptrdiff" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoLongLong(value: TargetLongLong) RETURNS TargetLongLong
+  AS "clear_fixture_echo_long_long"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN echoULongLong(value: TargetULongLong) RETURNS TargetULongLong
+  AS "clear_fixture_echo_ulong_long"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN echoSize(value: TargetUInt@size) RETURNS TargetUInt@size
+  AS "clear_fixture_echo_size"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN echoPtrdiff(value: TargetInt@size) RETURNS TargetInt@size
+  AS "clear_fixture_echo_ptrdiff"
+  FROM "clear_c_fixture"
+  ABI C;
 EXTERN FN echoFloat(value: Float32) RETURNS Float32 AS "clear_fixture_echo_float" FROM "clear_c_fixture" ABI C;
 EXTERN FN echoDouble(value: Float64) RETURNS Float64 AS "clear_fixture_echo_double" FROM "clear_c_fixture" ABI C;
 EXTERN FN echoI32(value: Int32) RETURNS Int32 AS "clear_fixture_echo_i32" FROM "clear_c_fixture" ABI C;
@@ -27,19 +47,39 @@ EXTERN FN echoU64(value: UInt64) RETURNS UInt64 AS "clear_fixture_echo_u64" FROM
 EXTERN FN echoBool(value: Bool) RETURNS Bool AS "clear_fixture_echo_bool" FROM "clear_c_fixture" ABI C;
 EXTERN FN cNoop() RETURNS Void AS "clear_fixture_noop" FROM "clear_c_fixture" ABI C;
 
-EXTERN FN makeRecord(id: Int64, weight: Float64) RETURNS FixtureRecord AS "clear_fixture_make_record" FROM "clear_c_fixture" ABI C;
+EXTERN FN makeRecord(id: Int64, weight: Float64) RETURNS FixtureRecord
+  AS "clear_fixture_make_record"
+  FROM "clear_c_fixture"
+  ABI C;
 EXTERN FN sumRecord(record: FixtureRecord) RETURNS Int64 AS "clear_fixture_sum_record" FROM "clear_c_fixture" ABI C;
 EXTERN FN sumFixed(values: [4]Int64) RETURNS Int64 AS "clear_fixture_sum_fixed" FROM "clear_c_fixture" ABI C;
-EXTERN FN openHandle(name: String@c, MUTABLE out: ?FixtureHandle) RETURNS TargetInt AS "clear_fixture_open" FROM "clear_c_fixture" ABI C;
+EXTERN FN openHandle(name: String@c, MUTABLE out: ?FixtureHandle) RETURNS TargetInt
+  AS "clear_fixture_open"
+  FROM "clear_c_fixture"
+  ABI C;
 EXTERN FN clear_fixture_close(handle: FixtureHandle) RETURNS TargetInt FROM "clear_c_fixture" ABI C;
 EXTERN FN handleName(handle: FixtureHandle) RETURNS String@c AS "clear_fixture_name" FROM "clear_c_fixture" ABI C;
-EXTERN FN findName(handle: FixtureHandle, key: TargetInt) RETURNS ?String@c AS "clear_fixture_find" FROM "clear_c_fixture" ABI C;
-EXTERN FN stringsEqual(left: String@c, right: String@c) RETURNS TargetInt AS "clear_fixture_string_equal" FROM "clear_c_fixture" ABI C;
-EXTERN FN fail(code: TargetInt, MUTABLE detail: TargetInt) RETURNS TargetInt AS "clear_fixture_fail" FROM "clear_c_fixture" ABI C;
-EXTERN FN applyCallback(value: TargetInt, callback: FN(TargetInt) -> TargetInt CALLCONV C)
-  RETURNS TargetInt AS "clear_fixture_apply" FROM "clear_c_fixture" ABI C;
+EXTERN FN findName(handle: FixtureHandle, key: TargetInt) RETURNS ?String@c
+  AS "clear_fixture_find"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN stringsEqual(left: String@c, right: String@c) RETURNS TargetInt
+  AS "clear_fixture_string_equal"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN fail(code: TargetInt, MUTABLE detail: TargetInt) RETURNS TargetInt
+  AS "clear_fixture_fail"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN applyCallback(value: TargetInt, callback: FN(TargetInt) -> TargetInt CALLCONV C) RETURNS TargetInt
+  AS "clear_fixture_apply"
+  FROM "clear_c_fixture"
+  ABI C;
 EXTERN FN values(handle: FixtureHandle) RETURNS ?[]@c Int64 AS "clear_fixture_values" FROM "clear_c_fixture" ABI C;
-EXTERN FN valueCount(handle: FixtureHandle) RETURNS TargetUInt@size AS "clear_fixture_value_count" FROM "clear_c_fixture" ABI C;
+EXTERN FN valueCount(handle: FixtureHandle) RETURNS TargetUInt@size
+  AS "clear_fixture_value_count"
+  FROM "clear_c_fixture"
+  ABI C;
 
 FN doubleForC(value: TargetInt) RETURNS TargetInt ->
   RETURN value * 2;
@@ -62,7 +102,7 @@ FN main() RETURNS Void ->
   ASSERT echoU8(7_u8) == 7_u8;
   ASSERT echoI16(-17_i16) == -17_i16;
   ASSERT echoU16(17_u16) == 17_u16;
-  ASSERT echoI64(-47_i64) == -47_i64;
+  ASSERT echoI64(-47) == -47;
   ASSERT echoU64(47_u64) == 47_u64;
   ASSERT echoBool(TRUE);
   cNoop();
@@ -79,11 +119,11 @@ FN main() RETURNS Void ->
   handle = handle_out?;
   ASSERT stringsEqual(handleName(handle), "alpha") == 1;
   ASSERT findName(handle, 42) EXISTS;
-  ASSERT findName(handle, 0) == NIL;
+  ASSERT(findName(handle, 0)).nil?();
 
   MUTABLE rejected: ?FixtureHandle = NIL;
   ASSERT openHandle("reject", rejected) == 7;
-  ASSERT rejected == NIL;
+  ASSERT rejected.nil?();
   MUTABLE detail: TargetInt = 0;
   ASSERT fail(9, detail) == 9;
   ASSERT detail == 90;

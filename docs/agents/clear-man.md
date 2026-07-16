@@ -6,6 +6,7 @@
 clear build <file.clear> [-o output] [--release|--safe]
 clear run <file.clear> [-- args...]
 clear test <file.clear>
+clear c-ffi <header.h> <output.ffi.clear> --link <library>
 clear help
 ```
 
@@ -62,6 +63,22 @@ clear test my_module.clear
 
 ASSERT statements in the code become test assertions. Memory leaks are
 detected and reported.
+
+### c-ffi
+
+Generate portable, formatted CLEAR declarations from a C header using Zig's C
+translator:
+
+```bash
+clear c-ffi sqlite3.h sqlite3.ffi.clear --link sqlite3
+clear c-ffi sqlite3.h sqlite3.ffi.clear --link sqlite3 --check
+clear c-ffi sqlite3.h sqlite3.ffi.clear --link sqlite3 --force
+```
+
+`--check` exits non-zero when the output is missing or stale. Existing changed
+output is protected unless `--force` is supplied. Generated declarations use
+`Target*` aliases for target-width C integers and are canonicalized by the
+same formatter as `clear fmt`.
 
 ## BUILD FLAGS
 
