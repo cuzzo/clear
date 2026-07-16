@@ -3,6 +3,31 @@
 require_relative "spec_helper"
 
 RSpec.describe NilKill do
+  it "recovers field types from typed parameter assignments" do
+    evidence = {
+      "fields" => [{
+        "language" => "ruby", "path" => "parser.rb", "owner" => "Parser",
+        "name" => "tokens", "declared_type" => nil,
+      }],
+      "facts" => {
+        "state_param_origin_records" => [{
+          "language" => "ruby", "path" => "parser.rb", "owner" => "Parser",
+          "function" => "initialize", "field" => "@tokens", "param" => "tokens",
+        }],
+        "type_definitions" => [{
+          "language" => "ruby", "path" => "parser.rb", "owner" => "Parser",
+          "name" => "initialize", "kind" => "method_signature",
+          "params" => [{"name" => "tokens", "type" => "T::Array[Token]"}],
+        }],
+      },
+    }
+
+    NilKill::StaticEvidence.send(:enrich_fields_from_param_origins!, evidence)
+
+    expect(evidence.dig("fields", 0, "declared_type")).to eq("T::Array[Token]")
+    expect(evidence.dig("fields", 0, "static_origin")).to eq("parameter_assignment")
+  end
+
   describe ".sorbet_type union policy" do
     it "emits T.any(...) for 2-3 class unions by default" do
       expect(NilKill.sorbet_type(%w[String Integer])).to eq("T.any(Integer, String)")
@@ -125,9 +150,76 @@ RSpec.describe NilKill do
       expect(graph.edges).to include(a_hash_including("kind" => "return_forward", "from" => "return:method_name:leaf"))
       expect(graph.sorbet_type_for("struct_field:Example::Node:name")).to eq("String")
     end
+
+
+    it "ranks conjunctive type dependencies by definite transitive unlocks" do
+      evidence = {
+        "facts" => {
+          "type_dependencies" => [
+            { "id" => "root:a", "kind" => "definition", "candidate" => true,
+              "candidate_kind" => "parameter", "resolved" => false, "requirements" => [], "name" => "a" },
+            { "id" => "root:b", "kind" => "definition", "candidate" => true,
+              "candidate_kind" => "parameter", "resolved" => false, "requirements" => [], "name" => "b" },
+            { "id" => "copy:a", "kind" => "definition", "candidate" => false,
+              "resolved" => false, "requirements" => ["root:a"], "name" => "copy" },
+            { "id" => "read:a", "kind" => "flow_read", "candidate" => false,
+              "resolved" => false, "requirements" => ["copy:a"], "name" => "copy" },
+            { "id" => "join", "kind" => "flow_read", "candidate" => false,
+              "resolved" => false, "requirements" => ["root:a", "root:b"], "name" => "joined" },
+          ],
+        },
+      }
+
+      pressure = described_class.from_evidence(evidence).unlock_pressure
+
+      expect(pressure.map { |row| row["candidate"] }).to eq(["root:a"])
+      expect(pressure.first["unlocked_ids"]).to include("copy:a", "read:a")
+      expect(pressure.first["unlocked_ids"]).not_to include("join")
+      expect(pressure.first["counts"]).to include("flow_read" => 1)
+    end
+
+    it "handles dependency cycles without treating an ungrounded cycle as resolved" do
+      graph = described_class.new
+      graph.add_dependency_node("left", requirements: ["right"], candidate: true)
+      graph.add_dependency_node("right", requirements: ["left"])
+      graph.add_dependency_node("read", requirements: ["right"], data: { "kind" => "flow_read" })
+
+      expect(graph.unlock_pressure.first["unlocked_ids"]).to contain_exactly("read", "right")
+
+      ungrounded = described_class.new
+      ungrounded.add_dependency_node("left", requirements: ["right"])
+      ungrounded.add_dependency_node("right", requirements: ["left"])
+      expect(ungrounded.unlock_pressure).to be_empty
+    end
   end
 
   describe NilKill::Report do
+    it "renders definite type dependency unlock pressure" do
+      evidence = {
+        "facts" => {
+          "type_dependencies" => [
+            { "id" => "root", "kind" => "definition", "candidate" => true,
+              "candidate_kind" => "parameter", "resolved" => false, "requirements" => [],
+              "file" => "src/pipeline.rb", "line" => 4, "name" => "source" },
+            { "id" => "read", "kind" => "flow_read", "candidate" => false,
+              "resolved" => false, "requirements" => ["root"], "name" => "source" },
+          ],
+        },
+      }
+      lines = []
+
+      described_class.new.send(:append_type_dependency_pressure, lines, evidence)
+
+      expect(lines.join("\n")).to include("Type Dependency Unlock Pressure")
+      expect(lines.join("\n")).to include("src/pipeline.rb:4 source (parameter); definitely unlocks 1 1 flow read")
+    end
+
+    it "reports when no single annotation has definite dependency impact" do
+      lines = []
+      described_class.new.send(:append_type_dependency_pressure, lines, { "facts" => {} })
+      expect(lines.last).to eq("- none")
+    end
+
     it "formats project paths as root-relative links when requested" do
       report = described_class.new(["--with-links"])
       abs = File.join(NilKill::ROOT, "src", "ast", "parser.rb")
@@ -245,6 +337,52 @@ RSpec.describe NilKill do
       expect(results).not_to include(a_hash_including(
         "ruleId" => "nil-kill.static.untyped-field",
         "message" => a_hash_including("text" => include("CurrentUnitSpan#id")),
+      ))
+    end
+
+    it "joins relative method paths to absolute return-origin paths" do
+      evidence = {
+        "schema_version" => 2,
+        "root" => "/repo",
+        "languages" => ["ruby"],
+        "static" => {
+          "files" => [],
+          "methods" => [{
+            "path" => "compiler/ruby/ast/parser.rb",
+            "line" => 10,
+            "owner" => "ClearParser",
+            "name" => "parse",
+            "kind" => "method",
+            "language" => "ruby",
+            "signature" => "sig { returns(T.nilable(AST::Program)) }",
+          }],
+          "facts" => {
+            "return_origins" => [{
+              "path" => "/repo/compiler/ruby/ast/parser.rb",
+              "class" => "ClearParser",
+              "method" => "parse",
+              "confidence" => "strong",
+              "blockers" => [],
+              "candidate_type" => {"kind" => "Primitive", "data" => "AST::Program"},
+              "sources" => [{
+                "line" => 14,
+                "kind" => "static",
+                "type" => {"kind" => "Primitive", "data" => "AST::Program"},
+              }],
+            }],
+          },
+        },
+        "runtime" => {},
+        "actions" => [],
+        "diagnostics" => [],
+      }
+
+      sarif = JSON.parse(described_class.new(["--format=sarif"], evidence: evidence).to_sarif(evidence))
+      results = sarif.fetch("runs").first.fetch("results")
+
+      expect(results).to include(a_hash_including(
+        "ruleId" => "nil-kill.static.false-nullable-return",
+        "message" => a_hash_including("text" => include("false-nilable return")),
       ))
     end
 
@@ -615,1006 +753,9 @@ RSpec.describe NilKill do
         end
       end
 
-      xit "narrows recv.method when callers consistently pass a class with a strong RBI return" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        store.facts["param_origins"] = [
-          { "callee" => "wrap", "slot" => "node", "origin_kind" => "static", "type" => "AST::Foo",
-            "path" => "src/c.rb", "line" => 1, "code" => "AST::Foo.new" },
-        ]
-        store.facts["existing_sigs"] = [
-          { "path" => "src/x.rb", "line" => 5, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-            "sig" => "sig { params(node: T.untyped).returns(T.untyped) }" },
-        ]
-        origin = {
-          "path" => "src/x.rb", "line" => 5, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "token", "line" => 6, "code" => "node.token" }],
-          "blockers" => ["untyped callee token"],
-        }
-        store.facts["return_origins"] = [origin]
+                                              end
 
-        with_rbi_stub(infer) { infer.send(:enrich_return_origins_with_receiver_inference!) }
-
-        expect(origin["sources"].first["kind"]).to eq("typed_call_inferred")
-        expect(origin["sources"].first["type"]).to eq("Token")
-        expect(origin["candidate_type"]).to eq("Token")
-        expect(origin["confidence"]).to eq("weak")
-      end
-
-      xit "narrows only when ALL callers pass classes that agree on the return type" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        store.facts["param_origins"] = [
-          { "callee" => "wrap", "slot" => "node", "origin_kind" => "static", "type" => "AST::Foo",
-            "path" => "src/c1.rb", "line" => 1, "code" => "AST::Foo.new" },
-          { "callee" => "wrap", "slot" => "node", "origin_kind" => "static", "type" => "AST::Mismatch",
-            "path" => "src/c2.rb", "line" => 1, "code" => "AST::Mismatch.new" },
-        ]
-        origin = {
-          "path" => "src/x.rb", "line" => 5, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "token", "line" => 6, "code" => "node.token" }],
-          "blockers" => [],
-        }
-        store.facts["return_origins"] = [origin]
-
-        with_rbi_stub(infer) { infer.send(:enrich_return_origins_with_receiver_inference!) }
-
-        expect(origin["sources"].first["kind"]).to eq("call_untyped")
-      end
-
-      xit "skips T.nilable narrowings (cascade-prone)" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        store.facts["param_origins"] = [
-          { "callee" => "wrap", "slot" => "node", "origin_kind" => "static", "type" => "AST::ReturnsNilable",
-            "path" => "src/c.rb", "line" => 1, "code" => "AST::ReturnsNilable.new" },
-        ]
-        origin = {
-          "path" => "src/x.rb", "line" => 5, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "token", "line" => 6, "code" => "node.token" }],
-          "blockers" => [],
-        }
-        store.facts["return_origins"] = [origin]
-
-        with_rbi_stub(infer) { infer.send(:enrich_return_origins_with_receiver_inference!) }
-
-        expect(origin["sources"].first["kind"]).to eq("call_untyped")
-      end
-
-      xit "skips when receiver is not a known param of the enclosing method" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        # No param_origins recorded for "wrap" -- no callsite evidence to drive inference.
-        store.facts["param_origins"] = []
-        origin = {
-          "path" => "src/x.rb", "line" => 5, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "token", "line" => 6, "code" => "node.token" }],
-          "blockers" => [],
-        }
-        store.facts["return_origins"] = [origin]
-
-        with_rbi_stub(infer) { infer.send(:enrich_return_origins_with_receiver_inference!) }
-
-        expect(origin["sources"].first["kind"]).to eq("call_untyped")
-      end
-
-      xit "rejects narrowing when runtime trace contradicts the inferred type" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        store.facts["param_origins"] = [
-          { "callee" => "wrap", "slot" => "node", "origin_kind" => "static", "type" => "AST::Foo",
-            "path" => "src/c.rb", "line" => 1, "code" => "AST::Foo.new" },
-        ]
-        # Runtime evidence shows the method actually returns Hash, not Token.
-        rec = { "returns" => %w[Hash], "key" => ["Wrapper", "wrap", "instance", File.expand_path("src/x.rb", NilKill::ROOT), 5] }
-        store.methods["#{rec["key"].join("\0")}"] = rec
-        origin = {
-          "path" => "src/x.rb", "line" => 5, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "token", "line" => 6, "code" => "node.token" }],
-          "blockers" => [],
-        }
-        store.facts["return_origins"] = [origin]
-
-        with_rbi_stub(infer) { infer.send(:enrich_return_origins_with_receiver_inference!) }
-
-        expect(origin["sources"].first["kind"]).to eq("call_untyped")
-      end
-
-      xit "ignores call shapes that don't lead with recv.method (chains, ConstClass.x)" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        store.facts["param_origins"] = [
-          { "callee" => "wrap", "slot" => "node", "origin_kind" => "static", "type" => "AST::Foo",
-            "path" => "src/c.rb", "line" => 1, "code" => "AST::Foo.new" },
-        ]
-        store.facts["existing_sigs"] = [
-          { "path" => "src/x.rb", "line" => 5, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-            "sig" => "sig { params(node: T.untyped).returns(T.untyped) }" },
-        ]
-        origin = {
-          "path" => "src/x.rb", "line" => 5, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [
-            { "kind" => "call_untyped", "callee" => "foo", "line" => 7, "code" => "node.foo.bar" },
-            { "kind" => "call_untyped", "callee" => "z", "line" => 8, "code" => "Some::Class.z" },
-          ],
-          "blockers" => [],
-        }
-        store.facts["return_origins"] = [origin]
-
-        with_rbi_stub(infer) { infer.send(:enrich_return_origins_with_receiver_inference!) }
-
-        origin["sources"].each { |s| expect(s["kind"]).to eq("call_untyped") }
-      end
-
-      xit "narrows recv.method(args) (method call with args is fine, args don't matter for return type)" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        store.facts["param_origins"] = [
-          { "callee" => "wrap", "slot" => "node", "origin_kind" => "static", "type" => "AST::Foo",
-            "path" => "src/c.rb", "line" => 1, "code" => "AST::Foo.new" },
-        ]
-        store.facts["existing_sigs"] = [
-          { "path" => "src/x.rb", "line" => 5, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-            "sig" => "sig { params(node: T.untyped).returns(T.untyped) }" },
-        ]
-        origin = {
-          "path" => "src/x.rb", "line" => 5, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "token", "line" => 6, "code" => "node.token(arg)" }],
-          "blockers" => [],
-        }
-        store.facts["return_origins"] = [origin]
-
-        with_rbi_stub(infer) { infer.send(:enrich_return_origins_with_receiver_inference!) }
-
-        expect(origin["sources"].first["kind"]).to eq("typed_call_inferred")
-        expect(origin["sources"].first["type"]).to eq("Token")
-      end
-    end
-
-    xit "plans structured hash-record cluster promotion actions from report candidates" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["hash_shapes"] = [
-        { "path" => "src/diagnostics.rb", "line" => 10, "keys" => %w[category severity summary template],
-          "value_types" => %w[Symbol String String String], "code" => "{category: :lint, severity: \"warning\", summary: \"s\", template: \"t\"}" },
-        { "path" => "src/diagnostics.rb", "line" => 20, "keys" => %w[category cause fix_hint severity summary template],
-          "value_types" => %w[Symbol String String String String String], "code" => "{category: :lint, cause: \"c\", fix_hint: \"f\", severity: \"warning\", summary: \"s\", template: \"t\"}" },
-      ]
-      store.facts["collection_index_lookups"] = [
-        { "path" => "src/use.rb", "line" => 30, "code" => "entry[:category]", "receiver" => "entry", "index" => ":category",
-          "lookup_type" => "T.nilable(Symbol)", "status" => "typed lookup",
-          "origin" => { "kind" => "hash literal", "path" => "src/diagnostics.rb", "line" => 10,
-            "name" => "entry", "code" => "{category: :lint, severity: \"warning\", summary: \"s\", template: \"t\"}" } },
-        { "path" => "src/use.rb", "line" => 44, "code" => "record[:summary]", "receiver" => "record", "index" => ":summary",
-          "lookup_type" => "T.nilable(String)", "status" => "typed lookup",
-          "origin" => { "kind" => "method parameter", "path" => "src/use.rb", "line" => 40,
-            "name" => "record", "type" => "T::Hash[Symbol, T.untyped]" } },
-      ]
-      store.facts["hash_record_blockers"] = [
-        { "path" => "src/use.rb", "line" => 31, "kind" => "dynamic_key", "code" => "entry[key]",
-          "receiver" => "entry", "message" => "dynamic hash-record key prevents struct accessor rewrite",
-          "origin" => { "kind" => "hash literal", "path" => "src/diagnostics.rb", "line" => 10,
-            "name" => "entry", "code" => "{category: :lint, severity: \"warning\", summary: \"s\", template: \"t\"}" } },
-      ]
-      store.facts["return_origins"] = [
-        { "path" => "src/diagnostics.rb", "line" => 8, "method" => "build_diagnostic", "class" => "Diagnostics",
-          "sources" => [{ "line" => 10, "code" => "{category: :lint, severity: \"warning\", summary: \"s\", template: \"t\"}" }] },
-        { "path" => "src/diagnostics.rb", "line" => 18, "method" => "build_diagnostics", "class" => "Diagnostics",
-          "sources" => [{ "line" => 10, "code" => "{category: :lint, severity: \"warning\", summary: \"s\", template: \"t\"}" }] },
-      ]
-      store.facts["existing_sigs"] = [
-        { "path" => "src/diagnostics.rb", "line" => 8, "method" => "build_diagnostic", "class" => "Diagnostics",
-          "sig" => "sig { returns(T::Hash[Symbol, T.untyped]) }" },
-        { "path" => "src/diagnostics.rb", "line" => 18, "method" => "build_diagnostics", "class" => "Diagnostics",
-          "sig" => "sig { returns(T::Array[T::Hash[Symbol, T.untyped]]) }" },
-        { "path" => "src/use.rb", "line" => 40, "method" => "render", "class" => "Use",
-          "sig" => "sig { params(record: T::Hash[Symbol, T.untyped]).returns(String) }" },
-      ]
-
-      infer.send(:propose_hash_record_cluster_actions)
-
-      action = store.actions.find { |candidate| candidate["kind"] == "promote_hash_record_cluster_to_struct" }
-      expect(action).to include("confidence" => "review", "path" => "src/diagnostics.rb", "line" => 10)
-      expect(action.dig("data", "struct_name")).to eq("CategoryRecord")
-      expect(action.dig("data", "producers")).to include(a_hash_including("path" => "src/diagnostics.rb", "line" => 10))
-      expect(action.dig("data", "consumers")).to include(a_hash_including("path" => "src/use.rb", "line" => 30, "key" => "category"))
-      expect(action.dig("data", "fields")).to include(
-        { "name" => "fix_hint", "type" => "T.nilable(String)", "optional" => true }
-      )
-      expect(action.dig("data", "blockers")).to include(
-        "dynamic hash-record key prevents struct accessor rewrite at src/use.rb:31"
-      )
-      expect(action.dig("data", "signatures")).to include(
-        a_hash_including("path" => "src/diagnostics.rb", "line" => 8, "kind" => "return", "type" => "CategoryRecord"),
-        a_hash_including("path" => "src/diagnostics.rb", "line" => 18, "kind" => "return", "type" => "T::Array[CategoryRecord]")
-      )
-      expect(action.dig("data", "signatures")).not_to include(
-        a_hash_including("path" => "src/use.rb", "line" => 40, "kind" => "param", "name" => "record", "type" => "CategoryRecord")
-      )
-    end
-
-    xit "does not treat test scratch under gems/tmp or gem spec fixtures as struct-name collisions" do
-      infer = infer_with_store
-      tmp_scratch = File.join(NilKill::ROOT, "gems", "tmp", "nil-kill-existing-struct-spec")
-      gem_spec = File.join(NilKill::ROOT, "gems", "nil-kill", "spec", "fixtures", "existing-struct-spec")
-      gem_lib = File.join(NilKill::ROOT, "gems", "nil-kill-existing-struct-spec", "lib")
-      FileUtils.mkdir_p(tmp_scratch)
-      FileUtils.mkdir_p(gem_spec)
-      FileUtils.mkdir_p(gem_lib)
-      begin
-        File.write(File.join(tmp_scratch, "tmp_struct.rb"), "class CollisionFixture < T::Struct\nend\n")
-        File.write(File.join(gem_spec, "fixture_struct.rb"), "class CollisionFixture < T::Struct\nend\n")
-        File.write(File.join(gem_lib, "real_gem_struct.rb"), "class CollisionFixture < T::Struct\nend\n")
-
-        paths = infer.send(:hash_record_existing_struct_paths, "CollisionFixture")
-
-        expect(paths).not_to include(a_string_including("gems/tmp"))
-        expect(paths).not_to include(a_string_including("gems/nil-kill/spec/fixtures"))
-        expect(paths).to include(a_string_matching(%r{gems/nil-kill-existing-struct-spec/lib/real_gem_struct\.rb\z}))
-      ensure
-        FileUtils.rm_rf(tmp_scratch)
-        FileUtils.rm_rf(gem_spec)
-        FileUtils.rm_rf(File.dirname(gem_lib))
-      end
-    end
-
-    xit "proposes conservative generic param narrowing from runtime element evidence" do
-      infer = infer_with_store
-      rec = {
-        "calls" => 50,
-        "params_ok" => {},
-        "params_by_name" => {},
-        "param_elem" => { "items" => ["String"] },
-        "param_kv" => {},
-        "returns" => [],
-        "return_elem" => [],
-        "return_kv" => [[], []],
-      }
-      src = {
-        "path" => "lib/example.rb",
-        "line" => 10,
-        "sig" => "sig { params(items: T::Array[T.untyped]).returns(T.untyped) }",
-      }
-
-      infer.send(:validate_sig, rec, src)
-      actions = infer.instance_variable_get(:@store).actions
-
-      expect(actions).to include(
-        a_hash_including(
-          "kind" => "narrow_generic_param",
-          "confidence" => "high",
-          "data" => a_hash_including("name" => "items", "type" => "T::Array[String]")
-        )
-      )
-    end
-
-    xit "keeps low-sample collection narrowing in review" do
-      infer = infer_with_store
-      rec = {
-        "calls" => 1,
-        "params_ok" => {},
-        "params_by_name" => {},
-        "param_elem" => { "items" => ["String"] },
-        "param_kv" => {},
-        "returns" => [],
-        "return_elem" => [],
-        "return_kv" => [[], []],
-      }
-      src = {
-        "path" => "lib/example.rb",
-        "line" => 10,
-        "sig" => "sig { params(items: T::Array[T.untyped]).returns(T.untyped) }",
-      }
-
-      infer.send(:validate_sig, rec, src)
-
-      expect(infer.instance_variable_get(:@store).actions).to include(
-        a_hash_including(
-          "kind" => "narrow_generic_param",
-          "confidence" => "review",
-          "data" => a_hash_including("name" => "items", "type" => "T::Array[String]")
-        )
-      )
-    end
-
-    xit "keeps runtime-only param fixes in review instead of high confidence" do
-      infer = infer_with_store
-      rec = {
-        "calls" => 50,
-        "params_ok" => { "name" => ["String"] },
-        "params_by_name" => {},
-        "param_elem" => {},
-        "param_kv" => {},
-        "returns" => [],
-        "return_elem" => [],
-        "return_kv" => [[], []],
-      }
-      src = {
-        "path" => "lib/example.rb",
-        "line" => 10,
-        "sig" => "sig { params(name: T.untyped).void }",
-      }
-
-      infer.send(:validate_sig, rec, src)
-
-      expect(infer.instance_variable_get(:@store).actions).to include(
-        a_hash_including(
-          "kind" => "fix_sig_param",
-          "confidence" => "review",
-          "data" => a_hash_including("name" => "name", "type" => "String")
-        )
-      )
-    end
-
-    xit "proposes param backflow fixes when static callsites agree" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "Example", "method" => "sink", "kind" => "instance",
-          "sig" => "sig { params(name: T.untyped).void }", "params" => [{ "name" => "name" }] },
-      ]
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 20, "callee" => "sink", "slot" => "name",
-          "origin_kind" => "static", "type" => "String", "code" => "\"Ada\"" },
-        { "path" => "lib/caller.rb", "line" => 21, "callee" => "sink", "slot" => "0",
-          "origin_kind" => "typed_return", "type" => "String", "code" => "name_for(user)" },
-      ]
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      expect(store.actions).to include(
-        a_hash_including(
-          "kind" => "fix_sig_param",
-          "confidence" => "review",
-          "path" => "lib/example.rb",
-          "line" => 10,
-          "message" => include("static callsites prove param name is String"),
-          "data" => a_hash_including(
-            "name" => "name",
-            "type" => "String",
-            "source" => "static_param_backflow",
-            "callsite_count" => 2
-          )
-        )
-      )
-    end
-
-    xit "proposes per-class backflow for shared method names but still rejects unknown callsites" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/a.rb", "line" => 10, "class" => "A", "method" => "sink", "kind" => "instance",
-          "sig" => "sig { params(name: T.untyped).void }", "params" => [{ "name" => "name" }] },
-        { "path" => "lib/b.rb", "line" => 10, "class" => "B", "method" => "sink", "kind" => "instance",
-          "sig" => "sig { params(name: T.untyped).void }", "params" => [{ "name" => "name" }] },
-        { "path" => "lib/c.rb", "line" => 10, "class" => "C", "method" => "known", "kind" => "instance",
-          "sig" => "sig { params(value: T.untyped).void }", "params" => [{ "name" => "value" }] },
-      ]
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 20, "callee" => "sink", "slot" => "name",
-          "origin_kind" => "static", "type" => "String", "code" => "\"Ada\"" },
-        { "path" => "lib/caller.rb", "line" => 21, "callee" => "known", "slot" => "value",
-          "origin_kind" => "unknown", "type" => nil, "code" => "dynamic_value" },
-      ]
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      # B:34 relaxation: a shared name no longer blocks the group. Both
-      # A#sink and B#sink get a REVIEW (loop-gated) String proposal; the
-      # genuinely-unknown `known` callsite is still rejected.
-      sink_paths = store.actions.select { |a| a["data"]["name"] == "name" && a["data"]["type"] == "String" }.map { |a| a["path"] }.sort
-      expect(sink_paths).to eq(["lib/a.rb", "lib/b.rb"])
-      expect(store.actions.any? { |a| a["data"]["name"] == "value" }).to be(false)
-      expect(store.actions).to all(a_hash_including("confidence" => "review"))
-    end
-
-    xit "rejects static param backflow candidates that do not satisfy the param protocol" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "Example", "method" => "stream_source?", "kind" => "instance",
-          "sig" => "sig { params(node: T.untyped).returns(T::Boolean) }",
-          "params" => [{ "name" => "node" }],
-          "protocols" => { "node" => { "methods" => ["type_info"] } } },
-        { "path" => "lib/ast.rb", "line" => 20, "class" => "AST::RangeLit", "method" => "type_info", "kind" => "instance",
-          "sig" => "sig { returns(Type) }", "params" => [] },
-      ]
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 30, "callee" => "stream_source?", "slot" => "node",
-          "origin_kind" => "static", "type" => "MIR::FieldGet", "code" => "node.left" },
-      ]
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      expect(store.actions).to be_empty
-    end
-
-    xit "rejects static param backflow candidates when the param protocol has unresolved forwarding gaps" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "Example", "method" => "direct_index_get", "kind" => "instance",
-          "sig" => "sig { params(ast_node: T.untyped).void }",
-          "params" => [{ "name" => "ast_node" }],
-          "protocols" => { "ast_node" => { "methods" => [], "gaps" => ["forwarded to direct_slice_backed_expr? at lib/example.rb:12"] } } },
-      ]
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 30, "callee" => "direct_index_get", "slot" => "ast_node",
-          "origin_kind" => "static", "type" => "Resolv::DNS::Name", "code" => "node.target" },
-      ]
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      expect(store.actions).to be_empty
-    end
-
-    xit "accepts a static param backflow candidate when ProtocolResolver follows a forwarded helper" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      # `wrap(node)` forwards `node` to `inspect_node(node)`.
-      # `inspect_node(child)` calls child.token.
-      # The narrowing candidate AST::Foo defines `token` so the chain
-      # satisfies and the backflow should propose `node: AST::Foo`.
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/wrapper.rb", "line" => 10, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-          "sig" => "sig { params(node: T.untyped).void }",
-          "params" => [{ "name" => "node" }],
-          "protocols" => { "node" => { "methods" => [], "gaps" => ["forwarded to inspect_node slot 0 at lib/wrapper.rb:12"] } } },
-        { "path" => "lib/wrapper.rb", "line" => 20, "class" => "Wrapper", "method" => "inspect_node", "kind" => "instance",
-          "sig" => "sig { params(child: T.untyped).void }",
-          "params" => [{ "name" => "child" }],
-          "protocols" => { "child" => { "methods" => ["token"], "gaps" => [] } } },
-        { "path" => "lib/ast.rb", "line" => 5, "class" => "AST::Foo", "method" => "token", "kind" => "instance",
-          "sig" => "sig { returns(Token) }", "params" => [] },
-      ]
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 30, "callee" => "wrap", "slot" => "node",
-          "origin_kind" => "static", "type" => "AST::Foo", "code" => "AST::Foo.new" },
-      ]
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      expect(store.actions).to include(
-        a_hash_including(
-          "kind" => "fix_sig_param",
-          "data" => a_hash_including("name" => "node", "type" => "AST::Foo", "source" => "static_param_backflow")
-        )
-      )
-    end
-
-    xit "rejects a static param backflow candidate when the forwarded helper requires a method the candidate lacks" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      # Same shape as accept-spec above but the candidate is Resolv::DNS::Name
-      # which does not define `token`. Resolver finds the missing method
-      # and the candidate is correctly rejected.
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/wrapper.rb", "line" => 10, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-          "sig" => "sig { params(node: T.untyped).void }",
-          "params" => [{ "name" => "node" }],
-          "protocols" => { "node" => { "methods" => [], "gaps" => ["forwarded to inspect_node slot 0 at lib/wrapper.rb:12"] } } },
-        { "path" => "lib/wrapper.rb", "line" => 20, "class" => "Wrapper", "method" => "inspect_node", "kind" => "instance",
-          "sig" => "sig { params(child: T.untyped).void }",
-          "params" => [{ "name" => "child" }],
-          "protocols" => { "child" => { "methods" => ["token"], "gaps" => [] } } },
-        # Resolv::DNS::Name exists in the index but does not have `token`.
-        { "path" => "vendor/resolv.rb", "line" => 1, "class" => "Resolv::DNS::Name", "method" => "to_s", "kind" => "instance",
-          "sig" => "sig { returns(String) }", "params" => [] },
-      ]
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 30, "callee" => "wrap", "slot" => "node",
-          "origin_kind" => "static", "type" => "Resolv::DNS::Name", "code" => "name_for(node)" },
-      ]
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      expect(store.actions).to be_empty
-    end
-
-    xit "blocks the chain when the forwarded helper is not in the method index" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/wrapper.rb", "line" => 10, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-          "sig" => "sig { params(node: T.untyped).void }",
-          "params" => [{ "name" => "node" }],
-          "protocols" => { "node" => { "methods" => [], "gaps" => ["forwarded to missing_helper slot 0 at lib/wrapper.rb:12"] } } },
-      ]
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 30, "callee" => "wrap", "slot" => "node",
-          "origin_kind" => "static", "type" => "AST::Foo", "code" => "AST::Foo.new" },
-      ]
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      expect(store.actions).to be_empty
-    end
-
-    xit "follows a two-hop forwarding chain via the resolver" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      # wrap -> middle -> leaf, where leaf calls token on its param.
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/x.rb", "line" => 10, "class" => "X", "method" => "wrap", "kind" => "instance",
-          "sig" => "sig { params(node: T.untyped).void }",
-          "params" => [{ "name" => "node" }],
-          "protocols" => { "node" => { "methods" => [], "gaps" => ["forwarded to middle slot 0 at lib/x.rb:11"] } } },
-        { "path" => "lib/x.rb", "line" => 20, "class" => "X", "method" => "middle", "kind" => "instance",
-          "sig" => "sig { params(arg: T.untyped).void }",
-          "params" => [{ "name" => "arg" }],
-          "protocols" => { "arg" => { "methods" => [], "gaps" => ["forwarded to leaf slot 0 at lib/x.rb:21"] } } },
-        { "path" => "lib/x.rb", "line" => 30, "class" => "X", "method" => "leaf", "kind" => "instance",
-          "sig" => "sig { params(payload: T.untyped).void }",
-          "params" => [{ "name" => "payload" }],
-          "protocols" => { "payload" => { "methods" => ["token"], "gaps" => [] } } },
-        { "path" => "lib/ast.rb", "line" => 5, "class" => "AST::Foo", "method" => "token", "kind" => "instance",
-          "sig" => "sig { returns(Token) }", "params" => [] },
-      ]
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 1, "callee" => "wrap", "slot" => "node",
-          "origin_kind" => "static", "type" => "AST::Foo", "code" => "AST::Foo.new" },
-      ]
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      expect(store.actions).to include(
-        a_hash_including("kind" => "fix_sig_param", "data" => a_hash_including("type" => "AST::Foo"))
-      )
-    end
-
-    xit "uses ivar protocols when a param is captured to an ivar" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      # initialize captures node to @node. Other class methods call @node.token.
-      # The ivar protocol carries the requirement back to the param.
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/x.rb", "line" => 10, "class" => "X", "method" => "initialize", "kind" => "instance",
-          "sig" => "sig { params(node: T.untyped).void }",
-          "params" => [{ "name" => "node" }],
-          "protocols" => { "node" => { "methods" => [], "gaps" => ["captured in @node at lib/x.rb:11"] } } },
-        { "path" => "lib/ast.rb", "line" => 5, "class" => "AST::Foo", "method" => "token", "kind" => "instance",
-          "sig" => "sig { returns(Token) }", "params" => [] },
-      ]
-      store.facts["ivar_protocols"] = { "X\0@node" => ["token"] }
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 1, "callee" => "initialize", "slot" => "node",
-          "origin_kind" => "static", "type" => "AST::Foo", "code" => "AST::Foo.new" },
-      ]
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      expect(store.actions).to include(
-        a_hash_including("kind" => "fix_sig_param", "data" => a_hash_including("type" => "AST::Foo"))
-      )
-    end
-
-    xit "blocks ivar capture when the ivar has no observed protocol" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/x.rb", "line" => 10, "class" => "X", "method" => "initialize", "kind" => "instance",
-          "sig" => "sig { params(node: T.untyped).void }",
-          "params" => [{ "name" => "node" }],
-          "protocols" => { "node" => { "methods" => [], "gaps" => ["captured in @unobserved at lib/x.rb:11"] } } },
-      ]
-      store.facts["ivar_protocols"] = {}
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 1, "callee" => "initialize", "slot" => "node",
-          "origin_kind" => "static", "type" => "AST::Foo", "code" => "AST::Foo.new" },
-      ]
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      expect(store.actions).to be_empty
-    end
-
-    xit "resolves a forwarding cycle without infinite recursion" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      # foo -> bar -> foo cycle. Both forward only -- no direct methods.
-      # Resolver should converge (empty methods), but the chain is
-      # forwarding-only with no required methods, so the candidate is
-      # accepted (any class satisfies an empty protocol).
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/x.rb", "line" => 10, "class" => "X", "method" => "foo", "kind" => "instance",
-          "sig" => "sig { params(arg: T.untyped).void }",
-          "params" => [{ "name" => "arg" }],
-          "protocols" => { "arg" => { "methods" => [], "gaps" => ["forwarded to bar slot 0 at lib/x.rb:11"] } } },
-        { "path" => "lib/x.rb", "line" => 20, "class" => "X", "method" => "bar", "kind" => "instance",
-          "sig" => "sig { params(arg: T.untyped).void }",
-          "params" => [{ "name" => "arg" }],
-          "protocols" => { "arg" => { "methods" => [], "gaps" => ["forwarded to foo slot 0 at lib/x.rb:21"] } } },
-      ]
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 1, "callee" => "foo", "slot" => "arg",
-          "origin_kind" => "static", "type" => "AST::Foo", "code" => "AST::Foo.new" },
-      ]
-
-      expect { infer.send(:propose_static_param_backflow_actions) }.not_to raise_error
-      expect(store.actions).to include(
-        a_hash_including("kind" => "fix_sig_param", "data" => a_hash_including("type" => "AST::Foo"))
-      )
-    end
-
-    xit "rejects non-informative Object static param backflow candidates" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "Example", "method" => "verify", "kind" => "instance",
-          "sig" => "sig { params(node: T.untyped).void }", "params" => [{ "name" => "node" }] },
-      ]
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 30, "callee" => "verify", "slot" => "node",
-          "origin_kind" => "static", "type" => "T.nilable(Object)", "code" => "node.value" },
-      ]
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      expect(store.actions).to be_empty
-    end
-
-    xit "promotes unambiguous forwarded-return chains to high-confidence return fixes" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "Example", "method" => "leaf", "kind" => "instance",
-          "sig" => "sig { returns(T.untyped) }" },
-        { "path" => "lib/example.rb", "line" => 20, "class" => "Example", "method" => "middle", "kind" => "instance",
-          "sig" => "sig { returns(T.untyped) }" },
-        { "path" => "lib/example.rb", "line" => 30, "class" => "Example", "method" => "root", "kind" => "instance",
-          "sig" => "sig { returns(T.untyped) }" },
-      ]
-      store.facts["return_origins"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "Example", "method" => "leaf", "kind" => "instance",
-          "candidate_type" => "String", "confidence" => "strong",
-          "sources" => [{ "kind" => "static", "type" => "String", "line" => 12, "code" => "\"ok\"" }], "blockers" => [] },
-        { "path" => "lib/example.rb", "line" => 20, "class" => "Example", "method" => "middle", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "leaf", "line" => 22, "code" => "leaf" }], "blockers" => ["untyped callee leaf"] },
-        { "path" => "lib/example.rb", "line" => 30, "class" => "Example", "method" => "root", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "middle", "line" => 32, "code" => "middle" }], "blockers" => ["untyped callee middle"] },
-      ]
-
-      infer.send(:propose_forwarded_return_chain_actions)
-
-      expect(store.actions).to include(
-        a_hash_including(
-          "kind" => "fix_sig_return",
-          "confidence" => "high",
-          "path" => "lib/example.rb",
-          "line" => 20,
-          "data" => a_hash_including("type" => "String", "source" => "forwarded_return_chain")
-        ),
-        a_hash_including(
-          "kind" => "fix_sig_return",
-          "confidence" => "high",
-          "path" => "lib/example.rb",
-          "line" => 30,
-          "data" => a_hash_including("type" => "String", "source" => "forwarded_return_chain")
-        )
-      )
-    end
-
-    xit "keeps ambiguous forwarded-return callees out of high-confidence fixes" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "A", "method" => "leaf", "kind" => "instance",
-          "sig" => "sig { returns(T.untyped) }" },
-        { "path" => "lib/example.rb", "line" => 20, "class" => "B", "method" => "leaf", "kind" => "instance",
-          "sig" => "sig { returns(T.untyped) }" },
-        { "path" => "lib/example.rb", "line" => 30, "class" => "Example", "method" => "root", "kind" => "instance",
-          "sig" => "sig { returns(T.untyped) }" },
-      ]
-      store.facts["return_origins"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "A", "method" => "leaf", "kind" => "instance",
-          "candidate_type" => "String", "confidence" => "strong",
-          "sources" => [{ "kind" => "static", "type" => "String", "line" => 12 }], "blockers" => [] },
-        { "path" => "lib/example.rb", "line" => 20, "class" => "B", "method" => "leaf", "kind" => "instance",
-          "candidate_type" => "Integer", "confidence" => "strong",
-          "sources" => [{ "kind" => "static", "type" => "Integer", "line" => 22 }], "blockers" => [] },
-        { "path" => "lib/example.rb", "line" => 30, "class" => "Example", "method" => "root", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "leaf", "line" => 32 }], "blockers" => ["untyped callee leaf"] },
-      ]
-
-      infer.send(:propose_forwarded_return_chain_actions)
-
-      expect(store.actions).not_to include(
-        a_hash_including("kind" => "fix_sig_return", "confidence" => "high", "path" => "lib/example.rb", "line" => 30)
-      )
-    end
-
-    xit "keeps nilable forwarded-return chains as review-only fixes" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "Example", "method" => "leaf", "kind" => "instance",
-          "sig" => "sig { returns(T.untyped) }" },
-        { "path" => "lib/example.rb", "line" => 20, "class" => "Example", "method" => "root", "kind" => "instance",
-          "sig" => "sig { returns(T.untyped) }" },
-      ]
-      store.facts["return_origins"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "Example", "method" => "leaf", "kind" => "instance",
-          "candidate_type" => "T.nilable(Type)", "confidence" => "strong",
-          "sources" => [
-            { "kind" => "static", "type" => "Type", "line" => 12 },
-            { "kind" => "nil", "line" => 13 },
-          ],
-          "blockers" => [] },
-        { "path" => "lib/example.rb", "line" => 20, "class" => "Example", "method" => "root", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "leaf", "line" => 22 }], "blockers" => ["untyped callee leaf"] },
-      ]
-
-      infer.send(:propose_forwarded_return_chain_actions)
-
-      expect(store.actions).to include(
-        a_hash_including(
-          "kind" => "fix_sig_return",
-          "confidence" => "review",
-          "path" => "lib/example.rb",
-          "line" => 20,
-          "data" => a_hash_including("type" => "T.nilable(Type)", "source" => "forwarded_return_chain")
-        )
-      )
-      expect(store.actions).not_to include(
-        a_hash_including("kind" => "fix_sig_return", "confidence" => "high", "path" => "lib/example.rb", "line" => 20)
-      )
-    end
-
-    xit "keeps duplicate forwarded-return method names ambiguous even when their sig types match" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "A", "method" => "leaf", "kind" => "instance",
-          "sig" => "sig { returns(String) }" },
-        { "path" => "lib/example.rb", "line" => 20, "class" => "B", "method" => "leaf", "kind" => "instance",
-          "sig" => "sig { returns(String) }" },
-        { "path" => "lib/example.rb", "line" => 30, "class" => "Example", "method" => "root", "kind" => "instance",
-          "sig" => "sig { returns(T.untyped) }" },
-      ]
-      store.facts["return_origins"] = [
-        { "path" => "lib/example.rb", "line" => 30, "class" => "Example", "method" => "root", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "leaf", "line" => 32 }], "blockers" => ["untyped callee leaf"] },
-      ]
-
-      infer.send(:propose_forwarded_return_chain_actions)
-
-      expect(store.actions).not_to include(
-        a_hash_including("kind" => "fix_sig_return", "path" => "lib/example.rb", "line" => 30)
-      )
-    end
-
-    xit "emits HIGH static-return-origin actions when all sources are static or RBI-backed" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      origin = {
-        "path" => "lib/example.rb", "line" => 8, "class" => "Example", "method" => "name", "kind" => "instance",
-        "candidate_type" => "String", "confidence" => "strong",
-        "sources" => [{ "kind" => "static", "type" => "String", "line" => 9, "code" => "\"ok\"" }],
-        "blockers" => []
-      }
-      src = { "path" => "lib/example.rb", "line" => 8, "return_origin" => origin }
-
-      infer.send(:propose_static_return_action, src, "sig { returns(T.untyped) }", nil)
-
-      expect(store.actions).to include(
-        a_hash_including(
-          "kind" => "fix_sig_return", "confidence" => "high", "path" => "lib/example.rb", "line" => 8,
-          "data" => a_hash_including("type" => "String", "source" => "static_return_origin")
-        )
-      )
-    end
-
-    xit "demotes a bare heuristic static return (non-literal) to REVIEW unless runtime-corroborated" do
-      # Regression: Pprof::Profile#add_sample is `@samples << {...}`
-      # (Array#<<). The static origin heuristically guessed String with
-      # confidence strong and NO blockers; it was stamped HIGH and then
-      # failed `srb tc` ("Expected String, got Array"). A bare static
-      # source whose code is not self-evidently typed must not be HIGH
-      # without runtime corroboration.
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      origin = {
-        "path" => "lib/p.rb", "line" => 8, "candidate_type" => "String", "confidence" => "strong",
-        "sources" => [{ "kind" => "static", "type" => "String", "line" => 9, "code" => "@samples << { a: 1 }" }],
-        "blockers" => []
-      }
-      src = { "path" => "lib/p.rb", "line" => 8, "return_origin" => origin }
-
-      infer.send(:propose_static_return_action, src, "sig { returns(T.untyped) }", nil)
-      expect(store.actions).to include(
-        a_hash_including("kind" => "fix_sig_return", "confidence" => "review", "path" => "lib/p.rb")
-      )
-      expect(store.actions).not_to include(a_hash_including("kind" => "fix_sig_return", "confidence" => "high"))
-
-      # Same origin, but runtime observed the method returning String ->
-      # corroborated -> HIGH is now justified.
-      store.actions.clear
-      infer.send(:propose_static_return_action, src, "sig { returns(T.untyped) }", { "returns" => ["String"] })
-      expect(store.actions).to include(
-        a_hash_including("kind" => "fix_sig_return", "confidence" => "high", "path" => "lib/p.rb")
-      )
-    end
-
-    xit "emits REVIEW static-return-origin actions when at least one source is a non-RBI forwarded call" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      origin = {
-        "path" => "lib/example.rb", "line" => 8, "class" => "Example", "method" => "name", "kind" => "instance",
-        "candidate_type" => "String", "confidence" => "strong",
-        "sources" => [
-          { "kind" => "static", "type" => "String", "line" => 9, "code" => "\"ok\"" },
-          { "kind" => "typed_call", "type" => "String", "callee" => "user_defined_helper", "line" => 10, "code" => "user_defined_helper" },
-        ],
-        "blockers" => ["forwarded source user_defined_helper"]
-      }
-      src = { "path" => "lib/example.rb", "line" => 8, "return_origin" => origin }
-
-      infer.send(:propose_static_return_action, src, "sig { returns(T.untyped) }", nil)
-
-      expect(store.actions).to include(
-        a_hash_including(
-          "kind" => "fix_sig_return", "confidence" => "review", "path" => "lib/example.rb", "line" => 8,
-          "data" => a_hash_including("type" => "String", "source" => "static_return_origin",
-                                     "blockers" => ["forwarded source user_defined_helper"])
-        )
-      )
-    end
-
-    xit "rejects forwarded-return-chain candidates when runtime observed a class outside the proposed type" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "Example", "method" => "leaf", "kind" => "instance",
-          "sig" => "sig { returns(String) }" },
-        { "path" => "lib/example.rb", "line" => 20, "class" => "Example", "method" => "root", "kind" => "instance",
-          "sig" => "sig { returns(T.untyped) }" },
-      ]
-      store.facts["return_origins"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "Example", "method" => "leaf", "kind" => "instance",
-          "candidate_type" => "String", "confidence" => "strong",
-          "sources" => [{ "kind" => "static", "type" => "String", "line" => 12, "code" => "\"ok\"" }], "blockers" => [] },
-        { "path" => "lib/example.rb", "line" => 20, "class" => "Example", "method" => "root", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "leaf", "line" => 22, "code" => "leaf" }], "blockers" => ["untyped callee leaf"] },
-      ]
-      rec = store.method_record(["Example", "root", "instance", File.expand_path("lib/example.rb", NilKill::ROOT), 20])
-      rec["returns"] = %w[String Symbol]
-
-      infer.send(:propose_forwarded_return_chain_actions)
-
-      expect(store.actions).not_to include(
-        a_hash_including("kind" => "fix_sig_return", "path" => "lib/example.rb", "line" => 20)
-      )
-    end
-
-    xit "rejects void return action when runtime observed a non-nil return" do
-      infer = infer_with_store
-      src = { "path" => "lib/example.rb", "line" => 8, "class" => "Example", "method" => "emit", "kind" => "instance",
-              "noreturn_candidate" => false }
-      rec = { "returns" => ["String"] }
-      unused = { infer.send(:method_location_key, src) => true }
-
-      infer.send(:propose_void_return_action, src, "sig { returns(T.untyped) }", unused, rec)
-
-      expect(infer.instance_variable_get(:@store).actions).to be_empty
-    end
-
-    xit "proposes runtime-void (REVIEW) when the method ran but never produced a usable return and static usage couldn't prove it" do
-      infer = infer_with_store
-      src = { "path" => "lib/example.rb", "line" => 8, "class" => "Example", "method" => "emit_fix!", "kind" => "instance",
-              "noreturn_candidate" => false }
-      rec = { "calls" => 45, "returns" => [] } # ran a lot, never a usable return
-      unused = {} # static usage scan could NOT prove it unused (name collision etc.)
-
-      infer.send(:propose_void_return_action, src, "sig { returns(T.untyped) }", unused, rec)
-
-      expect(infer.instance_variable_get(:@store).actions).to include(
-        a_hash_including("kind" => "fix_sig_return", "confidence" => "review",
-          "data" => a_hash_including("type" => "void", "source" => "runtime_void"))
-      )
-    end
-
-    xit "does not runtime-void a method whose return was observed usable at runtime" do
-      infer = infer_with_store
-      src = { "path" => "lib/example.rb", "line" => 8, "class" => "Example", "method" => "build", "kind" => "instance",
-              "noreturn_candidate" => false }
-      rec = { "calls" => 30, "returns" => %w[String] }
-
-      infer.send(:propose_void_return_action, src, "sig { returns(T.untyped) }", {}, rec)
-
-      expect(infer.instance_variable_get(:@store).actions).to be_empty
-    end
-
-    xit "rejects T.noreturn action when runtime observed any return" do
-      infer = infer_with_store
-      src = { "path" => "lib/example.rb", "line" => 8, "class" => "Example", "method" => "boom", "kind" => "instance",
-              "noreturn_candidate" => true }
-      rec = { "returns" => ["StandardError"] }
-
-      infer.send(:propose_noreturn_action, src, "sig { returns(T.untyped) }", rec)
-
-      expect(infer.instance_variable_get(:@store).actions).to be_empty
-    end
-
-    xit "rejects static_param_backflow narrowing when runtime observed a class outside the static candidate" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/example.rb", "line" => 10, "class" => "Example", "method" => "consume", "kind" => "instance",
-          "sig" => "sig { params(x: T.untyped).void }" },
-      ]
-      store.facts["param_origins"] = [
-        { "path" => "lib/caller.rb", "line" => 5, "callee" => "consume", "slot" => "0",
-          "origin_kind" => "static", "type" => "Node", "code" => "Node.new" },
-        { "path" => "lib/caller.rb", "line" => 6, "callee" => "consume", "slot" => "0",
-          "origin_kind" => "static", "type" => "Node", "code" => "Node.new" },
-      ]
-      rec = store.method_record(["Example", "consume", "instance", File.expand_path("lib/example.rb", NilKill::ROOT), 10])
-      rec["params_by_name"] = { "x" => %w[Node Symbol] }
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      expect(store.actions).not_to include(
-        a_hash_including("kind" => "fix_sig_param", "path" => "lib/example.rb")
-      )
-    end
-
-    xit "rejects static_param_backflow narrowing for the FunctionContext :Any-symbol fallthrough pattern" do
-      infer = infer_with_store
-      store = infer.instance_variable_get(:@store)
-      store.facts["existing_sigs"] = [
-        { "path" => "lib/function_context.rb", "line" => 10, "class" => "FunctionContext", "method" => "initialize",
-          "kind" => "instance", "sig" => "sig { params(return_type: T.untyped).void }" },
-      ]
-      store.facts["param_origins"] = [
-        { "path" => "lib/annotator.rb", "line" => 5, "callee" => "initialize", "slot" => "return_type",
-          "origin_kind" => "static", "type" => "Type", "code" => "node.return_type" },
-        { "path" => "lib/annotator.rb", "line" => 6, "callee" => "initialize", "slot" => "return_type",
-          "origin_kind" => "static", "type" => "Type", "code" => "node.return_type" },
-      ]
-      rec = store.method_record(["FunctionContext", "initialize", "instance",
-                                 File.expand_path("lib/function_context.rb", NilKill::ROOT), 10])
-      rec["params_by_name"] = { "return_type" => %w[Type Symbol] }
-
-      infer.send(:propose_static_param_backflow_actions)
-
-      expect(store.actions).not_to include(
-        a_hash_including("kind" => "fix_sig_param", "data" => a_hash_including("name" => "return_type", "type" => "Type"))
-      )
-    end
-
-    xit "runtime_contradicts? rejects T::Array narrowings when runtime saw non-Array return classes" do
-      infer = infer_with_store
-      # Proposer wants `T.nilable(T::Array[T.untyped])`; runtime observed Hash returns.
-      rec = { "returns" => %w[Hash NilClass] }
-      expect(infer.send(:runtime_contradicts?, rec, :return, nil, "T.nilable(T::Array[T.untyped])")).to be(true)
-    end
-
-    xit "runtime_contradicts? accepts T::Array narrowings when runtime saw only Array (and nil)" do
-      infer = infer_with_store
-      rec = { "returns" => %w[Array NilClass] }
-      expect(infer.send(:runtime_contradicts?, rec, :return, nil, "T.nilable(T::Array[T.untyped])")).to be(false)
-    end
-
-    xit "runtime_contradicts? rejects T::Hash narrowings when runtime saw Array" do
-      infer = infer_with_store
-      rec = { "returns" => %w[Array] }
-      expect(infer.send(:runtime_contradicts?, rec, :return, nil, "T::Hash[T.untyped, T.untyped]")).to be(true)
-    end
-
-    it "treats calls on a global-variable receiver as untyped (`$stderr.puts` is not assumed to return NilClass)" do
+                                                                                                                                            it "treats calls on a global-variable receiver as untyped (`$stderr.puts` is not assumed to return NilClass)" do
       Dir.mktmpdir("nil-kill-global-recv", NilKill::ROOT) do |dir|
         source = File.join(dir, "global_recv.rb")
         File.write(source, <<~RUBY)
@@ -1698,196 +839,7 @@ RSpec.describe NilKill do
       end
     end
 
-    xit "uses nested runtime shape evidence for generic narrowing" do
-      infer = infer_with_store
-      rec = {
-        "calls" => 50,
-        "params_ok" => {},
-        "params_by_name" => {},
-        "param_elem" => { "items" => ["Hash"] },
-        "param_kv" => {},
-        "param_elem_shapes" => {
-          "items" => [
-            {
-              "kind" => "hash",
-              "keys" => [{ "kind" => "class", "name" => "Symbol" }],
-              "values" => [
-                {
-                  "kind" => "array",
-                  "elements" => [{ "kind" => "class", "name" => "String" }],
-                },
-              ],
-            },
-          ],
-        },
-        "param_kv_shapes" => {},
-        "returns" => [],
-        "return_elem" => [],
-        "return_kv" => [[], []],
-        "return_elem_shapes" => [],
-        "return_kv_shapes" => [[], []],
-      }
-      src = {
-        "path" => "lib/example.rb",
-        "line" => 10,
-        "sig" => "sig { params(items: T::Array[T.untyped]).returns(T.untyped) }",
-      }
-
-      infer.send(:validate_sig, rec, src)
-
-      expect(infer.instance_variable_get(:@store).actions).to include(
-        a_hash_including(
-          "kind" => "narrow_generic_param",
-          "confidence" => "review",
-          "data" => a_hash_including("type" => "T::Array[T::Hash[Symbol, T::Array[String]]]")
-        )
-      )
-    end
-
-    xit "preserves nilable wrappers when narrowing collection generics" do
-      infer = infer_with_store
-      rec = {
-        "calls" => 50,
-        "params_ok" => {},
-        "params_by_name" => {},
-        "param_elem" => { "items" => ["String"] },
-        "param_kv" => {},
-        "returns" => ["Array"],
-        "return_elem" => ["String"],
-        "return_kv" => [[], []],
-        "return_elem_shapes" => [],
-        "return_kv_shapes" => [[], []],
-      }
-      src = {
-        "path" => "lib/example.rb",
-        "line" => 10,
-        "sig" => "sig { params(items: T.nilable(T::Array[T.untyped])).returns(T.nilable(T::Array[T.untyped])) }",
-      }
-
-      infer.send(:validate_sig, rec, src)
-
-      expect(infer.instance_variable_get(:@store).actions).to include(
-        a_hash_including(
-          "kind" => "narrow_generic_param",
-          "confidence" => "high",
-          "data" => a_hash_including("from" => "T.nilable(T::Array[T.untyped])", "type" => "T.nilable(T::Array[String])")
-        ),
-        a_hash_including(
-          "kind" => "narrow_generic_return",
-          "confidence" => "high",
-          "data" => a_hash_including("from" => "T.nilable(T::Array[T.untyped])", "type" => "T.nilable(T::Array[String])")
-        )
-      )
-    end
-
-    xit "keeps stable nested container shape when value candidates are too broad" do
-      infer = infer_with_store
-      rec = {
-        "calls" => 50,
-        "params_ok" => {},
-        "params_by_name" => {},
-        "param_elem" => { "items" => ["Hash"] },
-        "param_kv" => {},
-        "param_elem_shapes" => {
-          "items" => [
-            {
-              "kind" => "hash",
-              "keys" => [{ "kind" => "class", "name" => "Symbol" }],
-              "values" => (1..7).map { |idx| { "kind" => "class", "name" => "Value#{idx}" } },
-            },
-          ],
-        },
-        "param_kv_shapes" => {},
-        "returns" => [],
-        "return_elem" => [],
-        "return_kv" => [[], []],
-        "return_elem_shapes" => [],
-        "return_kv_shapes" => [[], []],
-      }
-      src = {
-        "path" => "lib/example.rb",
-        "line" => 10,
-        "sig" => "sig { params(items: T::Array[T.untyped]).returns(T.untyped) }",
-      }
-
-      infer.send(:validate_sig, rec, src)
-
-      expect(infer.instance_variable_get(:@store).actions).to include(
-        a_hash_including(
-          "kind" => "narrow_generic_param",
-          "confidence" => "review",
-          "data" => a_hash_including("type" => "T::Array[T::Hash[Symbol, T.untyped]]")
-        )
-      )
-    end
-
-    xit "keeps broad union collection narrowing in review" do
-      infer = infer_with_store
-      rec = {
-        "calls" => 50,
-        "params_ok" => {},
-        "params_by_name" => {},
-        "param_elem" => {},
-        "param_kv" => { "plan" => [["Symbol"], ["Array", "Set"]] },
-        "param_elem_shapes" => {},
-        "param_kv_shapes" => {
-          "plan" => [
-            [{ "kind" => "class", "name" => "Symbol" }],
-            [
-              { "kind" => "array", "elements" => [{ "kind" => "class", "name" => "String" }] },
-              { "kind" => "set", "elements" => [{ "kind" => "class", "name" => "Integer" }] },
-            ],
-          ],
-        },
-        "returns" => [],
-        "return_elem" => [],
-        "return_kv" => [[], []],
-        "return_elem_shapes" => [],
-        "return_kv_shapes" => [[], []],
-      }
-      src = {
-        "path" => "lib/example.rb",
-        "line" => 10,
-        "sig" => "sig { params(plan: T::Hash[Symbol, T.untyped]).returns(T.untyped) }",
-      }
-
-      infer.send(:validate_sig, rec, src)
-
-      expect(infer.instance_variable_get(:@store).actions).to include(
-        a_hash_including(
-          "kind" => "narrow_generic_param",
-          "confidence" => "review",
-          "data" => a_hash_including("type" => "T::Hash[Symbol, T.any(T::Array[String], T::Set[Integer])]")
-        )
-      )
-    end
-
-    xit "does not narrow generic params from polymorphic AST evidence" do
-      infer = infer_with_store
-      rec = {
-        "calls" => 50,
-        "params_ok" => {},
-        "params_by_name" => {},
-        "param_elem" => { "items" => ["AST::Name"] },
-        "param_kv" => {},
-        "returns" => [],
-        "return_elem" => [],
-        "return_kv" => [[], []],
-      }
-      src = {
-        "path" => "lib/example.rb",
-        "line" => 10,
-        "sig" => "sig { params(items: T::Array[T.untyped]).returns(T.untyped) }",
-      }
-
-      infer.send(:validate_sig, rec, src)
-
-      expect(infer.instance_variable_get(:@store).actions).not_to include(
-        a_hash_including("kind" => "narrow_generic_param")
-      )
-    end
-
-    xit "turns Sorbet result-type errors into review widening feedback" do
+                        it "turns Sorbet result-type errors into review widening feedback" do
       infer = infer_with_store
       output = <<~TEXT
         lib/example.rb:12: Expected `String` but found `T.nilable(String)` for method result type https://srb.help/7005
@@ -1910,66 +862,7 @@ RSpec.describe NilKill do
       )
     end
 
-    xit "keeps runtime-only return observations in review instead of high confidence" do
-      infer = infer_with_store
-      rec = {
-        "calls" => 50,
-        "params_ok" => {},
-        "params_by_name" => {},
-        "param_elem" => {},
-        "param_kv" => {},
-        "returns" => ["String"],
-        "return_elem" => [],
-        "return_kv" => [[], []],
-      }
-      src = {
-        "path" => "lib/example.rb",
-        "line" => 10,
-        "sig" => "sig { returns(T.untyped) }",
-      }
-
-      infer.send(:validate_sig, rec, src)
-
-      expect(infer.instance_variable_get(:@store).actions).to include(
-        a_hash_including(
-          "kind" => "fix_sig_return",
-          "confidence" => "review",
-          "data" => a_hash_including("type" => "String")
-        )
-      )
-    end
-
-    xit "keeps return fixes in review even when runtime and static evidence agree" do
-      infer = infer_with_store
-      rec = {
-        "calls" => 50,
-        "params_ok" => {},
-        "params_by_name" => {},
-        "param_elem" => {},
-        "param_kv" => {},
-        "returns" => ["String"],
-        "return_elem" => [],
-        "return_kv" => [[], []],
-      }
-      src = {
-        "path" => "lib/example.rb",
-        "line" => 10,
-        "sig" => "sig { returns(T.untyped) }",
-        "return_origin" => { "confidence" => "strong", "candidate_type" => "String" },
-      }
-
-      infer.send(:validate_sig, rec, src)
-
-      expect(infer.instance_variable_get(:@store).actions).to include(
-        a_hash_including(
-          "kind" => "fix_sig_return",
-          "confidence" => "review",
-          "data" => a_hash_including("type" => "String")
-        )
-      )
-    end
-
-    it "promotes unused T.untyped returns to verifiable void actions" do
+            it "promotes unused T.untyped returns to verifiable void actions" do
       Dir.mktmpdir("nil-kill-void", NilKill::ROOT) do |dir|
         source = File.join(dir, "void_example.rb")
         File.write(source, <<~RUBY)
@@ -2362,24 +1255,7 @@ RSpec.describe NilKill do
       end
     end
 
-    xit "does not auto-apply dead nil-check rewrites without separate proof" do
-      infer = infer_with_store
-      infer.instance_variable_get(:@store).facts["dead_nil_checks"] << {
-        "path" => "lib/example.rb",
-        "line" => 3,
-        "kind" => "nil_check",
-        "code" => "value.nil?",
-        "reason" => "value is provably non-nil",
-      }
-
-      infer.send(:build_actions)
-
-      expect(infer.instance_variable_get(:@store).actions).to include(
-        a_hash_including("kind" => "replace_dead_nil_check", "confidence" => "review")
-      )
-    end
-
-    describe "build_project_method_return_index" do
+        describe "build_project_method_return_index" do
       def with_rbi_field_types(infer, types)
         store = infer.instance_variable_get(:@store)
         original = store.facts["rbi_field_types"]
@@ -2391,376 +1267,10 @@ RSpec.describe NilKill do
         store.facts["rbi_field_types"] = original if store
       end
 
-      xit "includes existing_sigs entries with strong returns" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        store.facts["existing_sigs"] = [
-          { "class" => "Wrapper", "method" => "wrap",
-            "sig" => "sig { params(node: T.untyped).returns(String) }" },
-        ]
-        with_rbi_field_types(infer, {}) do
-          index = infer.send(:build_project_method_return_index)
-          expect(index[["Wrapper", "wrap"]]).to eq("String")
-        end
-      end
-
-      xit "skips existing_sigs with T.untyped or empty returns" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        store.facts["existing_sigs"] = [
-          { "class" => "Wrapper", "method" => "untyped_wrap",
-            "sig" => "sig { params(node: T.untyped).returns(T.untyped) }" },
-        ]
-        with_rbi_field_types(infer, {}) do
-          index = infer.send(:build_project_method_return_index)
-          expect(index).not_to have_key(["Wrapper", "untyped_wrap"])
-        end
-      end
-
-      xit "merges RBI struct-field accessor types" do
-        infer = infer_with_store
-        with_rbi_field_types(infer, { ["AST::Foo", "token"] => "Token", ["AST::Foo", "ignored"] => "T.untyped" }) do
-          index = infer.send(:build_project_method_return_index)
-          expect(index[["AST::Foo", "token"]]).to eq("Token")
-          expect(index).not_to have_key(["AST::Foo", "ignored"])
-        end
-      end
-
-      xit "merges strong inferred returns from return_origins for methods existing_sigs missed" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        store.facts["return_origins"] = [
-          { "class" => "Helper", "method" => "summarize", "confidence" => "strong",
-            "candidate_type" => "String" },
-          { "class" => "Helper", "method" => "weak", "confidence" => "strong",
-            "candidate_type" => "T::Array[T.untyped]" },
-          { "class" => "Helper", "method" => "blocked_one", "confidence" => "blocked",
-            "candidate_type" => "T.untyped" },
-        ]
-        with_rbi_field_types(infer, {}) do
-          index = infer.send(:build_project_method_return_index)
-          expect(index[["Helper", "summarize"]]).to eq("String")
-          expect(index).not_to have_key(["Helper", "weak"])
-          expect(index).not_to have_key(["Helper", "blocked_one"])
-        end
-      end
-
-      xit "converges in a fixed-point loop: iter 1 narrows method_b, iter 2 narrows method_a via method_b" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        # method_b's receiver: caller `caller_b` calls method_b(item) with item: AST::Foo.
-        # method_a's receiver: caller `caller_a` calls method_a(holder) with holder: Container.
-        # method_a's body does `holder.method_b(holder.item)` -- but the
-        # receiver-inference path only looks at `holder.method_b` as a
-        # call_untyped source. After iter 1, method_b's return becomes
-        # known. In iter 2, project_method_returns picks up method_b's
-        # newly-strong return and method_a's source narrows.
-        store.facts["param_origins"] = [
-          { "callee" => "method_b", "slot" => "item", "origin_kind" => "static", "type" => "AST::Foo",
-            "path" => "src/cb.rb", "line" => 1, "code" => "AST::Foo.new" },
-          { "callee" => "method_a", "slot" => "holder", "origin_kind" => "static", "type" => "Wrapper",
-            "path" => "src/ca.rb", "line" => 1, "code" => "Wrapper.new" },
-        ]
-        store.facts["existing_sigs"] = [
-          { "path" => "src/b.rb", "line" => 1, "class" => "Wrapper", "method" => "method_b", "kind" => "instance",
-            "sig" => "sig { params(item: T.untyped).returns(T.untyped) }" },
-          { "path" => "src/a.rb", "line" => 1, "class" => "Wrapper", "method" => "method_a", "kind" => "instance",
-            "sig" => "sig { params(holder: T.untyped).returns(T.untyped) }" },
-        ]
-        origin_b = {
-          "path" => "src/b.rb", "line" => 1, "class" => "Wrapper", "method" => "method_b", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "token", "line" => 2, "code" => "item.token" }],
-          "blockers" => [],
-        }
-        origin_a = {
-          "path" => "src/a.rb", "line" => 1, "class" => "Wrapper", "method" => "method_a", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "method_b", "line" => 2, "code" => "holder.method_b" }],
-          "blockers" => [],
-        }
-        store.facts["return_origins"] = [origin_b, origin_a]
-
-        stub = Object.new
-        stub.define_singleton_method(:return_type) do |method, recv|
-          (method.to_s == "token" && recv.to_s == "AST::Foo") ? "Token" : nil
-        end
-        original = NilKill.method(:rbi_return_index)
-        NilKill.define_singleton_method(:rbi_return_index) { stub }
-        begin
-          infer.send(:enrich_return_origins_with_receiver_inference!)
-        ensure
-          NilKill.define_singleton_method(:rbi_return_index, original)
-        end
-
-        # Iter 1: method_b narrows from token RBI lookup.
-        expect(origin_b["sources"].first["kind"]).to eq("typed_call_inferred")
-        expect(origin_b["sources"].first["type"]).to eq("Token")
-        # Iter 2: method_a narrows because Wrapper#method_b now has a strong
-        # return type that build_project_method_return_index sees.
-        expect(origin_a["sources"].first["kind"]).to eq("typed_call_inferred")
-        expect(origin_a["sources"].first["type"]).to eq("Token")
-      end
-
-      xit "stops early when an iteration produces zero new enrichments" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        # No param_origins -> nothing can be narrowed.
-        store.facts["param_origins"] = []
-        origin = {
-          "path" => "src/x.rb", "line" => 1, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "token", "line" => 1, "code" => "node.token" }],
-          "blockers" => [],
-        }
-        store.facts["return_origins"] = [origin]
-
-        stub = Object.new
-        stub.define_singleton_method(:return_type) { |_method, _recv| nil }
-        original = NilKill.method(:rbi_return_index)
-        NilKill.define_singleton_method(:rbi_return_index) { stub }
-        begin
-          expect { infer.send(:enrich_return_origins_with_receiver_inference!) }.not_to raise_error
-        ensure
-          NilKill.define_singleton_method(:rbi_return_index, original)
-        end
-
-        expect(origin["sources"].first["kind"]).to eq("call_untyped")
-      end
-
-      xit "matches project_method_returns via stripped container owner when receiver is T::Array[X]" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        # Caller passes a typed T::Array[Token] to `wrap(items)`.
-        store.facts["param_origins"] = [
-          { "callee" => "wrap", "slot" => "items", "origin_kind" => "static", "type" => "T::Array[Token]",
-            "path" => "src/c.rb", "line" => 1, "code" => "tokens" },
-        ]
-        store.facts["existing_sigs"] = [
-          { "path" => "src/x.rb", "line" => 5, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-            "sig" => "sig { params(items: T.untyped).returns(T.untyped) }" },
-          # A project method registered under bare "Array" (e.g. via a
-          # third-party-library RBI or struct field) -- the lookup must
-          # match this when the inferred receiver type is T::Array[Token].
-          { "path" => "ext/array_ext.rb", "line" => 1, "class" => "Array", "method" => "freeze_tokens",
-            "sig" => "sig { returns(T::Array[Token]) }" },
-        ]
-        origin = {
-          "path" => "src/x.rb", "line" => 5, "class" => "Wrapper", "method" => "wrap", "kind" => "instance",
-          "candidate_type" => "T.untyped", "confidence" => "blocked",
-          "sources" => [{ "kind" => "call_untyped", "callee" => "freeze_tokens", "line" => 6, "code" => "items.freeze_tokens" }],
-          "blockers" => [],
-        }
-        store.facts["return_origins"] = [origin]
-
-        stub = Object.new
-        stub.define_singleton_method(:return_type) { |_method, _recv| nil }
-        original = NilKill.method(:rbi_return_index)
-        NilKill.define_singleton_method(:rbi_return_index) { stub }
-        begin
-          infer.send(:enrich_return_origins_with_receiver_inference!)
-        ensure
-          NilKill.define_singleton_method(:rbi_return_index, original)
-        end
-
-        expect(origin["sources"].first["kind"]).to eq("typed_call_inferred")
-        expect(origin["sources"].first["type"]).to eq("T::Array[Token]")
-      end
-
-      xit "prefers existing_sigs return over inferred when both exist" do
-        infer = infer_with_store
-        store = infer.instance_variable_get(:@store)
-        store.facts["existing_sigs"] = [
-          { "class" => "Cls", "method" => "m",
-            "sig" => "sig { returns(String) }" },
-        ]
-        store.facts["return_origins"] = [
-          { "class" => "Cls", "method" => "m", "confidence" => "strong",
-            "candidate_type" => "Integer" },
-        ]
-        with_rbi_field_types(infer, {}) do
-          index = infer.send(:build_project_method_return_index)
-          expect(index[["Cls", "m"]]).to eq("String")
-        end
-      end
-    end
+                                                    end
 
     describe "hash-record collection escape gates" do
-      xit "blocks a producer constructed inside an array literal" do
-        Dir.mktmpdir("nil-kill-escape-gate") do |dir|
-          path = File.join(dir, "lowering.rb")
-          File.write(path, <<~RUBY)
-            class L
-              def lower(node)
-                inner = build(node)
-                MIR::StructInit.new(node.union_name.to_s, [
-                  { name: node.variant_name.to_s, value: inner }
-                ])
-              end
-            end
-          RUBY
-          infer = described_class.allocate
-          infer.instance_variable_set(:@store, NilKill::Store.new)
-
-          escaping = infer.send(:hash_record_producers_escaping_into_collection,
-            [{ "path" => path, "line" => 5, "code" => "{ name: node.variant_name.to_s, value: inner }" }])
-
-          expect(escaping).not_to be_empty
-        end
-      end
-
-      xit "blocks a producer pushed onto an array" do
-        Dir.mktmpdir("nil-kill-append") do |dir|
-          path = File.join(dir, "parser.rb")
-          File.write(path, <<~RUBY)
-            class P
-              def parse
-                fields << { name: name, value: :wildcard, name_token: tok }
-              end
-            end
-          RUBY
-          infer = described_class.allocate
-          infer.instance_variable_set(:@store, NilKill::Store.new)
-
-          escaping = infer.send(:hash_record_producers_escaping_into_collection,
-            [{ "path" => path, "line" => 3, "code" => "{ name: name, value: :wildcard, name_token: tok }" }])
-
-          expect(escaping).not_to be_empty
-        end
-      end
-
-      xit "uses indexed hash-record escape facts when available" do
-        Dir.mktmpdir("nil-kill-indexed-append") do |dir|
-          path = File.join(dir, "parser.rb")
-          File.write(path, <<~RUBY)
-            class P
-              def parse
-                fields << { name: name, value: :wildcard, name_token: tok }
-              end
-            end
-          RUBY
-          static = NilKill::StaticEvidence.build([path], root: dir, language: :ruby)
-          facts = static.fetch("facts")
-          rel_path = Pathname.new(path).relative_path_from(Pathname.new(NilKill::ROOT)).to_s
-          facts["hash_record_escape_sites"] = [{
-            "path" => rel_path,
-            "line" => 3,
-            "code" => "{ name: name, value: :wildcard, name_token: tok }",
-            "escapes_collection" => true
-          }]
-          infer = described_class.allocate
-          store = NilKill::Store.new
-          store.facts["hash_record_escape_sites"] = facts["hash_record_escape_sites"]
-          infer.instance_variable_set(:@store, store)
-          infer.define_singleton_method(:parsed_hash_record_source) { |_| raise "should use indexed facts" }
-
-          # TODO: Fix
-          site_path = facts["hash_record_escape_sites"].first.fetch("path")
-          escaping = infer.send(:hash_record_producers_escaping_into_collection,
-            [{ "path" => site_path, "line" => 3, "code" => "{ name: name, value: :wildcard, name_token: tok }" }])
-
-          expect(escaping).not_to be_empty
-        end
-      end
-
-      xit "blocks a producer stored via index-write" do
-        Dir.mktmpdir("nil-kill-idxwrite") do |dir|
-          path = File.join(dir, "pprof.rb")
-          File.write(path, <<~RUBY)
-            class Pprof
-              def intern_fn
-                f = {
-                  id: @next_func_id,
-                  name_idx: intern(name),
-                }
-                @functions[key] = f
-                f[:id]
-              end
-            end
-          RUBY
-          infer = described_class.allocate
-          infer.instance_variable_set(:@store, NilKill::Store.new)
-
-          escaping = infer.send(:hash_record_producers_escaping_into_collection,
-            [{ "path" => path, "line" => 3,
-               "code" => "{\n      id: @next_func_id,\n      name_idx: intern(name),\n    }" }])
-
-          expect(escaping).not_to be_empty
-        end
-      end
-
-      xit "does not block a confined local producer" do
-        Dir.mktmpdir("nil-kill-confined") do |dir|
-          path = File.join(dir, "label.rb")
-          File.write(path, <<~RUBY)
-            class Example
-              def label
-                user = {name: "Ada", id: 1}
-                "\#{user[:name]}:\#{user.fetch(:id)}"
-              end
-            end
-          RUBY
-          infer = described_class.allocate
-          infer.instance_variable_set(:@store, NilKill::Store.new)
-
-          escaping = infer.send(:hash_record_producers_escaping_into_collection,
-            [{ "path" => path, "line" => 3, "code" => '{name: "Ada", id: 1}' }])
-
-          expect(escaping).to be_empty
-        end
-      end
-
-      xit "separates coherent hidden element type opportunities from heterogeneous collection blockers" do
-        Dir.mktmpdir("nil-kill-gate-rows") do |dir|
-          path = File.join(dir, "lowering.rb")
-          File.write(path, <<~RUBY)
-            class L
-              def lower(node)
-                site_rows << { id: 1, a: x }
-                MIR::StructInit.new(node.union_name.to_s, [
-                  { name: node.variant_name.to_s, value: inner }
-                ])
-              end
-            end
-          RUBY
-          infer = described_class.allocate
-          infer.instance_variable_set(:@store, NilKill::Store.new)
-
-          coherent = {
-            "struct_name" => "NameRecord",
-            "type_name" => "MIR::NameRecord",
-            "common_keys" => %w[name value],
-            "optional_keys" => [],
-            "fields" => [{ "name" => "name", "type" => "String" }, { "name" => "value", "type" => "MIR::StructInit" }],
-            "producers" => [{ "path" => path, "line" => 5, "code" => "{ name: node.variant_name.to_s, value: inner }" }],
-            "collection_slots" => 2,
-          }
-          heterogeneous = coherent.merge(
-            "struct_name" => "AllocsRecord",
-            "common_keys" => %w[id],
-            "optional_keys" => %w[a b c d e f],
-            "fields" => [
-              { "name" => "id", "type" => "Integer" },
-              { "name" => "a", "type" => "T.any(String, Symbol)" },
-              { "name" => "b", "type" => "T.untyped" },
-              { "name" => "c", "type" => "T.untyped" },
-              { "name" => "d", "type" => "T.untyped" },
-              { "name" => "e", "type" => "String" },
-              { "name" => "f", "type" => "T.untyped" },
-            ],
-            "producers" => [{ "path" => path, "line" => 3, "code" => "{ id: 1, a: x }" }],
-            "collection_slots" => 4,
-          )
-
-          expect(infer.send(:hash_record_cluster_blockers, coherent)).to include(
-            a_string_matching(/hidden element type.*element-typed-collection rewrite/)
-          )
-          expect(infer.send(:hash_record_cluster_blockers, heterogeneous)).to include(
-            a_string_matching(/heterogeneous collection.*not a struct candidate/)
-          )
-        end
-      end
-    end
+                                        end
   end
 
   describe NilKill::SpecDependencyIndex do
@@ -2829,6 +1339,19 @@ RSpec.describe NilKill do
         slot = candidates.find { |c| c["class"] == "Capabilities::Conflict" && c["field"] == "message" }
         expect(slot).not_to be_nil
         expect(slot["type"]).to eq("String")
+      end
+
+      it "preserves bounded concrete node unions for field contracts" do
+        report = described_class.new
+        runtime = [{
+          "class" => "AST::Call", "field" => "target",
+          "classes" => ["AST::Identifier", "AST::GetField"], "calls" => 50,
+        }]
+
+        candidates = report.struct_field_candidates(runtime, [])
+
+        slot = candidates.find { |candidate| candidate["class"] == "AST::Call" && candidate["field"] == "target" }
+        expect(slot.fetch("type")).to eq("T.any(AST::GetField, AST::Identifier)")
       end
 
       it "skips T.nilable candidates at any nesting depth" do
@@ -2907,6 +1430,10 @@ RSpec.describe NilKill do
             "tlet_sites" => [
               { "tlet" => true, "type" => "T.untyped", "path" => "src/a.rb", "line" => 30, "name" => "@z" },
             ],
+            "type_dependencies" => [{
+              "id" => "ivar:A:@z", "candidate" => true, "candidate_kind" => "instance_field",
+              "file" => "src/a.rb", "line" => 30, "name" => "@z", "owner" => "A",
+            }],
             "ivar_param_origins" => {},
             "collection_runtime" => [],
           },
@@ -2941,6 +1468,91 @@ RSpec.describe NilKill do
           NilKill::Report::UNTYPED_CAUSES.each { |c| counts[c] ||= 0 }
         end
         expect(NilKill::Report::UNTYPED_CAUSES.sum { |c| table["Struct/class fields & ivars"][c] }).to eq(3)
+      end
+    end
+
+    describe "struct field and ivar accounting" do
+      it "prefers a strong source accessor over an untyped raw struct declaration" do
+        report = described_class.new
+        evidence = {
+          "methods" => [], "actions" => [],
+          "facts" => {
+            "existing_sigs" => [], "tlet_sites" => [], "type_dependencies" => [],
+            "type_definitions" => [{
+              "kind" => "method_signature", "owner" => "AST::Field", "name" => "type",
+              "signature" => "sig { returns(Type) }",
+              "return_type" => { "kind" => "Primitive", "data" => "Type" },
+            }],
+            "struct_declarations" => [{
+              "path" => "src/ast.rb", "class" => "AST::Field", "fields" => ["type"],
+              "field_types" => { "type" => "T.untyped" },
+            }],
+          },
+        }
+        report.define_singleton_method(:struct_rbi_types) { {} }
+
+        row = report.type_soundness_table(evidence).fetch("Struct/class fields & ivars")
+
+        expect(row).to include("total" => 1, "strong" => 1, "weak" => 0, "untyped" => 0)
+      end
+
+      it "credits source accessors inherited through included modules" do
+        report = described_class.new
+        evidence = {
+          "methods" => [], "actions" => [],
+          "facts" => {
+            "existing_sigs" => [], "tlet_sites" => [], "type_dependencies" => [],
+            "type_definitions" => [
+              { "kind" => "included_module", "owner" => "AST::Loop", "name" => "AST::DropsField" },
+              {
+                "kind" => "method_signature", "owner" => "AST::DropsField", "name" => "drops",
+                "return_type" => { "kind" => "Primitive", "data" => "AST::DropSet" },
+              },
+            ],
+            "struct_declarations" => [{
+              "path" => "src/ast.rb", "class" => "AST::Loop", "fields" => ["drops"], "field_types" => {},
+            }],
+          },
+        }
+        report.define_singleton_method(:struct_rbi_types) { {} }
+
+        row = report.type_soundness_table(evidence).fetch("Struct/class fields & ivars")
+
+        expect(row).to include("total" => 1, "strong" => 1, "weak" => 0, "untyped" => 0)
+      end
+
+      it "counts only unique instance-field T.let roots as ivars" do
+        report = described_class.new
+        evidence = {
+          "methods" => [], "actions" => [],
+          "facts" => {
+            "existing_sigs" => [], "struct_declarations" => [], "type_definitions" => [],
+            "tlet_sites" => [
+              { "path" => "src/a.rb", "line" => 3, "tlet" => true, "type" => "T.untyped" },
+              { "path" => "src/a.rb", "line" => 4, "tlet" => true, "type" => "T.untyped" },
+              { "path" => "src/a.rb", "line" => 5, "tlet" => true, "type" => "T.untyped" },
+            ],
+            "type_dependencies" => [
+              {
+                "id" => "ivar:A:@value", "candidate" => true, "candidate_kind" => "instance_field",
+                "file" => "src/a.rb", "line" => 3, "name" => "@value", "owner" => "A",
+              },
+              {
+                "id" => "ivar:A:@value", "candidate" => true, "candidate_kind" => "instance_field",
+                "file" => "src/a.rb", "line" => 4, "name" => "@value", "owner" => "A",
+              },
+              {
+                "id" => "local:A#run:value", "candidate" => true, "candidate_kind" => "local",
+                "file" => "src/a.rb", "line" => 5, "name" => "value", "owner" => "A",
+              },
+            ],
+          },
+        }
+        report.define_singleton_method(:struct_rbi_types) { {} }
+
+        row = report.type_soundness_table(evidence).fetch("Struct/class fields & ivars")
+
+        expect(row).to include("total" => 1, "strong" => 0, "weak" => 0, "untyped" => 1)
       end
     end
 

@@ -56,6 +56,11 @@ RSpec.describe NilKill::Report, "evidence-gap primitives" do
       expect(report.send(:collect_ran?, idx, "f", 9, 16)).to be(true)
     end
 
+    it "matches absolute static-fact paths against root-relative coverage" do
+      path = File.join(NilKill::ROOT, "f")
+      expect(report.send(:collect_ran?, idx, path, 9, 16)).to be(true)
+    end
+
     it "is false for a 1-2 line body (empty interior, hi == lo+1)" do
       expect(report.send(:collect_ran?, { "f" => Set[10, 11] }, "f", 10, 11)).to be(false)
     end

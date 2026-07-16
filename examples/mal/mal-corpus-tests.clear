@@ -11,7 +11,7 @@ FN stripCr(line: String) RETURNS !String ->
   RETURN line;
 END
 
-FN evalCorpusExpr!(expr: String, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !String ->
+FN evalCorpusExpr!(expr: String, rootId: Id<Env>, MUTABLE pool: [Pool(50000)]Env, MUTABLE penv: {String}Value) RETURNS !String ->
   result = runTest!(expr, rootId, pool, penv) OR_ELSE RAISE;
   RETURN prStr(result, TRUE) OR_ELSE RAISE;
 END
@@ -20,8 +20,8 @@ FN runMalFileCore!(path: String) RETURNS !Int64 ->
   raw = readFile(path) OR_ELSE RAISE;
   lines = raw.split("\n");
 
-  MUTABLE pool: Env[50000]@pool = [];
-  MUTABLE penv: HashMap<Value> = {};
+  MUTABLE pool: [Pool(50000)]Env = [];
+  MUTABLE penv: {String}Value = {};
   rootId = setupEnv!(pool) OR_ELSE RAISE;
 
   MUTABLE pendingExpr = "";

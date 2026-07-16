@@ -90,7 +90,11 @@ fn pressure_row_for_owner(document: &Document, owner: &str) -> Option<TemporalOr
                 document
                     .state_reads
                     .iter()
-                    .filter(|read| read.owner == function.owner && read.function == function.name)
+                    .filter(|read| {
+                        read.owner == function.owner
+                            && read.function == function.name
+                            && syntax::receiver_targets_owner(&read.receiver, &read.owner)
+                    })
                     .map(|read| read.field.clone()),
             ),
             writes: sorted_unique(
@@ -99,6 +103,7 @@ fn pressure_row_for_owner(document: &Document, owner: &str) -> Option<TemporalOr
                     .iter()
                     .filter(|write| {
                         write.owner == function.owner && write.function == function.name
+                            && syntax::receiver_targets_owner(&write.receiver, &write.owner)
                     })
                     .map(|write| write.field.clone()),
             ),
@@ -193,6 +198,32 @@ fn sorted_unique(values: impl Iterator<Item = String>) -> Vec<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn external_mutations_do_not_create_owner_lifecycle_pressure() {
+        let document: Document = serde_json::from_value(json!({
+            "file": "parser.rb",
+            "language": "ruby",
+            "owner_defs": [
+                { "name": "Parser", "file": "parser.rb", "kind": "class", "line": 1, "span": [1, 0, 20, 0] }
+            ],
+            "function_defs": [
+                { "id": "Parser#one", "name": "one", "owner": "Parser", "file": "parser.rb", "line": 2, "span": [2, 0, 4, 0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[2,0,4,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+                { "id": "Parser#two", "name": "two", "owner": "Parser", "file": "parser.rb", "line": 5, "span": [5, 0, 7, 0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[5,0,7,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" },
+                { "id": "Parser#three", "name": "three", "owner": "Parser", "file": "parser.rb", "line": 8, "span": [8, 0, 10, 0], "visibility": "public", "body": {"kind":"method_body","text":"","span":[8,0,10,0],"named":true,"field_name":null,"children":[]}, "params": [], "signature": "" }
+            ],
+            "state_writes": [
+                { "owner": "Parser", "function": "one", "field": "after_all", "receiver": "block", "file": "parser.rb", "line": 3, "span": [3, 0, 3, 20] },
+                { "owner": "Parser", "function": "two", "field": "after_all", "receiver": "block", "file": "parser.rb", "line": 6, "span": [6, 0, 6, 20] }
+            ],
+            "state_reads": [
+                { "owner": "Parser", "function": "three", "field": "after_all", "receiver": "block", "file": "parser.rb", "line": 9, "span": [9, 0, 9, 20] }
+            ]
+        }))
+        .unwrap();
+
+        assert!(scan_documents(&[document]).is_empty());
+    }
 
     #[test]
     fn test_temporal_ordering_pressure_gaps() {

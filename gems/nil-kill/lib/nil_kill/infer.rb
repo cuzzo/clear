@@ -14,14 +14,41 @@ module NilKill
       load_runtime
       index_sources
       load_sorbet if @run_sorbet
+      build_flow_graph
+      build_fallibility_pressure
+      build_hidden_enum_pressure
 
       input_data = @store.to_h
       input_data["unused_return_methods_by_location"] = unused_return_methods_by_location.to_h { |k, v| [k.to_json, v] }
+      input_data["facts"]["effective_struct_field_types"] = SlotCoverage.new([])
+        .resolved_struct_field_types(input_data)
+        .map { |(owner, field), type| { "owner" => owner, "field" => field, "type" => type } }
       delegate_to_rust(input_data)
 
       evidence = @store.to_h
       @store.write(evidence)
       Report.new([], evidence: evidence).run
+    end
+
+    def build_flow_graph
+      @store.facts["flow_graph"] = FlowGraph.from_evidence(@store.to_h).to_h
+    end
+
+    def build_fallibility_pressure
+      files = NilKill.target_files.select { |path| File.extname(path) == ".rb" }
+      @store.facts["fallibility_pressure"] = FallibilityPressure.scan(
+        files,
+        runtime_methods: @store.methods.values,
+        runtime_edges: @store.facts["runtime_call_edges"]
+      )
+    end
+
+    def build_hidden_enum_pressure
+      files = NilKill.target_files.select { |path| File.extname(path) == ".rb" }
+      @store.facts["hidden_enum_pressure"] = HiddenEnumPressure.scan(
+        files,
+        evidence: @store.to_h
+      )
     end
 
     def delegate_to_rust(input_data)

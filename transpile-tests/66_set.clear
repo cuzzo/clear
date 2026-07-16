@@ -2,7 +2,7 @@
 
 # Test 1: basic string set
 FN test_string_set() RETURNS !Void ->
-    MUTABLE s: String[]@set = Set[];
+    MUTABLE s: [Set]String = Set[];
 
     s.insert("hello");
     s.insert("world");
@@ -22,7 +22,7 @@ END
 
 # Test 2: numeric set (Int64)
 FN test_numeric_set() RETURNS !Void ->
-    MUTABLE ids: Int64[]@set = Set[];
+    MUTABLE ids: [Set]Int64 = Set[];
 
     ids.insert(10_i64);
     ids.insert(20_i64);
@@ -41,7 +41,7 @@ END
 
 # Test 3: empty set operations
 FN test_empty_set() RETURNS !Void ->
-    MUTABLE s: String[]@set = Set[];
+    MUTABLE s: [Set]String = Set[];
 
     ASSERT s.length() == 0_i64, "empty set should have count 0";
     ASSERT s.contains?("anything") == FALSE, "empty set contains nothing";
@@ -54,7 +54,7 @@ END
 
 # Test 4: set in a loop
 FN test_set_in_loop() RETURNS !Void ->
-    MUTABLE s: Int64[]@set = Set[];
+    MUTABLE s: [Set]Int64 = Set[];
 
     FOR i IN (0_i64 ..< 100_i64) DO
         s.insert(i MOD 10_i64);

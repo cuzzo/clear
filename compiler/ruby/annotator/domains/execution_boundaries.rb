@@ -10,14 +10,14 @@ module Annotator
 
       sig { params(node: AST::WithBlock).returns(T.nilable(Symbol)) }
       def visit_WithBlock(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         fn_ctx = current_fn_ctx
         if fn_ctx
           fn_node = function_node_for(fn_ctx.name)
           fn_node.semantic_with_blocks << node if fn_node
         end
-        phase_receiver_state.with_block_depth += 1
+        phase_traversal_state.with_block_depth += 1
         begin
         capability_expansion = CapabilityHelper::WithCapabilityExpansion.new
         node.capabilities.each do |cap|
@@ -78,14 +78,15 @@ module Annotator
                 fallible_sources
               )
             end
-            if node.arms
+            arms = node.arms
+            if arms
               # Record family-specific prelude effects before each arm body so
               # the per-arm delta includes synthetic acquire/snapshot work.
               fn_ctx_name = current_fn_ctx&.name
               direct_effects = effect_direct_effects
               snapshot = fn_ctx_name ? effect_direct_effects_for(fn_ctx_name).dup : nil
               per_arm_effects = []
-              node.arms.each do |arm|
+              arms.each do |arm|
                 before = fn_ctx_name ? effect_direct_effects_for(fn_ctx_name).dup : nil
                 # Family-specific prelude effects that the lowering will emit
                 # for this arm. LOCKED acquires a mutex (BLOCKING + CONTENTION
@@ -93,10 +94,10 @@ module Annotator
                 # (CONTENTION); ATOMIC binds the alias to the cell ref so any
                 # subsequent body access contends on the cache line (CONTENTION,
                 # no BLOCKING — atomics never park).
-                with_match_family_effects(arm[:family]).each { |effect| record_effect(effect) }
+                with_match_family_effects(arm.family).each { |effect| record_effect(effect) }
                 with_new_scope(current_scope) do
                   with_body_fact_scope(node) do
-                    visit_stmts(arm[:body])
+                    visit_stmts(arm.body)
                   end
                   finalize_scope(node)
                 end
@@ -162,7 +163,7 @@ module Annotator
 
         stamp_type!(node, :Void)
         ensure
-          phase_receiver_state.with_block_depth -= 1
+          phase_traversal_state.with_block_depth -= 1
         end
       end
 
@@ -174,12 +175,13 @@ module Annotator
       # instead of maintaining a second raw AST request path.
       sig { params(node: AST::WithBlock, capability_plan: CapabilityPlan::WithCapabilityPlan).void }
       def validate_with_match_source_shape!(node, capability_plan)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-        return unless node.arms && node.snapshot_mode.nil?
+        arms = node.arms
+        return unless arms && node.snapshot_mode.nil?
 
         mutable_cap = capability_plan.all.find(&:alias_mutable)
-        if mutable_cap && node.arms.any? { |arm| arm[:family] == :VERSIONED }
+        if mutable_cap && arms.any? { |arm| arm.family == :VERSIONED }
           error!(node, :WITH_MATCH_VERSIONED_AS_MUTABLE, name: mutable_cap.var_name)
         end
 
@@ -191,7 +193,7 @@ module Annotator
 
       sig { params(node: AST::WithBlock).void }
       def mark_with_runtime_requirements!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         fn_ctx = current_fn_ctx
         return unless fn_ctx
@@ -209,7 +211,7 @@ module Annotator
 
       sig { params(node: AST::WithBlock).returns(T::Boolean) }
       def with_block_uses_runtime?(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         node.snapshot_mode == :read ||
           node.snapshot_mode == :transaction ||
@@ -219,14 +221,14 @@ module Annotator
 
       sig { params(node: AST::WithBlock).returns(T::Boolean) }
       def with_block_has_versioned_arm?(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-        !!node.arms&.any? { |arm| arm[:family] == :VERSIONED }
+        !!node.arms&.any? { |arm| arm.family == :VERSIONED }
       end
 
       sig { params(node: AST::WithBlock, fn_ctx: FunctionContext).void }
       def mark_unrequired_polymorphic_with_runtime!(node, fn_ctx)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         bound_name = unrequired_polymorphic_runtime_bound_name(node)
         return unless bound_name
@@ -241,7 +243,7 @@ module Annotator
 
       sig { params(node: AST::WithBlock).returns(T.nilable(String)) }
       def unrequired_polymorphic_runtime_bound_name(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         capability_plan = CapabilityPlan.require_for(node)
         return nil unless node.polymorphic && capability_plan.all.length == 1
@@ -257,7 +259,7 @@ module Annotator
 
       sig { params(fn_node: AST::FunctionDef, bound_name: T.nilable(String)).returns(T::Boolean) }
       def with_requires_binding?(fn_node, bound_name)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         !!(fn_node.respond_to?(:requires) && fn_node.requires && fn_node.requires.key?(bound_name))
       end
@@ -276,7 +278,7 @@ module Annotator
       LOCK_POSSIBLE_TYPES = %i[LockTimeout LockCycle Deadlock].freeze
       # SNAPSHOT MUTABLE commit errors depend on the cell family.
       # @versioned -> MvccConflict (Versioned.update bounded retry).
-      # @indirect:atomic -> AtomicConflict after bounded AtomicPtr retries.
+      # @boxed:atomic -> AtomicConflict after bounded AtomicPtr retries.
       # The dispatch picks per cell at
       # validate_lock_error_clause! time; SNAPSHOT_POSSIBLE_TYPES is the
       # union over both for the resolve_error_selectors! reachability
@@ -285,7 +287,7 @@ module Annotator
 
       sig { params(node: AST::WithBlock).returns(T::Array[String]) }
       def retryable_with_fallible_sources(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         sources = T.let([], T::Array[String])
         current_body_fact_scope_nodes(node).each do |source_node|
@@ -309,7 +311,7 @@ module Annotator
 
       sig { params(node: T.any(AST::FuncCall, AST::MethodCall, AST::StaticCall)).returns(T::Boolean) }
       def retryable_with_call_fallible?(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return true if node.respond_to?(:can_fail) && node.can_fail
         return true if node.respond_to?(:error_union_type) && T.unsafe(node).error_union_type
@@ -318,7 +320,7 @@ module Annotator
 
       sig { params(node: AST::WithBlock).returns(T.nilable(T::Boolean)) }
       def retryable_with_universal_poly_candidate?(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return true if node.universal_poly
         capability_plan = CapabilityPlan.require_for(node)
@@ -337,7 +339,7 @@ module Annotator
 
       sig { params(node: AST::WithBlock, with_name: String, sources: T::Array[String]).void }
       def retryable_with_fallible_body_error!(node, with_name, sources)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         detail = sources.first(3).join(", ")
         detail += ", ..." if sources.length > 3
@@ -346,7 +348,7 @@ module Annotator
 
       sig { params(node: AST::WithBlock, lock_capabilities: CapabilityHelper::WithCapabilityFacts).void }
       def validate_lock_error_clause!(node, lock_capabilities)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         clause = node.lock_error_clause
         is_snapshot_txn = node.snapshot_mode == :transaction
@@ -411,7 +413,7 @@ module Annotator
         end
       end
 
-      # Reject `cfg.field = ...` when `cfg` is `@indirect:atomic`. The cell
+      # Reject `cfg.field = ...` when `cfg` is `@boxed:atomic`. The cell
       # publishes whole-T snapshots via atomic pointer swap, not per-field writes.
       # Only the WITH SNAPSHOT MUTABLE alias (a regular *T pointer
       # passed to AtomicPtr.update's closure) accepts field assignments.
@@ -422,13 +424,13 @@ module Annotator
       # cell binding -- the alias path falls through.
       #
       # Walks the target's chain to find the root Identifier. For
-      # GetField / GetIndex chains rooted at an @indirect:atomic
+      # GetField / GetIndex chains rooted at an @boxed:atomic
       # binding, fires the rejection. Other chain shapes (param
       # passing, etc.) are handled elsewhere.
 
       sig { params(field_node: AST::GetField, assignment_node: AST::Assignment).void }
       def reject_bare_atomic_ptr_mutation!(field_node, assignment_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         root = T.let(field_node, AST::GetField)
         root = root.target while root.respond_to?(:target) && !root.is_a?(AST::Identifier)
@@ -447,7 +449,7 @@ module Annotator
 
       sig { params(node: AST::GetField).returns(String) }
       def field_name_for_msg(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return node.field.to_s if node.respond_to?(:field) && node.field
         "<field>"
@@ -463,7 +465,7 @@ module Annotator
       # threshold (they don't synchronize).
       #
       # Atomic is admitted when:
-      #   - a binding has concrete sync `:atomic` (primitive or indirect:atomic).
+      #   - a binding has concrete sync `:atomic` (primitive or boxed:atomic).
       #   - a polymorphic param's REQUIRES disjunction includes `:ATOMIC`
       #     literally, or `:SNAPSHOTTED` (which expands to {VERSIONED, ATOMIC}).
       # The fix: narrow REQUIRES to a non-ATOMIC family
@@ -471,13 +473,13 @@ module Annotator
 
       sig { params(node: AST::WithBlock).void }
       def validate_no_multi_object_atomic!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         capability_plan = CapabilityPlan.require_for(node)
         caps = capability_plan.sync_constrained
         return if caps.size < 2
 
-        arm_admits_atomic = (node.arms || []).any? { |arm| arm[:family] == :ATOMIC }
+        arm_admits_atomic = (node.arms || []).any? { |arm| arm.family == :ATOMIC }
         offender = caps.find { |c| cap_admits_atomic?(c) }
         return unless offender || arm_admits_atomic
 
@@ -492,14 +494,14 @@ module Annotator
 
       # Does this capability's binding potentially run as `:atomic` at runtime?
       #   - concrete sync `:atomic` (covers primitive @atomic and
-      #     indirect:atomic via sym.indirect?, both flagged
+      #     boxed:atomic via sym.indirect?, both flagged
       #     by sym.atomic?);
       #   - polymorphic REQUIRES disjunction admitting :ATOMIC or
       #     :SNAPSHOTTED (which expands to {VERSIONED, ATOMIC}).
 
       sig { params(cap: CapabilityPlan::CapabilityTransition).returns(T::Boolean) }
       def cap_admits_atomic?(cap)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         sym = cap.source_entry
         return false unless sym
@@ -523,17 +525,17 @@ module Annotator
 
       sig { params(node: AST::WithBlock).void }
       def validate_snapshot_match_arms!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         (node.arms || []).each do |arm|
-          clauses = arm[:lock_error_clauses] || []
-          case arm[:family]
+          clauses = arm.lock_error_clauses
+          case arm.family
           when :VERSIONED
             # VERSIONED arms without an inline handler fall back to SYNC POLICY.
             if clauses.empty?
               synth = synthesize_clause_from_policy(:MvccConflict)
               if synth
-                arm[:lock_error_clauses] = [synth]
+                arm.lock_error_clauses = [synth]
               else
                 error!(node, :WITH_SNAPSHOT_MATCH_VERSIONED_NEEDS_HANDLER)
               end
@@ -548,7 +550,7 @@ module Annotator
         # annotated. Mirrors the single-arm pass at the bottom of
         # validate_lock_error_clause!.
         (node.arms || []).each do |arm|
-          (arm[:lock_error_clauses] || []).each do |clause|
+          arm.lock_error_clauses.each do |clause|
             case clause.action
             when AST::ErrorActionKind::Exit
               visit(T.must(clause.message))
@@ -568,7 +570,7 @@ module Annotator
 
       sig { params(node: AST::WithBlock, clause: AST::ErrorClause, is_snapshot_txn: T::Boolean).void }
       def resolve_error_selectors!(node, clause, is_snapshot_txn = false)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         possible = Set.new
         possible.merge(SNAPSHOT_POSSIBLE_TYPES) if is_snapshot_txn
@@ -630,7 +632,7 @@ module Annotator
 
       sig { params(node: AST::DoBlock).returns(T.nilable(Symbol)) }
       def visit_DoBlock(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         node.branches.each do |branch|
           full_analysis = T.let(nil, T.nilable(CapabilityHelper::CaptureAnalysis))
@@ -663,7 +665,7 @@ module Annotator
 
       sig { params(node: AST::BgStreamBlock).void }
       def visit_BgStreamBlock(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Effect tracking: generators are inherently unbounded (run until exhausted or cancelled).
         record_effect(EffectTracker::LOOP_UNBOUND)
@@ -682,12 +684,21 @@ module Annotator
           error!(node, :BG_STREAM_NO_YIELD)
         end
 
-        elem_syms = yield_types.map(&:resolved).uniq
-        if elem_syms.size > 1
-          error!(node, :BG_STREAM_INCONSISTENT_YIELD, types: elem_syms.join(', '))
+        inferred_join = Type.join_async_results(yield_types)
+        if node.declared_yield_type.nil? && !inferred_join.success?
+          surfaces = yield_types.map { |type| Type.surface_name(type) }.uniq
+          error!(node, :BG_STREAM_INCONSISTENT_YIELD,
+            types: surfaces.join(', '), union_shape: "Union<#{surfaces.join(', ')}>")
+        elsif node.declared_yield_type.nil? && inferred_join.type &&
+              stream_yields_contract_required?(T.must(inferred_join.type))
+          emit_missing_stream_yields_contract!(node, T.must(inferred_join.type))
         end
 
-        stamp_type!(node, Type.new(:"~?#{elem_syms.first}[]"))
+        element_type = node.declared_yield_type || inferred_join.type || Type.new(:Any)
+        stamp_type!(node, Type.new(StreamTypeExpression.new(
+          cardinality: :FINITE,
+          item: element_type.shape.expression,
+        )))
 
         node.capture_analysis = stream_analysis_result
 
@@ -698,28 +709,92 @@ module Annotator
 
       sig { params(node: AST::YieldExpr).void }
       def visit_YieldExpr(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         frame = current_stream_yield_frame
         unless frame
           error!(node, :YIELD_OUTSIDE_BG_STREAM)
           return
         end
+        error!(node, :YIELD_AFTER_CLOSE) if frame.closed
         visit(node.expr)
         stamp_type!(node, node.expr.full_type!(context: "yield expression"))
-        frame.yield_types << Type.new(node.full_type!(context: "yield result"))
+        yielded_type = Type.new(node.full_type!(context: "yield result"))
+        expected_type = frame.expected_type
+        if expected_type && !expected_type.accepts?(yielded_type)
+          error!(node, :BG_STREAM_INCONSISTENT_YIELD,
+            types: "#{Type.surface_name(expected_type)}, #{Type.surface_name(yielded_type)}",
+            union_shape: "Union<#{Type.surface_name(expected_type)}, #{Type.surface_name(yielded_type)}>")
+        end
+        frame.yield_types << yielded_type
         record_effect(EffectTracker::SUSPENDS)
+      end
+
+      sig { params(type: Type).returns(T::Boolean) }
+      def stream_yields_contract_required?(type)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        return true if type.future?
+
+        lookup_type_schema(type.resolved).is_a?(Schemas::UnionSchema)
+      end
+
+      sig { params(node: AST::BgStreamBlock, contract: Type).void }
+      def emit_missing_stream_yields_contract!(node, contract)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        contract_name = Type.surface_name(contract)
+        source = source_code
+        token = node.token
+        fix = T.let(nil, T.nilable(Fix))
+        if source && token
+          line = source.lines[token.line - 1]
+          start = token.column - 1
+          stream_at = line&.index(/\bSTREAM\b/, start)
+          if stream_at
+            insert_col = stream_at + "STREAM".length + 1
+            fix = Fix.new(
+              description: fix_description(:ADD_STREAM_YIELDS_CONTRACT, type: contract_name),
+              confidence: :auto,
+              edits: [Edit.new(
+                span: Span.new(file: nil, line: token.line, col: insert_col, length: 0),
+                replacement: " YIELDS #{contract_name}",
+              )],
+            )
+          end
+        end
+
+        return error!(node, :BG_STREAM_YIELDS_REQUIRED, type: contract_name) unless fix
+
+        fixable!(node,
+          code: :BG_STREAM_YIELDS_REQUIRED,
+          type: contract_name,
+          category: :type,
+          level: :error,
+          fixes: [fix])
+      end
+
+      sig { params(node: AST::CloseStream).void }
+      def visit_CloseStream(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        frame = current_stream_yield_frame
+        unless frame
+          error!(node, :CLOSE_OUTSIDE_BG_STREAM)
+        end
+        error!(node, :STREAM_ALREADY_CLOSED) if frame.closed
+        frame.closed = true
+        stamp_type!(node, :Void)
+        phase_traversal_state.branch_terminated = true
       end
 
       sig { params(node: AST::BgBlock).returns(T.nilable(T::Boolean)) }
       def visit_BgBlock(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Body runs in a separate fiber. The last expression's type determines T in ~T.
         # node.stack_size: :standard | :micro | :large | :xl | nil  (nil → STANDARD default)
         record_effect(EffectTracker::YIELD)
-        prev_bg_pinned = phase_receiver_state.current_bg_pinned
-        phase_receiver_state.current_bg_pinned = !!node.pinned
+        prev_bg_pinned = phase_traversal_state.current_bg_pinned
+        phase_traversal_state.current_bg_pinned = !!node.pinned
         begin
 
         last_type = T.let(Type.new(:Void), Type)
@@ -796,13 +871,13 @@ module Annotator
         end
         true
         ensure
-          phase_receiver_state.current_bg_pinned = prev_bg_pinned
+          phase_traversal_state.current_bg_pinned = prev_bg_pinned
         end
       end
 
       sig { params(node: AST::ThenChain).void }
       def visit_ThenChain(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Sequential chaining: each step runs in order inside the same fiber.
         # Steps with AS bindings declare a local variable accessible to later steps.
@@ -816,13 +891,13 @@ module Annotator
           visit(step.expr)
           step_type = step.expr.full_type!(context: "THEN step")
 
-          if step.binding
+          if (binding = step.binding)
             # Unwrap error union for the binding: !T -> T
             bind_type = step_type
             bind_type = step_type.payload_type if step_type.error_union?
 
             current_scope.declare(
-              step.binding,
+              binding,
               nil,
               bind_type,
               false,  # immutable
@@ -840,7 +915,7 @@ module Annotator
 
       sig { params(node: AST::NextExpr).returns(T.nilable(Symbol)) }
       def visit_NextExpr(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         record_effect(EffectTracker::YIELD)
         visit(node.expr)
@@ -889,11 +964,21 @@ module Annotator
           node.storage   = :heap
         elsif promise_type.dynamic_stream?
           elem_sym = T.must(promise_type.tense_type.element_type).to_sym
-          stamp_type!(node, Type.new(:"?#{elem_sym}"))
+          if promise_type.canonical_stream?
+            stamp_type!(node, Type.stream_step_of(T.must(promise_type.tense_type.element_type)))
+          else
+            stamp_type!(node, Type.new(:"?#{elem_sym}"))
+          end
         elsif promise_type.bounded_stream?
-          # NEXT on ~T[N]: returns T (the element type).
-          # Does NOT mark the stream as moved — the stream can be NEXT'd up to N times.
-          stamp_type!(node, T.must(promise_type.stream_element_type).to_sym)
+          # Canonical finite streams expose completion as a tagged step so an
+          # optional item remains distinguishable from exhaustion. Legacy
+          # ~T[N] keeps its direct-T behavior until corpus migration completes.
+          element_type = T.must(promise_type.stream_element_type)
+          if promise_type.canonical_stream?
+            stamp_type!(node, Type.stream_step_of(element_type))
+          else
+            stamp_type!(node, element_type.to_sym)
+          end
         elsif promise_type.shared_promise?
           # NEXT on ~T@shared: returns T, idempotent — same handle can be NEXT'd again.
           # Does NOT mark as moved; multiple consumers may hold their own handles.
@@ -921,7 +1006,7 @@ module Annotator
 
       sig { params(type_info: Type).returns(T::Boolean) }
       def async_next_result_requires_heap?(type_info)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return false if type_info.id_handle?
 

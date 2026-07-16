@@ -294,12 +294,25 @@ class PipelinePlaceholderRewriter
   sig { params(node: AST::WithBlock).returns(AST::Node) }
   def substitute_with_block(node)
     new_body = node.body.map { |stmt| substitute(stmt) }
-    return node if new_body == node.body
+    new_arms = node.arms&.map do |arm|
+      new_arm_body = arm.body.map { |stmt| substitute(stmt) }
+      if new_arm_body == arm.body
+        arm
+      else
+        AST::WithMatchArm.new(
+          family: arm.family,
+          body: new_arm_body,
+          lock_error_clauses: arm.lock_error_clauses,
+          token: arm.token,
+        )
+      end
+    end
+    return node if new_body == node.body && new_arms == node.arms
 
     new_with = AST::WithBlock.new(node.token, node.capabilities, new_body, node.deferred_drops)
     new_with.lock_error_clause = node.lock_error_clause
     new_with.deadlock_escape = node.deadlock_escape
-    new_with.arms = node.arms
+    new_with.arms = new_arms
     new_with.view_kind = node.view_kind
     new_with.snapshot_mode = node.snapshot_mode
     new_with.polymorphic = node.polymorphic

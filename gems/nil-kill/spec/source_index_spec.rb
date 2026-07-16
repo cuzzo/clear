@@ -43,6 +43,51 @@ RSpec.describe NilKill::SourceIndex do
     end
   end
 
+  it "identifies T.must around a total call without flagging a nilable call" do
+    Dir.mktmpdir("nil-kill-source-index-t-must") do |dir|
+      path = File.join(dir, "sample.rb")
+      File.write(path, <<~RUBY)
+        class Example
+          extend T::Sig
+
+          sig { returns(String) }
+          def total
+            "value"
+          end
+
+          sig { returns(T.nilable(String)) }
+          def optional
+            nil
+          end
+
+          sig { returns(String) }
+          def run
+            T.must(total)
+            T.must(optional)
+          end
+        end
+      RUBY
+
+      checks = described_class.new(path).dead_nil_checks
+
+      expect(checks).to include(a_hash_including(
+        "kind" => "non_nil_assertion",
+        "code" => "T.must(total)",
+        "subject" => "total"
+      ))
+      expect(checks).not_to include(a_hash_including("code" => "T.must(optional)"))
+
+      actions = NilKill::Analyzers::RuntimeEvidenceAnalyzer.new(
+        "languages" => ["ruby"],
+        "static" => { "facts" => { "dead_nil_checks" => checks } }
+      ).analyze
+      expect(actions).to include(a_hash_including(
+        "kind" => "replace_deterministic_guard",
+        "data" => a_hash_including("operation" => "remove_non_nil_assertion")
+      ))
+    end
+  end
+
   it "indexes Ruby struct block owners and Sorbet struct fields" do
     Dir.mktmpdir("nil-kill-source-index-struct-owners") do |dir|
       path = File.join(dir, "sample.rb")
@@ -406,149 +451,7 @@ RSpec.describe NilKill::SourceIndex do
     described_class.reset_global_shape_indexes
   end
 
-  xit "propagates block element hash shapes into forwarded method params" do
-    described_class.reset_global_shape_indexes
-
-    Dir.mktmpdir("nil-kill-forwarded-block-record-param") do |dir|
-      path = File.join(dir, "forwarded_block_record_param.rb")
-      File.write(path, <<~RUBY)
-        class ForwardedBlockRecordParam
-          extend T::Sig
-
-          sig { params(step: T::Hash[Symbol, T.untyped]).void }
-          def consume(step)
-            step[:expr]
-            forward(step)
-          end
-
-          def forward(value)
-            value
-          end
-
-          sig { params(stmts: T::Array[T.untyped]).void }
-          def run(stmts)
-            flat_steps = []
-            stmts.each do |stmt|
-              flat_steps << {expr: stmt, binding: nil}
-            end
-            flat_steps.each do |step|
-              consume(step)
-            end
-          end
-        end
-      RUBY
-
-      idx = described_class.new(path)
-      store = NilKill::Store.new
-      store.facts["existing_sigs"].concat(idx.methods.select { |method| method["has_sig"] })
-      store.facts["hash_shapes"].concat(idx.hash_shapes)
-      store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-      store.facts["hash_record_blockers"].concat(idx.hash_record_blockers)
-      store.facts["param_origins"].concat(idx.param_origins)
-      infer = NilKill::Infer.allocate
-      infer.instance_variable_set(:@store, store)
-      infer.send(:propose_hash_record_cluster_actions)
-
-      action = store.actions.find do |candidate|
-        Array(candidate.dig("data", "signatures")).any? { |signature| signature["method"] == "consume" }
-      end
-      expect(action.dig("data", "fields").map { |field| field["name"] }).to include("expr", "binding")
-      expect(action.dig("data", "signatures")).to include(a_hash_including(
-        "method" => "consume",
-        "name" => "step",
-        "type" => a_string_matching(/Record\z/)
-      ))
-      expect(idx.collection_index_lookups.find { |lookup| lookup["code"] == "step[:expr]" }.dig("origin", "shape", "keys").keys).to include("expr", "binding")
-    end
-  ensure
-    described_class.reset_global_shape_indexes
-  end
-
-  xit "plans constructor keyword signatures from local array element record shapes" do
-    described_class.reset_global_shape_indexes
-
-    Dir.mktmpdir("nil-kill-constructor-array-record-signature") do |dir|
-      path = File.join(dir, "constructor_array_record_signature.rb")
-      File.write(path, <<~RUBY)
-        class Signature
-          extend T::Sig
-
-          sig { params(params: T::Array[T::Hash[Symbol, T.untyped]]).void }
-          def initialize(params:)
-            @params = params
-            params.each { |param| param[:name] }
-          end
-        end
-
-        class Builder
-          def run(raw)
-            normalized = raw.map do |param|
-              {name: "arg", type: :Any}
-            end
-            Signature.new(params: normalized)
-          end
-        end
-      RUBY
-
-      idx = described_class.new(path)
-      store = NilKill::Store.new
-      store.facts["existing_sigs"].concat(idx.methods.select { |method| method["has_sig"] })
-      store.facts["hash_shapes"].concat(idx.hash_shapes)
-      store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-      store.facts["param_origins"].concat(idx.param_origins)
-      infer = NilKill::Infer.allocate
-      infer.instance_variable_set(:@store, store)
-      infer.send(:propose_hash_record_cluster_actions)
-
-      action = store.actions.find do |candidate|
-        Array(candidate.dig("data", "signatures")).any? { |signature| signature["method"] == "initialize" }
-      end
-      expect(action.dig("data", "signatures")).to include(a_hash_including(
-        "method" => "initialize",
-        "name" => "params",
-        "from" => "T::Array[T::Hash[Symbol, T.untyped]]",
-        "type" => a_string_matching(/\AT::Array\[.*Record\]\z/)
-      ))
-    end
-  ensure
-    described_class.reset_global_shape_indexes
-  end
-
-  xit "keeps hash record keys when a field value type is unknown" do
-    Dir.mktmpdir("nil-kill-unknown-record-field-key") do |dir|
-      path = File.join(dir, "unknown_record_field_key.rb")
-      File.write(path, <<~RUBY)
-        class UnknownRecordFieldKey
-          def consume(step)
-            step[:expr]
-          end
-
-          def run(value)
-            consume({expr: value.unknown_call, binding: nil})
-          end
-        end
-      RUBY
-
-      idx = described_class.new(path)
-      store = NilKill::Store.new
-      store.facts["existing_sigs"].concat(idx.methods.select { |method| method["has_sig"] })
-      store.facts["hash_shapes"].concat(idx.hash_shapes)
-      store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-      store.facts["param_origins"].concat(idx.param_origins)
-      infer = NilKill::Infer.allocate
-      infer.instance_variable_set(:@store, store)
-
-      infer.send(:propose_hash_record_cluster_actions)
-
-      action = store.actions.find do |candidate|
-        Array(candidate.dig("data", "consumers")).any? { |consumer| consumer["code"] == "step[:expr]" }
-      end
-      expect(action.dig("data", "fields").map { |field| field["name"] }).to include("expr", "binding")
-      expect(action.dig("data", "blockers")).to include("field expr needs type evidence; currently unknown")
-    end
-  end
-
-  it "classifies static return origins and records return-to-param flows" do
+        it "classifies static return origins and records return-to-param flows" do
     Dir.mktmpdir("nil-kill-return-origins") do |dir|
       path = File.join(dir, "returns.rb")
       File.write(path, <<~RUBY)
@@ -1328,372 +1231,7 @@ RSpec.describe NilKill::SourceIndex do
     end
   end
 
-  xit "plans review actions to promote local hash records with literal reads to structs" do
-    Dir.mktmpdir("nil-kill-hash-record-struct-action") do |dir|
-      path = File.join(dir, "hash_record_struct_action.rb")
-      File.write(path, <<~RUBY)
-        class HashRecordStructAction
-          def label
-            entry = {name: "Ada", id: 1}
-            "\#{entry[:name]}:\#{entry.fetch(:id)}"
-          end
-        end
-      RUBY
-
-      idx = described_class.new(path)
-      store = NilKill::Store.new
-      store.facts["hash_shapes"].concat(idx.hash_shapes)
-      store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-      infer = NilKill::Infer.allocate
-      infer.instance_variable_set(:@store, store)
-
-      infer.send(:propose_hash_record_struct_actions)
-
-      action = store.actions.find { |candidate| candidate["kind"] == "promote_hash_record_to_struct" }
-      expect(action).to include("confidence" => "review", "path" => NilKill.rel(path), "line" => 3)
-      expect(action.dig("data", "struct_name")).to eq("EntryRecord")
-      expect(action.dig("data", "fields")).to contain_exactly(
-        { "name" => "name", "type" => "String" },
-        { "name" => "id", "type" => "Integer" },
-      )
-      expect(action.dig("data", "read_rewrites")).to contain_exactly(
-        { "line" => 4, "code" => "entry[:name]", "replacement" => "entry.name" },
-        { "line" => 4, "code" => "entry.fetch(:id)", "replacement" => "entry.id" },
-      )
-    end
-  end
-
-  xit "uses nested hash-record array field shapes to unblock struct fields" do
-    Dir.mktmpdir("nil-kill-hash-record-nested-field-action") do |dir|
-      path = File.join(dir, "hash_record_nested_field_action.rb")
-      File.write(path, <<~RUBY)
-        class HashRecordNestedFieldAction
-          def label
-            plan = {name: "compile", steps: [{expr: "load", id: 1}]}
-            plan[:steps].first[:expr]
-          end
-        end
-      RUBY
-
-      idx = described_class.new(path)
-      store = NilKill::Store.new
-      store.facts["hash_shapes"].concat(idx.hash_shapes)
-      store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-      infer = NilKill::Infer.allocate
-      infer.instance_variable_set(:@store, store)
-
-      infer.send(:propose_hash_record_struct_actions)
-
-      action = store.actions.find { |candidate| candidate["kind"] == "promote_hash_record_to_struct" && candidate.dig("data", "struct_name") == "PlanRecord" }
-      expect(action).not_to be_nil
-      expect(action.dig("data", "blockers")).to be_empty
-      expect(action.dig("data", "fields")).to include(
-        a_hash_including("name" => "steps", "type" => "T::Array[StepsRecord]")
-      )
-      expect(action.dig("data", "nested_structs")).to include(
-        a_hash_including("struct_name" => "StepsRecord", "fields" => include(
-          { "name" => "expr", "type" => "String" },
-          { "name" => "id", "type" => "Integer" },
-        ))
-      )
-    end
-  end
-
-  xit "plans fetch symbol and string hash-record consumer rewrites" do
-    Dir.mktmpdir("nil-kill-hash-record-fetch-rewrites") do |dir|
-      path = File.join(dir, "hash_record_fetch_rewrites.rb")
-      File.write(path, <<~RUBY)
-        class HashRecordFetchRewrites
-          def label
-            entry = {name: "Ada", id: 1}
-            "\#{entry.fetch(:name)}:\#{entry.fetch("id")}"
-          end
-        end
-      RUBY
-
-      idx = described_class.new(path)
-      store = NilKill::Store.new
-      store.facts["hash_shapes"].concat(idx.hash_shapes)
-      store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-      infer = NilKill::Infer.allocate
-      infer.instance_variable_set(:@store, store)
-
-      infer.send(:propose_hash_record_struct_actions)
-
-      action = store.actions.find { |candidate| candidate["kind"] == "promote_hash_record_to_struct" }
-      expect(action.dig("data", "read_rewrites")).to contain_exactly(
-        { "line" => 4, "code" => "entry.fetch(:name)", "replacement" => "entry.name" },
-        { "line" => 4, "code" => "entry.fetch(\"id\")", "replacement" => "entry.id" },
-      )
-    end
-  end
-
-  xit "plans review actions to promote same-file returned hash records with literal reads to structs" do
-    Dir.mktmpdir("nil-kill-return-hash-record-struct-action") do |dir|
-      path = File.join(dir, "return_hash_record_struct_action.rb")
-      File.write(path, <<~RUBY)
-        class ReturnHashRecordStructAction
-          def build_user
-            {name: "Ada", id: 1}
-          end
-
-          def label
-            user = build_user
-            "\#{user[:name]}:\#{user.fetch(:id)}"
-          end
-        end
-      RUBY
-
-      idx = described_class.new(path)
-      store = NilKill::Store.new
-      store.facts["hash_shapes"].concat(idx.hash_shapes)
-      store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-      store.facts["return_origins"].concat(idx.return_origins)
-      infer = NilKill::Infer.allocate
-      infer.instance_variable_set(:@store, store)
-
-      infer.send(:propose_hash_record_struct_actions)
-
-      action = store.actions.find { |candidate| candidate["kind"] == "promote_hash_record_to_struct" }
-      expect(action).to include("confidence" => "review", "path" => NilKill.rel(path), "line" => 3)
-      expect(action["message"]).to include("returned by build_user")
-      expect(action.dig("data", "struct_name")).to eq("UserRecord")
-      expect(action.dig("data", "fields")).to contain_exactly(
-        { "name" => "name", "type" => "String" },
-        { "name" => "id", "type" => "Integer" },
-      )
-      expect(action.dig("data", "read_rewrites")).to contain_exactly(
-        { "line" => 8, "code" => "user[:name]", "replacement" => "user.name" },
-        { "line" => 8, "code" => "user.fetch(:id)", "replacement" => "user.id" },
-      )
-      expect(action.dig("data", "producer")).to include("method" => "build_user", "line" => 2)
-    end
-  end
-
-  xit "plans signature rewrites when a record literal producer is passed directly to a callee" do
-    Dir.mktmpdir("nil-kill-direct-producer-param-signature") do |dir|
-      path = File.join(dir, "direct_producer_param_signature.rb")
-      File.write(path, <<~RUBY)
-        class DirectProducerParamSignature
-          extend T::Sig
-
-          sig { params(step: T::Hash[Symbol, T.untyped]).void }
-          def sink(step)
-            step[:expr]
-          end
-
-          def caller
-            sink({expr: "x", binding: nil})
-          end
-        end
-      RUBY
-
-      idx = described_class.new(path)
-      store = NilKill::Store.new
-      store.facts["existing_sigs"].concat(idx.methods.select { |method| method["has_sig"] })
-      store.facts["hash_shapes"].concat(idx.hash_shapes)
-      store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-      store.facts["param_origins"].concat(idx.param_origins)
-      infer = NilKill::Infer.allocate
-      infer.instance_variable_set(:@store, store)
-
-      infer.send(:propose_hash_record_cluster_actions)
-
-      action = store.actions.find do |candidate|
-        Array(candidate.dig("data", "signatures")).any? { |signature| signature["method"] == "sink" }
-      end
-      expect(action.dig("data", "consumers")).to include(a_hash_including(
-        "code" => "step[:expr]",
-        "origin" => a_hash_including("kind" => "method parameter", "shape" => a_hash_including("poisoned" => false))
-      ))
-      expect(action.dig("data", "signatures")).to include(a_hash_including(
-        "kind" => "param",
-        "name" => "step",
-        "from" => "T::Hash[Symbol, T.untyped]",
-        "type" => "BindingRecord",
-        "method" => "sink"
-      ))
-    end
-  end
-
-  xit "preserves nilability when rewriting hash-record return signatures" do
-    infer = NilKill::Infer.allocate
-
-    expect(infer.send(:hash_record_signature_target, "T::Hash[Symbol, T.untyped]", "AllocRecord")).to eq("AllocRecord")
-    expect(infer.send(:hash_record_signature_target, "T.nilable(T::Hash[T.untyped, T.untyped])", "AllocRecord")).to eq("T.nilable(AllocRecord)")
-    expect(infer.send(:hash_record_signature_target, "T::Array[T::Hash[Symbol, T.untyped]]", "AllocRecord")).to eq("T::Array[AllocRecord]")
-    expect(infer.send(:hash_record_signature_target, "T.nilable(T::Array[T::Hash[Symbol, T.untyped]])", "AllocRecord")).to eq("T.nilable(T::Array[AllocRecord])")
-  end
-
-  xit "plans local record helper param rewrites through aliases" do
-    Dir.mktmpdir("nil-kill-local-record-helper-param-alias") do |dir|
-      path = File.join(dir, "local_record_helper_param_alias.rb")
-      File.write(path, <<~RUBY)
-        class LocalRecordHelperParamAlias
-          extend T::Sig
-
-          sig { params(dims: T::Hash[Symbol, T.nilable(Symbol)]).void }
-          def helper(dims)
-            dims[:sync]
-          end
-
-          def run
-            dims = {ownership: nil, sync: nil}
-            other = dims
-            helper(other)
-            dims[:ownership]
-          end
-        end
-      RUBY
-
-      idx = described_class.new(path)
-      store = NilKill::Store.new
-      store.facts["existing_sigs"].concat(idx.methods.select { |method| method["has_sig"] })
-      store.facts["hash_shapes"].concat(idx.hash_shapes)
-      store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-      store.facts["param_origins"].concat(idx.param_origins)
-      infer = NilKill::Infer.allocate
-      infer.instance_variable_set(:@store, store)
-
-      infer.send(:propose_hash_record_struct_actions)
-
-      action = store.actions.find { |candidate| candidate.dig("data", "struct_name") == "DimsRecord" }
-      expect(action.dig("data", "signatures")).to include(a_hash_including(
-        "kind" => "param",
-        "name" => "dims",
-        "from" => "T::Hash[Symbol, T.nilable(Symbol)]",
-        "type" => "DimsRecord",
-        "method" => "helper"
-      ))
-      expect(action.dig("data", "read_rewrites")).to include(
-        a_hash_including("code" => "dims[:sync]", "replacement" => "dims.sync"),
-        a_hash_including("code" => "dims[:ownership]", "replacement" => "dims.ownership")
-      )
-    end
-  end
-
-  xit "blocks local helper param promotion when the helper uses dynamic keys or mutates the record" do
-    Dir.mktmpdir("nil-kill-local-record-helper-param-blockers") do |dir|
-      path = File.join(dir, "local_record_helper_param_blockers.rb")
-      File.write(path, <<~RUBY)
-        class LocalRecordHelperParamBlockers
-          extend T::Sig
-
-          sig { params(dims: T::Hash[Symbol, T.nilable(Symbol)], key: Symbol).void }
-          def helper(dims, key)
-            dims[key]
-            dims[:sync] = nil
-          end
-
-          def run(key)
-            dims = {ownership: nil, sync: nil}
-            other = dims
-            helper(other, key)
-            dims[:ownership]
-          end
-        end
-      RUBY
-
-      idx = described_class.new(path)
-      store = NilKill::Store.new
-      store.facts["existing_sigs"].concat(idx.methods.select { |method| method["has_sig"] })
-      store.facts["hash_shapes"].concat(idx.hash_shapes)
-      store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-      store.facts["hash_record_blockers"].concat(idx.hash_record_blockers)
-      store.facts["param_origins"].concat(idx.param_origins)
-      infer = NilKill::Infer.allocate
-      infer.instance_variable_set(:@store, store)
-
-      infer.send(:propose_hash_record_struct_actions)
-
-      action = store.actions.find { |candidate| candidate.dig("data", "struct_name") == "DimsRecord" }
-      expect(action.dig("data", "blockers")).to include(
-        a_string_including("dynamic hash-record key prevents struct accessor rewrite"),
-        a_string_including("shape-changing hash-record mutation prevents broad struct rewrite")
-      )
-    end
-  end
-
-  xit "uses member calls on hash-record fields as protocol evidence for field types" do
-    Dir.mktmpdir("nil-kill-hash-record-field-member-protocol") do |dir|
-      path = File.join(dir, "hash_record_field_member_protocol.rb")
-      File.write(path, <<~RUBY)
-        module AST
-          module Locatable
-            def token; end
-            def full_type; end
-          end
-        end
-
-        class FieldMemberProtocol
-          extend T::Sig
-
-          sig { params(step: T::Hash[Symbol, T.untyped]).void }
-          def sink(step)
-            step[:expr].full_type
-            step[:expr].token
-          end
-
-          def caller(expr)
-            sink({expr: expr, binding: nil})
-          end
-        end
-      RUBY
-
-      idx = described_class.new(path)
-      store = NilKill::Store.new
-      store.facts["existing_sigs"].concat(idx.methods.select { |method| method["has_sig"] })
-      store.facts["hash_shapes"].concat(idx.hash_shapes)
-      store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-      store.facts["hash_record_member_calls"].concat(idx.hash_record_member_calls)
-      store.facts["param_origins"].concat(idx.param_origins)
-      infer = NilKill::Infer.allocate
-      infer.instance_variable_set(:@store, store)
-
-      infer.send(:propose_hash_record_cluster_actions)
-
-      action = store.actions.find { |candidate| candidate.dig("data", "struct_name") == "BindingRecord" }
-      expect(action.dig("data", "type_name")).to eq("AST::BindingRecord")
-      expect(action.dig("data", "scope")).to eq(["AST"])
-      expr_field = action.dig("data", "fields").find { |field| field["name"] == "expr" }
-      expect(expr_field).to include(
-        "type" => "AST::Locatable",
-        "required_members" => contain_exactly("full_type", "token")
-      )
-    end
-  end
-
-  xit "does not plan returned hash-record promotion for dynamic keys" do
-    Dir.mktmpdir("nil-kill-return-hash-record-dynamic-key") do |dir|
-      path = File.join(dir, "return_hash_record_dynamic_key.rb")
-      File.write(path, <<~RUBY)
-        class ReturnHashRecordDynamicKey
-          def build_user
-            {name: "Ada", id: 1}
-          end
-
-          def label(key)
-            user = build_user
-            user[key]
-          end
-        end
-      RUBY
-
-      idx = described_class.new(path)
-      store = NilKill::Store.new
-      store.facts["hash_shapes"].concat(idx.hash_shapes)
-      store.facts["collection_index_lookups"].concat(idx.collection_index_lookups)
-      store.facts["return_origins"].concat(idx.return_origins)
-      infer = NilKill::Infer.allocate
-      infer.instance_variable_set(:@store, store)
-
-      infer.send(:propose_hash_record_struct_actions)
-
-      expect(store.actions).not_to include(a_hash_including("kind" => "promote_hash_record_to_struct"))
-    end
-  end
-
-  it "records explicit hash-record blockers for dynamic keys and mutations" do
+                      it "records explicit hash-record blockers for dynamic keys and mutations" do
     Dir.mktmpdir("nil-kill-hash-record-blockers") do |dir|
       path = File.join(dir, "hash_record_blockers.rb")
       File.write(path, <<~RUBY)
@@ -2165,6 +1703,34 @@ RSpec.describe NilKill::SourceIndex do
       idx = described_class.new(path)
 
       expect(idx.collection_index_lookups.map { |lookup| lookup["code"] }).to eq(["items[0]"])
+    end
+  end
+
+  it "does not classify typed array indexing or mutation as hash-record blockers" do
+    Dir.mktmpdir("nil-kill-array-hash-record-blockers") do |dir|
+      path = File.join(dir, "typed_arrays.rb")
+      File.write(path, <<~RUBY)
+        class TypedArrays
+          extend T::Sig
+
+          sig do
+            params(
+              tokens: T::Array[String],
+              closings: T::Array[T.nilable(Integer)],
+              position: Integer
+            ).returns(T.nilable(String))
+          end
+          def lookup(tokens, closings, position)
+            closings[position] = position
+            tokens[position]
+          end
+        end
+      RUBY
+
+      idx = described_class.new(path)
+
+      expect(idx.collection_index_lookups.map { |lookup| lookup["code"] }).to include("tokens[position]")
+      expect(idx.hash_record_blockers).to be_empty
     end
   end
 

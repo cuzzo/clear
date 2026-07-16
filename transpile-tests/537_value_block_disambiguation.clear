@@ -11,7 +11,7 @@ FN main() RETURNS Void ->
     checked = nums |> SELECT { ASSERT _ > 0_i64, "positive"; _ + 4_i64 };
     ASSERT checked[2] == 7_i64, "keyword prefix statement in value block";
 
-    MUTABLE scores: HashMap<Int64> = {"alice": 10_i64, "bob": 20_i64};
+    MUTABLE scores: {String}Int64 = {"alice": 10_i64, "bob": 20_i64};
     ASSERT scores.count() == 2_i64, "hash literal stays hash";
     ASSERT scores["alice"] OR_ELSE 0_i64 == 10_i64, "hash literal readback";
 

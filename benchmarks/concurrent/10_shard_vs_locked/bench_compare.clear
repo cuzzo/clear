@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
   # Strategy 1: @sharded(8):locked (RwLock per shard)
   # ═══════════════════════════════════════════════════
 
-  MUTABLE locked_map: HashMap<String> @sharded(8):locked = {};
+  MUTABLE locked_map: {String}@sharded(8):locked String = {};
 
   # SET 1M
   MUTABLE set_futures: ~Void[]@list = [];
@@ -78,7 +78,7 @@ FN main() RETURNS Void ->
   # Strategy 2: @sharded(8) + SHARD (shared-nothing)
   # ═══════════════════════════════════════════════════
 
-  MUTABLE sn_map: HashMap<String> @sharded(8) = {};
+  MUTABLE sn_map: {String}@sharded(8) String = {};
 
   # SET 1M
   (0 ..< n)

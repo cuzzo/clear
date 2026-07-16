@@ -520,7 +520,7 @@ library or partly compiler-lowered.
 Launch surface:
 
 - The language owns capabilities: `@local`, `@locked`, `@writeLocked`,
-  `@shared`, `@multiowned`, `@indirect`, `@alwaysMutable`.
+  `@shared`, `@multiowned`, `@boxed`, `@alwaysMutable`.
 - Stdlib should expose small utility functions around channels/queues/sleep
   only where they preserve the language's capability model.
 

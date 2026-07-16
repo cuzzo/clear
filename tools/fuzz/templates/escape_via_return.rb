@@ -178,14 +178,14 @@ def escape_via_return_shape_cell(shape)
     <<~CHT
       STRUCT Cfg { setting: Int64 }
 
-      FN make() RETURNS !Cfg @indirect ->
+      FN make() RETURNS !Cfg @boxed ->
           cfg = Cfg{ setting: 7_i64 };
           RETURN cfg;
       END
 
       FN main() RETURNS Void ->
           c = make();
-          ASSERT c.setting == 7_i64, "return @indirect struct";
+          ASSERT c.setting == 7_i64, "return @boxed struct";
           RETURN;
       END
     CHT
@@ -193,14 +193,14 @@ def escape_via_return_shape_cell(shape)
     <<~CHT
       STRUCT Person { name: String }
 
-      FN make() RETURNS !Person @indirect ->
+      FN make() RETURNS !Person @boxed ->
           p = Person{ name: COPY "alice" };
           RETURN p;
       END
 
       FN main() RETURNS Void ->
           r = make();
-          ASSERT r.name == "alice", "return @indirect struct w/ String field";
+          ASSERT r.name == "alice", "return @boxed struct w/ String field";
           RETURN;
       END
     CHT

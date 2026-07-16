@@ -3,7 +3,7 @@
 # on function return, not heap-leaked. Repeated calls must stay O(1) frame/heap.
 
 FN buildCsv(n: Int64) RETURNS !String ->
-    MUTABLE parts: String[]@list = [];
+    MUTABLE parts: []String = [];
     FOR i IN (1_i64 ..= n) -> parts.append(i.toString());
     RETURN join(parts, ",");
 END

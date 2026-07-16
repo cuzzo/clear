@@ -1,4 +1,4 @@
-# typed: false
+# typed: strict
 require "sorbet-runtime"
 
 require 'zlib'

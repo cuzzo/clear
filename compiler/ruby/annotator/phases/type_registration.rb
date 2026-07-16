@@ -12,7 +12,7 @@ module Annotator
 
       sig { params(declarations: DeclarationIndex).void }
       def register_type_declarations(declarations)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
         structs = declarations.type_declarations.filter_map do |node|
           node if node.is_a?(AST::StructDef)
         end
@@ -31,7 +31,7 @@ module Annotator
 
       sig { params(structs: T::Array[AST::StructDef]).void }
       def resolve_recursive_struct_layouts!(structs)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
         names = structs.map { |node| node.name.to_sym }.to_set
         edges = T.let([], T::Array[RecursiveFieldEdge])
         structs.each do |node|
@@ -68,13 +68,13 @@ module Annotator
 
       sig { params(edges: T::Array[RecursiveFieldEdge]).returns(T::Array[Fix]) }
       def recursive_layout_fixes(edges)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
         source = diagnostic_source_code
         return [] unless source
 
         choices = [
           ["@node", "Store this edge in the compiler-managed graph slot map"],
-          ["@indirect", "Make this a unique owned heap edge"],
+          ["@boxed", "Make this a unique owned heap edge"],
           ["@multiowned", "Use local reference-counted shared identity"],
           ["@shared", "Use cross-execution atomic shared identity"],
           ["@link", "Make this a non-owning link to an independently owned node"],
@@ -169,7 +169,7 @@ module Annotator
 
       sig { params(node: TypeDeclaration).void }
       def register_type_declaration(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
         case node
         when AST::StructDef
           register_struct_declaration(node)
@@ -184,7 +184,7 @@ module Annotator
 
       sig { params(node: AST::ExternStructDecl).void }
       def register_extern_struct_declaration(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
         schema = if node.close_method && node.from_module
           Schemas::ResourceSchema.new(
             close_plan: Schemas::ResourceClosePlan.method(node.close_method),
@@ -214,8 +214,11 @@ module Annotator
 
       sig { params(node: AST::StructDef).void }
       def register_struct_declaration(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
         validate_type_param_list!(node, node.type_params, "struct") if node.type_params.any?
+        node.field_decls.each_value do |field|
+          error!(node, :COLLECTION_HINT_VALUE_ONLY) if field.type.preallocation_hint?
+        end
         stamp_field_defaults!(node.field_decls)
 
         declare_type_schema!(node, node.name.to_sym, Schemas::StructSchema.new(
@@ -228,7 +231,7 @@ module Annotator
 
       sig { params(node: AST::EnumDef).void }
       def register_enum_declaration(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
         declare_type_schema!(node, node.name.to_sym, Schemas::EnumSchema.new(
           variants: node.variants,
           visibility: node.visibility || :package,
@@ -238,7 +241,7 @@ module Annotator
 
       sig { params(node: AST::UnionDef).void }
       def register_union_declaration(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
         validate_type_param_list!(node, node.type_params, "union") if node.type_params.any?
         if node.type_params.any? && node.variants.any? { |_, variant| Schemas.inline_struct?(variant) }
           error!(node, :UNION_INLINE_IN_GENERIC)
@@ -255,7 +258,7 @@ module Annotator
 
       sig { params(fields: T::Hash[String, AST::StructField]).void }
       def stamp_field_defaults!(fields)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
         fields.each_value do |field|
           default = field.default
           next unless default
@@ -266,7 +269,7 @@ module Annotator
 
       sig { params(node: AST::UnionDef).void }
       def register_inline_struct_variants!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
         node.variants.each do |variant_name, variant_data|
           next unless Schemas.inline_struct?(variant_data)
 
@@ -283,7 +286,7 @@ module Annotator
 
       sig { params(node: TypeDeclaration, name: Symbol, schema: Scope::ScopeTypeSchema).void }
       def declare_type_schema!(node, name, schema)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
 
         if current_scope.resolve_type_entry(name)
           error!(node, :DUPLICATE_DECLARATION, label: "type", name: name)

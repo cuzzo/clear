@@ -5,7 +5,7 @@ Goal: make `tools/fuzz` an A-level, future-proof ownership-safety regression sui
 ## Phase 1 - Make Coverage Future-Proof
 
  - [x] Bring `tools/fuzz` into this branch from `origin/master` so hardening work can start against the real suite.
- - [x] Add an initial machine-readable ownership-surface registry for `tools/fuzz`. It enumerates storage capabilities (`plain`, `@local`, `@multiowned`, `@shared`, `@indirect`), sync capabilities (`@locked`, `@writeLocked`, `@versioned`, `@atomic`), collection/container shapes, cleanup-bearing value shapes, escape sources, escape sinks, execution boundaries, and MIR ownership contracts.
+ - [x] Add an initial machine-readable ownership-surface registry for `tools/fuzz`. It enumerates storage capabilities (`plain`, `@local`, `@multiowned`, `@shared`, `@boxed`), sync capabilities (`@locked`, `@writeLocked`, `@versioned`, `@atomic`), collection/container shapes, cleanup-bearing value shapes, escape sources, escape sinks, execution boundaries, and MIR ownership contracts.
  - [x] Add an initial `tools/fuzz/coverage.rb` report that loads the real templates, checks README/template drift, and reports uncovered registry dimensions.
  - [ ] Wire the ownership-surface registry into MIR safety tooling so MIR and fuzz share the same source of truth.
  - [ ] Replace template-local hardcoded dimensions (`ALLOC_KINDS`, `SYNCS`, ownership lists, escape-pattern lists) with registry-derived dimensions wherever the template is meant to cover a whole ownership surface.
@@ -22,7 +22,7 @@ Goal: make `tools/fuzz` an A-level, future-proof ownership-safety regression sui
  - [ ] Expand cleanup templates (`loop_cleanup`, `error_cleanup`, `branch_cleanup`, `or_positional`) to use the registry's complete cleanup-bearing type set instead of the current small `ALLOC_KINDS` sample.
  - [ ] Expand `access_gate` so every non-copy alias can try every meaningful escape sink: return, field store, list append, set insert, map put, pool insert, collection literal, function arg, `TAKES`, `GIVE`, BG capture, DO capture, BG STREAM capture.
  - [ ] Expand `lifetimed_return` beyond active `@local` cells so all lifetime-bound captures are tested once their baseline capture semantics compile: `@shared:atomic`, `@locked`, `@writeLocked`, `@versioned`/snapshot-like handles, `@multiowned`, and future lifetime-bearing capabilities.
- - [ ] Expand `stream_into_boundary` and `execution_boundary` to include all registered ownership/capability combinations that can cross or be rejected at BG / DO / BG STREAM / FSM / stream-pipeline boundaries, including `@multiowned`, `@indirect`, arena-like memory, nested boundaries, and modifier combinations.
+ - [ ] Expand `stream_into_boundary` and `execution_boundary` to include all registered ownership/capability combinations that can cross or be rejected at BG / DO / BG STREAM / FSM / stream-pipeline boundaries, including `@multiowned`, `@boxed`, arena-like memory, nested boundaries, and modifier combinations.
 
 ## Phase 3 - Prove The Fuzz Suite Catches Real Classes Of Bugs
 

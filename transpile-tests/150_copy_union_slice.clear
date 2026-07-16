@@ -13,7 +13,7 @@ FN copySlice!(src: Val[]) RETURNS !Val ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE items: Val[]@list = List[];
+    MUTABLE items: []Val = List[];
     items.append(Val{ Str: "hello" });
     items.append(Val{ Str: "world" });
     result = copySlice!(items);

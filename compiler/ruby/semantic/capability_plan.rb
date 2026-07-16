@@ -221,7 +221,12 @@ module CapabilityPlan
         true
       when :infer
         entry = source_entry
-        entry ? (!entry.sync.nil? || !entry.sync_families.empty?) : false
+        if entry
+          families = entry.sync_families
+          !entry.sync.nil? || (families ? !families.empty? : false)
+        else
+          false
+        end
       else
         false
       end

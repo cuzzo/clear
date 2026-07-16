@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
@@ -75,9 +79,22 @@ const KOTLIN_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
 const KOTLIN_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const KOTLIN_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+// CFG-SPECIFIC START: Kotlin control-flow vocabulary.
+const KOTLIN_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &["all", "any", "filter", "flatMap", "fold", "forEach", "map", "none", "reduce"],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 struct KotlinNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the Kotlin CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &KOTLIN_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
         (node.r#type == "CLASS").then_some(default_span)
     }

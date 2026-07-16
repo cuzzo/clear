@@ -14,7 +14,7 @@ module Annotator
 
       sig { params(declarations: DeclarationIndex).void }
       def register_program_signatures(declarations)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
 
         reject_duplicate_program_signatures!(declarations)
         declarations.function_declarations.each { |node| register_function_signature(node) }
@@ -27,7 +27,7 @@ module Annotator
 
       sig { params(node: AST::FunctionDef).returns(SymbolEntry) }
       def register_function_signature(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
 
         reject_duplicate_function_binding!(node)
         signature = SignatureRegistry.function_signature(
@@ -39,7 +39,7 @@ module Annotator
 
       sig { params(node: AST::ExternFnDecl).void }
       def register_extern_function_signature(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
 
         signature = SignatureRegistry.extern_function_signature(node)
         if node.owner_type
@@ -57,7 +57,7 @@ module Annotator
 
       sig { params(declarations: DeclarationIndex).void }
       def reject_duplicate_program_signatures!(declarations)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
 
         seen = T.let({}, T::Hash[String, AST::Node])
         declarations.function_declarations.each do |node|
@@ -72,7 +72,7 @@ module Annotator
 
       sig { params(node: T.any(AST::FunctionDef, AST::ExternFnDecl), seen: T::Hash[String, AST::Node], label: String).void }
       def reject_duplicate_seen_signature!(node, seen, label)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
 
         key = node.is_a?(AST::ExternFnDecl) && node.owner_type ? "#{node.owner_type}.#{node.name}" : node.name
         if seen.key?(key)
@@ -84,7 +84,7 @@ module Annotator
 
       sig { params(node: AST::FunctionDef).void }
       def reject_duplicate_function_binding!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
 
         return unless duplicate_signature_binding?(current_scope.local_entry(node.name))
         error!(node, :DUPLICATE_FUNCTION_DECLARATION, name: node.name)
@@ -93,7 +93,7 @@ module Annotator
 
       sig { params(node: AST::ExternFnDecl).void }
       def reject_duplicate_extern_function!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
 
         return unless duplicate_signature_binding?(current_scope.local_entry(node.name))
         error!(node, :DUPLICATE_FUNCTION_DECLARATION, name: node.name)
@@ -113,7 +113,7 @@ module Annotator
 
       sig { params(node: AST::ExternFnDecl, type_schema: Scope::ScopeTypeSchema).void }
       def reject_duplicate_extern_method!(node, type_schema)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
 
         methods = type_schema.methods
         return unless methods.is_a?(Hash) && methods.key?(node.name)

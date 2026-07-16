@@ -20,6 +20,7 @@ module NilKill
 
       def analyze
         actions = []
+        actions.concat(static_fact_actions)
         actions.concat(param_nullability_actions)
         actions.concat(return_nullability_actions)
         actions.concat(field_nullability_actions)
@@ -27,6 +28,68 @@ module NilKill
       end
 
       private
+
+      def static_fact_actions
+        facts = Hash(@static["facts"])
+        actions = Array(facts["dead_nil_checks"]).filter_map { |fact| dead_nil_check_action(fact) }
+        actions.concat(Array(facts["deterministic_guards"]).filter_map { |fact| deterministic_guard_action(fact) })
+        actions.uniq { |action| action["id"] }
+      end
+
+      def dead_nil_check_action(fact)
+        return unless fact.is_a?(Hash)
+
+        operation = case fact["kind"]
+        when "nil_check" then "replace_condition"
+        when "non_nil_assertion" then "remove_non_nil_assertion"
+        else "remove_safe_navigation"
+        end
+        build_static_action(
+          fact,
+          "dead_nil_check",
+          fact["reason"].to_s,
+          fact.merge("operation" => operation)
+        )
+      end
+
+      def deterministic_guard_action(fact)
+        return unless fact.is_a?(Hash)
+        return unless fact["proof_tier"] == "static_proven"
+        return if fact["predicate_kind"] == "nil_check"
+
+        build_static_action(
+          fact,
+          "deterministic_guard",
+          "#{fact["code"]} is always #{fact["truth_value"]}: #{fact["reason"]}",
+          fact
+        )
+      end
+
+      def build_static_action(fact, provenance_kind, message, data)
+        path = fact["path"].to_s
+        line = fact["line"].to_i
+        language = static_fact_language(fact, path)
+        symbol_id = [language, path, "static_fact", provenance_kind, line, fact["code"]].join("\0")
+        Actions::Record.build(
+          kind: "replace_deterministic_guard",
+          language: language,
+          confidence: REVIEW,
+          target: { "path" => path, "line" => line, "symbol_id" => symbol_id },
+          message: message,
+          data: data,
+          provenance: { "static_fact" => provenance_kind }
+        )
+      end
+
+      def static_fact_language(fact, path)
+        return fact["language"].to_s unless fact["language"].to_s.empty?
+
+        file = Array(@static["files"]).find { |entry| entry.is_a?(Hash) && entry["path"].to_s == path }
+        return file["language"].to_s if file && !file["language"].to_s.empty?
+
+        languages = Array(@evidence["languages"]).map(&:to_s).reject(&:empty?).uniq
+        languages.one? ? languages.first : ""
+      end
 
       def param_nullability_actions
         Hash(@runtime["param_observations"]).flat_map do |method_id, params|

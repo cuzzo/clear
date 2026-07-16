@@ -860,13 +860,13 @@ RSpec.describe SemanticAnnotator do
     let(:counter_struct) { "STRUCT Counter { value: Int64 }\n" }
 
     context "valid cross-dimension combinations" do
-      it "@local:indirect parses and compiles" do
-        code = counter_struct + "FN f() RETURNS !Void -> c = Counter{ value: 0 } @local:indirect; RETURN; END"
+      it "@local:boxed parses and compiles" do
+        code = counter_struct + "FN f() RETURNS !Void -> c = Counter{ value: 0 } @local:boxed; RETURN; END"
         expect { run(code) }.not_to raise_error
       end
 
-      it "@indirect:local (reversed order) parses and compiles" do
-        code = counter_struct + "FN f() RETURNS !Void -> c = Counter{ value: 0 } @indirect:local; RETURN; END"
+      it "@boxed:local (reversed order) parses and compiles" do
+        code = counter_struct + "FN f() RETURNS !Void -> c = Counter{ value: 0 } @boxed:local; RETURN; END"
         expect { run(code) }.not_to raise_error
       end
 
@@ -968,8 +968,7 @@ RSpec.describe SemanticAnnotator do
       FLUX
       tokens = Lexer.new(src).tokenize
       ast    = ClearParser.new(tokens, src).parse
-      ann    = SemanticAnnotator.new
-      ann.source_code = src
+      ann    = SemanticAnnotator.new(source_code: src)
       FixCollector.enable!
       begin
         ann.annotate!(ast) rescue nil

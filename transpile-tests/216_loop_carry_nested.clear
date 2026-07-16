@@ -26,7 +26,7 @@ FN processLines!(n: Int64) RETURNS !Void ->
         # Inner loop: frame-local list forces mark_per_iter here too.
         MUTABLE i: Int64 = 0;
         WHILE i < n DO
-            MUTABLE parts: String[]@list = [];
+            MUTABLE parts: []String = [];
             parts.append(i.toString());
             # Use prefix as length (no move, just read)
             resp = resp $+ i.toString() $+ ";" $+ prefix.length().toString();

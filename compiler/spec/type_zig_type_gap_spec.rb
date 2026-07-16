@@ -67,8 +67,9 @@ RSpec.describe Type, "zig_type gap coverage" do
     expect(caps.collection).to eq(:list)
     expect(caps.shard_count).to eq(3)
     expect(caps.soa).to be true
-    expect(caps.elem_ownership).to eq(:multiowned)
-    expect(caps.elem_sync).to eq(:atomic)
+    element_caps = T.must(type.element_type).capabilities
+    expect(element_caps.ownership).to eq(:multiowned)
+    expect(element_caps.sync).to eq(:atomic)
     expect(caps.link_source).to eq(:shared)
     expect(caps.observable).to be true
     expect(caps.observable_terminal).to eq(:sum)

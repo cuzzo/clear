@@ -103,7 +103,8 @@ RSpec.describe ClearFixSupport do
         RETURN m.coutn();
       END
     CLEAR
-    expect_rewrite(method_source, method_source.sub("coutn", "count"))
+    method_expected = method_source.sub("HashMap<Int64>", "{String}Int64").sub("coutn", "count")
+    expect_rewrite(method_source, method_expected, count: 2)
 
     var_source = <<~CLEAR
       FN main() RETURNS Int64 ->
@@ -157,8 +158,8 @@ RSpec.describe ClearFixSupport do
         RETURN;
       END
     CLEAR
-    expected = moved_source.sub("b = a;", "b = (COPY a);")
-    expect_rewrite(moved_source, expected, take_first: true)
+    expected = moved_source.sub("HashMap<Float64>", "{String}Float64").sub("b = a;", "b = (COPY a);")
+    expect_rewrite(moved_source, expected, take_first: true, count: 2)
     expect(descriptions_for(moved_source).join("\n")).to include("Change 'a' to `@shared`")
   end
 
@@ -285,6 +286,103 @@ RSpec.describe ClearFixSupport do
     end
   end
 
+  it "restores type migrations after warming REQUIRE imports" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "helper.clear"), "STRUCT Helper { value: Int64 }\n")
+      source = <<~CLEAR
+        REQUIRE "helper.clear";
+        FN main() RETURNS Void ->
+          values: Int64[]@list = [];
+          RETURN;
+        END
+      CLEAR
+
+      findings = described_class.collect_findings(source, source_dir: dir)
+      migration = findings.find { |finding| finding.category == :type_migration }
+      expect(migration&.fixes&.map(&:description)).to include("Rewrite as `[]Int64`.")
+    end
+  end
+
+  it "still collects root migrations when an external package is unavailable" do
+    source = <<~CLEAR
+      REQUIRE "pkg:not-installed";
+      values: Int64[]@list = [];
+    CLEAR
+
+    findings = described_class.collect_findings(source)
+    migration = findings.find { |finding| finding.category == :type_migration }
+    expect(migration&.fixes&.map(&:description)).to include("Rewrite as `[]Int64`.")
+  end
+
+  it "isolates REQUIRE warmup diagnostics and direct non-Ruby findings" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "helper.clear"), "STRUCT Helper { value: Int64 }\n")
+      source = <<~CLEAR
+        REQUIRE "helper.clear";
+        values: Int64[]@list = [];
+        missing = unknownName;
+      CLEAR
+
+      findings = described_class.collect_findings(source, source_dir: dir)
+      expect(findings.map(&:category)).to include(:type_migration)
+
+      direct = described_class.send(
+        :findings_for_path,
+        File.join(dir, "sample.clear"),
+        "values: Int64[]@list = [];\n",
+        out: StringIO.new,
+        only_set: nil,
+      )
+      expect(direct.map(&:category)).to include(:type_migration)
+    end
+  end
+
+  it "always restores collectors after malformed full and migration-only input" do
+    expect(described_class.collect_findings('value = "unterminated')).to eq([])
+    expect(described_class.collect_type_migrations('value = "unterminated')).to eq([])
+    expect(FixCollector.enabled?).to be(false)
+  end
+
+  it "skips malformed CLEAR heredocs without aborting a bulk fix run" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "negative_spec.rb")
+      File.write(path, <<~RUBY)
+        source = <<~CLEAR
+          value = "unterminated;
+        CLEAR
+      RUBY
+
+      result = described_class.run_args(
+        ["--only=type_migration", path],
+        out: StringIO.new,
+        err: StringIO.new,
+        input: StringIO.new,
+      )
+      expect(result.edits_applied).to eq(0)
+    end
+  end
+
+  it "drains findings when a pre-parser lint encounters malformed tokens" do
+    expect(described_class.collect_findings('"unterminated')).to eq([])
+  end
+
+  it "runs isolated type migrations without invoking semantic annotation" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "legacy.clear")
+      File.write(path, "values: Int64[]@list = [];\n")
+      allow(SemanticAnnotator).to receive(:new).and_raise("annotation must not run")
+
+      result = described_class.run_args(
+        ["--only=type_migration", path],
+        out: StringIO.new,
+        err: StringIO.new,
+        input: StringIO.new,
+      )
+      expect(result.edits_applied).to eq(1)
+      expect(File.read(path)).to eq("values: []Int64 = [];\n")
+    end
+  end
+
   it "prints dry-run findings, prompts for interactive choices, and loops until clean" do
     source = "FN main() RETURNS Int64 ->\n  MUTABLE x = 1;\n  RETURN x;\nEND\n"
     findings = described_class.preview_source(source)
@@ -333,7 +431,7 @@ RSpec.describe ClearFixSupport do
 
       moved_path = File.join(dir, "moved.clear")
       File.write(moved_path, <<~CLEAR)
-        STRUCT Config {id: Float64, data: HashMap<Float64>}
+        STRUCT Config {id: Float64, data: {String}Float64}
 
         FN main() RETURNS Void ->
           a = Config {id: 1.0, data: {"x": 1.0}};

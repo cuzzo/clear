@@ -347,10 +347,10 @@ class MIRChecker
     const :alloc, T.nilable(Symbol)
   end
 
-  sig { params(fn_name: T.nilable(String), schema_lookup: T.nilable(Proc)).void }
+  sig { params(fn_name: T.nilable(String), schema_lookup: T.nilable(Type::SchemaLookup)).void }
   def initialize(fn_name: nil, schema_lookup: nil)
     @fn_name = fn_name
-    @schema_lookup = T.let(schema_lookup, T.nilable(Proc))
+    @schema_lookup = T.let(schema_lookup, T.nilable(Type::SchemaLookup))
     @errors = T.let([], T::Array[String])
   end
 
@@ -404,7 +404,7 @@ class MIRChecker
         transfers << name
         return_transfers << name if node.target == :return
       when MIR::ErrDeferStmt
-        # @indirect field temps use ErrDeferStmt(DestroyPtr) instead of ErrCleanup.
+        # @boxed field temps use ErrDeferStmt(DestroyPtr) instead of ErrCleanup.
         # Track their names so ALLOC_WITHOUT_CLEANUP does not false-positive on them.
         body = node.body
         ptr = body.ptr if body.is_a?(MIR::DestroyPtr)
@@ -721,9 +721,13 @@ class MIRChecker
       stmt.clause_bodies&.each { |body| check_linear_stmts!(body, state.copy) }
     when MIR::StructDef
       stmt.methods&.each { |method| check_linear_stmt!(method, LinearOwnershipState.new) if method.is_a?(MIR::FnDef) }
-    when MIR::FsmB1Body, MIR::FsmGenericBody, MIR::FsmIoBody
-      ctx = stmt.ctx_struct
-      check_linear_stmts!(ctx.run_body, LinearOwnershipState.new) if ctx.respond_to?(:run_body)
+    when MIR::FsmB1Body
+      body_stmts = stmt.ctx_struct.run_body.body_stmts.filter_map do |body_stmt|
+        body_stmt if body_stmt.is_a?(MIR::Emittable)
+      end
+      check_linear_stmts!(body_stmts, LinearOwnershipState.new)
+    when MIR::FsmGenericBody, MIR::FsmIoBody
+      nil
     when MIR::Comment, MIR::ContinueStmt, MIR::EnumDef, MIR::FrameRestore,
          MIR::FrameSave, MIR::Import, MIR::MutualThunkTrampoline, MIR::Noop,
          MIR::PubConst, MIR::Suppress, MIR::ThunkTrampoline, MIR::TypeAlias,
@@ -1416,7 +1420,8 @@ class MIRChecker
 
   sig { params(node: T.nilable(MIR::Node)).returns(T::Boolean) }
   def value_constructor_expr?(node)
-    return true if node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit) || node.is_a?(MIR::ArrayDefaultInit)
+    return true if node.is_a?(MIR::StructInit) || node.is_a?(MIR::TupleLiteral) ||
+      node.is_a?(MIR::ArrayInit) || node.is_a?(MIR::ArrayDefaultInit)
     if node.is_a?(MIR::BlockExpr)
       terminal = node.body.reverse.find do |item|
         item.is_a?(MIR::BreakStmt) && item.label == node.label
@@ -2281,7 +2286,7 @@ class MIRChecker
     # ALLOC_WITHOUT_CLEANUP: every HEAP AllocMark must have a Cleanup, ErrCleanup,
     # ErrDeferStmt(DestroyPtr), or explicit TransferMark. Frame allocations are
     # freed by the arena rewind and do not require an explicit cleanup node.
-    # Exception: @indirect field temps use ErrDeferStmt(DestroyPtr) (errdefer_destroy_names).
+    # Exception: @boxed field temps use ErrDeferStmt(DestroyPtr) (errdefer_destroy_names).
     allocs.each do |name, alloc_marks|
       next if cleanups.key?(name)
       next if errdefer_destroy_names.include?(name)

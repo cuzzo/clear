@@ -2,7 +2,7 @@ use crate::decomplex::report::ReportSection;
 use crate::decomplex::report_value as rv;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub const TIER_WEIGHT: &[(i64, i64)] = &[(1, 3), (2, 2), (3, 1)];
 
@@ -28,8 +28,8 @@ pub struct FileRollup {
 
 #[derive(Clone, Debug)]
 struct Accumulator {
-    dets: BTreeMap<String, usize>,
     tiers: BTreeMap<String, i64>,
+    evidence_roots: BTreeMap<String, BTreeSet<String>>,
     findings: usize,
     at: Option<String>,
 }
@@ -48,13 +48,20 @@ pub fn rollup(sections: &[ReportSection], min_detectors: usize) -> Vec<Unit> {
                 let unit = acc
                     .entry((file.clone(), method.clone()))
                     .or_insert_with(|| Accumulator {
-                        dets: BTreeMap::new(),
                         tiers: BTreeMap::new(),
+                        evidence_roots: BTreeMap::new(),
                         findings: 0,
                         at: None,
                     });
-                *unit.dets.entry(section.title.clone()).or_insert(0) += 1;
                 unit.tiers.insert(section.title.clone(), section.tier);
+                let root = line
+                    .as_ref()
+                    .map(|line| format!("{file}:{method}:{line}"))
+                    .unwrap_or_else(|| format!("{}:{file}:{method}", section.title));
+                unit.evidence_roots
+                    .entry(section.title.clone())
+                    .or_default()
+                    .insert(root);
                 unit.findings += 1;
                 if unit.at.is_none() {
                     unit.at = Some(match line {
@@ -69,15 +76,29 @@ pub fn rollup(sections: &[ReportSection], min_detectors: usize) -> Vec<Unit> {
     let mut units = acc
         .into_iter()
         .filter_map(|((file, method), data)| {
-            if data.dets.len() < min_detectors {
+            let groups = independent_detector_groups(&data.evidence_roots);
+            if groups.len() < min_detectors {
                 return None;
             }
-            let detectors = data.dets.keys().cloned().collect::<Vec<_>>();
-            let score = data.tiers.values().map(|tier| tier_weight(*tier)).sum();
+            let detectors = groups
+                .iter()
+                .map(|group| group.join(" + "))
+                .collect::<Vec<_>>();
+            let score = groups
+                .iter()
+                .map(|group| {
+                    group
+                        .iter()
+                        .filter_map(|detector| data.tiers.get(detector))
+                        .map(|tier| tier_weight(*tier))
+                        .max()
+                        .unwrap_or(0)
+                })
+                .sum();
             Some(Unit {
                 file,
                 method,
-                n_detectors: detectors.len(),
+                n_detectors: groups.len(),
                 detectors,
                 score,
                 findings: data.findings,
@@ -95,6 +116,43 @@ pub fn rollup(sections: &[ReportSection], min_detectors: usize) -> Vec<Unit> {
             .then_with(|| left.method.cmp(&right.method))
     });
     units
+}
+
+fn independent_detector_groups(
+    roots: &BTreeMap<String, BTreeSet<String>>,
+) -> Vec<Vec<String>> {
+    let detectors = roots.keys().cloned().collect::<Vec<_>>();
+    let mut parents = (0..detectors.len()).collect::<Vec<_>>();
+
+    for left in 0..detectors.len() {
+        for right in (left + 1)..detectors.len() {
+            if !roots[&detectors[left]].is_disjoint(&roots[&detectors[right]]) {
+                union(&mut parents, left, right);
+            }
+        }
+    }
+
+    let mut groups: BTreeMap<usize, Vec<String>> = BTreeMap::new();
+    for (index, detector) in detectors.into_iter().enumerate() {
+        let root = find(&mut parents, index);
+        groups.entry(root).or_default().push(detector);
+    }
+    groups.into_values().collect()
+}
+
+fn find(parents: &mut [usize], index: usize) -> usize {
+    if parents[index] != index {
+        parents[index] = find(parents, parents[index]);
+    }
+    parents[index]
+}
+
+fn union(parents: &mut [usize], left: usize, right: usize) {
+    let left = find(parents, left);
+    let right = find(parents, right);
+    if left != right {
+        parents[right] = left;
+    }
 }
 
 pub fn by_file(units: &[Unit]) -> Vec<FileRollup> {
@@ -207,6 +265,21 @@ mod tests {
     }
 
     #[test]
+    fn rollup_collapses_detectors_backed_by_the_same_source_evidence() {
+        let sections = vec![
+            ReportSection::new("Decision Pressure", 1, "", vec![json!({"at": "a.rb:m:7"})]),
+            ReportSection::new("False Simplicity", 3, "", vec![json!({"at": "a.rb:m:7"})]),
+            ReportSection::new("Locality Drag", 2, "", vec![json!({"at": "a.rb:m:12"})]),
+        ];
+
+        let rows = rollup(&sections, 2);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].n_detectors, 2);
+        assert_eq!(rows[0].score, 5);
+        assert!(rows[0].detectors.contains(&"Decision Pressure + False Simplicity".to_string()));
+    }
+
+    #[test]
     fn test_rollup_edge_cases() {
         let sections = vec![
             ReportSection::new("A", 1, "", vec![
@@ -229,19 +302,19 @@ mod tests {
         let sections = vec![
             // Unit 1: file "y.rb", method "m", detectors [A, B] -> n_detectors = 2, score = 5 (3 + 2)
             ReportSection::new("A", 1, "", vec![json!({"at": "y.rb:m:1"})]),
-            ReportSection::new("B", 2, "", vec![json!({"at": "y.rb:m:1"})]),
+            ReportSection::new("B", 2, "", vec![json!({"at": "y.rb:m:2"})]),
             // Unit 2: file "x.rb", method "m", detectors [A, B] -> n_detectors = 2, score = 4 (3 + 1), findings = 3
             ReportSection::new("C", 3, "", vec![json!({"at": "x.rb:m:1"}), json!({"at": "x.rb:m:2"})]),
-            ReportSection::new("A", 1, "", vec![json!({"at": "x.rb:m:1"})]),
+            ReportSection::new("A", 1, "", vec![json!({"at": "x.rb:m:3"})]),
             // Unit 3: file "b.rb", method "m", detectors [A, B] -> n_detectors = 2, score = 4, findings = 2
             ReportSection::new("A", 1, "", vec![json!({"at": "b.rb:m:1"})]),
-            ReportSection::new("C", 3, "", vec![json!({"at": "b.rb:m:1"})]),
+            ReportSection::new("C", 3, "", vec![json!({"at": "b.rb:m:2"})]),
             // Unit 4: file "c.rb", method "m1", detectors [A, B] -> n_detectors = 2, score = 4, findings = 2
             ReportSection::new("A", 1, "", vec![json!({"at": "c.rb:m1:1"})]),
-            ReportSection::new("C", 3, "", vec![json!({"at": "c.rb:m1:1"})]),
+            ReportSection::new("C", 3, "", vec![json!({"at": "c.rb:m1:2"})]),
             // Unit 5: file "c.rb", method "m2", detectors [A, B] -> n_detectors = 2, score = 4, findings = 2
             ReportSection::new("A", 1, "", vec![json!({"at": "c.rb:m2:1"})]),
-            ReportSection::new("C", 3, "", vec![json!({"at": "c.rb:m2:1"})]),
+            ReportSection::new("C", 3, "", vec![json!({"at": "c.rb:m2:2"})]),
         ];
         let units = rollup(&sections, 2);
         assert_eq!(units.len(), 5);
@@ -334,4 +407,3 @@ mod tests {
         assert_eq!(rolls[3].file, "d");
     }
 }
-

@@ -264,6 +264,22 @@
       "file": "gems/fact-mine/examples/syntax-facts/csharp/core.cs",
       "functions": [
         {
+          "line": 10,
+          "name": "CSharpSyntaxFactsCore",
+          "owner": "CSharpSyntaxFactsCore",
+          "params": [
+            "status",
+            "sink"
+          ],
+          "span": [
+            10,
+            4,
+            15,
+            5
+          ],
+          "visibility": "public"
+        },
+        {
           "line": 17,
           "name": "Process",
           "owner": "CSharpSyntaxFactsCore",
@@ -469,6 +485,19 @@
           ]
         },
         {
+          "field": "sink",
+          "function": "CSharpSyntaxFactsCore",
+          "line": 14,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            14,
+            20,
+            14,
+            24
+          ]
+        },
+        {
           "field": "status",
           "function": "Audit",
           "line": 59,
@@ -479,6 +508,19 @@
             15,
             59,
             21
+          ]
+        },
+        {
+          "field": "status",
+          "function": "CSharpSyntaxFactsCore",
+          "line": 12,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            12,
+            22,
+            12,
+            28
           ]
         },
         {
@@ -498,7 +540,7 @@
       "state_writes": [
         {
           "field": "count",
-          "function": "(top-level)",
+          "function": "CSharpSyntaxFactsCore",
           "line": 13,
           "owner": "CSharpSyntaxFactsCore",
           "receiver": "self",
@@ -524,7 +566,7 @@
         },
         {
           "field": "sink",
-          "function": "(top-level)",
+          "function": "CSharpSyntaxFactsCore",
           "line": 14,
           "owner": "CSharpSyntaxFactsCore",
           "receiver": "self",
@@ -537,7 +579,7 @@
         },
         {
           "field": "status",
-          "function": "(top-level)",
+          "function": "CSharpSyntaxFactsCore",
           "line": 12,
           "owner": "CSharpSyntaxFactsCore",
           "receiver": "self",

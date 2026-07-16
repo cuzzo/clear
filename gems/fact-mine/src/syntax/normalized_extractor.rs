@@ -48,6 +48,7 @@ struct Extractor<'a> {
     owners: Vec<String>,
     functions: Vec<String>,
     function_params: Vec<Vec<String>>,
+    local_owned_values: Vec<BTreeSet<String>>,
     controls: Vec<String>,
     decision_spans: Vec<Span>,
     receiver_aliases: Vec<BTreeMap<String, String>>,
@@ -56,7 +57,7 @@ struct Extractor<'a> {
     seen_calls: HashSet<(String, String, String, usize, Span)>,
     seen_reads: HashSet<(String, String, String, String, usize, Span)>,
     seen_writes: HashSet<(String, String, String, String, usize, Span)>,
-    seen_effects: HashSet<(String, String, String, usize, Span)>,
+    seen_effects: HashSet<(String, String, String, String, usize, Span)>,
 }
 
 impl<'a> Extractor<'a> {
@@ -75,6 +76,7 @@ impl<'a> Extractor<'a> {
             owners: Vec::new(),
             functions: Vec::new(),
             function_params: Vec::new(),
+            local_owned_values: Vec::new(),
             controls: Vec::new(),
             decision_spans: Vec::new(),
             receiver_aliases: Vec::new(),
@@ -181,12 +183,17 @@ impl<'a> Extractor<'a> {
             file: self.file.clone(),
             name: name.to_string(),
             kind: kind.to_string(),
+            reopenable: self.behavior.reopenable_owner(node),
             line: owner_span[0],
             span: owner_span,
         }
     }
 
     fn scan_function(&mut self, node: &Node) {
+        if !self.functions.is_empty() && self.behavior.nested_function_is_lexical(node) {
+            self.scan_children(node);
+            return;
+        }
         let name = function_name_with_behavior(node, self.behavior)
             .unwrap_or_else(|| "(anonymous)".to_string());
         let current_owner = self.current_owner();
@@ -208,8 +215,24 @@ impl<'a> Extractor<'a> {
             body,
             visibility: Some(visibility),
             params: params.clone(),
+            callback_params: self.behavior.callback_parameter_names(node),
             signature: String::new(),
         });
+        if let Some(mut declaration) = self
+            .behavior
+            .state_declaration_from_function(node, &owner)
+        {
+            declaration.field = self.behavior.clean_identifier(&declaration.field);
+            declaration.file = self.file.clone();
+            declaration.owner = owner.clone();
+            declaration.line = node.first_lineno;
+            declaration.span = span(node);
+            self.owner_fields
+                .entry(owner.clone())
+                .or_default()
+                .push(declaration.field.clone());
+            self.facts.state_declarations.push(declaration);
+        }
         if let Some(alias) = predicate_alias(node, &self.file, &owner, self.behavior) {
             self.facts.predicate_aliases.push(alias);
         }
@@ -219,6 +242,7 @@ impl<'a> Extractor<'a> {
         }
         self.functions.push(name);
         self.function_params.push(params);
+        self.local_owned_values.push(BTreeSet::new());
         let function_name = self.current_function();
         let owner_name = self.current_owner();
         self.record_initializer_field_reads(node, &owner_name, &function_name);
@@ -240,6 +264,12 @@ impl<'a> Extractor<'a> {
             self.collect_owner_fields_from_children(node);
         }
         if let Some(scope) = function_scope(node) {
+            // Default argument expressions execute at method entry and may
+            // read owner state. They live in the normalized argument list,
+            // outside the function body, so scan them explicitly.
+            if let Some(args) = scope_args(scope) {
+                self.scan(args);
+            }
             if let Some(body) = scope_body(scope) {
                 self.scan(body);
             }
@@ -248,6 +278,7 @@ impl<'a> Extractor<'a> {
             self.owners.pop();
         }
         self.receiver_aliases.pop();
+        self.local_owned_values.pop();
         self.function_params.pop();
         self.functions.pop();
         if owner_pushed {
@@ -291,7 +322,11 @@ impl<'a> Extractor<'a> {
         if let Some(recv_node) = child_node(node, 0) {
             let receiver = normalized_text(recv_node);
             if receiver != "self" {
-                self.record_semantic_effect(node, "metaprogramming", &format!("class << {receiver}"));
+                self.record_semantic_effect(
+                    node,
+                    "metaprogramming",
+                    &format!("class << {receiver}"),
+                );
             }
         }
         self.scan_children(node);
@@ -451,7 +486,15 @@ impl<'a> Extractor<'a> {
             }
         }
         if hidden_assignment_mutation(node, written_field.as_deref(), self.behavior) {
-            self.record_semantic_effect(node, "hidden_mutation", &effect_detail);
+            let receiver_scope = child_node(node, 0)
+                .map(|receiver| self.mutation_receiver_scope(receiver))
+                .unwrap_or_else(|| "unknown".to_string());
+            self.record_semantic_effect_with_scope(
+                node,
+                "hidden_mutation",
+                &effect_detail,
+                &receiver_scope,
+            );
         }
         if let Some(receiver) = child_node(node, 0) {
             self.scan(receiver);
@@ -464,10 +507,7 @@ impl<'a> Extractor<'a> {
     fn scan_operator_call(&mut self, node: &Node) {
         if let Some(operator) = child_symbol(node, 1) {
             let op = operator.as_str();
-            if matches!(
-                op,
-                "==" | "!=" | "===" | "!==" | "<" | "<=" | ">" | ">="
-            ) {
+            if matches!(op, "==" | "!=" | "===" | "!==" | "<" | "<=" | ">" | ">=") {
                 let raw = normalized_text(node);
                 self.facts.comparison_uses.push(ComparisonUse {
                     canon_source: self.behavior.normalize_comparison_source(&raw),
@@ -487,7 +527,10 @@ impl<'a> Extractor<'a> {
         if child_symbol(node, 1).as_deref() == Some("<<")
             && !self.behavior.stream_insertion_operator(node)
         {
-            self.record_semantic_effect(node, "hidden_mutation", "<<");
+            let receiver_scope = child_node(node, 0)
+                .map(|receiver| self.mutation_receiver_scope(receiver))
+                .unwrap_or_else(|| "unknown".to_string());
+            self.record_semantic_effect_with_scope(node, "hidden_mutation", "<<", &receiver_scope);
         }
         self.scan_children(node);
     }
@@ -545,7 +588,15 @@ impl<'a> Extractor<'a> {
     }
 
     fn scan_operator_assignment(&mut self, node: &Node) {
-        self.record_semantic_effect(node, "hidden_mutation", "op-assign");
+        let receiver_scope = child_node(node, 0)
+            .map(|receiver| self.mutation_receiver_scope(receiver))
+            .unwrap_or_else(|| "unknown".to_string());
+        self.record_semantic_effect_with_scope(
+            node,
+            "hidden_mutation",
+            "op-assign",
+            &receiver_scope,
+        );
         self.scan_children(node);
     }
 
@@ -620,10 +671,21 @@ impl<'a> Extractor<'a> {
             call.span,
         );
         if self.seen_calls.insert(key) {
-            if self.behavior.record_method_calls_as_state_reads() {
+            if self.behavior.record_method_calls_as_state_reads()
+                && !self.behavior.suppress_method_call_state_read(&projected)
+            {
                 self.record_state_read_for_call(&projected, node);
             }
             self.record_state_write_for_mutating_call(&call);
+            if self.behavior.opaque_receiver_escape_call(&call)
+                && call.arguments.iter().any(|argument| {
+                    self.receiver_aliases.last().is_some_and(|aliases| {
+                        aliases.contains_key(argument.trim().trim_start_matches('&'))
+                    })
+                })
+            {
+                self.record_semantic_effect(node, "opaque_state_escape", "receiver");
+            }
             if call.receiver == "self" && node.text.contains(".(") {
                 self.record_semantic_effect(
                     node,
@@ -687,6 +749,7 @@ impl<'a> Extractor<'a> {
         }
         let field =
             first_string_or_symbol(node).or_else(|| child_node(node, 0).map(|n| n.text.clone()));
+        self.record_local_owned_value(field.as_deref(), child_node(node, 1));
         let writes = self
             .behavior
             .local_assignment_writes(field.as_deref(), node, span(node));
@@ -719,6 +782,25 @@ impl<'a> Extractor<'a> {
         }
     }
 
+    fn record_local_owned_value(&mut self, name: Option<&str>, value: Option<&Node>) {
+        let Some(name) = name.map(|name| self.behavior.clean_identifier(name)) else {
+            return;
+        };
+        let owned = value.is_some_and(|value| {
+            (matches!(value.r#type.as_str(), "ARRAY" | "LIST" | "ZLIST")
+                && self.behavior.array_literal_node(value))
+                || value.r#type == "HASH"
+        });
+        let Some(locals) = self.local_owned_values.last_mut() else {
+            return;
+        };
+        if owned {
+            locals.insert(name);
+        } else {
+            locals.remove(&name);
+        }
+    }
+
     fn scan_literal_expression(&mut self, node: &Node) {
         self.record_literal_state_reads(node);
         self.scan_children(node);
@@ -737,8 +819,13 @@ impl<'a> Extractor<'a> {
     ) {
         let receiver = self.behavior.clean_receiver(&receiver);
         let field = self.behavior.clean_identifier(&field);
+        let field = self.behavior.canonical_state_field(&receiver, &field);
+        if self.behavior.suppress_state_write(&receiver, &field, node) {
+            return;
+        }
         let write = StateWrite {
             field,
+            identity: String::new(),
             receiver,
             file: self.file.clone(),
             function: self.current_function(),
@@ -746,6 +833,8 @@ impl<'a> Extractor<'a> {
             span: write_span,
             owner: self.current_owner(),
         };
+        let mut write = write;
+        write.identity = self.behavior.state_identity(&write.owner, &write.field);
         let key = (
             write.field.clone(),
             write.receiver.clone(),
@@ -767,6 +856,7 @@ impl<'a> Extractor<'a> {
         }
         let read = StateRead {
             field,
+            identity: String::new(),
             receiver: "self".to_string(),
             file: self.file.clone(),
             function: self.current_function(),
@@ -788,6 +878,7 @@ impl<'a> Extractor<'a> {
         }
         self.push_state_read(StateRead {
             field,
+            identity: String::new(),
             receiver: "self".to_string(),
             file: self.file.clone(),
             function: self.current_function(),
@@ -832,8 +923,15 @@ impl<'a> Extractor<'a> {
     }
 
     fn record_behavior_initializer_writes(&mut self, node: &Node) {
-        let node_span = [node.first_lineno, node.first_column, node.last_lineno, node.last_column];
-        let init_writes = self.behavior.initializer_writes(node, &node.text, node_span);
+        let node_span = [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ];
+        let init_writes = self
+            .behavior
+            .initializer_writes(node, &node.text, node_span);
         for write in init_writes {
             let key = (
                 write.field.clone(),
@@ -844,15 +942,20 @@ impl<'a> Extractor<'a> {
                 write.span,
             );
             if self.seen_writes.insert(key) {
-                self.facts.state_writes.push(StateWrite {
+                let mut state_write = StateWrite {
                     field: write.field,
+                    identity: String::new(),
                     receiver: write.receiver,
                     file: self.file.clone(),
                     function: self.current_function(),
                     line: node.first_lineno,
                     span: write.span,
                     owner: self.current_owner(),
-                });
+                };
+                state_write.identity = self
+                    .behavior
+                    .state_identity(&state_write.owner, &state_write.field);
+                self.facts.state_writes.push(state_write);
             }
         }
     }
@@ -872,6 +975,7 @@ impl<'a> Extractor<'a> {
         let field = self.behavior.clean_identifier(&read.field);
         self.push_state_read(StateRead {
             field,
+            identity: String::new(),
             receiver,
             file: self.file.clone(),
             function: self.current_function(),
@@ -924,6 +1028,7 @@ impl<'a> Extractor<'a> {
         };
         self.push_state_read(StateRead {
             field: call.message.clone(),
+            identity: String::new(),
             receiver: call.receiver.clone(),
             file: self.file.clone(),
             function: self.current_function(),
@@ -941,7 +1046,8 @@ impl<'a> Extractor<'a> {
             return;
         };
         let write = StateWrite {
-            field,
+            field: self.behavior.canonical_state_field("self", &field),
+            identity: String::new(),
             receiver: "self".to_string(),
             file: call.file.clone(),
             function: call.function.clone(),
@@ -949,6 +1055,8 @@ impl<'a> Extractor<'a> {
             span: call.span,
             owner: call.owner.clone(),
         };
+        let mut write = write;
+        write.identity = self.behavior.state_identity(&write.owner, &write.field);
         let key = (
             write.field.clone(),
             write.receiver.clone(),
@@ -962,7 +1070,11 @@ impl<'a> Extractor<'a> {
         }
     }
 
-    fn push_state_read(&mut self, read: StateRead) {
+    fn push_state_read(&mut self, mut read: StateRead) {
+        read.field = self
+            .behavior
+            .canonical_state_field(&read.receiver, &read.field);
+        read.identity = self.behavior.state_identity(&read.owner, &read.field);
         let key = (
             read.field.clone(),
             read.receiver.clone(),
@@ -977,13 +1089,37 @@ impl<'a> Extractor<'a> {
     }
 
     fn record_semantic_effect(&mut self, node: &Node, kind: &str, detail: &str) {
-        self.record_semantic_effect_at(node.first_lineno, span(node), kind, detail);
+        self.record_semantic_effect_with_scope(node, kind, detail, "unknown");
     }
 
-    fn record_semantic_effect_at(&mut self, line: usize, span: Span, kind: &str, detail: &str) {
+    fn record_semantic_effect_with_scope(
+        &mut self,
+        node: &Node,
+        kind: &str,
+        detail: &str,
+        receiver_scope: &str,
+    ) {
+        self.record_semantic_effect_at(
+            node.first_lineno,
+            span(node),
+            kind,
+            detail,
+            receiver_scope,
+        );
+    }
+
+    fn record_semantic_effect_at(
+        &mut self,
+        line: usize,
+        span: Span,
+        kind: &str,
+        detail: &str,
+        receiver_scope: &str,
+    ) {
         let key = (
             kind.to_string(),
             detail.to_string(),
+            receiver_scope.to_string(),
             self.current_function(),
             line,
             span,
@@ -994,11 +1130,37 @@ impl<'a> Extractor<'a> {
         self.facts.semantic_effect_sites.push(SemanticEffectSite {
             kind: kind.to_string(),
             detail: detail.to_string(),
+            receiver_scope: receiver_scope.to_string(),
             file: self.file.clone(),
             function: self.current_function(),
             line,
             span,
         });
+    }
+
+    fn mutation_receiver_scope(&self, receiver: &Node) -> String {
+        match receiver.r#type.as_str() {
+            "IVAR" | "CVAR" | "GVAR" | "SELF" => "state".to_string(),
+            "LVAR" | "DVAR" => {
+                let name = self.receiver_text(receiver);
+                if self
+                    .function_params
+                    .last()
+                    .is_some_and(|params| params.iter().any(|param| param == &name))
+                {
+                    "parameter".to_string()
+                } else if self
+                    .local_owned_values
+                    .last()
+                    .is_some_and(|locals| locals.contains(&name))
+                {
+                    "owned_local".to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            }
+            _ => "unknown".to_string(),
+        }
     }
 
     fn record_branch_decision(&mut self, node: &Node, condition: &Node) {
@@ -1851,9 +2013,10 @@ fn predicate_expression<'a>(
     behavior: &dyn NormalizedLanguageBehavior,
 ) -> Option<&'a Node> {
     if node.r#type == "BLOCK" {
-        if let Some(single) = single_expression(node) {
-            return Some(single);
-        }
+        // An exact predicate alias must be a single expression. Treating the
+        // tail `return false` of a multi-statement body as the predicate made
+        // unrelated methods look like cloned boolean APIs.
+        return single_expression(node);
     }
     if !predicate_container_node(node)
         && predicate_body_text(&normalized_text_with_behavior(node, behavior), behavior).is_some()

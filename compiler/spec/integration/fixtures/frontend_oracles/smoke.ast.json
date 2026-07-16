@@ -1,0 +1,61 @@
+{
+  "node": "Program",
+  "statements": [
+    {
+      "node": "FunctionDef",
+      "name": "main",
+      "params": [
+        {
+          "name": "value",
+          "type": {
+            "type": "Int64"
+          }
+        }
+      ],
+      "return_type": {
+        "type": "Int64"
+      },
+      "body": [
+        {
+          "node": "IfStatement",
+          "condition": {
+            "node": "BinaryOp",
+            "left": {
+              "node": "Identifier",
+              "name": "value"
+            },
+            "op": "GT",
+            "right": {
+              "node": "Literal",
+              "type": "INT64",
+              "value": 0,
+              "storage": "stack"
+            }
+          },
+          "then_branch": [
+            {
+              "node": "ReturnNode",
+              "value": {
+                "node": "Identifier",
+                "name": "value"
+              }
+            }
+          ],
+          "else_branch": [
+            {
+              "node": "ReturnNode",
+              "value": {
+                "node": "Literal",
+                "type": "INT64",
+                "value": 0,
+                "storage": "stack"
+              }
+            }
+          ]
+        }
+      ],
+      "visibility": "package",
+      "explicit_return_type": true
+    }
+  ]
+}

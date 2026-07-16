@@ -62,7 +62,7 @@ RSpec.describe Espalier::ArchitectureAnalyzer do
       }
     ]
 
-    rows = described_class.encapsulation_pressure(manifest, threshold: 10.0)
+    rows = described_class.encapsulation_pressure(manifest, threshold: 10.0, closed_world: true)
     owners = rows.map { |row| row[:owner] }
     over_public = rows.find { |row| row[:owner] == "OverPublicPhase" }
 

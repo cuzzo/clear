@@ -180,7 +180,9 @@
           ]
         },
         {
-          "arguments": [],
+          "arguments": [
+
+          ],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -198,7 +200,9 @@
           ]
         },
         {
-          "arguments": [],
+          "arguments": [
+
+          ],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -240,7 +244,9 @@
           ]
         }
       ],
-      "dispatch_sites": [],
+      "dispatch_sites": [
+
+      ],
       "file": "gems/fact-mine/examples/syntax-facts/python/core.py",
       "functions": [
         {
@@ -361,7 +367,9 @@
           ]
         }
       ],
-      "predicate_bodies": [],
+      "predicate_bodies": [
+
+      ],
       "semantic_effects": [
         {
           "detail": "op-assign",
@@ -402,6 +410,19 @@
       ],
       "state_reads": [
         {
+          "field": "@_lock",
+          "function": "process",
+          "line": 18,
+          "owner": "PythonSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            18,
+            13,
+            18,
+            23
+          ]
+        },
+        {
           "field": "append",
           "function": "process",
           "line": 37,
@@ -412,45 +433,6 @@
             12,
             37,
             25
-          ]
-        },
-        {
-          "field": "audit",
-          "function": "process",
-          "line": 45,
-          "owner": "PythonSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            45,
-            16,
-            45,
-            26
-          ]
-        },
-        {
-          "field": "default",
-          "function": "process",
-          "line": 35,
-          "owner": "PythonSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            35,
-            20,
-            35,
-            32
-          ]
-        },
-        {
-          "field": "escalate",
-          "function": "process",
-          "line": 33,
-          "owner": "PythonSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            33,
-            20,
-            33,
-            33
           ]
         },
         {

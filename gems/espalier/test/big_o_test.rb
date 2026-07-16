@@ -40,11 +40,20 @@ class BigOTest < Minitest::Test
 
     analyzer = Espalier::BigOAnalyzer.new(
       class_name: "Owner", ivar_types: { "@cfg" => "FunctionCFG", "@values" => "Hash" },
-      nil_kill: nil_kill, local_types: { "users" => "T.nilable(T::Array[User])" }
+      nil_kill: nil_kill,
+      local_types: {
+        "users" => "T.nilable(T::Array[User])",
+        "tokens" => "T.nilable(T::Array[AST::Token])",
+        "table" => "T::Hash[String, T::Array[AST::Token]]",
+        "text" => "String"
+      }
     )
     assert_equal "Owner", analyzer.send(:resolve_type, "self", 1)
     assert_equal "Array", analyzer.send(:resolve_type, "items", 1)
     assert_equal "Array", analyzer.send(:resolve_type, "users", 1)
+    assert_equal "AST::Token", analyzer.send(:resolve_type, "tokens[position]", 1)
+    assert_equal "Array", analyzer.send(:resolve_type, "table[key]", 1)
+    assert_equal "String", analyzer.send(:resolve_type, "text[position]", 1)
     assert_equal "Array", analyzer.send(:resolve_type, "cfg.blocks", 1)
 
     result = analyzer.analyze_method("sort", [
@@ -71,8 +80,10 @@ class BigOTest < Minitest::Test
         operation: "normalized_ast", reason: "normalized fact", is_dynamic: true,
         trigger: "line 10" }
     ])
-    assert_equal "O(N^2)", result[:lower_bound_complexity]
-    assert_equal "O(log N)", result[:space_complexity]
+    assert_equal "unknown", result[:lower_bound_complexity]
+    assert_equal "unknown", result[:space_complexity]
+    assert_equal "O(N^2)", result[:known_time_component]
+    assert_equal "O(log N)", result[:known_space_component]
     assert result[:is_dynamic]
     assert_equal "line 10", result[:trigger]
     assert result[:warnings].any? { |warning| warning.include?("Function pointer") }
@@ -101,7 +112,66 @@ class BigOTest < Minitest::Test
     ])
     assert_includes result[:unknown_operations], "Widget#work"
     assert_includes result[:unknown_operations], "mystery.work"
+    assert_equal "unknown", result[:lower_bound_complexity]
+    assert_equal "O(1)", result[:known_time_component]
+    refute result[:time_complete]
+    refute result[:space_complete]
     assert_equal 3, result[:warnings].size
+  end
+
+  def test_declared_struct_fields_are_constant_without_hiding_methods
+    analyzer = Espalier::BigOAnalyzer.new(
+      local_types: { "node" => "AST::BinaryOp" },
+      declared_fields: { "AST::BinaryOp" => %w[left right] }
+    )
+
+    field = analyzer.analyze_method("field", [
+      { type: :call, receiver: "node", method: "left", line: 1 }
+    ])
+    assert_equal "O(1)", field[:lower_bound_complexity]
+    assert_equal "O(1)", field[:space_complexity]
+    assert field[:time_complete]
+    assert field[:space_complete]
+    assert_empty field[:unknown_operations]
+
+    method = analyzer.analyze_method("method", [
+      { type: :call, receiver: "node", method: "rewrite", line: 2 }
+    ])
+    assert_equal "unknown", method[:lower_bound_complexity]
+    assert_includes method[:unknown_operations], "AST::BinaryOp#rewrite"
+  end
+
+  def test_internal_calls_are_complete_but_callbacks_are_not
+    analyzer = Espalier::BigOAnalyzer.new
+    internal = analyzer.analyze_method("wrapper", [{
+      type: :call, receiver: "self", method: "helper", line: 2, internal_call: true
+    }])
+    assert_equal "O(1)", internal[:lower_bound_complexity]
+    assert_equal "O(1)", internal[:known_time_component]
+    assert internal[:time_complete]
+    assert internal[:space_complete]
+
+    callback = analyzer.analyze_method("callback", [{ type: :callback, line: 3 }])
+    assert_equal "unknown", callback[:lower_bound_complexity]
+    assert_equal "unknown", callback[:space_complexity]
+    assert_equal "O(1)", callback[:known_time_component]
+    assert_equal "O(1)", callback[:known_space_component]
+    refute callback[:time_complete]
+    refute callback[:space_complete]
+  end
+
+  def test_structural_unknown_preserves_proven_components
+    analyzer = Espalier::BigOAnalyzer.new
+    result = analyzer.analyze_method("partial", [
+      { type: :structural, line: 4, complexity: "O(N)", space: "O(N)" },
+      { type: :structural, line: 5, complexity: "unknown", space: "unknown" }
+    ])
+    assert_equal "unknown", result[:lower_bound_complexity]
+    assert_equal "unknown", result[:space_complexity]
+    assert_equal "O(N)", result[:known_time_component]
+    assert_equal "O(N)", result[:known_space_component]
+    refute result[:time_complete]
+    refute result[:space_complete]
   end
 
   def test_structural_big_o_only_consumes_normalized_facts
@@ -169,17 +239,194 @@ class BigOTest < Minitest::Test
     recursive_hints = recursive_consumer.hints_for(nil, { id: "method-1", name: "work", line: 1 }, "Owner")
     assert_equal "unknown", recursive_hints.last[:complexity]
     assert_equal "unknown", recursive_hints.last[:space]
+    mutual_facts = {
+      ["Owner", "even_step"] => [{
+        "line" => 20, "parameters" => ["n"], "iterations" => [],
+        "recursion" => { "calls" => 0 },
+        "call_contexts" => [{ "line" => 21, "message" => "odd_step", "argument_progress" => "shrinking" }]
+      }],
+      ["Owner", "odd_step"] => [{
+        "line" => 24, "parameters" => ["n"], "iterations" => [],
+        "recursion" => { "calls" => 0 },
+        "call_contexts" => [{ "line" => 25, "message" => "even_step", "argument_progress" => "halving" }]
+      }]
+    }
+    mutual_consumer = Espalier::StructuralBigO.new(
+      facts_by_method: mutual_facts,
+      method_complexities: { "Owner" => { "even_step" => "O(1)", "odd_step" => "O(1)" } },
+      internal_calls: { "Owner" => { "even_step" => ["odd_step"], "odd_step" => ["even_step"] } },
+      recursive_edges: {
+        ["Owner", "even_step", "odd_step"] => true,
+        ["Owner", "odd_step", "even_step"] => true
+      }
+    )
+    mutual_hint = mutual_consumer.hints_for(nil, { name: "even_step", line: 20 }, "Owner").last
+    assert_equal "O(N)", mutual_hint[:complexity]
+    assert_equal "O(N)", mutual_hint[:space]
+    assert_equal "high", mutual_hint[:confidence]
+    assert_includes mutual_hint[:reason], "size-change proof"
     assert_equal ["O(N)", "O(log N)", "multiple halving recursive branches"],
       consumer.send(:recursion_complexity, { "calls" => 2, "halving_calls" => 2 }, 1)
     assert_equal ["O(log N)", "O(log N)", "halving recursive progress"],
       consumer.send(:recursion_complexity, { "calls" => 1, "halving_calls" => 1 }, 1)
     assert_equal ["O(N)", "O(N)", "single shrinking recursive progress"],
       consumer.send(:recursion_complexity, { "calls" => 1, "shrinking_calls" => 1 }, 1)
+    assert_equal ["O(N)", "O(N)", "visited-set guarded structural recursion"],
+      consumer.send(:recursion_complexity, {
+        "calls" => 2, "visited_guarded_calls" => 2, "unknown_progress_calls" => 0
+      }, 2)
     unknown = consumer.send(:summary_hint, {
       "line" => 9, "parameters" => ["items"], "recursion" => { "calls" => 0 },
       "iterations" => [{ "power" => 1, "cardinality_relation" => "unknown", "execution_multiplicity" => "unknown" }]
     }, { line: 9 })
     assert_equal "unknown", unknown[:complexity]
+  end
+
+  def test_interprocedural_domains_are_attributed_to_the_callee
+    domain = {
+      "id" => "state:Helper:@items", "name" => "@items", "source_kind" => "state",
+      "path" => "helper.py", "span" => [20, 4, 20, 15]
+    }
+    callee_symbolic = Espalier::SymbolicComplexity.from_fact(
+      { "factors" => [{ "domain_id" => domain["id"], "exponent" => 1 }], "complete" => true },
+      [domain]
+    )
+    facts = {
+      "caller-id" => [{
+        "owner" => "Caller", "function" => "render", "line" => 3,
+        "parameters" => [], "iterations" => [], "size_domains" => [],
+        "recursion" => { "calls" => 0 },
+        "call_contexts" => [{ "line" => 4, "message" => "helper" }]
+      }],
+      ["Caller", "helper"] => [{
+        "owner" => "Caller", "function" => "helper", "line" => 20,
+        "parameters" => [], "iterations" => [], "size_domains" => [domain],
+        "recursion" => { "calls" => 0 }, "call_contexts" => []
+      }]
+    }
+    consumer = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      method_complexities: { "Caller" => { "helper" => "O(N)" } },
+      method_symbolic_time: { "Caller" => { "helper" => callee_symbolic } }
+    )
+
+    hint = consumer.hints_for(nil, { id: "caller-id", name: "render", line: 3 }, "Caller").last
+    variable = Espalier::SymbolicComplexity.render(hint[:symbolic_time]).last.first
+    assert_equal "Caller", variable[:origin_owner]
+    assert_equal "helper", variable[:origin_function]
+    assert_equal({ owner: "Caller", function: "render", message: "helper", line: 4 },
+      variable[:propagated_via].transform_keys(&:to_sym))
+  end
+
+  def test_state_replay_requires_generic_protocol_domain_progress_and_branching_evidence
+    statement = {
+      "line" => 1, "parameters" => [], "iterations" => [],
+      "recursion" => { "calls" => 0 },
+      "call_contexts" => [
+        { "message" => "speculate", "line" => 2 },
+        { "message" => "parse_value", "line" => 3 }
+      ]
+    }
+    speculate = {
+      "line" => 5, "parameters" => [], "iterations" => [],
+      "recursion" => { "calls" => 0 },
+      "call_contexts" => [{ "message" => "parse_value", "line" => 7 }],
+      "state_replays" => [{
+        "state_domain" => "state:Walker:@cursor",
+        "replayed_calls" => [{ "message" => "parse_value", "line" => 7 }]
+      }]
+    }
+    value = {
+      "line" => 10, "parameters" => [], "iterations" => [],
+      "recursion" => { "calls" => 0 },
+      "call_contexts" => [{ "message" => "parse_statement", "line" => 12 }],
+      "state_progress" => [{
+        "state_domain" => "state:Walker:@cursor", "direction" => "advance"
+      }],
+      "state_cursor_domains" => [{
+        "cursor_domain" => "state:Walker:@cursor",
+        "collection_domain" => "state:Walker:@items"
+      }]
+    }
+    facts = {
+      ["Walker", "parse_statement"] => [statement],
+      ["Walker", "speculate"] => [speculate],
+      ["Walker", "parse_value"] => [value]
+    }
+    graph = {
+      "Walker" => {
+        "parse_statement" => %w[speculate parse_value],
+        "speculate" => ["parse_value"],
+        "parse_value" => ["parse_statement"]
+      }
+    }
+    recursive_edges = {
+      ["Walker", "parse_statement", "speculate"] => true,
+      ["Walker", "parse_statement", "parse_value"] => true,
+      ["Walker", "speculate", "parse_value"] => true,
+      ["Walker", "parse_value", "parse_statement"] => true
+    }
+    consumer = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      internal_calls: graph,
+      recursive_edges: recursive_edges
+    )
+
+    hint = consumer.hints_for(nil, { name: "parse_statement", line: 1 }, "Walker").first
+    assert_equal "O(2^N)", hint[:complexity]
+    assert_equal "O(N)", hint[:space]
+    assert_includes hint[:reason], "checkpoint restoration"
+
+    without_cursor_domain = Marshal.load(Marshal.dump(facts))
+    without_cursor_domain[["Walker", "parse_value"]][0]["state_cursor_domains"] = []
+    rejected = Espalier::StructuralBigO.new(
+      facts_by_method: without_cursor_domain,
+      internal_calls: graph,
+      recursive_edges: recursive_edges
+    ).hints_for(nil, { name: "parse_statement", line: 1 }, "Walker").first
+    refute_equal "O(2^N)", rejected[:complexity]
+  end
+
+  def test_structural_big_o_propagates_unique_cross_owner_targets
+    facts = {
+      ["Caller", "run"] => [{
+        "line" => 2, "parameters" => [], "iterations" => [],
+        "recursion" => { "calls" => 0 },
+        "call_contexts" => [{
+          "line" => 3, "message" => "work", "execution_multiplicity" => "O(1)",
+          "argument_cardinality_relation" => "same"
+        }]
+      }]
+    }
+    consumer = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      method_complexities: { "Target" => { "work" => "O(N)" } },
+      method_spaces: { "Target" => { "work" => "O(1)" } },
+      method_time_complete: { "Target" => { "work" => true } },
+      method_space_complete: { "Target" => { "work" => true } },
+      resolved_calls: {
+        ["Caller", "run", "work", 3] => ["Target", "work"]
+      }
+    )
+
+    hints = consumer.hints_for(nil, { name: "run", line: 2 }, "Caller")
+    propagated = hints.find { |hint| hint[:operation] == "work" }
+    assert_equal "O(N)", propagated[:complexity]
+    assert_equal "O(1)", propagated[:space]
+    assert propagated[:time_complete]
+    assert propagated[:space_complete]
+
+    recursive = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      method_complexities: { "Target" => { "work" => "O(N)" } },
+      resolved_calls: { ["Caller", "run", "work", 3] => ["Target", "work"] },
+      resolved_recursive_edges: { ["Caller", "run", "Target", "work"] => true }
+    ).hints_for(nil, { name: "run", line: 2 }, "Caller")
+      .find { |hint| hint[:operation] == "work" }
+    assert_equal "unknown", recursive[:complexity]
+    assert_equal "unknown", recursive[:space]
+    refute recursive[:time_complete]
+    refute recursive[:space_complete]
   end
 
   def test_remaining_complexity_lattice_and_type_resolution_paths
@@ -207,6 +454,23 @@ class BigOTest < Minitest::Test
       execution_complexity: "O(N)"
     }])
     assert_equal "O(N^2 log N)", result[:lower_bound_complexity]
+  end
+
+  def test_normalized_call_costs_do_not_depend_on_an_espalier_language_registry
+    analyzer = Espalier::BigOAnalyzer.new(language: :unknown)
+    result = analyzer.analyze_method("typed_call", [{
+      type: :call,
+      receiver: "items",
+      method: "sort",
+      line: 4,
+      known_time_complexity: "O(N log N)",
+      known_space_complexity: "O(N)"
+    }])
+    assert_equal "O(N log N)", result[:lower_bound_complexity]
+    assert_equal "O(N)", result[:space_complexity]
+    assert result[:time_complete]
+    assert result[:space_complete]
+    assert_empty result[:unknown_operations]
   end
 
   def test_unknown_loop_call_with_collection_argument_stays_unknown

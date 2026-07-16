@@ -375,12 +375,6 @@ RSpec.describe ClearParser do
 
   describe ClearParser do
     it "covers token-level parser helpers and parser-only predicate suffixes" do
-      underscore = ClearParser.new([
-        token(:UNDERSCORE, "_"),
-        token(:EOF, nil),
-      ], "_").send(:consume_literal, "_")
-      expect(underscore.type).to eq(:UNDERSCORE)
-
       parser = parser_for("x")
       expect(parser.send(:match_at?, 1, :EOF)).to be(true)
       expect(parser.send(:match_at?, 99, :EOF)).to be(false)
@@ -411,14 +405,14 @@ RSpec.describe ClearParser do
       expect(func_call.name).to eq("check?")
     end
 
-    it "covers functor-call suffixes and bind backtracking" do
+    it "covers functor-call suffixes and invalid assignment targets" do
       expect(parse_expr("(f)()")).to be_a(AST::FuncCall)
 
       compound = parser_for("f() += 1;")
-      expect(compound.send(:try_parse_bind_or_assign)).to be_nil
+      expect { compound.send(:parse_statement) }.to raise_error(ParserError, /Invalid assignment target/)
 
       assignment = parser_for("f() = 1;")
-      expect(assignment.send(:try_parse_bind_or_assign)).to be_nil
+      expect { assignment.send(:parse_statement) }.to raise_error(ParserError, /Invalid assignment target/)
     end
 
     it "parses TIGHT, EXIT, DIE, extern, method, and requires edge cases" do
@@ -471,13 +465,6 @@ RSpec.describe ClearParser do
       expect(chained).to be_a(AST::IfBind)
       expect(chained.bindings.map(&:name)).to eq(%w[a b])
 
-      bare = AST::BinaryOp.new(token, AST::Identifier.new(token, "maybe"), :BIND_VAR, AST::Identifier.new(token, "a"))
-      expect {
-        parser_for("").send(:validate_no_bare_bind!, AST::BinaryOp.new(token, bare, :AND, AST::Identifier.new(token, "ok")), token(:KEYWORD, "IF"))
-      }.to raise_error(ParserError, /Multiple optional bindings/)
-      expect {
-        parser_for("").send(:validate_no_bare_bind!, AST::BinaryOp.new(token, AST::Identifier.new(token, "ok"), :AND, bare), token(:KEYWORD, "IF"))
-      }.to raise_error(ParserError, /Multiple optional bindings/)
     end
 
     it "parses match-expression arms, multi-pattern metadata, and while-bind shorthand" do
@@ -557,13 +544,18 @@ RSpec.describe ClearParser do
           token(:CHAR, ":"),
           token(:KEYWORD, "RETURN"),
           token(:EOF, nil),
-        ], ": RETURN").send(:parse_cap_join, token(:VAR_ID, "@shared"), { dim: :ownership, val: :shared })
+        ], ": RETURN").send(
+          :parse_cap_join,
+          token(:VAR_ID, "@shared"),
+          ClearParser::SigilAttrs.new(dim: :ownership, val: :shared),
+        )
       }.to raise_error(ParserError, /Expected a capability/)
 
       expect {
         parser_for("(rank: 1)(rank: 2)").tap do |p|
-          dims = { ownership: nil, sync: nil, layout: nil, lock_rank: 1 }
-          p.send(:parse_lock_rank_arg!, token(:VAR_ID, "@locked"), { dim: :sync, val: :locked }, dims)
+          dims = ClearParser::CapJoin.new(lock_rank: 1)
+          attrs = ClearParser::SigilAttrs.new(dim: :sync, val: :locked)
+          p.send(:parse_lock_rank_arg!, token(:VAR_ID, "@locked"), attrs, dims)
         end
       }.to raise_error(ParserError, /Duplicate rank/)
 
@@ -591,7 +583,7 @@ RSpec.describe ClearParser do
     it "covers capability and shape copying plus raw shape resolution" do
       caps = TypeCapabilities.new(ownership: :shared)
       expect(caps.copy.ownership).to eq(caps.ownership)
-      expect(caps.copy).not_to equal(caps)
+      expect(caps.copy).to equal(caps)
 
       shape = TypeShape.from_core("Box<Int64>")
       copy = shape.copy

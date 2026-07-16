@@ -41,7 +41,7 @@ FN main() RETURNS Void ->
     FOR run IN (0_i64 ..< 10000) DO
         # `parts` declared inside the loop → compiler emits saveLoopMark/restoreLoopMark,
         # rewinding the frame arena each iteration.
-        MUTABLE parts: String[]@list = List[];
+        MUTABLE parts: []String = List[];
 
         FOR i IN (0_i64 ..< 1000) -> parts.append("hello");
 

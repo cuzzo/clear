@@ -16,26 +16,32 @@ module Annotator
 
       sig { params(node: AST::WithBlock, fact: CapabilityPlan::CapabilityTransition).void }
       def record_deferred_with_validation!(node, fact)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         deferred_with_validations << DeferredWithValidation.new(
           node: node,
           fact: fact
         )
       end
 
+    end
+
+    module DeferredCapabilityAudit
+      extend T::Sig
+
       sig { void }
       def run_deferred_validations!
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
         flush_deferred_with_validations!
         finalize_capability_audit!
       end
+      private :run_deferred_validations!
 
       # Replay deferred WITH-on-param checks after caller-sync propagation has
       # had a chance to populate entry.sync.
       sig { returns(T::Array[DeferredWithValidation]) }
       def flush_deferred_with_validations!
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
         deferred_with_validations.each do |d|
           fact = d.fact
@@ -58,8 +64,8 @@ module Annotator
         end
         deferred_with_validations.clear
       end
-          private :flush_deferred_with_validations!
+      private :flush_deferred_with_validations!
 
-end
+    end
   end
 end

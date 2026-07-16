@@ -2088,11 +2088,12 @@ RSpec.describe "MIR gap-burn characterization" do
       nil,
       "pub fn helper() void {}",
       "/tmp",
-      nil,
-      nil,
-      nil,
-      nil,
-      nil,
+      {},
+      {},
+      {},
+      "",
+      [],
+      [],
     )
     importer = ModuleImporter.new(base_dir: "/tmp")
     importer.define_singleton_method(:compile_file) { |_path, caller_dir:| imported_mod }
@@ -2539,8 +2540,8 @@ RSpec.describe "MIR gap-burn characterization" do
       AST::Capability.new(capability: :EXCLUSIVE, var_node: match_cell, alias: "guarded")
     ], [], nil)
     match_node.arms = [
-      { family: :LOCKED, body: [AST::PassStmt.new(tok)] },
-      { family: :VERSIONED, body: [AST::PassStmt.new(tok)] },
+      AST::WithMatchArm.new(family: :LOCKED, body: [AST::PassStmt.new(tok)]),
+      AST::WithMatchArm.new(family: :VERSIONED, body: [AST::PassStmt.new(tok)]),
     ]
     attach_capability_plan!(match_node)
     low.define_singleton_method(:lower_body) { |_body| [MIR::Noop.new] }
@@ -2629,6 +2630,14 @@ RSpec.describe "MIR gap-burn characterization" do
     low.send(:mark_ownership_finalized_node!, finalized_for_append)
     low.send(:append_transfer_marks!, [finalized_for_append], append_state)
     expect(append_state.out).to eq([finalized_for_append])
+
+    duplicate_state = ownership_finalization_context(out: [MIR::MoveMark.new("owned")])
+    duplicate_state.transfer_mark_names << "owned"
+    low.send(:append_transfer_marks!, [
+      MIR::MoveMark.new("owned"),
+      MIR::TransferMark.new("owned", :return, :heap),
+    ], duplicate_state)
+    expect(duplicate_state.out).to contain_exactly(MIR::MoveMark.new("owned"))
 
     expect(low.send(:alloc_mark_present?, [MIR::AllocMark.new("owned", :heap, Type.new(:String))], "owned")).to eq(true)
     expect(low.send(:transfer_mark_present?, [MIR::TransferMark.new("owned", :return, :heap)], "owned")).to eq(true)
@@ -3305,7 +3314,7 @@ RSpec.describe "MIR gap-burn characterization" do
     error_fallback.full_type = Type.new(:String)
     expect(low.send(:or_fallback_expected_type, error_fallback).resolved).to eq(:String)
 
-    ex = AST::OrElseExit.new(tok, nil, :MvccConflict, nil)
+    ex = AST::OrElseExit.new(tok, nil, "MvccConflict", nil)
     facts = low.send(:or_else_exit_facts, ex, 11)
     expect(facts.kind).to eq(AST.kind_of_type(:MvccConflict).to_s)
     expect(facts.name_id).to eq(AST.id_of_type(:MvccConflict))

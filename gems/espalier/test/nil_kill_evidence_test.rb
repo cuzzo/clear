@@ -3,6 +3,7 @@
 require "minitest/autorun"
 require "tmpdir"
 require "json"
+require "fileutils"
 require_relative "../lib/espalier/nil_kill_evidence"
 
 class NilKillEvidenceTest < Minitest::Test
@@ -59,6 +60,26 @@ class NilKillEvidenceTest < Minitest::Test
       File.write(path, "invalid json")
       evidence = Espalier::NilKillEvidence.load(path)
       assert_empty evidence.method_signatures
+    end
+  end
+
+  def test_loads_aggregated_and_legacy_loop_rows
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "evidence.json")
+      runtime = File.join(dir, "runtime")
+      FileUtils.mkdir_p(runtime)
+      File.write(path, JSON.generate("facts" => {}, "methods" => []))
+      File.write(
+        File.join(runtime, "loops-1.jsonl"),
+        [
+          JSON.generate("path" => "/src/work.rb", "line" => 9, "count" => 7),
+          JSON.generate("path" => "/src/work.rb", "line" => 9),
+        ].join("\n") + "\n"
+      )
+
+      evidence = Espalier::NilKillEvidence.load(path)
+
+      assert_equal 8, evidence.loop_counts["/src/work.rb"][9]
     end
   end
 end

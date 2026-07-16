@@ -436,10 +436,17 @@ end
 # Include in classes that provide a `scope_stack` method.
 module ScopeHelper
     extend T::Sig
+    extend T::Helpers
+
+  abstract!
+
+  sig { abstract.returns(T::Array[Scope]) }
+  def scope_stack; end
+  private :scope_stack
 
   sig { returns(T::Array[Scope]) }
   def scope_stack_for_helper
-    T.cast(T.unsafe(self).__send__(:scope_stack), T::Array[Scope])
+    scope_stack
   end
 
   sig { returns(Scope) }
@@ -499,7 +506,14 @@ module ScopeHelper
     names.uniq
   end
 
-  sig { params(scope: T.nilable(Scope), blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  sig do
+    type_parameters(:Result)
+      .params(
+        scope: T.nilable(Scope),
+        blk: T.proc.returns(T.type_parameter(:Result)),
+      )
+      .returns(T.type_parameter(:Result))
+  end
   def with_new_scope(scope = nil, &blk)
     new_scope = scope.nil? ? Scope.new : scope.dup
     # Root scope keeps depth 0; each `with_new_scope` nest increases depth by

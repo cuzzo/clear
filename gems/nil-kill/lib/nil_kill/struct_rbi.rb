@@ -196,25 +196,7 @@ module NilKill
     end
 
     def existing_rbi_types
-      types = {}
-      Dir.glob(File.join(ROOT, "sorbet", "rbi", "**", "*.rbi")).each do |path|
-        klass = nil
-        pending_type = nil
-        File.readlines(path).each do |line|
-          if line =~ /^\s*class\s+([A-Z]\S*)/
-            klass = $1
-          elsif klass && line =~ /^\s*sig\s*\{\s*returns\((.+)\)\s*\}/
-            pending_type = $1.strip
-          elsif klass && line =~ /^\s*def\s+([a-zA-Z_]\w*)\b/
-            types[[klass, $1]] = pending_type || "T.untyped"
-            pending_type = nil
-          elsif line =~ /^\s*end\s*$/
-            klass = nil
-            pending_type = nil
-          end
-        end
-      end
-      types
+      StructFieldTypeIndex.from_rbi(ROOT)
     end
 
     def option_value(argv, flag)

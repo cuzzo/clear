@@ -30,13 +30,6 @@ module AutoType
       @skipped = Set.new
       @permanent_skip = load_permanent_skip
       @z3_solver = nil
-      load_z3_solver
-    end
-
-    def load_z3_solver
-      require "nil_kill/inference/z3_solver"
-    rescue LoadError, SyntaxError => e
-      warn "auto-type: Z3 solver not loaded (#{e.message}); running without pre-filter"
     end
 
     def load_permanent_skip
@@ -159,13 +152,55 @@ module AutoType
     # struct-rbi --validate's all-or-nothing revert.
     def struct_rbi_review_actions(evidence, existing_actions = [])
       seen = existing_actions.map { |action| fingerprint(action) }.to_set
+      existing_contracts = existing_struct_rbi_contracts(Array(evidence["actions"]))
       Array(evidence["actions"]).select do |action|
         next false unless action["confidence"] == NilKill::REVIEW
         next false unless action["kind"] == "add_struct_field_sig"
+        if action.dig("data", "target").to_s == "rbi"
+          contract = [action.dig("data", "class").to_s, action.dig("data", "field").to_s,
+                      action.dig("data", "type").to_s]
+          next false if existing_contracts.fetch(action["path"].to_s, Set.new).include?(contract)
+        end
         next false if seen.include?(fingerprint(action))
         next false if @skipped.include?(fingerprint(action))
         next false if permanently_skipped?(action)
         true
+      end
+    end
+
+    # The inference report intentionally continues to describe every
+    # resolvable Struct field even after its generated RBI has landed. A
+    # repeated verified loop must not feed those already-exact contracts back
+    # through Sorbet one at a time. Index the regular generated RBI once per
+    # selection pass and retain only missing or changed contracts.
+    def existing_struct_rbi_contracts(actions)
+      paths = actions.filter_map do |action|
+        next unless action["kind"] == "add_struct_field_sig"
+        next unless action.dig("data", "target").to_s == "rbi"
+        action["path"].to_s
+      end.uniq
+      paths.to_h do |rel_path|
+        path = File.expand_path(rel_path, NilKill::ROOT)
+        contracts = Set.new
+        current_class = nil
+        pending_type = nil
+        if File.file?(path)
+          File.foreach(path) do |line|
+            if (match = line.match(/\Aclass\s+(\S+)\s*\z/))
+              current_class = match[1]
+              pending_type = nil
+            elsif current_class && (match = line.match(/\A\s+sig \{ returns\((.+)\) \}\s*\z/))
+              pending_type = match[1]
+            elsif current_class && pending_type && (match = line.match(/\A\s+def\s+(\S+);\s*end\s*\z/))
+              contracts.add([current_class, match[1], pending_type])
+              pending_type = nil
+            elsif line.match?(/\Aend\s*\z/)
+              current_class = nil
+              pending_type = nil
+            end
+          end
+        end
+        [rel_path, contracts]
       end
     end
 
@@ -593,7 +628,7 @@ module AutoType
     def snapshot_files(actions)
       actions.flat_map { |action| snapshot_paths_for_action(action) }.uniq.each_with_object({}) do |rel_path, snapshot|
         path = File.expand_path(rel_path, NilKill::ROOT)
-        snapshot[path] = File.read(path) if File.file?(path)
+        snapshot[path] = File.file?(path) ? File.read(path) : nil
       end
     end
 
@@ -608,7 +643,9 @@ module AutoType
     end
 
     def restore_files(snapshot)
-      snapshot.each { |path, content| File.write(path, content) }
+      snapshot.each do |path, content|
+        content.nil? ? FileUtils.rm_f(path) : File.write(path, content)
+      end
     end
 
     def fingerprint(action)

@@ -28,6 +28,8 @@ RSpec.describe "in-place instrumentation lifecycle" do
   it "snapshots pristine, wraps the real file in place, restores byte-perfect" do
     dir = corpus_with_sigd_method
     a = File.join(dir, "a.rb")
+    untouched = File.join(dir, "untouched.rb")
+    File.write(untouched, "VALUE = 1\n")
     pristine = File.read(a)
     snap = File.join(NilKill::TMP_DIR, "src-snapshot")
     manifest = nil
@@ -37,6 +39,9 @@ RSpec.describe "in-place instrumentation lifecycle" do
     end
     rel = NilKill.rel(a)
     expect(manifest).to include(rel)
+    expect(manifest).not_to include(NilKill.rel(untouched))
+    expect(File.exist?(File.join(snap, NilKill.rel(untouched)))).to be(false)
+    expect(File.read(untouched)).to eq("VALUE = 1\n")
     # wrapped in place at the REAL path
     expect(File.read(a)).to include("NilKillRuntimeTrace.record_source_method_call")
     expect(File.read(a)).not_to eq(pristine)

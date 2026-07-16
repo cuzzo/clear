@@ -2,7 +2,7 @@
 # Value union, Env struct, and accessor functions.
 
 STRUCT Env {
-    vars: HashMap<Value>
+    vars: {String}Value
 }
 
 UNION Value {
@@ -10,11 +10,11 @@ UNION Value {
     Number: Float64, Str: String, Symbol: String,
     List: Value[],
     Vector: Value[],
-    Pair { pairCar: Value @indirect, pairCdr: Value @indirect },
-    Lambda { params: Value[], body: Value @indirect, envId: Id<Env> },
+    Pair { pairCar: Value @boxed, pairCdr: Value @boxed },
+    Lambda { params: Value[], body: Value @boxed, envId: Id<Env> },
     NativeFn: Int64,
     EnvRef: Id<Env>,
-    Tco { tcoAst: Value @indirect, tcoEnv: Id<Env> },
+    Tco { tcoAst: Value @boxed, tcoEnv: Id<Env> },
     Error { errMsg: String, errKind: String, errType: String },
     Int64Val: Int64,
     TypedI64Arr: Int64[],
@@ -201,7 +201,7 @@ FN prStr(v: Value, readably: Bool) RETURNS !String EFFECTS REENTRANT ->
     RETURN "";
 END
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS !Value
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value
   REQUIRES pool: LOCKED
   EFFECTS REENTRANT
 ->

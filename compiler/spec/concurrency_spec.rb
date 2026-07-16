@@ -445,9 +445,9 @@ RSpec.describe SemanticAnnotator do
         expect { run(code) }.to raise_error(CompilerError, /Capability @locked cannot be applied to primitive type/)
       end
 
-      it "raises error when @indirect is used on a number literal" do
-        code = "FN f() RETURNS !Void -> x = 42 @indirect; RETURN; END"
-        expect { run(code) }.to raise_error(CompilerError, /Capability @indirect cannot be applied to primitive type/)
+      it "raises error when @boxed is used on a number literal" do
+        code = "FN f() RETURNS !Void -> x = 42 @boxed; RETURN; END"
+        expect { run(code) }.to raise_error(CompilerError, /Capability @boxed cannot be applied to primitive type/)
       end
     end
   end
@@ -1563,14 +1563,14 @@ RSpec.describe SemanticAnnotator do
 
     describe "visit_BgBlock" do
       it "sets full_type to ~Void when body is empty" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         node = make_bg_block([])
         annotator.send(:visit_BgBlock, node)
         expect(node.full_type).to eq(:"~Void")
       end
 
       it "wraps the last expression's type in ~ (Float64 literal body)" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         bg = make_bg_block([make_num_lit])
         annotator.send(:visit_BgBlock, bg)
         expect(bg.full_type).to eq(:"~Float64")
@@ -1579,7 +1579,7 @@ RSpec.describe SemanticAnnotator do
 
     describe "visit_NextExpr" do
       it "raises when NEXT is called on a Float64 literal (non-tense)" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         next_node = make_next_expr(make_num_lit)
         expect { annotator.send(:visit_NextExpr, next_node) }
           .to raise_error(SourceError, /NEXT requires a future value/)
@@ -1612,7 +1612,7 @@ RSpec.describe SemanticAnnotator do
 
     describe "ownership tracker linear check" do
       it "raises when a tense variable is live at scope end" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         dummy_token = Lexer::Token.new(:KEYWORD, 'BG', 1, 1)
         dummy_node  = AST::BgBlock.new(dummy_token, [])
 
@@ -1627,7 +1627,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "does NOT raise when the tense variable has been moved (consumed)" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         dummy_token = Lexer::Token.new(:KEYWORD, 'BG', 1, 1)
         dummy_node  = AST::BgBlock.new(dummy_token, [])
 
@@ -1797,7 +1797,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Entity { health: Int64 }
         FN f() RETURNS !Void ->
           p: ~Int64 = BG {
-            MUTABLE pool: Entity[8]@pool = [];
+            MUTABLE pool: [Pool(8)]Entity = [];
             pool.insert(Entity{ health: 10_i64 });
             sleep(1_i64);
             1_i64;

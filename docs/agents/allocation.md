@@ -104,7 +104,7 @@ Is it returned from a function?
   or promoted to heap (lists, maps)
 ```
 
-String literals are compile-time constants in read-only memory — zero allocation. `@indirect` forces heap allocation for recursive types (e.g., tree nodes with self-referential pointers).
+String literals are compile-time constants in read-only memory — zero allocation. `@boxed` forces heap allocation for recursive types (e.g., tree nodes with self-referential pointers).
 
 This happens at compile time. The emitted Zig code uses the correct allocator with zero runtime decision-making.
 

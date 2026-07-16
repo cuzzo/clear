@@ -1428,6 +1428,41 @@ RSpec.describe SemanticAnnotator do
     end
 
     describe "BG STREAM open streams" do
+      it "uses spawned stream storage for canonical finite numeric producers" do
+        src = <<~CLEAR
+          FN f() RETURNS !Void ->
+            s: [~]Int64 = BG STREAM { YIELD 1; };
+            IF NEXT s EXISTS AS value THEN
+              ASSERT value == 1;
+            END
+            RETURN;
+          END
+        CLEAR
+
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("CheatLib.Stream(i64).spawnNew")
+        expect(out).not_to include("CheatLib.IntRange.spawnNew")
+      end
+
+      it "cleans owned items captured from canonical finite streams" do
+        src = <<~CLEAR
+          FN f() RETURNS !Void ->
+            s: [~]String = BG STREAM {
+              MUTABLE n: Int64 = 1;
+              YIELD n.toString();
+            };
+            IF NEXT s EXISTS AS value THEN
+              ASSERT value.length() == 1;
+            END
+            RETURN;
+          END
+        CLEAR
+
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include(".Item => |value|")
+        expect(out).to include("CheatLib.cleanup(@TypeOf(value), rt.heapAlloc(), &value)")
+      end
+
       it "allows ~?T[] in BindExpr declarations" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
@@ -1456,17 +1491,17 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(SourceError, /Type Mismatch: Cannot assign ~\?Float64\[] to ~Float64\[3\]/)
+        expect { run(src) }.to raise_error(SourceError, /Type Mismatch: Cannot assign ~Float64\[] to ~Float64\[3\]/)
       end
 
-      it "still accepts infinite streams as a separate syntax" do
+      it "rejects an infinite stream producer that can fall through" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(SourceError, /infinite stream producer can reach the end/i)
       end
 
       it "accepts the new open-stream spelling ~?T[]" do

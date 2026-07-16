@@ -3,11 +3,11 @@
 # Uses Env[50000]@pool for scoped environments instead of a flat HashMap.
 # Each Env holds a HashMap<Value> for its local bindings.
 # Parent links stored as Value.EnvRef in vars["__p"].
-# Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
+# Lambda closures capture envId: Id<Env> directly; body stored as Value @boxed.
 # Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
 
 STRUCT Env {
-    vars: HashMap<Value>
+    vars: {String}Value
 }
 
 UNION Value {
@@ -15,11 +15,11 @@ UNION Value {
     Number: Float64, Str: String, Symbol: String,
     List: Value[],
     Vector: Value[],
-    Pair { pairCar: Value @indirect, pairCdr: Value @indirect },
+    Pair { pairCar: Value @boxed, pairCdr: Value @boxed },
     Lambda { envId: Id<Env> },
     NativeFn: Int64,
     EnvRef: Id<Env>,
-    Tco { tcoAst: Value @indirect, tcoEnv: Id<Env> },
+    Tco { tcoAst: Value @boxed, tcoEnv: Id<Env> },
     Error { errMsg: String, errKind: String }
 }
 
@@ -154,7 +154,7 @@ END
 # Position and count stored as Value.Number at "__rp" and "__tc".
 # This avoids toString() inside WHILE loops for position updates.
 
-FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
+FN tokenizeToEnv!(MUTABLE penv: {String}Value, str: String) RETURNS !Void ->
     MUTABLE count: Int64 = 0;
     MUTABLE i: Int64 = 0;
     WHILE i < str.length() DO
@@ -194,12 +194,12 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS !Void ->
     RETURN;
 END
 
-FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS !String ->
+FN getTokenStr!(MUTABLE penv: {String}Value, idx: Int64) RETURNS !String ->
     val = penv["__t" $+ idx.toString()] OR_ELSE Value.Nil;
     RETURN COPY getStr(val);
 END
 
-FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
+FN readFormEnv!(MUTABLE penv: {String}Value) RETURNS !Value EFFECTS REENTRANT ->
     posVal = penv["__rp"] OR_ELSE Value{ Number: 0.0 };
     tcVal = penv["__tc"] OR_ELSE Value{ Number: 0.0 };
     pos = toInt(getNum(posVal));
@@ -219,8 +219,8 @@ FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT -
     RETURN readAtom(tok) OR_ELSE RAISE;
 END
 
-FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
-    MUTABLE items: Value[]@list = List[];
+FN readListEnv!(MUTABLE penv: {String}Value) RETURNS !Value EFFECTS REENTRANT ->
+    MUTABLE items: []Value = List[];
     MUTABLE listDone = FALSE;
     WHILE listDone == FALSE DO
         curPosVal = penv["__rp"] OR_ELSE Value{ Number: 0.0 };
@@ -250,7 +250,7 @@ END
 #      26=string-append 27=string-length 28=substring 29=string-ref
 #      30=number->string 31=string->number 32=string? 33=display
 
-FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value EFFECTS REENTRANT ->
+FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value EFFECTS REENTRANT ->
     # Arithmetic
     IF id == 1 THEN RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) }; END
     IF id == 2 THEN RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) }; END
@@ -264,7 +264,7 @@ FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: Env[50
     IF id == 9 THEN RETURN boolVal(getNum(evaled[1]) >= getNum(evaled[2])); END
     # List
     IF id == 10 THEN
-        MUTABLE litems: Value[]@list = List[];
+        MUTABLE litems: []Value = List[];
         FOR li IN (1_i64 ..< evaled.length()) ->
             litems.append(COPY evaled[li]);
         RETURN Value{ List: litems };
@@ -276,7 +276,7 @@ FN applyNative!(id: Int64, evaled: Value[], envId: Id<Env>, MUTABLE pool: Env[50
     IF id == 15 THEN appendOutput!(envId, (prStr(evaled[1], TRUE) OR_ELSE "") $+ "\n", pool) OR_ELSE RAISE; RETURN Value.Nil; END
     # Vector
     IF id == 16 THEN
-        MUTABLE velems: Value[]@list = List[];
+        MUTABLE velems: []Value = List[];
         FOR vi IN (1_i64 ..< evaled.length()) ->
             velems.append(COPY evaled[vi]);
         RETURN Value{ Vector: velems };
@@ -332,7 +332,7 @@ END
 
 # Environment operations using Pool
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS !Value EFFECTS REENTRANT ->
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value EFFECTS REENTRANT ->
     MUTABLE parentVal: Value = Value.Nil;
     IF pool[envId] EXISTS AS env THEN
         IF env.vars[name] EXISTS AS found THEN RETURN COPY found; END
@@ -346,7 +346,7 @@ END
 
 # envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
-FN envSet!(envId: Id<Env>, name: String, TAKES val: Value, MUTABLE pool: Env[50000]@pool) RETURNS !Bool EFFECTS REENTRANT ->
+FN envSet!(envId: Id<Env>, name: String, TAKES val: Value, MUTABLE pool: [Pool(50000)]Env) RETURNS !Bool EFFECTS REENTRANT ->
     MUTABLE parentVal: Value = Value.Nil;
     IF pool[envId] EXISTS AS env THEN
         IF env.vars.contains?(name) THEN
@@ -361,18 +361,18 @@ FN envSet!(envId: Id<Env>, name: String, TAKES val: Value, MUTABLE pool: Env[500
     END
 END
 
-FN appendOutput!(envId: Id<Env>, chunk: String, MUTABLE pool: Env[50000]@pool) RETURNS !Void EFFECTS REENTRANT ->
+FN appendOutput!(envId: Id<Env>, chunk: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Void EFFECTS REENTRANT ->
     current = envGet!(envId, "__output", pool) OR_ELSE Value.Nil;
     envSet!(envId, "__output", Value{ Str: COPY (getStr(current) $+ chunk) }, pool) OR_ELSE RAISE;
     RETURN;
 END
 
-FN readOutput!(envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !String ->
+FN readOutput!(envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !String ->
     current = envGet!(envId, "__output", pool) OR_ELSE Value.Nil;
     RETURN COPY getStr(current);
 END
 
-FN clearOutput!(envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Void ->
+FN clearOutput!(envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !Void ->
     envSet!(envId, "__output", Value{ Str: "" }, pool) OR_ELSE RAISE;
     RETURN;
 END
@@ -441,7 +441,7 @@ FN getErrKind(v: Value) RETURNS String ->
     RETURN "";
 END
 
-FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value ->
+FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value ->
     PARTIAL MATCH catchExpr START
         Value.List AS catchItems ->
             catchEnvId: Id<Env> = pool.insert(Env{ vars: {} });
@@ -461,7 +461,7 @@ END
 
 # eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
-FN eval!(astIn: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value EFFECTS REENTRANT ->
+FN eval!(astIn: Value, envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value EFFECTS REENTRANT ->
     MUTABLE ast: Value = COPY astIn;
     MUTABLE curEnv: Id<Env> = envId;
     MUTABLE tcoActive = TRUE;
@@ -483,9 +483,9 @@ FN eval!(astIn: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !V
     RETURN Value.Nil;
 END
 
-FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS !Value EFFECTS REENTRANT ->
+FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value EFFECTS REENTRANT ->
     IF items.length() == 0 THEN
-        MUTABLE empty: Value[]@list = List[];
+        MUTABLE empty: []Value = List[];
         RETURN Value{ List: empty };
     END
     formName = getSymName(items[0]);
@@ -611,7 +611,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
         END
 
     ELSE
-        MUTABLE evaled: Value[]@list = List[];
+        MUTABLE evaled: []Value = List[];
         FOR ei IN (0_i64 ..< items.length()) DO
             argVal = eval!(COPY items[ei], envId, pool) OR_ELSE RAISE;
             IF isError?(argVal) THEN RETURN argVal; END
@@ -643,7 +643,7 @@ FN evalList!(items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETU
                             END
                         END
                     END
-                    MUTABLE bodyPenv: HashMap<Value> = {};
+                    MUTABLE bodyPenv: {String}Value = {};
                     lambdaResult = runTest!(lambdaBodyText, callId, pool, bodyPenv) OR_ELSE RAISE;
                     RETURN COPY lambdaResult;,
                 DEFAULT -> RETURN Value.Nil;
@@ -660,7 +660,7 @@ END
 
 # runTest: tokenize + parse + eval
 
-FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !Value EFFECTS REENTRANT ->
+FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env, MUTABLE penv: {String}Value) RETURNS !Value EFFECTS REENTRANT ->
     tokenizeToEnv!(penv, input) OR_ELSE RAISE;
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv) OR_ELSE RAISE;
@@ -670,7 +670,7 @@ END
 # Setup: create root env with all native functions registered.
 # Returns the root env Id.
 
-FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS !Id<Env> ->
+FN setupEnv!(MUTABLE pool: [Pool(50000)]Env) RETURNS !Id<Env> ->
     rootId: Id<Env> = pool.insert(Env{ vars: {} });
     IF pool[rootId] EXISTS AS root THEN
         root.vars["__output"] = Value{ Str: "" };
@@ -713,12 +713,12 @@ END
 
 # Test helpers: create fresh interpreter, run input, return result string.
 
-FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !String ->
+FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: [Pool(50000)]Env, MUTABLE penv: {String}Value) RETURNS !String ->
     result = runTest!(input, rootId, pool, penv) OR_ELSE RAISE;
     RETURN prStr(result, readable) OR_ELSE RAISE;
 END
 
-FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS !String ->
+FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: [Pool(50000)]Env, MUTABLE penv: {String}Value) RETURNS !String ->
     MUTABLE result: Value = Value.Nil;
     FOR i IN (0_i64 ..< inputs.length()) DO
         result = runTest!(inputs[i], rootId, pool, penv) OR_ELSE RAISE;

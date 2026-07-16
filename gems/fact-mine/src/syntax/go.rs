@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
@@ -55,9 +59,44 @@ const GO_NIL_PREDICATES: &[&str] = &["isNull", "is_null", "nil"];
 const GO_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const GO_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+// CFG-SPECIFIC START: Go control-flow vocabulary.
+const GO_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &[],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 pub(crate) struct GoNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for GoNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the Go CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &GO_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
+    fn conditional_local_bindings(&self, conditional: &Node) -> Vec<String> {
+        let header = conditional
+            .text
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .strip_prefix("if ")
+            .unwrap_or_default();
+        let Some((initializer, _)) = header.split_once(';') else {
+            return Vec::new();
+        };
+        let Some((lhs, _)) = initializer.split_once(":=") else {
+            return Vec::new();
+        };
+        lhs.split(',')
+            .map(str::trim)
+            .filter(|name| simple_identifier(name))
+            .map(str::to_string)
+            .collect()
+    }
+
     fn self_member_receiver(&self, message: &str) -> String {
         format!("self.{message}")
     }
@@ -588,6 +627,20 @@ mod tests {
             text: "first\nsecond".to_string(),
         };
         assert!(behavior.embedded_member_reads(&multiline_node).is_empty());
+
+        assert_eq!(
+            behavior.conditional_local_bindings(&node(
+                "IF",
+                "if value, err := load(); err != nil { return err }"
+            )),
+            vec!["value", "err"]
+        );
+        assert!(behavior
+            .conditional_local_bindings(&node("IF", "if err != nil { return err }"))
+            .is_empty());
+        assert!(behavior
+            .conditional_local_bindings(&node("IF", "if err = load(); err != nil {}"))
+            .is_empty());
 
         // owner_for_function
         let fn_node = node("FUNCTION", "func (r *Receiver) MyMethod() {}");

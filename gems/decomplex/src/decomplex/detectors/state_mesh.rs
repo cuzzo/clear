@@ -196,7 +196,11 @@ impl StateMesh {
         for document in documents {
             let dialect = crate::decomplex::dialect::dialect_for_document(document);
             for write in &document.state_writes {
-                let norm = self.normalize(&write.field, &*dialect);
+                if !syntax::receiver_targets_owner(&write.receiver, &write.owner) {
+                    continue;
+                }
+                let norm =
+                    self.state_identity(&write.identity, &self.normalize(&write.field, &*dialect));
                 self.writes.push(Write {
                     attr: write.field.clone(),
                     norm,
@@ -217,7 +221,11 @@ impl StateMesh {
         for document in documents {
             let dialect = crate::decomplex::dialect::dialect_for_document(document);
             for read in &document.state_reads {
-                let norm = self.normalize(&read.field, &*dialect);
+                if !syntax::receiver_targets_owner(&read.receiver, &read.owner) {
+                    continue;
+                }
+                let norm =
+                    self.state_identity(&read.identity, &self.normalize(&read.field, &*dialect));
                 if !field_norms.contains(&norm) {
                     continue;
                 }
@@ -421,6 +429,7 @@ impl StateMesh {
         let fm_index: BTreeMap<String, &FieldMetrics> =
             fm.iter().map(|m| (m.name.clone(), m)).collect();
         let field_norms = self.known_field_norms();
+        let display_names = self.display_names(&field_norms);
 
         let mut fields_obj = BTreeMap::new();
         for fnorm in &field_norms {
@@ -464,7 +473,10 @@ impl StateMesh {
                 .collect();
 
             fields_obj.insert(
-                fnorm.clone(),
+                display_names
+                    .get(fnorm)
+                    .cloned()
+                    .unwrap_or_else(|| fnorm.clone()),
                 StateFieldRow {
                     messiness: m.messiness,
                     rank: m.rank,
@@ -493,13 +505,23 @@ impl StateMesh {
             let entry = all_unit_sites
                 .entry((w.file.clone(), w.defn.clone()))
                 .or_default();
-            entry.0.insert(w.norm.clone());
+            entry.0.insert(
+                display_names
+                    .get(&w.norm)
+                    .cloned()
+                    .unwrap_or_else(|| w.norm.clone()),
+            );
         }
         for r in &self.reads {
             let entry = all_unit_sites
                 .entry((r.file.clone(), r.defn.clone()))
                 .or_default();
-            entry.1.insert(r.norm.clone());
+            entry.1.insert(
+                display_names
+                    .get(&r.norm)
+                    .cloned()
+                    .unwrap_or_else(|| r.norm.clone()),
+            );
         }
 
         let mut dirs: BTreeMap<String, BTreeMap<String, BTreeMap<String, DefnObj>>> =
@@ -585,6 +607,51 @@ impl StateMesh {
         dialect.clean_identifier(attr)
     }
 
+    fn state_identity(&self, identity: &str, field: &str) -> String {
+        // FactMine only supplies an explicit identity where the language can
+        // prove the bare spelling would conflate independent state slots.
+        if identity.is_empty() { field.to_string() } else { identity.to_string() }
+    }
+
+    /// Keep the familiar field spelling when it identifies exactly one state
+    /// slot. If two independently-owned slots share that spelling, expose the
+    /// FactMine identity so users can tell them apart instead of receiving a
+    /// silently merged finding.
+    fn display_names(&self, field_norms: &BTreeSet<String>) -> BTreeMap<String, String> {
+        let raw_name = |norm: &str| {
+            self.writes
+                .iter()
+                .find(|write| write.norm == norm)
+                .map(|write| write.attr.clone())
+                .or_else(|| {
+                    self.reads
+                        .iter()
+                        .find(|read| read.norm == norm)
+                        .map(|read| read.attr.clone())
+                })
+                .unwrap_or_else(|| norm.to_string())
+        };
+        let raw_names = field_norms
+            .iter()
+            .map(|norm| (norm.clone(), raw_name(norm)))
+            .collect::<BTreeMap<_, _>>();
+        let mut counts = BTreeMap::<String, usize>::new();
+        for raw in raw_names.values() {
+            *counts.entry(raw.clone()).or_default() += 1;
+        }
+        raw_names
+            .into_iter()
+            .map(|(norm, raw)| {
+                let display = if counts.get(&raw).copied().unwrap_or_default() > 1 {
+                    norm.clone()
+                } else {
+                    raw
+                };
+                (norm, display)
+            })
+            .collect()
+    }
+
     fn known_field_norms(&self) -> BTreeSet<String> {
         let mut discovered = BTreeMap::new();
         for w in &self.writes {
@@ -606,6 +673,31 @@ impl StateMesh {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn local_receiver_members_are_not_owner_state() {
+        let document: Document = serde_json::from_value(json!({
+            "file": "parser.rb",
+            "language": "ruby",
+            "state_writes": [
+                { "field": "after_all", "receiver": "block", "file": "parser.rb", "function": "populate", "line": 3, "span": [3, 4, 3, 37], "owner": "Parser" },
+                { "field": "position", "receiver": "self", "file": "parser.rb", "function": "populate", "line": 4, "span": [4, 4, 4, 17], "owner": "Parser" }
+            ],
+            "state_reads": [
+                { "field": "before_all", "receiver": "block", "file": "parser.rb", "function": "populate", "line": 5, "span": [5, 12, 5, 28], "owner": "Parser" },
+                { "field": "position", "receiver": "self", "file": "parser.rb", "function": "populate", "line": 6, "span": [6, 4, 6, 13], "owner": "Parser" }
+            ]
+        }))
+        .unwrap();
+
+        let mut mesh = StateMesh::new(1);
+        mesh.load_document_facts(&[document]);
+        let report = mesh.to_json_graph();
+
+        assert!(report.fields.contains_key("position"));
+        assert!(!report.fields.contains_key("after_all"));
+        assert!(!report.fields.contains_key("before_all"));
+    }
 
     #[test]
     fn test_state_mesh_gaps() {
@@ -653,19 +745,21 @@ mod tests {
 
         let mut sm = StateMesh::new(1);
         sm.load_document_facts(&[doc_conditions]);
-        // All reads had some mismatch, so none were skipped!
-        assert_eq!(sm.reads.len(), 5);
+        // The external-receiver read is not owner state. The remaining reads
+        // each differ from the write target in another dimension.
+        assert_eq!(sm.reads.len(), 4);
 
         // 3. Test find_re_derivations when field_norms.is_empty() (line 255)
         let mut sm = StateMesh::new(1);
         let sa_empty = semantic_alias::SemanticAliasReport {
             alias_clusters: Vec::new(),
-            reification_misses: vec![
-                semantic_alias::ReificationMiss {
-                    predicate: "p".to_string(), canon: "c".to_string(), at: "foo.rb:m:10".to_string(),
-                    spans: BTreeMap::new(), raw: "raw".to_string()
-                }
-            ]
+            reification_misses: vec![semantic_alias::ReificationMiss {
+                predicate: "p".to_string(),
+                canon: "c".to_string(),
+                at: "foo.rb:m:10".to_string(),
+                spans: BTreeMap::new(),
+                raw: "raw".to_string(),
+            }],
         };
         sm.find_re_derivations(&sa_empty);
         assert!(sm.re_derivations.is_empty());
@@ -686,12 +780,13 @@ mod tests {
 
         let sa_invalid_at = semantic_alias::SemanticAliasReport {
             alias_clusters: Vec::new(),
-            reification_misses: vec![
-                semantic_alias::ReificationMiss {
-                    predicate: "p".to_string(), canon: "f1".to_string(), at: "invalid_at".to_string(),
-                    spans: BTreeMap::new(), raw: "f1".to_string()
-                }
-            ]
+            reification_misses: vec![semantic_alias::ReificationMiss {
+                predicate: "p".to_string(),
+                canon: "f1".to_string(),
+                at: "invalid_at".to_string(),
+                spans: BTreeMap::new(),
+                raw: "f1".to_string(),
+            }],
         };
         sm.find_re_derivations(&sa_invalid_at);
         assert!(sm.re_derivations.is_empty());
@@ -717,5 +812,22 @@ mod tests {
         let report = sm.to_json_graph();
         assert!(report.fields.contains_key("f1"));
         assert!(report.fields.contains_key("f2"));
+    }
+
+    #[test]
+    fn owner_qualified_fact_identities_prevent_c_field_collisions() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("state.c");
+        std::fs::write(
+            &file_path,
+            "struct Alpha { int flag; };\nstruct Beta { int flag; };\nvoid alpha(struct Alpha* self) { self->flag = 1; }\nvoid beta(struct Beta* self) { self->flag = 2; }\n",
+        )
+        .unwrap();
+
+        let document = crate::decomplex::syntax::parse_files(&[file_path], Language::C).unwrap();
+        let aliases = semantic_alias::scan_documents(&document);
+        let report = scan_documents_with_semantic_aliases_and_min_writes(&document, &aliases, 1);
+        assert!(report.fields.contains_key("Alpha::flag"));
+        assert!(report.fields.contains_key("Beta::flag"));
     }
 }

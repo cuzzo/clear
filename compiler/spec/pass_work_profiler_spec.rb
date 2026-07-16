@@ -51,9 +51,12 @@ RSpec.describe PassWorkProfiler do
     root = ast_node(children: [ast_node])
 
     result = profiler.measure("annotator.body_analysis", ast_root: root, token_count: 7) do
+      expect(profiler.active_stage_label).to eq("annotator.body_analysis")
       profiler.record_walk("AST.walk_body", 6, 0.125)
       :done
     end
+
+    expect(profiler.active_stage_label).to eq("(outside)")
 
     record = profiler.records.fetch(0)
     expect(result).to eq(:done)

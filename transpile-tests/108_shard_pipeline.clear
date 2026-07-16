@@ -4,7 +4,7 @@
 # multiple SHARD blocks in sequence (caught a codegen semicolon bug).
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<String>@sharded(2) = {};
+    MUTABLE map: {String}@sharded(2) String = {};
     n = 100_i64;
 
     # SHARD SET: route keys to owning shards, set values

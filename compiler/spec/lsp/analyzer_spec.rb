@@ -19,8 +19,7 @@ RSpec.describe LSP::Analyzer do
 
       expect(Lexer).to receive(:new).with(source).and_return(lexer)
       expect(ClearParser).to receive(:new).with(tokens, source).and_return(parser)
-      expect(SemanticAnnotator).to receive(:new).and_return(annotator)
-      expect(annotator).to receive(:source_code=).with(source)
+      expect(SemanticAnnotator).to receive(:new).with(source_code: source).and_return(annotator)
       expect(annotator).to receive(:annotate!).with(ast)
 
       result = LSP::Analyzer.run(source)

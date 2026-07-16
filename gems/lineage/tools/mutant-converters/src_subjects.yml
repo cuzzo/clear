@@ -23,12 +23,16 @@
   hard_gate: true
 - subject: Lexer
   require: ast/lexer
-  spec: spec/lexer_spec.rb
+  specs:
+    - spec/lexer_spec.rb
+    - spec/lexer_token_payload_spec.rb
   baseline: 76.22
   hard_gate: true
 - subject: ClearParser
   require: ast/lexer -r ast/parser
-  spec: spec/ast_coverage_burndown_spec.rb
+  specs:
+    - spec/ast_coverage_burndown_spec.rb
+    - spec/parser_mutation_contract_spec.rb
   baseline: 50.0
   hard_gate: false
 - subject: LSP::Diagnostics

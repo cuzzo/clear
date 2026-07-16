@@ -11,7 +11,7 @@ FN main() RETURNS Void ->
     futures.append(BG { double(4); });
 
     # Await all: NEXT on the list returns Int64[]@list
-    results: Int64[]@list = NEXT futures;
+    results: []Int64 = NEXT futures;
 
     # 1*2 + 2*2 + 3*2 + 4*2 = 2+4+6+8 = 20
     MUTABLE sum: Int64 = 0;

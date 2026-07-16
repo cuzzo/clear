@@ -8,7 +8,7 @@ RSpec.describe "Stack Tier Recommendations" do
     ast = ClearParser.new(tokens, source).parse
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
-    fn_nodes = annotator.semantic_function_nodes
+    fn_nodes = T.must(annotator.semantic_index).function_nodes
     [ast, fn_nodes]
   end
 
@@ -35,7 +35,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "assigns :standard to functions that use heap" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS !Point @indirect ->
+        FN make() RETURNS !Point @boxed ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
@@ -62,7 +62,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "assigns :standard to functions calling heap-using functions" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS !Point @indirect ->
+        FN make() RETURNS !Point @boxed ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
@@ -106,7 +106,7 @@ RSpec.describe "Stack Tier Recommendations" do
 
     it "does not count frame-allocated variables" do
       src = <<~CLEAR
-        STRUCT Big { a: Float64[200] }
+        STRUCT Big { a: [200]Float64 }
         FN test() RETURNS !Float64 ->
             b = Big{ a: [0.0] };
             RETURN b.a[0];
@@ -151,7 +151,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "promotes micro to standard when function needs runtime" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS !Point @indirect ->
+        FN make() RETURNS !Point @boxed ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
@@ -207,7 +207,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "errors when user picks @micro for a function that needs @standard" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS !Point @indirect ->
+        FN make() RETURNS !Point @boxed ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
@@ -226,7 +226,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "rejects @micro:canSmash with the same not-yet-supported error" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS !Point @indirect ->
+        FN make() RETURNS !Point @boxed ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
@@ -245,7 +245,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "does not error for auto-sized (no user override) calls" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS !Point @indirect ->
+        FN make() RETURNS !Point @boxed ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END

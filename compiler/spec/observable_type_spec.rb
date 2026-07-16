@@ -54,6 +54,14 @@ RSpec.describe Type, "@observable type flag" do
     expect(copy.observable?).to be true
   end
 
+  describe "#observable_array_future?" do
+    it "recognizes only observable future arrays" do
+      expect(parse_type("~String[]@set:observable").observable_array_future?).to be true
+      expect(parse_type("~String@observable").observable_array_future?).to be false
+      expect(parse_type("~String[]").observable_array_future?).to be false
+    end
+  end
+
   # Commit 2 of the pipeline-terminal wiring: the type→Zig mapping
   # for `~T@observable` must produce a heap-pointed `ObservableSum(T)`
   # (so the accumulator outlives the producer fiber and is reachable

@@ -294,7 +294,7 @@ module CaptureStrategy
   # topologies. All of these preserve the safe-sharing guarantee.
   sig { params(type: Type).returns(T::Boolean) }
   def self.safe_shared_across_fibers?(type)
-    # @indirect:atomic is a heap-pinned, internally ref-counted cell. Its
+    # @boxed:atomic is a heap-pinned, internally ref-counted cell. Its
     # pointer representation deliberately does not spell Arc in Zig, but a
     # fiber capture must retain the cell exactly like an Arc capture.
     return true if type.respond_to?(:atomic_ptr?) && type.atomic_ptr?

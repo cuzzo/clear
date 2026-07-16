@@ -21,8 +21,8 @@
 FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS !Void ->
   # Pre-allocate stacks: log2(1M) < 20; 48 entries is safe.
   # Using @list so both stacks live in the frame arena; trivially freed on exit.
-  MUTABLE lo_stk: Int64[]@list = [];
-  MUTABLE hi_stk: Int64[]@list = [];
+  MUTABLE lo_stk: []Int64 = [];
+  MUTABLE hi_stk: []Int64 = [];
   # Fill loop uses append → cannot be TIGHT (append calls rt.frameAlloc).
   TIGHT FOR fill_i IN (0 ..< 48) DO
     lo_stk.append(0);
@@ -121,7 +121,7 @@ FN main() RETURNS !Void ->
   n = 1_000_000;
 
   # Build data: permutation of [0, N-1] via Knuth multiplicative hash
-  MUTABLE arr: Float64[]@list = [];
+  MUTABLE arr: []Float64 = [];
   MUTABLE seed_i = 0;
   TIGHT WHILE seed_i < n DO
     v = seed_i * 2_654_435_761 MOD n + 0.0;
@@ -145,7 +145,7 @@ FN main() RETURNS !Void ->
   END
 
   # Mergesort (needs a temp buffer of the same size)
-  MUTABLE tmp_arr: Float64[]@list = [];
+  MUTABLE tmp_arr: []Float64 = [];
   TIGHT FOR ti IN (0 ..< n) -> tmp_arr.append(0.0);
   t1 = timestampMs();
   msort!(arr, tmp_arr, n);

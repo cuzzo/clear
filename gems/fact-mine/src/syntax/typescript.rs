@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::effect_from_call_with_lexicon;
 use super::javascript;
 use super::normalized_behavior::{
@@ -14,9 +18,24 @@ const TYPESCRIPT_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
 const TYPESCRIPT_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const TYPESCRIPT_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+// CFG-SPECIFIC START: TypeScript control-flow vocabulary.
+const TYPESCRIPT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &[
+        "every", "filter", "find", "flatMap", "forEach", "map", "reduce", "some",
+    ],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 pub(crate) struct TypeScriptNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the TypeScript CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &TYPESCRIPT_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn self_member_receiver(&self, message: &str) -> String {
         format!("this.{message}")
     }
@@ -266,6 +285,10 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         None
     }
 
+    fn suppress_state_write(&self, receiver: &str, _field: &str, node: &Node) -> bool {
+        receiver == "self" && node.text.contains(".bind(this)") && node.text.contains('=')
+    }
+
     fn format_array_type(&self, elem: &str) -> String {
         format!("{elem}[]")
     }
@@ -279,7 +302,8 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None" {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None"
+        {
             return type_text.to_string();
         }
         if type_text.contains(" | null") {
@@ -359,21 +383,42 @@ mod tests {
     fn test_typescript_behavior_comprehensive() {
         let b = TypeScriptNormalizedBehavior;
         assert_eq!(b.self_member_receiver("Foo"), "this.Foo");
-        assert_eq!(b.function_visibility("Foo", &node("DEFN", "private void Foo()"), &[]), "private");
-        assert_eq!(b.function_visibility("Foo", &node("DEFN", "protected void Foo()"), &[]), "private");
-        assert_eq!(b.function_visibility("Foo", &node("DEFN", "public void Foo()"), &[]), "public");
+        assert_eq!(
+            b.function_visibility("Foo", &node("DEFN", "private void Foo()"), &[]),
+            "private"
+        );
+        assert_eq!(
+            b.function_visibility("Foo", &node("DEFN", "protected void Foo()"), &[]),
+            "private"
+        );
+        assert_eq!(
+            b.function_visibility("Foo", &node("DEFN", "public void Foo()"), &[]),
+            "public"
+        );
 
-        assert_eq!(b.parameter_name_from_signature("public x: number"), Some("x".to_string()));
-        assert_eq!(b.parameter_name_from_signature("readonly value: number = 1"), Some("value".to_string()));
+        assert_eq!(
+            b.parameter_name_from_signature("public x: number"),
+            Some("x".to_string())
+        );
+        assert_eq!(
+            b.parameter_name_from_signature("readonly value: number = 1"),
+            Some("value".to_string())
+        );
         assert_eq!(b.parameter_name_from_signature("invalid name"), None);
 
         assert!(b.wrap_branch_predicate(&node("IF", "")));
-        assert_eq!(b.explicit_self_state_ref(&node("LVAR", ""), "Foo"), "this.Foo");
-        assert!(b.property_read_call(&node("CALL", "x.y"), &NormalizedCallParts {
-            receiver: "x".to_string(),
-            message: "y".to_string(),
-            arguments: Vec::new(),
-        }));
+        assert_eq!(
+            b.explicit_self_state_ref(&node("LVAR", ""), "Foo"),
+            "this.Foo"
+        );
+        assert!(b.property_read_call(
+            &node("CALL", "x.y"),
+            &NormalizedCallParts {
+                receiver: "x".to_string(),
+                message: "y".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
 
         assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
             receiver: "console".to_string(),
@@ -383,33 +428,42 @@ mod tests {
             span: [1, 2, 3, 4],
         }));
 
-        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
-            receiver: "self".to_string(),
-            message: "callback".to_string(),
-            arguments: Vec::new(),
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }, ""));
+        assert!(b.suppress_state_read_for_call(
+            &NormalizedCallProjection {
+                receiver: "self".to_string(),
+                message: "callback".to_string(),
+                arguments: Vec::new(),
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            },
+            ""
+        ));
 
-        assert!(b.owner_name_span("A", &node("CLASS", "class A {}"), [1, 2, 3, 4]).is_some());
-        assert!(b.owner_name_span("A", &node("INTERFACE_DECLARATION", ""), [1, 2, 3, 4]).is_some());
+        assert!(b
+            .owner_name_span("A", &node("CLASS", "class A {}"), [1, 2, 3, 4])
+            .is_some());
+        assert!(b
+            .owner_name_span("A", &node("INTERFACE_DECLARATION", ""), [1, 2, 3, 4])
+            .is_some());
 
         assert!(b.nil_guard_fact("isNull", "x").is_some());
 
-        assert!(b.semantic_effect_for_call(&CallSite {
-            receiver: "x".to_string(),
-            message: "isNull".to_string(),
-            file: "".to_string(),
-            function: "".to_string(),
-            owner: "".to_string(),
-            line: 1,
-            span: [1, 2, 3, 4],
-            conditional: false,
-            arguments: Vec::new(),
-            control: None,
-            safe_navigation: false,
-            block: false,
-        }).is_some());
+        assert!(b
+            .semantic_effect_for_call(&CallSite {
+                receiver: "x".to_string(),
+                message: "isNull".to_string(),
+                file: "".to_string(),
+                function: "".to_string(),
+                owner: "".to_string(),
+                line: 1,
+                span: [1, 2, 3, 4],
+                conditional: false,
+                arguments: Vec::new(),
+                control: None,
+                safe_navigation: false,
+                block: false,
+            })
+            .is_some());
 
         assert!(b.local_flow_declaration_keyword("let"));
         assert!(b.local_flow_keyword("let"));
@@ -423,7 +477,10 @@ mod tests {
         assert!(!b.predicate_body_language_signal("foo"));
 
         assert_eq!(b.format_array_type("number"), "number[]");
-        assert_eq!(b.format_hash_type("string", "number"), "Record<string, number>");
+        assert_eq!(
+            b.format_hash_type("string", "number"),
+            "Record<string, number>"
+        );
         assert_eq!(b.format_set_type("number"), "Set<number>");
 
         assert_eq!(b.format_nilable_type(""), "");
@@ -450,18 +507,29 @@ mod tests {
         assert_eq!(decl.as_ref().unwrap().r#type, Some("number".to_string()));
 
         // Test fallback split text branch in state_declaration_from_node with modifier stripping
-        let mut fallback_decl = node("PUBLIC_FIELD_DEFINITION", "public readonly myField: string = 'hello';");
+        let mut fallback_decl = node(
+            "PUBLIC_FIELD_DEFINITION",
+            "public readonly myField: string = 'hello';",
+        );
         let fallback_res = b.state_declaration_from_node(&fallback_decl, "MyClass", false);
         assert!(fallback_res.is_some());
         assert_eq!(fallback_res.as_ref().unwrap().field, "myField");
-        assert_eq!(fallback_res.as_ref().unwrap().r#type, Some("string".to_string()));
+        assert_eq!(
+            fallback_res.as_ref().unwrap().r#type,
+            Some("string".to_string())
+        );
 
         // Test fallback split text branch with 'this.' prefix stripping
-        let mut fallback_this_decl = node("PUBLIC_FIELD_DEFINITION", "this.myField: string = 'hello';");
-        let fallback_this_res = b.state_declaration_from_node(&fallback_this_decl, "MyClass", false);
+        let mut fallback_this_decl =
+            node("PUBLIC_FIELD_DEFINITION", "this.myField: string = 'hello';");
+        let fallback_this_res =
+            b.state_declaration_from_node(&fallback_this_decl, "MyClass", false);
         assert!(fallback_this_res.is_some());
         assert_eq!(fallback_this_res.as_ref().unwrap().field, "myField");
-        assert_eq!(fallback_this_res.as_ref().unwrap().r#type, Some("string".to_string()));
+        assert_eq!(
+            fallback_this_res.as_ref().unwrap().r#type,
+            Some("string".to_string())
+        );
 
         // Test in_method = true with ATTRASGN
         let mut in_method_decl = node("ATTRASGN", "this.field: number = 2");
@@ -471,11 +539,16 @@ mod tests {
         let in_method_res = b.state_declaration_from_node(&in_method_decl, "MyClass", true);
         assert!(in_method_res.is_some());
         assert_eq!(in_method_res.as_ref().unwrap().field, "field");
-        assert_eq!(in_method_res.as_ref().unwrap().r#type, Some("number".to_string()));
+        assert_eq!(
+            in_method_res.as_ref().unwrap().r#type,
+            Some("number".to_string())
+        );
 
         // Test in_method = true none branch (first child not a Node)
         let mut in_method_decl_none = node("ATTRASGN", "field = 2");
         in_method_decl_none.children = vec![Child::String("not_a_node".to_string())];
-        assert!(b.state_declaration_from_node(&in_method_decl_none, "MyClass", true).is_none());
+        assert!(b
+            .state_declaration_from_node(&in_method_decl_none, "MyClass", true)
+            .is_none());
     }
 }

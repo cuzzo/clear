@@ -18,6 +18,25 @@ RSpec.describe "predicate-impurity rejection" do
     ast
   end
 
+  def capability_audit_session(source = "")
+    ast = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    resolution = Annotator::Phases::ResolutionPhase.run(
+      program: ast, importer: nil, source_dir: Dir.pwd, source_code: source
+    )
+    type_session = Annotator::Phases::TypeAnalysisSession.new(source_code: source)
+    handoff = Annotator::Phases::TypeAnalysisPhase.run(
+      resolution: resolution, session: type_session
+    )
+    request = handoff.audit_request
+    Annotator::Phases::CapabilityAuditSession.new(
+      typed_program: handoff.typed_program,
+      inputs: request.inputs,
+      source_code: request.source_code,
+      language_mode: request.language_mode,
+      strict_test: request.strict_test
+    )
+  end
+
   describe "stdlib-call impurity inside WITH GUARD" do
     it "rejects a guard whose call allocates (e.g. `split`)" do
       # `split` returns a fresh String[] and is flagged
@@ -99,7 +118,7 @@ RSpec.describe "predicate-impurity rejection" do
 
   describe "typed stdlib impurity contracts" do
     it "rejects allocating and suspending stdlib calls through matched metadata" do
-      annotator = SemanticAnnotator.new
+      annotator = capability_audit_session
       alloc_call = AST::FuncCall.new(Lexer::Token.new(:VAR_ID, "make", 1, 1), "make", [])
       alloc_call.matched_stdlib_def = FunctionSignature.intrinsic_signature(allocates: true)
 

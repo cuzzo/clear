@@ -7,14 +7,14 @@
 UNION Value { Num: Float64, Items: Int64[] }
 
 FN makeItems() RETURNS !Value ->
-    MUTABLE items: Int64[]@list = List[];
+    MUTABLE items: []Int64 = List[];
     items.append(1_i64);
     items.append(2_i64);
     RETURN Value{ Items: items };
 END
 
 FN main() RETURNS Void ->
-    MUTABLE results: Value[]@list = List[];
+    MUTABLE results: []Value = List[];
     results.append(makeItems());
     results.append(makeItems());
     results.append(makeItems());

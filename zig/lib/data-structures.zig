@@ -8,8 +8,9 @@ const paged_slot_map = @import("paged-slot-map.zig");
 
 // Comptime atomic type selection for fields exercised by the loom suite.
 // Mirrors queues.zig: when the test root exports SimAtomic
-// (parking-lot-loom-test.zig), Stream/InfStream `closed` field accesses
-// become yield points so loom can observe close vs push/next races.
+// (parking-lot-loom-test.zig), Stream/InfStream metadata locks and `closed`
+// field accesses become yield points so loom can observe close vs push/next
+// races.
 // Falls through to std.atomic.Value for normal builds.
 const Atomic = blk: {
     const root = @import("root");
@@ -19,6 +20,20 @@ const Atomic = blk: {
 pub fn bind(comptime deps: type) type {
     return struct {
         const WaitGroup = fp.WaitGroup;
+
+        /// A finite stream step keeps producer completion separate from the
+        /// item payload. In particular, `StreamStep(?T).Item = null` is a
+        /// yielded optional value; `.Closed` is end-of-stream.
+        pub fn StreamStep(comptime T: type) type {
+            return union(enum) {
+                Item: T,
+                Closed: void,
+
+                pub fn isItem(self: @This()) bool {
+                    return self == .Item;
+                }
+            };
+        }
 
         fn cleanup(comptime T: type, alloc: std.mem.Allocator, cptr: *const T) void {
             deps.cleanup(T, alloc, cptr);
@@ -514,7 +529,7 @@ pub fn bind(comptime deps: type) type {
         return ptr;
     }
 
-    /// Move the payload out of a unique @indirect allocation and release only
+    /// Move the payload out of a unique @boxed allocation and release only
     /// its allocation shell. Ownership of every cleanup-bearing field moves
     /// into the returned value; no destructor and no deep copy runs here.
     pub fn unboxMove(comptime T: type, alloc: std.mem.Allocator, boxed: *T) T {
@@ -772,6 +787,15 @@ pub fn bind(comptime deps: type) type {
                 return val;
             }
 
+            /// Tagged completion form used by canonical `[~N]T`. Unlike an
+            /// optional sentinel, this preserves `null` when T is optional.
+            pub fn nextStep(self: *Self) anyerror!StreamStep(T) {
+                if (self.head >= N) return .{ .Closed = {} };
+                const val = try self.items[self.head].next();
+                self.head += 1;
+                return .{ .Item = val };
+            }
+
             /// Drain any unconsumed promises, freeing their Inner allocations.
             /// No-op when all N items have already been consumed.
             /// Must be called after a pipeline loop that may terminate early
@@ -820,7 +844,7 @@ pub fn bind(comptime deps: type) type {
                 buf:           [BUF_SIZE]T = undefined,
                 head:          std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
                 tail:          std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
-                lock:          std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+                lock:          Atomic(u32) = Atomic(u32).init(0),
                 consumer_task: ?*Task = null,
                 consumer_sched: ?*fp.Scheduler = null,
                 producer_task: ?*Task = null,
@@ -831,6 +855,10 @@ pub fn bind(comptime deps: type) type {
                 /// `lock` and use .release; readers use .acquire so they
                 /// observe `err` after seeing `closed = true`.
                 closed:        Atomic(bool) = Atomic(bool).init(false),
+                /// Exactly-once lifecycle signal. `deinit` may set `closed`
+                /// before the producer's deferred close runs, while an
+                /// explicit CLOSE may run before that defer.
+                finished:      Atomic(bool) = Atomic(bool).init(false),
                 /// Written under `lock` by setError/close-paths BEFORE
                 /// `closed.store(true, .release)`. Readers must observe
                 /// `closed.load(.acquire) == true` before reading this.
@@ -923,7 +951,56 @@ pub fn bind(comptime deps: type) type {
                 } else {
                     inner.lock.store(0, .release);
                 }
-                inner.wg.done();
+                if (!inner.finished.swap(true, .acq_rel)) inner.wg.done();
+            }
+
+            /// Read one tagged step without using the item type's optionality
+            /// as an EOF sentinel.
+            pub fn nextStep(self: *Self) anyerror!StreamStep(T) {
+                const inner = self.inner;
+                while (true) {
+                    const t = inner.tail.load(.monotonic);
+                    const h = inner.head.load(.acquire);
+                    if (h != t) {
+                        const val = inner.buf[t & MASK];
+                        inner.tail.store(t +% 1, .release);
+                        if (h -% t == BUF_SIZE) {
+                            while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                            if (inner.producer_task) |producer| {
+                                const producer_sched = inner.producer_sched orelse inner.sched;
+                                inner.producer_task = null;
+                                inner.producer_sched = null;
+                                inner.lock.store(0, .release);
+                                producer_sched.schedule(producer);
+                            } else {
+                                inner.lock.store(0, .release);
+                            }
+                        }
+                        return .{ .Item = val };
+                    }
+                    if (inner.closed.load(.acquire)) {
+                        if (inner.err) |err| return err;
+                        return .Closed;
+                    }
+                    while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                    const h2 = inner.head.load(.acquire);
+                    if (h2 != t) {
+                        inner.lock.store(0, .release);
+                        continue;
+                    }
+                    if (inner.closed.load(.acquire)) {
+                        inner.lock.store(0, .release);
+                        if (inner.err) |err| return err;
+                        return .Closed;
+                    }
+                    const waiter_sched = fp.active_scheduler;
+                    const task = waiter_sched.getCurrent();
+                    task.status.store(.Blocked, .release);
+                    inner.consumer_task = task;
+                    inner.consumer_sched = waiter_sched;
+                    inner.lock.store(0, .release);
+                    task.base.yield();
+                }
             }
 
             /// Record a terminal error from the generator fiber. Acquires
@@ -1003,19 +1080,11 @@ pub fn bind(comptime deps: type) type {
             /// Safe to call after reading all items (next() returned null) or mid-stream.
             pub fn deinit(self: *Self) void {
                 const inner = self.inner;
-                // Signal producer to stop (mirrors InfStream.deinit drain for strings).
+                // Signal the producer to stop before waiting for its final push
+                // attempt. Any item still buffered after the producer exits is
+                // owned by the stream and must be recursively cleaned.
                 while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
                 inner.closed.store(true, .release);
-                if (comptime (T == []const u8 or T == []u8)) {
-                    const h = inner.head.load(.acquire);
-                    const t = inner.tail.load(.acquire);
-                    var i: u32 = t;
-                    while (i != h) : (i +%= 1) {
-                        const item = inner.buf[i & MASK];
-                        if (item.len > 0) self.alloc.free(item);
-                    }
-                    inner.tail.store(h, .release);
-                }
                 if (inner.producer_task) |producer| {
                     const producer_sched = inner.producer_sched orelse inner.sched;
                     inner.producer_task = null;
@@ -1028,6 +1097,15 @@ pub fn bind(comptime deps: type) type {
                 // Wait for the generator fiber to call close() (wg.done()).
                 // Guarantees Inner is not accessed by the generator after destroy.
                 inner.wg.wait();
+                if (comptime needsCleanup(T)) {
+                    const h = inner.head.load(.acquire);
+                    const t = inner.tail.load(.acquire);
+                    var i: u32 = t;
+                    while (i != h) : (i +%= 1) {
+                        cleanup(T, self.alloc, &inner.buf[i & MASK]);
+                    }
+                    inner.tail.store(h, .release);
+                }
                 self.alloc.destroy(inner);
             }
         };
@@ -1076,6 +1154,7 @@ pub fn bind(comptime deps: type) type {
                 /// without taking `lock`. Writers (close, deinit) hold
                 /// `lock` and use .release; readers use .acquire.
                 closed: Atomic(bool) = Atomic(bool).init(false),
+                finished: Atomic(bool) = Atomic(bool).init(false),
                 err: ?anyerror = null,
                 has_generator: bool = false, // true only when created via spawnNew
                 wg: WaitGroup = undefined, // valid only when has_generator == true
@@ -1237,7 +1316,7 @@ pub fn bind(comptime deps: type) type {
                 } else {
                     inner.lock.store(0, .release);
                 }
-                inner.wg.done();
+                if (inner.has_generator and !inner.finished.swap(true, .acq_rel)) inner.wg.done();
             }
 
             /// Consumer reads next value, returning null on EOF (closed + empty).
@@ -2148,6 +2227,12 @@ pub fn bind(comptime deps: type) type {
         return struct {
             const Self = @This();
             inner: Map = .{},
+
+            pub fn initCapacity(alloc: std.mem.Allocator, capacity: u32) !Self {
+                var result = Self{};
+                try result.inner.ensureTotalCapacity(alloc, capacity);
+                return result;
+            }
 
             pub fn insert(self: *Self, alloc: std.mem.Allocator, value: T) !void {
                 if (is_string) {

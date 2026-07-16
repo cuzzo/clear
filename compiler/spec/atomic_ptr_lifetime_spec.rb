@@ -2,10 +2,10 @@ require "rspec"
 require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 require_relative "../ruby/ast/ast" unless defined?(MIR::ReassignPlan)
 
-# AtomicPtr M3.12 -- lifetime semantics for @indirect:atomic vs
+# AtomicPtr M3.12 -- lifetime semantics for @boxed:atomic vs
 # primitive @shared:atomic.
 #
-# @indirect:atomic is Arc-managed under the hood (M3.5 auto-promotes
+# @boxed:atomic is Arc-managed under the hood (M3.5 auto-promotes
 # ownership to :shared). Loaded snapshots have refcount lifetime;
 # the cell itself can flow into struct fields, BG handles, RETURN
 # values without trip-wiring the M2.6 escape audit. Mirrors the
@@ -21,18 +21,18 @@ RSpec.describe "AtomicPtr lifetime (M3.12)" do
     ast
   end
 
-  describe "POSITIVE: @indirect:atomic can escape (Arc-managed)" do
-    it "BG handle that captures @indirect:atomic can be returned without RETURNS x:T" do
+  describe "POSITIVE: @boxed:atomic can escape (Arc-managed)" do
+    it "BG handle that captures @boxed:atomic can be returned without RETURNS x:T" do
       # Without M3.12, the BG handle's lifetime would be tied to the
-      # @indirect:atomic cell, and RETURN bg without `RETURNS cfg:T`
-      # would be rejected by M2.6. With M3.12, @indirect:atomic is
+      # @boxed:atomic cell, and RETURN bg without `RETURNS cfg:T`
+      # would be rejected by M2.6. With M3.12, @boxed:atomic is
       # exempted from bg_lifetime_sources, so the BG handle has
       # nil/empty lifetime and RETURN bg is allowed.
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { v: Int64 }
           FN make_handle() RETURNS ~Void ->
-            cfg = Cfg{ v: 0 } @indirect:atomic;
+            cfg = Cfg{ v: 0 } @boxed:atomic;
             bg = BG {
               WITH SNAPSHOT cfg AS c {
                 _ = c.v;

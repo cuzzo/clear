@@ -65,7 +65,7 @@ module MIR
           each_direct_loop_node(node.body, &block)
         when AST::DoBlock
           node.branches.each do |branch|
-            each_direct_loop_node(T.cast(branch.fetch(:body), LocalBindingBody), &block)
+            each_direct_loop_node(branch.body, &block)
           end
         end
       end

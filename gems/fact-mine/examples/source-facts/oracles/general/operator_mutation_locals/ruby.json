@@ -270,7 +270,8 @@
         "detail": "<<",
         "function": "append_all",
         "kind": "hidden_mutation",
-        "line": 6
+        "line": 6,
+        "receiver_scope": "owned_local"
       }
     ],
     "state_declarations": [],

@@ -56,7 +56,7 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE parts: Int64[]@list = [];
+            MUTABLE parts: []Int64 = [];
             parts.append(i);
             i = i + 1_i64;
           END
@@ -71,7 +71,7 @@ RSpec.describe LoopFrameAnalysis do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           FOR i IN (0_i64 ..< 5) DO
-            MUTABLE parts: Int64[]@list = [];
+            MUTABLE parts: []Int64 = [];
             parts.append(i);
           END
           RETURN;
@@ -86,7 +86,7 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE xs: Int64[] = [1_i64, 2_i64];
           FOR x IN xs DO
-            MUTABLE parts: Int64[]@list = [];
+            MUTABLE parts: []Int64 = [];
             parts.append(x);
           END
           RETURN;
@@ -120,7 +120,7 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             m["k"] = i;
             i = i + 1_i64;
           END
@@ -138,7 +138,7 @@ RSpec.describe LoopFrameAnalysis do
           WHILE i < 3 DO
             MUTABLE j = 0_i64;
             WHILE j < 3 DO
-              MUTABLE parts: Int64[]@list = [];
+              MUTABLE parts: []Int64 = [];
               parts.append(j);
               j = j + 1_i64;
             END
@@ -182,7 +182,7 @@ RSpec.describe LoopFrameAnalysis do
       # Per-iteration rewind would corrupt the accumulated data.
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE all: Float64[]@list = [];
+          MUTABLE all: []Float64 = [];
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
             append(all, 1.0);
@@ -199,7 +199,7 @@ RSpec.describe LoopFrameAnalysis do
       # The local 'val' escapes into outer 'keys' — can't rewind and keep the pointer.
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE keys: String[]@list = [];
+          MUTABLE keys: []String = [];
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
             keys.append(i.toString());
@@ -240,7 +240,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE resp = "";
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE part: Int64[]@list = [];
+            MUTABLE part: []Int64 = [];
             part.append(i);
             resp = resp $+ i.toString();
             i = i + 1_i64;
@@ -260,7 +260,7 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE parts: Int64[]@list = [];
+            MUTABLE parts: []Int64 = [];
             parts.append(i);
             i = i + 1_i64;
           END
@@ -277,7 +277,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE resp = "";
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE parts: Int64[]@list = [];
+            MUTABLE parts: []Int64 = [];
             parts.append(i);
             resp = resp $+ i.toString();
             i = i + 1_i64;
@@ -368,7 +368,7 @@ RSpec.describe LoopFrameAnalysis do
       # also a mutation of an outer list via a different path.
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE outer: Float64[]@list = [];
+          MUTABLE outer: []Float64 = [];
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
             append(outer, i.toString().length());
@@ -389,10 +389,10 @@ RSpec.describe LoopFrameAnalysis do
       # The outer must be heap-promoted so the rewind doesn't corrupt its backing.
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE log: String[]@list = [];
+          MUTABLE log: []String = [];
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE parts: Int64[]@list = [];
+            MUTABLE parts: []Int64 = [];
             parts.append(i);
             log.append("done");
             i = i + 1_i64;
@@ -409,11 +409,11 @@ RSpec.describe LoopFrameAnalysis do
       src = <<~CLEAR
         UNION Val { Nil, Number: Float64 }
         FN main() RETURNS Void ->
-          MUTABLE outer: Val[]@list = [];
+          MUTABLE outer: []Val = [];
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
             # frame-alloc in WHILE's direct body drives mark_per_iter=true
-            MUTABLE buf: Val[]@list = [];
+            MUTABLE buf: []Val = [];
             buf.append(Val.Nil);
             FOR k IN (0_i64 ..< 4_i64) DO
               # Mutation buried inside a nested FOR; transitively in a
@@ -434,10 +434,10 @@ RSpec.describe LoopFrameAnalysis do
       src = <<~CLEAR
         UNION Val { Nil, Number: Float64 }
         FN main() RETURNS Void ->
-          MUTABLE outer: Val[]@list = [];
+          MUTABLE outer: []Val = [];
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE buf: Val[]@list = [];
+            MUTABLE buf: []Val = [];
             buf.append(Val.Nil);
             PARTIAL MATCH i START
               DEFAULT -> outer.append(Val.Nil);
@@ -507,7 +507,7 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE parts: Int64[]@list = [];
+            MUTABLE parts: []Int64 = [];
             parts.append(i);
             i = i + 1_i64;
           END
@@ -526,7 +526,7 @@ RSpec.describe LoopFrameAnalysis do
         END
 
         FN commands(program: String) RETURNS !String ->
-          MUTABLE parts: String[]@list = [];
+          MUTABLE parts: []String = [];
           MUTABLE i = 0;
           WHILE i < program.length() DO
             ch = program.charAt(i);
@@ -549,10 +549,10 @@ RSpec.describe LoopFrameAnalysis do
     it "WhileLoop moves a loop-local list to heap when stored in an outer list" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE outer: Int64[][]@list = [];
+          MUTABLE outer: [][]Int64 = [];
           MUTABLE i = 0;
           WHILE i < 1 DO
-            MUTABLE inner: Int64[]@list = [];
+            MUTABLE inner: []Int64 = [];
             inner.append(i);
             outer.append(inner);
             i += 1;
@@ -571,7 +571,7 @@ RSpec.describe LoopFrameAnalysis do
     it "WhileLoop moves a loop-local dynamic array to heap when stored in an outer list" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE outer: Int64[][]@list = [];
+          MUTABLE outer: [][]Int64 = [];
           MUTABLE i = 0;
           WHILE i < 1 DO
             inner: Int64[] = [i, i + 1];
@@ -591,10 +591,10 @@ RSpec.describe LoopFrameAnalysis do
     it "WhileLoop keeps an escaping loop-local map on heap without loop marks" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE outer: HashMap<Int64>[]@list = [];
+          MUTABLE outer: []{String}Int64 = [];
           MUTABLE i = 0;
           WHILE i < 1 DO
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             m["x"] = i;
             outer.append(m);
             i += 1;
@@ -614,7 +614,7 @@ RSpec.describe LoopFrameAnalysis do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           FOR i IN (0_i64 ..< 5) DO
-            MUTABLE parts: Int64[]@list = [];
+            MUTABLE parts: []Int64 = [];
             parts.append(i);
           END
           RETURN;
@@ -630,7 +630,7 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE xs: Int64[] = [1_i64, 2_i64, 3_i64];
           FOR x IN xs DO
-            MUTABLE parts: Int64[]@list = [];
+            MUTABLE parts: []Int64 = [];
             parts.append(x);
           END
           RETURN;
@@ -658,7 +658,7 @@ RSpec.describe LoopFrameAnalysis do
     it "outer-only append loop does NOT emit saveLoopMark" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          MUTABLE all: Float64[]@list = [];
+          MUTABLE all: []Float64 = [];
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
             append(all, 1.0);
@@ -700,7 +700,7 @@ RSpec.describe LoopFrameAnalysis do
           WHILE i < 3 DO
             MUTABLE j = 0_i64;
             WHILE j < 3 DO
-              MUTABLE parts: Int64[]@list = [];
+              MUTABLE parts: []Int64 = [];
               parts.append(j);
               j = j + 1_i64;
             END
@@ -730,7 +730,7 @@ RSpec.describe LoopFrameAnalysis do
             MUTABLE resp = "";
             MUTABLE i = 0_i64;
             WHILE i < 5 DO
-              MUTABLE parts: Int64[]@list = [];
+              MUTABLE parts: []Int64 = [];
               parts.append(i);
               resp = resp $+ i.toString() $+ ";" $+ prefix.length().toString();
               i = i + 1_i64;
@@ -755,7 +755,7 @@ RSpec.describe LoopFrameAnalysis do
             MUTABLE resp = "";
             MUTABLE j = 0_i64;
             WHILE j < 5 DO
-              MUTABLE parts: String[]@list = [];
+              MUTABLE parts: []String = [];
               parts.append(j.toString());
               resp = resp $+ j.toString() $+ ";" $+ prefix.length().toString();
               j = j + 1_i64;
@@ -779,7 +779,7 @@ RSpec.describe LoopFrameAnalysis do
             MUTABLE resp = "";
             MUTABLE j = 0_i64;
             WHILE j < 5 DO
-              MUTABLE parts: String[]@list = [];
+              MUTABLE parts: []String = [];
               parts.append(j.toString());
               resp = resp $+ j.toString() $+ ";" $+ prefix.length().toString();
               j = j + 1_i64;
@@ -1029,7 +1029,7 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            MUTABLE parts: Int64[]@list = [];
+            MUTABLE parts: []Int64 = [];
             parts.append(i);
             i = i + 1_i64;
           END
@@ -1060,7 +1060,7 @@ RSpec.describe LoopFrameAnalysis do
 
     it "analyze! passes schema lookup into while-bind loop-capture frame checks" do
       ast = run_mir(<<~CLEAR)
-        STRUCT Box { parts: Int64[]@list }
+        STRUCT Box { parts: []Int64 }
         FN maybe() RETURNS ?Box -> RETURN NIL; END
         FN main() RETURNS Void ->
           WHILE maybe() EXISTS AS box DO
@@ -1085,7 +1085,7 @@ RSpec.describe LoopFrameAnalysis do
     it "analyze! passes function nodes into loop expression frame allocation checks" do
       ast = run_mir(<<~CLEAR)
         FN scratch(n: Int64) RETURNS Int64 ->
-          MUTABLE parts: Int64[]@list = [];
+          MUTABLE parts: []Int64 = [];
           parts.append(n);
           RETURN n;
         END
@@ -1112,7 +1112,7 @@ RSpec.describe LoopFrameAnalysis do
           RETURN "k:${toString(n)}";
         END
         FN main() RETURNS Void ->
-          MUTABLE counts: HashMap<Int64>@sharded(4) = {};
+          MUTABLE counts: {String}@sharded(4) Int64 = {};
           (0_i64 ..< 4_i64) |> SHARD(makeKey(_), counts) |> CONCURRENT EACH {
             counts[_] = 1_i64;
           };

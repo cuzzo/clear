@@ -7,7 +7,7 @@ STRUCT Entity { health: Int64 }
 
 FN main() RETURNS Void ->
   p1: ~Int64 = BG {
-    MUTABLE pool: Entity[8]@pool = [];
+    MUTABLE pool: [Pool(8)]Entity = [];
     pool.insert(Entity{ health: 10 });
     pool.insert(Entity{ health: 20 });
     pool.insert(Entity{ health: 30 });

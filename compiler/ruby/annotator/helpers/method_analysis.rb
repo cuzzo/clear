@@ -15,7 +15,7 @@ module MethodAnalysis
   # Dispatch is driven by COLLECTION_METHOD_CONFIGS keyed on Type#dispatch_key.
   sig { params(node: AST::MethodCall).returns(T.nilable(T::Boolean)) }
   def resolve_collection_method(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     obj_type = node.object.full_type!(context: "collection method receiver")
     implicit_safe_nav = obj_type.optional? && node.object.respond_to?(:safe_nav_chain) &&
       node.object.safe_nav_chain == true
@@ -42,9 +42,9 @@ module MethodAnalysis
   #
   # @param matched_def [Hash] the STD_LIB definition that matched
   # @param args [Array] the resolved argument nodes
-  sig { params(matched_def: FunctionSignature, args: T::Array[T.untyped]).returns(T.nilable(Type)) }
+  sig { params(matched_def: FunctionSignature, args: T::Array[AST::Node]).returns(T.nilable(Type)) }
   def narrow_collection_type!(matched_def, args)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless matched_def.intrinsic_contract.behavior.narrows_collection && args.size >= 2
 
     list_arg = args[0]
@@ -56,7 +56,7 @@ module MethodAnalysis
     return if ti.is_a?(Type) && ti.promise_list?
     return unless ti.is_a?(Type) && ti.collection && ti.element_type&.resolved == :Any
 
-    val_arg = args[1]
+    val_arg = T.must(args[1])
     val_type = val_arg.resolved_type
     new_type = Type.new(:"#{val_type}[]", collection: ti.collection)
     new_type.copy_collection_shape_from!(ti)
@@ -68,14 +68,14 @@ module MethodAnalysis
 
   private
 
-  sig { params(node: AST::MethodCall, obj_type: Type, registry: T::Hash[String, T::Hash[Symbol, T.untyped]], tag_field: Symbol, type_label: String).returns(T.nilable(T::Boolean)) }
+  sig { params(node: AST::MethodCall, obj_type: Type, registry: IntrinsicRegistry::RawRegistry, tag_field: Symbol, type_label: String).returns(T.nilable(T::Boolean)) }
   def resolve_typed_method(node, obj_type, registry, tag_field, type_label)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     defn = FunctionSignature.unwrap(IntrinsicRegistry.lookup(registry, T.unsafe(node).name))
     unless defn
       available = registry.keys.join(", ")
       emit_typo_suggestion!(
-        node.token, node.name, registry.keys,
+        node.token, node.name, registry.keys.map(&:to_s),
         "Unknown method '#{node.name}' on #{type_label}. Available: #{available}",
         "method of #{type_label}",
         category: :type, cascade: true
@@ -111,8 +111,8 @@ module MethodAnalysis
     end
 
     # Set tag and return type
-    node.send(:"#{tag_field}=", node.name.to_sym)
-    stamp_type!(node, defn.return_def.resolve(obj_type, [], self))
+    node.public_send(:"#{tag_field}=", node.name.to_sym)
+    stamp_type!(node, defn.return_def.resolve(obj_type, []))
     node.container_borrow = defn.intrinsic_container_borrow?
 
     # Resolve zig pattern -- pick variant based on receiver type.
@@ -153,7 +153,7 @@ module MethodAnalysis
 
     # Ownership: mark TAKES args as moved (same as function_analysis.rb line 305-310)
     defn.intrinsic_argument_takes_indices.each do |arg_idx|
-      arg_node = node.args[arg_idx]
+      arg_node = T.must(node.args[arg_idx])
       move_if_takes_ownership!(arg_node, action: :takes, consumer_param_type: nil)
     end
 
@@ -176,7 +176,7 @@ module MethodAnalysis
 
   sig { params(node: AST::MethodCall).void }
   def validate_indirect_collection_insertion!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     receiver_type = node.object.full_type!(context: "collection insertion receiver")
     return unless receiver_type.linear_collection?
     signature = FunctionSignature.unwrap(node.matched_stdlib_def) if node.respond_to?(:matched_stdlib_def)
@@ -192,24 +192,24 @@ module MethodAnalysis
 
     element_type = receiver_type.element_type
     return unless element_type
-    actual_type = T.must(value_arg).full_type!(context: "collection insertion")
+    actual_type = value_arg.full_type!(context: "collection insertion")
     return unless element_type.resolved == actual_type.resolved
 
     if element_type.indirect? && !actual_type.indirect?
       if actual_type.any_rc? || actual_type.node_reference? || actual_type.link?
-        error!(T.must(value_arg), :INDIRECT_ELEMENT_IDENTITY,
+        error!(value_arg, :INDIRECT_ELEMENT_IDENTITY,
           type: element_type.resolved, actual: indirect_identity_display(actual_type))
       elsif language_mode != :easy
-        emit_indirect_element_explicit_error!(T.must(value_arg), element_type)
+        emit_indirect_element_explicit_error!(value_arg, element_type)
       else
         node.implicit_layout_cost = true
-        T.must(value_arg).layout_transport = :box
+        value_arg.layout_transport = :box
       end
     elsif !element_type.indirect? && actual_type.indirect?
-      T.must(value_arg).layout_transport = :unbox
+      value_arg.layout_transport = :unbox
     elsif element_type.indirect? != actual_type.indirect? &&
         (actual_type.any_rc? || actual_type.node_reference? || actual_type.link?)
-      error!(T.must(value_arg), :INDIRECT_ELEMENT_IDENTITY,
+      error!(value_arg, :INDIRECT_ELEMENT_IDENTITY,
         type: element_type.resolved, actual: indirect_identity_display(actual_type))
     end
   end
@@ -219,13 +219,13 @@ module MethodAnalysis
     parts = [Type.surface_name_type(type)]
     ownership = type.ownership_surface_name
     parts << ownership if ownership
-    parts << "@indirect" if type.indirect?
+    parts << "@boxed" if type.indirect?
     parts.join
   end
 
   sig { params(value_arg: AST::Node, element_type: Type).void }
   def emit_indirect_element_explicit_error!(value_arg, element_type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     token = value_arg.token
     fixes = T.let([], T::Array[Fix])
     if token
@@ -234,7 +234,7 @@ module MethodAnalysis
         confidence: :interactive,
         edits: [Edit.new(
           span: Span.new(file: nil, line: token.line, col: token.column + token.value.to_s.length, length: 0),
-          replacement: " @indirect",
+          replacement: " @boxed",
         )],
       )
     end
@@ -249,12 +249,12 @@ module MethodAnalysis
 
   sig { params(node: AST::MethodCall, obj_type: Type, defn: FunctionSignature).void }
   def narrow_receiver_collection!(node, obj_type, defn)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless defn.intrinsic_receiver_collection_narrowing?
     return unless node.args.length == 1
     return unless obj_type.element_type&.resolved == :Any
 
-    val_type = node.args[0].resolved_type
+    val_type = T.must(node.args[0]).resolved_type
     new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
     new_type.copy_placement_from!(obj_type, preserve_existing: false)
     new_type.copy_collection_shape_from!(obj_type)
@@ -273,7 +273,7 @@ module MethodAnalysis
   # Dispatch is driven by Type#dispatch_key — add new indexable types there.
   sig { params(type_info: Type, op: Symbol).returns(T.nilable(IndexOpDefinition)) }
   def resolve_index_op(type_info, op)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return nil if type_info.promise_list?
     INDEX_OPS.dig(type_info.dispatch_key, op)
   end

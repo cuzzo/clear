@@ -10,14 +10,14 @@
 # element: [0], [10], [20]. Reading them back must match.
 
 STRUCT Item {
-  data: Int64[]@list
+  data: []Int64
 }
 
 FN main() RETURNS !Void ->
-  MUTABLE items: Item[]@list = [];
+  MUTABLE items: []Item = [];
   MUTABLE p: Int64 = 0;
   WHILE p < 3 DO
-    MUTABLE data: Int64[]@list = [];
+    MUTABLE data: []Int64 = [];
     data.append(p * 10);
     items.append(Item{ data: data });
     p += 1;

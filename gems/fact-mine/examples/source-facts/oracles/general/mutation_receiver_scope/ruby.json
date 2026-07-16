@@ -1,0 +1,13 @@
+{
+  "syntax": {
+    "semantic_effects": [
+      {
+        "detail": "<<",
+        "function": "append",
+        "kind": "hidden_mutation",
+        "line": 5,
+        "receiver_scope": "parameter"
+      }
+    ]
+  }
+}

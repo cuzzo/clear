@@ -41,7 +41,7 @@ module CleanupClassifier
   FieldBearingSchema = T.type_alias { T.any(Schemas::StructSchema, Schemas::ResourceSchema, Schemas::InlineStructVariant) }
   CleanupNode = T.type_alias { T.nilable(AST::Node) }
   CaptureBindingBlock = T.type_alias do
-    T.proc.params(name: String, expr: AST::Node, anchor: AST::Node).void
+    T.proc.params(name: String, expr: AST::Node, anchor: T.any(AST::Node, AST::Binding)).void
   end
   CleanupExtraValue = T.type_alias do
     T.nilable(T.any(String, Symbol, T::Boolean, Type, Schemas::ResourceClosePlan))
@@ -592,7 +592,17 @@ module CleanupClassifier
     end
 
     # Struct fallback (strings/collections/rc as fields).
-    classify_struct_cleanup_fields(ti, nil, schema_lookup)
+    struct_entry = classify_struct_cleanup_fields(ti, nil, schema_lookup)
+    return struct_entry if struct_entry
+
+    # Structural products such as Tuple have no nominal schema to classify,
+    # but their recursive type tree may still contain promises, collections,
+    # strings, or other cleanup-bearing values. The runtime uniform cleanup
+    # traversal handles those fields by type.
+    structural_product = classify_structural_product(ti, schema_lookup)
+    return structural_product if structural_product
+
+    nil
   end
 
   # ── Walk MATCH AS bindings ──────────────────────────────────────
@@ -611,9 +621,10 @@ module CleanupClassifier
 
       node.cases.each do |c|
         next unless c.binding
-        variant_name = case c.value
-                       when AST::GetField then c.value.field
-                       when AST::MethodCall then c.value.name
+        case_value = c.value
+        variant_name = case case_value
+                       when AST::GetField then case_value.field
+                       when AST::MethodCall then case_value.name
                        else nil
                        end
         next unless variant_name
@@ -627,13 +638,13 @@ module CleanupClassifier
 
         src_entry = bindings[expr.name.to_s]
         e.set_alloc!(src_entry.alloc) if e && src_entry
-        bindings[c.binding] = e if e
+        bindings[T.must(c.binding)] = e if e
       end
     end
   end
 
   # Single dispatch point for MATCH AS variant cleanup. Returns nil when the
-  # variant doesn't need an AS-binding cleanup (unit variants, @indirect
+  # variant doesn't need an AS-binding cleanup (unit variants, @boxed
   # pointees, plain non-heap-bearing inline structs).
   sig { params(variant_type: Schemas::UnionSchema::VariantValue, union_lookup: T.any(String, Symbol), variant_name: T.any(String, Symbol)).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.match_as_entry_for(variant_type, union_lookup, variant_name)
@@ -667,8 +678,14 @@ module CleanupClassifier
   private_class_method def self.walk_capture_bindings(body, schema_lookup, bindings)
     each_capture_binding(body) do |name, expr, anchor_node|
       next unless AST.capture_expr_owns_result?(expr)
-      expr_ti = Type.from_node!(expr, context: "capture binding")
-      inner_ti = expr_ti.wrapped_type
+      expr_ti = AST.capture_expr_source_type(expr)
+      inner_ti = if expr_ti.stream_step?
+        expr_ti.stream_step_item_type
+      elsif expr_ti.error_union?
+        expr_ti.success_type
+      else
+        expr_ti.wrapped_type
+      end
       next unless inner_ti
       classification_node = anchor_node.is_a?(AST::Binding) ? anchor_node.expr : anchor_node
       e = classify_binding(inner_ti, classification_node, schema_lookup)
@@ -694,6 +711,10 @@ module CleanupClassifier
   sig { params(expr: AST::Node, schema_lookup: Proc).returns(T.nilable(Symbol)) }
   private_class_method def self.capture_expr_owned_alloc(expr, schema_lookup)
     case expr
+    when AST::NextExpr
+      # NEXT transfers an awaited value (or a popped stream item) into the
+      # receiving binding. Async results are materialized in heap storage.
+      :heap
     when AST::ResolveNode
       :heap
     when AST::FuncCall
@@ -777,7 +798,7 @@ module CleanupClassifier
       when AST::WhileBindLoop
         yield node.binding_name.to_s, node.condition, node
       when AST::IfBind
-        node.bindings.each { |b| yield b.name.to_s, b.expr, b }
+        node.bindings.each { |binding| yield binding.name.to_s, binding.expr, binding }
       end
     end
   end
@@ -846,8 +867,17 @@ module CleanupClassifier
     entry ||= classify_heap_storage(ti, node, schema_lookup, facts.sync)
     entry ||= classify_heap_composite(ti, node, schema_lookup, facts.sync)
     entry ||= classify_struct_cleanup_fields(ti, node, schema_lookup)
+    entry ||= classify_structural_product(ti, schema_lookup)
     entry ||= classify_non_copy_union(ti, schema_lookup)
     finalize_alloc_from_storage!(entry, node, ti, schema_lookup)
+  end
+
+  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.classify_structural_product(ti, schema_lookup)
+    return nil unless ti.tuple?
+    return nil unless ti.recursive_cleanup_shape?(T.unsafe(schema_lookup))
+
+    entry(:uniform, has_moved_guard: true)
   end
 
   sig { params(node: AST::Node).returns(BindingCleanupFacts) }
@@ -1155,7 +1185,7 @@ module CleanupClassifier
   # Catch-all for heap pointers not handled by classify_heap_storage.
   # Heap-stored composite (struct or union) whose cleanup the uniform
   # CheatLib.cleanup path handles via @TypeOf comptime dispatch.
-  # Covers @alwaysMutable / @indirect annotations AND structs promoted
+  # Covers @alwaysMutable / @boxed annotations AND structs promoted
   # to heap by MIRPass upgrade phases where type_info.provenance is not
   # set (only node.@storage_override is set).
   #
@@ -1308,8 +1338,10 @@ module CleanupClassifier
 
   sig { params(schema: T.nilable(FieldBearingSchema), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   private_class_method def self.elem_has_cleanup_fields?(schema, schema_lookup)
-    return false unless Schemas.inline_struct?(T.unsafe(schema)) || Schemas.field_bearing?(T.cast(schema, Schemas::SchemaValue))
-    concrete_schema = T.must(schema)
+    return false unless schema.is_a?(Schemas::InlineStructVariant) ||
+      schema.is_a?(Schemas::StructSchema) ||
+      schema.is_a?(Schemas::ResourceSchema)
+    concrete_schema = schema
     borrowed = borrowed_field_names(concrete_schema)
     concrete_schema.fields.any? do |name, v|
       next false if borrowed.include?(name.to_s)

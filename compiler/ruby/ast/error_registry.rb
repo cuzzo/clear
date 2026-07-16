@@ -2,7 +2,12 @@
 require "sorbet-runtime"
 
 module AST
-    extend T::Sig
+  extend T::Sig
+
+  ErrorTypeConflictValue = T.type_alias do
+    T.nilable(T.any(Symbol, Lexer::Token, T::Boolean))
+  end
+  ErrorTypeConflict = T.type_alias { T::Hash[Symbol, ErrorTypeConflictValue] }
 
   # Single source of truth for CLEAR error kinds and types.
   #
@@ -123,7 +128,7 @@ module AST
   # Returns [existed?, conflict?]. conflict is a Hash
   #   { existing_kind:, given_kind:, first_site:, is_stdlib: }
   # or nil when registration succeeded (or was a no-op re-use).
-  sig { params(type_sym: Symbol, kind_sym: Symbol, site_token: T.nilable(T.any(Lexer::Token, Object))).returns([T::Boolean, T.nilable(T::Hash[Symbol, T.untyped])]) }
+  sig { params(type_sym: Symbol, kind_sym: Symbol, site_token: T.nilable(Lexer::Token)).returns([T::Boolean, T.nilable(ErrorTypeConflict)]) }
   def self.register_type!(type_sym, kind_sym, site_token: nil)
     entry = ERROR_TYPES[type_sym]
     if entry.nil?

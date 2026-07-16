@@ -3,7 +3,7 @@
 # values() was never freed when used directly in a CONCURRENT pipeline expression.
 
 FN main() RETURNS Void ->
-    MUTABLE counts: HashMap<String, Int64>@sharded(4) = {};
+    MUTABLE counts: {String}@sharded(4) Int64 = {};
     n = 20_i64;
     FOR i IN (0_i64 ..< n) DO
         k = i.toString();
@@ -23,7 +23,7 @@ FN main() RETURNS Void ->
     ASSERT average == 1.0,        "avg should be 1";
 
     # Also test numeric-keyed sharded map inline values().
-    MUTABLE ncounts: HashMap<Int64, Int64>@sharded(4) = {};
+    MUTABLE ncounts: {Int64}@sharded(4) Int64 = {};
     FOR j IN (0_i64 ..< n) DO
         ncounts[j] = (ncounts[j] OR_ELSE 0_i64) + 1_i64;
     END

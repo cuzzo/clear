@@ -3,7 +3,8 @@ require "sorbet-runtime"
 
 require "set"
 
-class CircularDependencyError < StandardError; end
+class ModuleImportError < StandardError; end
+class CircularDependencyError < ModuleImportError; end
 
 # Orchestrates multi-file compilation with a shared module cache.
 # Prevents circular dependencies and compiles each .clear file exactly once.
@@ -32,7 +33,7 @@ class ModuleImporter
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   attr_reader :module_cache
 
-  sig { params(base_dir: String, pkg_paths: T::Hash[T.untyped, T.untyped], use_mir: T::Boolean, stdlib_root: String).void }
+  sig { params(base_dir: String, pkg_paths: T::Hash[String, String], use_mir: T::Boolean, stdlib_root: String).void }
   def initialize(base_dir: Dir.pwd, pkg_paths: {}, use_mir: false, stdlib_root: STDLIB_ROOT)
     @base_dir     = T.let(File.expand_path(base_dir), String)
     @module_cache = T.let({}, T::Hash[T.untyped, T.untyped])  # abs_path => CompiledModule
@@ -52,7 +53,7 @@ class ModuleImporter
   def compile_package(pkg_name, caller_dir: @base_dir)
     path = @pkg_paths[pkg_name.to_s] || resolve_stdlib_package(pkg_name)
     unless path
-      raise "REQUIRE error: unknown package '#{pkg_name}'. " \
+      raise ModuleImportError, "REQUIRE error: unknown package '#{pkg_name}'. " \
             "Register it with --pkg #{pkg_name}=/path/to/lib.clear " \
             "or place it under #{@stdlib_root}/#{pkg_name}/src/lib.clear"
     end
@@ -93,38 +94,41 @@ class ModuleImporter
       raise CircularDependencyError, "Circular dependency detected: #{cycle} -> #{File.basename(path)}"
     end
 
-    raise "REQUIRE error: file not found: #{abs_path}" unless File.exist?(abs_path)
+    raise ModuleImportError, "REQUIRE error: file not found: #{abs_path}" unless File.exist?(abs_path)
 
     @compiling.add(abs_path)
-
-    source     = File.read(abs_path)
-    source_dir = File.dirname(abs_path)
-
-    # STRICT-imports boundary (gradual-typing.md §7): imported modules
-    # must export concrete types in their public surface. Force the
-    # parser into strict mode (gradual=false) for the duration of the
-    # imported module's parse so `--gradual` from the top-level build
-    # never propagates across module boundaries. Explicit `Auto` in
-    # source still tokenizes; the post-parse check below catches it.
-    saved_gradual = ClearParser.gradual_mode
-    ClearParser.gradual_mode = false
     begin
-      tokens = Lexer.new(source).tokenize
-      ast    = ClearParser.new(tokens, source).parse
+      source     = File.read(abs_path)
+      source_dir = File.dirname(abs_path)
+
+      # STRICT-imports boundary (gradual-typing.md §7): imported modules
+      # must export concrete types in their public surface. Force the
+      # parser into strict mode (gradual=false) for the duration of the
+      # imported module's parse so `--gradual` from the top-level build
+      # never propagates across module boundaries. Explicit `Auto` in
+      # source still tokenizes; the post-parse check below catches it.
+      saved_gradual = ClearParser.gradual_mode
+      ClearParser.gradual_mode = false
+      ast = begin
+        budget = FrontendResourceBudget.new
+        tokens = Lexer.new(source, file: abs_path, budget: budget).tokenize
+        ClearParser.new(tokens, source, budget: budget).parse
+      ensure
+        ClearParser.gradual_mode = saved_gradual
+      end
+
+      reject_auto_in_public_signatures!(ast, abs_path)
+
+      annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir, source_code: source)
+      annotator.annotate!(ast)
+
+      mod = compile_module_mir(ast, annotator, source_dir)
+
+      @module_cache[abs_path] = mod
+      mod
     ensure
-      ClearParser.gradual_mode = saved_gradual
+      @compiling.delete(abs_path)
     end
-
-    reject_auto_in_public_signatures!(T.must(ast), abs_path)
-
-    annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir, source_code: source)
-    annotator.annotate!(T.must(ast))
-
-    mod = compile_module_mir(T.must(ast), annotator, source_dir)
-
-    @module_cache[abs_path] = mod
-    @compiling.delete(abs_path)
-    mod
   end
 
   # STRICT-imports check (M1.5). Imported modules cannot expose
@@ -200,9 +204,9 @@ class ModuleImporter
     sync_global_scope_function_signatures!(ast, annotator)
 
     # Collect schemas
-    struct_schemas = {}
-    enum_schemas = {}
-    union_schemas = {}
+    struct_schemas = T.let({}, T::Hash[Symbol, Schemas::StructSchema])
+    enum_schemas = T.let({}, T::Hash[Symbol, MIRLoweringSchemas::EnumVariants])
+    union_schemas = T.let({}, T::Hash[Symbol, Schemas::UnionSchema])
     ast.statements.each do |stmt|
       case stmt
       when AST::StructDef then struct_schemas[stmt.name.to_sym] = Schemas::StructSchema.new(fields: stmt.field_decls)
@@ -211,13 +215,13 @@ class ModuleImporter
       end
     end
 
-    fn_sigs = {}
+    fn_sigs = T.let({}, T::Hash[String, FunctionSignature])
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt)
     end
 
-    moved_guard_info = {}
+    moved_guard_info = T.let({}, MIRLoweringInput::MovedGuardInfo)
     fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
 
     lowering = MIRLowering.new(input: MIRLoweringInput.new(
@@ -256,7 +260,7 @@ class ModuleImporter
       entry = annotator.semantic_root_scope.resolve_entry(stmt.name)
       sig = entry&.fn_signature
       next unless sig
-      FunctionSignature.sync_signature_from_function_def!(sig, stmt)
+      sig.sync_from_function_def!(stmt)
     end
     nil
   end

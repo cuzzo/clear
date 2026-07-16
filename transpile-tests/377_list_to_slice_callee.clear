@@ -15,7 +15,7 @@ FN lenSlice(xs: Int64[]) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE xs: Int64[]@list = List[];
+    MUTABLE xs: []Int64 = List[];
     xs.append(1_i64);
     xs.append(2_i64);
     xs.append(3_i64);
@@ -25,6 +25,6 @@ FN main() RETURNS Void ->
     ASSERT lenSlice(xs) == 4_i64,  "@list -> []slice via .items, length";
 
     # And a plain literal slice should also pass through unchanged.
-    fixed: Int64[4] = [10_i64, 20_i64, 30_i64, 40_i64];
+    fixed: [4]Int64 = [10_i64, 20_i64, 30_i64, 40_i64];
     ASSERT sumSlice(fixed) == 100_i64, "fixed [N] -> []slice continues to work (test 373)";
 END

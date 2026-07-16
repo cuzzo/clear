@@ -1,5 +1,7 @@
 // Type inference visitor and analysis engine.
 
+mod languages;
+
 #[allow(unused_macros)]
 macro_rules! println {
     ($($arg:tt)*) => {
@@ -49,6 +51,10 @@ pub enum TypeExpr {
 }
 
 impl TypeExpr {
+    pub fn from_flow_hint(hint: &str, language: &str) -> Option<Self> {
+        languages::flow_hint(hint, language)
+    }
+
     fn has_balanced_delimiters(s: &str, open: char, close: char) -> bool {
         let mut depth = 0;
         for c in s.chars() {
@@ -64,242 +70,8 @@ impl TypeExpr {
         depth == 0
     }
 
-    pub fn parse(s: &str, language: &str) -> Self {
-        let s = s.trim();
-        if s.is_empty() {
-            return TypeExpr::Untyped;
-        }
-        match language {
-            "ruby" => Self::parse_ruby(s),
-            "python" => Self::parse_python(s),
-            "typescript" | "javascript" => Self::parse_typescript(s),
-            "go" => Self::parse_go(s),
-            _ => Self::parse_generic(s),
-        }
-    }
-
-    fn parse_ruby(s: &str) -> Self {
-        if s == "T.untyped" || s == "untyped" {
-            return TypeExpr::Untyped;
-        }
-        if s == "NilClass" || s == "nil" {
-            return TypeExpr::NilClass;
-        }
-        if s.starts_with("T.nilable(") && s.ends_with(')') {
-            let inner = &s["T.nilable(".len()..s.len() - 1];
-            if Self::has_balanced_delimiters(inner, '(', ')') {
-                return TypeExpr::Nilable(Box::new(Self::parse_ruby(inner)));
-            }
-        }
-        if (s.starts_with("T::Array[") || s.starts_with("Array[")) && s.ends_with(']') {
-            let prefix_len = if s.starts_with("T::") { "T::Array[".len() } else { "Array[".len() };
-            let inner = &s[prefix_len..s.len() - 1];
-            return TypeExpr::Array(Box::new(Self::parse_ruby(inner)));
-        }
-        if (s.starts_with("T::Hash[") || s.starts_with("Hash[")) && s.ends_with(']') {
-            let prefix_len = if s.starts_with("T::") { "T::Hash[".len() } else { "Hash[".len() };
-            let inner = &s[prefix_len..s.len() - 1];
-            let parts = split_top_level_params(inner);
-            if parts.len() == 2 {
-                return TypeExpr::Hash {
-                    key: Box::new(Self::parse_ruby(&parts[0])),
-                    value: Box::new(Self::parse_ruby(&parts[1])),
-                };
-            }
-        }
-        if (s.starts_with("T::Set[") || s.starts_with("Set[")) && s.ends_with(']') {
-            let prefix_len = if s.starts_with("T::") { "T::Set[".len() } else { "Set[".len() };
-            let inner = &s[prefix_len..s.len() - 1];
-            return TypeExpr::Set(Box::new(Self::parse_ruby(inner)));
-        }
-        if s.starts_with("T.any(") && s.ends_with(')') {
-            let inner = &s["T.any(".len()..s.len() - 1];
-            if Self::has_balanced_delimiters(inner, '(', ')') {
-                let parts = split_top_level_params(inner);
-                return TypeExpr::Union(parts.iter().map(|p| Self::parse_ruby(p)).collect());
-            }
-        }
-        TypeExpr::Primitive(s.to_string())
-    }
-
-    fn parse_python(s: &str) -> Self {
-        if s == "Any" || s == "any" {
-            return TypeExpr::Untyped;
-        }
-        if s == "None" {
-            return TypeExpr::NilClass;
-        }
-        if s.starts_with("Optional[") && s.ends_with(']') {
-            let inner = &s["Optional[".len()..s.len() - 1];
-            return TypeExpr::Nilable(Box::new(Self::parse_python(inner)));
-        }
-        if (s.starts_with("List[") || s.starts_with("list[")) && s.ends_with(']') {
-            let prefix_len = if s.starts_with('L') { "List[".len() } else { "list[".len() };
-            let inner = &s[prefix_len..s.len() - 1];
-            return TypeExpr::Array(Box::new(Self::parse_python(inner)));
-        }
-        if (s.starts_with("Dict[") || s.starts_with("dict[")) && s.ends_with(']') {
-            let prefix_len = if s.starts_with('D') { "Dict[".len() } else { "dict[".len() };
-            let inner = &s[prefix_len..s.len() - 1];
-            let parts = split_top_level_params(inner);
-            if parts.len() == 2 {
-                return TypeExpr::Hash {
-                    key: Box::new(Self::parse_python(&parts[0])),
-                    value: Box::new(Self::parse_python(&parts[1])),
-                };
-            }
-        }
-        if (s.starts_with("Set[") || s.starts_with("set[")) && s.ends_with(']') {
-            let prefix_len = if s.starts_with('S') { "Set[".len() } else { "set[".len() };
-            let inner = &s[prefix_len..s.len() - 1];
-            return TypeExpr::Set(Box::new(Self::parse_python(inner)));
-        }
-        if s.starts_with("Union[") && s.ends_with(']') {
-            let inner = &s["Union[".len()..s.len() - 1];
-            let parts = split_top_level_params(inner);
-            let mut has_none = false;
-            let mut non_none_parts = Vec::new();
-            for part in parts {
-                let parsed = Self::parse_python(&part);
-                if parsed == TypeExpr::NilClass {
-                    has_none = true;
-                } else {
-                    non_none_parts.push(parsed);
-                }
-            }
-            let base = if non_none_parts.is_empty() {
-                TypeExpr::Untyped
-            } else if non_none_parts.len() == 1 {
-                non_none_parts.into_iter().next().unwrap()
-            } else {
-                TypeExpr::Union(non_none_parts)
-            };
-            return if has_none {
-                TypeExpr::Nilable(Box::new(base))
-            } else {
-                base
-            };
-        }
-        if s.contains('|') {
-            let parts: Vec<&str> = s.split('|').map(|p| p.trim()).collect();
-            let mut has_none = false;
-            let mut non_none_parts = Vec::new();
-            for part in parts {
-                let parsed = Self::parse_python(part);
-                if parsed == TypeExpr::NilClass {
-                    has_none = true;
-                } else {
-                    non_none_parts.push(parsed);
-                }
-            }
-            let base = if non_none_parts.is_empty() {
-                TypeExpr::Untyped
-            } else if non_none_parts.len() == 1 {
-                non_none_parts.into_iter().next().unwrap()
-            } else {
-                TypeExpr::Union(non_none_parts)
-            };
-            return if has_none {
-                TypeExpr::Nilable(Box::new(base))
-            } else {
-                base
-            };
-        }
-        TypeExpr::Primitive(s.to_string())
-    }
-
-    fn parse_typescript(s: &str) -> Self {
-        if s == "any" || s == "unknown" {
-            return TypeExpr::Untyped;
-        }
-        if s == "null" || s == "undefined" {
-            return TypeExpr::NilClass;
-        }
-        if s.starts_with("Array<") && s.ends_with('>') {
-            let inner = &s["Array<".len()..s.len() - 1];
-            return TypeExpr::Array(Box::new(Self::parse_typescript(inner)));
-        }
-        if s.starts_with("Record<") && s.ends_with('>') {
-            let inner = &s["Record<".len()..s.len() - 1];
-            let parts = split_top_level_params(inner);
-            if parts.len() == 2 {
-                return TypeExpr::Hash {
-                    key: Box::new(Self::parse_typescript(&parts[0])),
-                    value: Box::new(Self::parse_typescript(&parts[1])),
-                };
-            }
-        }
-        if s.starts_with("Set<") && s.ends_with('>') {
-            let inner = &s["Set<".len()..s.len() - 1];
-            return TypeExpr::Set(Box::new(Self::parse_typescript(inner)));
-        }
-        if s.ends_with("[]") {
-            let inner = &s[..s.len() - 2];
-            return TypeExpr::Array(Box::new(Self::parse_typescript(inner)));
-        }
-        if s.contains('|') {
-            let parts: Vec<&str> = s.split('|').map(|p| p.trim()).collect();
-            let mut has_null = false;
-            let mut non_null_parts = Vec::new();
-            for part in parts {
-                let parsed = Self::parse_typescript(part);
-                if parsed == TypeExpr::NilClass {
-                    has_null = true;
-                } else {
-                    non_null_parts.push(parsed);
-                }
-            }
-            let base = if non_null_parts.is_empty() {
-                TypeExpr::Untyped
-            } else if non_null_parts.len() == 1 {
-                non_null_parts.into_iter().next().unwrap()
-            } else {
-                TypeExpr::Union(non_null_parts)
-            };
-            return if has_null {
-                TypeExpr::Nilable(Box::new(base))
-            } else {
-                base
-            };
-        }
-        TypeExpr::Primitive(s.to_string())
-    }
-
-    fn parse_go(s: &str) -> Self {
-        if s.starts_with('*') {
-            return TypeExpr::Nilable(Box::new(Self::parse_go(&s[1..])));
-        }
-        if s.starts_with("[]") {
-            return TypeExpr::Array(Box::new(Self::parse_go(&s[2..])));
-        }
-        if s.starts_with("map[") {
-            let mut depth = 0;
-            let mut close_idx = None;
-            for (i, c) in s.char_indices() {
-                if c == '[' {
-                    depth += 1;
-                } else if c == ']' {
-                    depth -= 1;
-                    if depth == 0 {
-                        close_idx = Some(i);
-                        break;
-                    }
-                }
-            }
-            if let Some(close) = close_idx {
-                let key = &s[4..close];
-                let value = &s[close + 1..];
-                return TypeExpr::Hash {
-                    key: Box::new(Self::parse_go(key)),
-                    value: Box::new(Self::parse_go(value)),
-                };
-            }
-        }
-        TypeExpr::Primitive(s.to_string())
-    }
-
-    fn parse_generic(s: &str) -> Self {
-        Self::parse_ruby(s)
+    pub fn parse(source: &str, language: &str) -> Self {
+        languages::parse(source, language)
     }
 
     pub fn to_sorbet_string(&self) -> String {
@@ -489,6 +261,15 @@ fn useful_type(t: &TypeExpr) -> bool {
 
 fn weak_type(t: &TypeExpr) -> bool {
     t.is_weak()
+}
+
+fn same_collection_kind(left: &TypeExpr, right: &TypeExpr) -> bool {
+    matches!(
+        (left, right),
+        (TypeExpr::Array(_), TypeExpr::Array(_))
+            | (TypeExpr::Hash { .. }, TypeExpr::Hash { .. })
+            | (TypeExpr::Set(_), TypeExpr::Set(_))
+    )
 }
 
 fn get_type_str(value: &Value) -> Option<String> {
@@ -758,6 +539,33 @@ pub(crate) fn collect_prepass_facts(
     }
 }
 
+/// Collect the only expression-level fact required by NilKill's trace-plan
+/// profile without running whole-method type inference. This must use the
+/// same normalized call matcher as the full visitor so the lean and complete
+/// profiles agree on every `T.let` site.
+pub(crate) fn collect_tlet_sites(
+    node: &crate::ast::Node,
+    path: &str,
+    sites: &mut Vec<serde_json::Value>,
+) {
+    if matches!(node.r#type.as_str(), "CALL" | "QCALL") {
+        if let Some((receiver, method, args_node)) = match_call(node) {
+            if method == "let" && receiver.text == "T" {
+                let arg_nodes = call_arguments(args_node);
+                sites.push(json!({
+                    "path": path,
+                    "line": node.first_lineno,
+                    "tlet": true,
+                    "type": arg_nodes.get(1).map(|arg| arg.text.clone()),
+                }));
+            }
+        }
+    }
+    for child in child_nodes(node) {
+        collect_tlet_sites(child, path, sites);
+    }
+}
+
 pub(crate) struct FactStore<'a> {
     pub(crate) tlet_sites: &'a mut Vec<serde_json::Value>,
     pub(crate) dead_nil_checks: &'a mut Vec<serde_json::Value>,
@@ -862,21 +670,63 @@ const CORE_CLASS_CONSTANTS: &[&str] = &[
 
 impl<'a> TypeInferenceVisitor<'a> {
     fn parse_type(&self, s: &str) -> TypeExpr {
-        TypeExpr::parse(s, self.document.language.as_str())
+        let parsed = TypeExpr::parse(s, self.document.language.as_str());
+        self.expand_type_aliases(parsed, &mut BTreeSet::new())
     }
-    
 
-    
+    fn expand_type_aliases(
+        &self,
+        parsed: TypeExpr,
+        seen: &mut BTreeSet<String>,
+    ) -> TypeExpr {
+        match parsed {
+            TypeExpr::Primitive(name) => {
+                let Some(target) = self.type_alias_target(&name) else {
+                    return TypeExpr::Primitive(name);
+                };
+                if !seen.insert(name.clone()) {
+                    return TypeExpr::Primitive(name);
+                }
+                let expanded = self.expand_type_aliases(
+                    TypeExpr::parse(target, self.document.language.as_str()),
+                    seen,
+                );
+                seen.remove(&name);
+                expanded
+            }
+            TypeExpr::Nilable(inner) => TypeExpr::Nilable(Box::new(
+                self.expand_type_aliases(*inner, seen),
+            )),
+            TypeExpr::Array(inner) => TypeExpr::Array(Box::new(
+                self.expand_type_aliases(*inner, seen),
+            )),
+            TypeExpr::Set(inner) => TypeExpr::Set(Box::new(
+                self.expand_type_aliases(*inner, seen),
+            )),
+            TypeExpr::Hash { key, value } => TypeExpr::Hash {
+                key: Box::new(self.expand_type_aliases(*key, seen)),
+                value: Box::new(self.expand_type_aliases(*value, seen)),
+            },
+            TypeExpr::Union(parts) => TypeExpr::Union(
+                parts
+                    .into_iter()
+                    .map(|part| self.expand_type_aliases(part, seen))
+                    .collect(),
+            ),
+            other => other,
+        }
+    }
 
-    
-
-    
-
-    
-
-    
-
-    
+    fn type_alias_target(&self, name: &str) -> Option<&str> {
+        if let Some(target) = self.document.type_aliases.get(name) {
+            return Some(target);
+        }
+        let owner = self.current_owners.last()?;
+        self.document
+            .type_aliases
+            .get(&format!("{owner}::{name}"))
+            .map(String::as_str)
+    }
 
     pub(crate) fn visit(&mut self, node: &crate::ast::Node) {
         match node.r#type.as_str() {
@@ -961,11 +811,12 @@ impl<'a> TypeInferenceVisitor<'a> {
 
     fn visit_class_or_module(&mut self, node: &crate::ast::Node) {
         let name = owner_name(node).unwrap_or_else(|| "(anonymous)".to_string());
-        let qualified = if self.current_owners.is_empty() {
-            name
-        } else {
-            format!("{}::{name}", self.current_owners.join("::"))
-        };
+        // Stack entries are already fully qualified. Joining the whole stack
+        // repeats every ancestor once nesting reaches three levels.
+        let qualified = self
+            .current_owners
+            .last()
+            .map_or(name.clone(), |owner| format!("{owner}::{name}"));
         self.current_owners.push(qualified);
         for child in child_nodes(node) {
             self.visit(child);
@@ -993,10 +844,6 @@ impl<'a> TypeInferenceVisitor<'a> {
                 (fd.name == func_name || (node.r#type == "DEFS" && fd.name == format!("self.{}", func_name)))
                     && (fd.line == node.first_lineno || fd.owner == owner)
             }) {
-                eprintln!(
-                    "TypeInferenceVisitor matched: name={}, owner={}, line={}",
-                    func_name, owner, node.first_lineno
-                );
                 let old_method = self.current_method.clone();
                 let old_method_kind = self.current_method_kind.clone();
                 let old_method_line = self.current_method_line;
@@ -1039,15 +886,14 @@ impl<'a> TypeInferenceVisitor<'a> {
                 }
 
                 // Populate local_container_origins with method parameters and parameter shapes
-                eprintln!("DEBUG: DEFN/DEFS matched method: {}, current_params: {:?}", func_name, self.current_params);
                 for (idx, param_name) in self.current_params.iter().enumerate() {
                     let origin = json!({
                         "kind": "method parameter",
                         "name": param_name,
                         "path": self.path,
-                        "line": node.first_lineno
+                        "line": node.first_lineno,
+                        "declared_type": self.param_types.get(param_name),
                     });
-                    eprintln!("DEBUG: inserting method parameter origin for {}: {:?}", param_name, origin);
                     self.local_container_origins.insert(param_name.clone(), origin);
 
                     if let Some(shape) = self.get_method_param_hash_shape(&owner, &func_name, param_name)
@@ -1146,7 +992,6 @@ impl<'a> TypeInferenceVisitor<'a> {
                     "blocked"
                 };
 
-                eprintln!("DEBUG: method={:?}, expressions={:?}", func_name, expressions.iter().map(|e| (&e.r#type, &e.text)).collect::<Vec<_>>());
                 let mut ret_hash_shape = None;
                 for expr in &expressions {
                     if let Some(shape) = self.hash_shape_for_value(expr) {
@@ -1652,6 +1497,18 @@ impl<'a> TypeInferenceVisitor<'a> {
                         "tlet": true,
                         "type": arg_nodes.get(1).map(|arg| arg.text.clone()),
                     }));
+                } else if method == "must" && receiver.text == "T" {
+                    let arg_nodes = call_arguments(args_node);
+                    if let Some(subject) = arg_nodes.first().filter(|arg| self.provably_non_nil(arg)) {
+                        self.facts.dead_nil_checks.push(json!({
+                            "path": self.path,
+                            "line": node.first_lineno,
+                            "kind": "non_nil_assertion",
+                            "code": node.text.clone(),
+                            "subject": subject.text.clone(),
+                            "reason": format!("{} has a statically proven non-nil type; T.must is redundant", subject.text),
+                        }));
+                    }
                 } else if node.r#type == "QCALL" {
                     if self.provably_non_nil(receiver) {
                         self.facts.dead_nil_checks.push(json!({
@@ -1681,8 +1538,6 @@ impl<'a> TypeInferenceVisitor<'a> {
         if node.r#type == "SELF" {
             return true;
         }
-        eprintln!("provably_non_nil: node.type={}, node.text={}, node_symbol={:?}, self.param_types={:?}, self.local_types={:?}",
-            node.r#type, node.text, node_symbol(node), self.param_types, self.local_types);
         match node.r#type.as_str() {
             "LVAR" | "DVAR" => {
                 if let Some(name) = node_symbol(node) {
@@ -1705,6 +1560,9 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     fn inspect_branch_guard(&mut self, node: &crate::ast::Node, inverted: bool) {
+        if self.is_prepass {
+            return;
+        }
         let Some(predicate) = child_node(node, 0) else {
             return;
         };
@@ -1797,7 +1655,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
         let (origin_kind, origin_name) = self.predicate_origin(receiver);
         let receiver_type = self.deterministic_guard_subject_type(receiver)?;
-        if receiver_type != TypeExpr::NilClass && !matches!(receiver_type, TypeExpr::Nilable(_)) {
+        if receiver_type.is_non_nil() {
             return Some(self.deterministic_guard_result(
                 false,
                 "nil_check",
@@ -2397,9 +2255,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         let mut class_chain = current_class.split("::").collect::<Vec<_>>();
         while !class_chain.is_empty() {
             let candidate = class_chain.join("::");
-            println!("Checking ivar {:?} for {:?}", name, candidate);
             if let Some(type_text) = self.ivar_tlet_types.get(&(candidate, name.to_string())) {
-                println!("Found type_text {:?}", type_text);
                 if useful_type(type_text) {
                     return Some(type_text.clone());
                 }
@@ -2440,14 +2296,20 @@ impl<'a> TypeInferenceVisitor<'a> {
                 let name = node_symbol(node)?;
                 extra_locals
                     .get(&name)
-                    .or_else(|| self.param_types.get(&name))
-                    .or_else(|| self.local_types.get(&name))
                     .cloned()
+                    .or_else(|| self.param_types.get(&name).cloned())
+                    .or_else(|| self.flow_or_refined_local_type(node, &name))
                     .or_else(|| {
                         if self.local_hash_shapes.contains_key(&name) {
-                            Some(TypeExpr::parse(&self.behavior.untyped_hash_type(), self.document.language.as_str()))
+                            Some(TypeExpr::parse(
+                                &self.behavior.untyped_hash_type(),
+                                self.document.language.as_str(),
+                            ))
                         } else if self.local_array_shapes.contains_key(&name) {
-                            Some(TypeExpr::parse(&self.behavior.untyped_array_type(), self.document.language.as_str()))
+                            Some(TypeExpr::parse(
+                                &self.behavior.untyped_array_type(),
+                                self.document.language.as_str(),
+                            ))
                         } else {
                             None
                         }
@@ -2460,6 +2322,9 @@ impl<'a> TypeInferenceVisitor<'a> {
             "OR" | "AND" => {
                 let left = child_node(node, 0).and_then(|c| self.expression_type_with_locals_and_shapes(c, extra_locals, extra_hash_shapes));
                 let right = child_node(node, 1).and_then(|c| self.expression_type_with_locals_and_shapes(c, extra_locals, extra_hash_shapes));
+                if left.is_none() || right.is_none() {
+                    return None;
+                }
                 let mut non_nil = Vec::new();
                 if let Some(ref l) = left {
                     if *l != TypeExpr::NilClass {
@@ -2486,8 +2351,83 @@ impl<'a> TypeInferenceVisitor<'a> {
                 }
                 None
             }
-            _ => self.static_expression_type_with_locals_and_shapes(node, extra_locals, extra_hash_shapes),
+            _ => self.static_expression_type_with_locals_and_shapes(
+                node,
+                extra_locals,
+                extra_hash_shapes,
+            ),
         }
+    }
+
+    fn flow_type_for_local(&self, node: &crate::ast::Node, name: &str) -> Option<TypeExpr> {
+        let fact = self.flow_fact_for_local(node, name)?;
+        let mut types = fact
+            .types
+            .iter()
+            .filter_map(|hint| flow_hint_type(hint, self.document.language.as_str()))
+            .collect::<Vec<_>>();
+        types.sort();
+        types.dedup();
+        match types.len() {
+            0 => None,
+            1 => types.pop(),
+            _ => Some(TypeExpr::Union(types)),
+        }
+    }
+
+    fn flow_or_refined_local_type(
+        &self,
+        node: &crate::ast::Node,
+        name: &str,
+    ) -> Option<TypeExpr> {
+        let flow = self.flow_type_for_local(node, name);
+        let local = self.local_types.get(name).cloned();
+        match (&flow, &local) {
+            (Some(flow_type), Some(local_type))
+                if flow_type.is_weak()
+                    && !local_type.is_weak()
+                    && same_collection_kind(flow_type, local_type) =>
+            {
+                local
+            }
+            _ => flow.or(local),
+        }
+    }
+
+    fn flow_fact_for_local(
+        &self,
+        node: &crate::ast::Node,
+        name: &str,
+    ) -> Option<&crate::syntax::cfg::FlowTypeFact> {
+        let function = self.current_method.as_ref()?;
+        let owner = self
+            .current_owners
+            .last()
+            .map(String::as_str)
+            .unwrap_or("(top-level)");
+        let use_span = [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ];
+        let cfg_node = self
+            .document
+            .control_flow_nodes
+            .iter()
+            .filter(|cfg| {
+                cfg.function == *function
+                    && cfg.owner == owner
+                    && span_contains(cfg.span, use_span)
+                    && !matches!(cfg.kind.as_str(), "entry" | "exit")
+            })
+            .min_by_key(|cfg| span_size(cfg.span))?;
+        let place = self.document.places.iter().find(|place| {
+            place.function == *function && place.owner == owner && place.name == name
+        })?;
+        self.document.flow_types.iter().find(|fact| {
+            fact.node_id == cfg_node.id && fact.place_id == place.id && fact.complete
+        })
     }
 
     fn static_expression_type(&self, node: &crate::ast::Node) -> Option<TypeExpr> {
@@ -2503,6 +2443,29 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     fn static_expression_type_with_locals_and_shapes(
+        &self,
+        node: &crate::ast::Node,
+        extra_locals: &std::collections::BTreeMap<String, TypeExpr>,
+        extra_hash_shapes: &std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Option<TypeExpr> {
+        let inferred = self.static_expression_type_with_locals_and_shapes_raw(
+            node,
+            extra_locals,
+            extra_hash_shapes,
+        )?;
+
+        // A safe-navigation call may skip execution and evaluate to nil even
+        // when the invoked method's ordinary return type is concrete. Keep
+        // that control-flow alternative attached to the inferred result so a
+        // later call in the same chain cannot manufacture a non-nil proof.
+        Some(if node.r#type == "QCALL" {
+            inferred.make_nilable()
+        } else {
+            inferred
+        })
+    }
+
+    fn static_expression_type_with_locals_and_shapes_raw(
         &self,
         node: &crate::ast::Node,
         extra_locals: &std::collections::BTreeMap<String, TypeExpr>,
@@ -2627,6 +2590,14 @@ impl<'a> TypeInferenceVisitor<'a> {
             let key = (class_name, callee.clone());
             if let Some(ty) = self.inferred_return_types.get(&key) {
                 return Some(ty.clone());
+            }
+            // An unqualified call targets the current owner. Its declared
+            // return remains authoritative when the callee body itself is
+            // too dynamic to infer (for example, a typed collection lookup).
+            if receiver.is_none() {
+                if let Some(ty) = self.known_return_type(&callee) {
+                    return Some(ty);
+                }
             }
 
             if let Some(ty) = self.behavior.static_call_return_type(node, &callee, receiver_type.as_ref().map(|t| t.to_sorbet_string()).as_deref()) {
@@ -3094,8 +3065,9 @@ impl<'a> TypeInferenceVisitor<'a> {
             }
             if let Some(ty) = self.expression_type(node) {
                 if useful_type(&ty) {
+                    let flow_complete = self.flow_fact_for_local(node, &name).is_some();
                     return vec![
-                        json!({"kind": if ty == TypeExpr::NilClass { "nil" } else { "static" }, "type": ty, "line": node_line, "code": code}),
+                        json!({"kind": if ty == TypeExpr::NilClass { "nil" } else { "static" }, "type": ty, "line": node_line, "code": code, "flow_complete": flow_complete}),
                     ];
                 }
             }
@@ -3905,6 +3877,11 @@ impl<'a> TypeInferenceVisitor<'a> {
                 return;
             }
             if node.r#type == "CALL" || node.r#type == "QCALL" || node.r#type == "FCALL" || node.r#type == "VCALL" {
+                // Passing a local to a call that cannot return does not let the
+                // value escape onto any continuing control-flow path.
+                if self.noreturn_call(node) {
+                    return;
+                }
                 let opt_method = match node.r#type.as_str() {
                     "VCALL" | "FCALL" => node_symbol(node),
                     "CALL" | "QCALL" => match_call(node).map(|(_, method, _)| method),
@@ -3940,23 +3917,26 @@ impl<'a> TypeInferenceVisitor<'a> {
                     (child.r#type == "LVAR" || child.r#type == "DVAR")
                         && node_symbol(child).as_deref() == Some(name)
                 }) {
-                    let mut is_recursive_arg_list = false;
+                    let mut is_non_escaping_arg_list = false;
                     if let Some(parent) = self.find_parent(root, node) {
                         if parent.r#type == "FCALL" || parent.r#type == "VCALL" {
                             if let Some(callee) = node_symbol(parent) {
                                 if self.current_method.as_ref() == Some(&callee) {
-                                    is_recursive_arg_list = true;
+                                    is_non_escaping_arg_list = true;
                                 }
                             }
                         } else if parent.r#type == "CALL" || parent.r#type == "QCALL" {
                             if let Some((_, callee, _)) = match_call(parent) {
                                 if self.current_method.as_ref() == Some(&callee) {
-                                    is_recursive_arg_list = true;
+                                    is_non_escaping_arg_list = true;
                                 }
                             }
                         }
+                        if self.noreturn_call(parent) {
+                            is_non_escaping_arg_list = true;
+                        }
                     }
-                    if !is_recursive_arg_list {
+                    if !is_non_escaping_arg_list {
                         escapes = true;
                     }
                 }
@@ -4379,7 +4359,6 @@ impl<'a> TypeInferenceVisitor<'a> {
             return;
         }
         let receiver_type = self.expression_type(receiver);
-        println!("DEBUG inspect_index_lookup: receiver={}, receiver_type={:?}, local_hash_shapes={:?}, local_array_shapes={:?}", receiver.text, receiver_type, self.local_hash_shapes, self.local_array_shapes);
         let lookup_type = self.collection_index_return_type(node, receiver_type.as_ref());
         let index_type = self.expression_type(args[0]);
         let origin = self.receiver_collection_origin(receiver);
@@ -4715,6 +4694,9 @@ impl<'a> TypeInferenceVisitor<'a> {
         let Some((receiver, name, args_node)) = match_call(node) else {
             return;
         };
+        if !self.hash_record_receiver_candidate(receiver) {
+            return;
+        }
         let args = call_arguments(args_node);
         if name == "[]" || name == "fetch" {
             if name == "fetch" && args.len() > 1 {
@@ -4758,6 +4740,32 @@ impl<'a> TypeInferenceVisitor<'a> {
                 "message": "shape-changing hash-record mutation prevents broad struct rewrite",
             }));
         }
+    }
+
+    fn hash_record_receiver_candidate(&mut self, receiver: &crate::ast::Node) -> bool {
+        if let Some(receiver_type) = self.expression_type(receiver) {
+            if let Some(info) = collection_type_info(&receiver_type) {
+                return info.kind == "hash";
+            }
+            if !matches!(receiver_type.strip_nilable(), TypeExpr::Untyped) {
+                return false;
+            }
+        }
+
+        let origin = self.hash_record_blocker_origin_for_receiver(receiver);
+        if let Some(declared_type) = origin.get("declared_type").and_then(|value| {
+            serde_json::from_value::<TypeExpr>(value.clone())
+                .ok()
+                .or_else(|| value.as_str().map(|text| self.parse_type(text)))
+        }) {
+            if let Some(info) = collection_type_info(&declared_type) {
+                return info.kind == "hash";
+            }
+            if useful_type(&declared_type) {
+                return false;
+            }
+        }
+        hash_record_blocker_origin(&origin)
     }
 
     fn hash_record_blocker_origin_for_receiver(&mut self, receiver: &crate::ast::Node) -> Value {
@@ -4982,7 +4990,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     fn inspect_array_literal(&mut self, node: &crate::ast::Node) {
-        if self.is_prepass {
+        if self.is_prepass || !self.behavior.array_literal_node(node) {
             return;
         }
         let elements = child_nodes(node);
@@ -4998,7 +5006,11 @@ impl<'a> TypeInferenceVisitor<'a> {
             if let Some(ty) = self.expression_type(elem) {
                 values.push(ty);
             } else {
-                return;
+                // Syntax identity already proved this is a source literal.
+                // Preserve an unknown slot instead of discarding the entire
+                // heterogeneous tuple fact; array_shapes uses the same
+                // conservative placeholder for partially known literals.
+                values.push(TypeExpr::Untyped);
             }
         }
         let unique = values.iter().collect::<BTreeSet<_>>();
@@ -5660,6 +5672,21 @@ fn merge_value(base: &Value, entries: &[(&str, Value)]) -> Value {
     out
 }
 
+fn span_contains(outer: Span, inner: Span) -> bool {
+    (outer[0], outer[1]) <= (inner[0], inner[1]) && (outer[2], outer[3]) >= (inner[2], inner[3])
+}
+
+fn span_size(span: Span) -> (usize, usize) {
+    (
+        span[2].saturating_sub(span[0]),
+        span[3].saturating_sub(span[1]),
+    )
+}
+
+fn flow_hint_type(hint: &str, language: &str) -> Option<TypeExpr> {
+    languages::flow_hint(hint, language)
+}
+
 fn nilable_type(type_text: &str) -> String {
     if type_text == "NilClass" || type_text.starts_with("T.nilable(") {
         type_text.to_string()
@@ -5790,16 +5817,11 @@ fn static_expression_reason(type_text: &str) -> String {
 }
 
 fn hash_record_blocker_origin(origin: &Value) -> bool {
-    matches!(
-        origin.get("kind").and_then(Value::as_str),
-        Some(
-            "hash literal"
-                | "method parameter"
-                | "forwarded return"
-                | "instance variable"
-                | "local hash shape"
+    origin.get("shape").is_some()
+        || matches!(
+            origin.get("kind").and_then(Value::as_str),
+            Some("hash literal" | "local hash shape")
         )
-    )
 }
 
 fn value_array(value: Option<&Value>) -> Vec<Value> {

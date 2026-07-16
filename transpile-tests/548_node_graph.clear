@@ -3,7 +3,7 @@
 STRUCT Node {
   left: ?Node@node,
   right: ?Node@node,
-  children: Node@node[]@list,
+  children: []Node@node,
   id: Int64
 }
 

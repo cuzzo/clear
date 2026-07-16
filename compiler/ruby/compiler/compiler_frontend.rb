@@ -19,6 +19,8 @@ require_relative "../mir/hoist"
 require_relative "../semantic/pass_state"
 require_relative "../mir/control_flow"
 require_relative "../mir/pre_mir_type_check"
+require_relative "../mir/lowering/schema_registry"
+require_relative "../mir/lowering/state"
 
 class CompilerFrontend
     extend T::Sig
@@ -40,8 +42,9 @@ class CompilerFrontend
   # needed by either the old transpiler or the MIR lowering path.
   sig { params(cheat_code: String, importer: ModuleImporter, source_dir: String, strict_test: T::Boolean, ownership_mode: Symbol).returns(T.nilable(CompilerFrontend::Result)) }
   def self.compile(cheat_code, importer:, source_dir:, strict_test: false, ownership_mode: :default)
-    tokens = Lexer.new(cheat_code).tokenize
-    ast = T.must(ClearParser.new(tokens, cheat_code, gradual: ownership_mode == :easy).parse)
+    budget = FrontendResourceBudget.new
+    tokens = Lexer.new(cheat_code, budget: budget).tokenize
+    ast = ClearParser.new(tokens, cheat_code, gradual: ownership_mode == :easy, budget: budget).parse
     T.unsafe(ast).language_mode = ownership_mode
 
     annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: strict_test, source_code: cheat_code)
@@ -86,9 +89,9 @@ class CompilerFrontend
     )
     mir_pass.transform!(ast)
 
-    struct_schemas = {}
-    enum_schemas = {}
-    union_schemas = {}
+    struct_schemas = T.let({}, T::Hash[Symbol, Schemas::StructSchema])
+    enum_schemas = T.let({}, T::Hash[Symbol, MIRLoweringSchemas::EnumVariants])
+    union_schemas = T.let({}, T::Hash[Symbol, Schemas::UnionSchema])
     ast.statements.each do |stmt|
       case stmt
       when AST::StructDef then struct_schemas[stmt.name.to_sym] = Schemas::StructSchema.new(fields: stmt.field_decls)
@@ -101,7 +104,7 @@ class CompilerFrontend
       end
     end
 
-    fn_sigs = {}
+    fn_sigs = T.let({}, T::Hash[String, FunctionSignature])
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
       fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt)
@@ -116,7 +119,7 @@ class CompilerFrontend
       fn_sigs[name] = sig
     end
 
-    moved_guard_info = {}
+    moved_guard_info = T.let({}, MIRLoweringInput::MovedGuardInfo)
     fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
 
     Result.new(ast, annotator, fn_nodes, fn_sigs, struct_schemas, enum_schemas, union_schemas, moved_guard_info)

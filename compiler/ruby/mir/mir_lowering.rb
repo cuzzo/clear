@@ -47,6 +47,7 @@ require_relative "lowering/control_flow"
 
 class MIRLowering
     extend T::Sig
+    include ThunkTransform::LoweringProtocol
 
   OwnershipFact = T.type_alias do
     T.any(
@@ -698,7 +699,7 @@ class MIRLowering
         body << MIR::BreakStmt.new(label, original_init)
       end
       block = MIR::BlockExpr.new(label, body)
-      block.result_type = original_init.result_type if original_init.respond_to?(:result_type)
+      block.result_type = T.unsafe(original_init).result_type if original_init.respond_to?(:result_type)
       binding.init = block
       return nodes
     end
@@ -1154,6 +1155,7 @@ class MIRLowering
 
     # --- Collections ---
     when AST::ListLit           then lower_list_lit(node)
+    when AST::TupleLit          then lower_tuple_lit(node)
     when AST::DefaultArrayLit   then lower_default_array_lit(node)
     when AST::HashLit           then lower_hash_lit(node)
 
@@ -1199,6 +1201,7 @@ class MIRLowering
     when AST::TestBlock        then lower_test_block(node)
     when AST::RequireNode      then lower_require(node)
     when AST::YieldExpr        then lower_yield(node)
+    when AST::CloseStream      then lower_close_stream(node)
     when AST::NextExpr         then lower_next_expr(node)
     when AST::StaticCall       then lower_static_call(node)
     when AST::OrElseRaise          then MIR::FieldGet.new(MIR::Ident.new("error"), "OrElseRaise")
@@ -1311,7 +1314,7 @@ class MIRLowering
     ), MIR::StructInit)
   end
 
-  sig { params(node: T.any(AST::Locatable, T.untyped)).returns(T::Boolean) }
+  sig { params(node: AST::Locatable).returns(T::Boolean) }
   def stack_fixed_array_coercion?(node)
     return false unless node.is_a?(AST::ListLit) && node.storage == :stack
     coerced_type = node.respond_to?(:coerced_type_info) ? node.coerced_type_info : node.full_type!
@@ -1523,6 +1526,8 @@ class MIRLowering
   sig { params(state: OwnershipFinalizationContext, marks: T::Array[MIR::Stmt], line: T.nilable(Integer), col: T.nilable(Integer)).void }
   def append_transfer_marks_to_body!(state, marks, line, col)
     marks.each do |mark|
+      next if mark.is_a?(MIR::MoveMark) && state.move_mark_names.include?(mark.name.to_s)
+      next if mark.is_a?(MIR::TransferMark) && state.transfer_mark_names.include?(mark.name.to_s)
       if ownership_finalized_node?(mark)
         append_already_finalized_node!(state, mark)
         next
@@ -1575,11 +1580,11 @@ class MIRLowering
     transfer_only = stmt.is_a?(AST::MoveNode)
     stmt_transfer_marks =
       if transfer_only
-        ownership_marks_for_transferred_temp(mir)
+        ownership_marks_for_transferred_temp(T.cast(mir, MIR::Node))
       else
         dedupe_transfer_marks(ownership_transfers_for_stmt(stmt, state.guarded_cleanup_names))
       end
-    statement_nodes = mir.is_a?(Array) ? mir.compact : [T.cast(mir, MIR::Node)]
+    statement_nodes = mir.is_a?(Array) ? mir.compact : [mir]
     guarded_nodes = if transfer_only
       []
     else
@@ -1594,12 +1599,13 @@ class MIRLowering
     )
   end
 
-  sig { params(stmt: T.untyped, mir: T.untyped).returns([T.untyped, T::Boolean]) }
+  sig { params(stmt: LowerableStmt, mir: MIR::NodeRoot).returns([MIR::NodeRoot, T::Boolean]) }
   def materialize_statement_discard(stmt, mir)
+    return [mir, false] unless stmt.is_a?(AST::Locatable)
     return [mir, false] unless discard_expr_stmt?(stmt, mir)
 
     discard_type = Type.from_node!(stmt, context: "discard allocation mark")
-    mir = place_discarded_owned_branch_value(mir, discard_type)
+    mir = place_discarded_owned_branch_value(T.cast(mir, MIR::Node), discard_type)
     normalized_prefix = normalize_allocating_result_expr!(mir)
     function_state.pending_stmts.concat(normalized_prefix) unless normalized_prefix.empty?
     return [mir, false] unless mir_allocates?(mir) && !mutating_receiver_allocator_op?(mir)
@@ -1891,9 +1897,11 @@ class MIRLowering
 
   sig { params(node: MIR::Node, body: T::Array[MIR::Node], state: OwnershipFinalizationContext).void }
   def append_block_result_transfer!(node, body, state)
-    return unless node.is_a?(MIR::BreakStmt) && node.value.is_a?(MIR::Ident)
+    return unless node.is_a?(MIR::BreakStmt)
+    value = node.value
+    return unless value.is_a?(MIR::Ident)
 
-    name = node.value.name.to_s
+    name = value.name.to_s
     return if state.body_transfer_mark_names.include?(name)
     return unless state.alloc_marks.key?(name) || state.body_alloc_mark_names.include?(name)
 
@@ -1912,6 +1920,8 @@ class MIRLowering
   sig { params(marks: T::Array[MIR::Stmt], state: OwnershipFinalizationContext).void }
   def append_transfer_marks!(marks, state)
     marks.each do |mark|
+      next if mark.is_a?(MIR::MoveMark) && state.move_mark_names.include?(mark.name.to_s)
+      next if mark.is_a?(MIR::TransferMark) && state.transfer_mark_names.include?(mark.name.to_s)
       if ownership_finalized_node?(mark)
         append_already_finalized_node!(state, mark)
         next
@@ -1995,7 +2005,8 @@ class MIRLowering
     when MIR::IfBindStmt
       if_bind_ownership_fact_targets(node)
     when MIR::ReturnStmt, MIR::BreakStmt
-      node.value ? ownership_fact_target_for_expr(ownership_fact_source(node.value), node.value, nil) : []
+      value = node.value
+      value ? ownership_fact_target_for_expr(ownership_fact_source(value), value, nil) : []
     when MIR::ReassignWithCleanup
       ownership_fact_target_for_expr(node.name.to_s, node.value, nil)
     when MIR::BgBlock
@@ -2319,7 +2330,7 @@ class MIRLowering
     MIR.each_surface_node(node) do |surface_node|
       append_ownership_transfer_targets_for_surface_node!(operands, surface_node, state)
     end
-    operands.uniq
+    operands.uniq { |operand| [operand.name, operand.target, operand.target_alloc] }
   end
 
   sig { params(operands: T::Array[OwnershipTransferTarget], surface_node: MIR::Node, state: OwnershipFinalizationContext).void }
@@ -3024,10 +3035,10 @@ class MIRLowering
   # Mirrors transpile_cast logic but returns MIR nodes instead of strings.
   sig { params(mir_node: MIR::Node, from_type: Type, to_type: Type::TypeInput).returns(T.nilable(MIR::Cast)) }
   def mir_cast(mir_node, from_type, to_type)
-    from_t = from_type.is_a?(Type) ? from_type : Type.new(from_type)
+    from_t = from_type
     to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to_type)
     return nil if from_t.semantic_type_key == to_t.semantic_type_key
-    # @indirect is constructed by destination placement (HeapCreate); it is
+    # @boxed is constructed by destination placement (HeapCreate); it is
     # not a Zig coercion. Emitting `@as(*T, value)` here wraps the payload in a
     # pointer cast before HeapCreate, so the generated initializer tries to
     # assign `*T` into a `T` cell. Keep numeric/shape coercions intact, but let
@@ -3181,7 +3192,7 @@ class MIRLowering
     end
   end
 
-  sig { params(node: AST::UnionDef).returns(T.untyped) }
+  sig { params(node: AST::UnionDef).returns(LoweredMir) }
   def lower_union_def(node)
     lowering_schemas.register_union(node.name, Schemas::UnionSchema.new(variants: node.variants))
     variant_facts = union_variant_lowering_facts(node)
@@ -3504,9 +3515,9 @@ class MIRLowering
 
   sig { params(mod: ModuleImporter::CompiledModule).void }
   def merge_module_schemas!(mod)
-    struct_schemas = mod.struct_schemas || {}
-    enum_schemas = T.cast(mod.enum_schemas || {}, T::Hash[Symbol, MIRLoweringSchemas::EnumVariants])
-    union_schemas = mod.union_schemas || {}
+    struct_schemas = mod.struct_schemas
+    enum_schemas = mod.enum_schemas
+    union_schemas = mod.union_schemas
 
     lowering_schemas.merge!(
       struct_schemas: struct_schemas,
@@ -3686,7 +3697,7 @@ class MIRLowering
         field_access = MIR::FieldGet.new(subject, f.name.to_s)
         bindings << MIR::Let.new(f.name.to_s, field_access, false, nil, "_ = &#{f.name};")
       else
-        val = T.cast(lower(f.expr), MIR::Node)
+        val = T.cast(lower(T.must(f.expr)), MIR::Node)
         field_access = MIR::FieldGet.new(subject, f.name.to_s)
         conditions << MIR::BinOp.new("==", field_access, val)
       end
@@ -4076,9 +4087,9 @@ class MIRLowering
       moved_without_copy: explicit_owned_sink_transfer?(ast_node, source_node),
       owned_parameter: owned_parameter_source_node?(source_node),
       needs_heap_create: !!(ast_node.respond_to?(:needs_heap_create) && ast_node.needs_heap_create),
-      same_alloc_verifiable: !!entry&.needs_cleanup?,
-      same_alloc_transfer_source: !!entry&.present?,
-      transfer_without_local_cleanup: !!(entry&.present? && !entry.needs_cleanup?),
+      same_alloc_verifiable: entry.needs_cleanup?,
+      same_alloc_transfer_source: entry.present?,
+      transfer_without_local_cleanup: entry.present? && !entry.needs_cleanup?,
       already_owned_value: owned_sink_value?(value, ast_node),
       existing_owned_source: existing_owned_source_node?(source_node),
       borrowed_union_sink: borrowed_union_sink_source?(ast_node, source_node, ti),

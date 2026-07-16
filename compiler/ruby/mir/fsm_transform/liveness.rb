@@ -195,11 +195,11 @@ module FsmTransform
       when Segments::IoSuspend
         next_idx = seg.index + 1
         bucket = (uses_by_seg[next_idx] ||= Set.new)
-        if tail.call_node.respond_to?(:receiver) && tail.call_node.receiver
-          walk_idents(tail.call_node.receiver) { |name| bucket << name }
+        call_node = tail.call_node
+        if call_node.is_a?(AST::MethodCall)
+          walk_idents(call_node.object) { |name| bucket << name }
         end
-        args = tail.call_node.respond_to?(:args) ? (tail.call_node.args || []) : []
-        args.each do |a|
+        call_node.args.each do |a|
           walk_idents(a) { |name| bucket << name }
         end
       end

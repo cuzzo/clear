@@ -42,7 +42,7 @@ FN search_batch!(files: String[], start: Int64, end: Int64, data_dir: String, ne
       }
     );
   END
-  counts: Int64[]@list = NEXT futures;
+  counts: []Int64 = NEXT futures;
   RETURN counts;
 END
 
@@ -58,7 +58,7 @@ FN main() RETURNS Void ->
   # Process files in batches to bound io_uring SQ pressure.
   # io_uring SQ capacity = 256; BATCH_SIZE = 128 keeps headroom.
   batch_size = 128;
-  MUTABLE results: SearchResult[]@list = [];
+  MUTABLE results: []SearchResult = [];
   MUTABLE batch_start = 0;
 
   WHILE batch_start < n DO

@@ -46,10 +46,14 @@ require "sorbet-runtime"
 module DiagnosticRegistry
   extend T::Sig
 
-  DiagnosticKwValue = T.type_alias { T.nilable(T.any(String, Symbol, Integer, T::Boolean, T::Class[T.anything])) }
+  DiagnosticKwValue = T.type_alias do
+    T.nilable(T.any(String, Symbol, Integer, T::Boolean, T::Class[T.anything], T::Array[Symbol]))
+  end
   DiagnosticEntryValue = T.type_alias { T.nilable(T.any(String, Symbol, T::Boolean)) }
   DiagnosticEntry = T.type_alias { T::Hash[Symbol, DiagnosticEntryValue] }
-  CATEGORIES = T.let(%i[type ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
+  DiagnosticArgs = T.type_alias { T::Array[DiagnosticKwValue] }
+  DiagnosticKwargs = T.type_alias { T::Hash[Symbol, DiagnosticKwValue] }
+  CATEGORIES = T.let(%i[type type_migration ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
   SEVERITIES = T.let(%i[error warning hint info].freeze, T::Array[Symbol])
 
   sig { returns(T::Array[Symbol]) }
@@ -105,6 +109,16 @@ module DiagnosticRegistry
       severity: :error, category: :syntax,
       template: "Unknown operator '%{value}'.",
       summary:  "The lexer saw an operator-shaped token it does not recognise.",
+    },
+    TYPE_NODE_LIMIT: {
+      severity: :error, category: :type,
+      template: "Type contains %{count} semantic nodes; the maximum is %{limit}.",
+      summary: "Type exceeds the compiler's semantic-node safety limit.",
+    },
+    TYPE_CAPABILITY_SITE_LIMIT: {
+      severity: :error, category: :capability,
+      template: "Type contains %{count} capability-bearing nodes; the maximum is %{limit}.",
+      summary: "Type exceeds the capability-site readability limit.",
     },
     OPERATOR_TYPO_SUGGESTION: {
       severity: :error, category: :syntax,
@@ -533,7 +547,7 @@ module DiagnosticRegistry
     DUPLICATE_LAYOUT_CAP: {
       severity: :error, category: :capability,
       template: "Duplicate layout",
-      summary:  "More than one layout-axis sigil (currently `@indirect` is the only layout sigil).",
+      summary:  "More than one layout-axis sigil (currently `@boxed` is the only layout sigil).",
     },
     DUPLICATE_SOA_CAP: {
       severity: :error, category: :capability,
@@ -572,7 +586,7 @@ module DiagnosticRegistry
     },
     UNKNOWN_CAPABILITY_SIGIL: {
       severity: :error, category: :capability,
-      template: "Unknown capability sigil '%{value}'. Expected @multiowned, @shared, @locked, @writeLocked, @local, @versioned, @atomic, or @indirect",
+      template: "Unknown capability sigil '%{value}'. Expected @multiowned, @shared, @locked, @writeLocked, @local, @versioned, @atomic, or @boxed",
       summary:  "Capability sigil after `:` in a chain isn't one of the recognised set.",
     },
     UNKNOWN_WITH_CAPABILITY: {
@@ -755,6 +769,16 @@ module DiagnosticRegistry
       template: "Syntax Error: Multiple optional bindings require parentheses around each binding.\n  Found: IF expr EXISTS AS name AND expr EXISTS AS name THEN\n  Use:   IF (expr EXISTS AS name) AND (expr EXISTS AS name) THEN",
       summary:  "Optional-binding chains in IF need each `expr EXISTS AS name` parenthesised.",
     },
+    CONDITIONAL_BINDING_UNDER_OR: {
+      severity: :error, category: :syntax,
+      template: "A conditional capture is not definite beneath `OR`; move `EXISTS AS`/`IS_OK AS` into an `AND` chain or use separate branches.",
+      summary:  "Conditional captures compose left-to-right through `AND`, but are not in scope after `OR`.",
+    },
+    FRONTEND_RESOURCE_LIMIT: {
+      severity: :error, category: :syntax,
+      template: "Frontend %{kind} resource limit exceeded (limit %{limit}); simplify or split this source.",
+      summary:  "The source exceeded a deterministic lexer/parser resource budget.",
+    },
     OPTIONAL_BINDING_REQUIRES_EXISTS: {
       severity: :error, category: :syntax,
       template: "Optional binding must state its test: use `expr EXISTS AS name`, not `expr AS name`.",
@@ -917,10 +941,10 @@ module DiagnosticRegistry
     },
     WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC: {
       severity: :error, category: :capability,
-      template: "WITH SNAPSHOT requires a @versioned or @indirect:atomic variable. '%{name}' is %{actual}. Declare the binding as `T@versioned` / `T@shared:versioned` for an MVCC cell, or `T@indirect:atomic` for a lock-free atomic-pointer cell.",
-      summary:  "WITH SNAPSHOT only works on MVCC cells (`@versioned`) or atomic-pointer cells (`@indirect:atomic`).",
-      cause: "WITH SNAPSHOT reads a stable view of a cell that publishes new values atomically. MVCC (`@versioned`) and AtomicPtr (`@indirect:atomic`) are the two sync families that maintain such snapshots; other bindings have no snapshot infrastructure, so the SNAPSHOT acquire has nothing to capture.",
-      fix_hint: "Add `@versioned` (MVCC — readers see a stable snapshot, writers retry on conflict) or `@indirect:atomic` (lock-free atomic pointer cell — readers snapshot, writers CAS-publish) to `%{name}`'s declaration. For non-snapshotted reads, use WITH EXCLUSIVE (locks) or direct access (refcounted handles) instead.",
+      template: "WITH SNAPSHOT requires a @versioned or @boxed:atomic variable. '%{name}' is %{actual}. Declare the binding as `T@versioned` / `T@shared:versioned` for an MVCC cell, or `T@boxed:atomic` for a lock-free atomic-pointer cell.",
+      summary:  "WITH SNAPSHOT only works on MVCC cells (`@versioned`) or atomic-pointer cells (`@boxed:atomic`).",
+      cause: "WITH SNAPSHOT reads a stable view of a cell that publishes new values atomically. MVCC (`@versioned`) and AtomicPtr (`@boxed:atomic`) are the two sync families that maintain such snapshots; other bindings have no snapshot infrastructure, so the SNAPSHOT acquire has nothing to capture.",
+      fix_hint: "Add `@versioned` (MVCC — readers see a stable snapshot, writers retry on conflict) or `@boxed:atomic` (lock-free atomic pointer cell — readers snapshot, writers CAS-publish) to `%{name}`'s declaration. For non-snapshotted reads, use WITH EXCLUSIVE (locks) or direct access (refcounted handles) instead.",
     },
     CAP_FIELD_NEEDS_WITH_EXCLUSIVE: {
       severity: :error, category: :capability,
@@ -933,7 +957,7 @@ module DiagnosticRegistry
       severity: :error, category: :capability,
       template: "Cannot read field '%{field}' of %{cap} binding '%{name}' directly. Wrap with `WITH SNAPSHOT %{name} AS x { ... x.%{field} ... }` to take a stable snapshot of the cell.",
       summary:  "Direct field access on an atomic-pointer cell requires WITH SNAPSHOT to read a stable T.",
-      cause: "`@indirect:atomic` is a CAS-published heap cell — the inner T can be swapped out by other fibers between reads. Direct field access `c.field` would race against publishers, and the underlying `*AtomicPtr(T)` type doesn't have the field anyway. WITH SNAPSHOT loads the current pointer once and binds the alias to that snapshot; the alias's view is stable for the body's duration.",
+      cause: "`@boxed:atomic` is a CAS-published heap cell — the inner T can be swapped out by other fibers between reads. Direct field access `c.field` would race against publishers, and the underlying `*AtomicPtr(T)` type doesn't have the field anyway. WITH SNAPSHOT loads the current pointer once and binds the alias to that snapshot; the alias's view is stable for the body's duration.",
       fix_hint: "Wrap the access in a WITH SNAPSHOT block: `WITH SNAPSHOT c AS x { print(x.field.toString()); }`. For mutating updates, use `WITH SNAPSHOT MUTABLE c AS x { x.field = ...; }` — the runtime CAS-publishes the modified clone at scope exit.",
     },
     WITH_NEEDS_MULTIOWNED: {
@@ -962,7 +986,7 @@ module DiagnosticRegistry
       template: "Unknown capability type: %{type}",
       summary:  "Internal annotator error — WITH-block dispatch saw a capability tag it doesn't know.",
       cause: "The annotator's WITH-block dispatch table doesn't have a handler for the capability tag `%{type}`. This is an internal compiler bug (or a stale build): every legal capability should have a corresponding dispatch arm. User code can't trigger this directly.",
-      fix_hint: "If you saw this from a user program, please report it as a compiler bug with the source snippet that triggered it. As a workaround, verify the capability sigil is one of: `@multiowned`, `@shared`, `@locked`, `@writeLocked`, `@versioned`, `@shared:atomic`, `@indirect:atomic`, `@local`.",
+      fix_hint: "If you saw this from a user program, please report it as a compiler bug with the source snippet that triggered it. As a workaround, verify the capability sigil is one of: `@multiowned`, `@shared`, `@locked`, `@writeLocked`, `@versioned`, `@shared:atomic`, `@boxed:atomic`, `@local`.",
     },
     WITH_CANNOT_INFER_CAP: {
       severity: :error, category: :capability,
@@ -1026,7 +1050,7 @@ module DiagnosticRegistry
       severity: :error, category: :capability,
       template: "Cannot use WITH BORROWED on %{qualifier} variable '%{name}'. %{remediation}",
       summary:  "WITH BORROWED rejected because the source binding is qualified in a way that conflicts.",
-      cause: "WITH BORROWED produces an immutable read-through alias. Some qualifier on the source (e.g. an `@indirect:atomic` cell, a tense source, a lock-only binding) requires going through that qualifier's unwrap — a plain BORROWED would skip the synchronisation or transformation the qualifier provides.",
+      cause: "WITH BORROWED produces an immutable read-through alias. Some qualifier on the source (e.g. an `@boxed:atomic` cell, a tense source, a lock-only binding) requires going through that qualifier's unwrap — a plain BORROWED would skip the synchronisation or transformation the qualifier provides.",
       fix_hint: "Use the unwrap form that matches the binding's qualifier: `WITH SNAPSHOT` for atomic / versioned cells, `WITH EXCLUSIVE` / `WITH READ` for locks, `WITH MATERIALIZED VIEW` for tense aggregates. The remediation in the message names the specific replacement.",
     },
 
@@ -1481,59 +1505,94 @@ module DiagnosticRegistry
     },
     RECURSIVE_LAYOUT_REQUIRES_INDIRECT: {
       severity: :error, category: :type,
-      template: "Layout Error: recursive field %{edge} has infinite inline size. Choose an explicit topology: `@node` for most mutable graphs; `@indirect` for a unique owned recursive edge; `@multiowned` for local shared tree/DAG identity; `@shared` for cross-execution shared identity; or `@link` for a non-owning edge into an independently owned, potentially enormous/open topology.",
+      template: "Layout Error: recursive field %{edge} has infinite inline size. Choose an explicit topology: `@node` for most mutable graphs; `@boxed` for a unique owned recursive edge; `@multiowned` for local shared tree/DAG identity; `@shared` for cross-execution shared identity; or `@link` for a non-owning edge into an independently owned, potentially enormous/open topology.",
       summary: "Recursive inline storage requires an explicit topology choice in every mode.",
       cause: "A value cannot contain itself inline because its size would be infinite.",
-      fix_hint: "Prefer `@node` for ordinary graphs, `@indirect` for uniquely owned recursive trees, an RC capability for shared identity, or `@link` for non-owning cross-domain edges. CLEAR does not infer this performance- and identity-bearing choice, even in EASY.",
+      fix_hint: "Prefer `@node` for ordinary graphs, `@boxed` for uniquely owned recursive trees, an RC capability for shared identity, or `@link` for non-owning cross-domain edges. CLEAR does not infer this performance- and identity-bearing choice, even in EASY.",
     },
     RECURSIVE_LAYOUT_AMBIGUOUS: {
       severity: :error, category: :type,
-      template: "Layout Error: recursive component has multiple cycle-breaking choices (%{edges}). Choose explicitly: `@node` for most graphs; `@indirect` for selected unique-owner edges; `@multiowned` or `@shared` for shared identity; or `@link` for non-owning edges. These choices have different ownership, allocation, and traversal costs.",
+      template: "Layout Error: recursive component has multiple cycle-breaking choices (%{edges}). Choose explicitly: `@node` for most graphs; `@boxed` for selected unique-owner edges; `@multiowned` or `@shared` for shared identity; or `@link` for non-owning edges. These choices have different ownership, allocation, and traversal costs.",
       summary: "The compiler will not choose among performance-distinct recursive layouts.",
       cause: "More than one field can break the recursive layout cycle, and each choice changes allocation and cache behavior.",
-      fix_hint: "Prefer `@node` for ordinary graphs. Use `@indirect` only for a selected unique-owner edge, RC capabilities for shared identity, and `@link` for non-owning references into separately owned domains.",
+      fix_hint: "Prefer `@node` for ordinary graphs. Use `@boxed` only for a selected unique-owner edge, RC capabilities for shared identity, and `@link` for non-owning references into separately owned domains.",
     },
     INDIRECT_ARGUMENT_EXPLICIT: {
       severity: :error, category: :type,
-      template: "Layout Error: argument %{index} requires %{expected}. EASY may construct the forced indirect representation automatically; DEFAULT and STRICT require explicit `@indirect` layout.",
+      template: "Layout Error: argument %{index} requires %{expected}. EASY may construct the forced indirect representation automatically; DEFAULT and STRICT require explicit `@boxed` layout.",
       summary: "A call cannot hide a heap-indirection choice outside EASY mode.",
       cause: "The callee ABI is pointer-backed but the argument is an inline value.",
-      fix_hint: "Construct or declare the value with `@indirect`, or use EASY mode when this destination contract uniquely forces the representation.",
+      fix_hint: "Construct or declare the value with `@boxed`, or use EASY mode when this destination contract uniquely forces the representation.",
     },
     INDIRECT_FIELD_EXPLICIT: {
       severity: :error, category: :type,
-      template: "Layout Error: field '%{field}' requires %{expected}. EASY may construct the forced indirect representation automatically; DEFAULT and STRICT require explicit `@indirect` layout.",
+      template: "Layout Error: field '%{field}' requires %{expected}. EASY may construct the forced indirect representation automatically; DEFAULT and STRICT require explicit `@boxed` layout.",
       summary: "A field initializer cannot hide a heap-indirection choice outside EASY mode.",
       cause: "The field representation is pointer-backed but the initializer is an inline value.",
-      fix_hint: "Construct or declare the value with `@indirect`, or use EASY when the field contract uniquely forces it.",
+      fix_hint: "Construct or declare the value with `@boxed`, or use EASY when the field contract uniquely forces it.",
     },
     INDIRECT_ELEMENT_PRIMITIVE: {
       severity: :error, category: :type,
-      template: "Layout Error: `@indirect` element layout is not allowed for primitive %{type}; it adds an allocation and pointer chase without solving a recursive layout.",
+      template: "Layout Error: `@boxed` element layout is not allowed for primitive %{type}; it adds an allocation and pointer chase without solving a recursive layout.",
       summary: "Primitive collection elements must remain inline.",
       cause: "Primitive values already have finite, compact layouts. Boxing each element would predictably damage locality and memory use.",
       fix_hint: "Use `%{type}[]@list`, or wrap the primitive in a STRUCT if stable identity is actually required.",
     },
+    COLLECTION_HINT_VALUE_ONLY: {
+      severity: :error, category: :type,
+      template: "Type Error: collection pre-allocation hints are allowed only on initialized local bindings.",
+      summary: "A capacity hint controls one allocation site; it is not part of a reusable type contract.",
+      cause: "Parameters, returns, and fields describe value shapes and ABIs, but `[List(N)]` and `[Set(N)]` describe how a particular value should initially allocate storage.",
+      fix_hint: "Use `[]T` or `[Set]T` in the reusable type, then put the capacity hint on the local binding that constructs the collection.",
+    },
+    RANK_INDEX_ARITY: {
+      severity: :error, category: :type,
+      template: "Index Error: rectangular rank expects %{expected} indices, got %{got}.",
+      summary: "Canonical rectangular indexing supplies one integer per axis.",
+      cause: "A comma-rank is one flat layout, so a complete element lookup must identify every axis.",
+      fix_hint: "Use `grid[x, y, ...]` with exactly one index for each declared dimension.",
+    },
+    RANK_INDEX_INTEGER: {
+      severity: :error, category: :type,
+      template: "Index Error: rectangular rank indices must be integers, got %{got}.",
+      summary: "Every rectangular axis uses an integer coordinate.",
+      cause: "Stride-based offset calculation is defined only for integer coordinates.",
+      fix_hint: "Convert the coordinate to an integer before indexing.",
+    },
+    RANK_LITERAL_SIZE: {
+      severity: :error, category: :type,
+      template: "Type Error: flat rank literal requires %{expected} items, got %{got}.",
+      summary: "A fixed rectangular rank owns exactly the product of its extents.",
+      cause: "The flat initializer does not fill the declared contiguous storage exactly.",
+      fix_hint: "Provide exactly the product of the declared dimensions as row-major items.",
+    },
+    RANK_DYNAMIC_LITERAL_NEEDS_SHAPE: {
+      severity: :error, category: :type,
+      template: "Type Error: a non-empty dynamic rank initializer requires explicit shape metadata.",
+      summary: "A flat item list cannot determine two or more dynamic extents unambiguously.",
+      cause: "The same flat item count may correspond to several rectangular shapes.",
+      fix_hint: "Initialize an empty dynamic rank, then use the shaped grid constructor once available; fixed ranks may use a flat row-major literal.",
+    },
     INDIRECT_ELEMENT_EXPLICIT: {
       severity: :error, category: :type,
-      template: "Layout Error: inserting inline %{type} into `%{type}@indirect[]@list` requires a heap allocation. EASY may apply this uniquely forced layout; DEFAULT and STRICT require an explicit `@indirect` construction.",
+      template: "Layout Error: inserting inline %{type} into `%{type}@boxed[]@list` requires a heap allocation. EASY may apply this uniquely forced layout; DEFAULT and STRICT require an explicit `@boxed` construction.",
       summary: "A collection insertion cannot hide a heap allocation outside EASY mode.",
       cause: "The destination stores pointers, while the source is an inline value. Converting it requires allocating one unique box.",
-      fix_hint: "Construct the value with `@indirect`, change the collection to inline `%{type}[]@list`, or use `@node` when this is graph identity rather than unique indirection.",
+      fix_hint: "Construct the value with `@boxed`, change the collection to inline `%{type}[]@list`, or use `@node` when this is graph identity rather than unique indirection.",
     },
     INDIRECT_ELEMENT_IDENTITY: {
       severity: :error, category: :type,
-      template: "Layout Error: %{actual} identity cannot be implicitly converted to unique `%{type}@indirect` ownership.",
+      template: "Layout Error: %{actual} identity cannot be implicitly converted to unique `%{type}@boxed` ownership.",
       summary: "Identity-bearing capabilities are not interchangeable with a unique box.",
-      cause: "@node, @link, @multiowned, and @shared each have distinct identity and lifetime semantics. Unwrapping one into @indirect would silently change those semantics.",
+      cause: "@node, @link, @multiowned, and @shared each have distinct identity and lifetime semantics. Unwrapping one into @boxed would silently change those semantics.",
       fix_hint: "Make the destination use the same capability, explicitly COPY a payload when legal, or choose a different topology representation.",
     },
     INDIRECT_TRANSFER_REQUIRES_COPY: {
       severity: :error, category: :ownership,
-      template: "Layout Error: `%{name}` is still live after insertion into an `@indirect` destination. Boxing can move a payload at zero copy cost only when the source is consumed; write `COPY %{name}` for an explicit snapshot, construct/move an `@indirect` value, or shorten the source lifetime.",
+      template: "Layout Error: `%{name}` is still live after insertion into an `@boxed` destination. Boxing can move a payload at zero copy cost only when the source is consumed; write `COPY %{name}` for an explicit snapshot, construct/move an `@boxed` value, or shorten the source lifetime.",
       summary: "Automatic boxing will not hide a deep copy.",
       cause: "The destination needs ownership while the original binding remains live. Preserving both values requires a potentially expensive semantic copy.",
-      fix_hint: "Use `COPY` explicitly, create the source as `@indirect` and move it, keep inline elements, or restructure so the source is dead at insertion.",
+      fix_hint: "Use `COPY` explicitly, create the source as `@boxed` and move it, keep inline elements, or restructure so the source is dead at insertion.",
     },
     COLLECTION_ELEMENT_LAYOUT_MISMATCH: {
       severity: :error, category: :type,
@@ -1701,6 +1760,20 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "Unsupported Index",
       summary:  "Indexing-by-int isn't supported on this type.",
+    },
+    TUPLE_INDEX_SYNTAX: {
+      severity: :error, category: :type,
+      template: "Tuple values use positional fields, not array indexing.",
+      summary: "Access Tuple positions with `._0`, `._1`, and so on.",
+      cause: "A Tuple is a heterogeneous product whose positions may have different types; treating it as an array would imply homogeneous indexed access.",
+      fix_hint: "Replace `tuple[N]` with `tuple._N` when N is a compile-time Tuple position.",
+    },
+    FIXED_POSITION_OUT_OF_BOUNDS: {
+      severity: :error, category: :type,
+      template: "Position %{index} is out of bounds for %{type}, which has %{count} positions.",
+      summary: "A compile-time positional access must name an existing field.",
+      cause: "Fixed positional shapes expose exactly their declared number of positions, numbered from zero.",
+      fix_hint: "Use a position from 0 through count - 1.",
     },
 
     # Containers / unions / structs / generics in annotator
@@ -1998,8 +2071,15 @@ module DiagnosticRegistry
     },
     BG_STREAM_INCONSISTENT_YIELD: {
       severity: :error, category: :type,
-      template: "BG STREAM block yields inconsistent types: %{types}. All YIELD expressions must produce the same type.",
-      summary:  "BG STREAM produces a typed stream; every YIELD must produce the same element type.",
+      template: "BG STREAM returns inconsistent types (%{types}) from its YIELD expressions. To return both, declare a named union covering %{union_shape}, add `YIELDS YourUnion`, and YIELD its explicit variants; OR change one of the YIELD expressions so every YIELD has the same base type.",
+      summary:  "BG STREAM never infers an accidental payload union; declare the union contract or make the yields homogeneous.",
+      fix_hint: "Use `BG STREAM YIELDS YourUnion { ... }` with explicit named-union variants, OR convert the conflicting YIELD expression to the other payload type. Optional (`?`) and fallible (`!`) widening of one base type does not need YIELDS.",
+    },
+    BG_STREAM_YIELDS_REQUIRED: {
+      severity: :error, category: :type,
+      template: "BG STREAM yields `%{type}`, which requires an explicit item contract. Write `BG STREAM YIELDS %{type} { ... }`. YIELDS is optional for one non-future base type widened only by `?` and/or `!`, but required for future and union item types.",
+      summary:  "Future and union stream items require an explicit YIELDS contract.",
+      fix_hint: "Insert `YIELDS %{type}` between `STREAM` and the opening brace.",
     },
     BG_STREAM_CAPTURES_WITH_SCOPED: {
       severity: :error, category: :escape,
@@ -2011,6 +2091,31 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "YIELD can only be used inside a BG STREAM { } block.",
       summary:  "YIELD only makes sense inside BG STREAM bodies.",
+    },
+    CLOSE_OUTSIDE_BG_STREAM: {
+      severity: :error, category: :type,
+      template: "CLOSE can only be used inside a BG STREAM { } block.",
+      summary:  "CLOSE terminates a BG STREAM producer.",
+    },
+    YIELD_AFTER_CLOSE: {
+      severity: :error, category: :concurrency,
+      template: "YIELD cannot follow CLOSE on the same BG STREAM control-flow path.",
+      summary:  "A closed stream cannot emit another item.",
+    },
+    STREAM_ALREADY_CLOSED: {
+      severity: :error, category: :concurrency,
+      template: "This BG STREAM control-flow path has already executed CLOSE.",
+      summary:  "A stream producer can close only once on a path.",
+    },
+    INFINITE_STREAM_CLOSE: {
+      severity: :error, category: :concurrency,
+      template: "An infinite stream cannot execute CLOSE; declare a finite [~]T stream instead.",
+      summary:  "Infinite streams have no normal completion event.",
+    },
+    INFINITE_STREAM_FALLTHROUGH: {
+      severity: :error, category: :concurrency,
+      template: "An infinite stream producer can reach the end of its body. Use a non-terminating loop or declare a finite [~]T stream.",
+      summary:  "An infinite stream must not close by normal fallthrough.",
     },
     BG_ARENA_AND_PARALLEL: {
       severity: :error, category: :capability,
@@ -2161,8 +2266,8 @@ module DiagnosticRegistry
       severity: :error, category: :mir,
       template: "%{message}",
       summary:  "MIR::HeapCreate boxes a value whose Zig type is already a pointer (double indirection).",
-      cause: "A heap box is exactly one level of indirection: `HeapCreate(T)` produces `*T`. If T is itself `*U` the result is `**U` — a double box. Reading it yields a dangling `*U` after the inner allocation is cleaned up (UAF), and the field/binding type no longer matches. This is the failure mode the @indirect single-source layout guards against.",
-      fix_hint: "Lowering bug — the HeapCreate cell type must be the BARE pointee (`transpile_type(base)`), never the already-pointerized field/binding type. Check the @indirect hoist sites in src/mir/mir_lowering.rb (lower_struct_lit / lower_union_variant_lit) use `field_type.resolved`, not `zig_type`.",
+      cause: "A heap box is exactly one level of indirection: `HeapCreate(T)` produces `*T`. If T is itself `*U` the result is `**U` — a double box. Reading it yields a dangling `*U` after the inner allocation is cleaned up (UAF), and the field/binding type no longer matches. This is the failure mode the @boxed single-source layout guards against.",
+      fix_hint: "Lowering bug — the HeapCreate cell type must be the BARE pointee (`transpile_type(base)`), never the already-pointerized field/binding type. Check the @boxed hoist sites in src/mir/mir_lowering.rb (lower_struct_lit / lower_union_variant_lit) use `field_type.resolved`, not `zig_type`.",
     },
     ALLOC_CLEANUP_MISMATCH: {
       severity: :error, category: :mir,
@@ -2635,7 +2740,7 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "@observable cannot be combined with %{labels}. %{explain} Drop the wrapper or pick a non-observable type.",
       summary:  "@observable rejects certain combined capabilities.",
-      cause: "@observable layers a publish/subscribe channel on top of a tense source — every write fans out to subscribers. Some other capabilities are incompatible because they impose a representation that the publish layer can't observe atomically (e.g., `@indirect:atomic` already CAS-publishes a different snapshot, `@locked` blocks subscribers).",
+      cause: "@observable layers a publish/subscribe channel on top of a tense source — every write fans out to subscribers. Some other capabilities are incompatible because they impose a representation that the publish layer can't observe atomically (e.g., `@boxed:atomic` already CAS-publishes a different snapshot, `@locked` blocks subscribers).",
       fix_hint: "Drop one of the conflicting wrappers (typically @observable if the consumer doesn't need diff feeds), OR pick a different sync model: `@versioned` cells get observable-like snapshots via WITH SNAPSHOT without the publish layer.",
     },
     OBSERVABLE_TERMINAL_MISMATCH: {
@@ -2917,31 +3022,31 @@ module DiagnosticRegistry
     },
     INDIRECT_ATOMIC_PRIMITIVE: {
       severity: :error, category: :type,
-      template: "@indirect:atomic is for STRUCTS. For primitive type %{type}, use `@shared:atomic` (the v0.2 primitive-as-cell form). The atomic primitive already fits in a single CAS-able machine word; @indirect would add a pointless heap indirection.",
-      summary:  "@indirect:atomic is for structs; primitives use @shared:atomic.",
-      cause: "`@indirect:atomic` publishes whole-T snapshots via atomic pointer swap — every update CAS-publishes a fresh heap allocation. That's necessary for structs (which don't fit in a CAS word) but wasteful for primitives like `%{type}` that already fit in a single machine word and can be CAS'd directly.",
-      fix_hint: "Use `@shared:atomic` for primitive cells: `MUTABLE c: %{type} = 0 @shared:atomic;` — direct atomic ops (`c.load()`, `c += 1`) without heap indirection. Reserve `@indirect:atomic` for structs.",
+      template: "@boxed:atomic is for STRUCTS. For primitive type %{type}, use `@shared:atomic` (the v0.2 primitive-as-cell form). The atomic primitive already fits in a single CAS-able machine word; @boxed would add a pointless heap indirection.",
+      summary:  "@boxed:atomic is for structs; primitives use @shared:atomic.",
+      cause: "`@boxed:atomic` publishes whole-T snapshots via atomic pointer swap — every update CAS-publishes a fresh heap allocation. That's necessary for structs (which don't fit in a CAS word) but wasteful for primitives like `%{type}` that already fit in a single machine word and can be CAS'd directly.",
+      fix_hint: "Use `@shared:atomic` for primitive cells: `MUTABLE c: %{type} = 0 @shared:atomic;` — direct atomic ops (`c.load()`, `c += 1`) without heap indirection. Reserve `@boxed:atomic` for structs.",
     },
     STRUCT_ATOMIC_NEEDS_INDIRECT: {
       severity: :error, category: :type,
-      template: "@atomic on a STRUCT requires @indirect (publishes whole-T snapshots via atomic pointer swap). Use `%{type}{...} @indirect:atomic` instead. (For primitive cells like `Int64@shared:atomic`, atomic alone is correct -- those fit in a single CAS-able machine word.)",
-      summary:  "@atomic on a struct requires @indirect.",
-      cause: "Struct atomic semantics need to publish the whole T as a single atomic operation. Hardware CAS only works on machine-word-sized values — for any struct larger than that, you need pointer-level CAS, which means heap-allocating the struct and publishing the pointer. That's exactly what `@indirect:atomic` does.",
-      fix_hint: "Add `@indirect` to the sigil chain: `%{type}{...} @indirect:atomic` (or full form `%{type}{...} @shared:indirect:atomic`). Reads land in `WITH SNAPSHOT`; writes via `WITH SNAPSHOT MUTABLE`.",
+      template: "@atomic on a STRUCT requires @boxed (publishes whole-T snapshots via atomic pointer swap). Use `%{type}{...} @boxed:atomic` instead. (For primitive cells like `Int64@shared:atomic`, atomic alone is correct -- those fit in a single CAS-able machine word.)",
+      summary:  "@atomic on a struct requires @boxed.",
+      cause: "Struct atomic semantics need to publish the whole T as a single atomic operation. Hardware CAS only works on machine-word-sized values — for any struct larger than that, you need pointer-level CAS, which means heap-allocating the struct and publishing the pointer. That's exactly what `@boxed:atomic` does.",
+      fix_hint: "Add `@boxed` to the sigil chain: `%{type}{...} @boxed:atomic` (or full form `%{type}{...} @shared:boxed:atomic`). Reads land in `WITH SNAPSHOT`; writes via `WITH SNAPSHOT MUTABLE`.",
     },
     LOCAL_INDIRECT_ATOMIC: {
       severity: :error, category: :type,
-      template: "@local:indirect:atomic is disallowed -- atomic without cross-thread visibility is pointless. Drop @local; @indirect:atomic implies cross-thread sharing.",
-      summary:  "@local with @indirect:atomic is contradictory.",
-      cause: "`@local` declares the binding lives entirely on the current thread/scheduler — no cross-thread visibility. But `@indirect:atomic` exists *specifically* to publish updates across threads. The two contradict: an atomic with no readers is paying for synchronisation hardware nobody can observe.",
-      fix_hint: "Drop `@local` — `@indirect:atomic` already implies the cross-thread sharing semantics you need. If the value is genuinely thread-local, use plain affine ownership (no atomic, no @local needed).",
+      template: "@local:boxed:atomic is disallowed -- atomic without cross-thread visibility is pointless. Drop @local; @boxed:atomic implies cross-thread sharing.",
+      summary:  "@local with @boxed:atomic is contradictory.",
+      cause: "`@local` declares the binding lives entirely on the current thread/scheduler — no cross-thread visibility. But `@boxed:atomic` exists *specifically* to publish updates across threads. The two contradict: an atomic with no readers is paying for synchronisation hardware nobody can observe.",
+      fix_hint: "Drop `@local` — `@boxed:atomic` already implies the cross-thread sharing semantics you need. If the value is genuinely thread-local, use plain affine ownership (no atomic, no @local needed).",
     },
     MULTIOWNED_INDIRECT_ATOMIC: {
       severity: :error, category: :type,
-      template: "@multiowned:indirect:atomic is disallowed -- Rc isn't thread-safe (non-atomic refcount), so it can't back a cross-thread atomic-ptr cell. Drop @multiowned; @indirect:atomic uses Arc internally for the published-value lifetime.",
-      summary:  "@multiowned with @indirect:atomic is unsound (Rc isn't atomic).",
-      cause: "`@multiowned` is Rc — single-scheduler, non-atomic refcount. `@indirect:atomic` publishes pointers across threads, and the published values' refcounts must be atomic-safe so receivers can release them safely. Rc would race on the refcount; the combination is genuinely unsound.",
-      fix_hint: "Drop `@multiowned` — `@indirect:atomic` uses Arc internally for the published-value lifetime, so you get atomic-safe sharing for free. If you wanted explicit shared ownership for non-atomic uses, use `@shared` (Arc) instead of `@multiowned` (Rc).",
+      template: "@multiowned:boxed:atomic is disallowed -- Rc isn't thread-safe (non-atomic refcount), so it can't back a cross-thread atomic-ptr cell. Drop @multiowned; @boxed:atomic uses Arc internally for the published-value lifetime.",
+      summary:  "@multiowned with @boxed:atomic is unsound (Rc isn't atomic).",
+      cause: "`@multiowned` is Rc — single-scheduler, non-atomic refcount. `@boxed:atomic` publishes pointers across threads, and the published values' refcounts must be atomic-safe so receivers can release them safely. Rc would race on the refcount; the combination is genuinely unsound.",
+      fix_hint: "Drop `@multiowned` — `@boxed:atomic` uses Arc internally for the published-value lifetime, so you get atomic-safe sharing for free. If you wanted explicit shared ownership for non-atomic uses, use `@shared` (Arc) instead of `@multiowned` (Rc).",
     },
     WITH_MATCH_VERSIONED_AS_MUTABLE: {
       severity: :error, category: :concurrency,
@@ -2972,17 +3077,17 @@ module DiagnosticRegistry
     },
     WITH_ATOMIC_HANDLER_WRONG_ERROR: {
       severity: :error, category: :concurrency,
-      template: "`ON MvccConflict` isn't valid on `@indirect:atomic`. AtomicPtr.update raises `AtomicConflict` (after 256 CAS losses), not `MvccConflict`. Use `ON AtomicConflict ...` instead, or drop the handler to fall back to the SYNC POLICY.",
-      summary:  "@indirect:atomic raises AtomicConflict; ON MvccConflict is a category mismatch.",
+      template: "`ON MvccConflict` isn't valid on `@boxed:atomic`. AtomicPtr.update raises `AtomicConflict` (after 256 CAS losses), not `MvccConflict`. Use `ON AtomicConflict ...` instead, or drop the handler to fall back to the SYNC POLICY.",
+      summary:  "@boxed:atomic raises AtomicConflict; ON MvccConflict is a category mismatch.",
     },
     INDIRECT_ATOMIC_FIELD_WRITE: {
       severity: :error, category: :concurrency,
-      template: "`@indirect:atomic` requires `WITH SNAPSHOT %{name} AS MUTABLE x { x.%{field} = ...; }` for mutation. Atomic pointer swap publishes a new whole-T snapshot, not a per-field write -- the `WITH SNAPSHOT` block clones the snapshot, mutates the clone, and CAS-publishes it. (This is different from primitive `@shared:atomic` Int64/Float64/Bool, which use direct ops like `c += 1` because they fit in a single CAS-able machine word.)",
-      summary:  "Per-field writes through @indirect:atomic must go via WITH SNAPSHOT AS MUTABLE.",
+      template: "`@boxed:atomic` requires `WITH SNAPSHOT %{name} AS MUTABLE x { x.%{field} = ...; }` for mutation. Atomic pointer swap publishes a new whole-T snapshot, not a per-field write -- the `WITH SNAPSHOT` block clones the snapshot, mutates the clone, and CAS-publishes it. (This is different from primitive `@shared:atomic` Int64/Float64/Bool, which use direct ops like `c += 1` because they fit in a single CAS-able machine word.)",
+      summary:  "Per-field writes through @boxed:atomic must go via WITH SNAPSHOT AS MUTABLE.",
     },
     WITH_MULTI_OBJECT_ATOMIC: {
       severity: :error, category: :concurrency,
-      template: "Multi-object WITH cannot admit ATOMIC: `%{name}` is (or could be) `@atomic` / `@indirect:atomic`, which gives no atomicity across cells. Either narrow the binding's REQUIRES to a non-ATOMIC family (e.g. `LOCKED | VERSIONED`, or just `VERSIONED` for cross-cell MVCC transactions), or refactor to single-cell WITH blocks. Per design contract docs/agents/atomicptr.md §4 + docs/agents/true-synchronization-polymorphism.md.",
+      template: "Multi-object WITH cannot admit ATOMIC: `%{name}` is (or could be) `@atomic` / `@boxed:atomic`, which gives no atomicity across cells. Either narrow the binding's REQUIRES to a non-ATOMIC family (e.g. `LOCKED | VERSIONED`, or just `VERSIONED` for cross-cell MVCC transactions), or refactor to single-cell WITH blocks. Per design contract docs/agents/atomicptr.md §4 + docs/agents/true-synchronization-polymorphism.md.",
       summary:  "Multi-binding WITH cannot include ATOMIC cells (no portable multi-pointer atomic).",
     },
     WITH_SNAPSHOT_MATCH_VERSIONED_NEEDS_HANDLER: {
@@ -3130,6 +3235,7 @@ module DiagnosticRegistry
   FIX_DESCRIPTIONS = T.let({
     ADD_DECL_CAPABILITY_GENERIC: "Add `%{sigil}` to '%{name}' at its declaration (line %{line}).",
     ADD_EFFECTS_REENTRANT: "Add `EFFECTS REENTRANT` so the runtime knows to schedule this fn on a service stack.",
+    ADD_STREAM_YIELDS_CONTRACT: "Add `YIELDS %{type}` so the stream's future or union item type is explicit.",
     ADD_ERROR_UNION_TO_RETURN: "Add `!` to the return type to declare the error union (Zig-style fallible signature).",
     ADD_NON_REENTRANT_REQUIRES: "Add %{requires} (rejects reentrant callbacks).",
     ADD_WITH_GUARD_ALIASES: "Add `AS <alias>` to each binding so the GUARD predicate can read the unwrapped value.",
@@ -3137,7 +3243,7 @@ module DiagnosticRegistry
     CHANGE_BINDING_CAPABILITY_FOR_MOVE: "Change '%{name}' to `%{cap}` at its declaration (%{reason}).",
     CHANGE_DECL_CAPABILITY_GENERIC: "Change `%{old_sigil}` to `%{new_sigil}` on '%{name}' (line %{line}).",
     CHOOSE_RECURSIVE_LAYOUT: "%{description} on %{edge} using `%{capability}`.",
-    CONSTRUCT_INDIRECT_LAYOUT: "Construct this value with explicit `@indirect` layout.",
+    CONSTRUCT_INDIRECT_LAYOUT: "Construct this value with explicit `@boxed` layout.",
     DECLARE_FN_REENTRANT: "Declare '%{fn}' as 'EFFECTS REENTRANT' (propagates the cost; caller runs on @service).",
     DECLARE_MAX_DEPTH_CYCLE: "Declare every cycle member ':MAX_DEPTH(%{depth})' and change each return type from `T` to `!T`. Runtime depth counter raises System MaxDepthExceeded above %{depth} entries. PICK N TIGHT: large N is not a workaround for being forced onto OS threads -- if depth is unknown/unbounded, prefer ':THUNK' (heap CPS) or plain 'EFFECTS REENTRANT' (OS threads).",
     DECLARE_MUTABLE_BINDING: "Declare '%{name}' as MUTABLE at its binding site (line %{line}).",
@@ -3167,12 +3273,14 @@ module DiagnosticRegistry
     REPLACE_MATCH_WITH_PARTIAL: "Replace `MATCH` with `PARTIAL MATCH` (relaxes exhaustiveness; allows DEFAULT and WHEN guards).",
     REPLACE_OPERATOR_TYPO: "Replace `%{match}` with `%{replace}` -- %{label}.",
     REPLACE_STRING_CONCAT_OPERATOR: "Replace `+` with `$+` for string concatenation.",
+    REWRITE_INLINE_PIVOT_TYPE: "Rewrite as `%{type}`.",
+    RENAME_BOXED_CAPABILITY: "Replace legacy `%{old}` with `%{new}`.",
     TEST_OPTIONAL_BOOL_PRESENCE: "Test whether the optional Bool is present with `%{name} EXISTS`.",
     DEFAULT_OPTIONAL_BOOL_PAYLOAD: "Use the Bool payload, defaulting NIL to FALSE, with `(%{name} OR_ELSE FALSE)`.",
     REPLACE_REENTRANT_WITH_VARIANT: "Replace `EFFECTS REENTRANT` with `%{suggestion}` (%{reason}).",
     REPLACE_STACK_SIGIL_WITH_SERVICE: "Replace `@%{stack}` with `@service` (this fiber transitively calls a plain :reentrant fn).",
     UPGRADE_VERSIONED_TO_SHARED: "Upgrade `@versioned` to `@shared:versioned` for cross-thread sharing.",
-    WITH_ADD_INDIRECT_ATOMIC: "Add `@indirect:atomic` to '%{name}' (lock-free atomic-pointer cell -- readers snapshot, writers CAS-publish).",
+    WITH_ADD_INDIRECT_ATOMIC: "Add `@boxed:atomic` to '%{name}' (lock-free atomic-pointer cell -- readers snapshot, writers CAS-publish).",
     WITH_ADD_LOCKED: "Add `@locked` to '%{name}' (Mutex -- single-writer EXCLUSIVE access).",
     WITH_ADD_MULTIOWNED: "Add `@multiowned` to '%{name}' (Rc -- single-scheduler refcount; cheap clones%{suffix}).",
     WITH_ADD_SHARED: "Add `@shared` to '%{name}' (Arc -- atomic refcount; safe %{suffix}).",
@@ -3219,12 +3327,12 @@ module DiagnosticRegistry
   # Format a registered code's template against `args`. Returns nil
   # when the code isn't known. The caller decides what to do with
   # nil — the legacy helper raises an internal-compiler-error there.
-  sig { params(code: Symbol, args: T::Array[T.untyped], kwargs: T.untyped).returns(T.nilable(String)) }
+  sig { params(code: Symbol, args: DiagnosticArgs, kwargs: DiagnosticKwValue).returns(T.nilable(String)) }
   def self.format(code, args = [], **kwargs)
     format_from_hash(code, args, kwargs)
   end
 
-  sig { params(code: Symbol, args: T::Array[T.untyped], kwargs: T.untyped).returns(T.nilable(String)) }
+  sig { params(code: Symbol, args: DiagnosticArgs, kwargs: DiagnosticKwargs).returns(T.nilable(String)) }
   def self.format_from_hash(code, args, kwargs)
     entry = DIAGNOSTICS[code]
     return nil unless entry
@@ -3232,7 +3340,7 @@ module DiagnosticRegistry
     format_template(T.cast(entry[:template], String), args, kwargs)
   end
 
-  sig { params(template: String, args: T::Array[T.untyped], kwargs: T.untyped).returns(String) }
+  sig { params(template: String, args: DiagnosticArgs, kwargs: DiagnosticKwargs).returns(String) }
   def self.format_template(template, args = [], kwargs = {})
     if !kwargs.empty? || template.include?("%{")
       return template % kwargs if !template.include?("%{") || named_template_args_complete?(template, kwargs)
@@ -3245,7 +3353,7 @@ module DiagnosticRegistry
     "#{template} [Internal Args Error: #{args.inspect}]"
   end
 
-  sig { params(template: String, kwargs: T.untyped).returns(T::Boolean) }
+  sig { params(template: String, kwargs: DiagnosticKwargs).returns(T::Boolean) }
   def self.named_template_args_complete?(template, kwargs)
     keys = named_template_keys(template)
     i = T.let(0, Integer)
@@ -3274,7 +3382,7 @@ module DiagnosticRegistry
     keys
   end
 
-  sig { params(template: String, args: T::Array[T.untyped]).returns(T::Boolean) }
+  sig { params(template: String, args: DiagnosticArgs).returns(T::Boolean) }
   def self.positional_template_args_complete?(template, args)
     positional_placeholder_count(template) <= args.length
   end
@@ -3311,7 +3419,7 @@ module DiagnosticRegistry
     "#{template} [Internal Args Error: #{detail}]"
   end
 
-  sig { params(template: String, kwargs: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(template: String, kwargs: DiagnosticKwargs).returns(T.nilable(Symbol)) }
   def self.missing_named_template_key(template, kwargs)
     keys = named_template_keys(template)
     i = T.let(0, Integer)

@@ -88,7 +88,7 @@ The `TODO.md` lists 8 compilation blockers - **all are already implemented**:
 | `substr()` | Done | `std_lib.rb:29-36`, `transpile-tests/55_string_ops.clear` |
 | `toNumber()` with `OR` fallback | Done | `std_lib.rb:88-93`, `transpile-tests/55_string_ops.clear` |
 | `MATCH ... AS` payload extraction | Done | `parser.rb:1298`, `transpiler.rb:1266`, `match_spec.rb:601-648` |
-| `@indirect` on union fields | Done | `parser.rb:1786`, `transpile-tests/97_stack_heap_interop.clear` |
+| `@boxed` on union fields | Done | `parser.rb:1786`, `transpile-tests/97_stack_heap_interop.clear` |
 | `@shared` construction | Done | `transpile-tests/35_shared.clear`, `capabilities_spec.rb` |
 | `RAISE` inside `WHILE` | Done | Error handling fully implemented |
 

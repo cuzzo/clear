@@ -3,7 +3,7 @@ require "set"
 require_relative "../ruby/tools/atomic_ptr_migration_suggester" unless defined?(AtomicPtrMigrationSuggester)
 
 # AtomicPtr M3.15: static eligibility check for the @shared:writeLocked
-# / @shared:locked (struct) -> @indirect:atomic migration. Tested in
+# / @shared:locked (struct) -> @boxed:atomic migration. Tested in
 # isolation; the doctor wires the runtime contention signal in
 # src/tools/doctor.rb (M3.16).
 RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
@@ -32,7 +32,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
 
     it "flags @shared:locked struct with read-only WITH EXCLUSIVE bodies" do
       # Read-mostly pattern: structurally eligible to switch to
-      # @indirect:atomic, even if every WITH is read-only. The doctor
+      # @boxed:atomic, even if every WITH is read-only. The doctor
       # combines this with profile contention to decide.
       cs = candidates(<<~CLEAR)
         STRUCT Cfg { host: String, port: Int64 }

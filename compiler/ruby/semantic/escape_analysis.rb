@@ -73,10 +73,10 @@ module EscapeAnalysis
       out = T.let({}, T::Hash[String, SymbolEntry])
       fn.params.each do |param|
         sym = param.symbol
-        out[param.name.to_s] = sym if EscapeAnalysis.send(:symbol_heap?, sym) && sym
+        out[param.name.to_s] = sym if EscapeAnalysis.symbol_heap?(sym) && sym
       end
       symbols.each do |name, sym|
-        out[name] = sym if EscapeAnalysis.send(:symbol_heap?, sym)
+        out[name] = sym if EscapeAnalysis.symbol_heap?(sym)
       end
       out
     end
@@ -385,7 +385,16 @@ module EscapeAnalysis
 
   sig { params(sink: EscapeSink, node: AST::Locatable, context: EscapeContext).void }
   private_class_method def self.apply_escape_sink!(sink, node, context)
-    send(sink.handler, node, context)
+    case sink.handler
+    when :apply_return_escape_sink! then apply_return_escape_sink!(T.cast(node, AST::ReturnNode), context)
+    when :apply_assignment_escape_sink! then apply_assignment_escape_sink!(T.cast(node, AST::Assignment), context)
+    when :apply_binding_escape_sink! then apply_binding_escape_sink!(T.cast(node, T.any(AST::VarDecl, AST::BindExpr)), context)
+    when :apply_execution_boundary_escape_sink! then apply_execution_boundary_escape_sink!(T.cast(node, T.any(AST::BgBlock, AST::BgStreamBlock)), context)
+    when :apply_lambda_escape_sink! then apply_lambda_escape_sink!(T.cast(node, AST::LambdaLit), context)
+    when :apply_func_call_escape_sink! then apply_func_call_escape_sink!(T.cast(node, AST::FuncCall), context)
+    when :apply_method_call_escape_sink! then apply_method_call_escape_sink!(T.cast(node, AST::MethodCall), context)
+    else Kernel.raise "BUG: unknown escape sink #{sink.handler}"
+    end
     nil
   end
 
@@ -1335,7 +1344,7 @@ module EscapeAnalysis
   end
 
   sig { params(sym: T.nilable(SymbolEntry)).returns(T::Boolean) }
-  private_class_method def self.symbol_heap?(sym)
+  def self.symbol_heap?(sym)
     canonical_symbol(sym)&.heap_storage? == true
   end
 end

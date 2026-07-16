@@ -5,12 +5,12 @@
 REQUIRE "types.clear";
 REQUIRE "parser.clear";
 
-FN readFileOr!(path: String, fallback: String, MUTABLE pool: Env[50000]@pool) RETURNS !String ->
+FN readFileOr!(path: String, fallback: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !String ->
     content = readFile(path) OR_ELSE RAISE;
     RETURN content;
 END
 
-FN readFileSafe!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS !String ->
+FN readFileSafe!(path: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !String ->
     content = readFileOr!(path, "", pool) OR_ELSE "";
     RETURN content;
 END
@@ -21,7 +21,7 @@ END
 # When returning 4, the parsed inspect AST is stored in env at "__dbg_inspect".
 # The caller should eval it, format with prStr, and re-call with the result string.
 
-FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE pool: Env[50000]@pool) RETURNS !Int64
+FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Int64
   REQUIRES pool: LOCKED
   EFFECTS REENTRANT
 ->
@@ -61,7 +61,7 @@ FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE po
             ELSE_IF startsWith?(cmdRaw, ":i ") THEN
                 # Parse the inspect expression, store AST in env, return 4
                 inspectExpr = substr(cmdRaw, 3, cmdRaw.length() - 3);
-                MUTABLE inspPenv: HashMap<Value> = {};
+                MUTABLE inspPenv: {String}Value = {};
                 tokenizeToEnv!(inspPenv, inspectExpr) OR_ELSE RAISE;
                 inspPenv["__rp"] = Value{ Number: 0.0 };
                 inspAst = readFormEnv!(inspPenv) OR_ELSE RAISE;

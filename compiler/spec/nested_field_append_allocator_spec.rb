@@ -12,13 +12,13 @@ require_relative "../ruby/compiler/compiler_frontend" unless defined?(CompilerFr
 
 RSpec.describe "nested-@list-field append inherits root container allocator" do
   NESTED_FIELD_SRC = <<~CHT
-    STRUCT Handle { values: Int64[]@list }
+    STRUCT Handle { values: []Int64 }
 
     FN run(n: Int64) RETURNS !Int64 ->
-        MUTABLE handles: Handle[]@list = List[];
+        MUTABLE handles: []Handle = List[];
         MUTABLE i: Int64 = 0_i64;
         WHILE i < n DO
-            MUTABLE scratch: Int64[]@list = List[];
+            MUTABLE scratch: []Int64 = List[];
             scratch.append(i);
             handles.append(Handle{ values: [] });
             IF handles[i] EXISTS AS handle THEN

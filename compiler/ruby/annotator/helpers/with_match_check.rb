@@ -132,9 +132,10 @@ module WithMatchCheck
       end
 
       # Rule 2: REQUIRES↔WHEN exhaustiveness (only for MATCH form).
-      next unless node.arms
+      arms = node.arms
+      next unless arms
 
-      arm_families = node.arms.map { |a| a[:family] }.to_set
+      arm_families = arms.map(&:family).to_set
 
       # Required families = union across all WITH-bound params' family disjunctions.
       required_families = bound_params.flat_map { |p| (requires_map[p] || Set.new).to_a }.to_set
@@ -300,13 +301,14 @@ module WithMatchCheck
   VERSIONED_SYNCS = T.let(%i[versioned].to_set.freeze, T::Set[Symbol])
   ATOMIC_SYNCS    = T.let(%i[atomic].to_set.freeze, T::Set[Symbol])
 
-  sig { params(arg: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(arg: AST::Node).returns(T.nilable(Symbol)) }
   def self.family_of_arg(arg)
     sym = arg.symbol
     return nil unless sym
-    return :LOCKED    if LOCKED_SYNCS.include?(sym.sync)
-    return :VERSIONED if VERSIONED_SYNCS.include?(sym.sync)
-    return :ATOMIC    if ATOMIC_SYNCS.include?(sym.sync)
+    sync = sym.sync
+    return :LOCKED    if sync && LOCKED_SYNCS.include?(sync)
+    return :VERSIONED if sync && VERSIONED_SYNCS.include?(sync)
+    return :ATOMIC    if sync && ATOMIC_SYNCS.include?(sync)
     # Non-sync bindings (plain T, @local, @multiowned) are all in the LOCAL
     # family. The body lowers to direct alias access through the no-op
     # WITH POLYMORPHIC path.
@@ -340,15 +342,16 @@ module WithMatchCheck
   # downstream readers (effect resolution, mir lowering) see concrete
   # families uniformly.
   # Returns an empty Set when the arg has no sync attribute (no contention).
-  sig { params(arg: T.untyped).returns(T::Set[Symbol]) }
+  sig { params(arg: AST::Node).returns(T::Set[Symbol]) }
   def self.family_of_arg_set(arg)
     sym = arg.symbol
     return Set.new unless sym
-    if sym.sync_families && sym.sync_families.size > 1
-      return expand_snapshotted(sym.sync_families)
+    families = sym.sync_families
+    if families && families.size > 1
+      return expand_snapshotted(families)
     end
-    if sym.sync_families && sym.sync_families.size == 1
-      single = sym.sync_families.first
+    if families && families.size == 1
+      single = families.first
       return Set[:VERSIONED, :ATOMIC] if single == :SNAPSHOTTED
     end
     fam = family_of_arg(arg)

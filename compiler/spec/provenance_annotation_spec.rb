@@ -79,7 +79,7 @@ RSpec.describe "Provenance annotation" do
       ast, _ = annotate(<<~CLEAR)
         STRUCT Holder { items: Int64[], label: String }
         FN build() RETURNS !Holder ->
-            MUTABLE vals: Int64[]@list = [];
+            MUTABLE vals: []Int64 = [];
             vals.append(1_i64);
             RETURN Holder{ items: vals, label: "test" };
         END
@@ -119,7 +119,7 @@ RSpec.describe "Provenance annotation" do
     it "frame list has :frame provenance" do
       ast, _ = annotate(<<~CLEAR)
         FN main() RETURNS Void ->
-            MUTABLE items: Int64[]@list = [];
+            MUTABLE items: []Int64 = [];
             RETURN;
         END
       CLEAR

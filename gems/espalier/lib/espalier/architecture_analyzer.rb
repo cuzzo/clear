@@ -28,8 +28,8 @@ module Espalier
       module node nodes object phase result src type value values
     ]).to_set.freeze
 
-    def self.encapsulation_pressure(manifest, threshold: DEFAULT_ENCAPSULATION_THRESHOLD)
-      new(manifest).encapsulation_pressure(threshold: threshold)
+    def self.encapsulation_pressure(manifest, threshold: DEFAULT_ENCAPSULATION_THRESHOLD, closed_world: false)
+      new(manifest, closed_world: closed_world).encapsulation_pressure(threshold: threshold)
     end
 
     def self.collaboration_meshes(manifest, threshold: DEFAULT_COLLABORATION_THRESHOLD)
@@ -48,8 +48,9 @@ module Espalier
       new(manifest).cohesive_value_facade_profiles
     end
 
-    def initialize(manifest)
+    def initialize(manifest, closed_world: false)
       @manifest = Array(manifest)
+      @closed_world = closed_world
       @owners = @manifest.map { |mod| value(mod, :module).to_s }.to_set
       @owner_by_simple = build_owner_by_simple
       @module_by_owner = @manifest.each_with_object({}) do |mod, out|
@@ -428,7 +429,7 @@ module Espalier
     end
 
     def privacy_candidates_by_owner
-      @privacy_candidates_by_owner ||= PrivacyAnalyzer.candidates(@manifest).group_by { |row| row[:module].to_s }
+      @privacy_candidates_by_owner ||= PrivacyAnalyzer.candidates(@manifest, closed_world: @closed_world).group_by { |row| row[:module].to_s }
     end
 
     def build_owner_edges

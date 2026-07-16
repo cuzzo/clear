@@ -228,7 +228,7 @@ lowering's job of deciding what to mark.
 
 ```
 for each capture (name, type) in node.captures:
-    if type is borrow_like (slice of owned, @indirect, field-of-owner):
+    if type is borrow_like (slice of owned, @boxed, field-of-owner):
         if !explicitly_moved(source_owner) and !explicitly_copied(name):
             raise lowering_error:
               "Capture '{name}' borrows from '{owner}'; cannot escape

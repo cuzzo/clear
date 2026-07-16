@@ -18,6 +18,7 @@ module NilKill
                  "type_normalizers" => [], "dispatcher_inferences" => [], "return_origins" => [], "param_origins" => [],
                  "rbi_field_types" => [], "noreturn_methods" => [],
                  "runtime_call_edges" => [], "fallibility_pressure" => [], "hidden_enum_pressure" => [], "flow_graph" => nil,
+                 "flow_local_types" => [], "type_dependencies" => [],
                  "static_evidence_summary" => {} }
       @diagnostics = { "sorbet_errors" => [], "nil_origins" => [], "sorbet_feedback" => [] }
       @actions = []

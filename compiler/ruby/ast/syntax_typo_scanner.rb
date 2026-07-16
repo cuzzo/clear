@@ -27,14 +27,20 @@ require_relative "fixable_error"
 module SyntaxTypoScanner
     extend T::Sig
 
+  class TypoRule < T::Struct
+    const :match, String
+    const :replace, String
+    const :label, String
+  end
+
   # One rule = (pattern, replacement, human-readable label for the fix).
   # Patterns are literal string matches, not regexes — intentional; a
   # regex would risk matching sub-strings of larger identifiers (e.g.
   # `selectors>` would have `s>` inside it, which would be wrong to flag).
   RULES = T.let([
-    { match: 's>', replace: '|>', label: 'pipeline operator (use `|>`, not `s>`)' },
-    { match: '=>', replace: '->', label: 'arrow (use `->`, not `=>`)' },
-  ].freeze, T::Array[T.untyped])
+    TypoRule.new(match: 's>', replace: '|>', label: 'pipeline operator (use `|>`, not `s>`)'),
+    TypoRule.new(match: '=>', replace: '->', label: 'arrow (use `->`, not `=>`)'),
+  ].freeze, T::Array[TypoRule])
 
   sig { params(source: String).returns(NilClass) }
   def self.scan!(source)
@@ -95,14 +101,14 @@ module SyntaxTypoScanner
       # similar valid identifiers.
       matched = T.let(false, T::Boolean)
       RULES.each do |r|
-        pat = r[:match]
+        pat = r.match
         next unless source[i, pat.length] == pat
-        if T.must(pat)[0] =~ /[A-Za-z_]/ && i > 0 && source[i - 1] =~ /[A-Za-z0-9_]/
+        if pat[0] =~ /[A-Za-z_]/ && i > 0 && source[i - 1] =~ /[A-Za-z0-9_]/
           next
         end
         emit_typo_finding!(line, col, r)
-        i += T.must(pat).length
-        col += T.must(pat).length
+        i += pat.length
+        col += pat.length
         matched = true
         break
       end
@@ -121,27 +127,27 @@ module SyntaxTypoScanner
     end
   end
 
-  sig { params(line: Integer, col: Integer, rule: T.untyped).void }
+  sig { params(line: Integer, col: Integer, rule: TypoRule).void }
   def self.emit_typo_finding!(line, col, rule)
     fix = Fix.new(
       description: DiagnosticRegistry.fix_description(
         :REPLACE_OPERATOR_TYPO,
-        match: rule[:match],
-        replace: rule[:replace],
-        label: rule[:label],
+        match: rule.match,
+        replace: rule.replace,
+        label: rule.label,
       ),
       confidence: :auto,
       edits: [Edit.new(
-        span: Span.new(file: nil, line: line, col: col, length: rule[:match].length),
-        replacement: rule[:replace]
+        span: Span.new(file: nil, line: line, col: col, length: rule.match.length),
+        replacement: rule.replace
       )]
     )
 
     anchor = Struct.new(:line, :column).new(line, col)
     message = T.must(DiagnosticRegistry.format(
       :OPERATOR_TYPO_SUGGESTION,
-      match: rule[:match],
-      replace: rule[:replace],
+      match: rule.match,
+      replace: rule.replace,
     ))
     finding = FixableFinding.new(
       level: :error,

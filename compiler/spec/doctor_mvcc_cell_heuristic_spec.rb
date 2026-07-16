@@ -3,7 +3,7 @@ require 'fileutils'
 require 'open3'
 
 # Spec for `clear doctor`'s MVCC cell heuristics:
-#   - COW thrash      → recommend @indirect on large fields
+#   - COW thrash      → recommend @boxed on large fields
 #   - MVCC misuse     → recommend back to @shared:writeLocked / @shared:locked
 #
 # Same synthesis strategy as doctor_mvcc_heuristic_spec.rb: hand-write a
@@ -25,7 +25,7 @@ RSpec.describe 'clear doctor — MVCC cell heuristics' do
   end
 
   describe 'COW thrash detector' do
-    it 'recommends @indirect when large struct + many commits + > 100MB COW' do
+    it 'recommends @boxed when large struct + many commits + > 100MB COW' do
       Dir.mktmpdir do |dir|
         profile_dir = File.join(dir, 'p.profile')
         # 320-byte struct, 400K commits, ~128MB COW.
@@ -37,7 +37,7 @@ RSpec.describe 'clear doctor — MVCC cell heuristics' do
         MVCC
         out = run_doctor(profile_dir)
         expect(out).to include('COW thrash')
-        expect(out).to include('@indirect')
+        expect(out).to include('@boxed')
         expect(out).to include('COW thrash detected')
       end
     end
@@ -46,7 +46,7 @@ RSpec.describe 'clear doctor — MVCC cell heuristics' do
       Dir.mktmpdir do |dir|
         profile_dir = File.join(dir, 'p.profile')
         # 8-byte struct, 1M commits — tiny COW total. Not a candidate for
-        # @indirect; the struct is already pointer-sized.
+        # @boxed; the struct is already pointer-sized.
         write_profile(profile_dir, <<~MVCC)
           # mvcc-profile v1
           # addr\tstruct_size\treads\tcommits\tretries\tupdate_failures

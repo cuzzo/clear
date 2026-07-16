@@ -17,14 +17,18 @@ require_relative '../ruby/annotator/helpers/intrinsic_registry' unless defined?(
 # FSM emit (under construction).
 
 RSpec.describe FsmTransform::SuspendResolvers do
-  # Minimal lowering double: implements .lower() by returning the
-  # input unchanged (resolvers don't introspect the lowered form,
-  # they just embed it as MIR; identity is enough for shape tests).
+  # Minimal lowering double: maps the AST-like fixtures to the same
+  # structural MIR nodes the production lowerer supplies.
   let(:lowering) {
     Class.new {
       include FsmTransform::LoweringProtocol
 
-      def lower(node); node; end
+      def lower(node)
+        return MIR::Ident.new(node.name) if node.is_a?(AST::Identifier)
+        return MIR::Lit.new(node.value.to_s) if node.respond_to?(:value)
+
+        MIR::Ident.new("__fixture")
+      end
     }.new
   }
 
@@ -133,8 +137,9 @@ RSpec.describe FsmTransform::SuspendResolvers do
     }
 
     let(:call_node) {
-      Struct.new(:args, :receiver, :matched_stdlib_def, :full_type).new(
-        [Struct.new(:value).new(100)], nil, stdlib_def, :Void)
+      AST::FuncCall.new(nil, "sleep", [AST::Literal.new(100, :Int64)]).tap do |call|
+        call.full_type = :Void
+      end
     }
 
     let(:io_tail) {
@@ -157,12 +162,10 @@ RSpec.describe FsmTransform::SuspendResolvers do
       expect(d.result_needs_cleanup).to eq(false)
     end
 
-    it "tolerates IO calls whose args reader returns nil" do
-      nil_args_def = IntrinsicRegistry.fs({ suspends: true, fsm_setup: [] })
-      nil_args_call = Struct.new(:args, :receiver, :matched_stdlib_def, :full_type).new(
-        nil, nil, nil_args_def, :Void
-      )
-      tail = FsmTransform::Segments::IoSuspend.new(nil_args_call, nil_args_def, nil)
+    it "accepts function calls with no arguments" do
+      no_args_def = IntrinsicRegistry.fs({ suspends: true, fsm_setup: [] })
+      no_args_call = AST::FuncCall.new(nil, "yield_now", []).tap { |call| call.full_type = :Void }
+      tail = FsmTransform::Segments::IoSuspend.new(no_args_call, no_args_def, nil)
 
       d = FsmTransform::SuspendResolvers.resolve(
         FsmTransform::Segments::Segment.new(0, [], tail), ctx, lowering)
@@ -171,11 +174,11 @@ RSpec.describe FsmTransform::SuspendResolvers do
       expect(d.bind_stmts).to be_empty
     end
 
-    it "tolerates IO call nodes without an args reader" do
+    it "accepts method calls with no arguments" do
       no_args_def = IntrinsicRegistry.fs({ suspends: true, fsm_setup: [] })
-      no_args_call = Struct.new(:receiver, :matched_stdlib_def, :full_type).new(
-        nil, no_args_def, :Void
-      )
+      receiver = typed_identifier("stream", :Stream)
+      no_args_call = AST::MethodCall.new(nil, receiver, "flush", [])
+      no_args_call.full_type = :Void
       tail = FsmTransform::Segments::IoSuspend.new(no_args_call, no_args_def, nil)
 
       d = FsmTransform::SuspendResolvers.resolve(
@@ -212,6 +215,8 @@ RSpec.describe FsmTransform::SuspendResolvers do
       arg_source = Object.new
       arg_mir = MIR::Lit.new("321")
       lowering_spy = Class.new {
+        include FsmTransform::LoweringProtocol
+
         attr_reader :seen
         define_method(:initialize) { |value| @value = value }
         define_method(:lower) { |node| @seen = node; @value }
@@ -412,7 +417,7 @@ RSpec.describe FsmTransform::SuspendResolvers do
 
   describe "resolve_next" do
     # Fake AST::Identifier as the promise expr. The resolver lowers
-    # via lowering.lower(); our double returns the input unchanged.
+    # it through the same AST -> structural MIR boundary as production.
     let(:promise_ast) {
       typed_identifier("promise", :"~Int64")
     }
@@ -447,13 +452,15 @@ RSpec.describe FsmTransform::SuspendResolvers do
       target = d.setup_stmts.first.target
       expect(target).to be_a(MIR::FieldGet)
       expect(target.field).to eq("sp_1")
-      expect(d.setup_stmts.first.value).to eq(promise_ast)
+      expect(d.setup_stmts.first.value).to eq(MIR::Ident.new("promise"))
       expect(d.setup_stmts.first.needs_field_cleanup).to eq(false)
     end
 
     it "stores the lowered promise expression, not the source AST node" do
       lowered = MIR::Ident.new("__promise_mir")
       lowering_spy = Class.new {
+        include FsmTransform::LoweringProtocol
+
         attr_reader :seen
         define_method(:initialize) { |value| @value = value }
         define_method(:lower) { |node| @seen = node; @value }

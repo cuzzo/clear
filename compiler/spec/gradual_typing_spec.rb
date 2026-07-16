@@ -910,6 +910,27 @@ RSpec.describe "Gradual typing — STRICT-imports boundary (M1.5)" do
     end
   end
 
+  it "clears cycle-detection state after a failed import so the file can be retried" do
+    import("", "helper.clear" => <<~HELPER) do |compiler, dir|
+      PUB FN identity(x: Int64) RETURNS Auto ->
+        RETURN x;
+      END
+    HELPER
+      expect {
+        compiler.compile_file("helper.clear", caller_dir: dir)
+      }.to raise_error(CompilerError, /public signature/)
+
+      File.write(File.join(dir, "helper.clear"), <<~CLEAR)
+        PUB FN identity(x: Int64) RETURNS Int64 ->
+          RETURN x;
+        END
+      CLEAR
+      expect {
+        compiler.compile_file("helper.clear", caller_dir: dir)
+      }.not_to raise_error
+    end
+  end
+
   it "rejects an imported package-visible function (default visibility)" do
     # Default visibility is `:package`, which is importable from
     # same-directory modules. Auto must be rejected for these too.
@@ -1167,7 +1188,7 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
   end
 
   it "handles defensive Auto restamp paths without stale fact rewrites" do
-    annotator = SemanticAnnotator.new
+    annotator = Annotator::Phases::TypeAnalysisSession.new
     token = Lexer::Token.new(:VAR_ID, "x", 1, 1)
     param = AST::Param.new(name: "x", type: Type.new(:Auto, auto: true))
     fn = AST::FunctionDef.new(token, "f", [param], [], Type.new(:Void), nil, [], [], nil, :pub, [], false)
@@ -1225,7 +1246,7 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
     expect(missing_call.full_type.auto?).to be(true)
 
     auto_sig = FunctionSignature.new(params: [], return_type: Type.new(:Auto, auto: true))
-    annotator.semantic_root_scope.declare("auto_ret", nil, auto_sig, false, false, nil, :static)
+    annotator.send(:semantic_root_scope).declare("auto_ret", nil, auto_sig, false, false, nil, :static)
     auto_call = AST::FuncCall.new(token, "auto_ret", [])
     auto_call.full_type = Type.new(:Auto, auto: true)
     expect {

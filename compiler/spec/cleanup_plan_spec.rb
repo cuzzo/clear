@@ -96,6 +96,25 @@ RSpec.describe CleanupClassifier do
   end
 
   describe "binding cleanup facts" do
+    it "classifies owned fallible captures through their successful type" do
+      plan = cleanup_plan_for(<<~CLEAR, "main")
+        FN makeLabel() RETURNS !String ->
+          RETURN "ready";
+        END
+
+        FN main() RETURNS Void ->
+          IF makeLabel() IS_OK AS label THEN
+            ASSERT label == "ready", "label";
+          END
+          RETURN;
+        END
+      CLEAR
+
+      entry = plan.facts.entry_for("label")
+      expect(entry.kind).to eq(:uniform)
+      expect(entry.has_moved_guard?).to eq(true)
+    end
+
     it "builds cleanup classification plans from legacy binding maps" do
       entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true)
 
@@ -190,7 +209,7 @@ RSpec.describe CleanupClassifier do
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
           WHILE i < 1_i64 DO
-            MUTABLE vals: Int64[]@list = List[];
+            MUTABLE vals: []Int64 = List[];
             i = i + 1_i64;
           END
           RETURN;
@@ -306,7 +325,7 @@ RSpec.describe CleanupClassifier do
       plan = cleanup_plan_for(<<~CLEAR, "main")
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           RETURN;
         END
       CLEAR
@@ -371,9 +390,9 @@ RSpec.describe CleanupClassifier do
     it "marks moved source guards through the public plan entrypoint" do
       plan = cleanup_plan_for(<<~CLEAR, "main")
         STRUCT Pt { x: Float64, y: Float64 }
-        FN consume(TAKES p: Pt[10]@pool) RETURNS Void -> RETURN; END
+        FN consume(TAKES p: [Pool(10)]Pt) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          MUTABLE pool: Pt[10]@pool = [];
+          MUTABLE pool: [Pool(10)]Pt = [];
           consume(GIVE pool);
           RETURN;
         END
@@ -393,7 +412,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "test!")
           UNION Value { Nil, Str: String }
-          FN test!(MUTABLE map: HashMap<Value>) RETURNS !String ->
+          FN test!(MUTABLE map: {String}Value) RETURNS !String ->
               val = map["t0"] OR_ELSE Value.Nil;
               PARTIAL MATCH val START
                   Value.Str AS s -> RETURN s;,
@@ -436,7 +455,7 @@ RSpec.describe CleanupClassifier do
     context "COPY of non-Copy union" do
       let(:plan) do
         cleanup_for(<<~CLEAR, "test")
-          UNION Data { Empty, Text: String, Nested { label: String, inner: Data @indirect } }
+          UNION Data { Empty, Text: String, Nested { label: String, inner: Data @boxed } }
           FN makeData() RETURNS Data ->
               RETURN Data{ Text: "hello" };
           END
@@ -1006,7 +1025,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "main")
           FN main() RETURNS Void ->
-              MUTABLE vals: Int64[]@list = List[];
+              MUTABLE vals: []Int64 = List[];
               vals.append(1_i64);
               RETURN;
           END
@@ -1024,7 +1043,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "main")
           FN main() RETURNS Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m["x"] = 1_i64;
               RETURN;
           END
@@ -1048,7 +1067,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "main")
           FN makeList() RETURNS !Int64[] ->
-              MUTABLE items: Int64[]@list = List[];
+              MUTABLE items: []Int64 = List[];
               items.append(1_i64);
               RETURN items;
           END
@@ -1071,7 +1090,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "main")
           FN makeList() RETURNS !Int64[] ->
-              MUTABLE items: Int64[]@list = List[];
+              MUTABLE items: []Int64 = List[];
               items.append(1_i64);
               RETURN items;
           END
@@ -1096,7 +1115,7 @@ RSpec.describe CleanupClassifier do
         cleanup_for(<<~CLEAR, "main")
           UNION Value { Num: Float64, Items: Int64[] }
           FN makeValue() RETURNS !Value ->
-              MUTABLE items: Int64[]@list = List[];
+              MUTABLE items: []Int64 = List[];
               items.append(1_i64);
               RETURN Value{ Items: items };
           END
@@ -1209,7 +1228,7 @@ RSpec.describe CleanupClassifier do
         cleanup_for(<<~CLEAR, "main")
           STRUCT Pt { x: Float64, y: Float64 }
           FN main() RETURNS Void ->
-              MUTABLE pool: Pt[10]@pool = [];
+              MUTABLE pool: [Pool(10)]Pt = [];
               RETURN;
           END
         CLEAR
@@ -1411,7 +1430,7 @@ RSpec.describe CleanupClassifier do
   describe "COPY non-Copy union consumed by MATCH TAKES" do
     it "keeps cleanup for COPY result after refine_moved_guards" do
       plan = mir_plan_for(<<~CLEAR, "main")
-        UNION Data { Empty, Text: String, Nested { label: String, inner: Data @indirect } }
+        UNION Data { Empty, Text: String, Nested { label: String, inner: Data @boxed } }
         FN makeNested() RETURNS !Data ->
             inner = Data{ Text: "hello" };
             RETURN Data.Nested{ label: "outer", inner: inner };

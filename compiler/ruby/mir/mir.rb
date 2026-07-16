@@ -329,14 +329,14 @@ module MIR
 
     const :value, Integer
 
-    sig { params(other: MIR::LoweredNodeId).returns(T::Boolean) }
+    sig { params(other: T.untyped).returns(T::Boolean) }
     def ==(other)
       return false unless other.is_a?(LoweredNodeId)
 
       other.value == value
     end
 
-    sig { params(other: MIR::LoweredNodeId).returns(T::Boolean) }
+    sig { params(other: T.untyped).returns(T::Boolean) }
     def eql?(other)
       self == other
     end
@@ -353,14 +353,14 @@ module MIR
 
     const :node_ids, T::Array[LoweredNodeId]
 
-    sig { params(other: MIR::LoweredBodyId).returns(T::Boolean) }
+    sig { params(other: T.untyped).returns(T::Boolean) }
     def ==(other)
       return false unless other.is_a?(LoweredBodyId)
 
       other.node_ids == node_ids
     end
 
-    sig { params(other: MIR::LoweredBodyId).returns(T::Boolean) }
+    sig { params(other: T.untyped).returns(T::Boolean) }
     def eql?(other)
       self == other
     end
@@ -615,7 +615,7 @@ module MIR
       let = stmts.grep(MIR::Let).find { |stmt| stmt.name.to_s == name }
       init_effect = of(let&.init)
       cleanup_kind = { true => init_effect.cleanup_kind || :uniform, false => :uniform }[init_effect.produces_owned] || :uniform
-      active = T.must(!name.empty? && !mark.nil? && !transfer.nil?)
+      active = !name.empty? && !mark.nil? && !transfer.nil?
       effect_when(active,
         owned(alloc: mark&.alloc, cleanup_kind: cleanup_kind, target_var: name))
     end
@@ -1128,7 +1128,7 @@ module MIR
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([body_slot(:then_body, then_body, ->(new_body) { self.then_body = new_body })], T::Array[BodySlot])
-      slots << body_slot(:else_body, else_body, ->(new_body) { self.else_body = new_body }) if else_body
+      slots << body_slot(:else_body, T.must(else_body), ->(new_body) { self.else_body = new_body }) if else_body
       slots
     end
   end
@@ -1148,7 +1148,7 @@ module MIR
     sig { returns(T::Array[BodySlot]) }
     def body_slots
       slots = T.let([body_slot(:then_body, then_body, ->(new_body) { self.then_body = new_body })], T::Array[BodySlot])
-      slots << body_slot(:else_body, else_body, ->(new_body) { self.else_body = new_body }) if else_body
+      slots << body_slot(:else_body, T.must(else_body), ->(new_body) { self.else_body = new_body }) if else_body
       slots
     end
   end
@@ -1234,7 +1234,7 @@ module MIR
       arms&.each_with_index do |arm, index|
         slots << body_slot(:"arms_#{index}", arm.body, ->(new_body) { arm.body = new_body })
       end
-      slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
+      slots << body_slot(:default_body, T.must(default_body), ->(new_body) { self.default_body = new_body }) if default_body
       slots
     end
   end
@@ -1263,7 +1263,7 @@ module MIR
       arms&.each_with_index do |arm, index|
         slots << body_slot(:"arms_#{index}", arm.body, ->(new_body) { arm.body = new_body })
       end
-      slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
+      slots << body_slot(:default_body, T.must(default_body), ->(new_body) { self.default_body = new_body }) if default_body
       slots
     end
   end
@@ -1291,7 +1291,7 @@ module MIR
       branches&.each_with_index do |branch, index|
         slots << body_slot(:"branches_#{index}", branch.body, ->(new_body) { branch.body = new_body })
       end
-      slots << body_slot(:default_body, default_body, ->(new_body) { self.default_body = new_body }) if default_body
+      slots << body_slot(:default_body, T.must(default_body), ->(new_body) { self.default_body = new_body }) if default_body
       slots
     end
   end
@@ -2793,7 +2793,7 @@ module MIR
   #     __p.* = init;
   #     break :blk __p;
   # }
-  # Used for: @indirect fields, heap struct literals, capability boxing.
+  # Used for: @boxed fields, heap struct literals, capability boxing.
   # alloc: Symbol (:heap, :frame) resolved via rt.
   HeapCreate = Struct.new(:zig_type, :init, :alloc, :label) do
     extend T::Sig
@@ -3136,12 +3136,12 @@ module MIR
   # Make a list from items.
   # Zig: try CheatLib.makeList(elem_type, alloc, &.{ items })
   # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
-  MakeList = Struct.new(:elem_type, :items, :alloc) do
+  MakeList = Struct.new(:elem_type, :items, :alloc, :minimum_capacity) do
     extend T::Sig
     include Expr
-    sig { params(elem_type: String, items: T::Array[Emittable], alloc: Symbol).void }
-    def initialize(elem_type, items, alloc)
-      super(elem_type, items, alloc)
+    sig { params(elem_type: String, items: T::Array[Emittable], alloc: Symbol, minimum_capacity: T.nilable(Integer)).void }
+    def initialize(elem_type, items, alloc, minimum_capacity = nil)
+      super(elem_type, items, alloc, minimum_capacity)
     end
 
     sig { returns(T::Array[Emittable]) }
@@ -3226,7 +3226,7 @@ module MIR
 
   # SNAPSHOT-mutable single-cell: `WITH SNAPSHOT cell AS MUTABLE va
   # { body } [ON MvccConflict <action>]` for a @versioned (MVCC) or
-  # @indirect:atomic (AtomicPtr M3.6) cell in transaction mode.
+  # @boxed:atomic (AtomicPtr M3.6) cell in transaction mode.
   # Versioned: lowers to `Versioned.update(rt, alloc, fn(va: *T) ...)`
   # wrapped in catch+switch for ON MvccConflict handling.
   # AtomicPtr (is_atomic_ptr=true): lowers to
@@ -3640,7 +3640,8 @@ module MIR
     def ownership_effect
       return OwnershipEffect.none unless owned_return?
       alloc_arg = args.find { |arg| arg.is_a?(AllocatorRef) }
-      OwnershipEffect.owned(alloc: alloc_arg&.kind || :heap)
+      alloc = alloc_arg.is_a?(AllocatorRef) ? alloc_arg.kind : :heap
+      OwnershipEffect.owned(alloc: alloc)
     end
   end
 
@@ -3682,7 +3683,8 @@ module MIR
     def ownership_effect
       return OwnershipEffect.none unless owned_return?
       alloc_arg = args.find { |arg| arg.is_a?(AllocatorRef) }
-      OwnershipEffect.owned(alloc: alloc_arg&.kind || :heap)
+      alloc = alloc_arg.is_a?(AllocatorRef) ? alloc_arg.kind : :heap
+      OwnershipEffect.owned(alloc: alloc)
     end
   end
 
@@ -3705,6 +3707,22 @@ module MIR
       RuntimeCallSpec,
     )
 
+    RANK_GET = T.let(
+      RuntimeCallSpec.new(
+        callee: "CheatLib.rankGet",
+        callable_contract: CallableContract.no_ownership(3),
+      ).freeze,
+      RuntimeCallSpec,
+    )
+
+    RANK_SET = T.let(
+      RuntimeCallSpec.new(
+        callee: "CheatLib.rankSet",
+        callable_contract: CallableContract.no_ownership(4),
+      ).freeze,
+      RuntimeCallSpec,
+    )
+
     sig { returns(RuntimeCallSpec) }
     def self.eql_spec
       EQL
@@ -3713,6 +3731,16 @@ module MIR
     sig { returns(RuntimeCallSpec) }
     def self.thread_count_spec
       THREAD_COUNT
+    end
+
+    sig { returns(RuntimeCallSpec) }
+    def self.rank_get_spec
+      RANK_GET
+    end
+
+    sig { returns(RuntimeCallSpec) }
+    def self.rank_set_spec
+      RANK_SET
     end
 
     sig { params(element_zig: String).returns(RuntimeCallSpec) }
@@ -4893,6 +4921,10 @@ module MIR
       return OwnershipEffect.none unless sig
 
       heap_return = sig.heap_return_alloc? == true
+      if sig.emits_allocating? && !sig.mutates_receiver? &&
+          !sig.frame_return_alloc? && !sig.return_type.void?
+        return OwnershipEffect.owned(alloc: heap_return ? :heap : nil)
+      end
       OwnershipEffect.from_callable_facts(
         emits_allocating: sig.emits_allocating? == true,
         heap_return_alloc: heap_return,

@@ -2,10 +2,10 @@ require_relative "spec_helper"
 require "json"
 
 RSpec.describe "NilKill Oracle Tests" do
-  fixtures_dir = File.join(__dir__, "fixtures", "oracle")
-  
-  if Dir.exist?(fixtures_dir)
-    Dir.glob(File.join(fixtures_dir, "*", "input.json")).each do |input_file|
+  fixture_roots = %w[oracle evidence_oracle].map { |name| File.join(__dir__, "fixtures", name) }
+
+  if fixture_roots.any? { |root| Dir.exist?(root) }
+    fixture_roots.flat_map { |root| Dir.glob(File.join(root, "*", "input.json")) }.each do |input_file|
       hash = File.basename(File.dirname(input_file))
       output_file = File.join(File.dirname(input_file), "output.json")
       
@@ -14,16 +14,17 @@ RSpec.describe "NilKill Oracle Tests" do
         expected_output = JSON.parse(File.read(output_file))
         
         isolated_env("NIL_KILL_TARGETS" => "/dev/null") do
-          infer = NilKill::Infer.new(["--no-sorbet"])
-          
-          # Run the deterministic Rust action builder against the fixture state.
-          infer.send(:delegate_to_rust, input_data)
+          actual_actions = if NilKill::Schema::EvidenceBundle.v2?(input_data)
+            NilKill::Analyzers::RuntimeEvidenceAnalyzer.new(input_data).analyze
+          else
+            infer = NilKill::Infer.new(["--no-sorbet"])
 
-          # Extract the result
-          actual_actions = infer.store.actions
-          
+            # Run the deterministic Rust action builder against the fixture state.
+            infer.send(:delegate_to_rust, input_data)
+            infer.store.actions
+          end
+
           expect(actual_actions).to match_array(expected_output["actions"])
-          # we can ignore diagnostics for the strict oracle unless they matter, but let's check actions first
         end
       end
     end

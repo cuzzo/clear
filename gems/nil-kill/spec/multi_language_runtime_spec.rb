@@ -47,6 +47,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
   it "resolves language providers from file extensions for static diff dispatch" do
     expect(NilKill::Languages.provider_for_path("src/probe.rb").language).to eq("ruby")
     expect(NilKill::Languages.provider_for_path("src/probe.py").language).to eq("python")
+    expect(NilKill::Languages.provider_for_path("src/probe.mjs").language).to eq("javascript")
     expect(NilKill::Languages.provider_for_path("src/probe.ts").language).to eq("typescript")
     expect(NilKill::Languages.provider_for_path("src/probe.lua").language).to eq("lua")
     expect(NilKill::Languages.provider_for_path("src/probe.go").language).to eq("go")
@@ -168,6 +169,53 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
 
     expect(void_findings.map { |finding| finding["kind"] }).not_to include("nullable_signature")
     expect(maybe_findings.map { |finding| finding["kind"] }).to include("nullable_signature")
+  end
+
+  it "does not mistake Sorbet T.any unions for untyped signatures" do
+    report = NilKill::Report.allocate
+    union = {
+      "language" => "ruby",
+      "owner" => "Parser",
+      "name" => "value",
+      "signature" => "sig { returns(T.any(String, Integer)) }",
+    }
+    typescript = union.merge("language" => "typescript", "signature" => "value(): any")
+
+    expect(report.send(:static_method_findings, union).map { |finding| finding["kind"] })
+      .not_to include("untyped_signature")
+    expect(report.send(:static_method_findings, typescript).map { |finding| finding["kind"] })
+      .to include("untyped_signature")
+  end
+
+  it "upgrades nullable returns only when return-path evidence proves non-nil" do
+    report = NilKill::Report.allocate
+    method = {
+      "language" => "ruby", "path" => "parser.rb", "line" => 4,
+      "owner" => "Parser", "name" => "token",
+      "signature" => "sig { returns(T.nilable(Token)) }",
+    }
+    origin = {
+      "confidence" => "strong", "blockers" => [],
+      "candidate_type" => {"kind" => "Primitive", "data" => "Token"},
+      "sources" => [
+        {"line" => 7, "kind" => "static", "type" => {"kind" => "Primitive", "data" => "Token"}},
+        {"line" => 9, "kind" => "typed_call", "type" => {"kind" => "Primitive", "data" => "Token"}},
+      ],
+    }
+
+    proven = report.send(:static_method_findings, method, return_origin: origin)
+    blocked = report.send(:static_method_findings, method, return_origin: origin.merge("blockers" => ["unknown path"]))
+    incomplete = report.send(
+      :static_method_findings,
+      method,
+      return_origin: origin.merge("sources" => [{"line" => 7, "kind" => "static"}])
+    )
+
+    expect(proven.map { |finding| finding["kind"] }).to include("false_nullable_return")
+    expect(proven.first["message"]).to include("line 7", "line 9")
+    expect(blocked.map { |finding| finding["kind"] }).to include("nullable_signature")
+    expect(blocked.map { |finding| finding["kind"] }).not_to include("false_nullable_return")
+    expect(incomplete.map { |finding| finding["kind"] }).not_to include("false_nullable_return")
   end
 
   it "uses the FactMine extension for TypeScript Tree-sitter static evidence" do
@@ -526,6 +574,62 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     end
   end
 
+  it "scans the requested root when static has no positional target" do
+    require_tree_sitter_language!(:ruby)
+
+    Dir.mktmpdir("nil-kill-root-static", NilKill::ROOT) do |dir|
+      File.write(File.join(dir, "top_level.rb"), "class RootFile; def call(value); value; end; end\n")
+      output = File.join(dir, "static.json")
+
+      NilKill::Commands::StaticCommand.new([
+        "--root", dir, "--language", "ruby", "--output", output,
+      ]).run
+      evidence = JSON.parse(File.read(output))
+
+      expect(evidence.fetch("files")).to include(a_hash_including("path" => "top_level.rb"))
+    end
+  end
+
+  it "adds a ranked production type-next projection with selectable source roles" do
+    evidence = {
+      "root" => "/repo",
+      "files" => [
+        { "path" => "lib/app.rb", "source_role" => "production" },
+        { "path" => "spec/app_spec.rb", "source_role" => "test" },
+      ],
+      "facts" => {
+        "type_dependencies" => [
+          { "id" => "root", "kind" => "parameter", "candidate" => true, "resolved" => false,
+            "requirements" => [], "name" => "value", "file" => "lib/app.rb" },
+          { "id" => "copy", "kind" => "local", "candidate" => false, "resolved" => false,
+            "requirements" => ["root"], "name" => "copy", "file" => "lib/app.rb" },
+          { "id" => "test-root", "kind" => "parameter", "candidate" => true, "resolved" => false,
+            "requirements" => [], "name" => "test_value", "file" => "/repo/spec/app_spec.rb" },
+          { "id" => "test-copy", "kind" => "local", "candidate" => false, "resolved" => false,
+            "requirements" => ["test-root"], "name" => "test_copy", "file" => "/repo/spec/app_spec.rb" },
+        ],
+      },
+    }
+    command = NilKill::Commands::StaticCommand.new([])
+    expect(command.send(:parse_source_roles, nil)).to eq(["production"])
+    expect(command.send(:parse_source_roles, "all")).to match_array(
+      %w[production test benchmark example generated vendored vcs_metadata]
+    )
+    expect { command.send(:parse_source_roles, "unknown") }.to raise_error(ArgumentError)
+    expect { command.send(:parse_source_roles, "") }.to raise_error(ArgumentError)
+
+    command.send(:append_type_next!, evidence)
+
+    expect(evidence.dig("facts", "type_next")).to contain_exactly(a_hash_including(
+      "candidate" => "root", "unlock_count" => 1, "unlocked_ids" => ["copy"]
+    ))
+    command.send(:append_type_next!, evidence, source_roles: ["test"])
+    expect(evidence.dig("facts", "type_next")).to contain_exactly(a_hash_including(
+      "candidate" => "test-root", "unlock_count" => 1, "unlocked_ids" => ["test-copy"]
+    ))
+    expect(evidence.dig("summary", "type_next_candidates")).to eq(1)
+  end
+
   it "keeps Go name-type struct fields typed in static evidence" do
     grammar = ENV["DECOMPLEX_TS_GO_PATH"]
     skip "set DECOMPLEX_TS_GO_PATH to run Go Tree-sitter static evidence test" unless grammar && File.file?(grammar)
@@ -734,7 +838,7 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     end
   end
 
-  it "keeps Ruby-only normalization defaulting to the legacy runtime directory" do
+  it "requires explicit trace paths even for Ruby normalization" do
     Dir.mktmpdir("nil-kill-ruby-default-traces", NilKill::ROOT) do |dir|
       static_path = File.join(dir, "static.json")
       output_path = File.join(dir, "evidence.json")
@@ -761,8 +865,8 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
       evidence = JSON.parse(File.read(output_path))
 
       expect(evidence["languages"]).to eq(["ruby"])
-      expect(evidence.dig("runtime", "runs")).to include(a_hash_including("run_id" => "run-1"))
-      expect(evidence.dig("metadata", "trace_files")).not_to be_empty
+      expect(evidence.dig("runtime", "runs")).to be_empty
+      expect(evidence.dig("metadata", "trace_files")).to eq([])
     end
   end
 

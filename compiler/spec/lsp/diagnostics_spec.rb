@@ -63,7 +63,7 @@ RSpec.describe LSP::Diagnostics do
       # strategy would mis-stamp every SNAPSHOT-form message with the
       # EXCLUSIVE code, surfacing the wrong fix-link in the editor.
       snapshot_msg =
-        "Cannot read field 'name' of @indirect:atomic binding 'cell' " \
+        "Cannot read field 'name' of @boxed:atomic binding 'cell' " \
         "directly. Wrap with `WITH SNAPSHOT cell AS x { ... x.name ... }` " \
         "to take a stable snapshot of the cell."
       f = StubFinding.new(

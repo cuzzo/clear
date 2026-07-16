@@ -122,6 +122,89 @@ RSpec.describe "nil-kill runtime trace" do
     end
   end
 
+  it "observes T::Struct construction without blocking Sorbet's generated initializer" do
+    Dir.mktmpdir("nil-kill-runtime-tstruct", NilKill::ROOT) do |dir|
+      source = File.join(dir, "sample.rb")
+      File.write(source, <<~RUBY)
+        require "sorbet-runtime"
+
+        class RuntimeRecord < T::Struct
+          const :name, String
+          const :payload, T.untyped
+        end
+
+        record = RuntimeRecord.new(name: "typed", payload: 42)
+        abort "bad construction" unless record.name == "typed"
+      RUBY
+
+      trace_tmp = File.join(dir, "trace-tmp")
+      trace_dir = File.join(trace_tmp, "runtime")
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+
+      _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+      struct_events = Dir.glob(File.join(trace_dir, "structs-*.jsonl")).flat_map do |path|
+        File.readlines(path, chomp: true).map { |line| JSON.parse(line) }
+      end
+      expect(struct_events).to include(
+        a_hash_including("class" => "RuntimeRecord", "field" => "name", "classes" => include("String")),
+        a_hash_including("class" => "RuntimeRecord", "field" => "payload", "classes" => include("Integer"))
+      )
+    end
+  end
+
+  it "observes a Struct that is reopened with a Sorbet-signed initializer" do
+    Dir.mktmpdir("nil-kill-runtime-reopened-struct", NilKill::ROOT) do |dir|
+      source = File.join(dir, "sample.rb")
+      File.write(source, <<~RUBY)
+        require "sorbet-runtime"
+
+        RuntimePlainRecord = Struct.new(:name, keyword_init: true)
+        class RuntimePlainRecord
+          extend T::Sig
+
+          sig { params(name: String).void }
+          def initialize(name:)
+            super
+          end
+        end
+
+        record = RuntimePlainRecord.new(name: "typed")
+        record.name = "updated"
+        abort "bad construction" unless record.name == "updated"
+      RUBY
+
+      trace_tmp = File.join(dir, "trace-tmp")
+      trace_dir = File.join(trace_tmp, "runtime")
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+
+      _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+      struct_events = Dir.glob(File.join(trace_dir, "structs-*.jsonl")).flat_map do |path|
+        File.readlines(path, chomp: true).map { |line| JSON.parse(line) }
+      end
+      name_events = struct_events.select { |event| event["class"] == "RuntimePlainRecord" && event["field"] == "name" }
+      expect(name_events).not_to be_empty
+      expect(name_events.flat_map { |event| event.fetch("classes") }).to include("String")
+    end
+  end
+
   it "does not force autoloaded constants from the Struct/Data const hook" do
     Dir.mktmpdir("nil-kill-runtime-autoload", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")
@@ -248,7 +331,7 @@ RSpec.describe "nil-kill runtime trace" do
     end
   end
 
-  it "source-instruments sampled and frame-only trace-plan methods when method TracePoint collection is disabled" do
+  it "source-instruments only unresolved trace-plan methods when method TracePoint collection is disabled" do
     Dir.mktmpdir("nil-kill-runtime-source-plan", NilKill::ROOT) do |dir|
       source = File.join(dir, "sample.rb")
       File.write(source, <<~RUBY)
@@ -278,11 +361,13 @@ RSpec.describe "nil-kill runtime trace" do
         "methods" => {
           ["Worker", "typed", "instance", File.expand_path(source), methods.fetch("typed")["line"]].join("\0") => {
             "sample" => false,
+            "frame" => false,
             "params" => { "value" => false },
             "return" => false,
           },
           ["Worker", "untyped", "instance", File.expand_path(source), methods.fetch("untyped")["line"]].join("\0") => {
             "sample" => true,
+            "frame" => true,
             "params" => { "value" => true },
             "return" => true,
           },
@@ -297,7 +382,8 @@ RSpec.describe "nil-kill runtime trace" do
       File.write(instrumented, instrumented_source)
 
       expect(instrumented_source).to include('record_source_method_call("Worker", "untyped"')
-      expect(instrumented_source).to include('record_source_method_call("Worker", "typed"')
+      expect(instrumented_source).not_to include('record_source_method_call("Worker", "typed"')
+      expect(instrumented_source).not_to include("catch(")
 
       trace_tmp = File.join(dir, "trace-tmp")
       trace_dir = File.join(trace_tmp, "runtime")
@@ -316,7 +402,7 @@ RSpec.describe "nil-kill runtime trace" do
       expect(status).to be_success, err
       method_events = Dir.glob(File.join(trace_dir, "methods-*.jsonl")).flat_map { |path| File.readlines(path, chomp: true).map { |line| JSON.parse(line) } }
       expect(method_events).to include(a_hash_including("class" => "Worker", "method" => "untyped", "returns" => include("String")))
-      expect(method_events).to include(a_hash_including("class" => "Worker", "method" => "typed"))
+      expect(method_events).not_to include(a_hash_including("class" => "Worker", "method" => "typed"))
     end
   end
 
@@ -762,6 +848,68 @@ RSpec.describe "nil-kill runtime trace" do
     end
   end
 
+  it "instruments every conditional state write without relying on wrapped-node visitation" do
+    Dir.mktmpdir("nil-kill-conditional-state", NilKill::ROOT) do |dir|
+      src = File.join(dir, "conditional_state.rb")
+      File.write(src, <<~RUBY)
+        class ConditionalState
+          def update(enabled)
+            if enabled
+              @inside = []
+            end
+            @modifier = {} if enabled
+            @@class_state = Set.new unless enabled
+            $nil_kill_global_state = []
+          end
+        end
+      RUBY
+
+      instrumented = NilKill::SourceInstrumenter.new.instrument_file(src)
+
+      expect(instrumented.scan("record_ivar_assignment").length).to eq(4)
+      expect(instrumented).to include('record_ivar_assignment(self, "@inside"')
+      expect(instrumented).to include('record_ivar_assignment(self, "@modifier"')
+      expect(instrumented).to include('record_ivar_assignment(self, "@@class_state"')
+      expect(instrumented).to include('record_ivar_assignment(self, "$nil_kill_global_state"')
+
+      global_only = File.join(dir, "global_only.rb")
+      File.write(global_only, "$nil_kill_global_only = []\n")
+      global_instrumented = NilKill::SourceInstrumenter.new.instrument_file(global_only)
+      expect(global_instrumented).to include(
+        'record_ivar_assignment(self, "$nil_kill_global_only"'
+      )
+    end
+  end
+
+  it "omits exact strong state-write sites while retaining unknown writes" do
+    Dir.mktmpdir("nil-kill-strong-state-site", NilKill::ROOT) do |dir|
+      src = File.join(dir, "strong_state.rb")
+      File.write(src, <<~RUBY)
+        class StrongState
+          def update
+            @typed = 1
+            @unknown = []
+          end
+        end
+      RUBY
+      typed_line = File.readlines(src).index { |line| line.include?("@typed") } + 1
+      plan = {
+        "methods" => {},
+        "state_write_sites" => {
+          [File.expand_path(src), typed_line, "typed"].join("\0") => false,
+        },
+      }
+      FileUtils.mkdir_p(File.dirname(NilKill::TRACE_PLAN_PATH))
+      File.write(NilKill::TRACE_PLAN_PATH, JSON.generate(plan))
+
+      instrumented = NilKill::SourceInstrumenter.new.instrument_file(src)
+
+      expect(instrumented).to include("@typed = 1")
+      expect(instrumented).not_to include('record_ivar_assignment(self, "@typed"')
+      expect(instrumented).to include('record_ivar_assignment(self, "@unknown"')
+    end
+  end
+
   it "records loop iterations against original source lines even when __LINE__ is present" do
     Dir.mktmpdir("nil-kill-loop-line", NilKill::ROOT) do |dir|
       src = File.join(dir, "loop_line.rb")
@@ -785,10 +933,12 @@ RSpec.describe "nil-kill runtime trace" do
       instrumented = NilKill::SourceInstrumenter.new.instrument_file(src)
 
       expect(instrumented).to include("MARKER = #{marker_line}")
-      expect(instrumented).to include(
-        "NilKillRuntimeTrace.record_loop_iteration(#{File.expand_path(src, NilKill::ROOT).inspect}, #{while_line})"
-      )
+      expect(instrumented).not_to include("record_loop_iteration")
+      plan = JSON.parse(File.read(NilKill::TRACE_PLAN_PATH))
+      expect(plan.dig("loop_sites", [File.expand_path(src, NilKill::ROOT), while_line].join("\0"))).to be(true)
       expect(instrumented).not_to include("MARKER = __LINE__")
     end
   end
+
+
 end

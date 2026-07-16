@@ -12,11 +12,12 @@ module Espalier
       new(YAML.load_file(path), root: root, limit: limit)
     end
 
-    def initialize(manifest, root: Dir.pwd, limit: DEFAULT_LIMIT, link_base: nil)
+    def initialize(manifest, root: Dir.pwd, limit: DEFAULT_LIMIT, link_base: nil, closed_world: false)
       @manifest = manifest || []
       @root = File.expand_path(root)
       @limit = limit
       @link_base = link_base && File.expand_path(link_base)
+      @closed_world = closed_world
     end
 
     def to_markdown
@@ -379,7 +380,7 @@ module Espalier
     end
 
     def privatization_candidates
-      @privatization_candidates ||= PrivacyAnalyzer.candidates(@manifest).map do |row|
+      @privatization_candidates ||= PrivacyAnalyzer.candidates(@manifest, closed_world: @closed_world).map do |row|
         row.merge(line: row[:line])
       end
     end

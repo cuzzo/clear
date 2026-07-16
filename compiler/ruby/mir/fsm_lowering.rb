@@ -60,7 +60,9 @@ module FsmLowering
 
   sig { params(name: String).returns(String) }
   def fsm_zig_safe_name(name)
-    T.cast(__send__(:zig_safe_name, name), String)
+    T.bind(self, MIRLowering) rescue nil
+
+    zig_safe_name(name)
   end
 
   # Lower a list of statements and produce Zig text. If no_result is
@@ -218,6 +220,8 @@ module FsmLowering
 
   sig { params(result_mir: MIR::Node, ast_node: AST::Node).returns(T::Array[MIR::FsmResultTransferFact]) }
   def fsm_result_transfer_facts(result_mir, ast_node)
+    T.bind(self, MIRLowering) rescue nil
+
     rename_map = fsm_fn_name_rename_map
     bindings = fsm_current_bindings
     guarded_cleanup_names = fsm_guarded_cleanup_names
@@ -232,7 +236,7 @@ module FsmLowering
       end
     end
     result_type = Type.from_node!(ast_node, context: "FSM result owner")
-    if result_owner.is_a?(MIR::Ident) && T.unsafe(self).__send__(:ownership_tracked_transfer_type?, result_type)
+    if result_owner.is_a?(MIR::Ident) && ownership_tracked_transfer_type?(result_type)
       owner_name = result_owner.name.to_s
       owner_name = rename_map.fetch(owner_name, owner_name)
       mir_entry = bindings[result_owner.name.to_s] || bindings[owner_name] || CleanupEntry::NONE
@@ -295,10 +299,12 @@ module FsmLowering
 
   sig { params(node: AST::Identifier).returns(T::Boolean) }
   def fsm_owned_transfer_identifier?(node)
+    T.bind(self, MIRLowering) rescue nil
+
     rename_map = fsm_fn_name_rename_map
     bindings = fsm_current_bindings
     ti = node.full_type!(context: "FSM owned transfer identifier")
-    return false unless T.unsafe(self).__send__(:ownership_tracked_transfer_type?, ti)
+    return false unless ownership_tracked_transfer_type?(ti)
     safe = fsm_zig_safe_name(node.name.to_s)
     safe = rename_map.fetch(safe, safe)
     entry = bindings[node.name.to_s] || bindings[safe.to_s] || CleanupEntry::NONE

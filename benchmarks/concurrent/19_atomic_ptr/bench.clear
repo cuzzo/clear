@@ -16,7 +16,7 @@
 #     old via EBR. Parity-or-better with arc-swap on the read path,
 #     bounded retry on the write path.
 #
-#   Variant C (M3 / arc-swap-style): @indirect:atomic
+#   Variant C (M3 / arc-swap-style): @boxed:atomic
 #     Readers atomic-load the published *T + EBR pin, deref directly.
 #     Writer rcu-loop (AtomicPtr.update): clone -> mutate -> CAS, retry
 #     until success (Rust arc-swap semantics; unbounded retries, no
@@ -133,8 +133,8 @@ FN main() RETURNS Void ->
   END
   elapsed_v = timestampMs() - t0_v;
 
-  # ───── Variant C: @indirect:atomic (M3 AtomicPtr) ─────
-  MUTABLE c_ap = Counter{ a: 0, b: 0 } @indirect:atomic;
+  # ───── Variant C: @boxed:atomic (M3 AtomicPtr) ─────
+  MUTABLE c_ap = Counter{ a: 0, b: 0 } @boxed:atomic;
 
   t0_ap = timestampMs();
   MUTABLE rfutures_ap: ~Int64[]@list = [];

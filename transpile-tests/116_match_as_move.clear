@@ -13,14 +13,14 @@
 UNION Value { Num: Float64, List: Value[] }
 
 FN makeInner() RETURNS !Value ->
-    MUTABLE items: Value[]@list = List[];
+    MUTABLE items: []Value = List[];
     items.append(Value{ Num: 1.0 });
     items.append(Value{ Num: 2.0 });
     RETURN Value{ List: items };
 END
 
 FN makeOuter() RETURNS !Value ->
-    MUTABLE items: Value[]@list = List[];
+    MUTABLE items: []Value = List[];
     items.append(makeInner());
     items.append(Value{ Num: 3.0 });
     RETURN Value{ List: items };

@@ -9,7 +9,7 @@ FN main() RETURNS Void ->
   p1: ~Int64 = BG {
     # @set: keyIterator yields ?*T, so the descriptor sets deref:
     # true and the bind reads __nxt.*.
-    MUTABLE s: Int64[]@set = [];
+    MUTABLE s: [Set]Int64 = [];
     s.insert(100_i64);
     s.insert(200_i64);
     s.insert(300_i64);
@@ -27,7 +27,7 @@ FN main() RETURNS Void ->
   p2: ~Int64 = BG {
     # HashMap<V>: keyIterator yields ?[]const u8 (string keys).
     # For :iterator with deref=false the bind reads __nxt directly.
-    MUTABLE m: HashMap<Int64> = {};
+    MUTABLE m: {String}Int64 = {};
     m["a"] = 1_i64;
     m["b"] = 2_i64;
     m["c"] = 3_i64;

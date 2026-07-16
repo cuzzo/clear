@@ -34,7 +34,7 @@ FN safe_filter() RETURNS !Void ->
 END
 
 FN shared_list_access() RETURNS !Void ->
-  items: Int64[]@list:shared:locked = [10, 20, 30, 40];
+  items: []@shared:locked Int64 = [10, 20, 30, 40];
 
   # Reader: iterates while holding the lock.
   reader = BG {

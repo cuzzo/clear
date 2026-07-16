@@ -4,8 +4,8 @@
 # Tests: Pipeline chains, CONCURRENT operators, SHARD pipeline,
 # aggregation operators on real data.
 
-FN generateReadings(n: Int64, seed: Int64) RETURNS !Float64[]@list ->
-  MUTABLE readings: Float64[]@list = [];
+FN generateReadings(n: Int64, seed: Int64) RETURNS ![]Float64 ->
+  MUTABLE readings: []Float64 = [];
   MUTABLE state = seed;
   FOR i IN (0 ..< n) DO
     state = (state * 13 + 7) MOD 10_007;
@@ -77,7 +77,7 @@ FN main() RETURNS Void ->
   # -------------------------------------------------------
   # Test 7: SHARD pipeline — partitioned map operations
   # -------------------------------------------------------
-  MUTABLE buckets: HashMap<Int64> @sharded(4) = {};
+  MUTABLE buckets: {String}@sharded(4) Int64 = {};
   n = 200;
   (0 ..< n)
     |> SHARD("b:${toString(_ MOD 10)}", buckets)

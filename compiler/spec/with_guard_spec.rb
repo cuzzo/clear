@@ -150,7 +150,7 @@ RSpec.describe "WITH GUARD clauses" do
   it "rejects when a MUTABLE guarded alias is mutated via index assignment" do
     expect {
       annotate(<<~CLEAR)
-        STRUCT Bin { items: Int64[3] }
+        STRUCT Bin { items: [3]Int64 }
         FN main() RETURNS Void ->
           b = Bin{ items: [0_i64, 0_i64, 0_i64] } @shared:locked;
           WITH EXCLUSIVE b AS MUTABLE y GUARD y.items[0] >= 0 {

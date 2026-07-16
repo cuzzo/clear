@@ -4,8 +4,8 @@ require_relative "../ruby/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # True-Sync-Polymorphism (#333): generalized rejection of multi-object
 # WITH where any sync-constrained binding could be `@atomic` /
-# `@indirect:atomic` at runtime. Folds and broadens M3.9 (which only
-# covered `WITH SNAPSHOT` with concrete `@indirect:atomic`).
+# `@boxed:atomic` at runtime. Folds and broadens M3.9 (which only
+# covered `WITH SNAPSHOT` with concrete `@boxed:atomic`).
 #
 # Rule:
 #   If a WITH binds 2+ sync-constrained cells AND any binding admits
@@ -23,16 +23,16 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
     ast
   end
 
-  # ── 1. Concrete @indirect:atomic in multi-cell SNAPSHOT (folded M3.9) ──
+  # ── 1. Concrete @boxed:atomic in multi-cell SNAPSHOT (folded M3.9) ──
 
-  describe "concrete @indirect:atomic in multi-cell SNAPSHOT" do
-    it "MUTABLE form rejects when ANY cell is @indirect:atomic" do
+  describe "concrete @boxed:atomic in multi-cell SNAPSHOT" do
+    it "MUTABLE form rejects when ANY cell is @boxed:atomic" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
           FN both!() RETURNS Void ->
             a = C{ v: 0 } @versioned;
-            b = C{ v: 0 } @indirect:atomic;
+            b = C{ v: 0 } @boxed:atomic;
             WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
               va.v = va.v + 1; vb.v = vb.v + 1;
             } ON MvccConflict RAISE
@@ -47,7 +47,7 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
           FN both() RETURNS Void ->
-            a = C{ v: 0 } @indirect:atomic;
+            a = C{ v: 0 } @boxed:atomic;
             b = C{ v: 0 } @versioned;
             WITH SNAPSHOT a AS va, SNAPSHOT b AS vb { x = va.v; y = vb.v; }
             RETURN;
@@ -162,12 +162,12 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
   # ── 4. Single-cell forms are unaffected ──
 
   describe "single-cell WITH always accepts ATOMIC" do
-    it "concrete @indirect:atomic single-cell SNAPSHOT MUTABLE" do
+    it "concrete @boxed:atomic single-cell SNAPSHOT MUTABLE" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
           FN one!() RETURNS !Void ->
-            a = C{ v: 0 } @indirect:atomic;
+            a = C{ v: 0 } @boxed:atomic;
             WITH SNAPSHOT a AS MUTABLE va { va.v = va.v + 1; }
             RETURN;
           END

@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
@@ -57,9 +61,22 @@ const LUA_NIL_PREDICATES: &[&str] = &["isNull", "is_null", "nil"];
 const LUA_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const LUA_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+// CFG-SPECIFIC START: Lua control-flow vocabulary.
+const LUA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &[],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 pub(crate) struct LuaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the Lua CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &LUA_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn self_member_receiver(&self, message: &str) -> String {
         format!("self.{message}")
     }

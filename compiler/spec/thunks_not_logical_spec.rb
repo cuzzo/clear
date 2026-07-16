@@ -58,9 +58,9 @@ RSpec.describe "Thunk Phase 4f.2 -- :NOT_LOGICAL" do
         END
       CLEAR
       fn = ast.statements.first
-      expect(fn.effects_span).to be_a(Hash)
-      expect(fn.effects_span[:start_tok].value).to eq("EFFECTS")
-      expect(fn.effects_span[:end_tok].value).to eq("NOT_LOGICAL")
+      expect(fn.effects_span).to be_a(AST::EffectSpan)
+      expect(fn.effects_span.start_token.value).to eq("EFFECTS")
+      expect(fn.effects_span.end_token.value).to eq("NOT_LOGICAL")
     end
   end
 

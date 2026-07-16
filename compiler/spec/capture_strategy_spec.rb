@@ -48,7 +48,7 @@ RSpec.describe CaptureStrategy do
       expect(strat).to be_a(CaptureStrategy::RcClone)
     end
 
-    it "classifies @indirect:atomic as an internally retained RcClone" do
+    it "classifies @boxed:atomic as an internally retained RcClone" do
       type = t(:Counter, sync: :atomic, layout: :indirect)
       strat = classify(type: type)
       expect(strat).to be_a(CaptureStrategy::RcClone)

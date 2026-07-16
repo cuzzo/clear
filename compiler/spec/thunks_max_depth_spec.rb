@@ -57,8 +57,8 @@ RSpec.describe "Thunk Phase 4f.3 -- :MAX_DEPTH(N)" do
         END
       CLEAR
       fn = ast.statements.first
-      expect(fn.effects_span[:start_tok].value).to eq("EFFECTS")
-      expect(fn.effects_span[:end_tok].value).to eq(")")
+      expect(fn.effects_span.start_token.value).to eq("EFFECTS")
+      expect(fn.effects_span.end_token.value).to eq(")")
     end
   end
 

@@ -157,7 +157,7 @@ pub fn body_stmts(defn_node: &Node) -> Vec<&Node> {
     statement_nodes(body)
 }
 
-fn statement_nodes(body: &Node) -> Vec<&Node> {
+pub(crate) fn statement_nodes(body: &Node) -> Vec<&Node> {
     match body.r#type.as_str() {
         "BLOCK" | "COMPOUND_STATEMENT" | "DECLARATION_LIST" | "FUNCTION_BODY" | "HASH"
         | "STATEMENTS" => body.children.iter().filter_map(node).collect(),

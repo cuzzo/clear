@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, CardinalityCallSemantics, NormalizedCallParts,
@@ -62,9 +66,34 @@ const PYTHON_NIL_PREDICATES: &[&str] = &["isNull", "is_null", "is_none"];
 const PYTHON_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const PYTHON_GUARD_MIDS: &[&str] = &["isNull", "is_null", "is_none", "is_some"];
 
+// CFG-SPECIFIC START: Python control-flow vocabulary.
+const PYTHON_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &["all", "any", "enumerate", "filter", "map"],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 pub(crate) struct PythonNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the Python CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &PYTHON_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
+    fn nested_function_is_lexical(&self, _function: &Node) -> bool {
+        true
+    }
+
+    fn canonical_state_field(&self, receiver: &str, field: &str) -> String {
+        if receiver == "self" && !field.starts_with('@') {
+            format!("@{field}")
+        } else {
+            field.to_string()
+        }
+    }
+
     fn cardinality_call_semantics(&self, message: &str) -> CardinalityCallSemantics {
         if message == "len" {
             CardinalityCallSemantics::MeasuresReceiver
@@ -127,10 +156,14 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
 
     fn suppress_state_read_for_call(
         &self,
-        call: &NormalizedCallProjection,
+        _call: &NormalizedCallProjection,
         _span_source: &str,
     ) -> bool {
-        call.receiver == "self" && matches!(call.message.as_str(), "callback" | "len" | "open")
+        false
+    }
+
+    fn suppress_method_call_state_read(&self, call: &NormalizedCallProjection) -> bool {
+        call.receiver == "self"
     }
 
     fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
@@ -140,10 +173,13 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
     }
 
     fn embedded_member_reads(&self, node: &Node) -> Vec<NormalizedStateRead> {
+        // Normalized calls scan their receiver separately and distinguish property
+        // access from invocation. Re-reading their dotted surface text here would
+        // turn `self.render()` into a synthetic state field named `render`.
+        if matches!(node.r#type.as_str(), "CALL" | "QCALL") {
+            return Vec::new();
+        }
         dotted_member_reads(&node.text, node.first_lineno, node.first_column)
-            .into_iter()
-            .filter(|read| read.field != "_lock" && !read.field.ends_with("_lock"))
-            .collect()
     }
 
     fn node_state_reads(&self, node: &Node) -> Vec<NormalizedStateRead> {
@@ -480,13 +516,41 @@ mod tests {
         }));
 
         // 8. suppress_state_read_for_call
-        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
+        assert!(!b.suppress_state_read_for_call(&NormalizedCallProjection {
             receiver: "self".to_string(),
             message: "callback".to_string(),
             arguments: Vec::new(),
             access_span: [1, 2, 3, 4],
             span: [1, 2, 3, 4],
         }, ""));
+        assert!(!b.suppress_state_read_for_call(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "render".to_string(),
+            arguments: vec!["value".to_string()],
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }, "self.render(value)"));
+        assert!(!b.suppress_state_read_for_call(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "theme".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }, "self.theme"));
+        assert!(b.suppress_method_call_state_read(&NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "render".to_string(),
+            arguments: vec!["value".to_string()],
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }));
+        assert!(!b.suppress_method_call_state_read(&NormalizedCallProjection {
+            receiver: "service".to_string(),
+            message: "render".to_string(),
+            arguments: vec!["value".to_string()],
+            access_span: [1, 2, 3, 4],
+            span: [1, 2, 3, 4],
+        }));
 
         // 9. property_read_call
         assert!(b.property_read_call(&node("CALL", "(x.y)"), &NormalizedCallParts {
@@ -497,9 +561,18 @@ mod tests {
 
         // 10. embedded_member_reads
         let reads = b.embedded_member_reads(&node("", "self.field_lock"));
-        assert!(reads.is_empty());
+        assert_eq!(reads.len(), 1);
+        assert_eq!(reads[0].field, "field_lock");
         let reads_eq = b.embedded_member_reads(&node("", "x = y"));
         assert!(reads_eq.is_empty());
+        assert!(b
+            .embedded_member_reads(&node("CALL", "self.render"))
+            .is_empty());
+
+        assert!(b.nested_function_is_lexical(&node("FUNCTION", "def nested(): pass")));
+        assert_eq!(b.canonical_state_field("self", "field"), "@field");
+        assert_eq!(b.canonical_state_field("theme", "field"), "field");
+        assert_eq!(b.canonical_state_field("self", "@field"), "@field");
 
         // 11. node_state_reads
         let reads_node = b.node_state_reads(&node("EXPRESSION_STATEMENT", "self.x = self.y"));

@@ -79,7 +79,8 @@ module Espalier
         "corpus" => {
           "commit" => commit || current_commit(root),
           "root" => root.to_s,
-          "complete" => true,
+          "complete" => evidence.dig("corpus", "complete") == true,
+          "completeness_reason" => evidence.dig("corpus", "reason"),
           "language_capabilities" => evidence["language_capabilities"] || {}
         },
         "nodes" => nodes.sort_by { |node| [node["kind"], node["path"].to_s, node["start_line"].to_i, node["id"]] },

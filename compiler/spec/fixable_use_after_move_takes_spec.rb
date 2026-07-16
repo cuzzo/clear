@@ -25,7 +25,7 @@ RSpec.describe UseAfterMoveChecker do
   describe "TAKES into plain affine parameter — no upgrade fixes offered" do
     let(:src) {
       <<~CLEAR
-        UNION Value { Nil, Lambda { body: Value @indirect } }
+        UNION Value { Nil, Lambda { body: Value @boxed } }
         FN consume(TAKES v: Value) RETURNS Void -> END
         FN main() RETURNS Void ->
             msg = Value.Nil;
@@ -53,7 +53,7 @@ RSpec.describe UseAfterMoveChecker do
     # makes the assignment a refcount bump instead of a move).
     let(:src) {
       <<~CLEAR
-        UNION Value { Nil, Lambda { body: Value @indirect } }
+        UNION Value { Nil, Lambda { body: Value @boxed } }
         FN main() RETURNS Void ->
             msg = Value.Nil;
             x = msg;
@@ -82,7 +82,7 @@ RSpec.describe UseAfterMoveChecker do
     # `:give`.
     let(:src) {
       <<~CLEAR
-        UNION Value { Nil, Lambda { body: Value @indirect } }
+        UNION Value { Nil, Lambda { body: Value @boxed } }
         FN consume(TAKES v: Value) RETURNS Void -> END
         FN main() RETURNS Void ->
             msg = Value.Nil;

@@ -17,7 +17,7 @@ RSpec.describe "OOM fault injection (alloc-as-FAULT model)", :integration do
   # -> Zig !T. `RETURNS Int64` (plain): FAULT is surface-exempt.
   GROW = <<~CLEAR
     FN grow(n: Int64) RETURNS Int64 ->
-      MUTABLE xs: Int64[]@list = [];
+      MUTABLE xs: []Int64 = [];
       MUTABLE i = 0;
       WHILE i < n DO
         xs.append(i);

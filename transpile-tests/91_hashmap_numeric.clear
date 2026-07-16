@@ -5,7 +5,7 @@
 
 FN main() RETURNS Void ->
     # HashMap<Int64, Float64> uses AutoHashMapUnmanaged (no key copies)
-    MUTABLE scores: HashMap<Int64, Float64> = {};
+    MUTABLE scores: {Int64}Float64 = {};
 
     # write via [] operator → numericMapPut
     scores[1_i64] = 10.0;

@@ -136,6 +136,9 @@ module FuzzCoverageModel
       failure_proves: 'Every registered collection/container shape remains syntactically admitted or intentionally rejected.',
       matrix_strategy: :smoke
     ),
+    tuple_collection_composition_matrix: profile(
+      failure_proves: 'Tuple composes recursively with collections, capability-bearing layers, and optional/fallible/future tenses without changing which node each tense gates.'
+    ),
     collection_sink_escape_matrix: profile(
       failure_proves: 'Owned values stored into list/set/map/pool and collection literals keep cleanup facts visible.'
     ),

@@ -496,6 +496,12 @@
         "line": 2
       },
       {
+        "detail": "clear",
+        "function": "method_six",
+        "kind": "hidden_mutation",
+        "line": 4
+      },
+      {
         "detail": "status=",
         "function": "method_six",
         "kind": "hidden_mutation",

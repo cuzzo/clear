@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallProjection,
@@ -58,9 +62,22 @@ const CPP_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
 const CPP_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const CPP_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+// CFG-SPECIFIC START: C++ control-flow vocabulary.
+const CPP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &["for_each", "transform"],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 pub(crate) struct CppNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the C++ CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &CPP_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn source_message_text(&self, message: &str, node: Option<&Node>) -> String {
         if node.is_some_and(|node| node.text.contains(&format!("{message}()"))) {
             format!("{message}()")

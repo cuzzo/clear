@@ -143,7 +143,7 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         STRUCT Particle { x: Float64, y: Float64 }
         FN main() RETURNS Void ->
-          ps: Particle[100]@soa = [];
+          ps: [100]@soa Particle = [];
         END
       CLEAR
     end
@@ -168,7 +168,7 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         STRUCT Item { v: Int64 }
         FN main() RETURNS Void ->
-          xs: Item[64]@pool = [];
+          xs: [Pool(64)]Item = [];
         END
       CLEAR
     end
@@ -192,7 +192,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when @set is applied to an array of strings" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-          xs: String[]@set = [];
+          xs: [Set]String = [];
         END
       CLEAR
     end
@@ -1110,7 +1110,7 @@ RSpec.describe "error emission coverage" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS Void ->
-              m: HashMap<Int64> = {};
+              m: {String}Int64 = {};
               m["key"] = 5_i64;
           END
         CLEAR
@@ -1120,7 +1120,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the collection is MUTABLE" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             m["key"] = 5_i64;
         END
       CLEAR
@@ -1226,7 +1226,7 @@ RSpec.describe "error emission coverage" do
     it "raises when a non-Copy value is assigned to two new bindings" do
       expect {
         run(<<~CLEAR)
-          UNION Value { Nil, Lambda { body: Value @indirect } }
+          UNION Value { Nil, Lambda { body: Value @boxed } }
           FN main() RETURNS Void ->
               msg = Value.Nil;
               other = msg;
@@ -1238,7 +1238,7 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when the binding is declared @multiowned (refcounted)" do
       run(<<~CLEAR)
-        UNION Value { Nil, Lambda { body: Value @indirect } }
+        UNION Value { Nil, Lambda { body: Value @boxed } }
         FN main() RETURNS Void ->
             msg = Value.Nil @multiowned;
             other = msg;
@@ -1259,7 +1259,7 @@ RSpec.describe "error emission coverage" do
     it "raises when a TAKES call inside the loop consumes an outer binding" do
       expect {
         run(<<~CLEAR)
-          UNION Value { Nil, Lambda { body: Value @indirect } }
+          UNION Value { Nil, Lambda { body: Value @boxed } }
           FN consume(TAKES v: Value) RETURNS Void -> END
           FN main() RETURNS Void ->
               v = Value.Nil;
@@ -1275,7 +1275,7 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when the call site is a borrow (no TAKES, no move)" do
       run(<<~CLEAR)
-        UNION Value { Nil, Lambda { body: Value @indirect } }
+        UNION Value { Nil, Lambda { body: Value @boxed } }
         FN inspect(v: Value) RETURNS Void -> END
         FN main() RETURNS Void ->
             v = Value.Nil;
@@ -1298,11 +1298,11 @@ RSpec.describe "error emission coverage" do
     it "raises when the bind-loop body TAKES an outer binding" do
       expect {
         run(<<~CLEAR)
-          UNION Value { Nil, Lambda { body: Value @indirect } }
+          UNION Value { Nil, Lambda { body: Value @boxed } }
           FN consume(TAKES v: Value) RETURNS Void -> END
           FN main() RETURNS Void ->
               msg = Value.Nil;
-              MUTABLE items: Int64[5]@list = [];
+              MUTABLE items: []Int64 = [];
               items.append(1_i64);
               items.append(2_i64);
               WHILE items.pop() EXISTS AS i DO
@@ -1315,11 +1315,11 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when the bind-loop body only borrows the outer binding" do
       run(<<~CLEAR)
-        UNION Value { Nil, Lambda { body: Value @indirect } }
+        UNION Value { Nil, Lambda { body: Value @boxed } }
         FN inspect(v: Value, n: Int64) RETURNS Void -> END
         FN main() RETURNS Void ->
             msg = Value.Nil;
-            MUTABLE items: Int64[5]@list = [];
+            MUTABLE items: []Int64 = [];
             items.append(1_i64);
             items.append(2_i64);
             WHILE items.pop() EXISTS AS i DO
@@ -1498,7 +1498,7 @@ RSpec.describe "error emission coverage" do
     it "raises when GIVE wraps a function-call result directly" do
       expect {
         run(<<~CLEAR)
-          UNION Value { Nil, Lambda { body: Value @indirect } }
+          UNION Value { Nil, Lambda { body: Value @boxed } }
           FN make() RETURNS Value -> RETURN Value.Nil; END
           FN consume(TAKES v: Value) RETURNS Void -> END
           FN main() RETURNS Void ->
@@ -1510,7 +1510,7 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when the call result is bound first, then GIVEn" do
       run(<<~CLEAR)
-        UNION Value { Nil, Lambda { body: Value @indirect } }
+        UNION Value { Nil, Lambda { body: Value @boxed } }
         FN main() RETURNS Void ->
             v = Value.Nil;
         END
@@ -1556,7 +1556,7 @@ RSpec.describe "error emission coverage" do
     it "raises when a non-TAKES param is moved into a local binding" do
       expect {
         run(<<~CLEAR)
-          UNION Value { Nil, Lambda { body: Value @indirect } }
+          UNION Value { Nil, Lambda { body: Value @boxed } }
           FN store(v: Value) RETURNS Void ->
               keep = v;
           END
@@ -1567,7 +1567,7 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when the parameter is declared TAKES" do
       run(<<~CLEAR)
-        UNION Value { Nil, Lambda { body: Value @indirect } }
+        UNION Value { Nil, Lambda { body: Value @boxed } }
         FN store!(TAKES v: Value) RETURNS !Void ->
             keep = v;
             RETURN;
@@ -1588,10 +1588,10 @@ RSpec.describe "error emission coverage" do
     it "raises when a non-Copy element is passed via index access to TAKES" do
       expect {
         run(<<~CLEAR)
-          UNION Value { Nil, Lambda { body: Value @indirect } }
+          UNION Value { Nil, Lambda { body: Value @boxed } }
           FN consume(TAKES v: Value) RETURNS Void -> END
           FN main() RETURNS Void ->
-              MUTABLE list: Value[]@list = [];
+              MUTABLE list: []Value = [];
               list.append(Value.Nil);
             IF list[0_i64] EXISTS AS value THEN consume(value); END
           END
@@ -1601,10 +1601,10 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when the element is passed to a borrow parameter (no TAKES)" do
       run(<<~CLEAR)
-        UNION Value { Nil, Lambda { body: Value @indirect } }
+        UNION Value { Nil, Lambda { body: Value @boxed } }
         FN inspect(v: Value) RETURNS Void -> END
         FN main() RETURNS Void ->
-            MUTABLE list: Value[]@list = [];
+            MUTABLE list: []Value = [];
             list.append(Value.Nil);
             IF list[0_i64] EXISTS AS value THEN inspect(value); END
         END
@@ -1797,7 +1797,7 @@ RSpec.describe "error emission coverage" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS !Void ->
-              items: Int64[5]@list = [];
+              items: []Int64 = [];
               WHILE items.pop() EXISTS AS v DO
                   _ = v;
               END
@@ -1809,7 +1809,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the receiver is MUTABLE" do
       run(<<~CLEAR)
         FN main() RETURNS !Void ->
-            MUTABLE items: Int64[5]@list = [];
+            MUTABLE items: []Int64 = [];
             items.append(1_i64);
             WHILE items.pop() EXISTS AS v DO
                 print(v);
@@ -2320,7 +2320,7 @@ RSpec.describe "error emission coverage" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m["a"] = 1_i64;
               n = m.count(0_i64);
               print(n.toString());
@@ -2332,7 +2332,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the method is called with no arguments" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             m["a"] = 1_i64;
             n = m.count();
             print(n.toString());
@@ -2351,7 +2351,7 @@ RSpec.describe "error emission coverage" do
         run(<<~CLEAR)
           STRUCT Item { v: Int64 }
           FN main() RETURNS Void ->
-              MUTABLE pool: Item[100]@pool = [];
+              MUTABLE pool: [Pool(100)]Item = [];
               id = pool.insert();
               _ = id;
           END
@@ -2363,7 +2363,7 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         STRUCT Item { v: Int64 }
         FN main() RETURNS Void ->
-            MUTABLE pool: Item[100]@pool = [];
+            MUTABLE pool: [Pool(100)]Item = [];
             id = pool.insert(Item{v: 1});
             IF pool[id] EXISTS AS got THEN
                 print(got.v.toString());
@@ -2603,7 +2603,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when all map values share the same type" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            m: HashMap<Int64> = {"a": 1_i64, "b": 2_i64};
+            m: {String}Int64 = {"a": 1_i64, "b": 2_i64};
             print(m.count().toString());
         END
       CLEAR
@@ -2740,7 +2740,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the loop drains a list via `pop()`" do
       run(<<~CLEAR)
         FN main() RETURNS !Void ->
-            MUTABLE items: Int64[5]@list = [];
+            MUTABLE items: []Int64 = [];
             items.append(1_i64);
             WHILE items.pop() EXISTS AS v DO
                 print(v.toString());
@@ -3714,7 +3714,7 @@ RSpec.describe "error emission coverage" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS Void ->
-              MUTABLE m: HashMap<Int64, Int64> = {};
+              MUTABLE m: {Int64}Int64 = {};
               m["str"] = 1_i64;
           END
         CLEAR
@@ -3724,7 +3724,7 @@ RSpec.describe "error emission coverage" do
     it "compiles with a matching numeric key" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            MUTABLE m: HashMap<Int64, Int64> = {};
+            MUTABLE m: {Int64}Int64 = {};
             m[1_i64] = 100_i64;
             print(m.count().toString());
         END
@@ -3741,7 +3741,7 @@ RSpec.describe "error emission coverage" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m[5_i64] = 1_i64;
           END
         CLEAR
@@ -3751,7 +3751,7 @@ RSpec.describe "error emission coverage" do
     it "compiles with a String key" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             m["a"] = 1_i64;
             print(m.count().toString());
         END
@@ -4761,7 +4761,7 @@ RSpec.describe "error emission coverage" do
   # :type — Capability-on-type interactions (Type Bucket 15).
   #
   # Note: 3 codes deferred. INDIRECT_ATOMIC_PRIMITIVE fires only
-  # when the annotator's primitive-cap check sees `@indirect:atomic`
+  # when the annotator's primitive-cap check sees `@boxed:atomic`
   # together — current source paths route through `@shared:atomic`
   # for primitives so the rejection never surfaces in user code.
   # LOCAL_INDIRECT_ATOMIC needs `ownership=:local + sync=:atomic +
@@ -4805,10 +4805,10 @@ RSpec.describe "error emission coverage" do
   # @example_for: STRUCT_ATOMIC_NEEDS_INDIRECT
   # @fix: `@atomic` on a struct publishes whole-T snapshots via
   # @fix: atomic pointer swap, which requires a heap-pinned cell.
-  # @fix: Use `@indirect:atomic` instead. (Primitives `@shared:atomic`
+  # @fix: Use `@boxed:atomic` instead. (Primitives `@shared:atomic`
   # @fix: are different — they fit in a single CAS-able machine
   # @fix: word, no indirection needed.)
-  describe ":STRUCT_ATOMIC_NEEDS_INDIRECT — `@atomic` on a struct without `@indirect`" do
+  describe ":STRUCT_ATOMIC_NEEDS_INDIRECT — `@atomic` on a struct without `@boxed`" do
     it "raises when @atomic is applied to a bare struct" do
       expect {
         run(<<~CLEAR)
@@ -4818,14 +4818,14 @@ RSpec.describe "error emission coverage" do
               _ = c;
           END
         CLEAR
-      }.to raise_error(CompilerError, /@atomic on a STRUCT requires @indirect/)
+      }.to raise_error(CompilerError, /@atomic on a STRUCT requires @boxed/)
     end
 
-    it "compiles when @indirect:atomic is used together" do
+    it "compiles when @boxed:atomic is used together" do
       run(<<~CLEAR)
         STRUCT Counter { v: Int64 }
         FN main() RETURNS Void ->
-            c = Counter{v: 0_i64} @indirect:atomic;
+            c = Counter{v: 0_i64} @boxed:atomic;
             _ = c;
         END
       CLEAR
@@ -4833,29 +4833,29 @@ RSpec.describe "error emission coverage" do
   end
 
   # @example_for: MULTIOWNED_INDIRECT_ATOMIC
-  # @fix: `@multiowned:indirect:atomic` is forbidden — `@multiowned`
+  # @fix: `@multiowned:boxed:atomic` is forbidden — `@multiowned`
   # @fix: is single-scheduler Rc with non-atomic refcounts, which
   # @fix: can't back a cross-thread atomic-ptr cell. Drop
-  # @fix: `@multiowned`; `@indirect:atomic` already uses Arc
+  # @fix: `@multiowned`; `@boxed:atomic` already uses Arc
   # @fix: internally for the published-value lifetime.
-  describe ":MULTIOWNED_INDIRECT_ATOMIC — `@multiowned:indirect:atomic` rejected" do
-    it "raises when @multiowned is combined with @indirect:atomic" do
+  describe ":MULTIOWNED_INDIRECT_ATOMIC — `@multiowned:boxed:atomic` rejected" do
+    it "raises when @multiowned is combined with @boxed:atomic" do
       expect {
         run(<<~CLEAR)
           STRUCT Counter { v: Int64 }
           FN main() RETURNS Void ->
-              c = Counter{v: 0_i64} @multiowned:indirect:atomic;
+              c = Counter{v: 0_i64} @multiowned:boxed:atomic;
               _ = c;
           END
         CLEAR
-      }.to raise_error(CompilerError, /@multiowned:indirect:atomic is disallowed/)
+      }.to raise_error(CompilerError, /@multiowned:boxed:atomic is disallowed/)
     end
 
-    it "compiles when only @indirect:atomic is used" do
+    it "compiles when only @boxed:atomic is used" do
       run(<<~CLEAR)
         STRUCT Counter { v: Int64 }
         FN main() RETURNS Void ->
-            c = Counter{v: 0_i64} @indirect:atomic;
+            c = Counter{v: 0_i64} @boxed:atomic;
             _ = c;
         END
       CLEAR

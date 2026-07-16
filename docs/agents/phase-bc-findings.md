@@ -22,17 +22,17 @@ actually happened and lays out the realistic path.
 
 The original plan claimed Type#layout was a "side-channel with 5
 propagation sites." Audit reveals:
-- Type#layout has **one writer per fact**: parser for explicit `@indirect`,
+- Type#layout has **one writer per fact**: parser for explicit `@boxed`,
   function_analysis.rb:790 for "atomic struct → indirect" inference.
 - 8+ readers (capabilities, generic_analysis, annotator, MIR) ask "is
-  this @indirect?" in contexts where a Symbol may not exist (generic merge,
+  this @boxed?" in contexts where a Symbol may not exist (generic merge,
   field types, inner types of generic instantiations).
 - The "side-channel" complaint was about how layout was read in
   Type#zig_type to emit `*T` — **that path was removed in SIMP-09**.
 - The remaining propagation sites are normal type-system field-tracking,
   not duplicate decisions.
 
-To actually delete Type#layout requires routing the @indirect bit through
+To actually delete Type#layout requires routing the @boxed bit through
 a different mechanism. Options:
 - Move to Symbol#layout only (SIMP-13's approach for provenance) — works
   for binding nodes but not for field/generic types that have no Symbol.

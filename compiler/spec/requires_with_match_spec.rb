@@ -93,7 +93,7 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
       with_block = ast.statements.first.body.first
       expect(with_block.arms).not_to be_nil
       expect(with_block.arms.length).to eq(2)
-      expect(with_block.arms.map { |a| a[:family] }).to eq([:LOCKED, :VERSIONED])
+      expect(with_block.arms.map(&:family)).to eq([:LOCKED, :VERSIONED])
     end
 
     it "parses per-arm ON clauses" do
@@ -112,8 +112,8 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
       CHT
       ast = parse(src)
       arms = ast.statements.first.body.first.arms
-      expect(arms[0][:lock_error_clauses].length).to eq(1)
-      expect(arms[1][:lock_error_clauses].length).to eq(0)
+      expect(arms[0].lock_error_clauses.length).to eq(1)
+      expect(arms[1].lock_error_clauses.length).to eq(0)
     end
 
     it "rejects WITH MATCH with no WHEN arms" do

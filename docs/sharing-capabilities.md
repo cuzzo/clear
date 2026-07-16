@@ -7,6 +7,12 @@ CLEAR separates:
 3. **the strategy it uses** (Capabilities) from
 4. **when it's available** (Tense: `~T`)
 
+On an Inline Pivot type, a capability sits immediately after the exact layer
+it controls: `[]@shared:locked User` is one shared, locked list, while
+`[]User@shared` is a list whose individual `User` values are shared. This
+placement is part of the type's access contract and is preserved rather than
+flattened onto the binding.
+
 ## Types, Capabilities, and Execution Boundaries
 Rust is not inherently complicated, nor is its type system much more complex than C++'s. The actual friction comes from Rust using a 'God-like' type system forced to handle too many things at once.
 
@@ -254,7 +260,7 @@ Do multiple fibers need to access this data?
             or @shared:locked (cross-scheduler)
 
 Stable heap address needed (graph edges, self-referential)?
-└── @indirect (combinable with any of the above)
+└── @boxed (combinable with any of the above)
 ```
 
 **Note on primitives**: Capabilities cannot be applied to primitive types (`Int64`, `Float64`, `Bool`, `Byte`, `Float32`). Wrap in a `STRUCT` first — this makes the intent explicit and gives you named fields.

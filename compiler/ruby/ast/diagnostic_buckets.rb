@@ -105,7 +105,8 @@ module DiagnosticBuckets
       codes: %i[
         FIXED_ARRAY_SIZE_AS_DYNAMIC FIXED_ARRAY_SIZE_MISMATCH
         SOA_NEEDS_FIXED_ARRAY POOL_NEEDS_FIXED_CAPACITY
-        SHARDED_NEEDS_2_PLUS COLLECTION_NEEDS_ARRAY_TYPE
+        SHARDED_NEEDS_2_PLUS COLLECTION_NEEDS_ARRAY_TYPE TYPE_NODE_LIMIT
+        COLLECTION_HINT_VALUE_ONLY
       ],
     },
 
@@ -119,6 +120,9 @@ module DiagnosticBuckets
       codes: %i[
         NUMERIC_MAP_KEY_BAD STRING_MAP_KEY_BAD
         STRING_INDEX_BY_INT UNSUPPORTED_INDEX
+        TUPLE_INDEX_SYNTAX FIXED_POSITION_OUT_OF_BOUNDS
+        RANK_INDEX_ARITY RANK_INDEX_INTEGER RANK_LITERAL_SIZE
+        RANK_DYNAMIC_LITERAL_NEEDS_SHAPE
       ],
     },
 
@@ -300,8 +304,8 @@ module DiagnosticBuckets
       alien_factor: :medium,
       summary: "BG STREAM / YIELD / NEXT / @split. Async/await is a partial onramp for JS devs; CLEAR's fiber model is stricter about consumption and capability requirements.",
       codes: %i[
-        BG_STREAM_NO_YIELD BG_STREAM_INCONSISTENT_YIELD
-        YIELD_OUTSIDE_BG_STREAM
+        BG_STREAM_NO_YIELD BG_STREAM_INCONSISTENT_YIELD BG_STREAM_YIELDS_REQUIRED
+        YIELD_OUTSIDE_BG_STREAM CLOSE_OUTSIDE_BG_STREAM
         NEXT_NEEDS_FUTURE
         ATSPLIT_STREAM_ONLY ATSPLIT_NEEDS_OPEN_STREAM
         RC_PROMISE_NEEDS_SHARED SOA_TO_EXTERN_FN
@@ -314,7 +318,7 @@ module DiagnosticBuckets
       category: :type,
       frequency: 2,
       alien_factor: :high,
-      summary: "Capability sigils require specific underlying types: `@indirect:atomic` on a struct, `@observable` on a Set, `@multiowned` not on local primitives. Hard to reason about without a capability mental model.",
+      summary: "Capability sigils require specific underlying types: `@boxed:atomic` on a struct, `@observable` on a Set, `@multiowned` not on local primitives. Hard to reason about without a capability mental model.",
       codes: %i[
         FN_PARAM_NO_CAPABILITY
         INDIRECT_ATOMIC_PRIMITIVE STRUCT_ATOMIC_NEEDS_INDIRECT
@@ -390,7 +394,7 @@ module DiagnosticBuckets
       category: :capability,
       frequency: 5,
       alien_factor: :high,
-      summary: "Reading or writing a field directly on a `@locked` / `@writeLocked` / `@indirect:atomic` binding is rejected. The lock or atomic cell must be unwrapped via `WITH EXCLUSIVE` (locks) or `WITH SNAPSHOT` (atomic) so the inner value is accessible through the alias.",
+      summary: "Reading or writing a field directly on a `@locked` / `@writeLocked` / `@boxed:atomic` binding is rejected. The lock or atomic cell must be unwrapped via `WITH EXCLUSIVE` (locks) or `WITH SNAPSHOT` (atomic) so the inner value is accessible through the alias.",
       codes: %i[
         CAP_FIELD_NEEDS_WITH_EXCLUSIVE
         CAP_FIELD_NEEDS_WITH_SNAPSHOT
@@ -452,7 +456,7 @@ module DiagnosticBuckets
       summary: "`@cap(modifier)` parens, mixing `:` and `,` capability separators, sharded counts that need ≥ 2, sigils that need a positive count argument.",
       codes: %i[
         MIXED_AT_CAPABILITIES CAP_BAD_MODIFIER
-        SHARDED_TOO_FEW SIGIL_N_NONPOSITIVE
+        SHARDED_TOO_FEW SIGIL_N_NONPOSITIVE TYPE_CAPABILITY_SITE_LIMIT
       ],
     },
 

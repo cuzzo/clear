@@ -1,5 +1,5 @@
 use super::{
-    clone_similarity, complexity, effects, local_flow,
+    cfg, clone_similarity, complexity, effects, local_flow,
     normalized_behavior::{NormalizedLanguageBehavior, SyntaxMetadata},
     normalized_extractor, path_condition, protocols, redundant_nil_guard, visibility,
     CloneCandidate, LocalComplexityScore, PathConditionSite, ProtocolMethodEffect,
@@ -41,6 +41,8 @@ pub(crate) struct StatefulSyntaxMetadata {
     pub(crate) local_methods: Vec<local_flow::MethodSummary>,
     pub(crate) local_complexity_scores: BTreeMap<String, LocalComplexityScore>,
     pub(crate) path_condition_sites: Vec<PathConditionSite>,
+    pub(crate) control_flow: cfg::ControlFlowFacts,
+    pub(crate) control_flow_metrics: Vec<cfg::ControlFlowMetric>,
     pub(crate) protocol_method_effects: Vec<ProtocolMethodEffect>,
     pub(crate) protocol_call_paths: Vec<ProtocolMethodPath>,
     pub(crate) clone_candidates: Vec<CloneCandidate>,
@@ -88,18 +90,40 @@ impl<'a> StatefulSyntaxPass<'a> {
                 &facts.call_sites,
                 &facts.function_defs,
             ));
+        // The extractor records an opaque aggregate escape before all
+        // declarations have been seen. Once the document is complete, remove
+        // the conservative marker for a statically known local self-call: its
+        // reads are represented by the callee's own facts instead.
+        facts.semantic_effect_sites.retain(|site| {
+            site.kind != "opaque_state_escape"
+                || !facts.call_sites.iter().any(|call| {
+                    call.file == site.file
+                        && call.function == site.function
+                        && call.line == site.line
+                        && call.receiver == "self"
+                        && facts.function_defs.iter().any(|function| {
+                            function.owner == call.owner && function.name == call.message
+                        })
+                })
+        });
         effects::dedup_semantic_effect_sites(&mut facts.semantic_effect_sites);
 
         let file = self.file.to_string_lossy().to_string();
+        let syntax = self
+            .behavior
+            .syntax_metadata(self.source, &facts.function_defs);
         let local_methods = local_flow::local_methods_from_normalized(
             &file,
             self.lines,
             self.normalized_root,
             &facts.function_defs,
+            &syntax.method_param_types,
             self.behavior,
         );
         let path_condition_sites =
             path_condition::normalized_fact_sites(&file, self.lines, self.normalized_root);
+        let control_flow = cfg::build(&local_methods, self.behavior);
+        let control_flow_metrics = cfg::metrics(&control_flow);
         let protocol_method_effects = protocols::method_effects_from_facts(
             self.behavior,
             &facts.function_defs,
@@ -129,13 +153,13 @@ impl<'a> StatefulSyntaxPass<'a> {
             ),
             local_methods,
             path_condition_sites,
+            control_flow,
+            control_flow_metrics,
             protocol_method_effects,
             protocol_call_paths,
             clone_candidates,
             redundant_nil_guards,
-            syntax: self
-                .behavior
-                .syntax_metadata(self.source, &facts.function_defs),
+            syntax,
         }
     }
 }

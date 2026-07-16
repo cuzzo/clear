@@ -103,7 +103,7 @@
     "capabilities": {
       "patterns": [
         {
-          "comment": "Capability sigil with optional :modifier:modifier... chain (e.g. @shared:locked, @indirect:atomic, @sharded(N))",
+          "comment": "Capability sigil with optional :modifier:modifier... chain (e.g. @shared:locked, @boxed:atomic, @sharded(N))",
           "match": "(@(?:multiowned|shared|locked|writeLocked|list|pool|set|map|sharded|striped|local|indirect|atomic|versioned|observable|pinned|arena|large|xl|service|micro|standard|reentrant|nonReentrant|canSmash|parallel|soa|split|raw|frozen|alwaysMutable|link|thunk|maxDepth))((?::[a-zA-Z][a-zA-Z0-9]*)*)",
           "captures": {
             "1": { "name": "storage.modifier.capability.clear" },

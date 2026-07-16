@@ -1,12 +1,12 @@
 # Test: try/catch pattern - Error matched, handleCatch returns Tco with
-# @indirect field containing frame-allocated string, eval resolves Tco.
+# @boxed field containing frame-allocated string, eval resolves Tco.
 
 UNION Value {
     Nil, TrueVal, FalseVal,
     Number: Float64, Str: String, Symbol: String,
     List: Value[],
     Error { errMsg: String, errKind: String },
-    Tco { tcoAst: Value @indirect, tcoEnv: Int64 },
+    Tco { tcoAst: Value @boxed, tcoEnv: Int64 },
 }
 
 FN getStr(v: Value) RETURNS String ->
@@ -92,17 +92,17 @@ FN prStr(v: Value, readably: Bool) RETURNS !String ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE raiseForm: Value[]@list = List[];
+    MUTABLE raiseForm: []Value = List[];
     raiseForm.append(Value{ Symbol: "raise" });
     raiseForm.append(Value{ Str: "x" });
     raiseForm.append(Value{ Str: "E" });
 
-    MUTABLE catchForm: Value[]@list = List[];
+    MUTABLE catchForm: []Value = List[];
     catchForm.append(Value{ Symbol: "catch" });
     catchForm.append(Value{ Symbol: "e" });
     catchForm.append(Value{ Str: "ok" });
 
-    MUTABLE tryForm: Value[]@list = List[];
+    MUTABLE tryForm: []Value = List[];
     tryForm.append(Value{ Symbol: "try" });
     tryForm.append(Value{ List: raiseForm });
     tryForm.append(Value{ List: catchForm });

@@ -104,12 +104,7 @@ impl BranchMetadata {
             return false;
         }
         let param = parts.remove(0);
-        let Some(mut type_name) = document
-            .method_param_types
-            .get(function)
-            .and_then(|params| params.get(param))
-            .cloned()
-        else {
+        let Some(mut type_name) = method_parameter_type(document, function, param) else {
             return false;
         };
 
@@ -164,6 +159,30 @@ impl BranchMetadata {
             current = next.clone();
         }
     }
+}
+
+fn method_parameter_type(document: &Document, function: &str, param: &str) -> Option<String> {
+    if let Some(type_name) = document
+        .method_param_types
+        .get(function)
+        .and_then(|params| params.get(param))
+    {
+        return Some(type_name.clone());
+    }
+
+    // FactMine keys owner-qualified methods as "Owner\0method" so methods
+    // with the same name in different owners cannot overwrite one another.
+    // Branch facts intentionally carry the display name. Resolve it only
+    // when the candidate parameter type is unambiguous across owners.
+    let suffix = format!("\0{function}");
+    let candidates = document
+        .method_param_types
+        .iter()
+        .filter(|(identity, _)| identity.ends_with(&suffix))
+        .filter_map(|(_, params)| params.get(param))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    (candidates.len() == 1).then(|| candidates.into_iter().next()).flatten()
 }
 
 fn filter_wrapper_decisions(decisions: Vec<Decision>) -> Vec<Decision> {
@@ -263,6 +282,7 @@ impl Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn test_branch_metadata() {
@@ -310,6 +330,55 @@ mod tests {
         );
         let metadata_loop = BranchMetadata::from_documents(&[loop_doc.clone()]);
         assert!(!metadata_loop.immutable_state_ref(&loop_doc, "loop_fn", "obj.a"));
+    }
+
+    #[test]
+    fn ruby_t_struct_const_reads_do_not_count_as_mutable_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("immutable_record.rb");
+        let source = [
+            "class Options < T::",
+            r#"Struct
+  const :enabled, T::Boolean
+  prop :dirty, T::Boolean
+end
+
+class Example
+  extend T::Sig
+
+  sig { params(options: Options).returns(String) }
+  def from_const(options)
+    if options.enabled
+      "on"
+    else
+      "off"
+    end
+  end
+
+  sig { params(options: Options).returns(String) }
+  def from_prop(options)
+    if options.dirty
+      "dirty"
+    else
+      "clean"
+    end
+  end
+end
+"#,
+        ]
+        .concat();
+        fs::write(
+            &file,
+            source,
+        )
+        .unwrap();
+
+        let rows = scan_files(&[file], Language::Ruby).unwrap();
+
+        assert!(!rows.iter().any(|row| row.method == "from_const"));
+        assert!(rows.iter().any(|row| {
+            row.method == "from_prop" && row.state_refs == ["options.dirty"]
+        }));
     }
 
     #[test]
@@ -374,4 +443,3 @@ mod tests {
         assert_eq!(findings[1].file, "a.rb");
     }
 }
-

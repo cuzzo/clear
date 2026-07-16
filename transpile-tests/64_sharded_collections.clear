@@ -6,7 +6,7 @@ STRUCT Score { value: Float64 }
 
 FN main() RETURNS Void ->
     # @pool:sharded(4): 4 independent Pool(Score) shards behind a single interface
-    MUTABLE sp: Score[100]@pool:sharded(4) = [];
+    MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
 
     # insert / get / remove / count work identically to non-sharded pools
     id_a: Id<Score> = sp.insert(Score{ value: 10.0 });
@@ -27,13 +27,13 @@ FN main() RETURNS Void ->
     sp |> EACH { _.value = 0.0; };
 
     # EACH on a regular @list (sequential iteration)
-    MUTABLE items: Score[]@list = [];
+    MUTABLE items: []Score = [];
     append(items, Score{ value: 1.0 });
     append(items, Score{ value: 2.0 });
     items |> EACH { _.value = 0.0; };
 
     # @list:sharded(2): 2 independent list shards
-    MUTABLE sl: Score[]@list:sharded(2) = [];
+    MUTABLE sl: []@sharded(2) Score = [];
 
     RETURN;
 END

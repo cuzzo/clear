@@ -76,7 +76,7 @@ END
 # =========================================================================
 
 FN main() RETURNS Void ->
-  MUTABLE map: HashMap<String> @shared:sharded(128):locked = {};
+  MUTABLE map: {String}@shared:sharded(128):locked String = {};
   n = 1_000_000;
   workers = threadCount();
   chunk = n / workers;

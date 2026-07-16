@@ -94,6 +94,7 @@
             "kind": "class",
             "line": 1,
             "name": "String",
+            "reopenable": true,
             "span": [
               1,
               0,

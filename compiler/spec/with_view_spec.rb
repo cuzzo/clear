@@ -191,7 +191,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
       expect {
         annotate(<<~CLEAR)
           FN main() RETURNS Void ->
-              xs: Int64[3] = [1, 2, 3];
+              xs: [3]Int64 = [1, 2, 3];
               WITH MATERIALIZED VIEW xs AS s {
                   ASSERT s != NIL, "ok";
               }

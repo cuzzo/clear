@@ -26,7 +26,7 @@ FN main() RETURNS Void ->
   ASSERT incByte(255) == 0, "+ wraps 255 to 0";
   ASSERT decByte(0) == 255, "- wraps 0 to 255";
   ASSERT byteToString(65) == "A", "byteToString renders printable ASCII";
-  MUTABLE renderBytes: Int64[]@list = [];
+  MUTABLE renderBytes: []Int64 = [];
   renderBytes.append(65);
   renderBytes.append(10);
   rendered = bytesToString(renderBytes) OR_ELSE RAISE;
@@ -45,7 +45,7 @@ FN main() RETURNS Void ->
   ASSERT rawA.length() == 1, "runBytes returns one output byte";
   ASSERT rawA[0] == 65, "runBytes returns byte value";
   ASSERT run(",.", "Z") == "Z", "echoes one byte";
-  MUTABLE nonPrintableInput: Int64[]@list = [];
+  MUTABLE nonPrintableInput: []Int64 = [];
   nonPrintableInput.append(0);
   nonPrintableInput.append(255);
   nonPrintableInput.append(10);

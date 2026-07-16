@@ -239,7 +239,7 @@ module Schemas
   # One union variant whose payload is an anonymous inline struct
   # (`UNION Shape { Circle { radius: Float64 } }`). `fields` maps field
   # name (String) to its declared type input. `deinit_entries` is filled in by
-  # the annotator after parse (which fields need @indirect / array
+  # the annotator after parse (which fields need @boxed / array
   # cleanup) and is intentionally mutable in place, like
   # StructSchema#methods.
   # ruby-to-clear: pub
@@ -495,7 +495,7 @@ module Schemas
   sig { params(s: SchemaValue).returns(T::Boolean) }
   def self.resource?(s) = s.is_a?(ResourceSchema)
 
-  sig { params(v: UnionSchema::VariantValue).returns(T::Boolean) }
+  sig { params(v: Object).returns(T::Boolean) }
   def self.inline_struct?(v) = v.is_a?(InlineStructVariant)
 
   # Field-bearing schema: StructSchema or ResourceSchema (EXTERN STRUCT

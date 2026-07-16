@@ -1,6 +1,6 @@
 # Test: Stack vs Heap interoperability.
 # Functions take plain Types — the caller handles unwrapping.
-# A single function must accept stack, @indirect, and @local structs.
+# A single function must accept stack, @boxed, and @local structs.
 
 STRUCT Point { x: Float64, y: Float64 }
 
@@ -18,10 +18,10 @@ FN main() RETURNS Void ->
     r1 = sum(a);
     ASSERT r1 == 3.0, "stack Point sum should be 3";
 
-    # 2. @indirect — heap-allocated *Point, stable address for graphs.
-    b = Point{ x: 10.0, y: 20.0 } @indirect;
+    # 2. @boxed — heap-allocated *Point, stable address for graphs.
+    b = Point{ x: 10.0, y: 20.0 } @boxed;
     r2 = sum(b);
-    ASSERT r2 == 30.0, "@indirect Point sum should be 30";
+    ASSERT r2 == 30.0, "@boxed Point sum should be 30";
 
     # 3. @local — heap pointer shared across fibers (no lock).
     MUTABLE c = Point{ x: 100.0, y: 200.0 } @local;

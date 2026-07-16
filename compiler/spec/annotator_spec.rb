@@ -579,7 +579,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "errors DEFAULT when direct param analysis has no type" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           token = Lexer::Token.new(:IDENTIFIER, "cfg", 1, 1)
           param = AST::Param.new(name: "cfg", type: nil, default: AST::DefaultLit.new(token),
             mutable: false, takes: false, comptime: false, name_token: token,
@@ -627,7 +627,7 @@ RSpec.describe SemanticAnnotator do
 
       context "observable type annotations" do
         it "rejects sync and ownership wrappers layered onto observables" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           token = Lexer::Token.new(:TYPE_ID, "Float64", 1, 1)
           node = AST::Identifier.new(token, "running")
           type = Type.new(:"~Float64", ownership: :shared, sync: :locked, observable: true)
@@ -638,7 +638,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "rejects sharded collection annotations with fewer than two shards" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           token = Lexer::Token.new(:TYPE_ID, "Float64", 1, 1)
           node = AST::Identifier.new(token, "items")
           type = Type.new(:"Float64[]", collection: :list, shard_count: 1)
@@ -651,7 +651,7 @@ RSpec.describe SemanticAnnotator do
 
       context "direct visitor type propagation" do
         it "preserves sync and link metadata when unwrapping optionals" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           allow(annotator).to receive(:visit)
           token = Lexer::Token.new(:IDENTIFIER, "maybe_box", 1, 1)
           target = AST::Identifier.new(token, "maybe_box")
@@ -668,7 +668,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "allows optional unwrap results without ownership metadata" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           allow(annotator).to receive(:visit)
           token = Lexer::Token.new(:IDENTIFIER, "maybe_n", 1, 1)
           target = AST::Identifier.new(token, "maybe_n")
@@ -682,7 +682,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "allows optional unwrap targets whose ownership was unset" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           allow(annotator).to receive(:visit)
           token = Lexer::Token.new(:IDENTIFIER, "maybe_n", 1, 1)
           target = AST::Identifier.new(token, "maybe_n")
@@ -698,7 +698,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "types open-ended slice nodes" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           allow(annotator).to receive(:visit)
           token = Lexer::Token.new(:IDENTIFIER, "items", 1, 1)
           target = AST::Identifier.new(token, "items")
@@ -711,7 +711,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "marks explicit non-value COPY outside a function as heap-owned" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           allow(annotator).to receive(:visit)
           token = Lexer::Token.new(:IDENTIFIER, "label", 1, 1)
           value = AST::Identifier.new(token, "label")
@@ -725,7 +725,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "ignores unknown intrinsic reject predicates" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           token = Lexer::Token.new(:IDENTIFIER, "n", 1, 1)
           arg = AST::Identifier.new(token, "n")
 
@@ -733,7 +733,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "accepts assignment narrowing from NIL" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           token = Lexer::Token.new(:IDENTIFIER, "x", 1, 1)
           value = AST::Identifier.new(token, "value")
           node = AST::Assignment.new(token, "x", value)
@@ -745,7 +745,7 @@ RSpec.describe SemanticAnnotator do
         end
 
         it "declares params with direct sync and ignores unknown requires families" do
-          annotator = SemanticAnnotator.new
+          annotator = Annotator::Phases::TypeAnalysisSession.new
           token = Lexer::Token.new(:IDENTIFIER, "locked", 1, 1)
           locked = AST::Param.new(name: "locked", type: Type.new(:Int64), default: nil,
             mutable: false, takes: false, comptime: false, name_token: token,
@@ -823,7 +823,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             FN sum_list(list: Float64[]) RETURNS Float64 -> RETURN 0; END
-            fixed : Float64[3] = [1, 2, 3];
+            fixed : [3]Float64 = [1, 2, 3];
             sum_list(fixed);
           FLUX
         }
@@ -937,8 +937,8 @@ RSpec.describe SemanticAnnotator do
 
       it "handles method calls on struct.list[index].field without crash" do
         code = <<~FLUX
-          STRUCT Node { keys: Int64[]@list, vals: String[]@list }
-          STRUCT DB { nodes: Node[]@list }
+          STRUCT Node { keys: []Int64, vals: []String }
+          STRUCT DB { nodes: []Node }
           FN countKeys(db: DB, idx: Int64) RETURNS Int64 ->
               IF db.nodes[idx] EXISTS AS node THEN RETURN node.keys.length(); END
               RETURN 0_i64;
@@ -949,8 +949,8 @@ RSpec.describe SemanticAnnotator do
 
       it "handles mutation through struct.list[index].field" do
         code = <<~FLUX
-          STRUCT Node { keys: Int64[]@list, vals: String[]@list }
-          STRUCT DB { nodes: Node[]@list }
+          STRUCT Node { keys: []Int64, vals: []String }
+          STRUCT DB { nodes: []Node }
           FN addKey!(MUTABLE db: DB, idx: Int64, key: Int64) RETURNS !Void ->
               IF db.nodes[idx] EXISTS AS node THEN node.keys.append(key); END
           END
@@ -960,8 +960,8 @@ RSpec.describe SemanticAnnotator do
 
       it "flags needs_mut_ref on GetIndex for mutating intrinsic" do
         code = <<~FLUX
-          STRUCT Node { keys: Int64[]@list }
-          FN addKey!(MUTABLE nodes: Node[]@list, idx: Int64, key: Int64) RETURNS !Void ->
+          STRUCT Node { keys: []Int64 }
+          FN addKey!(MUTABLE nodes: []Node, idx: Int64, key: Int64) RETURNS !Void ->
               IF nodes[idx] EXISTS AS node THEN node.keys.append(key); END
           END
         FLUX
@@ -974,8 +974,8 @@ RSpec.describe SemanticAnnotator do
 
       it "flags needs_mut_ref on GetIndex for field assignment" do
         code = <<~FLUX
-          STRUCT Node { keys: Int64[]@list }
-          FN setKeys!(MUTABLE nodes: Node[]@list, idx: Int64) RETURNS Void ->
+          STRUCT Node { keys: []Int64 }
+          FN setKeys!(MUTABLE nodes: []Node, idx: Int64) RETURNS Void ->
               IF nodes[idx] EXISTS AS node THEN node.keys = [1, 2, 3]; END
           END
         FLUX
@@ -989,10 +989,10 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.cleanup before field reassignment of list type" do
         src = <<~FLUX
           FN test() RETURNS !Void ->
-            STRUCT Node { vals: String[]@list }
-            MUTABLE nodes: Node[]@list = [];
+            STRUCT Node { vals: []String }
+            MUTABLE nodes: []Node = [];
             nodes.append(Node{ vals: [] });
-            MUTABLE nv: String[]@list = [];
+            MUTABLE nv: []String = [];
             IF nodes[0] EXISTS AS node THEN node.vals = nv; END
           END
         FLUX
@@ -1002,8 +1002,8 @@ RSpec.describe SemanticAnnotator do
 
       it "skips CopyNode for list values targeting @list struct fields" do
         code = <<~FLUX
-          STRUCT Node { keys: Int64[]@list }
-          MUTABLE keys: Int64[]@list = [];
+          STRUCT Node { keys: []Int64 }
+          MUTABLE keys: []Int64 = [];
           keys.append(1);
           Node{ keys: keys };
         FLUX
@@ -1319,7 +1319,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             # [1, 2, 3] is inferred as Float64[3]
-            list : Float64[3] = [1, 2, 3];
+            list : [3]Float64 = [1, 2, 3];
           FLUX
         }
         it "succeeds" do
@@ -1332,7 +1332,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             # Assigning size 2 to capacity 3
-            list : Float64[3] = [1, 2];
+            list : [3]Float64 = [1, 2];
           FLUX
         }
         it "succeeds (fills remaining with default/garbage)" do
@@ -1343,7 +1343,7 @@ RSpec.describe SemanticAnnotator do
       context "Oversized Assignment (Size > Capacity)" do
         let(:code) {
           <<~FLUX
-            list : Float64[1] = [1.0, 2.0, 3.0];
+            list : [1]Float64 = [1.0, 2.0, 3.0];
           FLUX
         }
         it "raises a Fixed Array Size Mismatch error" do
@@ -1355,7 +1355,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             # Any[] -> Float64[5]
-            list : Float64[5] = [];
+            list : [5]Float64 = [];
           FLUX
         }
         it "succeeds (safe autocast from empty)" do
@@ -1404,7 +1404,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             # String[3] -> Float64[3]
-            list : Float64[3] = ["a", "b", "c"];
+            list : [3]Float64 = ["a", "b", "c"];
           FLUX
         }
         it "raises a Type Mismatch error" do
@@ -1651,10 +1651,10 @@ RSpec.describe SemanticAnnotator do
         end
 
 
-        it "resolves literal tuple indices positionally" do
+        it "resolves tuple positional fields exactly" do
           tuple_ast = run(<<~FLUX)
             key: Tuple<String@symbol, Int64> = [:kind, 1];
-            value = key[1];
+            value = key._1;
           FLUX
           expect(tuple_ast.statements.last.resolved_type).to eq(:Int64)
         end
@@ -1664,7 +1664,7 @@ RSpec.describe SemanticAnnotator do
       context "Typed Nested Hash" do
         let(:code) {
           <<~FLUX
-            registry: HashMap<String@symbol, HashMap<String@symbol, Any>> = {
+            registry: {String@symbol}{String@symbol}Any = {
               :entry: { :kind: :Input, :id: 1 }
             };
           FLUX
@@ -2500,7 +2500,7 @@ RSpec.describe SemanticAnnotator do
         expect_escape("x")
         run_mir_escape(<<~FLUX)
           STRUCT Config { id: Float64 }
-          FN create() RETURNS !Config @indirect ->
+          FN create() RETURNS !Config @boxed ->
             x = Config { id: 1 };
             RETURN x; # x must be on heap to survive return
           END
@@ -2510,7 +2510,7 @@ RSpec.describe SemanticAnnotator do
       it "uses heap_struct cleanup for promoted struct with String field (no field leak)" do
         ast = run_mir_escape(<<~FLUX)
           STRUCT Person { name: String, age: Float64 }
-          FN make() RETURNS !Person @indirect ->
+          FN make() RETURNS !Person @boxed ->
             p = Person { name: "alice", age: 30 };
             RETURN p;
           END
@@ -2533,10 +2533,10 @@ RSpec.describe SemanticAnnotator do
       it "promotes a variable assigned to a Global" do
         expect_escape("local")
         run_mir_escape(<<~FLUX)
-          STRUCT Item { id: Float64, name: Byte[100] }
-          STRUCT Container { item: Item @indirect }
+          STRUCT Item { id: Float64, name: [100]Byte }
+          STRUCT Container { item: Item @boxed }
 
-          MUTABLE g: Container @indirect = Container { item: Item{id:0, name: [0]} }; # Global Heap
+          MUTABLE g: Container @boxed = Container { item: Item{id:0, name: [0]} }; # Global Heap
 
           FN update() USE(MUTABLE g) ->
             local = Item { id: 99, name: [1] };
@@ -2546,19 +2546,19 @@ RSpec.describe SemanticAnnotator do
       end
 
       # Regression: a frame value assigned into a GLOBAL must be
-      # heap-promoted even when the global's type is `@indirect`
-      # (not `%`). `@indirect` is context-deferred and is NOT :heap
+      # heap-promoted even when the global's type is `@boxed`
+      # (not `%`). `@boxed` is context-deferred and is NOT :heap
       # on a plain struct, so the assign-escape gate must key off the
       # destination being a global (scope_depth 0), not the global's
       # Type.location flag. Without this, `local` would dangle after
-      # `update()` returns (UAF). Guards the %->@indirect migration.
-      it "promotes a frame value assigned to an @indirect Global (scope-depth gate)" do
+      # `update()` returns (UAF). Guards the %->@boxed migration.
+      it "promotes a frame value assigned to an @boxed Global (scope-depth gate)" do
         expect_escape("local")
         run_mir_escape(<<~FLUX)
-          STRUCT Item { id: Float64, name: Byte[100] }
-          STRUCT Container { item: Item @indirect }
+          STRUCT Item { id: Float64, name: [100]Byte }
+          STRUCT Container { item: Item @boxed }
 
-          MUTABLE g: Container @indirect = Container { item: Item{id:0, name: [0]} };
+          MUTABLE g: Container @boxed = Container { item: Item{id:0, name: [0]} };
 
           FN update() USE(MUTABLE g) ->
             local = Item { id: 99, name: [1] };
@@ -2653,10 +2653,10 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "uses :register for Heap Objects (Pointers)" do
-        # Even though Config is a struct, Config @indirect is a pointer (8 bytes).
+        # Even though Config is a struct, Config @boxed is a pointer (8 bytes).
         # Pointers fit in registers.
         code = preamble + <<~FLUX
-          FN make_heap() RETURNS !Config @indirect ->
+          FN make_heap() RETURNS !Config @boxed ->
             c = Config{id:1};
             RETURN c;
           END
@@ -2679,7 +2679,7 @@ RSpec.describe SemanticAnnotator do
 
       it "uses :destination_pass for Fixed Arrays" do
         code = <<~FLUX
-          FN get_vec() RETURNS Float64[3] -> RETURN [1, 2, 3]; END
+          FN get_vec() RETURNS [3]Float64 -> RETURN [1, 2, 3]; END
         FLUX
         expect(get_strategy(code)).to eq(:destination_pass)
       end
@@ -3234,7 +3234,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "rejects hash-shaped intrinsic overloads when the base type cannot match" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         token = Lexer::Token.new(:IDENTIFIER, "arg", 1, 1)
         arg = AST::Identifier.new(token, "arg")
         arg.full_type = Type.new(:String)
@@ -3873,7 +3873,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<?Int64> = {};
+              MUTABLE m: {String}?Int64 = {};
               m["missing"] = NIL;
               m["present"] = 1_i64;
               RETURN;
@@ -3887,7 +3887,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves count() return type as Int64" do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             n = m.count();
             RETURN;
           END
@@ -3900,7 +3900,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.mapCount in Zig" do
         out = transpile_map(<<~CLEAR)
           FN f() RETURNS !Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             n = m.count();
             RETURN;
           END
@@ -3912,7 +3912,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m.count(42);
               RETURN;
             END
@@ -3925,7 +3925,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves contains?() return type as Bool" do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             found = m.contains?("x");
             RETURN;
           END
@@ -3938,7 +3938,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.mapContains in Zig" do
         out = transpile_map(<<~CLEAR)
           FN f() RETURNS !Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             found = m.contains?("x");
             RETURN;
           END
@@ -3950,7 +3950,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m.contains?();
               RETURN;
             END
@@ -3962,7 +3962,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m.contains?(42);
               RETURN;
             END
@@ -3975,7 +3975,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves delete() return type as Void" do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             m.delete("x");
             RETURN;
           END
@@ -3988,7 +3988,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.mapDelete in Zig" do
         out = transpile_map(<<~CLEAR)
           FN f() RETURNS !Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             m.delete("x");
             RETURN;
           END
@@ -4000,7 +4000,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m.delete();
               RETURN;
             END
@@ -4013,7 +4013,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves keys() return type as String[]" do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             ks = m.keys();
             RETURN;
           END
@@ -4026,7 +4026,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.mapKeys in Zig" do
         out = transpile_map(<<~CLEAR)
           FN f() RETURNS !Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             ks = m.keys();
             RETURN;
           END
@@ -4038,7 +4038,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m.keys("x");
               RETURN;
             END
@@ -4051,7 +4051,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves values() return type as V[]" do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             vs = m.values();
             RETURN;
           END
@@ -4064,7 +4064,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.mapValues in Zig" do
         out = transpile_map(<<~CLEAR)
           FN f() RETURNS !Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             vs = m.values();
             RETURN;
           END
@@ -4076,7 +4076,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m.values(1);
               RETURN;
             END
@@ -4101,7 +4101,7 @@ RSpec.describe SemanticAnnotator do
       it "emits zero-init for empty string-keyed map literals" do
         out = transpile_map(<<~CLEAR)
           FN f() RETURNS !Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             RETURN;
           END
         CLEAR
@@ -4115,7 +4115,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
-              MUTABLE m: HashMap<Int64> = {};
+              MUTABLE m: {String}Int64 = {};
               m.frobnicate();
               RETURN;
             END
@@ -4325,7 +4325,7 @@ RSpec.describe SemanticAnnotator do
     let(:code) do
       <<~CLEAR
         FN use_fixed_array() RETURNS Void ->
-          vals: Float64[3] = [1.0, 2.0, 3.0];
+          vals: [3]Float64 = [1.0, 2.0, 3.0];
           _ = vals;
         END
       CLEAR
@@ -4349,7 +4349,7 @@ RSpec.describe SemanticAnnotator do
     it "works for a two-element Float64 array" do
       two_code = <<~CLEAR
         FN use_two_array() RETURNS Void ->
-          ns: Float64[2] = [10.0, 20.0];
+          ns: [2]Float64 = [10.0, 20.0];
           _ = ns;
         END
       CLEAR
@@ -4445,7 +4445,7 @@ RSpec.describe SemanticAnnotator do
     it "iterates over a fixed array" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
         FN f() RETURNS !Int64 ->
-          items: Int64[3] = [1_i64, 2_i64, 3_i64];
+          items: [3]Int64 = [1_i64, 2_i64, 3_i64];
           MUTABLE sum: Int64 = 0;
           FOR x IN items DO
             sum += x;
@@ -4459,7 +4459,7 @@ RSpec.describe SemanticAnnotator do
     it "iterates over a list" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
         FN f() RETURNS !Void ->
-          MUTABLE nums: Int64[]@list = [];
+          MUTABLE nums: []Int64 = [];
           nums.append(1_i64);
           MUTABLE sum: Int64 = 0;
           FOR n IN nums DO
@@ -4733,7 +4733,7 @@ RSpec.describe SemanticAnnotator do
   describe "WHILE bind footgun: stateless condition on immutable receiver" do
     it "supports clearing a mutable list" do
       src = <<~CLEAR
-        FN clear_items!(MUTABLE items: Int64[]@list) RETURNS Void ->
+        FN clear_items!(MUTABLE items: []Int64) RETURNS Void ->
           items.clear();
         END
       CLEAR
@@ -4769,7 +4769,7 @@ RSpec.describe SemanticAnnotator do
     it "allows WHILE EXISTS AS when the method receiver is MUTABLE" do
       src = <<~CHT
         FN test() RETURNS !Void ->
-          MUTABLE items: Int64[5]@list = [];
+          MUTABLE items: []Int64 = [];
           items.append(1_i64);
           WHILE items.pop() EXISTS AS v DO
             _ = v;

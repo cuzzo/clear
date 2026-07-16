@@ -199,17 +199,27 @@ impl<'a> RedundantNilGuard<'a> {
         let then_body = node.children.get(1).and_then(ast::node);
         let else_body = node.children.get(2).and_then(ast::node);
 
-        if let Some(cond) = cond {
-            self.inspect_node(cond, defstack, known);
+        let scoped_bindings = self
+            .behavior
+            .conditional_local_bindings(node)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let mut scoped_known = known.clone();
+        for binding in &scoped_bindings {
+            scoped_known.remove(binding);
         }
 
-        let then_known = self.known_for_branch(node.r#type.as_str(), true, cond, known);
-        let else_known = self.known_for_branch(node.r#type.as_str(), false, cond, known);
+        if let Some(cond) = cond {
+            self.inspect_node(cond, defstack, &scoped_known);
+        }
+
+        let then_known = self.known_for_branch(node.r#type.as_str(), true, cond, &scoped_known);
+        let else_known = self.known_for_branch(node.r#type.as_str(), false, cond, &scoped_known);
 
         let then_flow = self.process_block(&self.stmts_for(then_body), defstack, &then_known);
         let else_flow = self.process_block(&self.stmts_for(else_body), defstack, &else_known);
 
-        if then_flow.terminated && else_flow.terminated {
+        let mut flow = if then_flow.terminated && else_flow.terminated {
             Flow {
                 known: BTreeSet::new(),
                 terminated: true,
@@ -233,7 +243,17 @@ impl<'a> RedundantNilGuard<'a> {
                     .collect(),
                 terminated: false,
             }
+        };
+
+        if !flow.terminated {
+            for binding in scoped_bindings {
+                flow.known.remove(&binding);
+                if known.contains(&binding) {
+                    flow.known.insert(binding);
+                }
+            }
         }
+        flow
     }
 
     fn known_for_branch(
@@ -531,6 +551,13 @@ impl<'a> RedundantNilGuard<'a> {
 
     fn stmts_for<'node>(&self, node: Option<&'node Node>) -> Vec<&'node Node> {
         let Some(node) = node else { return Vec::new() };
+        // Tree-sitter C/C#/JS-style `else if` uses an ELSE_CLAUSE wrapper.
+        // Process its child as a statement so assignments and nested branch
+        // facts update flow state, rather than merely recursively inspecting
+        // it under the predecessor's proof set.
+        if node.r#type == "ELSE_CLAUSE" {
+            return node.children.iter().filter_map(ast::node).collect();
+        }
         if self.call_parts(node).is_some() {
             return vec![node];
         }
@@ -564,9 +591,17 @@ impl<'a> RedundantNilGuard<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tree_sitter::Parser;
 
     struct TestBehavior;
     impl NormalizedLanguageBehavior for TestBehavior {}
+
+    struct ShadowBehavior;
+    impl NormalizedLanguageBehavior for ShadowBehavior {
+        fn conditional_local_bindings(&self, _conditional: &Node) -> Vec<String> {
+            vec!["err".to_string()]
+        }
+    }
 
     fn scanner() -> RedundantNilGuard<'static> {
         RedundantNilGuard {
@@ -575,6 +610,58 @@ mod tests {
             behavior: &TestBehavior,
             findings: Vec::new(),
         }
+    }
+
+    #[test]
+    fn c_reallocation_kills_a_prior_non_nil_proof() {
+        let source = r#"
+struct entry { int size; };
+int queue(struct entry* previous) {
+  struct entry* value = previous;
+  if (value == NULL) {
+    return 1;
+  } else if (value->size == 0) {
+    value = realloc(value, 64);
+    if (value == NULL)
+      return 2;
+  }
+  return 0;
+}
+"#;
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_c::LANGUAGE.into())
+            .expect("C grammar");
+        let tree = parser.parse(source, None).expect("C source parses");
+        let root = crate::ast::normalize_tree(tree.root_node(), source, Language::C);
+        let lines = source.lines().map(str::to_string).collect::<Vec<_>>();
+        let findings = scan_normalized("queue.c", &lines, &root, crate::syntax::c::behavior());
+        assert!(findings.is_empty(), "unexpected findings: {findings:?}");
+    }
+
+    #[test]
+    fn conditional_shadowing_restores_the_outer_flow_fact_after_the_branch() {
+        let mut scanner = RedundantNilGuard {
+            file: "shadow.go".to_string(),
+            lines: Vec::new(),
+            behavior: &ShadowBehavior,
+            findings: Vec::new(),
+        };
+        let branch = Node {
+            r#type: "IF".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 1,
+            text: "if err := load(); err != nil {}".to_string(),
+        };
+        let known = BTreeSet::from(["err".to_string(), "other".to_string()]);
+
+        let flow = scanner.process_branch(&branch, &[], &known);
+
+        assert_eq!(flow.known, known);
+        assert!(!flow.terminated);
     }
 
     #[test]

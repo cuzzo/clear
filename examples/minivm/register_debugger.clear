@@ -10,7 +10,7 @@ REQUIRE "register_debugger_types.clear";
 FN frameContextIBase(
     frameIndex: Int64,
     iBase: Int64,
-    frameIBases: Int64[]@list
+    frameIBases: []Int64
 ) RETURNS Int64 ->
     IF frameIndex == 0_i64 THEN RETURN iBase; END
     idx = frameIBases.length() - frameIndex;
@@ -21,7 +21,7 @@ END
 FN frameContextFBase(
     frameIndex: Int64,
     fBase: Int64,
-    frameFBases: Int64[]@list
+    frameFBases: []Int64
 ) RETURNS Int64 ->
     IF frameIndex == 0_i64 THEN RETURN fBase; END
     idx = frameFBases.length() - frameIndex;
@@ -32,7 +32,7 @@ END
 FN frameContextIp(
     frameIndex: Int64,
     ip: Int64,
-    frameRetIps: Int64[]@list
+    frameRetIps: []Int64
 ) RETURNS Int64 ->
     IF frameIndex == 0_i64 THEN RETURN ip; END
     idx = frameRetIps.length() - frameIndex;
@@ -105,7 +105,7 @@ FN debugPrintHelp() RETURNS Void ->
 END
 
 # Print all visible bindings frozen in `varSnapshot`.
-FN debugPrintInfo!(varSnapshot: HashMap<String>) RETURNS !Void ->
+FN debugPrintInfo!(varSnapshot: {String}String) RETURNS !Void ->
     keys = varSnapshot.keys();
     IF keys.length() == 0_i64 THEN
         print("no bindings in scope");
@@ -176,7 +176,7 @@ END
 # (i.e. the IP recorded by ICALL/FCALL at the call site). The frame
 # matching `activeFrame` is marked with a leading `*` so `:up` /
 # `:down` / `:frame N` are visible against the stack.
-FN debugPrintBacktrace!(frameRetIps: Int64[]@list, currentIp: Int64, currentLine: Int64, currentColumn: Int64, sourceLines: Int64[]@list, sourceColumns: Int64[]@list, activeFrame: Int64) RETURNS !Void ->
+FN debugPrintBacktrace!(frameRetIps: []Int64, currentIp: Int64, currentLine: Int64, currentColumn: Int64, sourceLines: []Int64, sourceColumns: []Int64, activeFrame: Int64) RETURNS !Void ->
     currentIpStr = currentIp.toString() OR_ELSE "?";
     currentLineStr = currentLine.toString() OR_ELSE "?";
     MUTABLE marker0: String = "  ";
@@ -217,8 +217,8 @@ END
 # `isBreakpoint[ip]` rather than the entry snapshot, so `:bd N` is
 # reflected on the next `:info b`.
 FN debugPrintBreakpoints!(
-    breakpointEntries: BreakpointEntry[]@list,
-    isBreakpoint: Int64[]@list
+    breakpointEntries: []BreakpointEntry,
+    isBreakpoint: []Int64
 ) RETURNS !Void ->
     IF breakpointEntries.length() == 0_i64 THEN
         print("no breakpoints set");
@@ -244,9 +244,9 @@ END
 # per line" semantics, same as `BC_PAUSE_ON`).
 FN debugAddBreakpoint!(
     line: Int64,
-    sourceLines: Int64[]@list,
-    MUTABLE isBreakpoint: Int64[]@list,
-    MUTABLE breakpointEntries: BreakpointEntry[]@list
+    sourceLines: []Int64,
+    MUTABLE isBreakpoint: []Int64,
+    MUTABLE breakpointEntries: []BreakpointEntry
 ) RETURNS !Void ->
     IF line <= 0_i64 THEN
         print("invalid line number");
@@ -288,8 +288,8 @@ END
 # live `isBreakpoint[ip]` flag, so zeroing the flag is enough.
 FN debugDeleteBreakpoint!(
     id: Int64,
-    MUTABLE isBreakpoint: Int64[]@list,
-    breakpointEntries: BreakpointEntry[]@list
+    MUTABLE isBreakpoint: []Int64,
+    breakpointEntries: []BreakpointEntry
 ) RETURNS !Void ->
     MUTABLE found: Bool = FALSE;
     FOR bi IN (0_i64 ..< breakpointEntries.length()) DO
@@ -315,7 +315,7 @@ END
 # Without this filter, names from a different function (same physical
 # register, different semantics) would shadow each other in the
 # snapshot map.
-FN activeFunctionEntryIp(varNames: RegisterVarName[]@list, currentIp: Int64) RETURNS Int64 ->
+FN activeFunctionEntryIp(varNames: []RegisterVarName, currentIp: Int64) RETURNS Int64 ->
     MUTABLE bestEntry: Int64 = 0_i64;
     FOR ni IN (0_i64 ..< varNames.length()) DO
         IF varNames[ni] EXISTS AS entry THEN
@@ -343,7 +343,7 @@ END
 # instructions execute, so a binding declared on line N hasn't yet
 # taken effect.
 FN snapshotRegisterVars!(
-    varNames: RegisterVarName[]@list,
+    varNames: []RegisterVarName,
     ip: Int64,
     pauseLine: Int64,
     iregs: Int64[],
@@ -351,12 +351,12 @@ FN snapshotRegisterVars!(
     sregs: String[],
     iBase: Int64,
     fBase: Int64
-) RETURNS !HashMap<String> ->
-    MUTABLE varSnapshot: HashMap<String> = {};
+) RETURNS !{String}String ->
+    MUTABLE varSnapshot: {String}String = {};
     bestEntry = activeFunctionEntryIp(varNames, ip);
 
-    MUTABLE winnerIdx: HashMap<Int64> = {};
-    MUTABLE winnerLine: HashMap<Int64> = {};
+    MUTABLE winnerIdx: {String}Int64 = {};
+    MUTABLE winnerLine: {String}Int64 = {};
     FOR vni IN (0_i64 ..< varNames.length()) DO
         IF varNames[vni] EXISTS AS vEntry THEN
             IF vEntry.funcEntryIp == bestEntry AND vEntry.sourceLine < pauseLine THEN
@@ -425,8 +425,8 @@ END
 # whose `step` is in `(toStep, fromStep]`. Restores the register
 # files to what they were just after `step == toStep`.
 FN replayBackward!(
-    events: TraceEvent[]@list,
-    traceStrings: String[]@list,
+    events: []TraceEvent,
+    traceStrings: []String,
     fromStep: Int64,
     toStep: Int64,
     MUTABLE iregs: Int64[],
@@ -463,21 +463,21 @@ FN registerDebugPause!(
     line: Int64,
     column: Int64,
     ip: Int64,
-    varNames: RegisterVarName[]@list,
+    varNames: []RegisterVarName,
     MUTABLE iregs: Int64[],
     MUTABLE fregs: Float64[],
     MUTABLE sregs: String[],
     iBase: Int64,
     fBase: Int64,
-    frameIBases: Int64[]@list,
-    frameFBases: Int64[]@list,
-    frameRetIps: Int64[]@list,
-    sourceLines: Int64[]@list,
-    sourceColumns: Int64[]@list,
-    MUTABLE isBreakpoint: Int64[]@list,
-    MUTABLE breakpointEntries: BreakpointEntry[]@list,
-    traceEvents: TraceEvent[]@list,
-    traceStrings: String[]@list,
+    frameIBases: []Int64,
+    frameFBases: []Int64,
+    frameRetIps: []Int64,
+    sourceLines: []Int64,
+    sourceColumns: []Int64,
+    MUTABLE isBreakpoint: []Int64,
+    MUTABLE breakpointEntries: []BreakpointEntry,
+    traceEvents: []TraceEvent,
+    traceStrings: []String,
     currentStep: Int64
 ) RETURNS !Int64 ->
     lineStr = line.toString() OR_ELSE "?";

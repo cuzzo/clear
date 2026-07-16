@@ -3,12 +3,12 @@
 
 STRUCT Env { x: Int64 }
 
-FN consume!(TAKES p: Env[10]@pool) RETURNS Int64 ->
+FN consume!(TAKES p: [Pool(10)]Env) RETURNS Int64 ->
     RETURN p.length();
 END
 
 FN main() RETURNS Void ->
-    MUTABLE pool: Env[10]@pool = [];
+    MUTABLE pool: [Pool(10)]Env = [];
     pool.insert(Env{ x: 1_i64 });
     pool.insert(Env{ x: 2_i64 });
     pool.insert(Env{ x: 3_i64 });

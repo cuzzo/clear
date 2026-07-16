@@ -51,12 +51,12 @@ FN main() RETURNS !Void ->
     MUTABLE local_c     = Counter{ value: 1 } @local;
     MUTABLE multi_c     = Counter{ value: 1 } @multiowned;
     MUTABLE shared_c    = Counter{ value: 1 } @shared;
-    MUTABLE indirect_c  = Counter{ value: 1 } @indirect;
+    MUTABLE indirect_c  = Counter{ value: 1 } @boxed;
 
     MUTABLE locked_c    = Counter{ value: 1 } @shared:locked;
     MUTABLE wlocked_c   = Counter{ value: 1 } @shared:writeLocked;
     MUTABLE versioned_c = Counter{ value: 1 } @shared:versioned;
-    MUTABLE atomic_c    = Counter{ value: 1 } @indirect:atomic;
+    MUTABLE atomic_c    = Counter{ value: 1 } @boxed:atomic;
 
     MUTABLE bare_locked_c    = Counter{ value: 1 } @locked;
     MUTABLE bare_wlocked_c   = Counter{ value: 1 } @writeLocked;
@@ -77,7 +77,7 @@ FN main() RETURNS !Void ->
 
     MUTABLE locked_zero = Counter{ value: 0 } @shared:locked;
     MUTABLE versioned_zero = Counter{ value: 0 } @shared:versioned;
-    MUTABLE atomic_zero = Counter{ value: 0 } @indirect:atomic;
+    MUTABLE atomic_zero = Counter{ value: 0 } @boxed:atomic;
 
     check!(locked_zero, 0) OR_ELSE RAISE;
     check!(versioned_zero, 0) OR_ELSE RAISE;

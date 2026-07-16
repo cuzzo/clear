@@ -31,13 +31,33 @@ CLEAR provides a comprehensive set of primitives for precise control over memory
 | `String` | UTF-8 encoded text (affine) | `"hello"` |
 | `Void` | Absence of a value | `RETURN;` |
 
+Structural types use Inline Pivot notation. Layers are written in the same
+order in which code accesses them: `[List]{Symbol}User` is read as
+`value[index][symbol]`, while `{Symbol}[List]User` is
+`value[symbol][index]`. Common forms are:
+
+| Type | Meaning |
+|---|---|
+| `[10]T` | Fixed contiguous array of ten `T` values |
+| `[]T` / `[List]T` | Dynamic list of `T` |
+| `[List(10)]T` | Dynamic list with initial capacity ten |
+| `[Set]T` | Dynamic set of `T` |
+| `[Pool(100)]T` | Generational pool with 100 slots |
+| `[10, 5]T` | Flat contiguous rank-2 array |
+| `{K}V` | Map from `K` to `V`; `{}V` is the Symbol-key shorthand |
+| `Tuple<A, B>` | Positional product type, constructed as `Tuple{a, b}` |
+
+Tuple fields use `._0`, `._1`, and so on. Their bounds are checked from the
+tuple type, and tuples deliberately do not support array indexing.
+
 ## 3. Types vs Capabilities
 
 CLEAR distinguishes between what data *is* (Type) and how it is *accessed* (Capability). In Rust, capabilities like `Arc`, `Rc`, and `Mutex` are part of the type, leading to "function coloring" and high refactoring costs. In CLEAR, functions take **Types**, not **Capabilities**.
 
 ### Capability Annotations
 
-Capabilities are applied at the **declaration site** with `@` suffixes:
+Capabilities are applied at the declaration or directly after the exact type
+layer they govern:
 
 | Capability | Rust Equivalent | CLEAR Syntax |
 |---|---|---|
@@ -45,7 +65,7 @@ Capabilities are applied at the **declaration site** with `@` suffixes:
 | Multi-threaded shared ownership | `Arc<T>` | `value @shared` |
 | Mutex (exclusive lock) | `Arc<Mutex<T>>` | `value @shared:locked` |
 | RwLock (read-write lock) | `Arc<RwLock<T>>` | `value @shared:writeLocked` |
-| Heap pointer | `Box<T>` | `value @indirect` |
+| Heap pointer | `Box<T>` | `value @boxed` |
 | Thread-local pointer | *(no direct equivalent)* | `value @local` |
 
 ### Zero Blast Radius Refactoring
@@ -143,12 +163,12 @@ Function parameters are **implicit borrows** by default. Only `TAKES` transfers 
 
 ```ruby clear
 # Owned: can store into collections
-FN store!(TAKES v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
+FN store!(TAKES v: Value, MUTABLE map: {String}Value) RETURNS Void ->
     map["item"] = v;                # OKAY: v is owned via TAKES
     RETURN;
 END
 
-FN bad!(v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
+FN bad!(v: Value, MUTABLE map: {String}Value) RETURNS Void ->
     map["item"] = v;                # COMPILER ERROR: Cannot move borrowed value 'v'
     RETURN;
 END
@@ -165,7 +185,7 @@ The `@sharded` capability partitions data across threads, enabling massive paral
 
 ```ruby clear
 # A sharded map distributes keys across independent thread-local heaps
-MUTABLE registry: HashMap<Int64>@sharded(8) = {};
+MUTABLE registry: {String}@sharded(8) Int64 = {};
 
 # CLEAR automatically pins this fiber to the correct shard
 BG {
@@ -173,8 +193,8 @@ BG {
 }
 
 # Sharding is also available for Pools and Lists
-MUTABLE users: User[100]@pool:sharded(4) = [];
-MUTABLE logs: String[]@list:sharded(2) = [];
+MUTABLE users: [Pool(100)]@sharded(4) User = [];
+MUTABLE logs: [List]@sharded(2) String = [];
 
 # Note: Sharding provides peak throughput but carries a risk of
 # data skew if keys/items are not uniformly distributed.
@@ -353,7 +373,7 @@ END
 | Owned (local, TAKES param) | Move (consumes source) | Yes |
 
 ```ruby clear illustrative
-UNION Value { Nil, Num: Float64, List: Value[] }
+UNION Value { Nil, Num: Float64, List: []Value }
 
 # Borrowed source: MATCH AS produces a borrow
 FN sum(v: Value) RETURNS Float64 ->
@@ -365,7 +385,7 @@ FN sum(v: Value) RETURNS Float64 ->
 END
 
 # Owned source: MATCH AS moves the payload
-FN take!(TAKES v: Value) RETURNS Value[] ->
+FN take!(TAKES v: Value) RETURNS []Value ->
     MATCH v START
         Value.List AS items ->       # items is []Value (owned, v consumed)
             RETURN items;            # OKAY: returning owned data
@@ -377,7 +397,7 @@ END
 Storing a borrowed `MATCH AS` binding into a struct or union variant is a compile error:
 
 ```ruby clear illustrative
-FN bad(items: Value[]) RETURNS Value ->
+FN bad(items: []Value) RETURNS Value ->
     # items is a borrowed parameter
     RETURN Value.Lambda{ params: items };  # COMPILER ERROR: Cannot store borrowed 'items'
 END
@@ -431,13 +451,15 @@ See [docs/pipelines.md#operators](docs/pipelines.md#operators) for a full list o
 
 Pipelines are automatically fused for efficiency.
 
-## 10. Time as Tense (~T)
+## 10. Time as Tense (`~T`) and Streams
 
 Tense represents a value that will exist in the future. CLEAR eliminates the complexity of `Future/Promise/Observable` with a single unified tense.
 
 - `~User` is read as **"Future User"**.
-- `~User[]` is read as **"Future Users"**.
-- A **STREAM** of users is simply one way to produce "Future Users".
+- `~[]User` is a future that resolves to a list.
+- `[]~User` is a definite list whose items are futures.
+- `[~]User`, `[~N]User`, and `[~INF]User` are finite-unbounded, bounded, and
+  infinite streams respectively.
 
 ```ruby clear illustrative
 # 1. Promise (~T): A single future value
@@ -445,21 +467,32 @@ p: ~String = BG { sleep(100); RETURN "Data"; };
 ready = p IS_READY;                                 # Poll only; never consumes or binds
 val = NEXT p;                                       # OKAY: Blocks until ready
 
-# 2. Open Stream (~?T[]): Asynchronous generator
-# NEXT on ~?T[] returns ?T, with NIL signaling exhaustion.
-gen: ~?Int64[] = BG STREAM {
+# 2. Finite stream: completion is distinct from an optional item.
+gen: [~]?Int64 = BG STREAM YIELDS ?Int64 {
     YIELD 10;
+    YIELD NIL;
     YIELD 20;
+    CLOSE;
 };
-val = NEXT gen;                                     # OKAY: Returns ?Int64 (NIL when exhausted)
+WHILE NEXT gen EXISTS AS item DO
+    # item is ?Int64; NIL here is data, not stream completion.
+    print(item);
+END
 
-# 3. Infinite Stream (~T[INF]): Lazy rendezvous generator
-counter: ~Int64[INF] = BG STREAM {
+# 3. Infinite Stream ([~INF]T): Lazy rendezvous generator
+counter: [~INF]Int64 = BG STREAM {
     MUTABLE i = 0;
     WHILE TRUE DO { YIELD i; i += 1; }
 };
 v1 = NEXT counter;                                  # OKAY: Returns Int64 (never NIL)
 ```
+
+`BG STREAM YIELDS T` is analogous to `FN ... RETURNS T`. `YIELDS` may be
+written for any stream and is required when the item contract is a future or a
+named union. It is not required for a homogeneous `T`, `?T`, `!T`, or `!?T`
+stream. Yielding `T` and `NIL` infers `?T`; yielding unrelated `T` and `K`
+never silently creates a union and produces a fixable diagnostic asking for a
+`YIELDS` contract or homogeneous yield sites.
 
 `IS_READY` answers only whether a single future has settled. It cannot use
 `AS`, because readiness does not distinguish successful and failed outcomes;
@@ -475,13 +508,13 @@ Streams can also carry sharing capabilities:
 - `@split` means ordered fanout / pub-sub semantics. Each cloned handle sees the same items in the same order, and memoized items are released once every live split owner has consumed them.
 
 ```ruby clear illustrative
-source: ~?Int64[]@split = BG STREAM {
+source: [~]@split Int64 = BG STREAM {
     YIELD 10;
     YIELD 20;
 };
 
-a: ~?Int64[]@split = CLONE source;
-b: ~?Int64[]@split = CLONE source;
+a: [~]@split Int64 = CLONE source;
+b: [~]@split Int64 = CLONE source;
 
 ASSERT NEXT a == 10, "first subscriber sees first value";
 ASSERT NEXT b == 10, "second subscriber sees the same first value";
@@ -499,11 +532,12 @@ All collections are **automatically monomorphized** -- the compiler generates ze
 
 | Sigil | Collection | Purpose |
 | :--- | :--- | :--- |
-| `T[N]` | `Array` | Fixed-size, stack-allocated (if small) |
-| `T[]@list` | `List` | Dynamic-size, heap-backed |
-| `T[N]@pool` | `Pool` | Fixed-capacity, generational handles |
-| `T[]@set` | `Set` | Dynamic-size, heap-backed, distinct items |
-| `T[]@ring` | `Ring` | Circular Ring Buffer (mainly for Streams - v0.2) |
+| `[N]T` | `Array` | Fixed-size, contiguous storage |
+| `[]T` / `[List]T` | `List` | Dynamic-size, heap-backed |
+| `[Pool(N)]T` | `Pool` | Fixed-capacity, generational handles |
+| `[Set]T` | `Set` | Dynamic-size, heap-backed, distinct items |
+| `[N, M]T` | rank-2 array | One flat row-major allocation |
+| `{K}V` | `Map` | Associative lookup from `K` to `V` |
 
 
 ```ruby clear
@@ -513,13 +547,13 @@ STRUCT User { name: String }
 vals = [10, 20, 30];
 
 # 2. Dynamic List
-MUTABLE items: Int64[]@list = [];
+MUTABLE items: []Int64 = [];
 items.append(42);
 
 # 3. Generational Pool
-# Pools provide peak cache locality. Switching from List to @pool:soa
+# Pools provide peak cache locality. Switching from List to [Pool(N)]@soa
 # (Structure of Arrays) is a one-line refactor for massive speed.
-MUTABLE users: User[100]@pool = [];
+MUTABLE users: [Pool(100)]User = [];
 
 id = users.insert(User{ name: "Alice" });           # Returns stable handle
 user = users.get(id) OR_ELSE RAISE;                      # Returns ?T (checks stale handles)
@@ -527,17 +561,18 @@ user = users.get(id) OR_ELSE RAISE;                      # Returns ?T (checks st
 
 ### Element-Level Capabilities
 
-Capabilities normally apply to the **collection** (`T[]@shared` = one shared list). For rare cases where each **element** needs its own capability, place the capability before the array suffix:
+Capabilities attach immediately after the layer they govern. A capability on
+the list and one on its elements are therefore visibly different:
 
 ```ruby clear illustrative
 # Collection-level (common): one Arc wrapping the whole list
-MUTABLE shared_list: User[]@list:shared = [];
+MUTABLE shared_list: []@shared User = [];
 
 # Element-level (rare): each element is individually Arc'd
-MUTABLE arc_users: User@shared[]@list = [];
+MUTABLE arc_users: []User@shared = [];
 
 # Element-level with pool: each slot holds an Arc'd user
-MUTABLE arc_pool: User@shared[100]@pool = [];
+MUTABLE arc_pool: [Pool(100)]User@shared = [];
 ```
 
 Element-level capabilities are primarily useful in struct fields where individual elements need independent lifetime management (e.g., a graph where each node is shared across multiple edges).
@@ -577,7 +612,7 @@ STRUCT Node {
     id: Int64,
     left: ?Node@node,
     right: ?Node@node,
-    children: Node@node[]@list
+    children: []Node@node
 }
 
 FN buildGraph() RETURNS Void ->
@@ -617,34 +652,34 @@ implicit store is reclaimed when its outermost graph scope ends. This is what
 makes cycles inexpensive and cleanup deterministic.
 
 For a uniquely owned recursive tree that does not need sharing or cycles,
-`@indirect` remains the simpler pointer-like representation:
+`@boxed` remains the simpler pointer-like representation:
 
 ```ruby clear illustrative
 STRUCT TreeNode {
     value: Int64,
-    left: ?TreeNode@indirect,
-    right: ?TreeNode@indirect
+    left: ?TreeNode@boxed,
+    right: ?TreeNode@boxed
 }
 ```
 
-In EASY mode, a uniquely forced recursive edge may omit `@indirect` with
+In EASY mode, a uniquely forced recursive edge may omit `@boxed` with
 identical MIR, ABI, allocation count, and cleanup behavior:
 
 ```ruby clear illustrative
 STRUCT ChainNode {
     value: Int64,
-    next: ?ChainNode       # EASY infers ?ChainNode@indirect
+    next: ?ChainNode       # EASY infers ?ChainNode@boxed
 }
 ```
 
 DEFAULT and STRICT require the explicit layout. EASY also requires it when
 there is more than one performance-distinct choice—such as `left` and `right`
-recursive edges. Moving a value into `T[]@list` never causes boxing: list
+recursive edges. Moving a value into `[]T` never causes boxing: list
 elements remain inline and contiguous.
 
-`?.` is the safe navigate operator to peek into optional types. It combines with `OR_ELSE` to handle missing data like an error. One `?.` guards a continuous chain of non-optional members, so `user?.profile.name` is sufficient when only `user` is optional. A member that is itself optional introduces a new boundary (`user?.optionalProfile?.name`). Bounds-safe `@list` indexing also introduces a boundary: `users[i]?.profile.name`.
+`?.` is the safe navigate operator to peek into optional types. It combines with `OR_ELSE` to handle missing data like an error. One `?.` guards a continuous chain of non-optional members, so `user?.profile.name` is sufficient when only `user` is optional. A member that is itself optional introduces a new boundary (`user?.optionalProfile?.name`). Bounds-safe list indexing also introduces a boundary: `users[i]?.profile.name`.
 
-An `@list` indexed read has type `?T` and returns NIL when the index is out of bounds. Use `IF users[i] EXISTS AS user THEN ... END` when mutating a struct element; the binding aliases the actual list slot rather than a temporary copy.
+An `[]T` indexed read has type `?T` and returns NIL when the index is out of bounds. Use `IF users[i] EXISTS AS user THEN ... END` when mutating a struct element; the binding aliases the actual list slot rather than a temporary copy.
 
 Safe navigation can also make that mutation conditional:
 
@@ -782,7 +817,7 @@ For passing default options or defining Zig-compatible layouts:
 ```ruby clear illustrative
 # Local struct (no external module)
 EXTERN STRUCT ParseOptions {};
-EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
+EXTERN STRUCT JsonRecord { id: Int64, data: []Int64 };
 
 # Comptime type parameters for generic FFI
 EXTERN FN parseFromSliceLeaky<T>(comptime: T, content: String, options: ParseOptions)
@@ -906,7 +941,7 @@ It's sometimes useful to define a STRUCT with a borrowed field (iterators are a 
 
 ```ruby clear
 STRUCT SliceIter {
-    source: BORROWED Int64[], # Allows `source` to be a BORROW, must be initialized in a scope.
+    source: BORROWED []Int64, # Allows `source` to be a BORROW, must be initialized in a scope.
     pos: Int64,
     len: Int64
 }
@@ -940,7 +975,7 @@ END
 | `@locked` | Mutex (single-scheduler) |
 | `@writeLocked` | RwLock (single-scheduler) |
 | `@local` | Thread-local heap pointer |
-| `@indirect` | Heap allocation (explicit in DEFAULT/STRICT; EASY may infer only a uniquely forced edge) |
+| `@boxed` | Heap allocation (explicit in DEFAULT/STRICT; EASY may infer only a uniquely forced edge) |
 | `@link` | To create cyclic graphs (WeakRef/Ref) |
 | `@sharded(N)` | Shared-nothing partitioned across N shards |
 
@@ -955,6 +990,8 @@ END
 | `!T` | Error union type | `RETURNS !Float64` |
 | `?T` | Optional type | `RETURNS ?User` |
 | `~T` | Promise / stream type | `p: ~Int64 = BG { 42; }` |
+| `[~]T` | Finite stream | `s: [~]Int64 = BG STREAM { YIELD 1; }` |
+| `Tuple<A, B>` | Positional product | `p = Tuple{"ok", 1_i64}; p._0` |
 
 ## Integer Overflow Operators
 

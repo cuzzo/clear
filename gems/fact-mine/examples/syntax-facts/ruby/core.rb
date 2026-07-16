@@ -116,6 +116,10 @@ class RubySyntaxFactsCore
   end
 
   def loaded? = @status == :ready
+
+  def source_or_default(source = @source)
+    source
+  end
 end
 
 if $GLOBAL_STATE > 0

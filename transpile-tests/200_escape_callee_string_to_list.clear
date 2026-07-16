@@ -8,7 +8,7 @@ FN buildKey(i: Int64) RETURNS !String ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE keys: String[]@list = [];
+    MUTABLE keys: []String = [];
     FOR i IN (1_i64 ..= 5) DO
         keys.append(buildKey(i));
     END

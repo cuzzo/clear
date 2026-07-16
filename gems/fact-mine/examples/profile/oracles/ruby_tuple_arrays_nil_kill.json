@@ -1,0 +1,14 @@
+{
+  "tuple_arrays": [
+    {
+      "code": "[[name, node], current]",
+      "line": 9,
+      "size": 2
+    },
+    {
+      "code": "[name, node]",
+      "line": 9,
+      "size": 2
+    }
+  ]
+}

@@ -117,7 +117,7 @@ Reference docs: `mir-bugs.md` (known MIR violations), `alloc-bugs.md` (frame-the
 
 Chains: `pool: Env[N]@pool:shared:locked` = Pool<Env> wrapped in Arc<RwLock<…>>. `Type#bare_data_type` strips Group 1 for `ContainerInit`.
 
-**Ownership transfer:** `GIVE` (caller → callee), `TAKES` (callee receives). Zero implicit copies. Rc/Arc bump refcounts (not copies). Primitives, strings, enums are Copy. Unions with heap variants (`@indirect`, `[]T` slices, collections) are non-Copy. Borrow state lives in `OwnershipGraph`; it is the single source of truth — do not inspect AST node types for borrow decisions.
+**Ownership transfer:** `GIVE` (caller → callee), `TAKES` (callee receives). Zero implicit copies. Rc/Arc bump refcounts (not copies). Primitives, strings, enums are Copy. Unions with heap variants (`@boxed`, `[]T` slices, collections) are non-Copy. Borrow state lives in `OwnershipGraph`; it is the single source of truth — do not inspect AST node types for borrow decisions.
 
 **`WITH` blocks** unwrap capabilities at the call site. `WITH ... AS alias { ... }` aliases are non-escaping — `RETURN alias` / `alias.field` rejected; `RETURN COPY alias` allowed (COPY breaks the borrow).
 

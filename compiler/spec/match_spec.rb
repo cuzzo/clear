@@ -668,6 +668,23 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("const x = __match_payload_")
       end
 
+      it "dereferences a borrowed list element before matching its union tag" do
+        out = transpile(<<~CLEAR)
+          UNION Value { Number: Int64, Empty }
+          FN main() RETURNS Void ->
+            values: []Value = [Value{ Number: 7_i64 }];
+            IF values[0_i64] EXISTS AS value THEN
+              PARTIAL MATCH value START
+                Value.Number AS number -> ASSERT number == 7_i64;,
+                Value.Empty -> ASSERT FALSE;
+              END
+            END
+          END
+        CLEAR
+
+        expect(out).to include("switch (value.*)")
+      end
+
       it "MATCH and MATCH produce identical Zig output for the same exhaustive case" do
         src_iff = <<~CLEAR
           UNION Shape { Circle: Float64, Point }

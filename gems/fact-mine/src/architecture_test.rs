@@ -24,6 +24,29 @@ fn collect_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
+fn type_inference_language_grammars_live_in_language_modules() {
+    let engine = fs::read_to_string(crate_src().join("type_inference.rs"))
+        .expect("read type inference engine");
+    for token in [
+        "fn parse_ruby",
+        "fn parse_python",
+        "fn parse_typescript",
+        "fn parse_go",
+        "match language {",
+    ] {
+        assert!(
+            !engine.contains(token),
+            "shared type inference engine contains language selector {token}"
+        );
+    }
+
+    let languages = crate_src().join("type_inference/languages");
+    for file in ["ruby.rs", "python.rs", "typescript.rs", "go.rs"] {
+        assert!(languages.join(file).is_file(), "missing type semantics module {file}");
+    }
+}
+
+#[test]
 fn public_api_does_not_export_ast_or_parser_internals() {
     let lib_source = fs::read_to_string(crate_src().join("lib.rs")).expect("read lib.rs");
     let syntax_source = fs::read_to_string(crate_src().join("syntax.rs")).expect("read syntax.rs");
@@ -264,6 +287,24 @@ fn syntax_directory_does_not_gain_unreviewed_helper_files() {
         "complexity_facts.rs",
         "clone_similarity.rs",
         "complexity.rs",
+        "cfg/branches.rs",
+        "cfg/builder.rs",
+        "cfg/callbacks.rs",
+        "cfg/cases.rs",
+        "cfg/cursor.rs",
+        "cfg/dataflow.rs",
+        "cfg/effects.rs",
+        "cfg/exceptions.rs",
+        "cfg/exits.rs",
+        "cfg/facts.rs",
+        "cfg/loops.rs",
+        "cfg/metrics.rs",
+        "cfg/mod.rs",
+        "cfg/projection.rs",
+        "cfg/short_circuit.rs",
+        "cfg/statements.rs",
+        "cfg/validation.rs",
+        "cfg/worklist.rs",
         "effects.rs",
         "local_flow.rs",
         "normalized_behavior.rs",
@@ -331,6 +372,10 @@ fn complexity_fact_extractor_has_no_language_iterator_lexicon() {
         "\"map\"",
         "\"range\"",
         "\"times\"",
+        "\"ZLIST\"",
+        "\"DSTR\"",
+        "TypeExpr::Primitive(\"String\"",
+        "NormalizedCallComplexity {",
     ];
     let offenders = forbidden
         .iter()
@@ -339,7 +384,7 @@ fn complexity_fact_extractor_has_no_language_iterator_lexicon() {
         .collect::<Vec<_>>();
     assert!(
         offenders.is_empty(),
-        "language iterator/cardinality identities belong in language adapters: {}",
+        "language iterator, literal, and call-cost identities belong in language adapters: {}",
         offenders.join(", ")
     );
 }
@@ -416,7 +461,10 @@ fn language_specific_ast_files_live_only_in_ast_adapters() {
 #[test]
 fn syntax_subfiles_do_not_declare_nested_modules() {
     let syntax_dir = crate_src().join("syntax");
-    let allowed_module_loaders = [syntax_dir.join("adapters/mod.rs")];
+    let allowed_module_loaders = [
+        syntax_dir.join("adapters/mod.rs"),
+        syntax_dir.join("cfg/mod.rs"),
+    ];
     let mut offenders = Vec::new();
 
     for path in rust_files_recursive(&syntax_dir) {
@@ -735,6 +783,136 @@ fn production_source(source: &str) -> String {
         .take_while(|line| line.trim() != "#[cfg(test)]")
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[test]
+fn generic_cfg_does_not_own_concrete_language_knowledge() {
+    let cfg_dir = crate_src().join("syntax/cfg");
+    let forbidden = [
+        "Language::",
+        "Ruby",
+        "Python",
+        "JavaScript",
+        "TypeScript",
+        "Kotlin",
+        "Swift",
+        "Lua",
+        "Php",
+        "CSharp",
+        "ruby_",
+        "python_",
+        "javascript_",
+        "do end",
+        "\"each\"",
+        "\"forEach\"",
+        "\"iter_mut\"",
+    ];
+    let mut offenders = Vec::new();
+
+    for path in rust_files_recursive(&cfg_dir) {
+        let source = production_source(&fs::read_to_string(&path).expect("read CFG file"));
+        for pattern in forbidden {
+            if source.contains(pattern) {
+                offenders.push(format!("{}: {}", path.display(), pattern));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "Generic CFG code must consume normalized facts and injected profiles, never concrete-language knowledge:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn language_cfg_additions_are_explicitly_demarcated() {
+    let syntax_dir = crate_src().join("syntax");
+    let language_files = [
+        "c.rs",
+        "cpp.rs",
+        "csharp.rs",
+        "go.rs",
+        "java.rs",
+        "javascript.rs",
+        "kotlin.rs",
+        "lua.rs",
+        "php.rs",
+        "python.rs",
+        "ruby.rs",
+        "rust.rs",
+        "swift.rs",
+        "typescript.rs",
+        "zig.rs",
+    ];
+    let mut offenders = Vec::new();
+    let mut report = Vec::new();
+    let mut total_marked_lines = 0usize;
+    let mut total_vocabulary_entries = 0usize;
+
+    for file in language_files {
+        let path = syntax_dir.join(file);
+        let source = fs::read_to_string(&path).expect("read language syntax file");
+        let mut inside = false;
+        let mut marked_lines = 0usize;
+        let mut vocabulary_entries = 0usize;
+        let mut profile_lines = Vec::new();
+
+        for (index, line) in production_source(&source).lines().enumerate() {
+            if line.contains("CFG-SPECIFIC START:") {
+                if inside {
+                    offenders.push(format!("{file}:{} nested CFG marker", index + 1));
+                }
+                inside = true;
+                continue;
+            }
+            if line.contains("CFG-SPECIFIC END") {
+                if !inside {
+                    offenders.push(format!("{file}:{} unmatched CFG end marker", index + 1));
+                }
+                inside = false;
+                continue;
+            }
+            if inside {
+                marked_lines += 1;
+                vocabulary_entries += line.matches('"').count() / 2;
+            }
+            if line.contains("cfg_profile") || line.contains("_CFG_PROFILE") {
+                profile_lines.push((index + 1, inside));
+            }
+        }
+
+        if inside {
+            offenders.push(format!("{file}: unclosed CFG marker"));
+        }
+        if marked_lines == 0 {
+            offenders.push(format!("{file}: no marked CFG-specific lines"));
+        }
+        total_marked_lines += marked_lines;
+        total_vocabulary_entries += vocabulary_entries;
+        report.push(format!(
+            "{file}: {marked_lines} marked lines, {vocabulary_entries} vocabulary entries"
+        ));
+        offenders.extend(
+            profile_lines
+                .into_iter()
+                .filter(|(_, is_marked)| !is_marked)
+                .map(|(line, _)| format!("{file}:{line} CFG profile outside marked section")),
+        );
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "Language-owned CFG additions must stay measurable inside CFG-SPECIFIC markers:\n{}",
+        offenders.join("\n")
+    );
+
+    eprintln!(
+        "CFG adapter audit:\n{}\nTOTAL: {} marked lines, {} vocabulary entries",
+        report.join("\n"),
+        total_marked_lines,
+        total_vocabulary_entries
+    );
 }
 
 #[test]

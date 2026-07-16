@@ -251,8 +251,8 @@ class PipelineEachLowerer < T::Struct
   sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(MIR::ForStmt) }
   def lower_range_literal_each(list_node, each_op)
     range = T.cast(list_node, AST::RangeLit)
-    start_mir = self.visit_mir.call(T.cast(range.start, AST::Node))
-    end_mir = self.visit_mir.call(T.cast(range.finish, AST::Node))
+    start_mir = self.visit_mir.call(range.start)
+    end_mir = self.visit_mir.call(range.finish)
     end_expr = range.inclusive ? MIR::BinOp.new("+", end_mir, MIR::Lit.new("1")) : end_mir
     range_body_mir = self.visit_body_with_placeholder.call(each_op.body, "__each_item")
     capture_name = self.ast_stmts_use_placeholder.call(each_op.body) ? "__each_item" : "_"

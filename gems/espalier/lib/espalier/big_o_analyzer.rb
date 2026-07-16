@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "yaml"
+require_relative "symbolic_complexity"
 require "set"
 
 module Espalier
@@ -35,13 +36,16 @@ module Espalier
 
     attr_reader :registry, :nil_kill_evidence
 
-    def initialize(language: :ruby, nil_kill_evidence: {}, class_name: nil, ivar_types: {}, nil_kill: nil, local_types: {})
+    def initialize(language: :ruby, nil_kill_evidence: {}, class_name: nil, ivar_types: {}, nil_kill: nil, local_types: {}, declared_fields: {})
       @language = language
       @nil_kill_evidence = nil_kill_evidence
       @class_name = class_name
       @ivar_types = ivar_types || {}
       @local_types = local_types || {}
       @nil_kill = nil_kill
+      @declared_fields = declared_fields.each_with_object({}) do |(owner, fields), index|
+        index[clean_type_name(owner)] = Set.new(Array(fields).map { |field| field.to_s.delete_prefix("@") })
+      end
       @registry = load_registry(language)
     end
 
@@ -59,6 +63,9 @@ module Espalier
       @local_types = local_types if local_types
       complexity = "O(1)"
       space_complexity = "O(1)"
+      time_complete = true
+      space_complete = true
+      symbolic_time = nil
       is_dynamic = false
       trigger = nil
       unknown_operations = []
@@ -70,6 +77,26 @@ module Espalier
       
       ast_nodes.each do |node|
         if node[:type] == :call
+          # Internal calls are summarized by StructuralBigO's fixed point. An
+          # O(1) callee intentionally produces no structural hint, so the call
+          # itself must not be mistaken for unresolved external behavior.
+          next if node[:internal_call]
+
+          if node[:known_time_complexity]
+            known_complexity = node[:known_time_complexity].to_s
+            if node[:symbolic_time]
+              symbolic_time = Espalier::SymbolicComplexity.sum(symbolic_time, node[:symbolic_time])
+              known_complexity = Espalier::SymbolicComplexity.render(symbolic_time)&.first || known_complexity
+            elsif node[:execution_complexity]
+              known_complexity = multiply_complexity(known_complexity, node[:execution_complexity])
+            end
+            complexity = max_complexity(complexity, known_complexity)
+            if node[:known_space_complexity]
+              space_complexity = max_space_complexity(space_complexity, node[:known_space_complexity].to_s)
+            end
+            next
+          end
+
           receiver_type = resolve_type(node[:receiver], node[:line])
           method_called = node[:method].to_s
 
@@ -82,21 +109,23 @@ module Espalier
             elsif (chained_complexity = flattened_chain_complexity(node, ast_nodes))
               chained_complexity = multiply_complexity(chained_complexity, node[:execution_complexity]) if node[:execution_complexity]
               complexity = max_complexity(complexity, chained_complexity)
-            elsif state_accessor_return_type(receiver_type, method_called)
+            elsif declared_field?(receiver_type, method_called) || state_accessor_return_type(receiver_type, method_called)
               complexity = max_complexity(complexity, "O(1)")
             else
               unknown_operations << "#{receiver_type}##{method_called}"
+              time_complete = false
+              space_complete = false
               warnings << "Missing method complexity for `#{receiver_type}##{method_called}` in stdlib_complexity_ruby.yml at line #{node[:line]}."
               if Array(node[:collection_arguments]).any? && !node[:internal_call]
-                complexity = max_complexity(complexity, "unknown")
                 warnings << unknown_collection_call_warning(node, method_called)
               end
             end
           else
             unknown_operations << "#{node[:receiver]}.#{method_called}"
+            time_complete = false
+            space_complete = false
             warnings << "Unknown receiver type for `#{node[:receiver]}` at line #{node[:line]}. Defaulting to O(1) for `.#{method_called}`, but this could be worse."
             if Array(node[:collection_arguments]).any?
-              complexity = max_complexity(complexity, "unknown")
               warnings << unknown_collection_call_warning(node, method_called)
             end
           end
@@ -108,9 +137,26 @@ module Espalier
           is_dynamic = true
         elsif node[:type] == :structural
           structural_complexity = node[:complexity].to_s
-          complexity = max_complexity(complexity, structural_complexity)
+          if node[:symbolic_time]
+            symbolic_time = Espalier::SymbolicComplexity.sum(symbolic_time, node[:symbolic_time])
+            rendered_symbolic = Espalier::SymbolicComplexity.render(symbolic_time)&.first
+            if rendered_symbolic && complexity_rank(rendered_symbolic) >= complexity_rank(structural_complexity)
+              structural_complexity = rendered_symbolic
+            end
+          end
+          time_complete = false if node[:time_complete] == false
+          space_complete = false if node[:space_complete] == false
+          if structural_complexity == "unknown"
+            time_complete = false
+          else
+            complexity = max_complexity(complexity, structural_complexity)
+          end
           if node[:space]
-            space_complexity = max_space_complexity(space_complexity, node[:space].to_s)
+            if node[:space].to_s == "unknown"
+              space_complete = false
+            else
+              space_complexity = max_space_complexity(space_complexity, node[:space].to_s)
+            end
           end
           if node[:is_dynamic]
             is_dynamic = true
@@ -118,14 +164,22 @@ module Espalier
           end
           warnings << structural_warning(node) if structural_complexity != "O(1)"
         elsif node[:type] == :callback || node[:type] == :yield
+          time_complete = false
+          space_complete = false
           warnings << "Function pointer / callback executed at line #{node[:line]}. This could execute arbitrary O(N^x) code, meaning our calculation is strictly a LOWER BOUND."
         end
       end
 
       {
         method: method_name,
-        lower_bound_complexity: complexity,
-        space_complexity: space_complexity,
+        lower_bound_complexity: time_complete ? complexity : "unknown",
+        space_complexity: space_complete ? space_complexity : "unknown",
+        known_time_component: complexity,
+        known_space_component: space_complexity,
+        symbolic_time: symbolic_time,
+        complexity_variables: Espalier::SymbolicComplexity.render(symbolic_time)&.last || [],
+        time_complete: time_complete,
+        space_complete: space_complete,
         is_dynamic: is_dynamic,
         trigger: trigger,
         unknown_operations: unknown_operations.uniq,
@@ -171,6 +225,11 @@ module Espalier
       return nil unless receiver_name
       receiver_name = receiver_name.to_s
 
+      if receiver_name.match?(/\A[^\[\]]+\[[^\[\]]+\]\z/)
+        collection_name = receiver_name.sub(/\[[^\[\]]+\]\z/, "")
+        return clean_type_name(indexed_element_type(raw_simple_type(collection_name, line)))
+      end
+
       if receiver_name.include?(".")
         parts = receiver_name.split(".")
         current_type = resolve_simple_type(parts.first, line)
@@ -185,37 +244,78 @@ module Espalier
     end
 
     def resolve_simple_type(receiver_name, line)
+      clean_type_name(raw_simple_type(receiver_name, line))
+    end
+
+    def raw_simple_type(receiver_name, line)
       if receiver_name == "self"
-        return clean_type_name(@class_name)
+        return @class_name
       end
 
       if (type = @local_types[receiver_name])
-        return clean_type_name(type)
+        return type
       end
 
       if receiver_name.start_with?("@")
         type = @ivar_types[receiver_name] || @ivar_types[receiver_name[1..]]
-        return clean_type_name(type) if type
+        return type if type
       end
 
       if (type = @ivar_types["@#{receiver_name}"] || @ivar_types[receiver_name])
-        return clean_type_name(type)
+        return type
       end
 
       if @class_name && @nil_kill
         sig = @nil_kill.method_signatures["#{@class_name}##{receiver_name}"]
         if sig
           ret = extract_return_type(sig)
-          return clean_type_name(ret) if ret
+          return ret if ret
         end
       end
 
       if @nil_kill_evidence
         type = @nil_kill_evidence.dig(line.to_s, receiver_name) || @nil_kill_evidence.dig(line.to_s, "@#{receiver_name}")
-        return clean_type_name(type) if type
+        return type if type
       end
 
       nil
+    end
+
+    def indexed_element_type(type)
+      return nil unless type
+
+      text = type.to_s.strip
+      if text =~ /\AT\.nilable\((.+)\)\z/
+        return indexed_element_type(Regexp.last_match(1))
+      end
+      if text =~ /\A(?:T::|T\.)?Array\[(.+)\]\z/
+        return Regexp.last_match(1).strip
+      end
+      if text =~ /\A(?:T::|T\.)?Hash\[(.+)\]\z/
+        parts = split_generic_arguments(Regexp.last_match(1))
+        return parts[1]&.strip if parts.length == 2
+      end
+
+      "String" if clean_type_name(text) == "String"
+    end
+
+    def split_generic_arguments(source)
+      depth = 0
+      start = 0
+      parts = []
+      source.each_char.with_index do |char, index|
+        case char
+        when "[", "(", "{" then depth += 1
+        when "]", ")", "}" then depth -= 1
+        when ","
+          next unless depth.zero?
+
+          parts << source[start...index]
+          start = index + 1
+        end
+      end
+      parts << source[start..]
+      parts
     end
 
     def resolve_method_return_type(class_name, method_name)
@@ -242,6 +342,11 @@ module Espalier
       return nil unless @nil_kill&.respond_to?(:state_types)
 
       clean_type_name(@nil_kill.state_types.dig(class_name, "@#{method_name}"))
+    end
+
+    def declared_field?(class_name, method_name)
+      fields = @declared_fields[clean_type_name(class_name)]
+      fields&.include?(method_name.to_s.delete_prefix("@"))
     end
 
     def flattened_chain_complexity(node, ast_nodes)
@@ -282,20 +387,17 @@ module Espalier
 
     def complexity_rank(complexity)
       return 1 if complexity.nil?
+      return 1 if complexity == "O(1)" || complexity == "unknown"
+      return 2 if complexity == "O(log N)"
+      return 100 if complexity == "O(2^N)"
+      return 200 if complexity == "O(N!)"
 
-      case complexity.to_s
-      when "O(1)" then 1
-      when "O(log N)" then 2
-      when "O(N)" then 10
-      when "O(N log N)" then 11
-      when "O(N * M)" then 14
-      when /\AO\(N\^(\d+)( log N)?\)\z/
-        10 + ($1.to_i * 2) + ($2 ? 1 : 0)
-      when "O(2^N)" then 100
-      when "O(N!)" then 200
-      else
-        1
-      end
+      rank = Espalier::SymbolicComplexity.rank_string(complexity)
+      return 1 if rank.negative?
+      return 10 if rank == 1
+      return 11 if rank == 1.1
+
+      10 + (rank.floor * 2) + (rank.modulo(1).positive? ? 1 : 0)
     end
 
     def multiply_complexity(current, multiplier)

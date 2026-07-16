@@ -1,7 +1,7 @@
 # Test: list.remove(i) returns the removed element
 
 FN main() RETURNS Void ->
-    MUTABLE items: Float64[]@list = List[];
+    MUTABLE items: []Float64 = List[];
     items.append(10.0);
     items.append(20.0);
     items.append(30.0);

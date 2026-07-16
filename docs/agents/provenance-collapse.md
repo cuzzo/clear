@@ -16,7 +16,7 @@ Neither layer knows the other did it. Every bug in this class — leaks of duped
 | Channel | Type | Set | Read |
 |---|---|---|---|
 | `Type#provenance` | `:heap`/`:frame`/`:rodata`/`:borrow` | `visit_CopyNode`, `EscapeGraph#stamp_node_heap!`, `Type#sync=` setter side-effect, schema resolution | `Type#zig_type` (computes `*T`), `cleanup_classifier`, `dupeValue` arms |
-| `Type#layout` | `:indirect`/nil | `parse_type_annotation` for `@indirect`, `function_analysis.rb:790` for atomic struct params, `scope.rb:172` propagation | `Type#zig_type` (computes `*T`), `cleanup_classifier` |
+| `Type#layout` | `:indirect`/nil | `parse_type_annotation` for `@boxed`, `function_analysis.rb:790` for atomic struct params, `scope.rb:172` propagation | `Type#zig_type` (computes `*T`), `cleanup_classifier` |
 | `Type#sync` | `:locked`/`:write_locked`/etc. | parser, annotator | sets `provenance=:heap` as setter side-effect |
 | `Type#ownership` | `:affine`/`:shared`/`:multiowned`/`:link` | parser | `inherently_heap?` |
 | `AST::Locatable#storage` | `:stack`/`:frame`/`:heap` | `finalize_storage!`, `EscapeGraph#stamp_node_heap!`, parser | `lower_var_decl` cleanup-alloc decision |
@@ -31,7 +31,7 @@ Neither layer knows the other did it. Every bug in this class — leaks of duped
 | `promoteDeep` | whole-struct, return-time | **yes** | **yes** ← bug source |
 | `dupeValue` | COPY of struct/list/etc. | yes | n/a (caller takes ownership) |
 | `dupeUnionValue` | COPY of union | yes | n/a |
-| `dupeStructSlices` | union @indirect field | yes | n/a |
+| `dupeStructSlices` | union @boxed field | yes | n/a |
 
 ## What the simplified architecture says
 

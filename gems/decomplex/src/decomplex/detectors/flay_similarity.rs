@@ -172,7 +172,79 @@ impl Scanner {
                 best_by_key.insert(key, finding);
             }
         }
+        self.add_subsequence_findings(candidates, &mut best_by_key);
         best_by_key.into_values().collect()
+    }
+
+    fn add_subsequence_findings(
+        &self,
+        candidates: &[CloneCandidate],
+        findings: &mut BTreeMap<String, SimilarityFinding>,
+    ) {
+        let mut by_child: HashMap<(&str, &str), Vec<usize>> = HashMap::new();
+        for (index, candidate) in candidates.iter().enumerate() {
+            if !matches!(
+                candidate.node_name.as_str(),
+                "defn" | "defs" | "body_statement" | "match"
+            )
+                || candidate.child_fingerprints.len() < 3
+            {
+                continue;
+            }
+            for child in candidate.child_fingerprints.iter().collect::<HashSet<_>>() {
+                by_child
+                    .entry((candidate.node_name.as_str(), child.as_str()))
+                    .or_default()
+                    .push(index);
+            }
+        }
+
+        let mut pairs = HashSet::new();
+        for indexes in by_child.values() {
+            for left in 0..indexes.len() {
+                for right in (left + 1)..indexes.len() {
+                    let pair = if indexes[left] < indexes[right] {
+                        (indexes[left], indexes[right])
+                    } else {
+                        (indexes[right], indexes[left])
+                    };
+                    pairs.insert(pair);
+                }
+            }
+        }
+
+        for (left, right) in pairs {
+            let left = &candidates[left];
+            let right = &candidates[right];
+            if left.fingerprint == right.fingerprint || site_for(left) == site_for(right) {
+                continue;
+            }
+            let (matched_mass, matched_children) = common_subsequence_mass(left, right);
+            let smaller_mass = left.mass.min(right.mass).max(1);
+            if matched_children < 2
+                || matched_mass < self.mass
+                || matched_mass * 100 < smaller_mass * 45
+            {
+                continue;
+            }
+
+            let cluster = vec![left, right];
+            let mut key = cluster
+                .iter()
+                .map(|candidate| {
+                    format!(
+                        "{}\0{}\0{}",
+                        candidate.file, candidate.line, candidate.node_name
+                    )
+                })
+                .collect::<Vec<_>>();
+            key.sort();
+            let key = key.join("\0");
+            let finding = self.finding_for(&cluster, "type3", matched_mass);
+            if findings.get(&key).is_none_or(|existing| existing.mass < finding.mass) {
+                findings.insert(key, finding);
+            }
+        }
     }
 
     fn finding_for(
@@ -267,6 +339,28 @@ impl Scanner {
         self.mass
             .max(((self.mass as f64) * 23.0 / 8.0).ceil() as usize)
     }
+}
+
+fn common_subsequence_mass(
+    left: &CloneCandidate,
+    right: &CloneCandidate,
+) -> (usize, usize) {
+    let rows = left.child_fingerprints.len();
+    let cols = right.child_fingerprints.len();
+    let mut table = vec![vec![(0usize, 0usize); cols + 1]; rows + 1];
+    for row in 0..rows {
+        for col in 0..cols {
+            table[row + 1][col + 1] = if left.child_fingerprints[row]
+                == right.child_fingerprints[col]
+            {
+                let mass = left.child_masses[row].min(right.child_masses[col]);
+                (table[row][col].0 + mass, table[row][col].1 + 1)
+            } else {
+                table[row][col + 1].max(table[row + 1][col])
+            };
+        }
+    }
+    table[rows][cols]
 }
 
 fn uniq_sites<'a>(
@@ -454,6 +548,54 @@ end
     }
 
     #[test]
+    fn detects_structural_match_clones() {
+        let out = scan(
+            r#"
+value =~ /alpha/
+entry =~ /beta/
+"#,
+            1,
+            1,
+        );
+        assert!(
+            out.iter().any(|finding| finding.node == "match"),
+            "{out:#?}"
+        );
+    }
+
+    #[test]
+    fn detects_large_shared_method_subsequences_despite_insertions() {
+        let out = scan(
+            r#"
+def branch_prefix(node)
+  setup(node)
+  alpha(node.left)
+  beta(node.right)
+  gamma(node.name)
+  finish(node)
+end
+
+def background_prefix(entry)
+  prepare(entry)
+  setup(entry)
+  extra(entry)
+  alpha(entry.left)
+  beta(entry.right)
+  gamma(entry.name)
+  finish(entry)
+end
+"#,
+            6,
+            1,
+        );
+        assert!(out.iter().any(|finding| {
+            finding.clone_type == "type3" && finding.node == "body_statement" &&
+                finding.sites.iter().any(|site| site.contains("branch_prefix")) &&
+                finding.sites.iter().any(|site| site.contains("background_prefix"))
+        }), "{out:#?}");
+    }
+
+    #[test]
     fn test_flay_similarity_gaps() {
         let out = scan(
             r#"
@@ -573,4 +715,3 @@ end
         assert_eq!(pruned[0].mass, 15);
     }
 }
-

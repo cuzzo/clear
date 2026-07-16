@@ -362,7 +362,7 @@ class ReporterTest < Minitest::Test
         end
       RB
 
-      report = Espalier::Reporter.new(manifest, root: dir).to_markdown
+      report = Espalier::Reporter.new(manifest, root: dir, closed_world: true).to_markdown
 
       assert_includes report, "## Privatization Candidates"
       assert_includes report, "`CompilerPhase#prepare`"

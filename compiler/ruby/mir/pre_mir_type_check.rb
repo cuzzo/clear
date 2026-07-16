@@ -1,4 +1,4 @@
-# typed: false
+# typed: strict
 # pre_mir_type_check.rb -- AST→MIR boundary invariant.
 #
 # Every evaluatable AST node (anything that includes the typed-node

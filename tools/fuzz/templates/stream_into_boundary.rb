@@ -9,7 +9,7 @@
 # move ∈ {borrow, copy, give, clone, lend}, value ∈ {int, string, struct}.
 #
 # Constraints (per spec):
-#   - @local | @shared can cross boundaries; @multiowned | @indirect cannot.
+#   - @local | @shared can cross boundaries; @multiowned | @boxed cannot.
 #   - CLONE requires @shared or @split.
 #   - LEND poisons the boundary with the borrow's lifetime. Until the
 #     parser accepts that surface syntax, those cells are expected hard

@@ -47,7 +47,7 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
         c = C{ v: 0 };
         WITH SNAPSHOT c AS view { x = view.v; }
       CLEAR
-      expect { run(src) }.to raise_error(/WITH SNAPSHOT requires a @versioned or @indirect:atomic variable/i)
+      expect { run(src) }.to raise_error(/WITH SNAPSHOT requires a @versioned or @boxed:atomic variable/i)
     end
 
     it "rejects `WITH SNAPSHOT` on a @locked variable" do
@@ -56,16 +56,16 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
         c = C{ v: 0 } @locked;
         WITH SNAPSHOT c AS view { x = view.v; }
       CLEAR
-      expect { run(src) }.to raise_error(/WITH SNAPSHOT requires a @versioned or @indirect:atomic variable/i)
+      expect { run(src) }.to raise_error(/WITH SNAPSHOT requires a @versioned or @boxed:atomic variable/i)
     end
 
     it "reports indirect non-atomic sync accurately" do
       src = <<~CLEAR
         STRUCT C { v: Int64 }
-        c = C{ v: 0 } @indirect:locked;
+        c = C{ v: 0 } @boxed:locked;
         WITH SNAPSHOT c AS view { x = view.v; }
       CLEAR
-      expect { run(src) }.to raise_error(/'c' is @indirect:locked/)
+      expect { run(src) }.to raise_error(/'c' is .*@boxed:locked/)
     end
 
     it "reports ownership-only sources accurately" do
@@ -242,11 +242,11 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
   # @example_for: WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC
   # @fix: WITH SNAPSHOT only works on cells that publish stable
   # @fix: snapshots. Add `@versioned` (MVCC: readers see a stable
-  # @fix: snapshot, writers retry on conflict) or `@indirect:atomic`
+  # @fix: snapshot, writers retry on conflict) or `@boxed:atomic`
   # @fix: (lock-free atomic-pointer cell — readers snapshot, writers
   # @fix: CAS-publish) to the binding's declaration.
   describe ":WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC — WITH SNAPSHOT on a plain binding" do
-    it "raises when the source has no @versioned / @indirect:atomic sigil" do
+    it "raises when the source has no @versioned / @boxed:atomic sigil" do
       expect {
         run(<<~CLEAR)
           STRUCT C { v: Int64 }
@@ -256,7 +256,7 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
             RETURN;
           END
         CLEAR
-      }.to raise_error(/WITH SNAPSHOT requires a @versioned or @indirect:atomic/i)
+      }.to raise_error(/WITH SNAPSHOT requires a @versioned or @boxed:atomic/i)
     end
 
     it "compiles when the source is @versioned" do

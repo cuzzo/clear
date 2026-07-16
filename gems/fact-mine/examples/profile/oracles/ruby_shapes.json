@@ -58,9 +58,9 @@
       "key": [
         "RubyShapes",
         "initialize",
-        "class"
+        "instance"
       ],
-      "kind": "class",
+      "kind": "instance",
       "language": "ruby",
       "line": 13,
       "local_complexity": 0.0,

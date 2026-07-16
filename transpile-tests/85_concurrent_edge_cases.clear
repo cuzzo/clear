@@ -26,7 +26,7 @@ FN main() RETURNS Void ->
     ASSERT big_total == 21.0, "chained: tripled [1,2,3,4]=[3,6,9,12], WHERE >7 = [9,12], sum=21";
 
     # Edge case 4: CONCURRENT EACH on @list
-    MUTABLE list_items: Item[]@list = [];
+    MUTABLE list_items: []Item = [];
     append(list_items, Item{value: 1.0});
     append(list_items, Item{value: 2.0});
     append(list_items, Item{value: 3.0});

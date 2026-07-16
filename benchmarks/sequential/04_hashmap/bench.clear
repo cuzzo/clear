@@ -6,7 +6,7 @@
 # C uses calloc/free for the bucket array. Rust uses heap via with_capacity.
 
 FN main() RETURNS Void ->
-  MUTABLE m: HashMap<Int64, Float64> = {};
+  MUTABLE m: {Int64}Float64 = {};
 
   # Insert phase: 1M integer key-value pairs
   t0 = timestampMs();

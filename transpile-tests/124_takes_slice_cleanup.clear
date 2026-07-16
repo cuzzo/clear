@@ -7,7 +7,7 @@ FN process!(TAKES items: Value[]) RETURNS Float64 ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE list: Value[]@list = List[];
+    MUTABLE list: []Value = List[];
     list.append(Value{ Symbol: COPY "hello" });
     list.append(Value{ Symbol: COPY "world" });
     result = process!(list);

@@ -80,3 +80,38 @@ fn test_cli_error_paths_and_variations() {
         .unwrap();
     assert!(!out.status.success());
 }
+
+#[test]
+fn trace_plan_cli_is_deterministic_across_worker_counts() {
+    use std::io::Write;
+    use std::process::Command;
+
+    let bin_path = env!("CARGO_BIN_EXE_fact-mine-rust");
+    let mut first = tempfile::Builder::new().suffix(".rb").tempfile().unwrap();
+    let mut second = tempfile::Builder::new().suffix(".rb").tempfile().unwrap();
+    first
+        .write_all(b"class A\n  def one(value)\n    value\n  end\nend\n")
+        .unwrap();
+    second
+        .write_all(b"class B\n  def two(value)\n    value\n  end\nend\n")
+        .unwrap();
+
+    let run = |jobs: &str| {
+        Command::new(bin_path)
+            .env("FACT_MINE_JOBS", jobs)
+            .args([
+                "profile",
+                "trace-plan",
+                first.path().to_str().unwrap(),
+                second.path().to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+    };
+    let sequential = run("1");
+    let parallel = run("4");
+
+    assert!(sequential.status.success());
+    assert!(parallel.status.success());
+    assert_eq!(sequential.stdout, parallel.stdout);
+}

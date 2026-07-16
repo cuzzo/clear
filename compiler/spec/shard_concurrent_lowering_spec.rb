@@ -15,7 +15,7 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
   it "lowers SHARD + CONCURRENT EACH as verifier-visible structural MIR" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
-          MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
+          MUTABLE counts: {Int64}@sharded(4) Int64 = {};
           (0..<16_i64) |> SHARD(_ MOD 4_i64, counts) |> CONCURRENT EACH {
               counts[_] = (counts[_] OR_ELSE 0_i64) + 1_i64;
           };
@@ -35,9 +35,9 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
   it "auto-detects a single @sharded map in list-backed CONCURRENT EACH" do
     conc = last_concurrent_op(<<~CLEAR)
       FN main() RETURNS Void ->
-          MUTABLE items: Int64[]@list = [];
+          MUTABLE items: []Int64 = [];
           items.append(1_i64);
-          MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
+          MUTABLE counts: {Int64}@sharded(4) Int64 = {};
           items |> CONCURRENT EACH {
               counts[_] = (counts[_] OR_ELSE 0_i64) + 1_i64;
           };
@@ -54,10 +54,10 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
     expect {
       conc = last_concurrent_op(<<~CLEAR)
         FN main() RETURNS Void ->
-            MUTABLE items: Int64[]@list = [];
+            MUTABLE items: []Int64 = [];
             items.append(1_i64);
-            MUTABLE a: HashMap<Int64, Int64>@sharded(4) = {};
-            MUTABLE b: HashMap<Int64, Int64>@sharded(4) = {};
+            MUTABLE a: {Int64}@sharded(4) Int64 = {};
+            MUTABLE b: {Int64}@sharded(4) Int64 = {};
             items |> CONCURRENT EACH {
                 a[_] = (a[_] OR_ELSE 0_i64) + 1_i64;
                 b[_] = (b[_] OR_ELSE 0_i64) + 1_i64;
@@ -72,9 +72,9 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
   it "keeps normal concurrent each when the @sharded map is only inspected" do
     conc = last_concurrent_op(<<~CLEAR)
       FN main() RETURNS Void ->
-          MUTABLE items: Int64[]@list = [];
+          MUTABLE items: []Int64 = [];
           items.append(1_i64);
-          MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
+          MUTABLE counts: {Int64}@sharded(4) Int64 = {};
           items |> CONCURRENT EACH {
               count = counts.count();
           };
@@ -89,9 +89,9 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
     expect {
       conc = last_concurrent_op(<<~CLEAR)
         FN main() RETURNS Void ->
-            MUTABLE items: Int64[]@list = [];
+            MUTABLE items: []Int64 = [];
             items.append(1_i64);
-            MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
+            MUTABLE counts: {Int64}@sharded(4) Int64 = {};
             items |> CONCURRENT EACH {
                 counts[_] = (counts[_] OR_ELSE 0_i64) + 1_i64;
                 counts[_ + 1_i64] = (counts[_ + 1_i64] OR_ELSE 0_i64) + 1_i64;

@@ -769,18 +769,18 @@ module Doctor
         if is_mvcc_fit
           mvcc_candidates << l
           atomic_ptr_candidates << l
-          "read-heavy (#{read_pct}%) + contended → try @shared:versioned (or @indirect:atomic for whole-struct publish)"
+          "read-heavy (#{read_pct}%) + contended → try @shared:versioned (or @boxed:atomic for whole-struct publish)"
         elsif is_atomic_fit
           atomic_candidates << l
           atomic_ptr_candidates << l
           if cont_pct >= 10
-            "write-heavy + contended → check static eligibility for @shared:atomic / @indirect:atomic"
+            "write-heavy + contended → check static eligibility for @shared:atomic / @boxed:atomic"
           else
-            "very hot lock + write-heavy → check static eligibility for @shared:atomic / @indirect:atomic"
+            "very hot lock + write-heavy → check static eligibility for @shared:atomic / @boxed:atomic"
           end
         elsif is_atomic_ptr_fit
           atomic_ptr_candidates << l
-          "contended lock → check static eligibility for @indirect:atomic (whole-struct publish)"
+          "contended lock → check static eligibility for @boxed:atomic (whole-struct publish)"
         elsif cont_pct >= 20 && avg_hold > 1_000_000
           "hot lock + long hold — break up the critical section"
         elsif cont_pct >= 20
@@ -807,7 +807,7 @@ module Doctor
       puts "    - read-mostly (>=80% reads is a good rule of thumb)"
       puts "    - readers are blocking on writers today (cont% >= 10%)"
       puts "    - the protected struct is small (<256 bytes; large structs"
-      puts "      copy on every write — wrap large fields in @indirect, or"
+      puts "      copy on every write — wrap large fields in @boxed, or"
       puts "      stay with @shared:writeLocked)"
       puts ""
       puts "  Migration: change `@shared:writeLocked` -> `@shared:versioned`"
@@ -817,7 +817,7 @@ module Doctor
       puts "  `ON MvccConflict ...` is optional (the program SYNC POLICY's"
       puts "  default RAISE applies otherwise). For polymorphic helpers,"
       puts "  prefer `REQUIRES x: SNAPSHOTTED` (umbrella for @versioned"
-      puts "  and @indirect:atomic) over the narrower `VERSIONED`. See"
+      puts "  and @boxed:atomic) over the narrower `VERSIONED`. See"
       puts "  docs/mvcc.md and docs/agents/true-synchronization-polymorphism.md."
     end
 
@@ -880,7 +880,7 @@ module Doctor
     puts "  acquires; the source has struct-shape bindings whose WITH-"
     puts "  EXCLUSIVE bodies are either read-only or whole-struct"
     puts "  replace (`alias = StructName{...}`). Switching to"
-    puts "  `@indirect:atomic` removes the lock entirely: readers do an"
+    puts "  `@boxed:atomic` removes the lock entirely: readers do an"
     puts "  acquire-load + EBR pin (lock-free, parallel-scaling); the"
     puts "  writer's whole-T publish becomes a CAS-loop (Rust arc-swap"
     puts "  rcu semantics — bounded internal retry, AtomicConflict on"
@@ -898,7 +898,7 @@ module Doctor
       loc   = c[:line] ? "line #{c[:line]}" : "(line unknown)"
       puts "    #{loc}: '#{c[:name]}: #{c[:struct_name]}' #{sigil}"
       puts "      #{c[:n_uses]} eligible WITH site(s); whole-struct or read-only body"
-      puts "      → migrate to `#{c[:name]} = #{c[:struct_name]}{...} @indirect:atomic;`"
+      puts "      → migrate to `#{c[:name]} = #{c[:struct_name]}{...} @boxed:atomic;`"
       puts "         and rewrite WITH EXCLUSIVE -> WITH SNAPSHOT (read) /"
       puts "         WITH SNAPSHOT MUTABLE (whole-struct replace; AtomicConflict"
       puts "         is defaulted by SYNC POLICY -- no inline handler needed)"
@@ -908,7 +908,7 @@ module Doctor
   # ── MVCC Cells ──
   # Per-Versioned(T) cell stats from mvcc-profile.zig: reads, commits,
   # retries, struct size. Two diagnoses:
-  #   - COW thrash: many commits + large struct -> @indirect heap-
+  #   - COW thrash: many commits + large struct -> @boxed heap-
   #     promotes the offending field so the CAS publishes a pointer
   #     swap (8 bytes) instead of a struct copy (256+ bytes).
   #   - MVCC misuse: more commits than reads -> not read-heavy ->
@@ -983,7 +983,7 @@ module Doctor
 
       # COW thrash: commits >= 10K AND struct >= 256B AND total COW >= 100MB.
       # The 256B threshold matches the doctor advice in the lock section
-      # ("the protected struct is small (<256 bytes)") — bigger == @indirect
+      # ("the protected struct is small (<256 bytes)") — bigger == @boxed
       # candidate. The 100MB total guards against a hot small-struct cell
       # spuriously firing — at 256B+ the byte volume goes up fast.
       is_cow_thrash = c[:commits] >= 10_000 && c[:struct_size] >= 256 && cow_bytes >= 100_000_000
@@ -995,7 +995,7 @@ module Doctor
       is_misuse = c[:commits] >= 1_000 && c[:reads] < c[:commits]
 
       # Single-cell whole-struct Versioned cells can skip MVCC update overhead
-      # with @indirect:atomic. Static shape analysis remains the
+      # with @boxed:atomic. Static shape analysis remains the
       # false-positive gate.
       is_atomic_ptr_upgrade = c[:multi_commits] == 0 &&
                               (c[:commits] >= 1_000 || c[:reads] >= 1_000)
@@ -1003,7 +1003,7 @@ module Doctor
       diagnosis =
         if is_cow_thrash
           cow_thrash << c
-          "COW thrash (#{cow_str} copied) → @indirect on large fields"
+          "COW thrash (#{cow_str} copied) → @boxed on large fields"
         elsif is_misuse
           misuse << c
           "write-heavy (#{c[:commits]} commits vs #{c[:reads]} reads) → " +
@@ -1014,7 +1014,7 @@ module Doctor
           "#{c[:update_failures]} commits exhausted retries (-> error.UpdateRetriesExhausted)"
         elsif is_atomic_ptr_upgrade
           atomic_ptr_upgrade << c
-          "single-cell only → check static eligibility for @indirect:atomic upgrade"
+          "single-cell only → check static eligibility for @boxed:atomic upgrade"
         else
           "ok"
         end
@@ -1032,13 +1032,13 @@ module Doctor
       puts ""
       puts "    STRUCT Big {"
       puts "      hot_field: Int64,           // small, copy is fine"
-      puts "      cold_field: BigPayload @indirect,  // heap-pointed,"
+      puts "      cold_field: BigPayload @boxed,  // heap-pointed,"
       puts "                                  //   COW becomes a 1-word swap"
       puts "    }"
       puts ""
       puts "  Wrap any field where the bulk of the @sizeOf(T) lives. The"
       puts "  CAS payload becomes a pointer (8 bytes) instead of a struct"
-      puts "  copy. Readers still see consistent snapshots — @indirect is"
+      puts "  copy. Readers still see consistent snapshots — @boxed is"
       puts "  always read through the cell's pointer."
     end
 
@@ -1059,13 +1059,13 @@ module Doctor
     end
 
     # The lock-profile path is the primary surface; this catches the same
-    # @indirect:atomic upgrade signal from MVCC profile data.
+    # @boxed:atomic upgrade signal from MVCC profile data.
     emit_atomic_ptr_upgrade_from_mvcc!(profile_dir) if atomic_ptr_upgrade.any?
     puts ""
   end
 
   # Cross-reference runtime single-cell MVCC traffic with static whole-struct
-  # replacement eligibility before suggesting @indirect:atomic.
+  # replacement eligibility before suggesting @boxed:atomic.
   sig { params(profile_dir: String).returns(T.nilable(Array)) }
   def self.emit_atomic_ptr_upgrade_from_mvcc!(profile_dir)
     src_path = File.join(profile_dir, 'source.clear')
@@ -1081,7 +1081,7 @@ module Doctor
     puts "  cells doing only single-cell whole-struct commits (no multi-"
     puts "  cell `Shared.updateMulti` traffic); the source has matching"
     puts "  WITH SNAPSHOT MUTABLE bodies that are whole-struct replace."
-    puts "  Switching to `@indirect:atomic` skips MVCC's bounded-retry +"
+    puts "  Switching to `@boxed:atomic` skips MVCC's bounded-retry +"
     puts "  EBR-pin-on-update overhead: same lock-free read path, plus a"
     puts "  rcu-style retry update (bounded internally; AtomicConflict on"
     puts "  cap exhaustion, defaulted by SYNC POLICY)."
@@ -1093,7 +1093,7 @@ module Doctor
       loc   = c[:line] ? "line #{c[:line]}" : "(line unknown)"
       puts "    #{loc}: '#{c[:name]}: #{c[:struct_name]}' #{sigil}"
       puts "      #{c[:n_uses]} eligible WITH SNAPSHOT site(s); whole-struct or read-only"
-      puts "      → migrate to `#{c[:name]} = #{c[:struct_name]}{...} @indirect:atomic;`"
+      puts "      → migrate to `#{c[:name]} = #{c[:struct_name]}{...} @boxed:atomic;`"
       puts "         WITH SNAPSHOT (read) stays the same shape;"
       puts "         WITH SNAPSHOT MUTABLE drops the trailing `ON MvccConflict`"
       puts "         (AtomicConflict is defaulted by SYNC POLICY)"

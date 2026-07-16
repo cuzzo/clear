@@ -3,6 +3,24 @@ require_relative "../ruby/ast/diagnostic_registry" unless defined?(DiagnosticReg
 require_relative "../ruby/ast/diagnostic_buckets" unless defined?(DiagnosticBuckets)
 
 RSpec.describe DiagnosticBuckets do
+  it "loads every newly registered type and capability diagnostic bucket" do
+    path = File.expand_path("../ruby/ast/diagnostic_buckets.rb", __dir__)
+    wrapped = Module.new
+    wrapped.module_eval(File.read(path), path)
+    buckets = wrapped.const_get(:DiagnosticBuckets)::BUCKETS
+    codes = buckets.flat_map { |bucket| bucket[:codes] }
+
+    expect(codes).to include(
+      :TYPE_NODE_LIMIT,
+      :COLLECTION_HINT_VALUE_ONLY,
+      :TUPLE_INDEX_SYNTAX,
+      :RANK_DYNAMIC_LITERAL_NEEDS_SHAPE,
+      :BG_STREAM_YIELDS_REQUIRED,
+      :YIELD_OUTSIDE_BG_STREAM,
+      :TYPE_CAPABILITY_SITE_LIMIT,
+    )
+  end
+
   it "every bucketed code is in the diagnostic registry" do
     unknown = DiagnosticBuckets::BUCKETS.flat_map { |b|
       b[:codes].reject { |c| DiagnosticRegistry.known?(c) }.map { |c| "  :#{c} (in bucket #{b[:id]})" }

@@ -52,6 +52,7 @@ const tests = [_]Test{
     .{ .name = "parking fsm-rwlock loom: 1 FSM writer + 1 FSM reader exhaustive (256 schedules)", .func = &ploom.testFsmRwlockWriterReader },
     .{ .name = "parking fsm-rwlock loom: 1W+2R FSM 3^10 base-3 exhaustive (wake-on-undo guard)", .func = &ploom.testFsmRwlockOneWriterTwoReaders },
     .{ .name = "stream close-err-atomic: producer/consumer handshake on closed+err (4096 schedules)", .func = &ploom.testStreamCloseErrAtomicCoverage },
+    .{ .name = "stream nextStep production interleavings: full-ring producer wake and locked close recheck", .func = &ploom.testStreamNextStepInterleavings },
     .{ .name = "split-stream err-set-atomic: producer/consumer handshake on err_set + non-atomic err (4096 schedules)", .func = &ploom.testSplitStreamErrSetAtomicCoverage },
     .{ .name = "stream publish-acquire-atomic: SplitStream chunk.len release/acquire vs values[] (4096 schedules)", .func = &ploom.testStreamChunkPublishAtomicCoverage },
     .{ .name = "split-stream production lifecycle: retain, publish, close, error, deinit", .func = &ploom.testSplitStreamProductionLifecycle },

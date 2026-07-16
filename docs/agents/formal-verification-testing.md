@@ -147,7 +147,7 @@ diagnostic should fire on at least one combinatoric cell.
 **Matrix**:
 - 4 boundary forms (`BG`, `DO`, `BG STREAM`, `CONCURRENT EACH`/`WHERE`/`SELECT`)
 - × 3 modifiers (none, `@parallel`, `@pinned`)
-- × 5 ownership (`@local`, `@shared`, `@multiowned`, `@arena`, `@indirect`)
+- × 5 ownership (`@local`, `@shared`, `@multiowned`, `@arena`, `@boxed`)
 - × 4 sync wrappers for `@shared` (`@locked`, `@writeLocked`, `@atomic`,
   `@versioned`)
 - × 5 move modes (borrow, GIVE, COPY, CLONE, LEND-when-landed)

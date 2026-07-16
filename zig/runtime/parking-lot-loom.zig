@@ -2854,6 +2854,122 @@ pub fn testFsmRwlockTwoWriters() !void {
 const StreamI64 = DataStructures.Stream(i64);
 var g_stream_inner: StreamI64.Inner = undefined;
 var g_stream_observed_err: bool = false;
+var g_next_step_stream: StreamI64 = undefined;
+var g_next_step_observed_closed: bool = false;
+var g_next_step_err: ?anyerror = null;
+
+fn entryStreamNextStepConsumer() callconv(.c) void {
+    const step = g_next_step_stream.nextStep() catch |err| {
+        g_next_step_err = err;
+        harness.done[0] = true;
+        while (true) fc.__fiber.?.yield();
+    };
+    g_next_step_observed_closed = switch (step) {
+        .Closed => true,
+        .Item => false,
+    };
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryStreamNextStepCloseOwner() callconv(.c) void {
+    // The test starts with the metadata lock held by this closer. Publish
+    // close, then release the lock exactly as Stream.close does. This forces
+    // nextStep's fast closed check to race with the locked recheck without
+    // relying on wall-clock timing.
+    g_stream_inner.closed.store(true, .release);
+    g_stream_inner.lock.store(0, .release);
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+/// Exercise the production Stream.nextStep metadata protocol. The direct
+/// full-ring cases cover both release branches after consuming a slot; the
+/// deterministic two-fiber schedule covers a close published after the fast
+/// closed check but before the consumer acquires the metadata lock.
+pub fn testStreamNextStepInterleavings() !void {
+    const allocator = std.heap.c_allocator;
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        drainSchedState();
+        g_sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    // Draining a full ring with no parked producer releases the metadata
+    // lock locally.
+    g_stream_inner = .{ .sched = &g_sched };
+    for (0..64) |i| g_stream_inner.buf[i] = @intCast(i);
+    g_stream_inner.head.store(64, .release);
+    g_next_step_stream = .{ .inner = &g_stream_inner, .alloc = allocator };
+    const unparked_step = try g_next_step_stream.nextStep();
+    switch (unparked_step) {
+        .Item => |value| if (value != 0) return error.NextStepWrongUnparkedValue,
+        .Closed => return error.NextStepClosedFullRing,
+    }
+    if (g_stream_inner.lock.load(.acquire) != 0) return error.NextStepLockNotReleased;
+
+    // The same transition must clear and schedule a parked producer before
+    // releasing the lock. Use a real Task and Scheduler queue so this checks
+    // the complete production wake path rather than only toggling fields.
+    g_stream_inner.tail.store(0, .release);
+    var producer_task = Task{
+        .base = undefined,
+        .user_fn = @ptrCast(&splitStreamDummyFn),
+    };
+    producer_task.status.store(.Blocked, .release);
+    g_stream_inner.producer_task = &producer_task;
+    g_stream_inner.producer_sched = &g_sched;
+    const previous_active = fp.active_scheduler;
+    const previous_running = fp.scheduler_running;
+    fp.active_scheduler = &g_sched;
+    fp.scheduler_running = true;
+    defer {
+        fp.active_scheduler = previous_active;
+        fp.scheduler_running = previous_running;
+    }
+    const parked_step = try g_next_step_stream.nextStep();
+    switch (parked_step) {
+        .Item => |value| if (value != 0) return error.NextStepWrongParkedValue,
+        .Closed => return error.NextStepClosedFullRing,
+    }
+    if (g_stream_inner.producer_task != null or g_stream_inner.producer_sched != null)
+        return error.NextStepProducerNotCleared;
+    if (producer_task.status.load(.acquire) != .Ready) return error.NextStepProducerNotReadied;
+    if (g_sched.ready_queue.pop() != &producer_task) return error.NextStepProducerNotScheduled;
+    producer_task.in_inbox.store(qs.IN_INBOX_IDLE, .release);
+
+    // Force this ordering:
+    //   consumer fast closed.load(false)
+    //   consumer attempts the pre-held metadata lock
+    //   closer publishes closed and releases the lock
+    //   consumer acquires, rechecks closed, and releases the lock
+    // The schedule values select consumer(0), consumer(0), closer(1) three
+    // times, then consumer. SimAtomic yields before each atomic operation.
+    var schedule = [_]u8{ 0, 0, 1, 1, 1, 0, 0, 0 };
+    var h = LoomHarness.initExhaustive(allocator, &schedule);
+    defer h.deinit();
+    harness = &h;
+    h.resetExhaustive(&schedule);
+    g_stream_inner = .{
+        .sched = &g_sched,
+        .lock = sim_atomic.SimAtomic(u32).init(1),
+    };
+    g_next_step_stream = .{ .inner = &g_stream_inner, .alloc = allocator };
+    g_next_step_observed_closed = false;
+    g_next_step_err = null;
+    try h.createThread(0, @intFromPtr(&entryStreamNextStepConsumer));
+    try h.createThread(1, @intFromPtr(&entryStreamNextStepCloseOwner));
+    try h.run();
+
+    if (g_next_step_err) |err| return err;
+    if (!h.done[0] or !h.done[1]) return error.NextStepCloseRaceDidNotComplete;
+    if (!g_next_step_observed_closed) return error.NextStepCloseRaceMissedClosed;
+    if (g_stream_inner.lock.load(.acquire) != 0) return error.NextStepCloseRaceLeftLocked;
+}
 
 fn entryStreamConsumer() callconv(.c) void {
     while (!g_stream_inner.closed.load(.acquire)) {

@@ -65,7 +65,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
       FN work(xs: Int64[]) RETURNS Int64 -> RETURN xs.length(); END
 
       FN runit() RETURNS !Int64 ->
-          MUTABLE lst: Int64[]@list = List[];
+          MUTABLE lst: []Int64 = List[];
           lst.append(1_i64); lst.append(2_i64); lst.append(3_i64);
           slice: Int64[] = lst;
           p: ~Int64 = BG { work(slice); };
@@ -124,7 +124,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
       END
 
       FN runit() RETURNS !Int64 ->
-          MUTABLE xsList: V[]@list = List[];
+          MUTABLE xsList: []V = List[];
           xsList.append(V{ IntV: 42 });
           xsSlice: V[] = xsList;
           p: ~Int64 = BG { consumeSlice(xsSlice); };
@@ -159,7 +159,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
       END
 
       FN runit() RETURNS !Int64 ->
-          MUTABLE xs: V[]@list = List[];
+          MUTABLE xs: []V = List[];
           xs.append(V{ IntV: 1 });
           vec: V = COPY V{ Vec: xs };
           p: ~Int64 = BG { consumeVec(COPY vec); };
@@ -187,7 +187,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
       FN consume!(TAKES xs: Int64[]) RETURNS Int64 -> RETURN xs.length(); END
 
       FN runit() RETURNS !Int64 ->
-          MUTABLE lst: Int64[]@list = List[];
+          MUTABLE lst: []Int64 = List[];
           lst.append(1_i64); lst.append(2_i64); lst.append(3_i64);
           p: ~Int64 = BG { consume!(GIVE lst); };
           RETURN NEXT p;
@@ -207,15 +207,15 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
 
   describe "Bug #7 (FIXED): COPY of an @list fn-param captured into BG" do
     let(:src) { <<~CHT }
-      FN consume(xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
+      FN consume(xs: []Int64) RETURNS Int64 -> RETURN xs.length(); END
 
-      FN runit(TAKES ops: Int64[]@list) RETURNS !Int64 ->
+      FN runit(TAKES ops: []Int64) RETURNS !Int64 ->
           p: ~Int64 = BG { consume(COPY ops); };
           RETURN NEXT p;
       END
 
       FN main() RETURNS !Void ->
-          MUTABLE arr: Int64[]@list = List[];
+          MUTABLE arr: []Int64 = List[];
           arr.append(1_i64); arr.append(2_i64); arr.append(3_i64);
           n: Int64 = runit(GIVE arr) OR_ELSE RAISE;
           ASSERT n == 3, "@list-param + COPY captures into BG";

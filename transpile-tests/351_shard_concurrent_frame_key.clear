@@ -4,7 +4,7 @@
 
 FN main() RETURNS Void ->
     n = 128_i64;
-    MUTABLE map: HashMap<Int64>@sharded(4) = {};
+    MUTABLE map: {String}@sharded(4) Int64 = {};
 
     (0..<n) |> SHARD("k:${toString(_)}", map) |> CONCURRENT EACH {
         map[_] = 1_i64;

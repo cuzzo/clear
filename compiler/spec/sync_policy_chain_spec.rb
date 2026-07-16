@@ -14,7 +14,7 @@ require_relative "../ruby/ast/ast" unless defined?(MIR::ReassignPlan)
 #      handler — node.lock_error_clause becomes the policy's
 #      MvccConflict handler.
 #   2. The same fallback runs for SNAPSHOT MATCH MUTABLE's VERSIONED
-#      arm when arm[:lock_error_clauses] is empty.
+#      arm when arm.lock_error_clauses is empty.
 #   3. The user's user-written SYNC POLICY (when present) takes
 #      precedence over the baked-in default; the synthesized clause
 #      reflects the user's choice (e.g. RETRY(N) THEN RAISE).
@@ -68,7 +68,7 @@ RSpec.describe "SYNC POLICY chain (#328)" do
           RETURN;
         END
         FN main() RETURNS Void ->
-          MUTABLE cfg = Cfg{ port: 80 } @indirect:atomic;
+          MUTABLE cfg = Cfg{ port: 80 } @boxed:atomic;
           bumpPort!(cfg);
           RETURN;
         END
@@ -76,17 +76,17 @@ RSpec.describe "SYNC POLICY chain (#328)" do
 
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "bumpPort!" }
       with_node = fn.body.find { |s| s.is_a?(AST::WithBlock) }
-      versioned_arm = with_node.arms.find { |a| a[:family] == :VERSIONED }
-      atomic_arm    = with_node.arms.find { |a| a[:family] == :ATOMIC }
+      versioned_arm = with_node.arms.find { |a| a.family == :VERSIONED }
+      atomic_arm    = with_node.arms.find { |a| a.family == :ATOMIC }
 
       # VERSIONED: synthesized clause from policy.
-      expect(versioned_arm[:lock_error_clauses]).not_to be_empty
-      sel = versioned_arm[:lock_error_clauses].first.selectors.first
+      expect(versioned_arm.lock_error_clauses).not_to be_empty
+      sel = versioned_arm.lock_error_clauses.first.selectors.first
       expect(sel.name).to eq(:MvccConflict)
 
       # ATOMIC: still empty (rcu retries until success; #330 will
       # bound and add AtomicConflict policy fallback).
-      expect(atomic_arm[:lock_error_clauses]).to be_empty
+      expect(atomic_arm.lock_error_clauses).to be_empty
     end
   end
 

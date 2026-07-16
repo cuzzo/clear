@@ -3,19 +3,19 @@ require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 require_relative "../ruby/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # AtomicPtr M3.9 -- multi-cell `WITH SNAPSHOT` rejection when any
-# cell is @indirect:atomic.
+# cell is @boxed:atomic.
 #
-# `@indirect:atomic` has no portable hardware multi-pointer CAS
+# `@boxed:atomic` has no portable hardware multi-pointer CAS
 # primitive (and software MCAS is out of scope for v0.3), so per-cell
 # atomic CAS gives no atomicity ACROSS cells. MVCC's `Shared.updateMulti`
 # works because of sorted-pointer locking + commit-or-rollback machinery
 # that AtomicPtr doesn't have. Reject the combination at the annotator
 # with the user-specified message:
 #
-#   "@indirect:atomic cannot guarantee multi-object consistency.
+#   "@boxed:atomic cannot guarantee multi-object consistency.
 #    If you need multi-object consistency use @shared:versioned
 #    or @shared:locked."
-RSpec.describe "Multi-cell `WITH SNAPSHOT` with @indirect:atomic (M3.9)" do
+RSpec.describe "Multi-cell `WITH SNAPSHOT` with @boxed:atomic (M3.9)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
     ast = ClearParser.new(tokens, src).parse
@@ -41,13 +41,13 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @indirect:atomic (M3.9)" do
       }.not_to raise_error
     end
 
-    it "rejects multi-cell SNAPSHOT MUTABLE when ANY cell is @indirect:atomic" do
+    it "rejects multi-cell SNAPSHOT MUTABLE when ANY cell is @boxed:atomic" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
           FN both!() RETURNS Void ->
             a = C{ v: 0 } @versioned;
-            b = C{ v: 0 } @indirect:atomic;
+            b = C{ v: 0 } @boxed:atomic;
             WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
               va.v = va.v + 1;
               vb.v = vb.v + 1;
@@ -58,7 +58,7 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @indirect:atomic (M3.9)" do
       }.to raise_error(/Multi-object WITH cannot admit ATOMIC.*atomicity across cells/im)
     end
 
-    it "rejects multi-cell SNAPSHOT (read-only) when ANY cell is @indirect:atomic" do
+    it "rejects multi-cell SNAPSHOT (read-only) when ANY cell is @boxed:atomic" do
       # Even pure-read multi-cell SNAPSHOT is rejected -- per-cell
       # atomic loads aren't cross-cell consistent (the reader can
       # see a state nobody ever published). The error directs the
@@ -67,7 +67,7 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @indirect:atomic (M3.9)" do
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
           FN both() RETURNS Void ->
-            a = C{ v: 0 } @indirect:atomic;
+            a = C{ v: 0 } @boxed:atomic;
             b = C{ v: 0 } @versioned;
             WITH SNAPSHOT a AS va, SNAPSHOT b AS vb {
               x = va.v;
@@ -79,13 +79,13 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @indirect:atomic (M3.9)" do
       }.to raise_error(/Multi-object WITH cannot admit ATOMIC/i)
     end
 
-    it "rejects multi-cell SNAPSHOT when ALL cells are @indirect:atomic" do
+    it "rejects multi-cell SNAPSHOT when ALL cells are @boxed:atomic" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
           FN both!() RETURNS Void ->
-            a = C{ v: 0 } @indirect:atomic;
-            b = C{ v: 0 } @indirect:atomic;
+            a = C{ v: 0 } @boxed:atomic;
+            b = C{ v: 0 } @boxed:atomic;
             WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
               va.v = va.v + 1;
               vb.v = vb.v + 1;
@@ -98,12 +98,12 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @indirect:atomic (M3.9)" do
   end
 
   describe "single-cell SNAPSHOT (regression)" do
-    it "single-cell @indirect:atomic still works (M3.5/M3.6 path unaffected)" do
+    it "single-cell @boxed:atomic still works (M3.5/M3.6 path unaffected)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
           FN one!() RETURNS !Void ->
-            a = C{ v: 0 } @indirect:atomic;
+            a = C{ v: 0 } @boxed:atomic;
             WITH SNAPSHOT a AS MUTABLE va { va.v = va.v + 1; }
             RETURN;
           END

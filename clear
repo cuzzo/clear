@@ -659,7 +659,9 @@ when 'build'
       importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
       annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir)
       annotator.annotate!(ast)
-      fn_nodes = annotator.semantic_function_nodes
+      semantic_index = annotator.semantic_index
+      raise "stack verification requires a complete semantic index" unless semantic_index
+      fn_nodes = semantic_index.function_nodes
 
       base_name = File.basename(source, '.clear')
       prefix = "._clear_tmp_#{base_name}"

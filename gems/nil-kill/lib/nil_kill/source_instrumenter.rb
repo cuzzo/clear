@@ -8,6 +8,10 @@ module NilKill
       @method_plans_by_file_line = Hash.new { |h, k| h[k] = {} }
       @tracepoint_methods = {}
       @trace_plan = File.exist?(TRACE_PLAN_PATH) ? JSON.parse(File.read(TRACE_PLAN_PATH)) : { "methods" => {} }
+      @loop_sites = @trace_plan.fetch("loop_sites", {})
+      @state_write_sites = @trace_plan.fetch("state_write_sites", {})
+      @plan_dirty = false
+      @defer_plan_write = false
       @trace_plan.fetch("methods", {}).each do |raw_key, plan|
         owner, method_id, kind, path, line = raw_key.split("\0", 5)
         next if plan && plan["sample"] == false && plan["frame"] == false
@@ -24,6 +28,10 @@ module NilKill
       @trace_plan = { "methods" => {} }
       @method_plans_by_file_line ||= Hash.new { |h, k| h[k] = {} }
       @tracepoint_methods ||= {}
+      @loop_sites ||= {}
+      @state_write_sites ||= {}
+      @plan_dirty = false
+      @defer_plan_write = false
     end
 
     # Computed at call time, not load time: the spec suite resets
@@ -33,10 +41,11 @@ module NilKill
       File.join(NilKill::RUNTIME_DIR, ".nk-linemap.json")
     end
 
-    # In-place instrumentation. Snapshot every pristine target file
-    # into snapshot_dir, then OVERWRITE the real file with its
-    # instrumented form. There is exactly ONE copy of each file -- at
-    # its real path -- and it is always wrapped, so EVERY load
+    # In-place instrumentation. Snapshot each target whose bytes actually
+    # change into snapshot_dir, then overwrite that real file with its
+    # instrumented form. Untouched files need neither a snapshot nor a write.
+    # There is exactly ONE active copy of each instrumented file -- at
+    # its real path -- so EVERY load
     # mechanism (require, require_relative, Kernel#load, autoload,
     # absolute require, a bare `ruby file.rb` entrypoint, a re-exec, an
     # RUBYOPT-armed spawn) loads the wrapped code. "ran" (Ruby
@@ -51,15 +60,23 @@ module NilKill
       FileUtils.mkdir_p(snapshot_dir)
       @line_map = {}
       manifest = []
-      NilKill.target_files.each do |path|
-        rel = NilKill.rel(path)
-        snap = File.join(snapshot_dir, rel)
-        FileUtils.mkdir_p(File.dirname(snap))
-        FileUtils.cp(path, snap)
-        instrumented, line_map = instrument_file_with_map(path)
-        File.write(path, instrumented)
-        @line_map[rel] = line_map if line_map
-        manifest << rel
+      @defer_plan_write = true
+      begin
+        NilKill.target_files.each do |path|
+          rel = NilKill.rel(path)
+          source = File.read(path)
+          instrumented, line_map = instrument_file_with_map(path, source: source)
+          next if instrumented.b == source.b
+
+          snap = File.join(snapshot_dir, rel)
+          FileUtils.mkdir_p(File.dirname(snap))
+          File.binwrite(snap, source.b)
+          File.binwrite(path, instrumented.b)
+          @line_map[rel] = line_map if line_map
+          manifest << rel
+        end
+      ensure
+        @defer_plan_write = false
       end
       FileUtils.mkdir_p(File.dirname(line_map_path))
       File.write(line_map_path, JSON.generate(@line_map))
@@ -72,16 +89,24 @@ module NilKill
     # Every src line start maps to an instrumented byte = src byte +
     # net bytes inserted by edits before it; injected lines inherit
     # the preceding src line (their tracing belongs to that code).
-    def instrument_file_with_map(path)
-      source = File.read(path)
+    def instrument_file_with_map(path, source: nil)
+      source ||= File.read(path)
+      abs_path = File.expand_path(path, ROOT)
+      return [source, nil] unless instrumentable_source?(source, abs_path)
+      state_writes = state_write_candidate?(source)
       @line_offsets = line_offsets(source)
       parsed = Syntax.parse(source)
       return [source, nil] unless parsed.success?
       edits = []
-      collect_ivar_assignment_edits(parsed.value, edits) if source.include?("@")
-      collect_loop_edits(parsed.value, File.expand_path(path, ROOT), edits) if source.include?("while") || source.include?("until")
-      collect_method_edits(parsed.value, File.expand_path(path, ROOT), edits)
-      collect_source_ref_edits(parsed.value, edits, File.expand_path(path, ROOT)) if source.include?("__LINE__")
+      collect_raw_file_edits(
+        parsed,
+        parsed.root,
+        abs_path,
+        edits,
+        ivars: state_writes,
+        loops: source.include?("while") || source.include?("until"),
+        source_refs: source.include?("__LINE__")
+      )
       write_tracepoint_fallback_plan
       return [source, nil] if edits.empty?
       kept = non_overlapping_edits(edits).sort_by { |s, _e, _r| s }
@@ -114,17 +139,40 @@ module NilKill
 
     def instrument_file(path)
       source = File.read(path)
+      abs_path = File.expand_path(path, ROOT)
+      return source unless instrumentable_source?(source, abs_path)
+      state_writes = state_write_candidate?(source)
       @line_offsets = line_offsets(source)
       parsed = Syntax.parse(source)
       return source unless parsed.success?
       edits = []
-      collect_ivar_assignment_edits(parsed.value, edits) if source.include?("@")
-      collect_loop_edits(parsed.value, File.expand_path(path, ROOT), edits) if source.include?("while") || source.include?("until")
-      collect_method_edits(parsed.value, File.expand_path(path, ROOT), edits)
-      collect_source_ref_edits(parsed.value, edits, File.expand_path(path, ROOT)) if source.include?("__LINE__")
+      collect_raw_file_edits(
+        parsed,
+        parsed.root,
+        abs_path,
+        edits,
+        ivars: state_writes,
+        loops: source.include?("while") || source.include?("until"),
+        source_refs: source.include?("__LINE__")
+      )
       write_tracepoint_fallback_plan
       return source if edits.empty?
       apply_edits(source, edits)
+    end
+
+    def instrumentable_source?(source, abs_path)
+      @method_plans_by_file_line[abs_path].any? ||
+        state_write_candidate?(source) || source.include?("while") ||
+        source.include?("until") || source.include?("__LINE__")
+    end
+
+    # Conservative lexical gate only: false positives merely parse a file,
+    # while every legal ordinary instance/class/global variable spelling is
+    # admitted to the exact grammar traversal below. The old `include?("@")`
+    # gate parsed documentation mentions and accidentally excluded global
+    # writes in files with no ivars.
+    def state_write_candidate?(source)
+      source.match?(/@@?[A-Za-z_]/) || source.include?("$")
     end
 
     def line_offsets(source)
@@ -149,38 +197,129 @@ module NilKill
       [low, 1].max
     end
 
-    def collect_method_edits(node, path, edits, visited = Set.new)
-      return unless visited.add?(node)
-      case node
-      when Syntax::DefNode
-        plan = @method_plans_by_file_line[path][node.location.start_line]
-        return unless plan
-        # Endless defs (`def f = expr`) have no `end` keyword to anchor
-        # the suffix; fall back to TracePoint. One-line classic defs
-        # (`def f; ...; end`) DO have an `end` and are wrappable -- the
-        # suffix anchors on end_keyword_loc, not the end line start.
-        ek = node.end_keyword_loc
-        # Punt ONLY shapes the inline wrapper genuinely cannot express:
-        # endless defs (no `end` to anchor the suffix).
-        # - A `return` inside an iterator / `proc` block is a NON-LOCAL
-        #   method return: rewritten to `throw __nil_kill_return_tag`,
-        #   stays source-wrapped.
-        # - A `return` LOCAL to a lambda returns from the lambda, not
-        #   the method, so it never reaches the wrapper's catch -- the
-        #   method is still safely wrapped; we only must NOT rewrite
-        #   that return (collect_return_edits skips lambda scopes).
-        # The TracePoint fallback is unreliable in the real
-        # multi-process collect; inline wrappers are not.
-        ek = nil if ek && ek.length.zero?
-        if ek.nil?
-          @tracepoint_methods[plan.fetch("raw_key")] = plan.fetch("plan")
+    # Collect every source transformation in one traversal. The previous
+    # implementation independently walked the complete adapter tree for
+    # methods, returns, state writes, loops, and __LINE__. On large targets
+    # those repeated Ruby walks cost more than parsing and produced identical
+    # information.
+    def collect_raw_file_edits(context, raw, path, edits, ivars:, loops:, source_refs:, return_plan: nil)
+      type = raw.type
+
+      if ivars && (type == "assignment" || type == "operator_assignment")
+        lhs = raw.child_by_field_name("left") || raw.named_children.first
+        if lhs && %w[instance_variable class_variable global_variable].include?(lhs.type)
+          value = raw.child_by_field_name("value") || raw.named_children.last
+          if value
+            name = context.source.byteslice(lhs.start_byte...lhs.end_byte)
+            normalized_name = name.sub(/\A@/, "")
+            site_key = [path, raw.start_point.row + 1, normalized_name].join("\0")
+            unless @state_write_sites[site_key] == false
+              rhs = context.source.byteslice(value.start_byte...value.end_byte)
+              replacement = "NilKillRuntimeTrace.record_ivar_assignment(self, #{name.inspect}, (#{rhs}), __FILE__, __LINE__)"
+              edits << [value.start_byte, value.end_byte, replacement]
+            end
+          end
+        end
+      end
+
+      if loops && (type == "while" || type == "until")
+        key = [path, raw.start_point.row + 1].join("\0")
+        unless @loop_sites[key]
+          @loop_sites[key] = true
+          @plan_dirty = true
+        end
+      end
+
+      if source_refs && type == "identifier" && context.source.byteslice(raw.start_byte...raw.end_byte) == "__LINE__"
+        edits << [raw.start_byte, raw.end_byte, (raw.start_point.row + 1).to_s]
+      end
+
+      case type
+      when "method", "singleton_method"
+        node = context.wrap(raw)
+        plan = @method_plans_by_file_line[path][raw.start_point.row + 1]
+        active_plan = nil
+        if plan
+          # Endless defs have no `end` anchor and retain the TracePoint
+          # fallback. Classic one-line defs still have an anchor.
+          ek = node.end_keyword_loc
+          ek = nil if ek && ek.length.zero?
+          if ek.nil?
+            @tracepoint_methods[plan.fetch("raw_key")] = plan.fetch("plan")
+            @plan_dirty = true
+          else
+            insert_method_wrapper(node, plan, edits)
+            active_plan = plan
+          end
+        end
+
+        # A return is owned only by this method's body, never by its
+        # parameters/defaults or an enclosing method. Visit the body first so
+        # the shared visited set does not encounter it through child_nodes
+        # with the wrong return scope.
+        body = raw.child_by_field_name("body") || context.children(raw).find { |child| child.type == "body_statement" }
+        collect_raw_file_edits(
+          context,
+          body,
+          path,
+          edits,
+          ivars: ivars,
+          loops: loops,
+          source_refs: source_refs,
+          return_plan: active_plan
+        ) if body
+        context.children(raw).each do |child|
+          next if body && same_raw_node?(child, body)
+          collect_raw_file_edits(
+            context,
+            child,
+            path,
+            edits,
+            ivars: ivars,
+            loops: loops,
+            source_refs: source_refs,
+            return_plan: nil
+          )
+        end
+        return
+      when "class", "module", "lambda"
+        return_plan = nil
+      when "return"
+        if return_plan
+          node = context.wrap(raw)
+          add_return_edit(node, return_plan, edits)
           return
         end
-        insert_method_wrapper(node, plan, edits)
-        collect_return_edits(node.body, plan, edits)
-        return
       end
-      node.child_nodes.compact.each { |child| collect_method_edits(child, path, edits, visited) } if node.respond_to?(:child_nodes)
+
+      # `lambda { ... }` owns its returns even though the adapter represents
+      # it as a call with a block rather than a LambdaNode.
+      if %w[call command command_call].include?(type) && raw_lambda_call?(context, raw)
+        return_plan = nil
+      end
+
+      context.children(raw).each do |child|
+        collect_raw_file_edits(
+          context,
+          child,
+          path,
+          edits,
+          ivars: ivars,
+          loops: loops,
+          source_refs: source_refs,
+          return_plan: return_plan
+        )
+      end
+    end
+
+    def same_raw_node?(left, right)
+      left.type == right.type && left.start_byte == right.start_byte && left.end_byte == right.end_byte
+    end
+
+    def raw_lambda_call?(context, raw)
+      method = raw.child_by_field_name("method")
+      block = raw.child_by_field_name("block")
+      method && block && context.source.byteslice(method.start_byte...method.end_byte) == "lambda"
     end
 
     def insert_method_wrapper(node, plan, edits)
@@ -196,24 +335,10 @@ module NilKill
       call = "NilKillRuntimeTrace.record_source_method_call(#{plan["class"].inspect}, #{plan["method"].inspect}, #{plan["kind"].inspect}, __FILE__, #{plan["line"]}, #{params_expr})"
       raise_call = "NilKillRuntimeTrace.record_source_method_raise(#{plan["class"].inspect}, #{plan["method"].inspect}, #{plan["kind"].inspect}, __FILE__, #{plan["line"]}, __nil_kill_error)"
       ret = "NilKillRuntimeTrace.record_source_method_return(#{plan["class"].inspect}, #{plan["method"].inspect}, #{plan["kind"].inspect}, __FILE__, #{plan["line"]}, __nil_kill_result)"
-      prefix = "\n#{body_indent}__nil_kill_return_tag = Object.new\n#{body_indent}#{call}\n#{body_indent}begin\n#{body_indent}  catch(__nil_kill_return_tag) do\n#{body_indent}    __nil_kill_result = begin\n"
-      suffix = "#{body_indent}    end\n#{body_indent}    #{ret}\n#{body_indent}  end\n#{body_indent}rescue Exception => __nil_kill_error\n#{body_indent}  #{raise_call}\n#{body_indent}  raise\n#{body_indent}end\n"
+      prefix = "\n#{body_indent}#{call}\n#{body_indent}begin\n#{body_indent}  __nil_kill_result = begin\n"
+      suffix = "#{body_indent}  end\n#{body_indent}  #{ret}\n#{body_indent}rescue Exception => __nil_kill_error\n#{body_indent}  #{raise_call}\n#{body_indent}  raise\n#{body_indent}end\n"
       edits << [header_end, header_end, prefix]
       edits << [end_anchor, end_anchor, suffix]
-    end
-
-    # Under in-place instrumentation the file IS at its real src path,
-    # so __FILE__ and __dir__ already resolve correctly with NO rewrite
-    # (the parallel-tree problem -- and its SourceFileNode/__dir__
-    # rewrites -- are gone). Only __LINE__ still needs literalising:
-    # the injected wrapper shifts every later line, so a raw __LINE__
-    # would yield the instrumented line, not the src line.
-    def collect_source_ref_edits(node, edits, _real_file = nil, visited = Set.new)
-      return unless visited.add?(node)
-      if node.is_a?(Syntax::SourceLineNode)
-        edits << [node.location.start_offset, node.location.end_offset, node.location.start_line.to_s]
-      end
-      node.child_nodes.compact.each { |child| collect_source_ref_edits(child, edits, _real_file, visited) } if node.respond_to?(:child_nodes)
     end
 
     def method_header_end_offset(node)
@@ -221,38 +346,18 @@ module NilKill
       loc.start_offset + loc.length
     end
 
-    def collect_return_edits(node, plan, edits, visited = Set.new)
-      return unless node
-      return unless visited.add?(node)
-      case node
-      when Syntax::DefNode, Syntax::ClassNode, Syntax::ModuleNode, Syntax::LambdaNode
-        # New scope: a `return` here belongs to it, not this method.
-        # We DO recurse into BlockNode now so non-local `return`s inside
-        # `do..end` / `{}` iterator and `proc` blocks are rewritten to a
-        # tagged throw -- equivalent to the non-local method return, and
-        # the value flows to record_source_method_return. Lambda scopes
-        # are excluded here and below (lambda-local return is left as-is
-        # -- it does not escape the wrapper).
-        return
-      when Syntax::ReturnNode
-        args = node.arguments&.arguments || []
-        expr =
-          if args.empty?
-            "nil"
-          elsif args.size == 1
-            args.first.slice
-          else
-            args.map(&:slice).join(", ")
-          end
-        replacement = "throw __nil_kill_return_tag, NilKillRuntimeTrace.record_source_method_return(#{plan["class"].inspect}, #{plan["method"].inspect}, #{plan["kind"].inspect}, __FILE__, #{plan["line"]}, (#{expr}))"
-        edits << [node.location.start_offset, node.location.end_offset, replacement]
-        return
-      end
-      # `lambda { ... }` body is lambda-scoped: do NOT rewrite its local
-      # returns. Skip the whole call subtree; the caller's recursion
-      # still walks siblings.
-      return if node.is_a?(Syntax::CallNode) && node.name == :lambda && node.block.is_a?(Syntax::BlockNode)
-      node.child_nodes.compact.each { |child| collect_return_edits(child, plan, edits, visited) } if node.respond_to?(:child_nodes)
+    def add_return_edit(node, plan, edits)
+      args = node.arguments&.arguments || []
+      expr =
+        if args.empty?
+          "nil"
+        elsif args.size == 1
+          args.first.slice
+        else
+          args.map(&:slice).join(", ")
+        end
+      replacement = "return NilKillRuntimeTrace.record_source_method_return(#{plan["class"].inspect}, #{plan["method"].inspect}, #{plan["kind"].inspect}, __FILE__, #{plan["line"]}, (#{expr}))"
+      edits << [node.location.start_offset, node.location.end_offset, replacement]
     end
 
     def source_params_expr(plan)
@@ -268,36 +373,6 @@ module NilKill
 
     def end_line_offset(line)
       @line_offsets[line] ? @line_offsets[line] - 1 : @line_offsets.last.to_i
-    end
-
-    def collect_ivar_assignment_edits(node, edits, visited = Set.new)
-      return unless visited.add?(node)
-      case node
-      when Syntax::InstanceVariableWriteNode, Syntax::ClassVariableWriteNode, Syntax::GlobalVariableWriteNode
-        value = node.value
-        if value&.location
-          name = node.name.to_s
-          rhs = value.slice
-          replacement = "NilKillRuntimeTrace.record_ivar_assignment(self, #{name.inspect}, (#{rhs}), __FILE__, __LINE__)"
-          edits << [value.location.start_offset, value.location.end_offset, replacement]
-        end
-      end
-      node.child_nodes.compact.each { |child| collect_ivar_assignment_edits(child, edits, visited) } if node.respond_to?(:child_nodes)
-    end
-
-    def collect_loop_edits(node, path, edits, visited = Set.new)
-      return unless visited.add?(node)
-      abs_path = File.expand_path(path, NilKill::ROOT)
-      case node
-      when Syntax::WhileNode, Syntax::UntilNode
-        if node.predicate&.location
-          pred = node.predicate
-          replacement_start = "(NilKillRuntimeTrace.record_loop_iteration(#{abs_path.inspect}, #{node.location.start_line}); "
-          edits << [pred.location.start_offset, pred.location.start_offset, replacement_start]
-          edits << [pred.location.end_offset, pred.location.end_offset, ")"]
-        end
-      end
-      node.child_nodes.compact.each { |child| collect_loop_edits(child, path, edits, visited) } if node.respond_to?(:child_nodes)
     end
 
     def apply_edits(source, edits)
@@ -318,10 +393,12 @@ module NilKill
     end
 
     def write_tracepoint_fallback_plan
-      return if @tracepoint_methods.empty?
+      return if @defer_plan_write || !@plan_dirty
       @trace_plan["tracepoint_methods"] = @tracepoint_methods
+      @trace_plan["loop_sites"] = @loop_sites
       FileUtils.mkdir_p(File.dirname(TRACE_PLAN_PATH))
       File.write(TRACE_PLAN_PATH, JSON.pretty_generate(@trace_plan))
+      @plan_dirty = false
     end
 
     def non_overlapping_edits(edits)

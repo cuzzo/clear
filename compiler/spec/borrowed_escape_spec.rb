@@ -186,7 +186,7 @@ RSpec.describe BorrowChecker do
       expect { annotate(<<~CLEAR) }.not_to raise_error
         STRUCT Node { id: Int64 }
         FN main() RETURNS Void ->
-          n: Node @indirect = Node{ id: 1 };
+          n: Node @boxed = Node{ id: 1 };
           WITH BORROWED n AS ref {
             x = ref.id;
           }

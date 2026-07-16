@@ -1,6 +1,6 @@
 FN main() RETURNS Void ->
   # Setup: build a small map
-  MUTABLE scores: HashMap<Int64> = {"alice": 10_i64, "bob": 20_i64, "carol": 30_i64};
+  MUTABLE scores: {String}Int64 = {"alice": 10_i64, "bob": 20_i64, "carol": 30_i64};
 
   # count(): number of entries
   ASSERT scores.count() == 3, "count should be 3 after init";

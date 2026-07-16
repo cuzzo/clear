@@ -151,7 +151,7 @@ crashing the post-fix path).
 - Whether the bug is in (a) the optimizer's interaction with libc's malloc
   (false positive), (b) escape analysis missing a specific path that only
   manifests with the runner's full Value union (18 variants, several with
-  `@indirect`), or (c) the lowering for a specific operation (`@indirect`
+  `@boxed`), or (c) the lowering for a specific operation (`@boxed`
   field cleanup, `MUTABLE pool: Env[N]@pool` threading, mutual recursion
   between `eval!` / `evalList!` / `applyNative` / `exec!`).
 
@@ -181,12 +181,12 @@ The pattern strongly suggests a compiler bug:
 The architectural correct fix is to **catch the bug at compile time**, not
 add another runtime guard. Plan:
 
-1. **Bisect the runner**: comment out variants of `Value` (`Pair @indirect`,
-   `Tco @indirect`, `Lambda { ... envId: Id<Env> }`, `Error { errMsg, errKind }`)
+1. **Bisect the runner**: comment out variants of `Value` (`Pair @boxed`,
+   `Tco @boxed`, `Lambda { ... envId: Id<Env> }`, `Error { errMsg, errKind }`)
    one by one. The variant that, when removed, makes the bug disappear is
    the trigger.
 2. **Reduce surface area**, don't add more invariants. If the trigger is
-   a missed escape on `@indirect` cleanup or pool-threaded params, the fix
+   a missed escape on `@boxed` cleanup or pool-threaded params, the fix
    should remove the special case or unify it with the existing path —
    not add another invariant to `mir_checker.rb`.
 3. Skip step 4 (cleanupCheck) — runtime detection only confirms the bug

@@ -77,6 +77,30 @@ RSpec.describe IntrinsicRegistry do
     expect(fs.intrinsic_bc?).to be(true)
   end
 
+  it "constructs each signature's intrinsic contract once and invalidates it on replacement" do
+    fs = IntrinsicRegistry.send(:convert_entry, "append", STD_LIB["append"], REGISTRIES)
+    original = fs.intrinsic_contract
+
+    expect(fs.intrinsic_contract).to equal(original)
+
+    fs.replace_intrinsic_emit!(IntrinsicEmit.new(allocates: false))
+    replacement = fs.intrinsic_contract
+    expect(replacement).not_to equal(original)
+    expect(replacement.allocation.allocates).to be(false)
+    expect(fs.intrinsic_contract).to equal(replacement)
+  end
+
+  it "uses registry identity before structural compatibility matching" do
+    allow(IntrinsicRegistry).to receive(:registry_matches?).and_call_original
+
+    expect(IntrinsicRegistry.send(:registry_name_for, REGISTRIES, MAP_METHODS)).to eq(:MAP_METHODS)
+    expect(IntrinsicRegistry).not_to have_received(:registry_matches?)
+
+    equivalent = MAP_METHODS.dup
+    expect(IntrinsicRegistry.send(:registry_name_for, REGISTRIES, equivalent)).to eq(:MAP_METHODS)
+    expect(IntrinsicRegistry).to have_received(:registry_matches?).at_least(:once)
+  end
+
   it "exposes typed intrinsic argument specs for consumers" do
     fs = IntrinsicRegistry.send(:convert_entry, "append", STD_LIB["append"], REGISTRIES)
     arg_specs = fs.intrinsic_arg_specs

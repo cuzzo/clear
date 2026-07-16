@@ -1,3 +1,7 @@
+// CFG-SPECIFIC START: shared CFG profile contract.
+use super::cfg::ControlFlowProfile;
+// CFG-SPECIFIC END
+
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
@@ -5,8 +9,6 @@ use super::normalized_behavior::{
     NormalizedSemanticEffect,
 };
 use super::CallSite;
-use super::StateDeclaration;
-use crate::ast::Child;
 use crate::ast::{Node, Span};
 use std::collections::BTreeMap;
 
@@ -42,9 +44,22 @@ const C_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
 const C_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const C_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+// CFG-SPECIFIC START: C control-flow vocabulary.
+const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
+    iterator_messages: &[],
+    ignored_callback_body_sources: &[],
+};
+// CFG-SPECIFIC END
+
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
+    // CFG-SPECIFIC START: expose the C CFG profile.
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        &C_CFG_PROFILE
+    }
+    // CFG-SPECIFIC END
+
     fn call_receiver(&self, parts: &NormalizedCallParts) -> String {
         if parts.receiver != "self" {
             return parts.receiver.clone();
@@ -59,6 +74,10 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
 
     fn self_member_receiver(&self, message: &str) -> String {
         format!("self->{message}")
+    }
+
+    fn state_identity(&self, owner: &str, field: &str) -> String {
+        (!owner.is_empty()).then(|| format!("{owner}::{field}")).unwrap_or_default()
     }
 
     fn suppress_state_read_for_call(
@@ -110,7 +129,7 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
 
         let params = self.parameter_list_source(&node.text);
         let first = params.split(',').next().unwrap_or_default().trim();
-        if let Some(owner) = typed_self_owner(first) {
+        if let Some(owner) = typed_pointer_owner(first) {
             return owner;
         }
 
@@ -172,6 +191,10 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {
         eliminable_guard_from_call(call, C_GUARD_MIDS)
             .or_else(|| effect_from_call_with_lexicon(call, &C_EFFECT_LEXICON))
+    }
+
+    fn opaque_receiver_escape_call(&self, call: &CallSite) -> bool {
+        call.receiver == "self"
     }
 
     fn local_flow_declaration_keyword(&self, keyword: &str) -> bool {
@@ -271,21 +294,25 @@ fn span(node: &Node) -> Span {
     ]
 }
 
-fn typed_self_owner(parameter: &str) -> Option<String> {
+fn typed_pointer_owner(parameter: &str) -> Option<String> {
+    if !parameter.contains('*') {
+        return None;
+    }
     let normalized = parameter.replace(['*', '&'], " ");
     let tokens = normalized
         .split_whitespace()
-        .filter(|token| !matches!(*token, "const" | "struct"))
+        .filter(|token| !matches!(*token, "const" | "volatile" | "struct"))
         .collect::<Vec<_>>();
-    if tokens.last().copied() != Some("self") || tokens.len() < 2 {
+    if tokens.len() < 2 {
         return None;
     }
     tokens
         .get(tokens.len() - 2)
         .filter(|owner| {
-            owner
-                .chars()
-                .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+            **owner != "void"
+                && owner
+                    .chars()
+                    .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
         })
         .map(|owner| (*owner).to_string())
 }
@@ -356,42 +383,57 @@ mod tests {
     #[test]
     fn test_c_behavior_comprehensive() {
         let b = CNormalizedBehavior;
-        
+
         // 1. call_receiver
-        assert_eq!(b.call_receiver(&NormalizedCallParts {
-            receiver: "self".to_string(),
-            message: "foo".to_string(),
-            arguments: vec!["self->field".to_string()],
-        }), "self.field");
-        assert_eq!(b.call_receiver(&NormalizedCallParts {
-            receiver: "self".to_string(),
-            message: "foo".to_string(),
-            arguments: vec!["not_self".to_string()],
-        }), "self");
-        assert_eq!(b.call_receiver(&NormalizedCallParts {
-            receiver: "obj".to_string(),
-            message: "foo".to_string(),
-            arguments: Vec::new(),
-        }), "obj");
+        assert_eq!(
+            b.call_receiver(&NormalizedCallParts {
+                receiver: "self".to_string(),
+                message: "foo".to_string(),
+                arguments: vec!["self->field".to_string()],
+            }),
+            "self.field"
+        );
+        assert_eq!(
+            b.call_receiver(&NormalizedCallParts {
+                receiver: "self".to_string(),
+                message: "foo".to_string(),
+                arguments: vec!["not_self".to_string()],
+            }),
+            "self"
+        );
+        assert_eq!(
+            b.call_receiver(&NormalizedCallParts {
+                receiver: "obj".to_string(),
+                message: "foo".to_string(),
+                arguments: Vec::new(),
+            }),
+            "obj"
+        );
 
         // 2. self_member_receiver
         assert_eq!(b.self_member_receiver("foo"), "self->foo");
 
         // 3. suppress_state_read_for_call
-        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
-            receiver: "self.field".to_string(),
-            message: "foo".to_string(),
-            arguments: vec!["a".to_string()],
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }, ""));
-        assert!(!b.suppress_state_read_for_call(&NormalizedCallProjection {
-            receiver: "self.field".to_string(),
-            message: "foo".to_string(),
-            arguments: Vec::new(),
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }, ""));
+        assert!(b.suppress_state_read_for_call(
+            &NormalizedCallProjection {
+                receiver: "self.field".to_string(),
+                message: "foo".to_string(),
+                arguments: vec!["a".to_string()],
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            },
+            ""
+        ));
+        assert!(!b.suppress_state_read_for_call(
+            &NormalizedCallProjection {
+                receiver: "self.field".to_string(),
+                message: "foo".to_string(),
+                arguments: Vec::new(),
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            },
+            ""
+        ));
 
         // 4. suppress_self_call_state_read
         assert!(b.suppress_self_call_state_read(&NormalizedCallProjection {
@@ -410,32 +452,61 @@ mod tests {
         }));
 
         // 5. property_read_call
-        assert!(b.property_read_call(&node("CALL", "x.y"), &NormalizedCallParts {
-            receiver: "x".to_string(),
-            message: "y".to_string(),
-            arguments: Vec::new(),
-        }));
+        assert!(b.property_read_call(
+            &node("CALL", "x.y"),
+            &NormalizedCallParts {
+                receiver: "x".to_string(),
+                message: "y".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
 
         // 6. owner_name_span
         let struct_node = node("STRUCT", "struct MyStruct {\n    int x;\n}");
-        assert!(b.owner_name_span("MyStruct", &struct_node, [1, 2, 3, 4]).is_some());
+        assert!(b
+            .owner_name_span("MyStruct", &struct_node, [1, 2, 3, 4])
+            .is_some());
         // Cover start_offset != 0 in keyword_block_span
         let struct_node_offset = node("STRUCT", "\nstruct MyStruct {\n    int x;\n}");
-        assert!(b.owner_name_span("MyStruct", &struct_node_offset, [1, 2, 3, 4]).is_some());
+        assert!(b
+            .owner_name_span("MyStruct", &struct_node_offset, [1, 2, 3, 4])
+            .is_some());
         // Cover end_offset == 0 in keyword_block_span
         let struct_node_inline = node("STRUCT", "struct MyStruct {}");
-        assert!(b.owner_name_span("MyStruct", &struct_node_inline, [1, 2, 3, 4]).is_some());
+        assert!(b
+            .owner_name_span("MyStruct", &struct_node_inline, [1, 2, 3, 4])
+            .is_some());
 
         // 7. declarative_owner
-        let typedef_node = node("TYPE_DEFINITION", "typedef struct MyStruct { int x; } MyStruct;");
-        assert_eq!(b.declarative_owner(&typedef_node, "").unwrap().name, "MyStruct");
+        let typedef_node = node(
+            "TYPE_DEFINITION",
+            "typedef struct MyStruct { int x; } MyStruct;",
+        );
+        assert_eq!(
+            b.declarative_owner(&typedef_node, "").unwrap().name,
+            "MyStruct"
+        );
         assert!(b.declarative_owner(&node("LVAR", ""), "").is_none());
 
         // 8. owner_for_function
         let fn_node = node("FUNCTION", "void foo(struct MyStruct* self)");
-        assert_eq!(b.owner_for_function("foo", &fn_node, "file", "file"), "MyStruct");
-        assert_eq!(b.owner_for_function("MyStruct_foo", &node("FUNCTION", "void MyStruct_foo()"), "file", "file"), "MyStruct");
-        assert_eq!(b.owner_for_function("foo", &node("FUNCTION", "void foo()"), "current", "file"), "current");
+        assert_eq!(
+            b.owner_for_function("foo", &fn_node, "file", "file"),
+            "MyStruct"
+        );
+        assert_eq!(
+            b.owner_for_function(
+                "MyStruct_foo",
+                &node("FUNCTION", "void MyStruct_foo()"),
+                "file",
+                "file"
+            ),
+            "MyStruct"
+        );
+        assert_eq!(
+            b.owner_for_function("foo", &node("FUNCTION", "void foo()"), "current", "file"),
+            "current"
+        );
 
         // 9. receiver_aliases_for_function
         let aliases = b.receiver_aliases_for_function(&fn_node);
@@ -445,8 +516,14 @@ mod tests {
         assert_eq!(aliases_ptr.get("ptr").map(String::as_str), Some("self"));
 
         // 10. function_visibility
-        assert_eq!(b.function_visibility("foo", &node("FN", "static void foo()"), &[]), "private");
-        assert_eq!(b.function_visibility("foo", &node("FN", "void foo()"), &[]), "public");
+        assert_eq!(
+            b.function_visibility("foo", &node("FN", "static void foo()"), &[]),
+            "private"
+        );
+        assert_eq!(
+            b.function_visibility("foo", &node("FN", "void foo()"), &[]),
+            "public"
+        );
 
         // 11. wrap_branch_predicate
         assert!(b.wrap_branch_predicate(&node("IF", "")));
@@ -462,27 +539,32 @@ mod tests {
         assert!(b.terminating_call_message("abort"));
 
         // 15. semantic_effect_for_call
-        assert!(b.semantic_effect_for_call(&CallSite {
-            receiver: "x".to_string(),
-            message: "isNull".to_string(),
-            file: "".to_string(),
-            function: "".to_string(),
-            owner: "".to_string(),
-            line: 1,
-            span: [1, 2, 3, 4],
-            conditional: false,
-            arguments: Vec::new(),
-            control: None,
-            safe_navigation: false,
-            block: false,
-        }).is_some());
+        assert!(b
+            .semantic_effect_for_call(&CallSite {
+                receiver: "x".to_string(),
+                message: "isNull".to_string(),
+                file: "".to_string(),
+                function: "".to_string(),
+                owner: "".to_string(),
+                line: 1,
+                span: [1, 2, 3, 4],
+                conditional: false,
+                arguments: Vec::new(),
+                control: None,
+                safe_navigation: false,
+                block: false,
+            })
+            .is_some());
 
         // 16. local_flow_declaration_keyword
         assert!(b.local_flow_declaration_keyword("int"));
 
         // 17. local_flow_keyword
         assert!(b.local_flow_keyword("int"));
-        for kw in &["break", "case", "const", "continue", "default", "else", "false", "for", "if", "return", "static", "struct", "true", "while"] {
+        for kw in &[
+            "break", "case", "const", "continue", "default", "else", "false", "for", "if",
+            "return", "static", "struct", "true", "while",
+        ] {
             assert!(b.local_flow_keyword(kw));
         }
         assert!(!b.local_flow_keyword("not_a_keyword"));
@@ -495,7 +577,10 @@ mod tests {
 
         // 20. field_name_from_declaration
         let field_node = node("FIELD_DECLARATION", "int my_field;");
-        assert_eq!(b.field_name_from_declaration(&field_node), Some("my_field".to_string()));
+        assert_eq!(
+            b.field_name_from_declaration(&field_node),
+            Some("my_field".to_string())
+        );
         assert_eq!(b.field_name_from_declaration(&node("LVAR", "")), None);
 
         // 21-25. formatting

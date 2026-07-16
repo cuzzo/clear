@@ -38,6 +38,7 @@ module MIRLoweringCapabilities
     T.nilable(T.any(
       AST::Node,
       AST::RawBody,
+      Lexer::Token,
       T::Hash[BasicObject, BasicObject],
       Symbol,
       String,
@@ -642,7 +643,7 @@ module MIRLoweringCapabilities
       var_name = cap.target_label
       alias_name = cap.alias_name
       if cap.alias_explicit
-        alias_alloc_map[alias_name] = send(:placement_for_node, var_node)
+        alias_alloc_map[alias_name] = placement_for_node(var_node)
         alias_owner_map[alias_name] = var_name.to_s
       end
       case cap.capability
@@ -707,12 +708,11 @@ module MIRLoweringCapabilities
     safe_alias = safe_with_capability_alias(alias_name)
     snapshot_mode = node.respond_to?(:snapshot_mode) && node.snapshot_mode
 
-    arms_meta = node.arms.map { |arm|
-      family = T.cast(arm[:family], Symbol)
+    arms_meta = T.must(node.arms).map { |arm|
       MIR::WithMatchArm.new(
-        family: family,
+        family: arm.family,
         guard_var: "__#{alias_name}_match_#{node.object_id.abs}",
-        body: lower_body(arm[:body]),
+        body: lower_body(arm.body),
       )
     }
     MIR::ScopeBlock.new([MIR::WithMatchDispatch.new(cell, safe_alias, snapshot_mode, runtime_binding_name, arms_meta)])
@@ -788,7 +788,7 @@ module MIRLoweringCapabilities
   def ast_contains_return?(node)
     T.bind(self, MIRLowering) rescue nil
     case node
-    when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type, AST::FunctionDef
+    when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type, Lexer::Token, AST::FunctionDef
       false
     when Array
       node.any? { |item| ast_contains_return?(item) }
@@ -905,7 +905,7 @@ module MIRLoweringCapabilities
     out
   end
 
-  sig { params(node: AST::WithBlock, body_mir: T::Array[T.untyped], with_label: T.nilable(String)).returns(T::Array[MIR::Node]) }
+  sig { params(node: AST::WithBlock, body_mir: T::Array[MIR::Node], with_label: T.nilable(String)).returns(T::Array[MIR::Node]) }
   def wrap_body_with_guard(node, body_mir, with_label)
     T.bind(self, MIRLowering) rescue nil
     guard_cond = combined_guard_cond(node)

@@ -29,7 +29,7 @@ STRUCT BigS {
 # buildList creates a large local struct (→ frame arena, uses_frame=true)
 # and returns a @list built from it.  The compiler must emit promoteList
 # to copy the list's arena buffer to heap before the frame mark rewinds.
-FN buildList() RETURNS !Float64[]@list ->
+FN buildList() RETURNS ![]Float64 ->
   zero:  Chunk5 = Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 };
   first: Chunk5 = Chunk5{ a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 };
   big: BigS = BigS{
@@ -40,7 +40,7 @@ FN buildList() RETURNS !Float64[]@list ->
     c21: zero,  c22: zero, c23: zero, c24: zero, c25: zero,
     c26: zero
   };
-  MUTABLE vals: Float64[]@list = [];
+  MUTABLE vals: []Float64 = [];
   append(vals, big.c1.a);
   append(vals, big.c1.b);
   append(vals, big.c1.c);

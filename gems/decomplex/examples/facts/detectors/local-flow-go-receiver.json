@@ -8,6 +8,7 @@
       "line": 5,
       "name": "Handle",
       "owner": "Worker",
+      "param_types": {},
       "span": [
         5,
         0,

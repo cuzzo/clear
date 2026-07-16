@@ -36,6 +36,8 @@ FactMine owns:
 - fixpoint-loop evidence;
 - recursive call argument shape (shrinking or halving);
 - recursive-call containment inside loops;
+- receiver-state checkpoint, restoration, and intervening-call facts;
+- receiver-state cursor progress and collection-index domain relationships;
 - normalized call-site containment and operation identity;
 - call-argument cardinality (`same`, `partition_of`, `independent_of`, or
   `unknown`);
@@ -83,6 +85,7 @@ The normalized fact layer recognizes:
 - fixpoints only when a normalized boolean flag is reset and re-raised while
   iterating;
 - linear, halving, branching, and loop-contained shrinking recursion.
+- receiver-state replay across branching recursive components.
 - fixed, input-sized, and unknown-sized collection materializations.
 
 Espalier derives recursion time and space together. Halving recursion uses
@@ -94,6 +97,15 @@ Internal recursive strongly connected components are never iterated through the
 ordinary cost fixed point. Direct recursion uses FactMine's normalized progress
 facts; mutual recursion without a progress proof is `unknown`. This prevents
 recursive call cycles from fabricating ever-growing O(N^k) results.
+
+Receiver-state replay is promoted to exponential time only when all of the
+following normalized evidence agrees: a local checkpoint is restored to the
+same receiver field after an intervening call; that call re-enters the same
+recursive component; the component has more recursive call sites than a simple
+cycle; the receiver field progresses; and the field indexes a receiver-state
+collection. The analysis is language-neutral and method-name-neutral. A missing
+gate remains `unknown`; checkpoint-like local variables alone are not enough.
+The resulting recurrence is reported as O(2^N) time and O(N) live stack space.
 
 ## Complexity model
 
@@ -119,7 +131,8 @@ highlighted. Nil-kill/runtime evidence may refine them later.
   source language is supported.
 - The oracle corpus includes fixed loops, Cartesian products, hierarchical
   traversal, amortized cursors, fixpoints, recursive complexity classes,
-  mutual recursion, allocation space, and interprocedural time/space.
+  mutual recursion, cross-language receiver-state replay, allocation space, and
+  interprocedural time/space.
 
 ## Prohibited regressions
 

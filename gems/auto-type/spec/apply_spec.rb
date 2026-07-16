@@ -233,6 +233,28 @@ RSpec.describe AutoType::Apply do
     expect(output).to include("class AST::Bar\n  sig { returns(Integer) }\n  def id; end\nend")
   end
 
+  it "creates the generated struct-field RBI when it does not exist yet" do
+    path, rel = repo_tmp_file("generated_struct_fields.rbi", "placeholder\n")
+    FileUtils.rm(path)
+
+    changed = applier.apply_actions([
+      { "kind" => "add_struct_field_sig", "confidence" => "review", "path" => rel, "line" => 1,
+        "data" => { "target" => "rbi", "class" => "AST::Node", "field" => "token", "type" => "Lexer::Token" } },
+    ])
+
+    expect(changed).to eq(1)
+    expect(File.read(path)).to eq(<<~RBI)
+      # typed: true
+      # frozen_string_literal: true
+
+      class AST::Node
+        sig { returns(Lexer::Token) }
+        def token; end
+      end
+
+    RBI
+  end
+
   it "rewrites source T::Struct const and prop field types" do
     _path, rel = repo_tmp_file("apply_source_struct_fields.rb", <<~RUBY)
       class Example < T::Struct
@@ -859,7 +881,8 @@ RSpec.describe AutoType::Apply do
 
   it "tools/clear-nil-kill-verify.sh runs the host spec suite (regression: prevents Sorbet-only verifier)" do
     script = File.read(File.join(NilKill::ROOT, "tools", "clear-nil-kill-verify.sh"))
-    expect(script).to match(/bundle exec prspec spec\/(?:\s|$)/),
-      "verify script must include `bundle exec prspec spec/` so loop changes are gated on host behavioral tests, not just `srb tc`"
+    expect(script).to include("bundle exec prspec compiler/spec/")
+    expect(script).to include("bundle exec prspec gems/nil-kill/spec")
+    expect(script).to include("bundle exec prspec gems/auto-type/spec")
   end
 end

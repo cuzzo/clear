@@ -31,9 +31,9 @@ RSpec.describe "automatic ownership transport" do
   it "keeps parent cleanup when a local field view is inferred as a borrow" do
     zig = transpile(<<~CLEAR)
       STRUCT Node { value: Int64 }
-      STRUCT Container { node: Node @indirect, id: Int64 }
+      STRUCT Container { node: Node @boxed, id: Int64 }
       FN makeContainer(v: Int64) RETURNS !Container ->
-        node: Node @indirect = Node{ value: v };
+        node: Node @boxed = Node{ value: v };
         RETURN Container{ node: node, id: 1 };
       END
       FN main() RETURNS !Void ->
@@ -182,7 +182,7 @@ RSpec.describe "automatic ownership transport" do
   it "derives mutation from stdlib and user signature metadata" do
     stdlib_source = <<~CLEAR
       FN main() RETURNS Void ->
-        MUTABLE x: Int64[]@list = [1];
+        MUTABLE x: []Int64 = [1];
         y = x;
         x.append(2);
         ASSERT y[0] == 1;
@@ -239,7 +239,7 @@ RSpec.describe "automatic ownership transport" do
 
   it "records resolved mutation through a nested place against its root binding" do
     source = <<~CLEAR
-      STRUCT Holder { values: Int64[]@list, name: String }
+      STRUCT Holder { values: []Int64, name: String }
       FN main() RETURNS Void ->
         MUTABLE holder = Holder{ values: [1], name: "Ada" };
         snapshot = holder;

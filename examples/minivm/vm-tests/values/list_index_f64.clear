@@ -1,5 +1,5 @@
 FN main() RETURNS Float64 ->
-    MUTABLE data: Float64[]@list = [];
+    MUTABLE data: []Float64 = [];
     append(data, 1.5);
     append(data, 2.5);
     append(data, 3.5);

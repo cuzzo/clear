@@ -41,4 +41,4 @@ When the CLEAR transpiler processes Ruby code, it queries the Decomplex fact-gra
 - **Fact: Unique** -> Transpile to `GIVE` (Move).
 - **Fact: Borrowed** -> Transpile to `WITH ... AS alias` (Borrow).
 - **Fact: Shared** -> Transpile to `@shared:locked` (Arc/RwLock).
-- **Fact: Escaped Field** -> Transpile to `RETURN COPY field` or `@indirect` wrapper.
+- **Fact: Escaped Field** -> Transpile to `RETURN COPY field` or `@boxed` wrapper.

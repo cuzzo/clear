@@ -3,6 +3,8 @@ use super::{
     zig, CallSite, FunctionDef, Language, StateDeclaration,
 };
 use crate::ast::{Node, Span};
+use crate::syntax::cfg::ControlFlowProfile;
+use crate::type_inference::TypeExpr;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Default)]
@@ -10,6 +12,7 @@ pub(crate) struct SyntaxMetadata {
     pub(crate) immutable_struct_readers: BTreeMap<String, Vec<String>>,
     pub(crate) immutable_struct_reader_types: BTreeMap<String, BTreeMap<String, String>>,
     pub(crate) type_aliases: BTreeMap<String, String>,
+    pub(crate) type_alias_lines: BTreeMap<String, usize>,
     pub(crate) method_param_types: BTreeMap<String, BTreeMap<String, String>>,
 }
 
@@ -74,6 +77,7 @@ pub(crate) struct NormalizedNilGuardFact {
 pub(crate) enum BlockCallSemantics {
     Iteration,
     Once,
+    Deferred,
     Unknown,
 }
 
@@ -91,7 +95,21 @@ pub(crate) enum CollectionAllocationSemantics {
     UnknownSize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct NormalizedCallComplexity {
+    pub(crate) time: &'static str,
+    pub(crate) space: &'static str,
+}
+
 pub(crate) trait NormalizedLanguageBehavior: Sync {
+    fn cfg_profile(&self) -> &'static ControlFlowProfile {
+        ControlFlowProfile::neutral_ref()
+    }
+
+    fn declared_type_hint_complete(&self, _type_name: &str) -> bool {
+        true
+    }
+
     fn collection_allocation_semantics(&self, _message: &str) -> CollectionAllocationSemantics {
         CollectionAllocationSemantics::None
     }
@@ -108,11 +126,88 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
-    fn empty_check_call(&self, _message: &str) -> bool { false }
-    fn visited_membership_call(&self, _message: &str) -> bool { false }
-    fn visited_insert_call(&self, _message: &str) -> bool { false }
-    fn empty_collection_constructor(&self, _message: &str) -> bool { false }
-    fn collection_parameter_type(&self, _type_name: &str) -> bool { false }
+    fn iteration_yields_collection_value(&self, _message: &str) -> bool {
+        false
+    }
+
+    fn callback_parameter_names(&self, _function: &Node) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn callback_invocation_message(&self, _message: &str) -> bool {
+        false
+    }
+
+    /// Whether a function nested inside another function is a lexical closure
+    /// rather than an owner method.
+    fn nested_function_is_lexical(&self, _function: &Node) -> bool {
+        false
+    }
+
+    /// Bindings introduced by a conditional header that shadow outer locals.
+    fn conditional_local_bindings(&self, _conditional: &Node) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Project equivalent state spellings to one owner-relative identity.
+    fn canonical_state_field(&self, _receiver: &str, field: &str) -> String {
+        field.to_string()
+    }
+
+    /// A stable state identity for analyzers that must distinguish two owners
+    /// with the same field spelling. Owner qualification is the portable
+    /// default: two unrelated classes both having `config` or `kind` state
+    /// must never be analyzed as one mutable field.
+    fn state_identity(&self, owner: &str, field: &str) -> String {
+        (!owner.is_empty())
+            .then(|| format!("{owner}::{field}"))
+            .unwrap_or_default()
+    }
+
+    fn empty_check_call(&self, _message: &str) -> bool {
+        false
+    }
+    fn visited_membership_call(&self, _message: &str) -> bool {
+        false
+    }
+    fn visited_insert_call(&self, _message: &str) -> bool {
+        false
+    }
+    fn empty_collection_constructor(&self, _message: &str) -> bool {
+        false
+    }
+    fn collection_parameter_type(&self, _type_name: &str) -> bool {
+        false
+    }
+    fn call_complexity(
+        &self,
+        _receiver_type: &TypeExpr,
+        _message: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        None
+    }
+
+    /// Return a cost only when the adapter recognizes a language/runtime
+    /// intrinsic without guessing the receiver's type. This keeps spellings in
+    /// language adapters while downstream complexity analysis stays generic.
+    fn intrinsic_call_complexity(
+        &self,
+        _receiver: Option<&str>,
+        _message: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        None
+    }
+
+    fn literal_receiver_type(&self, _node: &Node) -> Option<TypeExpr> {
+        None
+    }
+
+    /// Whether a normalized ARRAY/LIST node is a source collection literal.
+    /// Some parsers reuse those node kinds for argument lists, so the
+    /// language adapter must make the syntax-identity decision.
+    fn array_literal_node(&self, _node: &Node) -> bool {
+        true
+    }
     fn supports_parameter_normalization(&self) -> bool {
         false
     }
@@ -248,6 +343,19 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         Vec::new()
     }
 
+    /// Excludes syntax that looks like a field assignment but only initializes
+    /// a callable view. `this.run = this.run.bind(this)` does not create
+    /// independently mutable domain state.
+    fn suppress_state_write(&self, _receiver: &str, _field: &str, _node: &Node) -> bool {
+        false
+    }
+
+    /// Whether passing the receiver aggregate to this call makes every field
+    /// of that aggregate an opaque possible read.
+    fn opaque_receiver_escape_call(&self, _call: &CallSite) -> bool {
+        false
+    }
+
     fn implicit_owner_fields(&self) -> bool {
         false
     }
@@ -261,6 +369,18 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         _node: &Node,
         _owner: &str,
         _in_method: bool,
+    ) -> Option<StateDeclaration> {
+        None
+    }
+
+    /// Recover a declared state slot from a function-shaped normalized node.
+    /// Some source constructs (for example a C# auto-property) are modeled as
+    /// a function to retain their executable accessor body, but still declare
+    /// a stable state slot.
+    fn state_declaration_from_function(
+        &self,
+        _node: &Node,
+        _owner: &str,
     ) -> Option<StateDeclaration> {
         None
     }
@@ -303,6 +423,10 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
 
     fn record_method_calls_as_state_reads(&self) -> bool {
         true
+    }
+
+    fn suppress_method_call_state_read(&self, _call: &NormalizedCallProjection) -> bool {
+        false
     }
 
     fn suppress_self_call_state_read(&self, _call: &NormalizedCallProjection) -> bool {
@@ -357,6 +481,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         default_kind.to_string()
     }
 
+    /// Whether an owner declaration may extend a prior declaration with the
+    /// same name. This is normalized evidence for downstream detectors; the
+    /// language rule itself belongs in the language behavior.
+    fn reopenable_owner(&self, _node: &Node) -> bool {
+        false
+    }
+
     fn declarative_owner(&self, _node: &Node, _current_owner: &str) -> Option<NormalizedOwner> {
         None
     }
@@ -377,6 +508,26 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         _file_owner: &str,
     ) -> String {
         current_owner.to_string()
+    }
+
+    fn function_dispatch_name(&self, name: &str) -> String {
+        name.to_string()
+    }
+
+    fn function_dispatch_kind(&self, _name: &str, owner: &str) -> String {
+        if owner.is_empty() { "top" } else { "instance" }.to_string()
+    }
+
+    fn receiver_is_type_reference(&self, _receiver: &str) -> bool {
+        false
+    }
+
+    fn constructor_dispatch_name(&self, _receiver: &str, _message: &str) -> Option<String> {
+        None
+    }
+
+    fn declarative_owner_constant_operations(&self, _node: &Node) -> Vec<String> {
+        Vec::new()
     }
 
     fn body_owner_for_function(
@@ -474,7 +625,12 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
-    fn initializer_writes(&self, _node: &Node, _source_text: &str, _span: Span) -> Vec<NormalizedStateWrite> {
+    fn initializer_writes(
+        &self,
+        _node: &Node,
+        _source_text: &str,
+        _span: Span,
+    ) -> Vec<NormalizedStateWrite> {
         Vec::new()
     }
 
@@ -611,7 +767,8 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None" {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None"
+        {
             return type_text.to_string();
         }
         if type_text == "NilClass" || type_text.starts_with("T.nilable(") {
@@ -748,8 +905,12 @@ mod tests {
 
         // other default trait methods with missing lines
         assert!(!b.emit_index_assignment_mutation(&node, None));
+        assert_eq!(b.state_identity("First", "config"), "First::config");
+        assert_eq!(b.state_identity("Second", "config"), "Second::config");
+        assert_eq!(b.state_identity("", "config"), "");
         assert_eq!(b.self_member_receiver("m"), "m");
         assert!(b.owner_name_from_text(&node).is_none());
+        assert!(b.literal_receiver_type(&node).is_none());
         assert_eq!(b.parameter_list_source("("), "");
         assert!(b.parameter_name_from_signature("").is_none());
         assert!(b.literal_state_refs(&node, "text").is_empty());

@@ -2,10 +2,10 @@
 # Verifies that move suppression fires for the RHS variable when
 # assigning through indexed struct field access, preventing double-free.
 
-STRUCT Node { keys: Int64[]@list, vals: String[]@list }
+STRUCT Node { keys: []Int64, vals: []String }
 
 FN main() RETURNS Void ->
-    MUTABLE nodes: Node[]@list = [];
+    MUTABLE nodes: []Node = [];
     nodes.append(Node{ keys: [], vals: [] });
     IF nodes[0] EXISTS AS node THEN
         node.keys.append(1);
@@ -13,7 +13,7 @@ FN main() RETURNS Void ->
     END
 
     # Replace vals (String[]@list) through indexed access
-    MUTABLE nv: String[]@list = [];
+    MUTABLE nv: []String = [];
     nv.append("ten");
     nv.append("twenty");
     IF nodes[0] EXISTS AS node THEN node.vals = nv; END
@@ -23,7 +23,7 @@ FN main() RETURNS Void ->
     ASSERT nodes[0]?.vals[1] == "twenty", "val 1 is twenty";
 
     # Replace keys (Int64[]@list) through indexed access
-    MUTABLE nk: Int64[]@list = [];
+    MUTABLE nk: []Int64 = [];
     nk.append(10);
     nk.append(20);
     IF nodes[0] EXISTS AS node THEN node.keys = nk; END

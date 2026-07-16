@@ -15,6 +15,13 @@ const RUBY_ASSIGNMENT_OPERATORS: &[&str] = &[
 pub(crate) struct RubyAstAdapter;
 
 impl AstNormalizationAdapter for RubyAstAdapter {
+    // CFG-SPECIFIC START: Ruby's `do` node includes trailing control keywords;
+    // expose only its executable children to the shared CFG normalizer.
+    fn cfg_control_body_wrapper(&self, node: TreeSitterNode<'_>) -> bool {
+        node.kind() == "do" || ENSURE_BODY_WRAPPER_KINDS.contains(&node.kind())
+    }
+    // CFG-SPECIFIC END
+
     fn tracks_dynamic_local_scope(&self) -> bool {
         true
     }

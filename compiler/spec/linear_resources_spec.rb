@@ -782,7 +782,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~CLEAR
         STRUCT Node { id: Int64 }
         FN main() RETURNS Void ->
-          MUTABLE nodes: Node@multiowned[]@list = List[];
+          MUTABLE nodes: []Node@multiowned = List[];
           RETURN;
         END
       CLEAR
@@ -795,7 +795,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~CLEAR
         STRUCT Node { id: Int64 }
         FN main() RETURNS Void ->
-          MUTABLE nodes: Node@shared[]@list = List[];
+          MUTABLE nodes: []Node@shared = List[];
           RETURN;
         END
       CLEAR
@@ -808,8 +808,8 @@ RSpec.describe SemanticAnnotator do
       src = <<~CLEAR
         STRUCT Node { id: Int64 }
         FN main() RETURNS Void ->
-          MUTABLE nodes: Node@multiowned[]@list = List[];
-          MUTABLE links: Node@link[]@list = List[];
+          MUTABLE nodes: []Node@multiowned = List[];
+          MUTABLE links: []Node@link = List[];
           RETURN;
         END
       CLEAR
@@ -822,7 +822,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~CLEAR
         STRUCT Counter { value: Int64 }
         FN main() RETURNS Void ->
-          MUTABLE counters: Counter@shared:locked[]@list = List[];
+          MUTABLE counters: []Counter@shared:locked = List[];
           RETURN;
         END
       CLEAR
@@ -835,7 +835,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~CLEAR
         STRUCT Account { balance: Int64 }
         FN main() RETURNS Void ->
-          MUTABLE accounts: Account@shared:writeLocked[]@list = List[];
+          MUTABLE accounts: []Account@shared:writeLocked = List[];
           RETURN;
         END
       CLEAR

@@ -28,12 +28,27 @@ module Espalier
       new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations).build
     end
 
-    def self.project_modules(evidence)
+    def self.project_modules(evidence, source_roles: ["production"])
       return [] unless evidence && evidence["methods"]
+
+      allowed_roles = Array(source_roles).map(&:to_s).to_set
+      roles_by_path = Array(evidence["files"]).each_with_object({}) do |file, roles|
+        path = file["path"].to_s
+        role = file["source_role"] || source_role(path)
+        roles[path] = role
+        roles[File.expand_path(path, evidence["root"])] = role if evidence["root"]
+      end
+      role_for = ->(path) { roles_by_path.fetch(path.to_s) { source_role(path) } }
 
       resolve_owner = ->(owner, path, language) {
         lang = language.to_s.downcase
-        if lang == "rust" || lang == "go" || lang == "zig" || lang == "c" || lang == "cpp" || lang == "csharp"
+        # A source file is part of an owner identity in languages that permit
+        # unrelated modules/classes with the same short name. Without it,
+        # parallel TS/JS version trees (and native compilation units) are
+        # merged into a fictional class and produce false state/complexity
+        # claims. Deliberate declaration merging remains an explicit future
+        # relation, never an accidental name collision.
+        if lang == "rust" || lang == "go" || lang == "zig" || lang == "c" || lang == "cpp" || lang == "csharp" || lang == "typescript" || lang == "javascript"
           "#{owner}@#{path}"
         else
           owner
@@ -43,6 +58,10 @@ module Espalier
       # Group methods by owner
       methods_by_owner = Hash.new { |h, k| h[k] = [] }
       methods_by_id = {}
+      owner_kinds = Array(evidence["owners"]).each_with_object({}) do |owner, kinds|
+        key = resolve_owner.call(owner["name"], owner["path"], owner["language"])
+        kinds[key] = owner["kind"].to_s
+      end
       accesses_by_function = Hash.new { |h, k| h[k] = [] }
       Array(evidence.dig("facts", "state_accesses")).each do |access|
         accesses_by_function[access["function_id"]] << access
@@ -52,12 +71,30 @@ module Espalier
         key = [fact["path"], fact["owner"], fact["function"], fact["line"].to_i]
         complexity_by_method[key] << fact
       end
-      Array(evidence["methods"]).each do |m|
+      raw_methods = Array(evidence["methods"])
+      implementation_keys = raw_methods.filter_map do |method|
+        source = method["raw_source"].to_s
+        next unless source.include?("{")
+
+        [method["path"].to_s, method["owner"].to_s, method["name"].to_s, method["kind"].to_s]
+      end.to_set
+      raw_methods.each do |m|
+        next unless allowed_roles.include?(role_for.call(m["path"]))
+        overload_key = [m["path"].to_s, m["owner"].to_s, m["name"].to_s, m["kind"].to_s]
+        # TypeScript overload signatures are declarations immediately followed
+        # by a concrete implementation. Reporting both as executable methods
+        # doubles every downstream metric; retain the implementation only.
+        if implementation_keys.include?(overload_key) && !m["raw_source"].to_s.include?("{")
+          next
+        end
         accesses = accesses_by_function[m["id"]]
         meth = {
           id: m["id"],
           owner_id: m["owner_id"],
+          raw_owner: m["owner"],
           name: m["name"],
+          dispatch_name: m["dispatch_name"] || m["name"],
+          dispatch_kind: m["kind"],
           signature: m["signature"],
           parameters: Array(m["params"]),
           visibility: (m["visibility"] || :public).to_sym,
@@ -73,14 +110,44 @@ module Espalier
           delegations: []
         }
         owner_key = resolve_owner.call(m["owner"], m["path"], m["language"])
+        meth[:projected_owner] = owner_key
         methods_by_owner[owner_key] << meth
         methods_by_id[m["id"]] = meth
+      end
+
+      methods_by_dispatch = Hash.new { |hash, key| hash[key] = [] }
+      methods_by_id.each_value do |method|
+        methods_by_dispatch[[method[:raw_owner].to_s, method[:dispatch_name].to_s, method[:dispatch_kind].to_s]] << method
+      end
+
+      flow_types = Hash.new { |hash, key| hash[key] = Set.new }
+      Array(evidence.dig("facts", "flow_local_types")).each do |fact|
+        next unless fact["complete"]
+
+        resolved = Array(fact["resolved_types"]).filter_map do |type|
+          if type.is_a?(FactMine::Syntax::TypeExpr) && type.kind == "Primitive"
+            type.data.to_s
+          elsif type.is_a?(Hash) && type["kind"] == "Primitive"
+            type["data"].to_s
+          end
+        end.uniq
+        next unless resolved.length == 1
+
+        key = [fact["file"].to_s, fact["owner"].to_s, fact["function"].to_s,
+               fact["line"].to_i, fact["name"].to_s]
+        flow_types[key] << resolved.first
+      end
+
+      constant_operations = Hash.new { |hash, owner| hash[owner] = Set.new }
+      Array(evidence.dig("facts", "struct_declarations")).each do |declaration|
+        constant_operations[declaration["class"].to_s].merge(Array(declaration["constant_operations"]).map(&:to_s))
       end
 
       # Group fields by owner
       fields_by_owner = Hash.new { |h, k| h[k] = [] }
       first_field_by_owner = {}
       Array(evidence["fields"]).each do |f|
+        next unless allowed_roles.include?(role_for.call(f["path"]))
         owner_key = resolve_owner.call(f["owner"], f["path"], f["language"])
         fields_by_owner[owner_key] << f
         first_field_by_owner[owner_key] ||= f
@@ -93,15 +160,68 @@ module Espalier
         next unless source
 
         target = methods_by_id[call["target"]]
+        receiver = call["receiver"].to_s
+        implicit_receiver = receiver.empty? || receiver == "self" || receiver == "this"
+        operation_owner = nil
+        operation_overridden = false
+        unless target || !implicit_receiver
+          implicit_candidates = methods_by_dispatch[
+            [source[:raw_owner].to_s, call["message"].to_s, source[:dispatch_kind].to_s]
+          ]
+          operation_overridden ||= !implicit_candidates.empty?
+          target = implicit_candidates.first if implicit_candidates.length == 1
+          operation_owner = source[:raw_owner].to_s
+        end
+        unless target || call["receiver_kind"] != "type"
+          static_candidates = methods_by_dispatch[[call["receiver"].to_s, call["message"].to_s, "class"]]
+          operation_overridden ||= !static_candidates.empty?
+          target = static_candidates.first if static_candidates.length == 1
+          operation_owner = call["receiver"].to_s
+        end
+        unless target || call["constructor_target"].to_s.empty? || call["receiver_kind"] != "type"
+          constructor_candidates = methods_by_dispatch[
+            [call["receiver"].to_s, call["constructor_target"].to_s, "instance"]
+          ]
+          operation_overridden ||= !constructor_candidates.empty?
+          target = constructor_candidates.first if constructor_candidates.length == 1
+        end
+        unless target
+          flow_key = [(call["path"] || source[:file]).to_s,
+                      (call["owner"] || source[:raw_owner]).to_s,
+                      (call["function"] || source[:name]).to_s,
+                      call["line"].to_i, call["receiver"].to_s]
+          receiver_types = flow_types[flow_key]
+          if receiver_types.length == 1
+            typed_candidates = methods_by_dispatch[[receiver_types.first, call["message"].to_s, "instance"]]
+            operation_overridden ||= !typed_candidates.empty?
+            target = typed_candidates.first if typed_candidates.length == 1
+            operation_owner = receiver_types.first
+          end
+        end
+        known_time = call["known_time_complexity"]
+        known_space = call["known_space_complexity"]
+        if !target && !operation_overridden && operation_owner &&
+            constant_operations[operation_owner].include?(call["message"].to_s)
+          known_time ||= "O(1)"
+          known_space ||= "O(1)"
+        end
         source[:delegations] << {
           receiver: call["receiver"].to_s.empty? ? "self" : call["receiver"],
-          message: target ? target[:name] : call["message"],
+          message: call["message"],
           line: call["line"]&.to_i,
           span: call["span"],
           type: call["conditional"] ? :conditional : :always,
           confidence: call["confidence"],
-          unresolved_reason: call["unresolved_reason"]
+          unresolved_reason: (target || known_time || known_space) ? nil : call["unresolved_reason"],
+          target_id: target && target[:id],
+          target_owner: target && target[:projected_owner],
+          target_method: target && target[:name],
+          known_time_complexity: known_time,
+          known_space_complexity: known_space
         }
+        if target
+          source[:delegations].last[:confidence] = "high"
+        end
       end
 
       # Map state protocols and param origins to reads/writes and delegations
@@ -145,20 +265,30 @@ module Espalier
       end
 
       # Construct modules array
+      declared_fields = Hash.new { |hash, owner| hash[owner] = Set.new }
+      Array(evidence.dig("facts", "struct_declarations")).each do |declaration|
+        Array(declaration["fields"]).each do |field|
+          declared_fields[declaration["class"]] << field.to_s.delete_prefix("@")
+        end
+      end
       all_owners = (methods_by_owner.keys + fields_by_owner.keys).uniq.reject(&:empty?)
       all_owners.map do |owner|
         meta = module_metadata(owner, methods_by_owner[owner], first_field_by_owner[owner])
+        owner_kind = owner_kinds[owner]
+        module_like = %w[module program namespace].include?(owner_kind) ||
+          (%i[javascript typescript].include?(meta[:language]) && owner_kind == "owner")
         {
-          type: :class,
+          type: module_like ? :module : :class,
           name: owner,
           file: meta[:file],
           line: meta[:line],
           span: meta[:span],
           language: meta[:language],
-          states: fields_by_owner[owner].map { |field| field["name"] }.to_set,
-          state_records: fields_by_owner[owner],
-          ivar_types: fields_by_owner[owner].to_h { |field| [field["name"], field["declared_type"]] }.compact,
+          states: module_like ? Set.new : fields_by_owner[owner].map { |field| field["name"] }.to_set,
+          state_records: module_like ? [] : fields_by_owner[owner],
+          ivar_types: module_like ? {} : fields_by_owner[owner].to_h { |field| [field["name"], field["declared_type"]] }.compact,
           ivar_properties: {},
+          declared_fields: declared_fields,
           methods: methods_by_owner[owner]
         }
       end
@@ -172,6 +302,21 @@ module Espalier
         line: first_meth ? first_meth[:line] : (first_field ? first_field["line"] : 1),
         span: first_meth ? first_meth[:span] : (first_field ? first_field["span"] : nil)
       }
+    end
+
+    def self.source_role(path)
+      text = path.to_s.tr("\\", "/")
+      parts = text.split("/").reject(&:empty?)
+      basename = parts.last.to_s
+      return "vcs_metadata" if (parts & %w[.git .hg .svn]).any?
+      return "vendored" if (parts & %w[vendor vendors third_party third-party]).any?
+      return "generated" if (parts & %w[generated gen dist]).any?
+      return "benchmark" if (parts & %w[benchmark benchmarks bench benches]).any?
+      return "example" if (parts & %w[example examples sample samples]).any?
+      return "test" if (parts & %w[test tests spec specs __tests__]).any?
+      return "test" if basename.match?(/(?:\A|[_\.])test(?:[_\.]|\z)|(?:\A|[_\.])spec(?:[_\.]|\z)/)
+
+      "production"
     end
 
 
@@ -288,6 +433,10 @@ module Espalier
       dispatcher_inferences = Array(facts["dispatcher_inferences"])
       hash_record_member_calls = Array(facts["hash_record_member_calls"])
       complexity_facts = Array(facts["complexity_facts"])
+      flow_local_types = Array(facts["flow_local_types"]).uniq do |fact|
+        [fact["file"], fact["function"], fact["node_id"], fact["place_id"]]
+      end
+      type_dependencies = Array(facts["type_dependencies"]).uniq { |fact| fact["id"] }
 
       # Collect languages of owners to know if they need @ prepended for fields
       owner_languages = {}
@@ -352,6 +501,7 @@ module Espalier
         "vcs" => @vcs&.to_s,
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
+        "corpus" => corpus_metadata,
         "runtime_fields" => false,
         "files" => files.map { |file| file_record(file) },
         "owners" => owners.sort_by { |owner| [owner["path"].to_s, owner["line"].to_i, owner["name"].to_s] },
@@ -361,6 +511,10 @@ module Espalier
           "calls" => calls.sort_by { |call| [call["path"].to_s, call["line"].to_i, call["id"].to_s] },
           "state_accesses" => state_accesses.sort_by { |access| [access["path"].to_s, access["line"].to_i, access["id"].to_s] },
           "complexity_facts" => complexity_facts.sort_by { |fact| [fact["path"].to_s, fact["line"].to_i, fact["function"].to_s] },
+          "flow_local_types" => flow_local_types.sort_by do |fact|
+            [fact["file"].to_s, fact["function"].to_s, fact["line"].to_i, fact["name"].to_s, fact["node_id"].to_s]
+          end,
+          "type_dependencies" => type_dependencies.sort_by { |fact| fact["id"].to_s },
           "call_graph_edges" => call_graph_edges.sort_by { |edge| [edge["source"].to_s, edge["target"].to_s, edge["kind"].to_s] },
           "state_type_edges" => state_type_edges.sort_by { |edge| [edge["source"].to_s, edge["target"].to_s, edge["label"].to_s] },
           "state_types" => Hash[state_types.sort],
@@ -405,6 +559,8 @@ module Espalier
           "fields" => fields.uniq { |field| field["id"] }.size,
           "calls" => calls.size,
           "state_accesses" => state_accesses.size,
+          "flow_local_types" => flow_local_types.size,
+          "type_dependencies" => type_dependencies.size,
           "signatures" => typed_signature_count,
           "state_types" => state_types.size,
           "state_type_records" => deduped[:state_type_records].size,
@@ -444,6 +600,7 @@ module Espalier
         "root" => @root,
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
+        "corpus" => corpus_metadata,
         "runtime_fields" => false,
         "files" => [],
         "fields" => [],
@@ -458,6 +615,25 @@ module Espalier
       return Espalier.target_dirs(root: @root) if @targets.empty?
 
       @targets.map { |target| File.expand_path(target, @root) }
+    end
+
+    def corpus_metadata
+      git_top = begin
+        git_root_for(@root)
+      rescue ArgumentError
+        nil
+      end
+      complete = git_top &&
+        target_dirs.any? { |target| File.directory?(target) && File.expand_path(target) == File.expand_path(git_top) } &&
+        Espalier.target_exclude_dirs(root: @root).empty?
+      {
+        "complete" => !!complete,
+        "reason" => if complete
+          "the selected target includes the Git worktree root without configured exclusions"
+        else
+          "the selected target is not a proven closed corpus"
+        end
+      }
     end
 
     def target_files
@@ -481,22 +657,25 @@ module Espalier
 
     def git_tracked_target_files(exts)
       targets = target_dirs
-      git_tracked_files.select do |path|
+      tracked = targets.flat_map do |target|
+        git_tracked_files(git_root_for(target))
+      end
+      tracked.select do |path|
         target_path?(path, targets) && source_file?(path, exts)
       end.uniq.sort
     end
 
-    def git_tracked_files
-      top = git_root
+    def git_tracked_files(top)
       out, status = Open3.capture2e("git", "-C", top, "ls-files", "-z")
       raise ArgumentError, "git ls-files failed under #{top}: #{out.strip}" unless status.success?
 
       out.split("\0").reject(&:empty?).map { |path| File.expand_path(path, top) }
     end
 
-    def git_root
-      out, status = Open3.capture2e("git", "-C", @root, "rev-parse", "--show-toplevel")
-      raise ArgumentError, "--vcs=git requires #{@root} to be inside a git worktree" unless status.success?
+    def git_root_for(target)
+      probe = File.directory?(target) ? target : File.dirname(target)
+      out, status = Open3.capture2e("git", "-C", probe, "rev-parse", "--show-toplevel")
+      raise ArgumentError, "--vcs=git requires #{probe} to be inside a git worktree" unless status.success?
 
       File.expand_path(out.strip)
     end
@@ -525,6 +704,7 @@ module Espalier
       {
         "path" => rel(file),
         "language" => file_language(file).to_s,
+        "source_role" => self.class.source_role(rel(file)),
         "digest" => "sha256:#{Digest::SHA256.file(file).hexdigest}",
         "parser" => "tree_sitter",
       }

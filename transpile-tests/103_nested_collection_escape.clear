@@ -4,11 +4,11 @@
 # when they're fields of a returned struct literal.
 
 STRUCT ListHolder { items: Int64[], label: String }
-STRUCT MapHolder { data: HashMap<Int64>, label: String }
+STRUCT MapHolder { data: {String}Int64, label: String }
 
 # Return struct containing @list via StructLit (direct escape)
 FN buildListDirect() RETURNS !ListHolder ->
-    MUTABLE vals: Int64[]@list = List[];
+    MUTABLE vals: []Int64 = List[];
     vals.append(10_i64);
     vals.append(20_i64);
     vals.append(30_i64);
@@ -17,7 +17,7 @@ END
 
 # Return struct containing HashMap via StructLit (direct escape)
 FN buildMapDirect() RETURNS !MapHolder ->
-    MUTABLE m: HashMap<Int64> = {};
+    MUTABLE m: {String}Int64 = {};
     m["x"] = 100_i64;
     m["y"] = 200_i64;
     RETURN MapHolder{ data: m, label: "direct" };

@@ -19,12 +19,12 @@ module Espalier
       /[!?]\z/
     ].freeze
 
-    def self.candidates(manifest, threshold: DEFAULT_SCORE_THRESHOLD)
-      new(manifest, threshold: threshold).candidates
+    def self.candidates(manifest, threshold: DEFAULT_SCORE_THRESHOLD, closed_world: false)
+      new(manifest, threshold: threshold, closed_world: closed_world).candidates
     end
 
-    def self.annotate!(manifest, threshold: DEFAULT_SCORE_THRESHOLD)
-      rows = candidates(manifest, threshold: threshold)
+    def self.annotate!(manifest, threshold: DEFAULT_SCORE_THRESHOLD, closed_world: false)
+      rows = candidates(manifest, threshold: threshold, closed_world: closed_world)
       by_key = rows.to_h { |row| [[row[:module], row[:name]], row] }
       Array(manifest).each do |mod|
         Array(mod[:functions]).each do |fn|
@@ -40,9 +40,10 @@ module Espalier
       manifest
     end
 
-    def initialize(manifest, threshold:)
+    def initialize(manifest, threshold:, closed_world:)
       @manifest = Array(manifest)
       @threshold = threshold.to_f
+      @closed_world = closed_world
     end
 
     def candidates
@@ -53,6 +54,9 @@ module Espalier
     private
 
     def candidate_for(row)
+      # A source-only graph cannot prove a library method has no callers. This
+      # detector is valid only when the caller opts into a closed-world scan.
+      return nil unless @closed_world
       return nil unless row[:visibility] == :public
       return nil if public_surface_name?(row[:name])
       return nil if row[:callers].empty?

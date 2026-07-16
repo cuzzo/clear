@@ -1,11 +1,11 @@
-# Template: @indirect union payload memory safety.
-# Exercises the single-source @indirect layout (Type#layout == :indirect ->
+# Template: @boxed union payload memory safety.
+# Exercises the single-source @boxed layout (Type#layout == :indirect ->
 # exactly one pointer level): construct, MATCH-extract, deref-on-read, and
-# cleanup of @indirect union payloads across payload kinds, including the
+# cleanup of @boxed union payloads across payload kinds, including the
 # recursive (self-referential) shapes from examples/mal.
 #
 # Cross-references:
-#   - CLAUDE.md "Group 2 (data shape)" / @indirect heap-pinned cell
+#   - CLAUDE.md "Group 2 (data shape)" / @boxed heap-pinned cell
 #   - transpile-tests/174_union_match_struct_fields.clear (inline-struct field)
 #   - transpile-tests/520_mal_indirect_lambda_body_cleanup.clear (recursive)
 #   - INV-INDIRECT-SINGLE-BOX (mir_checker): no double box.
@@ -16,7 +16,7 @@
 #   op      ∈ {local, return}
 #
 # Every cell is expected to :pass leak-free. A failing or leaking cell is a
-# real regression in the @indirect box/deref/cleanup path (double-box UAF,
+# real regression in the @boxed box/deref/cleanup path (double-box UAF,
 # missing deref, or unreleased payload allocation).
 
 INDIRECT_RU_PAYLOADS = %i[
@@ -32,12 +32,12 @@ end
 # Variant declaration line for the payload kind under test.
 def indirect_ru_variant_decl(payload)
   case payload
-  when :int_single then "Box: Int64 @indirect"
-  when :str_single then "Box: String @indirect"
-  when :int_inline then "Box { v: Int64 @indirect }"
-  when :str_inline then "Box { v: String @indirect }"
-  when :rec_single then "Box: U @indirect"
-  when :rec_inline then "Box { inner: U @indirect }"
+  when :int_single then "Box: Int64 @boxed"
+  when :str_single then "Box: String @boxed"
+  when :int_inline then "Box { v: Int64 @boxed }"
+  when :str_inline then "Box { v: String @boxed }"
+  when :rec_single then "Box: U @boxed"
+  when :rec_inline then "Box { inner: U @boxed }"
   end
 end
 
@@ -53,7 +53,7 @@ def indirect_ru_ctor(payload)
   end
 end
 
-# The MATCH arm body that extracts the @indirect payload and ASSERTs it.
+# The MATCH arm body that extracts the @boxed payload and ASSERTs it.
 def indirect_ru_check(payload)
   case payload
   when :int_single

@@ -24,7 +24,7 @@ RSpec.describe "Effect Tracking" do
     it "does not treat non-escaping HashMap creation as heap placement" do
       effs = effects_of(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE counts: HashMap<Int64> = {"alice": 1_i64, "bob": 2_i64};
+          MUTABLE counts: {String}Int64 = {"alice": 1_i64, "bob": 2_i64};
           RETURN;
         END
       CLEAR
@@ -35,7 +35,7 @@ RSpec.describe "Effect Tracking" do
       effs = effects_of(<<~CLEAR)
         STRUCT Item { value: Float64 }
         FN main() RETURNS Void ->
-          MUTABLE items: Item[100]@pool = [];
+          MUTABLE items: [Pool(100)]Item = [];
           RETURN;
         END
       CLEAR

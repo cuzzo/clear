@@ -16,6 +16,6 @@ FN sum_all(rs: Box[]) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-  rs: Box[3] = [Box{ Small: 1_i64 }, Box{ Large: 10_i64 }, Box{ Small: 100_i64 }];
+  rs: [3]Box = [Box{ Small: 1_i64 }, Box{ Large: 10_i64 }, Box{ Small: 100_i64 }];
   ASSERT sum_all(rs) == 111_i64, "1 + 10 + 100";
 END

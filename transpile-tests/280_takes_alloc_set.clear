@@ -1,12 +1,12 @@
 # Bug: frame-allocated @set GIVE'd to TAKES @set param → alloc mismatch.
 # Same architectural cause as 277.
 
-FN consume!(TAKES s: Int64[]@set) RETURNS Int64 ->
+FN consume!(TAKES s: [Set]Int64) RETURNS Int64 ->
     RETURN s.length();
 END
 
 FN main() RETURNS Void ->
-    MUTABLE s: Int64[]@set = Set[];
+    MUTABLE s: [Set]Int64 = Set[];
     s.insert(10_i64);
     s.insert(20_i64);
     s.insert(30_i64);

@@ -14,6 +14,53 @@ end
 
 module NilKill
   class StaticEvidence
+    TRACE_PLAN_FACT_KEYS = %w[
+      tlet_sites struct_declarations state_type_records type_definitions
+    ].freeze
+
+    # Runtime trace planning needs only enforceable declarations and T.let
+    # sites. Asking Espalier to construct the complete NilKill evidence bundle
+    # also computes CFG/DFG, protocols, shapes, aliases, call graphs, and
+    # pressure inputs that TracePlan immediately discards. Keep this narrow
+    # profile explicit so adding a new runtime-elision fact requires updating
+    # both this contract and its parity oracle.
+    def self.build_trace_plan(targets = nil, root: NilKill::ROOT)
+      files = Array(targets || NilKill.target_files)
+      return { "methods" => [], "fields" => [], "facts" => {} } if files.empty?
+
+      tmp = Tempfile.new(["nil-kill-trace-plan-facts", ".json"])
+      tmp.close
+      binary = Espalier::StaticEvidence::FACT_MINE_RUST_BINARY
+      ok = system(binary, "profile", "trace-plan", "--output", tmp.path, *files)
+      raise "fact-mine-rust trace-plan failed with status #{$?.exitstatus}" unless ok
+
+      raw = FactMine::Syntax::TypeExpr.wrap_types!(JSON.parse(File.read(tmp.path)))
+      facts = TRACE_PLAN_FACT_KEYS.to_h { |key| [key, raw[key]] }
+      declarations = Array(raw["struct_declarations"])
+      resolved_declarations = Marshal.load(Marshal.dump(declarations))
+      resolution_evidence = {
+        "methods" => Array(raw["methods"]),
+        "facts" => {
+          "struct_declarations" => resolved_declarations,
+          "type_definitions" => Array(raw["type_definitions"]),
+        },
+      }
+      resolve_struct_declaration_classes!(resolution_evidence)
+      # Preserve the conservative unqualified entry as sampled while adding
+      # the fully-qualified declaration with its enforceable field types.
+      # Runtime lookup tries the qualified class first and then suffixes.
+      facts["struct_declarations"] = declarations.map do |declaration|
+        declaration.merge("field_types" => {})
+      end + resolved_declarations
+      {
+        "methods" => Array(raw["methods"]),
+        "fields" => Array(raw["fields"]),
+        "facts" => facts,
+      }
+    ensure
+      tmp&.unlink
+    end
+
     def self.build(targets = nil, root: NilKill::ROOT, language: nil, vcs: nil, include_annotations: true)
       if defined?(NilKill::SourceIndex)
         ENV["FACT_MINE_NORETURN_METHODS"] = NilKill::SourceIndex.noreturn_methods.to_a.join(",")
@@ -37,6 +84,7 @@ module NilKill
           vcs: vcs,
           include_annotations: include_annotations
         )
+        enrich_fields_from_param_origins!(evidence)
         if evidence["facts"] && evidence["facts"]["type_definitions"]
           class_fields = Set.new(Array(evidence["fields"]).map { |f| [f["owner"], f["name"]] })
           evidence["facts"]["type_definitions"].each do |d|
@@ -66,6 +114,45 @@ module NilKill
         end
       end
     end
+
+    # FactMine records direct parameter-to-state assignments independently
+    # from signature extraction. Joining those normalized facts recovers a
+    # field's declared type without re-parsing any source-language syntax.
+    def self.enrich_fields_from_param_origins!(evidence)
+      facts = evidence["facts"] || {}
+      signatures = Array(facts["type_definitions"])
+        .select { |definition| definition["kind"] == "method_signature" }
+        .group_by do |definition|
+          [definition["language"], definition["path"], definition["owner"], definition["name"]]
+        end
+
+      Array(facts["state_param_origin_records"]).each do |origin|
+        key = [origin["language"], origin["path"], origin["owner"], origin["function"]]
+        param_types = Array(signatures[key]).filter_map do |signature|
+          param = Array(signature["params"]).find { |candidate| candidate["name"] == origin["param"] }
+          param && param["type"]
+        end
+        param_types = param_types.reject do |type|
+          type.to_s.empty? || type.to_s.match?(/\bT\.untyped\b|\bAny\b|(?<!\.)\bany\b|\bunknown\b/)
+        end
+        param_types.uniq!(&:to_s)
+        next unless param_types.one?
+
+        normalized_field = origin["field"].to_s.sub(/\A@/, "")
+        Array(evidence["fields"]).each do |field|
+          next unless field["language"] == origin["language"]
+          next unless field["path"] == origin["path"]
+          next unless field["owner"] == origin["owner"]
+          next unless field["name"].to_s.sub(/\A@/, "") == normalized_field
+          next unless field["declared_type"].to_s.empty?
+
+          field["declared_type"] = param_types.first
+          field["static_origin"] = "parameter_assignment"
+        end
+      end
+      evidence
+    end
+    private_class_method :enrich_fields_from_param_origins!
 
     def self.append_ruby_struct_definitions!(evidence, root)
       Array(evidence["files"]).each do |f|

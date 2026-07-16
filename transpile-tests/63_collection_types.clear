@@ -6,7 +6,7 @@ STRUCT Point { x: Float64, y: Float64 }
 
 FN main() RETURNS Void ->
     # @list with UFCS append
-    MUTABLE pts: Point[]@list = [];
+    MUTABLE pts: []Point = [];
     pts.append(Point{ x: 1.0, y: 2.0 });
     pts.append(Point{ x: 3.0, y: 4.0 });
     pts.append(Point{ x: 5.0, y: 6.0 });
@@ -32,7 +32,7 @@ FN main() RETURNS Void ->
     ASSERT small_pts.length() == 2, "@list WHERE should return 2 items";
 
     # Pool constructor with handle-based access (lazy inference via insert)
-    MUTABLE pool: Point[100]@pool = [];
+    MUTABLE pool: [Pool(100)]Point = [];
 
     # insert returns an Id<Point> (u64 handle)
     id_a: Id<Point> = pool.insert(Point{ x: 10.0, y: 20.0 });

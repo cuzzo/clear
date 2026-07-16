@@ -1,5 +1,6 @@
 pub mod co_update;
 pub mod decision_pressure;
+pub mod declared_type_pressure;
 pub mod derived_state;
 pub mod false_simplicity;
 pub mod fat_union;
@@ -16,6 +17,7 @@ pub mod path_condition;
 pub mod predicate_alias;
 pub mod redundant_nil_guard;
 pub mod semantic_alias;
+pub mod scoped_state_restoration;
 pub mod sequence_mine;
 pub mod state_branch_density;
 pub mod state_mesh;

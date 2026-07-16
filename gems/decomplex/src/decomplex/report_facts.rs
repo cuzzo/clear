@@ -1,8 +1,8 @@
 use crate::decomplex::detectors::{
-    co_update, decision_pressure, derived_state, false_simplicity, fat_union, flay_similarity,
+    co_update, decision_pressure, declared_type_pressure, derived_state, false_simplicity, fat_union, flay_similarity,
     function_lcom, implicit_control_flow, inconsistent_rename_clone, local_flow, locality_drag,
     miner, operational_discontinuity, oversized_predicate, path_condition, predicate_alias,
-    redundant_nil_guard, semantic_alias, sequence_mine, state_branch_density, state_mesh,
+    redundant_nil_guard, scoped_state_restoration, semantic_alias, sequence_mine, state_branch_density, state_mesh,
     superfluous_state, temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
 };
 use crate::decomplex::parallel;
@@ -25,6 +25,7 @@ pub const FORMAT: &str = "decomplex.report-facts.v1";
 const DEFAULT_MASS: usize = 32;
 const DEFAULT_FUZZY: usize = 1;
 const DEFAULT_EXCLUDE_DIRS: &[&str] = &[
+    ".git",
     ".clear-cache",
     ".clear-transpile-cache",
     ".global-zig-cache",
@@ -39,6 +40,18 @@ pub enum VcsFilter {
     Git,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceRole {
+    Production,
+    Test,
+    Benchmark,
+    Example,
+    Generated,
+    Vendored,
+    VcsMetadata,
+}
+
 #[derive(Clone, Debug)]
 pub struct Options {
     pub language: Option<Language>,
@@ -46,6 +59,7 @@ pub struct Options {
     pub mass: usize,
     pub fuzzy: usize,
     pub vcs: Option<VcsFilter>,
+    pub source_roles: BTreeSet<SourceRole>,
 }
 
 impl Default for Options {
@@ -56,6 +70,7 @@ impl Default for Options {
             mass: DEFAULT_MASS,
             fuzzy: DEFAULT_FUZZY,
             vcs: None,
+            source_roles: BTreeSet::from([SourceRole::Production]),
         }
     }
 }
@@ -64,13 +79,18 @@ impl Default for Options {
 pub struct SourceFile {
     pub path: PathBuf,
     pub language: Language,
+    pub source_role: SourceRole,
 }
 
 struct SharedFacts {
     local_summaries: Vec<local_flow::MethodSummary>,
     local_complexity_scores: BTreeMap<(String, String), syntax::LocalComplexityScore>,
     semantic_aliases: semantic_alias::SemanticAliasReport,
+    declaration_type_pressures: Vec<fact_mine_rust::profile::DeclarationTypePressure>,
 }
+
+#[derive(Clone, Debug, Serialize)]
+struct CorpusMetadata { complete: bool, reason: String, targets: Vec<String> }
 
 impl SharedFacts {
     fn new(documents: &[Document]) -> Self {
@@ -94,6 +114,8 @@ impl SharedFacts {
                 profile_phase(profile, "shared.semantic_aliases", started.elapsed());
                 result
             });
+            let declaration_type_pressures = scope.spawn(|| documents.iter()
+                .flat_map(fact_mine_rust::profile::extract_declaration_type_pressures).collect());
             Self {
                 local_summaries: local_summaries.join().expect("local-flow facts worker"),
                 local_complexity_scores: local_complexity_scores
@@ -102,6 +124,8 @@ impl SharedFacts {
                 semantic_aliases: semantic_aliases
                     .join()
                     .expect("semantic-alias facts worker"),
+                declaration_type_pressures: declaration_type_pressures.join()
+                    .expect("declaration-type-pressure facts worker"),
             }
         })
     }
@@ -109,7 +133,8 @@ impl SharedFacts {
 
 pub fn collect(targets: &[PathBuf], options: &Options, include_documents: bool) -> Result<Value> {
     let files = collect_source_files(targets, options)?;
-    facts_for_source_files(&files, options, include_documents)
+    let corpus = corpus_metadata(targets, &files, options);
+    facts_for_source_files_with_corpus(&files, options, include_documents, corpus)
 }
 
 pub fn collect_source_files(targets: &[PathBuf], options: &Options) -> Result<Vec<SourceFile>> {
@@ -127,6 +152,14 @@ pub fn collect_source_files(targets: &[PathBuf], options: &Options) -> Result<Ve
 }
 
 pub fn facts_for_source_files(files: &[SourceFile], options: &Options, include_documents: bool) -> Result<Value> {
+    facts_for_source_files_with_corpus(files, options, include_documents, CorpusMetadata {
+        complete: false,
+        reason: "source files were supplied without a closed-corpus target".to_string(),
+        targets: files.iter().map(|file| file.path.to_string_lossy().to_string()).collect(),
+    })
+}
+
+fn facts_for_source_files_with_corpus(files: &[SourceFile], options: &Options, include_documents: bool, corpus: CorpusMetadata) -> Result<Value> {
     if files.is_empty() {
         bail!("facts requires at least one supported source file");
     }
@@ -158,7 +191,7 @@ pub fn facts_for_source_files(files: &[SourceFile], options: &Options, include_d
     profile_phase(profile, "group_documents", group_started.elapsed());
 
     let detectors_started = Instant::now();
-    let detectors = collect_detector_facts(&groups, &shared, options)?;
+    let detectors = collect_detector_facts(&groups, &shared, options, corpus.complete)?;
     profile_phase(profile, "detectors", detectors_started.elapsed());
 
     let assemble_started = Instant::now();
@@ -167,9 +200,20 @@ pub fn facts_for_source_files(files: &[SourceFile], options: &Options, include_d
         .map(|file| file.path.to_string_lossy().to_string())
         .collect::<Vec<_>>();
     reported_files.sort();
+    let file_roles = files
+        .iter()
+        .map(|file| {
+            (
+                file.path.to_string_lossy().to_string(),
+                serde_json::to_value(file.source_role).expect("serialize source role"),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let output = json!({
         "format": FORMAT,
         "files": reported_files,
+        "file_roles": file_roles,
+        "corpus": corpus,
         "detectors": detectors,
         "documents": projected_documents,
     });
@@ -183,8 +227,9 @@ fn collect_detector_facts(
     groups: &BTreeMap<Language, Vec<Document>>,
     shared: &SharedFacts,
     options: &Options,
+    corpus_complete: bool,
 ) -> Result<Map<String, Value>> {
-    let tasks = detector_tasks(groups, shared, options);
+    let tasks = detector_tasks(groups, shared, options, corpus_complete);
     let jobs = parallel::job_count();
     if jobs <= 1 {
         return run_detector_tasks_sequential(tasks);
@@ -202,6 +247,7 @@ fn detector_tasks<'a>(
     groups: &'a BTreeMap<Language, Vec<Document>>,
     shared: &'a SharedFacts,
     options: &'a Options,
+    corpus_complete: bool,
 ) -> Vec<DetectorTask<'a>> {
     let mut tasks: Vec<DetectorTask<'a>> = Vec::new();
     macro_rules! detector_task {
@@ -343,10 +389,39 @@ fn detector_tasks<'a>(
     });
     detector_task!("superfluous_state", {
         merge_array_reports(groups, |documents| {
-            json_value(superfluous_state::scan_documents(documents))
+            json_value(superfluous_state::scan_documents_with_corpus(documents, corpus_complete))
         })
     });
+    detector_task!("declared_type_pressure", {
+        let documents = groups.values().flatten().collect::<Vec<_>>();
+        json_value(declared_type_pressure::scan(
+            &shared.declaration_type_pressures,
+            &documents,
+        ))
+    });
+    detector_task!("scoped_state_restoration", {
+        merge_array_reports(groups, |documents| json_value(scoped_state_restoration::scan_documents(documents)))
+    });
     tasks
+}
+
+fn corpus_metadata(targets: &[PathBuf], files: &[SourceFile], options: &Options) -> CorpusMetadata {
+    let normalized_targets = targets.iter().map(|target| normalize_path(target)).collect::<Vec<_>>();
+    let roots = git_roots_for_files(files).unwrap_or_default();
+    let complete = options.excludes.is_empty() && roots.len() == 1
+        && normalized_targets.iter().any(|target| target.is_dir() && roots.contains(target));
+    let reason = if complete {
+        "the selected target includes the Git worktree root without custom exclusions"
+    } else if !options.excludes.is_empty() {
+        "custom exclusions make the selected corpus incomplete"
+    } else {
+        "the selected target does not cover a complete Git worktree"
+    };
+    CorpusMetadata {
+        complete,
+        reason: reason.to_string(),
+        targets: normalized_targets.iter().map(|target| target.to_string_lossy().to_string()).collect(),
+    }
 }
 
 fn run_detector_tasks_parallel(
@@ -547,7 +622,7 @@ fn state_heatmap_findings_for_groups(
         let report = state_mesh::scan_documents_with_semantic_aliases_and_min_writes(
             documents,
             semantic_aliases,
-            1,
+            2,
         );
         rows.extend(state_heatmap_findings(&report));
     }
@@ -700,7 +775,7 @@ fn expand_target(target: &Path, options: &Options, out: &mut Vec<SourceFile>) ->
     if target.is_dir() {
         expand_directory(target, options, out)
     } else if target.is_file() {
-        push_source_file(target, options, out);
+        push_source_file(target, options, out, true);
         Ok(())
     } else {
         Ok(())
@@ -717,7 +792,7 @@ fn expand_directory(dir: &Path, options: &Options, out: &mut Vec<SourceFile>) ->
         if path.is_dir() {
             expand_directory(&path, options, out)?;
         } else if path.is_file() {
-            push_source_file(&path, options, out);
+            push_source_file(&path, options, out, false);
         }
     }
     Ok(())
@@ -741,7 +816,12 @@ fn is_binary_file(path: &Path) -> bool {
     false
 }
 
-fn push_source_file(path: &Path, options: &Options, out: &mut Vec<SourceFile>) {
+fn push_source_file(
+    path: &Path,
+    options: &Options,
+    out: &mut Vec<SourceFile>,
+    allow_extensionless_override: bool,
+) {
     if excluded_path(path, options) {
         return;
     }
@@ -761,17 +841,63 @@ fn push_source_file(path: &Path, options: &Options, out: &mut Vec<SourceFile>) {
 
     let language = match (options.language, ext_lang) {
         (Some(opt_lang), Some(e_lang)) if opt_lang == e_lang => Some(opt_lang),
-        (Some(opt_lang), _) if path.extension().is_none() => Some(opt_lang),
+        (Some(opt_lang), _) if allow_extensionless_override && path.extension().is_none() => {
+            Some(opt_lang)
+        }
         (None, Some(e_lang)) => Some(e_lang),
         _ => None,
     };
     let Some(language) = language else {
         return;
     };
+    let source_role = source_role(path);
+    if !allow_extensionless_override && !options.source_roles.contains(&source_role) {
+        return;
+    }
     out.push(SourceFile {
         path: path.to_path_buf(),
         language,
+        source_role,
     });
+}
+
+fn source_role(path: &Path) -> SourceRole {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let parts = text.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>();
+    let basename = parts.last().copied().unwrap_or_default();
+    if parts.iter().any(|part| matches!(*part, ".git" | ".hg" | ".svn")) {
+        SourceRole::VcsMetadata
+    } else if parts
+        .iter()
+        .any(|part| matches!(*part, "vendor" | "vendors" | "third_party" | "third-party"))
+    {
+        SourceRole::Vendored
+    } else if parts
+        .iter()
+        .any(|part| matches!(*part, "generated" | "gen" | "dist"))
+    {
+        SourceRole::Generated
+    } else if parts
+        .iter()
+        .any(|part| matches!(*part, "benchmark" | "benchmarks" | "bench" | "benches"))
+    {
+        SourceRole::Benchmark
+    } else if parts
+        .iter()
+        .any(|part| matches!(*part, "example" | "examples" | "sample" | "samples"))
+    {
+        SourceRole::Example
+    } else if parts
+        .iter()
+        .any(|part| matches!(*part, "test" | "tests" | "spec" | "specs" | "__tests__"))
+        || basename
+            .split(['_', '.'])
+            .any(|part| matches!(part, "test" | "spec"))
+    {
+        SourceRole::Test
+    } else {
+        SourceRole::Production
+    }
 }
 
 fn excluded_path(path: &Path, options: &Options) -> bool {
@@ -825,6 +951,24 @@ mod tests {
         assert_eq!(names, vec!["tracked.rb"]);
     }
 
+    #[test]
+    fn corpus_metadata_distinguishes_worktree_root_from_partial_target() {
+        let dir = TempDir::new().expect("tempdir");
+        run_git(dir.path(), &["init"]);
+        let source = dir.path().join("state.rb");
+        fs::write(&source, "class State\n  def write\n    @value = 1\n  end\nend\n").unwrap();
+        run_git(dir.path(), &["add", "state.rb"]);
+
+        let complete = collect(&[dir.path().to_path_buf()], &Options::default(), false).unwrap();
+        assert_eq!(complete.pointer("/corpus/complete"), Some(&json!(true)));
+
+        let partial = collect(&[source], &Options::default(), false).unwrap();
+        assert_eq!(partial.pointer("/corpus/complete"), Some(&json!(false)));
+        let state = partial.get("detectors").and_then(|v| v.get("superfluous_state"))
+            .and_then(Value::as_array).unwrap();
+        assert!(state.is_empty(), "partial corpora cannot prove state is unread");
+    }
+
     fn run_git(dir: &Path, args: &[&str]) {
         let status = Command::new("git")
             .arg("-C")
@@ -875,6 +1019,7 @@ mod tests {
         };
 
         assert!(excluded_path(Path::new("/node_modules/foo.js"), &options));
+        assert!(excluded_path(Path::new("/repo/.git/HEAD"), &options));
         assert!(excluded_path(Path::new("/zig-cache/bar"), &options));
         assert!(excluded_path(Path::new("/foo/abc"), &options));
         assert!(excluded_path(Path::new("dir/foo/abc"), &options));
@@ -933,8 +1078,72 @@ mod tests {
 
         // Test root directory name parsing fallback
         let mut files_root = Vec::new();
-        push_source_file(Path::new("/"), &options, &mut files_root);
+        push_source_file(Path::new("/"), &options, &mut files_root, true);
         assert!(files_root.is_empty());
+    }
+
+    #[test]
+    fn directory_expansion_ignores_extensionless_files_even_with_language_override() {
+        let dir = TempDir::new().expect("tempdir");
+        fs::write(dir.path().join("main.go"), "package main\n").unwrap();
+        fs::write(dir.path().join("Dockerfile"), "FROM scratch\n").unwrap();
+        fs::write(dir.path().join("install"), "#!/bin/sh\n").unwrap();
+        fs::create_dir(dir.path().join(".git")).unwrap();
+        fs::write(dir.path().join(".git").join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        let options = Options {
+            language: Some(Language::Go),
+            ..Options::default()
+        };
+
+        let files = collect_source_files(&[dir.path().to_path_buf()], &options).unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path.file_name().unwrap(), "main.go");
+    }
+
+    #[test]
+    fn directory_expansion_ranks_production_and_retains_selectable_test_sources() {
+        let dir = TempDir::new().expect("tempdir");
+        let production = dir.path().join("app.go");
+        let test = dir.path().join("app_test.go");
+        fs::write(&production, "package app\n").unwrap();
+        fs::write(&test, "package app\n").unwrap();
+
+        let production_files = collect_source_files(
+            &[dir.path().to_path_buf()],
+            &Options::default(),
+        )
+        .unwrap();
+        assert_eq!(production_files.len(), 1);
+        assert_eq!(production_files[0].path, production);
+
+        let test_files = collect_source_files(
+            &[dir.path().to_path_buf()],
+            &Options {
+                source_roles: BTreeSet::from([SourceRole::Test]),
+                ..Options::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(test_files.len(), 1);
+        assert_eq!(test_files[0].path, test);
+        assert_eq!(test_files[0].source_role, SourceRole::Test);
+    }
+
+    #[test]
+    fn explicit_extensionless_target_can_use_language_override() {
+        let dir = TempDir::new().expect("tempdir");
+        let script = dir.path().join("tool");
+        fs::write(&script, "package main\n").unwrap();
+        let options = Options {
+            language: Some(Language::Go),
+            ..Options::default()
+        };
+
+        let files = collect_source_files(&[script.clone()], &options).unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, script);
     }
 
     #[test]
@@ -1046,11 +1255,34 @@ mod tests {
     }
 
     #[test]
+    fn state_heatmap_omits_write_once_value_state() {
+        let document: Document = serde_json::from_value(json!({
+            "file": "result.rb",
+            "language": "ruby",
+            "state_writes": [
+                { "field": "published", "identity": "Result::published", "receiver": "self", "file": "result.rb", "function": "initialize", "line": 2, "span": [2, 1, 2, 12], "owner": "Result" },
+                { "field": "cursor", "identity": "Worker::cursor", "receiver": "self", "file": "result.rb", "function": "initialize", "line": 8, "span": [8, 1, 8, 9], "owner": "Worker" },
+                { "field": "cursor", "identity": "Worker::cursor", "receiver": "self", "file": "result.rb", "function": "advance", "line": 12, "span": [12, 1, 12, 9], "owner": "Worker" }
+            ]
+        })).unwrap();
+        let documents = vec![document];
+        let aliases = semantic_alias::scan_documents(&documents);
+        let groups = BTreeMap::from([(Language::Ruby, documents)]);
+
+        let rows = state_heatmap_findings_for_groups(&groups, &aliases).unwrap();
+        let rows = rows.as_array().unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get("field").unwrap(), "cursor");
+    }
+
+    #[test]
     fn test_git_roots_edges() {
         // Test early return (all files inside current root)
         let file_in = SourceFile {
             path: PathBuf::from("src/decomplex/report_facts.rs"),
             language: Language::Rust,
+            source_role: SourceRole::Production,
         };
         let res_in = git_roots_for_files(&[file_in]);
         assert!(res_in.is_ok());
@@ -1059,6 +1291,7 @@ mod tests {
         let file_out = SourceFile {
             path: PathBuf::from("/non-existent-dir-12345/some-file.rb"),
             language: Language::Ruby,
+            source_role: SourceRole::Production,
         };
         let res_out = git_roots_for_files(&[file_out]);
         assert!(res_out.is_err());

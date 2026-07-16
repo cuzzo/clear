@@ -12,6 +12,13 @@ require_relative 'fixable_error'
 
 module ErrorHelper
     extend T::Sig
+    extend T::Helpers
+
+  abstract!
+
+  sig { abstract.returns(T.nilable(String)) }
+  def source_code; end
+  private :source_code
 
   # usage:
   #   error!(node, :CODE)                              # no args
@@ -164,7 +171,7 @@ module ErrorHelper
 
   sig { returns(T.nilable(String)) }
   def diagnostic_source_code
-    T.cast(T.unsafe(self).__send__(:source_code), T.nilable(String))
+    source_code
   end
 
   sig { params(node_or_token: T.untyped).returns(DiagnosticToken) }

@@ -8,7 +8,7 @@ RSpec.describe "optional @list indexing" do
   UNSAFE_SOURCE = <<~CLEAR
     STRUCT Item { name: Int64 }
     FN main() RETURNS Void ->
-      MUTABLE items: Item[]@list = [];
+      MUTABLE items: []Item = [];
       items.append(Item{ name: 7 });
       value = items[0].name;
       ASSERT value == 7;
@@ -21,7 +21,7 @@ RSpec.describe "optional @list indexing" do
     STRUCT Profile { name: Int64 }
     STRUCT Item { profile: Profile }
     FN main() RETURNS Void ->
-      MUTABLE items: Item[]@list = [];
+      MUTABLE items: []Item = [];
       items.append(Item{ profile: Profile{ name: 7 } });
       value = items[0]?.profile.name;
       ASSERT value == 7;
@@ -88,7 +88,7 @@ RSpec.describe "optional @list indexing" do
     source = <<~CLEAR
       STRUCT Item { name: Int64 }
       FN main() RETURNS Void ->
-        MUTABLE items: Item[]@list = [];
+        MUTABLE items: []Item = [];
         items.append(Item{ name: 1_i64 });
         items[0]?.name = 7_i64;
         items[9]?.name = 99_i64;
@@ -121,7 +121,7 @@ RSpec.describe "optional @list indexing" do
     source = <<~CLEAR
       STRUCT Item { name: String }
       FN main() RETURNS Void ->
-        MUTABLE items: Item[]@list = [];
+        MUTABLE items: []Item = [];
         items.append(Item{ name: COPY "abc" });
         size = items[0]?.name.length() OR_ELSE 0_i64;
         ASSERT size == 3_i64;
@@ -146,7 +146,7 @@ RSpec.describe "optional @list indexing" do
   it "preserves @node on the element nested inside the optional" do
     type = Type.new(:"Node[]@list")
     type.elem_ownership = :node
-    result = FunctionReturn.variant(:OptionalOfElement).resolve(type, [], nil)
+    result = FunctionReturn.variant(:OptionalOfElement).resolve(type, [])
 
     expect(result.optional?).to be(true)
     expect(result.wrapped_type&.node?).to be(true)

@@ -2812,6 +2812,15 @@ class Formatter::Emitter
   # Spacing decision between two adjacent code tokens A (prev) and B (cur).
   sig { params(a: Formatter::FormatLexer::Token, b: Formatter::FormatLexer::Token, line: Array, b_idx: Integer).returns(T::Boolean) }
   def needs_space?(a, b, line, b_idx)
+    # Inline Pivot collection layers form one type token sequence. Whitespace
+    # is introduced only after a capability chain, where it disambiguates the
+    # payload from the final capability name.
+    if in_type_context?(line, b_idx - 1)
+      return false if a.type == :SYM && [']', '}'].include?(a.raw) && b.type == :TYPE_ID
+      return false if a.type == :SYM && [']', '}'].include?(a.raw) &&
+        b.type == :SYM && ['[', '{'].include?(b.raw)
+    end
+
     # Capability attach (§4): @X flush-attaches to a type token when the
     # position is a type context (struct field, param type, RETURNS type).
     # Value position (`1 @locked`, `foo() @locked`) keeps the space.

@@ -622,6 +622,61 @@ pub const CheatLib = struct {
         return list;
     }
 
+    pub fn makeListCapacity(comptime T: type, allocator: std.mem.Allocator, items: []const T, minimum_capacity: usize) !std.ArrayListUnmanaged(T) {
+        var list = try std.ArrayListUnmanaged(T).initCapacity(allocator, @max(items.len, minimum_capacity));
+        list.appendSliceAssumeCapacity(items);
+        return list;
+    }
+
+    pub fn Grid(comptime T: type, comptime rank: usize) type {
+        if (rank < 2) @compileError("Grid requires at least two dimensions");
+        return struct {
+            const Self = @This();
+
+            items: []T = &.{},
+            capacity: usize = 0,
+            shape: [rank]usize = @splat(0),
+            strides: [rank]usize = @splat(0),
+
+            pub const empty: Self = .{};
+
+            pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+                if (self.capacity != 0) allocator.free(self.items.ptr[0..self.capacity]);
+                self.* = .empty;
+            }
+        };
+    }
+
+    fn rankOffset(dimensions: anytype, indices: anytype) usize {
+        if (dimensions.len != indices.len) @panic("rank index arity mismatch");
+        var offset: usize = 0;
+        var stride: usize = 1;
+        var axis = dimensions.len;
+        while (axis > 0) {
+            axis -= 1;
+            const extent: usize = @intCast(dimensions[axis]);
+            const index: usize = @intCast(indices[axis]);
+            if (index >= extent) @panic("rank index out of bounds");
+            const term = @mulWithOverflow(index, stride);
+            if (term[1] != 0) @panic("rank offset overflow");
+            const next = @addWithOverflow(offset, term[0]);
+            if (next[1] != 0) @panic("rank offset overflow");
+            offset = next[0];
+            const next_stride = @mulWithOverflow(stride, extent);
+            if (next_stride[1] != 0) @panic("rank stride overflow");
+            stride = next_stride[0];
+        }
+        return offset;
+    }
+
+    pub fn rankGet(container: anytype, dimensions: anytype, indices: anytype) ElementType(@TypeOf(container)) {
+        return getAt(container, rankOffset(dimensions, indices));
+    }
+
+    pub fn rankSet(container: anytype, dimensions: anytype, indices: anytype, value: anytype) void {
+        setAt(container, rankOffset(dimensions, indices), value);
+    }
+
     // Works for ArrayListUnmanaged (has .items) AND Standard Slices (direct access)
     // Also handles casting the index to usize automatically.
     // Unwraps optional containers (e.g. from hashmap.get()) before indexing.
@@ -811,14 +866,21 @@ pub const CheatLib = struct {
     // the comptime `@hasField` dispatch.
     pub fn setAt(container: anytype, index: anytype, value: anytype) void {
         const i: usize = @intCast(index);
-        const c = if (@typeInfo(@TypeOf(container)) == .pointer and @typeInfo(@TypeOf(container)).pointer.size == .one) container.* else container;
+        if (@typeInfo(@TypeOf(container)) == .pointer and @typeInfo(@TypeOf(container)).pointer.size == .one) {
+            if (@hasField(@TypeOf(container.*), "items")) {
+                container.items[i] = value;
+            } else {
+                container.*[i] = value;
+            }
+            return;
+        }
 
-        if (@hasField(@TypeOf(c), "items")) {
+        if (@hasField(@TypeOf(container), "items")) {
             // ArrayListUnmanaged
-            c.items[i] = value;
+            container.items[i] = value;
         } else {
             // Standard Slice
-            c[i] = value;
+            container[i] = value;
         }
     }
 
@@ -1026,6 +1088,7 @@ pub const CheatLib = struct {
     pub const Promise = DataStructures.Promise;
     pub const SharedPromise = DataStructures.SharedPromise;
     pub const BoundedStream = DataStructures.BoundedStream;
+    pub const StreamStep = DataStructures.StreamStep;
     pub const Stream = DataStructures.Stream;
     pub const InfStream = DataStructures.InfStream;
     pub const BoundedChannel = DataStructures.BoundedChannel;
@@ -3561,13 +3624,18 @@ pub const CheatLib = struct {
         // 2. ArrayList (list collections)
         if (comptime isArrayList(T)) {
             const ElemT = comptime arrayListElemType(T).?;
+            // ArrayList.deinit overwrites its receiver. The compiler may place
+            // an immutable empty list nested in a Tuple/struct in read-only
+            // storage, so drop a shallow copy while retaining ownership of the
+            // same backing allocation.
+            var list = ptr.*;
             // Recursively cleanup elements (RC release, string free, nested unions, etc.)
             if (comptime needsCleanup(ElemT)) {
-                for (ptr.items) |*item| {
+                for (list.items) |*item| {
                     cleanup(ElemT, alloc, item);
                 }
             }
-            ptr.deinit(alloc);
+            list.deinit(alloc);
             return;
         }
 
@@ -3737,7 +3805,7 @@ pub const CheatLib = struct {
                     }
                 } else if (f_info == .pointer and f_info.pointer.size == .one and @typeInfo(f_info.pointer.child) != .@"opaque" and @typeInfo(f_info.pointer.child) != .@"fn") {
                     // Single pointer (*T): cleanup the pointee then free the pointer.
-                    // This handles @indirect fields in inline struct union variants.
+                    // This handles @boxed fields in inline struct union variants.
                     const pointee = @field(ptr, field.name);
                     const ChildT = f_info.pointer.child;
                     if (comptime needsCleanup(ChildT)) {

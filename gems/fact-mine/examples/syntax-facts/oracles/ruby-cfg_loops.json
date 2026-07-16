@@ -1,0 +1,1171 @@
+{
+  "documents": [
+    {
+      "control_flow_edges": [
+        {
+          "from": "cfg:CfgLoops#break_loop:branch:0.loop.0:25:6",
+          "function": "break_loop",
+          "kind": "branch_false",
+          "line": 25,
+          "owner": "CfgLoops",
+          "span": [
+            25,
+            6,
+            25,
+            25
+          ],
+          "to": "cfg:CfgLoops#break_loop:stmt:0.loop.1:26:6"
+        },
+        {
+          "from": "cfg:CfgLoops#break_loop:branch:0.loop.0:25:6",
+          "function": "break_loop",
+          "kind": "branch_true",
+          "line": 25,
+          "owner": "CfgLoops",
+          "span": [
+            25,
+            6,
+            25,
+            25
+          ],
+          "to": "cfg:CfgLoops#break_loop:break:0.loop.0.then.0:25:6"
+        },
+        {
+          "from": "cfg:CfgLoops#break_loop:break:0.loop.0.then.0:25:6",
+          "function": "break_loop",
+          "kind": "break",
+          "line": 25,
+          "owner": "CfgLoops",
+          "span": [
+            25,
+            6,
+            25,
+            11
+          ],
+          "to": "cfg:CfgLoops#break_loop:stmt:2:28:4"
+        },
+        {
+          "from": "cfg:CfgLoops#break_loop:entry:0:23:2",
+          "function": "break_loop",
+          "kind": "entry",
+          "line": 23,
+          "owner": "CfgLoops",
+          "span": [
+            23,
+            2,
+            29,
+            5
+          ],
+          "to": "cfg:CfgLoops#break_loop:stmt:1:24:4"
+        },
+        {
+          "from": "cfg:CfgLoops#break_loop:stmt:0.loop.1:26:6",
+          "function": "break_loop",
+          "kind": "loop_backedge",
+          "line": 26,
+          "owner": "CfgLoops",
+          "span": [
+            26,
+            6,
+            26,
+            19
+          ],
+          "to": "cfg:CfgLoops#break_loop:stmt:1:24:4"
+        },
+        {
+          "from": "cfg:CfgLoops#break_loop:stmt:1:24:4",
+          "function": "break_loop",
+          "kind": "loop_body",
+          "line": 24,
+          "owner": "CfgLoops",
+          "span": [
+            24,
+            4,
+            27,
+            7
+          ],
+          "to": "cfg:CfgLoops#break_loop:branch:0.loop.0:25:6"
+        },
+        {
+          "from": "cfg:CfgLoops#break_loop:stmt:1:24:4",
+          "function": "break_loop",
+          "kind": "loop_exit",
+          "line": 24,
+          "owner": "CfgLoops",
+          "span": [
+            24,
+            4,
+            27,
+            7
+          ],
+          "to": "cfg:CfgLoops#break_loop:stmt:2:28:4"
+        },
+        {
+          "from": "cfg:CfgLoops#break_loop:stmt:2:28:4",
+          "function": "break_loop",
+          "kind": "fallthrough",
+          "line": 28,
+          "owner": "CfgLoops",
+          "span": [
+            28,
+            4,
+            28,
+            17
+          ],
+          "to": "cfg:CfgLoops#break_loop:exit:3:29:5"
+        },
+        {
+          "from": "cfg:CfgLoops#iterator_loop:entry:0:16:2",
+          "function": "iterator_loop",
+          "kind": "entry",
+          "line": 16,
+          "owner": "CfgLoops",
+          "span": [
+            16,
+            2,
+            21,
+            5
+          ],
+          "to": "cfg:CfgLoops#iterator_loop:stmt:1:17:4"
+        },
+        {
+          "from": "cfg:CfgLoops#iterator_loop:stmt:0.loop.0:18:6",
+          "function": "iterator_loop",
+          "kind": "loop_backedge",
+          "line": 18,
+          "owner": "CfgLoops",
+          "span": [
+            18,
+            6,
+            18,
+            19
+          ],
+          "to": "cfg:CfgLoops#iterator_loop:stmt:1:17:4"
+        },
+        {
+          "from": "cfg:CfgLoops#iterator_loop:stmt:1:17:4",
+          "function": "iterator_loop",
+          "kind": "loop_body",
+          "line": 17,
+          "owner": "CfgLoops",
+          "span": [
+            17,
+            4,
+            19,
+            7
+          ],
+          "to": "cfg:CfgLoops#iterator_loop:stmt:0.loop.0:18:6"
+        },
+        {
+          "from": "cfg:CfgLoops#iterator_loop:stmt:1:17:4",
+          "function": "iterator_loop",
+          "kind": "loop_exit",
+          "line": 17,
+          "owner": "CfgLoops",
+          "span": [
+            17,
+            4,
+            19,
+            7
+          ],
+          "to": "cfg:CfgLoops#iterator_loop:stmt:2:20:4"
+        },
+        {
+          "from": "cfg:CfgLoops#iterator_loop:stmt:2:20:4",
+          "function": "iterator_loop",
+          "kind": "fallthrough",
+          "line": 20,
+          "owner": "CfgLoops",
+          "span": [
+            20,
+            4,
+            20,
+            17
+          ],
+          "to": "cfg:CfgLoops#iterator_loop:exit:3:21:5"
+        },
+        {
+          "from": "cfg:CfgLoops#nested_loop:branch:0.loop.0.loop.0:42:8",
+          "function": "nested_loop",
+          "kind": "branch_false",
+          "line": 42,
+          "owner": "CfgLoops",
+          "span": [
+            42,
+            8,
+            42,
+            28
+          ],
+          "to": "cfg:CfgLoops#nested_loop:stmt:0.loop.0.loop.1:43:8"
+        },
+        {
+          "from": "cfg:CfgLoops#nested_loop:branch:0.loop.0.loop.0:42:8",
+          "function": "nested_loop",
+          "kind": "branch_true",
+          "line": 42,
+          "owner": "CfgLoops",
+          "span": [
+            42,
+            8,
+            42,
+            28
+          ],
+          "to": "cfg:CfgLoops#nested_loop:break:0.loop.0.loop.0.then.0:42:8"
+        },
+        {
+          "from": "cfg:CfgLoops#nested_loop:break:0.loop.0.loop.0.then.0:42:8",
+          "function": "nested_loop",
+          "kind": "break",
+          "line": 42,
+          "owner": "CfgLoops",
+          "span": [
+            42,
+            8,
+            42,
+            13
+          ],
+          "to": "cfg:CfgLoops#nested_loop:stmt:0.loop.1:45:6"
+        },
+        {
+          "from": "cfg:CfgLoops#nested_loop:entry:0:39:2",
+          "function": "nested_loop",
+          "kind": "entry",
+          "line": 39,
+          "owner": "CfgLoops",
+          "span": [
+            39,
+            2,
+            48,
+            5
+          ],
+          "to": "cfg:CfgLoops#nested_loop:stmt:1:40:4"
+        },
+        {
+          "from": "cfg:CfgLoops#nested_loop:loop:0.loop.0:41:6",
+          "function": "nested_loop",
+          "kind": "loop_body",
+          "line": 41,
+          "owner": "CfgLoops",
+          "span": [
+            41,
+            6,
+            44,
+            9
+          ],
+          "to": "cfg:CfgLoops#nested_loop:branch:0.loop.0.loop.0:42:8"
+        },
+        {
+          "from": "cfg:CfgLoops#nested_loop:loop:0.loop.0:41:6",
+          "function": "nested_loop",
+          "kind": "loop_exit",
+          "line": 41,
+          "owner": "CfgLoops",
+          "span": [
+            41,
+            6,
+            44,
+            9
+          ],
+          "to": "cfg:CfgLoops#nested_loop:stmt:0.loop.1:45:6"
+        },
+        {
+          "from": "cfg:CfgLoops#nested_loop:stmt:0.loop.0.loop.1:43:8",
+          "function": "nested_loop",
+          "kind": "loop_backedge",
+          "line": 43,
+          "owner": "CfgLoops",
+          "span": [
+            43,
+            8,
+            43,
+            22
+          ],
+          "to": "cfg:CfgLoops#nested_loop:loop:0.loop.0:41:6"
+        },
+        {
+          "from": "cfg:CfgLoops#nested_loop:stmt:0.loop.1:45:6",
+          "function": "nested_loop",
+          "kind": "loop_backedge",
+          "line": 45,
+          "owner": "CfgLoops",
+          "span": [
+            45,
+            6,
+            45,
+            23
+          ],
+          "to": "cfg:CfgLoops#nested_loop:stmt:1:40:4"
+        },
+        {
+          "from": "cfg:CfgLoops#nested_loop:stmt:1:40:4",
+          "function": "nested_loop",
+          "kind": "loop_body",
+          "line": 40,
+          "owner": "CfgLoops",
+          "span": [
+            40,
+            4,
+            46,
+            7
+          ],
+          "to": "cfg:CfgLoops#nested_loop:loop:0.loop.0:41:6"
+        },
+        {
+          "from": "cfg:CfgLoops#nested_loop:stmt:1:40:4",
+          "function": "nested_loop",
+          "kind": "loop_exit",
+          "line": 40,
+          "owner": "CfgLoops",
+          "span": [
+            40,
+            4,
+            46,
+            7
+          ],
+          "to": "cfg:CfgLoops#nested_loop:stmt:2:47:4"
+        },
+        {
+          "from": "cfg:CfgLoops#nested_loop:stmt:2:47:4",
+          "function": "nested_loop",
+          "kind": "fallthrough",
+          "line": 47,
+          "owner": "CfgLoops",
+          "span": [
+            47,
+            4,
+            47,
+            17
+          ],
+          "to": "cfg:CfgLoops#nested_loop:exit:3:48:5"
+        },
+        {
+          "from": "cfg:CfgLoops#next_loop:branch:0.loop.0:33:6",
+          "function": "next_loop",
+          "kind": "branch_false",
+          "line": 33,
+          "owner": "CfgLoops",
+          "span": [
+            33,
+            6,
+            33,
+            24
+          ],
+          "to": "cfg:CfgLoops#next_loop:stmt:0.loop.1:34:6"
+        },
+        {
+          "from": "cfg:CfgLoops#next_loop:branch:0.loop.0:33:6",
+          "function": "next_loop",
+          "kind": "branch_true",
+          "line": 33,
+          "owner": "CfgLoops",
+          "span": [
+            33,
+            6,
+            33,
+            24
+          ],
+          "to": "cfg:CfgLoops#next_loop:continue:0.loop.0.then.0:33:6"
+        },
+        {
+          "from": "cfg:CfgLoops#next_loop:continue:0.loop.0.then.0:33:6",
+          "function": "next_loop",
+          "kind": "continue",
+          "line": 33,
+          "owner": "CfgLoops",
+          "span": [
+            33,
+            6,
+            33,
+            10
+          ],
+          "to": "cfg:CfgLoops#next_loop:stmt:1:32:4"
+        },
+        {
+          "from": "cfg:CfgLoops#next_loop:entry:0:31:2",
+          "function": "next_loop",
+          "kind": "entry",
+          "line": 31,
+          "owner": "CfgLoops",
+          "span": [
+            31,
+            2,
+            37,
+            5
+          ],
+          "to": "cfg:CfgLoops#next_loop:stmt:1:32:4"
+        },
+        {
+          "from": "cfg:CfgLoops#next_loop:stmt:0.loop.1:34:6",
+          "function": "next_loop",
+          "kind": "loop_backedge",
+          "line": 34,
+          "owner": "CfgLoops",
+          "span": [
+            34,
+            6,
+            34,
+            19
+          ],
+          "to": "cfg:CfgLoops#next_loop:stmt:1:32:4"
+        },
+        {
+          "from": "cfg:CfgLoops#next_loop:stmt:1:32:4",
+          "function": "next_loop",
+          "kind": "loop_body",
+          "line": 32,
+          "owner": "CfgLoops",
+          "span": [
+            32,
+            4,
+            35,
+            7
+          ],
+          "to": "cfg:CfgLoops#next_loop:branch:0.loop.0:33:6"
+        },
+        {
+          "from": "cfg:CfgLoops#next_loop:stmt:1:32:4",
+          "function": "next_loop",
+          "kind": "loop_exit",
+          "line": 32,
+          "owner": "CfgLoops",
+          "span": [
+            32,
+            4,
+            35,
+            7
+          ],
+          "to": "cfg:CfgLoops#next_loop:stmt:2:36:4"
+        },
+        {
+          "from": "cfg:CfgLoops#next_loop:stmt:2:36:4",
+          "function": "next_loop",
+          "kind": "fallthrough",
+          "line": 36,
+          "owner": "CfgLoops",
+          "span": [
+            36,
+            4,
+            36,
+            17
+          ],
+          "to": "cfg:CfgLoops#next_loop:exit:3:37:5"
+        },
+        {
+          "from": "cfg:CfgLoops#until_loop:entry:0:9:2",
+          "function": "until_loop",
+          "kind": "entry",
+          "line": 9,
+          "owner": "CfgLoops",
+          "span": [
+            9,
+            2,
+            14,
+            5
+          ],
+          "to": "cfg:CfgLoops#until_loop:stmt:1:10:4"
+        },
+        {
+          "from": "cfg:CfgLoops#until_loop:stmt:0.loop.0:11:6",
+          "function": "until_loop",
+          "kind": "loop_backedge",
+          "line": 11,
+          "owner": "CfgLoops",
+          "span": [
+            11,
+            6,
+            11,
+            19
+          ],
+          "to": "cfg:CfgLoops#until_loop:stmt:1:10:4"
+        },
+        {
+          "from": "cfg:CfgLoops#until_loop:stmt:1:10:4",
+          "function": "until_loop",
+          "kind": "loop_body",
+          "line": 10,
+          "owner": "CfgLoops",
+          "span": [
+            10,
+            4,
+            12,
+            7
+          ],
+          "to": "cfg:CfgLoops#until_loop:stmt:0.loop.0:11:6"
+        },
+        {
+          "from": "cfg:CfgLoops#until_loop:stmt:1:10:4",
+          "function": "until_loop",
+          "kind": "loop_exit",
+          "line": 10,
+          "owner": "CfgLoops",
+          "span": [
+            10,
+            4,
+            12,
+            7
+          ],
+          "to": "cfg:CfgLoops#until_loop:stmt:2:13:4"
+        },
+        {
+          "from": "cfg:CfgLoops#until_loop:stmt:2:13:4",
+          "function": "until_loop",
+          "kind": "fallthrough",
+          "line": 13,
+          "owner": "CfgLoops",
+          "span": [
+            13,
+            4,
+            13,
+            16
+          ],
+          "to": "cfg:CfgLoops#until_loop:exit:3:14:5"
+        },
+        {
+          "from": "cfg:CfgLoops#while_loop:entry:0:2:2",
+          "function": "while_loop",
+          "kind": "entry",
+          "line": 2,
+          "owner": "CfgLoops",
+          "span": [
+            2,
+            2,
+            7,
+            5
+          ],
+          "to": "cfg:CfgLoops#while_loop:stmt:1:3:4"
+        },
+        {
+          "from": "cfg:CfgLoops#while_loop:stmt:0.loop.0:4:6",
+          "function": "while_loop",
+          "kind": "loop_backedge",
+          "line": 4,
+          "owner": "CfgLoops",
+          "span": [
+            4,
+            6,
+            4,
+            19
+          ],
+          "to": "cfg:CfgLoops#while_loop:stmt:1:3:4"
+        },
+        {
+          "from": "cfg:CfgLoops#while_loop:stmt:1:3:4",
+          "function": "while_loop",
+          "kind": "loop_body",
+          "line": 3,
+          "owner": "CfgLoops",
+          "span": [
+            3,
+            4,
+            5,
+            7
+          ],
+          "to": "cfg:CfgLoops#while_loop:stmt:0.loop.0:4:6"
+        },
+        {
+          "from": "cfg:CfgLoops#while_loop:stmt:1:3:4",
+          "function": "while_loop",
+          "kind": "loop_exit",
+          "line": 3,
+          "owner": "CfgLoops",
+          "span": [
+            3,
+            4,
+            5,
+            7
+          ],
+          "to": "cfg:CfgLoops#while_loop:stmt:2:6:4"
+        },
+        {
+          "from": "cfg:CfgLoops#while_loop:stmt:2:6:4",
+          "function": "while_loop",
+          "kind": "fallthrough",
+          "line": 6,
+          "owner": "CfgLoops",
+          "span": [
+            6,
+            4,
+            6,
+            16
+          ],
+          "to": "cfg:CfgLoops#while_loop:exit:3:7:5"
+        }
+      ],
+      "control_flow_nodes": [
+        {
+          "function": "break_loop",
+          "id": "cfg:CfgLoops#break_loop:branch:0.loop.0:25:6",
+          "kind": "branch",
+          "line": 25,
+          "owner": "CfgLoops",
+          "role": "if_condition",
+          "source": "break if item.done?",
+          "span": [
+            25,
+            6,
+            25,
+            25
+          ]
+        },
+        {
+          "function": "break_loop",
+          "id": "cfg:CfgLoops#break_loop:break:0.loop.0.then.0:25:6",
+          "kind": "jump",
+          "line": 25,
+          "owner": "CfgLoops",
+          "role": "break",
+          "source": "break",
+          "span": [
+            25,
+            6,
+            25,
+            11
+          ]
+        },
+        {
+          "function": "break_loop",
+          "id": "cfg:CfgLoops#break_loop:entry:0:23:2",
+          "kind": "entry",
+          "line": 23,
+          "owner": "CfgLoops",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            23,
+            2,
+            29,
+            5
+          ]
+        },
+        {
+          "function": "break_loop",
+          "id": "cfg:CfgLoops#break_loop:exit:3:29:5",
+          "kind": "exit",
+          "line": 29,
+          "owner": "CfgLoops",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            23,
+            2,
+            29,
+            5
+          ]
+        },
+        {
+          "function": "break_loop",
+          "id": "cfg:CfgLoops#break_loop:stmt:0.loop.1:26:6",
+          "kind": "statement",
+          "line": 26,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "publish(item)",
+          "span": [
+            26,
+            6,
+            26,
+            19
+          ]
+        },
+        {
+          "function": "break_loop",
+          "id": "cfg:CfgLoops#break_loop:stmt:1:24:4",
+          "kind": "loop",
+          "line": 24,
+          "owner": "CfgLoops",
+          "role": "iterator_loop",
+          "source": "items.each do |item| break if item.done? publish(item) end",
+          "span": [
+            24,
+            4,
+            27,
+            7
+          ]
+        },
+        {
+          "function": "break_loop",
+          "id": "cfg:CfgLoops#break_loop:stmt:2:28:4",
+          "kind": "statement",
+          "line": 28,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "finish(items)",
+          "span": [
+            28,
+            4,
+            28,
+            17
+          ]
+        },
+        {
+          "function": "iterator_loop",
+          "id": "cfg:CfgLoops#iterator_loop:entry:0:16:2",
+          "kind": "entry",
+          "line": 16,
+          "owner": "CfgLoops",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            16,
+            2,
+            21,
+            5
+          ]
+        },
+        {
+          "function": "iterator_loop",
+          "id": "cfg:CfgLoops#iterator_loop:exit:3:21:5",
+          "kind": "exit",
+          "line": 21,
+          "owner": "CfgLoops",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            16,
+            2,
+            21,
+            5
+          ]
+        },
+        {
+          "function": "iterator_loop",
+          "id": "cfg:CfgLoops#iterator_loop:stmt:0.loop.0:18:6",
+          "kind": "statement",
+          "line": 18,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "publish(item)",
+          "span": [
+            18,
+            6,
+            18,
+            19
+          ]
+        },
+        {
+          "function": "iterator_loop",
+          "id": "cfg:CfgLoops#iterator_loop:stmt:1:17:4",
+          "kind": "loop",
+          "line": 17,
+          "owner": "CfgLoops",
+          "role": "iterator_loop",
+          "source": "items.each do |item| publish(item) end",
+          "span": [
+            17,
+            4,
+            19,
+            7
+          ]
+        },
+        {
+          "function": "iterator_loop",
+          "id": "cfg:CfgLoops#iterator_loop:stmt:2:20:4",
+          "kind": "statement",
+          "line": 20,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "finish(items)",
+          "span": [
+            20,
+            4,
+            20,
+            17
+          ]
+        },
+        {
+          "function": "nested_loop",
+          "id": "cfg:CfgLoops#nested_loop:branch:0.loop.0.loop.0:42:8",
+          "kind": "branch",
+          "line": 42,
+          "owner": "CfgLoops",
+          "role": "if_condition",
+          "source": "break if other.done?",
+          "span": [
+            42,
+            8,
+            42,
+            28
+          ]
+        },
+        {
+          "function": "nested_loop",
+          "id": "cfg:CfgLoops#nested_loop:break:0.loop.0.loop.0.then.0:42:8",
+          "kind": "jump",
+          "line": 42,
+          "owner": "CfgLoops",
+          "role": "break",
+          "source": "break",
+          "span": [
+            42,
+            8,
+            42,
+            13
+          ]
+        },
+        {
+          "function": "nested_loop",
+          "id": "cfg:CfgLoops#nested_loop:entry:0:39:2",
+          "kind": "entry",
+          "line": 39,
+          "owner": "CfgLoops",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            39,
+            2,
+            48,
+            5
+          ]
+        },
+        {
+          "function": "nested_loop",
+          "id": "cfg:CfgLoops#nested_loop:exit:3:48:5",
+          "kind": "exit",
+          "line": 48,
+          "owner": "CfgLoops",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            39,
+            2,
+            48,
+            5
+          ]
+        },
+        {
+          "function": "nested_loop",
+          "id": "cfg:CfgLoops#nested_loop:loop:0.loop.0:41:6",
+          "kind": "loop",
+          "line": 41,
+          "owner": "CfgLoops",
+          "role": "iterator_loop",
+          "source": "others.each do |other| break if other.done? publish(other) end",
+          "span": [
+            41,
+            6,
+            44,
+            9
+          ]
+        },
+        {
+          "function": "nested_loop",
+          "id": "cfg:CfgLoops#nested_loop:stmt:0.loop.0.loop.1:43:8",
+          "kind": "statement",
+          "line": 43,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "publish(other)",
+          "span": [
+            43,
+            8,
+            43,
+            22
+          ]
+        },
+        {
+          "function": "nested_loop",
+          "id": "cfg:CfgLoops#nested_loop:stmt:0.loop.1:45:6",
+          "kind": "statement",
+          "line": 45,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "after_inner(item)",
+          "span": [
+            45,
+            6,
+            45,
+            23
+          ]
+        },
+        {
+          "function": "nested_loop",
+          "id": "cfg:CfgLoops#nested_loop:stmt:1:40:4",
+          "kind": "loop",
+          "line": 40,
+          "owner": "CfgLoops",
+          "role": "iterator_loop",
+          "source": "items.each do |item| others.each do |other| break if other.done? publish(other) end after_inner(item) end",
+          "span": [
+            40,
+            4,
+            46,
+            7
+          ]
+        },
+        {
+          "function": "nested_loop",
+          "id": "cfg:CfgLoops#nested_loop:stmt:2:47:4",
+          "kind": "statement",
+          "line": 47,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "finish(items)",
+          "span": [
+            47,
+            4,
+            47,
+            17
+          ]
+        },
+        {
+          "function": "next_loop",
+          "id": "cfg:CfgLoops#next_loop:branch:0.loop.0:33:6",
+          "kind": "branch",
+          "line": 33,
+          "owner": "CfgLoops",
+          "role": "if_condition",
+          "source": "next if item.skip?",
+          "span": [
+            33,
+            6,
+            33,
+            24
+          ]
+        },
+        {
+          "function": "next_loop",
+          "id": "cfg:CfgLoops#next_loop:continue:0.loop.0.then.0:33:6",
+          "kind": "jump",
+          "line": 33,
+          "owner": "CfgLoops",
+          "role": "continue",
+          "source": "next",
+          "span": [
+            33,
+            6,
+            33,
+            10
+          ]
+        },
+        {
+          "function": "next_loop",
+          "id": "cfg:CfgLoops#next_loop:entry:0:31:2",
+          "kind": "entry",
+          "line": 31,
+          "owner": "CfgLoops",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            31,
+            2,
+            37,
+            5
+          ]
+        },
+        {
+          "function": "next_loop",
+          "id": "cfg:CfgLoops#next_loop:exit:3:37:5",
+          "kind": "exit",
+          "line": 37,
+          "owner": "CfgLoops",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            31,
+            2,
+            37,
+            5
+          ]
+        },
+        {
+          "function": "next_loop",
+          "id": "cfg:CfgLoops#next_loop:stmt:0.loop.1:34:6",
+          "kind": "statement",
+          "line": 34,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "publish(item)",
+          "span": [
+            34,
+            6,
+            34,
+            19
+          ]
+        },
+        {
+          "function": "next_loop",
+          "id": "cfg:CfgLoops#next_loop:stmt:1:32:4",
+          "kind": "loop",
+          "line": 32,
+          "owner": "CfgLoops",
+          "role": "iterator_loop",
+          "source": "items.each do |item| next if item.skip? publish(item) end",
+          "span": [
+            32,
+            4,
+            35,
+            7
+          ]
+        },
+        {
+          "function": "next_loop",
+          "id": "cfg:CfgLoops#next_loop:stmt:2:36:4",
+          "kind": "statement",
+          "line": 36,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "finish(items)",
+          "span": [
+            36,
+            4,
+            36,
+            17
+          ]
+        },
+        {
+          "function": "until_loop",
+          "id": "cfg:CfgLoops#until_loop:entry:0:9:2",
+          "kind": "entry",
+          "line": 9,
+          "owner": "CfgLoops",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            9,
+            2,
+            14,
+            5
+          ]
+        },
+        {
+          "function": "until_loop",
+          "id": "cfg:CfgLoops#until_loop:exit:3:14:5",
+          "kind": "exit",
+          "line": 14,
+          "owner": "CfgLoops",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            9,
+            2,
+            14,
+            5
+          ]
+        },
+        {
+          "function": "until_loop",
+          "id": "cfg:CfgLoops#until_loop:stmt:0.loop.0:11:6",
+          "kind": "statement",
+          "line": 11,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "publish(user)",
+          "span": [
+            11,
+            6,
+            11,
+            19
+          ]
+        },
+        {
+          "function": "until_loop",
+          "id": "cfg:CfgLoops#until_loop:stmt:1:10:4",
+          "kind": "loop",
+          "line": 10,
+          "owner": "CfgLoops",
+          "role": "until_loop",
+          "source": "until user.ready? publish(user) end",
+          "span": [
+            10,
+            4,
+            12,
+            7
+          ]
+        },
+        {
+          "function": "until_loop",
+          "id": "cfg:CfgLoops#until_loop:stmt:2:13:4",
+          "kind": "statement",
+          "line": 13,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "finish(user)",
+          "span": [
+            13,
+            4,
+            13,
+            16
+          ]
+        },
+        {
+          "function": "while_loop",
+          "id": "cfg:CfgLoops#while_loop:entry:0:2:2",
+          "kind": "entry",
+          "line": 2,
+          "owner": "CfgLoops",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            2,
+            2,
+            7,
+            5
+          ]
+        },
+        {
+          "function": "while_loop",
+          "id": "cfg:CfgLoops#while_loop:exit:3:7:5",
+          "kind": "exit",
+          "line": 7,
+          "owner": "CfgLoops",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            2,
+            2,
+            7,
+            5
+          ]
+        },
+        {
+          "function": "while_loop",
+          "id": "cfg:CfgLoops#while_loop:stmt:0.loop.0:4:6",
+          "kind": "statement",
+          "line": 4,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "publish(user)",
+          "span": [
+            4,
+            6,
+            4,
+            19
+          ]
+        },
+        {
+          "function": "while_loop",
+          "id": "cfg:CfgLoops#while_loop:stmt:1:3:4",
+          "kind": "loop",
+          "line": 3,
+          "owner": "CfgLoops",
+          "role": "while_loop",
+          "source": "while user.ready? publish(user) end",
+          "span": [
+            3,
+            4,
+            5,
+            7
+          ]
+        },
+        {
+          "function": "while_loop",
+          "id": "cfg:CfgLoops#while_loop:stmt:2:6:4",
+          "kind": "statement",
+          "line": 6,
+          "owner": "CfgLoops",
+          "role": "linear_statement",
+          "source": "finish(user)",
+          "span": [
+            6,
+            4,
+            6,
+            16
+          ]
+        }
+      ],
+      "file": "gems/fact-mine/examples/syntax-facts/ruby/cfg_loops.rb",
+      "language": "ruby"
+    }
+  ],
+  "format": "decomplex.syntax-facts.v1"
+}

@@ -3,10 +3,10 @@ require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 require_relative "../ruby/ast/ast" unless defined?(MIR::ReassignPlan)
 
 # AtomicPtr M3.5 / M3.6 -- WITH SNAPSHOT validation against
-# @indirect:atomic cells. Read mode shares the @versioned surface
+# @boxed:atomic cells. Read mode shares the @versioned surface
 # (M3.5); MUTABLE mode requires NO `ON MvccConflict` (M3.6, Rust rcu --
 # AtomicPtr.update retries until success, no conflict path).
-RSpec.describe "WITH SNAPSHOT against @indirect:atomic (M3.5 / M3.6)" do
+RSpec.describe "WITH SNAPSHOT against @boxed:atomic (M3.5 / M3.6)" do
   def annotate(src)
     tokens = Lexer.new(src).tokenize
     ast = ClearParser.new(tokens, src).parse
@@ -15,12 +15,12 @@ RSpec.describe "WITH SNAPSHOT against @indirect:atomic (M3.5 / M3.6)" do
   end
 
   describe "read mode (M3.5)" do
-    it "accepts WITH SNAPSHOT cell AS view { ... } on @indirect:atomic" do
+    it "accepts WITH SNAPSHOT cell AS view { ... } on @boxed:atomic" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { v: Int64 }
           FN main() RETURNS Void ->
-            cfg = Cfg{ v: 0 } @indirect:atomic;
+            cfg = Cfg{ v: 0 } @boxed:atomic;
             WITH SNAPSHOT cfg AS x { _ = x.v; }
             RETURN;
           END
@@ -38,17 +38,17 @@ RSpec.describe "WITH SNAPSHOT against @indirect:atomic (M3.5 / M3.6)" do
             RETURN;
           END
         CLEAR
-      }.to raise_error(/WITH SNAPSHOT requires a @versioned or @indirect:atomic/)
+      }.to raise_error(/WITH SNAPSHOT requires a @versioned or @boxed:atomic/)
     end
   end
 
   describe "MUTABLE mode (M3.6)" do
-    it "accepts WITH SNAPSHOT cell AS MUTABLE x { ... } with NO ON MvccConflict on @indirect:atomic" do
+    it "accepts WITH SNAPSHOT cell AS MUTABLE x { ... } with NO ON MvccConflict on @boxed:atomic" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Counter { value: Int64 }
           FN main() RETURNS Void ->
-            cfg = Counter{ value: 0 } @indirect:atomic;
+            cfg = Counter{ value: 0 } @boxed:atomic;
             WITH SNAPSHOT cfg AS MUTABLE x { x.value = x.value + 1; }
             RETURN;
           END
@@ -56,17 +56,17 @@ RSpec.describe "WITH SNAPSHOT against @indirect:atomic (M3.5 / M3.6)" do
       }.not_to raise_error
     end
 
-    it "rejects ON MvccConflict on an @indirect:atomic SNAPSHOT MUTABLE block" do
+    it "rejects ON MvccConflict on an @boxed:atomic SNAPSHOT MUTABLE block" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Counter { value: Int64 }
           FN main() RETURNS Void ->
-            cfg = Counter{ value: 0 } @indirect:atomic;
+            cfg = Counter{ value: 0 } @boxed:atomic;
             WITH SNAPSHOT cfg AS MUTABLE x { x.value = x.value + 1; } ON MvccConflict RAISE
             RETURN;
           END
         CLEAR
-      }.to raise_error(/ON MvccConflict.*isn'?t valid.*@indirect:atomic|AtomicConflict.*not.*MvccConflict/i)
+      }.to raise_error(/ON MvccConflict.*isn'?t valid.*@boxed:atomic|AtomicConflict.*not.*MvccConflict/i)
     end
 
     it "no inline ON MvccConflict: @versioned SNAPSHOT MUTABLE falls back to the program SYNC POLICY (#328)" do

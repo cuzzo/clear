@@ -24,7 +24,7 @@ RSpec.describe UseAfterMoveChecker do
   describe "plain affine binding — offers COPY + @multiowned + @shared" do
     let(:src) {
       <<~CLEAR
-        UNION Value { Nil, Lambda { body: Value @indirect } }
+        UNION Value { Nil, Lambda { body: Value @boxed } }
         FN main() RETURNS Void ->
             msg = Value.Nil;
             x = msg;
@@ -57,7 +57,7 @@ RSpec.describe UseAfterMoveChecker do
     # this binding's declaration, not the first `;` on the line.
     let(:src) {
       <<~CLEAR
-        UNION Value { Nil, Lambda { body: Value @indirect } }
+        UNION Value { Nil, Lambda { body: Value @boxed } }
         FN main() RETURNS Void ->
             z = 0; msg = Value.Nil;
             x = msg;

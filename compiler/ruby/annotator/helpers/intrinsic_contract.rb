@@ -128,14 +128,19 @@ class IntrinsicContract < T::Struct
   const :ownership, IntrinsicOwnershipContract
   const :behavior, IntrinsicBehaviorContract
 
-  sig { returns(IntrinsicContract) }
-  def self.empty
+  EMPTY = T.let(
     new(
       template: IntrinsicTemplateContract.new,
       allocation: IntrinsicAllocationContract.new,
       ownership: IntrinsicOwnershipContract.new,
       behavior: IntrinsicBehaviorContract.new,
-    )
+    ),
+    IntrinsicContract
+  )
+
+  sig { returns(IntrinsicContract) }
+  def self.empty
+    EMPTY
   end
 
   sig { params(emit: IntrinsicEmit, params: T::Array[AST::Param]).returns(IntrinsicContract) }

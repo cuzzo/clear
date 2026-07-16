@@ -507,7 +507,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "preserves every capability axis when substituting a generic type parameter" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         generic = Type.new(:T)
         generic.ownership = :shared
         generic.sync = :locked
@@ -526,7 +526,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "substitutes nested generic instances and array suffixes" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
 
         nested = annotator.send(:apply_type_subst, Type.new(:"Cache<T>"), { T: :Box })
         array = annotator.send(:apply_type_subst, Type.new(:"T[]"), { T: :Box })
@@ -536,7 +536,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "substitutes bare type params without capability metadata" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
 
         substituted = annotator.send(:apply_type_subst, Type.new(:T), { T: :Box })
 
@@ -545,7 +545,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "substitutes capability metadata without ownership overrides" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
 
         substituted = annotator.send(:apply_type_subst, Type.new(:T, sync: :locked), { T: :Box })
 
@@ -557,7 +557,7 @@ RSpec.describe SemanticAnnotator do
       it "preserves declared sharding and sync metadata on map bindings" do
         ast = run(<<~CLEAR)
           FN main() RETURNS Void ->
-            MUTABLE counts: HashMap<Int64>@sharded(4):locked = {};
+            MUTABLE counts: {String}@sharded(4):locked Int64 = {};
             RETURN;
           END
         CLEAR
@@ -568,7 +568,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "propagates sharding metadata from collection declarations" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         token = Lexer::Token.new(:IDENTIFIER, "items", 1, 1)
         value = AST::Identifier.new(token, "value")
         value.full_type = Type.new(:"Int64[]")
@@ -583,7 +583,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "propagates sharding, sync, and ownership metadata from map declarations" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         token = Lexer::Token.new(:IDENTIFIER, "counts", 1, 1)
         value = AST::Identifier.new(token, "value")
         value.full_type = Type.new(:"HashMap<Int64, String>")
@@ -599,13 +599,13 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "treats nil expressions as having no container source" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
 
         expect(annotator.send(:find_container_source, nil)).to be_nil
       end
 
       it "finds the root source for slice borrows" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         token = Lexer::Token.new(:IDENTIFIER, "items", 1, 1)
         target = AST::Identifier.new(token, "items")
         target.full_type = Type.new(:"Int64[]")
@@ -615,7 +615,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "finds the receiver source for explicit container borrow markers" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         token = Lexer::Token.new(:IDENTIFIER, "items", 1, 1)
         target = AST::Identifier.new(token, "items")
         expr = AST::GetIndex.new(token, target, AST::Literal.new(token, :NUMBER, 0, nil))
@@ -625,14 +625,60 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "ignores explicit container borrow markers without a receiver" do
-        annotator = SemanticAnnotator.new
-        expr = Struct.new(:container_borrow).new(true)
+        annotator = Annotator::Phases::TypeAnalysisSession.new
+        token = Lexer::Token.new(:INT64, 1, 1, 1)
+        expr = AST::Literal.new(token, :INT64, 1, nil)
+        expr.container_borrow = true
 
         expect(annotator.send(:find_container_source, expr)).to be_nil
       end
 
+      it "substitutes every recursive type-expression variant without reparsing" do
+        annotator = Annotator::Phases::TypeAnalysisSession.new
+        parameter = NamedTypeExpression.new(name: :T)
+        signature = Type::FunctionType.new(
+          params: [Type::FunctionTypeParam.new(type: Type.new(:T))],
+          return_type: Type.new(:T)
+        )
+        expression = TupleTypeExpression.new(items: [
+          FunctionTypeExpression.new(signature: signature),
+          OptionalTypeExpression.new(inner: parameter),
+          FallibleTypeExpression.new(inner: parameter, error_set: parameter),
+          FutureTypeExpression.new(inner: parameter),
+          LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: parameter),
+          MapTypeExpression.new(key: parameter, value: parameter),
+          StreamTypeExpression.new(cardinality: :FINITE, item: parameter),
+        ])
+        substituted = annotator.send(:apply_expression_subst, expression, { T: Type.new(:Int64) })
+        unknown_class = Class.new { include TypeExpression }
+        unknown = T.cast(unknown_class.new, TypeExpression)
+
+        expect(TypeExpressionPrinter.inline(substituted))
+          .to eq("Tuple<FN(Int64) -> Int64, ?Int64, !Int64, ~Int64, []Int64, {Int64}Int64, [~]Int64>")
+        expect(annotator.send(:apply_expression_subst, unknown, {})).to equal(unknown)
+      end
+
+      it "binds generic callback parameter and result types structurally" do
+        annotator = Annotator::Phases::TypeAnalysisSession.new
+        token = Lexer::Token.new(:VAR_ID, "invoke", 1, 1)
+        node = AST::FuncCall.new(token, "invoke", [])
+        param_signature = Type::FunctionType.new(
+          params: [Type::FunctionTypeParam.new(type: Type.new(:T))],
+          return_type: Type.new(:T)
+        )
+        actual_signature = Type::FunctionType.new(
+          params: [Type::FunctionTypeParam.new(type: Type.new(:Int64))],
+          return_type: Type.new(:Int64)
+        )
+        substitution = {}
+
+        annotator.send(:extract_type_bindings!, node, Type.new(param_signature),
+          Type.new(actual_signature), [:T], substitution)
+        expect(substitution.fetch(:T).resolved).to eq(:Int64)
+      end
+
       it "ignores slices whose target is not array-shaped" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         token = Lexer::Token.new(:IDENTIFIER, "name", 1, 1)
         target = AST::Identifier.new(token, "name")
         target.full_type = Type.new(:String)

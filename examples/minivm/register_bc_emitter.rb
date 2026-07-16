@@ -433,6 +433,7 @@ class RegisterBcEmitter
   # is the right behavior -- they have no user-visible name.
   def record_var_name(kind, virtual_reg, name, type_name = nil)
     return unless name && !name.empty?
+    return if name.to_s.start_with?("__")
     # Stamp the current CLEAR source line so the runtime snapshot can
     # tell which name is visible at a given pause line. Source lines
     # are stable across the optimizer (which can fold/remove ops);
@@ -672,7 +673,7 @@ class RegisterBcEmitter
     return compile_inline_zig_stmt(stmt) if inline_zig_node?(stmt)
 
     case stmt
-    when MIR::Comment, MIR::Suppress, MIR::Noop
+    when MIR::Comment, MIR::Suppress, MIR::Noop, MIR::DefaultValue
       nil
     when MIR::FrameSave, MIR::FrameRestore, MIR::AllocMark, MIR::Cleanup, MIR::ErrCleanup, MIR::ErrDeferStmt,
          MIR::ReturnMark, MIR::MoveMark, MIR::ReassignMark, MIR::TransferMark, MIR::FieldCleanupMark,
@@ -763,6 +764,8 @@ class RegisterBcEmitter
       compile_try_catch_stmt(stmt)
     when MIR::FallibleLockBinding
       compile_fallible_lock_binding(stmt)
+    when MIR::SortedLockAcquire
+      compile_sorted_lock_acquire(stmt)
     when MIR::AssertStmt
       compile_assert_stmt(stmt)
     else
@@ -862,6 +865,69 @@ class RegisterBcEmitter
     emit(JMP, 0)
     @with_fallible_escapes ||= []
     @with_fallible_escapes << (@ops.length - 1)
+    @ops[success_patch] = @ops.length
+  end
+
+  def compile_sorted_lock_acquire(stmt)
+    sources = (stmt.entries || []).map do |entry|
+      source = lock_acquire_source(entry)
+      raise Unsupported, "register emitter does not know sorted lock source" unless source
+      [entry, source]
+    end
+
+    retries = stmt.retries.to_i
+    attempt_reg = nil
+    if retries.positive?
+      attempt_reg = fresh_ireg
+      emit(ICONST, attempt_reg, add_const(0))
+    end
+    retry_top = @ops.length
+    fail_patches = []
+
+    sources.each_with_index do |(entry, source), index|
+      record_shared_event(:acquire, source.fetch(:name), source.fetch(:kind), caps: source.fetch(:caps))
+      timeout = fresh_ireg
+      emit(ICONST, timeout, add_const(stmt.fallible ? 100 : 30000))
+      acquired = fresh_ireg
+      emit(LOCKACQ, acquired, source.fetch(:cell), timeout)
+      emit(JF, acquired, 0)
+      fail_patches << [@ops.length - 1, index]
+      bind_lock_alias(entry.alias_name.to_s, source)
+    end
+
+    @with_lock_releases ||= []
+    @with_lock_releases.concat(sources.map { |_entry, source| source.fetch(:cell) })
+    emit(JMP, 0)
+    success_patch = @ops.length - 1
+
+    fail_patches.each do |patch, acquired_count|
+      @ops[patch] = @ops.length
+      sources.first(acquired_count).reverse_each do |_entry, source|
+        emit(LOCKREL, source.fetch(:cell))
+      end
+
+      if retries.positive?
+        one = fresh_ireg
+        emit(ICONST, one, add_const(1))
+        next_attempt = fresh_ireg
+        emit(IADD, next_attempt, attempt_reg, one)
+        limit = fresh_ireg
+        emit(ICONST, limit, add_const(retries))
+        can_retry = fresh_ireg
+        emit(ILT, can_retry, next_attempt, limit)
+        emit(JF, can_retry, 0)
+        exhausted_patch = @ops.length - 1
+        emit(IMOV, attempt_reg, next_attempt)
+        emit(JMP, retry_top)
+        @ops[exhausted_patch] = @ops.length
+      end
+
+      semantic_body(stmt.action&.body || []).each { |child| compile_stmt(child) }
+      emit(JMP, 0)
+      @with_fallible_escapes ||= []
+      @with_fallible_escapes << (@ops.length - 1)
+    end
+
     @ops[success_patch] = @ops.length
   end
 
@@ -2637,6 +2703,10 @@ class RegisterBcEmitter
       reg = fresh_ireg
       emit(ICONST, reg, add_const(value))
       reg
+    when MIR::DefaultValue
+      reg = fresh_ireg
+      emit(ICONST, reg, add_const(0))
+      reg
     when MIR::EnumTag
       unless @tag_context_type
         raise Unsupported, "register emitter cannot compile enum tag #{expr.variant.inspect} without a tag context"
@@ -2683,6 +2753,8 @@ class RegisterBcEmitter
       compile_i64_try_catch(expr)
     when MIR::Orelse
       compile_i64_orelse(expr)
+    when MIR::IfOptional
+      compile_i64_if_optional(expr)
     when MIR::ShardedMapGet
       compile_i64_sharded_map_get(expr, fallback_reg: nil)
     when MIR::ListLength
@@ -2706,6 +2778,10 @@ class RegisterBcEmitter
       value = parse_f64_literal(expr.value)
       reg = fresh_freg
       emit(FCONST, reg, add_const([:f64, value]))
+      reg
+    when MIR::DefaultValue
+      reg = fresh_freg
+      emit(FCONST, reg, add_const([:f64, 0.0]))
       reg
     when MIR::Ident
       @freg_by_name.fetch(resolve_ctx_name(expr.name)) do
@@ -2768,6 +2844,10 @@ class RegisterBcEmitter
 
       reg = fresh_sreg
       emit(SCONST, reg, add_const(unescape_string(text[1...-1])))
+      reg
+    when MIR::DefaultValue
+      reg = fresh_sreg
+      emit(SCONST, reg, add_const(""))
       reg
     when MIR::Ident
       @sreg_by_name.fetch(resolve_ctx_name(expr.name)) do
@@ -4255,6 +4335,8 @@ class RegisterBcEmitter
       end
     when MIR::ContainerInit
       compile_container_init_value(expr)
+    when MIR::DefaultValue
+      compile_default_value(expr)
     when MIR::DeepCopy
       value = compile_value_expr(expr.source)
       clone_value(value) if value
@@ -4362,6 +4444,23 @@ class RegisterBcEmitter
       end
       nil
     end
+  end
+
+  def compile_default_value(expr)
+    return nil if expr.kind == :undefined
+
+    if expr.kind == :collection_empty && (kind = list_value_type(expr.zig_type))
+      reg = fresh_vreg
+      opcode = case kind
+               when :f64_list then LFNEW
+               when :string_list then LSNEW
+               else LNEW
+               end
+      emit(opcode, reg)
+      return { kind: kind, reg: reg }
+    end
+
+    raise Unsupported, "register emitter does not support default value #{expr.kind.inspect} for #{expr.zig_type.inspect}"
   end
 
   # `FOR x IN pool DO ... END` -- iterate alive slots only. The loop
@@ -6045,6 +6144,54 @@ class RegisterBcEmitter
     end
 
     raise Unsupported, "register emitter only supports OR_ELSE fallback for HashMap<Int64> get in this tranche"
+  end
+
+  def compile_i64_if_optional(expr)
+    if expr.optional.is_a?(MIR::ShardedMapGet) &&
+        expr.then_expr.is_a?(MIR::Ident) &&
+        expr.then_expr.name.to_s == expr.capture.to_s
+      fallback = compile_i64_expr(expr.else_expr)
+      return compile_i64_sharded_map_get(expr.optional, fallback_reg: fallback)
+    end
+
+    saved_iregs = @ireg_by_name.dup
+    saved_values = @value_by_name.dup
+    optional_value = compile_value_expr(expr.optional)
+    condition = nil
+
+    if optional_value && optional_value[:alive_reg]
+      zero = fresh_ireg
+      emit(ICONST, zero, add_const(0))
+      condition = fresh_ireg
+      emit(INEQ, condition, optional_value.fetch(:alive_reg), zero)
+      @value_by_name[expr.capture.to_s] = optional_value
+    else
+      optional_reg = compile_i64_expr(expr.optional)
+      missing = fresh_ireg
+      emit(ICONST, missing, add_const(-1))
+      condition = fresh_ireg
+      emit(INEQ, condition, optional_reg, missing)
+      @ireg_by_name[expr.capture.to_s] = optional_reg
+    end
+
+    result = fresh_ireg
+    emit(JF, condition, 0)
+    else_patch = @ops.length - 1
+    then_reg = compile_i64_expr(expr.then_expr)
+    emit(IMOV, result, then_reg) unless result == then_reg
+    emit(JMP, 0)
+    end_patch = @ops.length - 1
+
+    @ireg_by_name = saved_iregs.dup
+    @value_by_name = saved_values.dup
+    @ops[else_patch] = @ops.length
+    else_reg = compile_i64_expr(expr.else_expr)
+    emit(IMOV, result, else_reg) unless result == else_reg
+    @ops[end_patch] = @ops.length
+    result
+  ensure
+    @ireg_by_name = saved_iregs if saved_iregs
+    @value_by_name = saved_values if saved_values
   end
 
   def compile_i64_sharded_map_get(expr, fallback_reg:)
@@ -7828,7 +7975,9 @@ class RegisterBcEmitter
         return :f64
       end
     elsif expr.is_a?(MIR::InlineBc)
-      return :string if [:toString, :charAt, :substr].include?(expr.op)
+      return :string if %i[
+        toString charAt substr replace lowercase downcase uppercase upcase readFile join
+      ].include?(expr.op)
       return :void if expr.op == :sleep
       if expr.op == :getAt
         list_arg = (expr.args || []).first
@@ -8105,7 +8254,7 @@ class RegisterBcEmitter
     # the program. Pull them in so calls like `Point{ x: 1.0, y: 2.0 }`
     # in the importing file resolve.
     annotator = @frontend_result.respond_to?(:annotator) ? @frontend_result.annotator : nil
-    types_table = annotator&.scope_stack&.first&.types
+    types_table = annotator&.semantic_root_scope&.types
     types_table&.each do |name, entry|
       schema = entry.is_a?(Hash) ? entry[:schema] : nil
       next unless schema.is_a?(Hash)

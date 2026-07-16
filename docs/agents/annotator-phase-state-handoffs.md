@@ -29,6 +29,58 @@ That is the bar for v0.1.
 
 ## Current State
 
+### Three umbrella phase products (implemented July 2026)
+
+The public annotation pipeline now has three fail-closed handoffs:
+
+1. `ResolutionPhase` publishes immutable `ResolutionFacts` after imports,
+   declaration indexing, type registration, signature registration,
+   reentrance metadata, sync policy, and error-type registration.
+2. `TypeAnalysisPhase` consumes those exact facts and publishes
+   `TypedProgramFacts` after the body walk, catch resolution, program result
+   typing, `Auto` finalization, and a source-located whole-AST type inventory.
+3. `CapabilityAuditPhase` consumes that exact typed product and publishes a
+   `CapabilityAuditReport` after recursion/effect/fallibility/FSM/lock,
+   capability, ownership, and deferred whole-program checks.
+
+`AnnotationProducts` enforces ordering and exact upstream object identity as an
+immutable sequence of snapshots; each publication returns a new frozen ledger.
+`SemanticIndex` can only be constructed from the complete ledger. A diagnostic
+in any phase leaves the prior snapshot available but cannot publish the failed
+or downstream product.
+
+`AnnotationPipeline` is the only owner of phase order and the individual phase
+adapters. `SemanticAnnotator` supplies one immutable, typed operation record and
+receives the latest immutable product snapshot after each successful phase.
+This avoids the copied dual implementations that broke the experimental
+`parser-phases` branch. The remaining migration is mechanical: move each
+operation's implementation into an explicit phase context without changing
+these product contracts or adding another orchestration path.
+
+### Validation and analyzer interpretation
+
+- Full compiler suite: 6,681 examples, zero failures.
+- Sorbet: zero errors.
+- Added/changed `compiler/ruby` executable lines are required to remain at 100%
+  line coverage; phase success and each fail-closed boundary have direct tests.
+- MiniVM annotation measured 5.508s, 5.516s, and 5.510s (5.510s median) in
+  fresh processes; the phase boundaries add no material regression.
+- NilKill's defect-oriented static counts are unchanged: dead nil checks 11,
+  deterministic guards 3, and hash-record blockers 50. All new explicit Ruby
+  methods are typed.
+- Decomplex's decision pressure (119), temporal ordering pressure (5), missing
+  abstractions (25), broken protocols (56), and weighted inlined cognitive
+  complexity (76) are unchanged. It does increase inventory-style totals for
+  state heatmap and branch density because it counts the new immutable fact and
+  operation records as additional owners. That is a detector-credit gap, not a
+  new behavioral branch hub.
+- Espalier recognizes `AnnotationPipeline` as the mediator. Its
+  `SemanticAnnotator` collaboration-hub score rose from 62.98 to 75.09 because
+  typed phase/product edges are counted as added fan-out, but this is far below
+  the 112.40 score of the pre-coordinator intermediate version. Espalier does
+  not yet credit directed, fail-closed product dependencies or exact upstream
+  identity constraints.
+
 The refactor split behavior by compilation phase and visitor domain, but the
 handoff mechanism is still the `SemanticAnnotator` instance. Phase modules read
 and write shared state such as `@fn_nodes`, `@current_fn_ctx`, `@og`,

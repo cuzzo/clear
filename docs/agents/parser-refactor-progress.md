@@ -1,0 +1,795 @@
+# Parser refactor progress and metrics
+
+This is the staged measurement ledger for
+[`parser-refactor.md`](parser-refactor.md). Each implementation stage is
+committed separately. Analyzer counts are only compared against reports made
+with the same command and target file.
+
+## Commands
+
+The early staged checks used the available direct executables. After the
+locked bundle was installed for Stage 5E, the same static-only analyzer modes
+were retained so every snapshot remained comparable:
+
+```sh
+env FACT_MINE_RUST_BINARY=gems/fact-mine/target/debug/fact-mine-rust \
+  ruby gems/nil-kill/exe/nil-kill static --root . --language ruby \
+  --output tmp/parser-refactor-metrics/STAGE/nil-kill-static.json \
+  compiler/ruby/ast/parser.rb
+
+env FACT_MINE_RUST_BINARY=gems/fact-mine/target/debug/fact-mine-rust \
+  ruby gems/espalier/exe/espalier --format yaml \
+  --output tmp/parser-refactor-metrics/STAGE/espalier.yml \
+  compiler/ruby/ast/parser.rb
+
+gems/decomplex/target/debug/decomplex-rust report --language=ruby \
+  --format=markdown \
+  --output tmp/parser-refactor-metrics/STAGE/decomplex.md \
+  compiler/ruby/ast/parser.rb
+```
+
+NilKill is deliberately run in static-only mode: no collection or inference.
+The Decomplex Ruby executable cannot be used because this branch does not
+contain `gems/decomplex/lib/decomplex`; the shipped Rust report executable is
+used directly.
+
+## Stage 0: baseline
+
+Commit baseline: `486dbfc2` (before parser changes).
+
+| Measure | Baseline |
+| --- | ---: |
+| Parser lines | 4,889 |
+| `T.cast` sites | 50 |
+| `T.must` sites | 161 |
+| `T.unsafe` sites | 6 |
+| NilKill methods | 182 |
+| NilKill fields | 8 |
+| NilKill hash shapes | 31 |
+| NilKill array shapes | 1,461 |
+| NilKill collection index lookups | 105 |
+| NilKill hash-record blockers | 86 |
+| NilKill dead nil checks | 1 |
+| NilKill deterministic guards | 2 |
+| Espalier functions | 182 |
+| Espalier state slots | 8 |
+| Espalier complete time results | 9 |
+| Espalier incomplete time results | 173 |
+| Espalier methods with known `O(2^N)` component | 95 |
+| Espalier methods with known `O(N)` stack component | 96 |
+| Decomplex total candidates | 438 |
+| Decomplex convergence units | 84 |
+| Decomplex root-cause clusters | 38 |
+| Decomplex state-based branch findings | 69 |
+| Decomplex scoped-state-restoration findings | 4 |
+| Decomplex weighted-inlined-complexity findings | 81 |
+| Decomplex decision-pressure contracts | 5 |
+| Decomplex declared-type-pressure findings | 1 |
+
+The replay stress input nests value blocks in calls:
+
+```clear
+f({ f({ f(); 0 }); 0 });
+```
+
+Adding one wrapper adds ten source bytes but approximately doubles parse time.
+On this baseline, nesting depths 7 through 10 took 0.029, 0.063, 0.121, and
+0.238 seconds. Espalier independently reports the receiver-cursor replay as a
+known `O(2^N)` time component and `O(N)` live-stack component.
+
+The directly runnable parser specs pass: 93 examples, 0 failures. The locked
+bundle is missing MessagePack, SimpleCov, and Sorbet, so the canonical parser
+compatibility, SimpleCov, and Sorbet commands cannot run in this environment.
+New units will additionally be checked with Ruby's built-in line coverage so
+the refactor does not depend on the unavailable SimpleCov wrapper.
+
+## Stage observations
+
+This section is extended at every implementation stage with metric deltas,
+new-code findings, and detector gaps. A lower raw finding count is not treated
+as success unless the corresponding parser contract actually improved.
+
+### Stage 1: checked boundaries and typed AST defaults
+
+The lexer now owns checked textual, integer, and float payload accessors. The
+parser uses them at typed payload sites instead of reconstructing the
+kind/value invariant with casts. The nine reviewed return contracts are now
+non-nil, as are the immediately enclosing EXTERN and visibility dispatchers.
+Program language mode, struct field tokens, and parser-produced `comptime` and
+`tight` flags now have typed defaults.
+
+| Measure | Baseline | Stage 1 | Delta |
+| --- | ---: | ---: | ---: |
+| Parser `T.cast` sites | 50 | 8 | -42 |
+| Parser `T.must` sites | 161 | 94 | -67 |
+| Parser `T.unsafe` sites | 6 | 6 | 0 |
+| NilKill calls | 3,768 | 3,648 | -120 |
+| NilKill array shapes | 1,461 | 1,419 | -42 |
+| NilKill hash shapes | 31 | 31 | 0 |
+| NilKill hash-record blockers | 86 | 86 | 0 |
+| Espalier complete/incomplete time results | 9 / 173 | 9 / 173 | 0 / 0 |
+| Espalier known `O(2^N)` component | 95 | 95 | 0 |
+| Espalier known `O(N)` stack component | 96 | 96 | 0 |
+| Decomplex candidates | 438 | 440 | +2 |
+| Decomplex convergence units | 84 | 91 | +7 |
+| Decomplex root-cause clusters | 38 | 39 | +1 |
+
+The unchanged complexity values are expected: this stage corrects data
+contracts and does not alter recursive parser control flow. NilKill's raw fact
+counts reflect the eliminated casts and assertions, but it has no concise
+headline for “reviewed false-nilable signatures corrected”; the nine method
+signatures must currently be compared directly.
+
+Decomplex's apparent regression is a detector bug, not new parser mutation.
+It classifies the read-only `Token#text!` validation accessor as hidden
+mutation solely because its Ruby name ends in `!`. That adds 125 alleged
+mutation calls, increases False Simplicity from 67 to 69 categories, and pulls
+seven additional methods into convergence. The changed-files Espalier report
+correctly records that `text!`, `integer!`, and `float!` write no state.
+Decomplex should consume effect facts or otherwise distinguish a raising
+checked accessor from a mutating bang method before using the signal for
+cross-detector convergence.
+
+Validation: 103 focused parser/contract examples pass; all 480 top-level
+`transpile-tests/*.clear` fixtures lex and parse; Ruby built-in coverage reports
+zero uncovered executable lines in the new token/AST contract methods. The
+canonical full compiler, MessagePack compatibility, SimpleCov, and Sorbet
+gates remain unavailable because the locked bundle is absent.
+
+### Stage 2A: named struct-literal fields
+
+Generic and ordinary struct literals now share one parser for
+`ParsedStructField` records. Field name, value, and diagnostic token remain
+attached until the final value/token maps are built; the former anonymous
+`[[name, value], token]` pair and duplicate grammar branches are gone.
+
+| Measure | Stage 1 | Stage 2A | Delta |
+| --- | ---: | ---: | ---: |
+| Parser methods | 182 | 184 | +2 |
+| Parser `T.must` sites | 94 | 90 | -4 |
+| NilKill array shapes | 1,419 | 1,420 | +1 |
+| NilKill hash-record blockers | 86 | 88 | +2 |
+| NilKill struct declarations | 3 | 4 | +1 |
+| Espalier known `O(2^N)` component | 95 | 97 | +2 |
+| Decomplex candidates | 440 | 441 | +1 |
+| Decomplex convergence units | 91 | 92 | +1 |
+| Decomplex root-cause clusters | 39 | 36 | -3 |
+| Decomplex weighted-inlined findings | 81 | 82 | +1 |
+
+The source contract improved materially, but no current headline metric
+represents “semantic tuple replaced by named record” or “duplicated grammar
+branch unified.” NilKill counts the honest `Array[ParsedStructField]` as one
+more array shape and the two genuine output maps as hash blockers. Espalier
+propagates the pre-existing replay SCC to the two new helpers, increasing the
+number of methods labelled with an exponential known component without any
+new replay or branch multiplicity. Decomplex's inlined metric deliberately
+keeps extracted helper cost visible, but consequently does not reflect this
+improved local contract either. FactMine does at least expose the additional
+typed struct declaration.
+
+Validation: 104 focused examples pass; all 480 top-level CLEAR fixtures parse;
+the new record-building helpers have zero uncovered executable lines.
+
+### Stage 2B: named capability records
+
+Capability sigil metadata, joined expression capabilities, and element
+capabilities are now explicit `T::Struct` records. Parser code reads named
+fields instead of indexing symbol-keyed hashes, and the mutable join state is
+confined to `CapJoin` and `ElementCapability` accumulators. The shared sigil
+tables remain genuine lookup maps.
+
+| Measure | Stage 2A | Stage 2B | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,916 | 4,944 | +28 |
+| Parser `T.must` sites | 90 | 83 | -7 |
+| NilKill calls | 3,651 | 3,626 | -25 |
+| NilKill hash shapes | 31 | 29 | -2 |
+| NilKill array shapes | 1,420 | 1,407 | -13 |
+| NilKill collection index lookups | 105 | 73 | -32 |
+| NilKill hash-record blockers | 88 | 65 | -23 |
+| NilKill struct declarations | 4 | 7 | +3 |
+| Espalier complete/incomplete time results | 9 / 175 | 10 / 174 | +1 / -1 |
+| Espalier known `O(2^N)` component | 97 | 97 | 0 |
+| Espalier known `O(N)` stack component | 98 | 98 | 0 |
+| Decomplex candidates | 441 | 439 | -2 |
+| Decomplex convergence units | 92 | 93 | +1 |
+| Decomplex state-based branch findings | 69 | 70 | +1 |
+| Decomplex False Simplicity findings | 69 | 65 | -4 |
+
+NilKill reflects this contract improvement well: semantic hash shapes,
+indexing, and hash-record blockers all fall substantially while three named
+struct declarations appear. Espalier appropriately leaves recursive
+complexity unchanged and gains one complete local result.
+
+Decomplex removes four False Simplicity findings and no longer reports
+eliminable nil-guard pressure in the capability join and branch-prefix
+methods. Its headline convergence and state-branch counts nevertheless rise
+because it treats reads of `const` fields on immutable `SigilAttrs` values as
+branches over mutable object state. That is a detector gap: FactMine exposes
+the `T::Struct` and `const` declarations, so Decomplex should distinguish a
+local immutable value record from receiver/parser lifecycle state. Property
+setters on the two deliberately local accumulators are real writes, but they
+should likewise not imply hidden non-local mutation without escape or receiver
+state evidence.
+
+Validation: 80 focused parser/contract examples pass; all 480 top-level CLEAR
+fixtures parse; Ruby built-in coverage reports all 81 changed executable
+parser lines covered.
+
+### Stage 2C: named effect declarations and spans
+
+`parse_effects_decl` now returns `ParsedEffectsDecl` instead of a
+`[kind, metadata_hash]` tuple. Semantic modifiers live on that parse result;
+the AST retains a separate `AST::EffectSpan` with exactly the two source
+tokens diagnostics need. The reentrance annotator consumes those named token
+fields instead of heterogeneous hash entries.
+
+| Measure | Stage 2B | Stage 2C | Delta |
+| --- | ---: | ---: | ---: |
+| NilKill calls | 3,626 | 3,628 | +2 |
+| NilKill hash shapes | 29 | 23 | -6 |
+| NilKill array shapes | 1,407 | 1,406 | -1 |
+| NilKill collection index lookups | 73 | 71 | -2 |
+| NilKill hash-record blockers | 65 | 65 | 0 |
+| NilKill struct declarations | 7 | 8 | +1 |
+| Espalier complete/incomplete time results | 10 / 174 | 10 / 174 | 0 / 0 |
+| Espalier known `O(2^N)` component | 97 | 97 | 0 |
+| Espalier known `O(N)` stack component | 98 | 98 | 0 |
+| Decomplex candidates | 439 | 439 | 0 |
+| Decomplex convergence units | 93 | 93 | 0 |
+| Decomplex decision-pressure findings | 5 | 5 | 0 |
+| Decomplex state-based branch findings | 70 | 70 | 0 |
+| Decomplex False Simplicity findings | 65 | 65 | 0 |
+
+NilKill again captures the removal of fixed-schema hashes and indexing, but
+there is still no direct headline for replacing the semantic return tuple or
+for typing the AST/diagnostic boundary in another file. Espalier is correctly
+unchanged because recursive control flow did not change.
+
+An intermediate analyzer run was useful: the first record design placed
+semantic modifiers on an optional span and introduced two safe-navigation
+guards. Decomplex increased decision pressure and False Simplicity by one
+each. Separating semantic parse data from source-span data and giving `tight`
+a non-nil default removed both new findings; the final Decomplex counts match
+Stage 2B.
+
+Validation: 24 focused source-parser and diagnostic examples pass; all 480
+top-level CLEAR fixtures parse. Built-in coverage reports zero uncovered
+changed executable lines: 20 in the parser, three in the AST record, and four
+in the reentrance diagnostic consumer.
+
+### Stage 2D: typed WITH MATCH arms and complete body ownership
+
+The parser's `WithMatchArm` hash was confirmed to have one closed schema at
+all construction sites and is now `AST::WithMatchArm`. Parser, annotator, and
+MIR lowering consumers use named fields, including the mutable per-arm error
+clause list.
+
+The audit exposed two real bugs hidden by the former hash convention. Generic
+AST body traversal only returned the empty main body of a MATCH-form WITH and
+omitted every arm body. Pipeline placeholder rewriting therefore also returned
+early without rewriting arm bodies. `WithBlock#child_bodies`, `AST.body_slots`,
+and `PipelinePlaceholderRewriter` now own and transform arm bodies explicitly.
+
+| Measure | Stage 2C | Stage 2D | Delta |
+| --- | ---: | ---: | ---: |
+| NilKill calls | 3,628 | 3,623 | -5 |
+| NilKill hash shapes | 23 | 21 | -2 |
+| NilKill array shapes | 1,406 | 1,405 | -1 |
+| NilKill collection index lookups | 71 | 71 | 0 |
+| NilKill hash-record blockers | 65 | 65 | 0 |
+| NilKill struct declarations in parser target | 8 | 8 | 0 |
+| Espalier complete/incomplete time results | 10 / 174 | 10 / 174 | 0 / 0 |
+| Espalier known `O(2^N)` component | 97 | 97 | 0 |
+| Espalier known `O(N)` stack component | 98 | 98 | 0 |
+| Decomplex candidates | 439 | 439 | 0 |
+| Decomplex convergence units | 93 | 93 | 0 |
+| Decomplex decision-pressure findings | 5 | 5 | 0 |
+| Decomplex state-based branch findings | 70 | 70 | 0 |
+| Decomplex False Simplicity findings | 65 | 65 | 0 |
+
+The parser-only NilKill snapshot sees the two removed literal hash shapes but
+cannot represent the more valuable cross-file result: a previously invisible
+AST body subtree is now included in canonical traversal and transformation.
+None of the three parser-target headline reports moves for that correctness
+fix. A useful generic detector would compare body-owning records against
+canonical traversal/rewriter coverage, but only if it can be derived from
+typed body fields and visitor structure across languages; a parser-specific
+arm rule would not be worthwhile.
+
+Validation: 25 focused source-parser, annotation, traversal, pipeline rewrite,
+and MIR-lowering examples pass; all 480 top-level CLEAR fixtures parse.
+Built-in coverage reports zero uncovered changed executable lines across the
+parser, AST, annotator, and pipeline rewriter. The two MIR lowering changes
+are keyword-argument source lines Ruby marks non-executable, and the source
+regression exercises their named-field values through the resulting MIR arms.
+
+### Stage 3: typed rule execution without capture interpretation
+
+The token-routing tables remain declarative, but `ParserRule` now contains
+only its token key and action. `PatternStep#value: T.untyped`, generic injected
+values, the broad `PatternCapture` union, `process_pattern`, `run_action`, and
+both positional action dispatchers are gone. Multi-step ASSERT, CAST, BREAK,
+and CONTINUE routes parse their operands in dedicated typed methods; trivial
+single-expression routes construct their typed AST nodes directly in the
+primary dispatcher.
+
+An intermediate implementation extracted every trivial route into a method.
+Decomplex correctly showed that those one-expression, single-caller helpers
+added no meaningful boundary, and Espalier propagated the existing replay SCC
+through all of them. Inlining only the trivial routes removed that noise while
+retaining typed grammar entry points for the genuinely multi-step forms.
+
+| Measure | Stage 2D | Stage 3 | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,950 | 4,900 | -50 |
+| Parser methods | 184 | 182 | -2 |
+| Parser `T.cast` sites | 8 | 6 | -2 |
+| Parser `T.must` sites | 78 | 76 | -2 |
+| NilKill calls | 3,623 | 3,528 | -95 |
+| NilKill hash shapes | 21 | 21 | 0 |
+| NilKill array shapes | 1,405 | 1,396 | -9 |
+| NilKill collection index lookups | 71 | 42 | -29 |
+| NilKill hash-record blockers | 65 | 36 | -29 |
+| Espalier functions | 184 | 182 | -2 |
+| Espalier complete/incomplete time results | 10 / 174 | 10 / 172 | 0 / -2 |
+| Espalier known `O(2^N)` component | 97 | 97 | 0 |
+| Espalier known `O(N)` stack component | 98 | 98 | 0 |
+| Decomplex candidates | 439 | 434 | -5 |
+| Decomplex convergence units | 93 | 92 | -1 |
+| Decomplex state-based branch findings | 70 | 67 | -3 |
+| Decomplex weighted-inlined findings | 82 | 82 | 0 |
+
+The metrics now move with the source design: NilKill reflects removal of the
+heterogeneous capture arrays and their positional reads, and Decomplex loses
+three state-based decisions that were really branches over pattern metadata.
+There is still no direct headline for “untyped mini-interpreter removed,” but
+the underlying facts make the improvement visible. Espalier correctly keeps
+the recursive complexity classification unchanged.
+
+Validation: 102 focused parser/contract examples pass; all 480 top-level CLEAR
+fixtures parse. Built-in coverage reports zero uncovered changed executable
+lines (58 parser lines and two parser-rule lines).
+
+### Stage 4A: single-pass VAR_ID statements
+
+The assignment parser no longer parses a VAR_ID-led form speculatively,
+restores `@pos`, and parses the same form again as an expression. A typed
+`ParsedVarForm` carries the already-parsed node and its assignment
+classification to ordinary statements, value blocks, and BG bodies.
+Destructuring is selected by non-mutating token lookahead and then parsed
+exactly once.
+
+The adversarial source is a nested sequence of calls whose arguments are value
+blocks, for example `f({ f({ f(); 0 }); 0 });`. Before this stage, depths 7
+through 11 took 0.042, 0.062, 0.142, 0.259, and 0.520 seconds. Every nested
+statement was reached down both the speculative-assignment and expression
+branches, giving Θ(2^N) time and Θ(N) live parser stack. After this stage,
+`parse_expression` invocations are exactly `3N + 1`; depth 10 takes about
+0.0025 seconds. A separate brace-classification lookahead still rescans nested
+blocks and leaves Θ(N²) token-peek work; Stage 4B addresses that independently.
+
+| Measure | Stage 3 | Stage 4A | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,900 | 4,938 | +38 |
+| Parser methods | 182 | 183 | +1 |
+| NilKill calls | 3,528 | 3,568 | +40 |
+| NilKill hash shapes | 21 | 21 | 0 |
+| NilKill array shapes | 1,396 | 1,411 | +15 |
+| NilKill collection index lookups | 42 | 42 | 0 |
+| NilKill hash-record blockers | 36 | 36 | 0 |
+| Espalier functions | 182 | 183 | +1 |
+| Espalier known `O(2^N)` component | 97 | 0 | -97 |
+| Espalier known `O(N)` time component | 11 | 31 | +20 |
+| Espalier known `O(N)` stack component | 98 | 5 | -93 |
+| Decomplex candidates | 434 | 432 | -2 |
+| Decomplex convergence units | 92 | 93 | +1 |
+| Decomplex state-based branch findings | 67 | 69 | +2 |
+| Decomplex False Simplicity findings | 65 | 66 | +1 |
+
+Espalier reflects the material algorithmic improvement unusually well: the
+generic recursive-SCC/replay facts remove the exponential component from all
+97 affected methods and the propagated linear-stack component from 93. This
+is evidence that the earlier FactMine/Espalier work is detecting the intended
+cross-language pattern rather than only the parser's method names.
+
+NilKill's counts rise because the deterministic classifier and typed result
+make more static calls and local array operations visible; its record-blocker
+metrics remain flat. Decomplex's total candidates fall slightly, but it adds
+local state-branch findings for the explicit token classifier and does not
+represent the exponential-to-linear recursive-work improvement. Those are not
+reporting bugs: NilKill and Decomplex answer different questions. A generic
+complexity-delta handoff from Espalier into Decomplex's convergence report
+would make this kind of high-value improvement harder to miss.
+
+Validation: 47 focused source-parser/contract examples pass; all 487 current
+top-level CLEAR fixtures parse. Ruby built-in coverage reports all 60 changed
+executable parser lines covered. Invalid call-result assignments now receive
+the existing `INVALID_ASSIGNMENT` diagnostic instead of failing later at the
+statement terminator.
+
+### Stage 4B: linear nested-delimiter lookahead
+
+Hash-literal versus value-block disambiguation previously scanned from each
+opening brace to its first top-level separator. On nested value-block calls,
+every outer scan walked every inner block, so Stage 4A's linear recursive parse
+still performed Θ(N²) token peeks. The parser now indexes matching structural
+delimiters once in Θ(N) time and Θ(N) space. Lookahead jumps directly over a
+nested `()`, `[]`, or `{}` without moving `@pos`.
+
+At depths 20, 40, and 80, measured lookahead fell from 1,492, 5,782, and
+22,762 token peeks to 142, 282, and 562. Depth 160 performs 1,122 peeks and
+parses in about 0.016 seconds. This establishes Θ(N) time for the adversarial
+family after tokenization, with the ordinary Θ(N) recursive-descent stack.
+Ruby's Sorbet-wrapped implementation reaches its host stack limit near 320 of
+these deeply nested forms. That bounded linear-space behavior does not justify
+changing CLEAR syntax; a documented nesting limit or iterative expression
+stack would be preferable if real programs approach it.
+
+| Measure | Stage 4A | Stage 4B | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,938 | 4,974 | +36 |
+| Parser methods | 183 | 184 | +1 |
+| Parser state fields | 8 | 9 | +1 |
+| NilKill calls | 3,568 | 3,605 | +37 |
+| NilKill hash shapes | 21 | 21 | 0 |
+| NilKill array shapes | 1,411 | 1,418 | +7 |
+| NilKill collection index lookups | 42 | 45 | +3 |
+| NilKill hash-record blockers | 36 | 39 | +3 |
+| Espalier functions | 183 | 184 | +1 |
+| Espalier known `O(N)` time component | 31 | 33 | +2 |
+| Espalier known `O(N)` stack component | 5 | 5 | 0 |
+| Decomplex candidates | 432 | 435 | +3 |
+| Decomplex convergence units | 93 | 94 | +1 |
+| Decomplex state-based branch findings | 69 | 70 | +1 |
+| Decomplex False Simplicity findings | 66 | 66 | 0 |
+
+The surface metrics move upward because the optimization adds one immutable,
+derived token index and its construction loop. The first version used an
+integer-keyed hash and raised NilKill's hash-shape count; replacing it with a
+typed positional array and two fixed delimiter strings returned hash shapes to
+the Stage 4A count. The remaining index/blocker findings are real operations,
+but describe a bounded data structure that removes repeated work.
+
+Neither Espalier nor Decomplex distinguishes Stage 4A's measured Θ(N²) nested
+rescanning from Stage 4B's Θ(N) behavior: Espalier reports `O(N)` as a known
+component for the individual scanner in both versions, without multiplying
+that scan by recursive nesting depth. This is a generic feature gap worth
+addressing. The needed fact is “a recursive parse SCC invokes a scan over the
+remaining receiver-state cursor domain”; it should not depend on braces,
+CLEAR, or parser method names. Decomplex correctly reports the added local
+state/control surface but has no cross-method asymptotic model to credit the
+trade.
+
+Validation: 49 focused source-parser/contract examples pass; all 487 current
+top-level CLEAR fixtures parse. Ruby built-in coverage reports all 25 changed
+executable parser lines covered.
+
+### Stage 4C: remove cursor and semantic side channels
+
+Three implicit parser protocols are gone:
+
+- Generic-angle lookahead now advances a local offset instead of mutating
+  `@pos` under an `ensure` restoration.
+- MATCH disambiguation uses the indexed closing brace and following arm arrow,
+  so the four temporary `@suppress_struct_lit` scopes and the field itself are
+  gone. A pattern parse exception can no longer leak that mode into later work.
+- `parse_requires_clause` returns a typed `ParsedRequiresClause` containing
+  capability and reentrance products. `@last_requires_clauses` and the
+  `RequiresKind` hash-union/indexing convention are gone.
+
+| Measure | Stage 4B | Stage 4C | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,974 | 4,959 | -15 |
+| Parser methods | 184 | 184 | 0 |
+| Parser state fields | 9 | 7 | -2 |
+| NilKill state accesses | 106 | 85 | -21 |
+| NilKill struct declarations | 9 | 11 | +2 |
+| NilKill hash shapes | 21 | 19 | -2 |
+| NilKill array shapes | 1,418 | 1,424 | +6 |
+| NilKill collection index lookups | 45 | 42 | -3 |
+| NilKill hash-record blockers | 39 | 41 | +2 |
+| Espalier functions | 184 | 184 | 0 |
+| Espalier known `O(N)` time component | 33 | 33 | 0 |
+| Espalier known `O(N)` stack component | 5 | 5 | 0 |
+| Decomplex candidates | 435 | 401 | -34 |
+| Decomplex root-cause clusters | 37 | 36 | -1 |
+| Decomplex scoped-state restoration | 4 | 0 | -4 |
+| Decomplex weighted-inlined findings | 82 | 81 | -1 |
+
+NilKill and Decomplex both capture the architectural result: two fewer state
+fields, 21 fewer state accesses, two fewer literal hash shapes, and no scoped
+restoration hazards. The first replacement for `match_destructure_brace?`
+guarded a token that is guaranteed by the lexer's trailing EOF contract;
+Decomplex raised decision pressure from five to six. Tightening that read with
+`T.must` returned the final count to five.
+
+NilKill's `hash_record_blockers` increase is a reporting bug. The two new
+findings cite `@delimiter_closings[@pos]` and `@tokens[closing_index + 1]`, both
+statically typed arrays, but describe them as “dynamic hash-record keys.” The
+same report also labels assignment into the typed `closings` array as a
+“shape-changing hash-record mutation.” Collection-index facts are valid; these
+sites must not contribute to hash-record blockers.
+
+Espalier is correctly stable on asymptotic components. Its complete-result
+count falls from seven to six because the new token-boundary predicate becomes
+an unknown component in callers, even though it contains only constant-time
+indexed reads. That is a smaller generic inference gap around fixed-count
+collection access, not a runtime-complexity regression.
+
+Validation: 82 focused source-parser, MATCH, REQUIRES, generic-literal, and
+contract examples pass; all 487 current top-level CLEAR fixtures parse. Ruby
+built-in coverage reports all 46 changed executable parser lines covered.
+
+### Stage 5A: semantic-only suffix results
+
+Suffix parsing no longer returns `AST::Node | Symbol`. The internal
+`SUFFIX_DECLINE` symbol, result union, identity test, and loop cast are gone.
+`suffix_rule_applicable?` decides whether conditional-binding and inline-union
+suffixes belong to their surrounding grammar before dispatch; every dispatched
+suffix method now returns its concrete AST type.
+
+| Measure | Stage 4C | Stage 5A | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,959 | 4,954 | -5 |
+| Parser methods | 184 | 186 | +2 |
+| Parser `T.cast` sites | 6 | 5 | -1 |
+| NilKill calls | 3,612 | 3,608 | -4 |
+| NilKill state accesses | 85 | 85 | 0 |
+| NilKill hash/array shapes | 19 / 1,424 | 19 / 1,424 | 0 / 0 |
+| NilKill collection indexes / blockers | 42 / 41 | 42 / 41 | 0 / 0 |
+| Espalier functions | 184 | 186 | +2 |
+| Espalier known `O(N)` time component | 33 | 33 | 0 |
+| Decomplex candidates | 401 | 398 | -3 |
+| Decomplex convergence units | 94 | 92 | -2 |
+| Decomplex state-based branch findings | 70 | 67 | -3 |
+
+The two small predicates add methods but remove a non-semantic union and
+state-like branches over its sentinel value. NilKill records the removed cast
+and four calls; Decomplex removes three state-based findings and two
+cross-detector convergence units. Espalier appropriately sees two constant
+helpers without changing the parser's known asymptotic components.
+
+Validation: focused source tests exercise ordinary EXISTS construction,
+conditional-binding decline, IS_READY's binding diagnostic, inline union
+construction, and MATCH destructuring. All changed executable lines are
+covered, and all 487 top-level CLEAR fixtures parse.
+
+### Stage 5B: shared typed MATCH grammar and truthful type syntax
+
+Expression and statement MATCH forms duplicated the entire arm-header grammar
+and differed only in body parsing. `ParsedMatchStart` and `ParsedMatchArm` now
+carry the shared token, subject, TAKES flag, pattern values, binding, and
+destructuring data. Each outer parser retains its own body rule and delegates
+only the genuinely identical header and AST construction work.
+
+`parse_type_annotation` now declares the `Type` it has always returned (or
+raises), removing five downstream `T.must` recoveries. The delimiter index
+also grows its typed optional array during the existing token pass instead of
+using `Array.new(length)`, the only construct that prevented strict
+Ruby-to-CLEAR emission.
+
+| Measure | Stage 5A | Stage 5B | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,954 | 4,952 | -2 |
+| Parser methods | 186 | 189 | +3 |
+| Parser `T.must` sites | 78 | 72 | -6 |
+| NilKill calls | 3,608 | 3,603 | -5 |
+| NilKill struct declarations | 11 | 13 | +2 |
+| NilKill array shapes | 1,424 | 1,420 | -4 |
+| NilKill collection indexes / blockers | 42 / 41 | 42 / 41 | 0 / 0 |
+| Espalier functions | 186 | 189 | +3 |
+| Espalier known `O(N)` time component | 33 | 33 | 0 |
+| Decomplex candidates | 398 | 343 | -55 |
+| Decomplex convergence units | 92 | 91 | -1 |
+| Decomplex root-cause clusters | 36 | 33 | -3 |
+| Decomplex state-based branch findings | 67 | 65 | -2 |
+| Decomplex structural-similarity findings | 2 | 1 | -1 |
+
+The top two Decomplex convergence units were the duplicated MATCH methods;
+both disappear from the ranked list. One shared `parse_match_arm` WICC finding
+and one False Simplicity finding replace the two 33/35-finding, five-detector
+clusters, while total candidates fall by 55. This is the intended effect of a
+typed grammar boundary rather than line-moving helpers. NilKill also sees four
+fewer anonymous array shapes and five fewer impossible nil assertions.
+
+Strict Ruby-to-CLEAR now emits the full parser. The targeted clean-
+transpilation verifier passes G0/G1 but cannot run G2-G4 in `--only` mode
+because generated `ast/ast.clear`, `lexer.clear`, and six other dependencies
+are absent. That is a verifier dependency classification (`C1`), not a parser
+translation error; the final full-corpus run must generate dependencies.
+
+Validation: focused source tests cover every shared arm variant in both MATCH
+body modes and the non-optional nested type paths; all 487 top-level CLEAR
+fixtures parse. Ruby-to-CLEAR strict emission succeeds without autofix.
+
+### Stage 5C: total capability parse results
+
+`parse_capabilities` and constructor capability parsing now return an empty
+`CapabilityParseResult` when no modifier is present. Their two consumers read
+the record's declared defaults directly instead of branching over nil and
+safe-navigating every field. Absence is data in the typed record, not absence
+of the parse result.
+
+| Measure | Stage 5B | Stage 5C | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,952 | 4,951 | -1 |
+| Parser methods | 189 | 189 | 0 |
+| NilKill calls | 3,603 | 3,601 | -2 |
+| NilKill hash/array shapes | 19 / 1,420 | 19 / 1,420 | 0 / 0 |
+| NilKill collection indexes / blockers | 42 / 41 | 42 / 41 | 0 / 0 |
+| Espalier functions | 189 | 189 | 0 |
+| Espalier known `O(N)` time component | 33 | 33 | 0 |
+| Decomplex candidates | 343 | 336 | -7 |
+| Decomplex root-cause clusters | 33 | 31 | -2 |
+| Decomplex False Simplicity findings | 67 | 66 | -1 |
+| `parse_type_annotation` converged findings | 44 | 27 | -17 |
+| `parse_lit` converged findings | 13 | 7 | -6 |
+
+This small contract correction removes 17 findings from the main type parser
+and six from literal parsing without adding helpers or state. It also produces
+ordinary non-optional CLEAR record returns under Ruby-to-CLEAR.
+
+An attempted `ParsedFunctionHeader`/return/catch decomposition was rejected
+before commit. It reduced `parse_function_def` from four detectors to three,
+but created a new three-detector return helper: total candidates increased
+343→346, convergence 91→93, state branches 65→66, and WICC 82→83. The code
+was reverted. The function grammar remains cohesive until a boundary can
+reduce total complexity instead of redistributing it.
+
+Validation: 62 focused source-parser and capability examples pass; all 15
+changed executable parser lines are covered; all 487 top-level CLEAR fixtures
+parse; strict Ruby-to-CLEAR emission remains green.
+
+### Stage 5D: one typed task-prefix grammar
+
+DO-branch and BG-body prefixes were near-clones over the same `SigilAttrs`
+schema. `TaskPrefix` is now their typed superset, and `parse_task_prefix`
+receives the allowed sigil table plus the caller-specific diagnostic labels.
+DO and BG keep distinct allowed sets and errors; accumulation, duplicate stack
+size checks, token provenance, and arrow consumption have one implementation.
+
+| Measure | Stage 5C | Stage 5D | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,951 | 4,899 | -52 |
+| Parser methods | 189 | 188 | -1 |
+| NilKill calls | 3,601 | 3,565 | -36 |
+| NilKill struct declarations | 13 | 12 | -1 |
+| NilKill array shapes | 1,420 | 1,407 | -13 |
+| NilKill collection indexes | 42 | 41 | -1 |
+| NilKill hash-record blockers | 41 | 42 | +1 |
+| Espalier functions | 189 | 188 | -1 |
+| Espalier known `O(N)` time component | 33 | 35 | +2 |
+| Decomplex candidates | 336 | 334 | -2 |
+| Decomplex convergence units | 91 | 90 | -1 |
+| Decomplex state-based branch findings | 65 | 64 | -1 |
+| Decomplex structural-similarity findings | 1 | 0 | -1 |
+
+The last structural clone disappears, along with 52 parser lines, 36 calls,
+and 13 array-shape facts. The unified method remains a visible convergence
+unit because prefix parsing genuinely has validation branches, but no longer
+forces two grammar implementations to evolve together.
+
+NilKill's blocker count again moves opposite to its actual facts: indexing the
+caller-provided `T::Hash[String, SigilAttrs]` is a real dynamic map lookup, but
+the blocker headline mixes it with the previously documented array false
+positives. The one-count increase is not evidence of a new anonymous-record
+schema; both sigil tables are genuine lookup maps and should remain hashes.
+
+Validation: 48 focused source-parser examples cover absent prefixes, every
+shared attribute, token provenance, duplicate stack sizes, and both typo
+diagnostics; all 22 changed executable parser lines are covered; all 487
+top-level CLEAR fixtures parse; strict Ruby-to-CLEAR emission remains green.
+
+### Stage 5E: finish truthful boundary propagation
+
+Running the locked Sorbet toolchain after installing the repository bundle
+exposed the final propagation work from Stage 1's non-nil parser contracts.
+Fifty parser `T.must` calls were now provably redundant, as were five
+assertions at parser consumers in the compiler frontend, module importer, and
+LSP analyzer. The four parser-produced AST fields now use explicit typed
+getters, which Sorbet and Ruby-to-CLEAR both recognize without relying on
+`attr_reader` macro inference inside `Struct` blocks.
+
+The delimiter index keeps its two genuinely necessary assertions: a
+non-empty typed stack has a last entry, and an entry drawn from the fixed
+opening-delimiter alphabet has a matching index. REQUIRES typo recovery now
+returns an explicit empty `RequiresKind` when `FixCollector` mode continues
+after recording the error, rather than violating its declared result type.
+
+| Measure | Stage 5D | Stage 5E | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,899 | 4,904 | +5 |
+| Parser `T.must` sites | 71 | 21 | -50 |
+| NilKill calls | 3,565 | 3,508 | -57 |
+| NilKill flow-local types | 1,668 | 1,677 | +9 |
+| NilKill state-type records | 240 | 241 | +1 |
+| NilKill hash/array shapes | 19 / 1,407 | 19 / 1,407 | 0 / 0 |
+| NilKill collection indexes / blockers | 41 / 42 | 41 / 42 | 0 / 0 |
+| Espalier time/space classifications | unchanged | unchanged | 0 |
+| Decomplex total candidates | 334 | 334 | 0 |
+| Decomplex convergence / root clusters | 90 / 31 | 90 / 31 | 0 / 0 |
+| Decomplex state / scoped-state findings | 64 / 0 | 64 / 0 | 0 / 0 |
+
+NilKill correctly reflects the 57-call reduction. None of the three analyzers
+reports Sorbet-invalid redundant assertions or malformed accessor signatures
+as a dedicated correctness signal; that is reasonable for Espalier, but a
+useful NilKill contract check could have caught the redundant non-nil
+assertions once `consume` became total. Decomplex is appropriately stable:
+the grammar and decisions did not change.
+
+Validation: locked `bundle exec srb tc` passes with zero errors, and the full
+non-integration compiler suite passes 6,472 examples. Aggregate built-in line
+coverage plus all 487 CLEAR fixtures covers every executable line authored by
+the refactor. The raw zero-context diff identifies six uncovered lines, but
+`git blame` shows that all six predate the refactor and were only included by
+hunk realignment; no refactor-authored executable line is uncovered.
+
+### Stage 6: generated CLEAR readiness gate
+
+The final Ruby parser translates in strict mode with the compiler helper
+configuration. The fresh artifact is 5,515 CLEAR lines, contains all twelve
+named parser records introduced by this refactor, and contains no
+`unsupportedRuby(...)` or unsupported marker. The clean-transpilation verifier
+reports G0 and G1 at 100% for all 4,399 nonblank Ruby source lines.
+
+The generated source is deliberately not committed under `compiler/src`.
+Repository policy requires the generated dependency closure and a successful
+CLEAR frontend/type-check before generated self-host sources become checked-in
+source. The targeted verifier classifies the next gate as C1 because
+`ast/ast.clear` is not part of a parser-only generation. Supplying the existing
+generated closure reaches the underlying blocker: strict translation of
+`compiler/ruby/ast/type.rb` fails on three early returns inside collection
+blocks, so `ast/type.clear` cannot be generated. Default-mode translation
+would insert `unsupportedRuby(...)` placeholders at those sites and therefore
+does not satisfy the gate. No generated dependency was hand-edited to conceal
+that repository-level self-host gap.
+
+This is not parser debt: `compiler/ruby/ast/parser.rb` itself is strict-clean.
+It is also why `tools/parser_compat.rb` cannot yet execute the CLEAR side of
+its differential oracle. The Ruby parser, its source-string regressions, and
+the full compiler suite are green; generated behavioral equivalence remains a
+self-host dependency milestone rather than an unfinished parser refactor.
+
+## Final outcome
+
+| Measure | Baseline | Final | Delta |
+| --- | ---: | ---: | ---: |
+| Parser lines | 4,889 | 4,904 | +15 |
+| Parser methods | 182 | 188 | +6 |
+| `T.cast` sites | 50 | 5 | -45 |
+| `T.must` sites | 161 | 21 | -140 |
+| `T.unsafe` sites | 6 | 6 | 0 |
+| NilKill calls | 3,768 | 3,508 | -260 |
+| NilKill state accesses | 106 | 85 | -21 |
+| NilKill struct declarations | 3 | 12 | +9 |
+| NilKill hash shapes | 31 | 19 | -12 |
+| NilKill array shapes | 1,461 | 1,407 | -54 |
+| NilKill collection index lookups | 105 | 41 | -64 |
+| NilKill hash-record blockers | 86 | 42 | -44 |
+| NilKill dead nil checks | 1 | 0 | -1 |
+| NilKill deterministic guards | 2 | 1 | -1 |
+| Espalier known `O(2^N)` component | 95 | 0 | -95 |
+| Espalier known `O(N)` stack component | 96 | 7 | -89 |
+| Espalier complete/incomplete results | 9 / 173 | 6 / 182 | -3 / +9 |
+| Decomplex total candidates | 438 | 334 | -104 |
+| Decomplex convergence units | 84 | 90 | +6 |
+| Decomplex root-cause clusters | 38 | 31 | -7 |
+| Decomplex state-based branches | 69 | 64 | -5 |
+| Decomplex scoped-state restoration | 4 | 0 | -4 |
+| Decomplex structural similarity | 2 | 0 | -2 |
+| Decomplex weighted-inlined complexity | 81 | 82 | +1 |
+| Decomplex False Simplicity | 67 | 66 | -1 |
+
+The parser now performs a single deterministic parse of VAR_ID-led forms and
+uses an immutable delimiter-closing index for nested lookahead. The adversarial
+nested-value-block family therefore moves from Θ(2^N) time to Θ(N) time,
+with Θ(N) live recursive stack and delimiter-index space. No CLEAR syntax
+change was necessary. Anonymous semantic tuples/hashes, the pattern mini-
+interpreter, suffix sentinels, cursor restoration, and parser semantic side
+channels have been replaced by typed records and explicit grammar boundaries.
+
+The final Espalier time distribution is 146 `O(1)`, 35 `O(N)`, six `O(N+M)`,
+and one `O(N+M+K+L+P)` known component; space is 181 `O(1)` and seven `O(N)`.
+Its exponential finding reaches zero. The remaining incomplete classifications
+are precision limits, not evidence of replay in the final parser.

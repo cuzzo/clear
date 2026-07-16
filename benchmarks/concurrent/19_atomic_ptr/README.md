@@ -1,6 +1,6 @@
 # Benchmark 18: AtomicPtr (M3) producer-consumer config swap
 
-Lock-free atomic-pointer publish workload comparing M3 `@indirect:atomic`
+Lock-free atomic-pointer publish workload comparing M3 `@boxed:atomic`
 against three baselines:
 
 - CLEAR `@shared:writeLocked` (RwLock baseline)
@@ -46,7 +46,7 @@ substantially with core count, contention, and the OS scheduler.
 | CLEAR `@shared:writeLocked` (1T)   |   14 ms | Single scheduler — no real contention    |
 | CLEAR `@shared:writeLocked` (8T)   |  206 ms | Writer-preferring fairness drains readers |
 | CLEAR `@shared:versioned`  (8T)    |    3 ms | Lock-free reads, EBR-pinned snapshots    |
-| CLEAR `@indirect:atomic`   (8T)    |    6 ms | rcu-loop CAS-publish, EBR-pinned reads   |
+| CLEAR `@boxed:atomic`   (8T)    |    6 ms | rcu-loop CAS-publish, EBR-pinned reads   |
 | Go `atomic.Pointer[T]`     (default GOMAXPROCS) | ~1 ms | GC-managed snapshots, native CAS |
 | Rust `arc-swap::ArcSwap`   (16 OS threads) | ~8 ms | rcu via arc-swap's hazard-pointer slots |
 

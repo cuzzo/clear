@@ -113,8 +113,8 @@ STRUCT Procedure {
 }
 
 STRUCT Program {
-  procs:  Procedure[]@list,
-  allOps: ByteCode[]@list
+  procs:  []Procedure,
+  allOps: []ByteCode
 }
 
 
@@ -166,8 +166,8 @@ FN loadProgram(path: String) RETURNS !Program ->
   procCount = parseInt(procsTail);
   pos += 1;
 
-  MUTABLE procs:  Procedure[]@list = [];
-  MUTABLE allOps: ByteCode[]@list  = [];
+  MUTABLE procs:  []Procedure = [];
+  MUTABLE allOps: []ByteCode  = [];
   # Workaround for puck-clear-bugs.md #2: hoist every loop-body temporary
   # into an outer MUTABLE so the WHILE body never frame-allocates.
   MUTABLE p = 0;
@@ -246,7 +246,7 @@ FN doCompare(kind: Int64, a: Int64, b: Int64) RETURNS Int64 ->
 END
 
 FN handleSyscall!(
-    MUTABLE stack: Int64[]@list,
+    MUTABLE stack: []Int64,
     id: Int64,
     startMs: Int64
 ) RETURNS !Void ->
@@ -270,12 +270,12 @@ END
 FN runProc!(
     program: Program,
     procIdx: Int64,
-    MUTABLE memory: Int64[]@list,
+    MUTABLE memory: []Int64,
     startMs: Int64
 ) RETURNS !Int64 EFFECTS REENTRANT ->
 
   proc = program.procs[procIdx] OR_ELSE Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
-  MUTABLE stack: Int64[]@list = [];
+  MUTABLE stack: []Int64 = [];
   MUTABLE ip: Int64 = 0;
 
   WHILE ip < proc.opCount DO
@@ -306,7 +306,7 @@ FN runProc!(
       IF v == 0 THEN ip = c.arg; END
     ELSE_IF c.op == opCall() THEN
       callee = program.procs[c.arg] OR_ELSE Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
-      MUTABLE calleeMem: Int64[]@list = [];
+      MUTABLE calleeMem: []Int64 = [];
       MUTABLE m = 0;
       WHILE m < callee.params DO
         calleeMem.append(0_i64);
@@ -343,9 +343,9 @@ END
 FN main() RETURNS !Void ->
   # Keep the integration example hermetic: exercise the VM with a tiny
   # PUSH/RETURN program instead of depending on the process working directory.
-  MUTABLE procs: Procedure[]@list = [];
+  MUTABLE procs: []Procedure = [];
   procs.append(Procedure{ params: 0_i64, opStart: 0_i64, opCount: 2_i64 });
-  MUTABLE allOps: ByteCode[]@list = [];
+  MUTABLE allOps: []ByteCode = [];
   allOps.append(ByteCode{ op: opPush(), arg: 42_i64, kind: kNone() });
   allOps.append(ByteCode{ op: opReturn(), arg: 0_i64, kind: kNone() });
   program = Program{ procs: procs, allOps: allOps };
@@ -353,7 +353,7 @@ FN main() RETURNS !Void ->
 
   IF program.procs.length() <= 0 THEN RAISE "vm: program has no procs"; END
   mainProc = program.procs[0] OR_ELSE Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
-  MUTABLE mainMem: Int64[]@list = [];
+  MUTABLE mainMem: []Int64 = [];
   MUTABLE i = 0;
   WHILE i < mainProc.params DO
     mainMem.append(0_i64);

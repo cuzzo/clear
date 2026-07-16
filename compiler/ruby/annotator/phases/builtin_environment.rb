@@ -8,13 +8,13 @@ module Annotator
 
       sig { void }
       def initialize_builtin_environment!
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
         setup_builtins
       end
 
       sig { void }
       def setup_builtins
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, ResolutionSession)
 
         STD_LIB.each_key do |name|
           current_scope.declare(name, nil, :Intrinsic, false, false, nil, :stack)

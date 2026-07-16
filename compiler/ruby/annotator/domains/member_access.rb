@@ -8,7 +8,7 @@ module Annotator
 
       sig { params(node: AST::GetIndex).returns(T.nilable(Type)) }
       def visit_GetIndex(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.target)
         visit(node.index)
@@ -18,18 +18,22 @@ module Annotator
           node.target.safe_nav_chain == true
         target_type_info = T.must(target_type_info.wrapped_type) if implicit_safe_nav
 
-        if target_type_info.tuple?
-          unless node.index.is_a?(AST::Literal) && node.index.value.is_a?(Integer)
-            error!(node, :UNSUPPORTED_INDEX)
+        if target_type_info.rank?
+          indices = node.index.is_a?(AST::TupleLit) ? node.index.items : [node.index]
+          if indices.length != target_type_info.rank
+            error!(node, :RANK_INDEX_ARITY, expected: target_type_info.rank, got: indices.length)
           end
-          tuple_index = T.cast(node.index.value, Integer)
-          tuple_types = target_type_info.generic_args
-          unless tuple_index >= 0 && tuple_index < tuple_types.length
-            error!(node, :UNSUPPORTED_INDEX)
+          indices.each do |index|
+            index_type = index.full_type!(context: "rank index")
+            error!(index, :RANK_INDEX_INTEGER, got: index_type.resolved) unless index_type.integer?
           end
-          stamp_type!(node, T.must(tuple_types[tuple_index]))
+          stamp_type!(node, T.must(target_type_info.element_type))
           node.container_borrow = true
           return
+        end
+
+        if target_type_info.tuple?
+          error!(node, :TUPLE_INDEX_SYNTAX)
         end
 
         # Look up index operation from the registry
@@ -38,7 +42,7 @@ module Annotator
         if op
           # Registry-driven: type and ownership from INDEX_OPS
           result_type = IntrinsicRegistry.to_return_def(op[:return_type])
-                                        .resolve(target_type_info, [], self)
+                                        .resolve(target_type_info, [])
           navigation = node.target.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
           if navigation && !result_type.optional?
             result_type = Type.optional_of(result_type)
@@ -79,7 +83,7 @@ module Annotator
 
       sig { params(node: AST::GetField).returns(T.nilable(T.any(Type, Symbol))) }
       def visit_GetField(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Enum/Union variant access: TypeName.Variant
         # Must be checked BEFORE visiting target to avoid "variable not found" error.
@@ -100,6 +104,23 @@ module Annotator
         end
         target_type = T.must(target_type.wrapped_type) if implicit_safe_nav
         type = target_type.resolved
+
+        if target_type.tuple? && (match = /\A_(\d+)\z/.match(node.field.to_s))
+          position = match[1].to_i
+          position_type = target_type.fixed_position_type(position)
+          if position_type.nil?
+            error!(node, :FIXED_POSITION_OUT_OF_BOUNDS,
+              index: position, count: T.must(target_type.fixed_position_count), type: Type.surface_name(target_type))
+          end
+          field_type = T.must(position_type)
+          navigation = node.target.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+          field_type = Type.optional_of(field_type) if navigation && !field_type.optional?
+          node.tuple_position = position
+          node.safe_nav_chain = true if implicit_safe_nav
+          node.container_borrow = true
+          stamp_type!(node, field_type)
+          return
+        end
 
         # Struct Field Lookup
         if node.wildcard?
@@ -146,8 +167,8 @@ module Annotator
 
         field_type = field_def.type
         # SOA tracking: record field access on pipeline variable `_`
-        if phase_receiver_state.pipeline_accessed_fields && node.target.is_a?(AST::Identifier) && node.target.name == "_"
-          T.must(phase_receiver_state.pipeline_accessed_fields).add(node.field)
+        if phase_traversal_state.pipeline_accessed_fields && node.target.is_a?(AST::Identifier) && node.target.name == "_"
+          T.must(phase_traversal_state.pipeline_accessed_fields).add(node.field)
         end
         # For generic instances (e.g. Pair<Number>), substitute type params into field type.
         # Handles compound types like T[], ?T, !T via apply_type_subst.
@@ -163,7 +184,7 @@ module Annotator
           field_type = apply_type_subst(field_type, subst)
         end
         if field_type.indirect?
-          # A struct-pointee @indirect field is an owned heap pointer that
+          # A struct-pointee @boxed field is an owned heap pointer that
           # moves like the old `%T`: bind/move the `*T`, let Zig auto-deref
           # field access, and free once. An explicit read-deref there turns
           # the move into a value copy and leaks the box. String/scalar and
@@ -191,7 +212,7 @@ module Annotator
 
       sig { params(node: AST::GetField).void }
       def emit_moved_field_path_error_if_needed!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         path = get_path_to_root(node)
         return if path.empty?
@@ -210,7 +231,7 @@ module Annotator
 
       sig { params(node: AST::GetField).void }
       def emit_capability_field_access_error_if_needed!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Capability-wrapped bindings hide the inner T behind a lock /
         # atomic cell. Direct field access on the outer binding skips the
@@ -225,12 +246,12 @@ module Annotator
         return if node.is_assignment_lhs
 
         sym = node.target.symbol
-        in_auto_lock = phase_receiver_state.auto_locked_assign_name == node.target.name
+        in_auto_lock = phase_traversal_state.auto_locked_assign_name == node.target.name
         in_with_block = inside_with_block?
         cap_error = [
           [sym&.locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@locked"],
           [sym&.write_locked?, :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@writeLocked"],
-          [sym&.atomic_ptr?, :CAP_FIELD_NEEDS_WITH_SNAPSHOT, "SNAPSHOT", "@indirect:atomic"],
+          [sym&.atomic_ptr?, :CAP_FIELD_NEEDS_WITH_SNAPSHOT, "SNAPSHOT", "@boxed:atomic"],
         ].find { |candidate| candidate[0] }
         if cap_error && !in_auto_lock && !in_with_block
           emit_cap_field_needs_with!(node,
@@ -242,7 +263,7 @@ module Annotator
 
       sig { params(node: AST::Slice).void }
       def visit_Slice(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.target)
         visit(node.start) if node.start
@@ -252,7 +273,7 @@ module Annotator
         # A slice of T[3] is T[] (Fixed becomes Dynamic view)
         target_type = node.target.full_type!(context: "slice target")
         if target_type&.array?
-          element = target_type.element_type
+          element = T.must(target_type.element_type)
           slice_type = Type.new(:"#{element.resolved}[]")
           slice_type.elem_ownership = element.ownership
           slice_type.elem_sync = element.sync
@@ -268,7 +289,7 @@ module Annotator
 
       sig { params(node: AST::HashLit).void }
       def visit_HashLit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         expected_map = node.coerced_type_info
         if expected_map&.map?
@@ -332,15 +353,16 @@ module Annotator
 
       sig { params(node: AST::StructLit).returns(T.nilable(Symbol)) }
       def visit_StructLit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-        schema = lookup_type_schema(node.name.to_sym)
+        display_name = node.name.to_s
+        schema = lookup_type_schema(display_name.to_sym)
         if schema.nil?
           tok = node.token
           if tok
             emit_typo_suggestion!(
-              tok, node.name, all_known_type_names,
-              "Unknown struct type '#{node.name}'",
+              tok, display_name, all_known_type_names,
+              "Unknown struct type '#{display_name}'",
               "closest declared type",
               category: :type, cascade: true
             )
@@ -379,7 +401,7 @@ module Annotator
           if Schemas.inline_struct?(raw_expected)
             error!(node, :UNION_INLINE_VARIANT_OLD_SYNTAX, union: node.name, variant: variant_name, union2: node.name, variant2: variant_name)
           end
-          # @indirect single-type payload: unwrap inner type for type-checking;
+          # @boxed single-type payload: unwrap inner type for type-checking;
           # mark the value node so the transpiler heap-allocates it via create(*T).
           indirect_payload = raw_expected.is_a?(Type) && raw_expected.indirect?
           raw_for_check = if indirect_payload
@@ -439,7 +461,7 @@ module Annotator
           raw_expected = T.let(schema.fields[field_name]&.type, T.nilable(T.any(Type, Symbol)))
           if raw_expected.nil?
             valid_fields = schema.fields.keys.reject { |k| k.to_s.start_with?("_") }
-            name_tok = node.field_tokens&.[](field_name)
+            name_tok = node.field_tokens[field_name]
             if name_tok
               emit_typo_suggestion!(
                 name_tok, field_name, valid_fields,
@@ -487,7 +509,7 @@ module Annotator
             # The field declaration is the explicit layout decision.  A
             # literal placed into that field is contextually constructed in
             # its declared representation in every mode; requiring a second
-            # @indirect at each initializer would duplicate the contract.
+            # @boxed at each initializer would duplicate the contract.
             val_node.needs_heap_create = true
             current_fn_ctx&.record_heap_use!
           end
@@ -515,7 +537,7 @@ module Annotator
 
       sig { params(node: AST::ListLit).returns(T.nilable(T.any(Symbol, Type))) }
       def visit_ListLit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # 1. Analyze all items
         node.items.each { |item| visit(item) }
@@ -550,8 +572,8 @@ module Annotator
         # Produces ~T[N] type — a fixed-size stream of N concurrent BG fibers.
         # This must be checked before the general array logic, since ~T items would
         # otherwise produce a bare ~T[] type (which is a compiler error).
-        if !node.items.empty? && node.items.all? { |i| Type.new(i.resolved_type).future? }
-          inner_types = node.items.map { |i| Type.new(i.resolved_type).tense_type.to_sym }.uniq
+        if !node.items.empty? && node.items.all? { |i| Type.new(T.must(i.resolved_type)).future? }
+          inner_types = node.items.map { |i| Type.new(T.must(i.resolved_type)).tense_type.to_sym }.uniq
           if inner_types.size > 1
             error!(node, :BOUNDED_STREAM_MIXED_TYPES, types: inner_types.join(', '))
           end
@@ -587,10 +609,10 @@ module Annotator
         # 2. Infer base type from the first element.
         #    If all items are string-like (Byte[N] or String), widen to String so mixed
         #    string lengths ("a", "bb", "ccc") don't produce a type error.
-        if node.items.all? { |i| Type.new(i.resolved_type).string? }
+        if node.items.all? { |i| Type.new(T.must(i.resolved_type)).string? }
           base_type = :String
         else
-          base_type = node.items.first.resolved_type
+          base_type = T.must(T.must(node.items.first).resolved_type)
           # 3. Validate Consistency — all items must share the same type.
           node.items.each_with_index do |item, index|
             next if index == 0
@@ -609,9 +631,19 @@ module Annotator
         end
       end
 
+      sig { params(node: AST::TupleLit).void }
+      def visit_TupleLit(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        node.items.each { |item| visit(item) }
+        item_types = node.items.map { |item| item.full_type!(context: "tuple literal item") }
+        stamp_type!(node, Type.generic_instance_of(:Tuple, item_types))
+        node.storage = :stack
+      end
+
       sig { params(node: AST::DefaultArrayLit).returns(Type) }
       def visit_DefaultArrayLit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         type_info = Type.new(node.type_info)
         stamp_type!(node, type_info)
         node.storage = :stack
@@ -620,13 +652,13 @@ module Annotator
 
       sig { params(node: AST::RangeLit).returns(T.nilable(Type)) }
       def visit_RangeLit(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.start)
         visit(node.finish)
 
-        start_type = node.start.resolved_type
-        finish_type = node.finish.resolved_type
+        start_type = node.start.full_type!.resolved
+        finish_type = node.finish.full_type!.resolved
 
         unless Type.new(start_type).numeric?
           error!(node, :RANGE_START_NEEDS_NUMERIC, got: start_type)
@@ -658,53 +690,6 @@ module Annotator
         stamp_type!(node, Type.new(:"~#{base_type}[]"))
       end
 
-      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Type) }
-      def infer_element_type(args, node)
-        T.bind(self, SemanticAnnotator)
-
-        receiver = args.first
-        ti = receiver.is_a?(AST::Locatable) ? receiver.full_type!(context: "element receiver") : nil
-        ti&.element_type || Type.new(:Any)
-      end
-
-      # Infer return type for list.pop() — returns ?T (optional element type).
-
-      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Type) }
-      def infer_optional_element_type(args, node)
-        T.bind(self, SemanticAnnotator)
-
-        receiver = args.first
-        ti = receiver.is_a?(AST::Locatable) ? receiver.full_type!(context: "optional element receiver") : nil
-        elem = ti&.element_type || Type.new(:Any)
-        Type.optional_of(elem)
-      end
-
-      # Infer return type for stream/list `.toList()` — an owned heap list
-      # of the receiver's element type (unwrapping stream/promise tenses).
-
-      sig { params(args: T::Array[AST::Node], node: T.nilable(AST::Node)).returns(Type) }
-      def infer_to_list(args, node)
-        T.bind(self, SemanticAnnotator)
-
-        receiver = T.must(args[0])
-        recv_t = receiver.full_type!(context: "toList receiver")
-        elem_t = if recv_t.dynamic_stream? || recv_t.promise_list?
-          recv_t.tense_type.element_type
-        elsif recv_t.bounded_stream?
-          recv_t.stream_element_type
-        elsif recv_t.inf_stream?
-          recv_t.inf_stream_element_type
-        elsif recv_t.open_stream?
-          recv_t.open_stream_element_type
-        else
-          recv_t.element_type
-        end
-        elem = T.must(elem_t)
-        list = Type.new(:"#{elem.resolved}[]", collection: :list, location: :heap)
-        list.elem_ownership = elem.ownership
-        list.elem_sync = elem.sync
-        list
-      end
     end
   end
 end

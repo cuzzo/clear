@@ -106,7 +106,7 @@ syn match clearUserType "\<[A-Z][a-zA-Z0-9]*\>"
 
 " -------------------------------------------------------------------
 " Capability sigils — @cap with optional :modifier:modifier... chain
-" e.g. @shared:locked, @indirect:atomic, @list:soa
+" e.g. @shared:locked, @boxed:atomic, @list:soa
 " -------------------------------------------------------------------
 syn match clearCapability "@\(multiowned\|shared\|locked\|writeLocked\|list\|pool\|set\|map\|sharded\|striped\|local\|indirect\|atomic\|versioned\|observable\|pinned\|arena\|large\|xl\|service\|micro\|standard\|reentrant\|nonReentrant\|canSmash\|parallel\|soa\|split\|raw\|frozen\|alwaysMutable\|link\|thunk\|maxDepth\)\(:[a-zA-Z][a-zA-Z0-9]*\)*"
 

@@ -85,11 +85,7 @@ module MIRLoweringLiterals
 
     tuple_type = Type.new(node.coerced_type_info || node.full_type!)
     if tuple_type.tuple?
-      tuple_items = node.items.each_with_index.map do |item, index|
-        expected_item = T.must(tuple_type.generic_args[index])
-        with_expected_type(expected_item) { lower(item) }
-      end
-      return MIR::TupleLiteral.new(tuple_items)
+      return lower_tuple_items(node.items, tuple_type)
     end
 
     plan = list_literal_plan(node)
@@ -193,7 +189,7 @@ module MIRLoweringLiterals
     # Non-empty list literal -> makeList
     inner = T.cast(
       with_ownership_consumption(
-        MIR::MakeList.new(elem_zig, items_mir, list_alloc),
+        MIR::MakeList.new(elem_zig, items_mir, list_alloc, ti.allocation_hint),
         items_mir.flat_map { |item| mir_ident_names(item) },
         "MIR::MakeList",
         target_alloc: list_alloc,
@@ -201,6 +197,38 @@ module MIRLoweringLiterals
       MIR::MakeList,
     )
     wrap_list_literal_capability(inner, ti, list_alloc)
+  end
+
+  sig { params(node: AST::TupleLit).returns(MIR::TupleLiteral) }
+  def lower_tuple_lit(node)
+    T.bind(self, MIRLowering) rescue nil
+    tuple_type = node.full_type!(context: "tuple literal lowering")
+    lower_tuple_items(node.items, tuple_type)
+  end
+
+  sig { params(items: T::Array[AST::Node], tuple_type: Type).returns(MIR::TupleLiteral) }
+  def lower_tuple_items(items, tuple_type)
+    T.bind(self, MIRLowering) rescue nil
+    alloc = function_state.current_decl_or_frame_alloc
+    lowered = items.each_with_index.map do |item, index|
+      expected_item = T.must(tuple_type.generic_args[index])
+      with_decl_alloc(alloc) do
+        value = with_expected_type(expected_item) { lower(item) }
+        placed = place_value_for_destination(value, item, alloc, expected_item)
+        owned = materialize_owned_sink_value(placed, item, alloc, expected_item)
+        hoist_alloc(owned, item, err_cleanup: true)
+      end
+    end
+    tuple = MIR::TupleLiteral.new(lowered)
+    T.cast(
+      with_ownership_consumption(
+        tuple,
+        lowered.flat_map { |item| mir_ident_names(item) },
+        "MIR::TupleLiteral",
+        target_alloc: alloc,
+      ),
+      MIR::TupleLiteral,
+    )
   end
 
   sig { params(ti: Type).returns(T::Boolean) }
@@ -244,7 +272,7 @@ module MIRLoweringLiterals
     end
   end
 
-  sig { params(node: AST::HashLit).returns(T.untyped) }
+  sig { params(node: AST::HashLit).returns(MIR::Emittable) }
   def lower_hash_lit(node)
     T.bind(self, MIRLowering) rescue nil
 
@@ -252,7 +280,7 @@ module MIRLoweringLiterals
     capability = hash_literal_capability_plan(plan)
 
     if node.pairs.empty?
-      return capability.empty_result if capability.empty_result
+      return T.must(capability.empty_result) if capability.empty_result
 
       return empty_hash_literal(plan, capability.zig_type)
     end

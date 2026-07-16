@@ -94,6 +94,7 @@ class MIRLoweringCaptureState < T::Struct
   prop :do_capture_map, T.nilable(CaptureMap), default: nil
   prop :current_stream_is_inf, T.nilable(T::Boolean), default: nil
   prop :current_stream_local, T.nilable(String), default: nil
+  prop :current_stream_close_label, T.nilable(String), default: nil
   prop :current_fsm_inherited_alloc_names, T::Set[String], factory: -> { Set.new }
   prop :current_fsm_inherited_guarded_names, T::Set[String], factory: -> { Set.new }
   prop :current_fsm_owned_result_guards, T::Hash[String, String], factory: -> { {} }
@@ -107,6 +108,11 @@ class MIRLoweringCapabilityState < T::Struct
   prop :rc_unwrap_map, T.nilable(MIRLoweringCapabilities::RcUnwrapMap), default: nil
   prop :with_alias_alloc_map, T.nilable(MIRLoweringCapabilities::AliasAllocMap), default: nil
   prop :with_alias_owner_map, T.nilable(MIRLoweringCapabilities::AliasOwnerMap), default: nil
+  # IF ... EXISTS AS aliases over collection lookups are physically *T in
+  # Zig (getAt returns ?*T), unlike ordinary optional captures which are T.
+  # Carry that representation fact through the lexical lowering context so
+  # consumers such as MATCH do not have to reconstruct it from ownership.
+  prop :if_bind_pointer_aliases, T::Set[String], factory: -> { Set.new }
   prop :atomic_emit_raw, T::Boolean, default: false
 end
 

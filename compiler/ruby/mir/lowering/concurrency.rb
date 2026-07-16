@@ -197,21 +197,25 @@ module MIRLoweringConcurrency
       .params(
         local_stream: String,
         is_inf: T::Boolean,
+        close_label: T.nilable(String),
         blk: T.proc.returns(T.type_parameter(:Result)),
       )
       .returns(T.type_parameter(:Result))
   end
-  def with_stream_body_context(local_stream, is_inf, &blk)
+  def with_stream_body_context(local_stream, is_inf, close_label: nil, &blk)
     T.bind(self, MIRLowering) rescue nil
     prev_stream_local = capture_state.current_stream_local
     prev_stream_is_inf = capture_state.current_stream_is_inf
+    prev_close_label = capture_state.current_stream_close_label
     capture_state.current_stream_local = local_stream
     capture_state.current_stream_is_inf = is_inf
+    capture_state.current_stream_close_label = close_label
     blk.call
   ensure
     T.bind(self, MIRLowering) rescue nil
     capture_state.current_stream_local = prev_stream_local
     capture_state.current_stream_is_inf = prev_stream_is_inf
+    capture_state.current_stream_close_label = prev_close_label
   end
 
   sig { params(caps: FiberCtxBuilder::Result, analysis: T.nilable(CapabilityHelper::CaptureAnalysis), receiver: String, close_plans: T::Hash[String, Schemas::ResourceClosePlan]).returns(T::Array[MIR::Stmt]) }
@@ -320,6 +324,8 @@ module MIRLoweringConcurrency
 
   sig { params(symbol: T.nilable(SymbolEntry), captured_type: T.nilable(Type)).returns(T.nilable(Symbol)) }
   def boundary_capture_forbidden_reason(symbol, captured_type)
+    T.bind(self, MIRLowering) rescue nil
+
     return nil unless symbol || captured_type
     return :local_scheduler_affinity if boundary_capture_local?(symbol, captured_type)
     return :non_atomic_rc if boundary_capture_multiowned_rc?(symbol, captured_type)
@@ -329,7 +335,7 @@ module MIRLoweringConcurrency
     return :affine_versioned if boundary_capture_versioned?(symbol, captured_type)
 
     type_info = captured_type || symbol&.type
-    return type_info.parallel_boundary_forbidden_reason(T.unsafe(self).__send__(:mir_schema_lookup)) if type_info
+    return type_info.parallel_boundary_forbidden_reason(T.cast(mir_schema_lookup, Type::SchemaLookup)) if type_info
 
     nil
   end
@@ -936,7 +942,6 @@ module MIRLoweringConcurrency
   def finalize_bg_discard_expr(expr, mir)
     T.bind(self, MIRLowering) rescue nil
     finalized, hoisted_discard = materialize_statement_discard(expr, mir)
-    finalized = T.cast(finalized, MIR::NodeRoot)
     return finalized unless discard_expr_stmt?(expr, finalized) && !hoisted_discard
 
     MIR::ExprStmt.new(T.cast(finalized, MIR::Node), true)
@@ -961,9 +966,11 @@ module MIRLoweringConcurrency
   # MIRLowering object. Production lowering always supplies the guard method.
   sig { params(stmt: AST::Node, nodes: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
   def guard_bg_shared_node_statement(stmt, nodes)
+    T.bind(self, MIRLowering) rescue nil
+
     return nodes unless T.unsafe(self).respond_to?(:guard_shared_node_statement, true)
 
-    T.unsafe(self).__send__(:guard_shared_node_statement, stmt, nodes)
+    guard_shared_node_statement(stmt, nodes)
   end
 
   sig { params(mir: T.any(MIR::Node, T::Array[MIR::Node])).returns(T::Array[MIR::Node]) }
@@ -1010,19 +1017,21 @@ module MIRLoweringConcurrency
   sig do
     params(
       node: AST::BgBlock,
-      transform_result: T.untyped,
+      transform_result: MIR::FsmLoweringResult,
       captured: T::Hash[String, Type],
-      analysis: T.untyped,
+      analysis: T.nilable(CapabilityHelper::CaptureAnalysis),
     ).returns(MIR::BgBlock)
   end
   def fsm_bg_block_from_transform!(node, transform_result, captured, analysis)
+    T.bind(self, MIRLowering) rescue nil
+
     unless transform_result.is_a?(MIR::FsmLoweringResult)
       Kernel.raise "FSM lowering must return MIR::FsmLoweringResult; rendered Zig without typed FSM structure is unverifiable"
     end
     fsm_structure = transform_result.structure
     result_type = Type.from_node!(node, context: "FSM BG result").tense_type
     fsm_structure.owned_result_required =
-      !!(result_type && T.unsafe(self).__send__(:ownership_tracked_transfer_type?, result_type))
+      !!(result_type && ownership_tracked_transfer_type?(result_type))
     MIRChecker.check_fsm_structure!(fsm_structure, source: node)
     # The fiber body is consumed into the FSM state machine. Exposing it again
     # through run_body would double-walk ownership and manufacture diagnostics.
@@ -1044,7 +1053,12 @@ module MIRLoweringConcurrency
     expected_t = Type.from_node(function_state.current_expected_type)
     tense_t = bg_stream_expected_type?(expected_t) ? T.must(expected_t) : Type.new(node.full_type!)
     is_inf = tense_t.inf_stream?
-    stream_zig = tense_t.zig_type
+    stream_zig = if tense_t.dynamic_stream?
+      element_t = T.must(tense_t.tense_type.element_type)
+      "CheatLib.Stream(#{element_t.zig_type})"
+    else
+      tense_t.zig_type
+    end
 
     ctx_type = "__SgCtx#{id}"
     alloc_var = "__sg#{id}_alloc"
@@ -1062,7 +1076,7 @@ module MIRLoweringConcurrency
     # rendezvous-channel form (MIR::StreamSpawn / MIR::StreamYield)
     # that the bc_emitter compiles to STREAM_SPAWN + STREAM_YIELD opcodes.
     if bc_target?
-      run_body = with_stream_body_context(local_stream, is_inf) do
+      run_body = with_stream_body_context(local_stream, is_inf, close_label: is_inf ? nil : blk_label) do
         node.body.map { |expr| lower(expr) }
       end
 
@@ -1207,6 +1221,23 @@ module MIRLoweringConcurrency
     transfer_marks.empty? ? push : MIR::ScopeBlock.new([*transfer_marks, MIR::ExprStmt.new(push, false)])
   end
 
+  sig { params(_node: AST::CloseStream).returns(MIR::Node) }
+  def lower_close_stream(_node)
+    T.bind(self, MIRLowering) rescue nil
+    stream_local = capture_state.current_stream_local || "__stream_local"
+    close = MIR::ExprStmt.new(
+      MIR::MethodCall.new(MIR::Ident.new(stream_local), "close", [], false,
+        MIR::CallableContract.no_ownership(0)),
+      false,
+    )
+    label = capture_state.current_stream_close_label
+    if bc_target? && label
+      return MIR::ScopeBlock.new([close, MIR::BreakStmt.new(label, MIR::Ident.new(stream_local))])
+    end
+
+    MIR::ScopeBlock.new([close, MIR::ReturnStmt.new(nil)])
+  end
+
   sig { params(promise_type: Type, result_type: Type, fallback_alloc: Symbol).returns(T.nilable(Symbol)) }
   def next_result_owned_alloc(promise_type, result_type, fallback_alloc)
     T.bind(self, MIRLowering) rescue nil
@@ -1337,14 +1368,14 @@ module MIRLoweringConcurrency
       block = MIR::BlockExpr.new(label, [
         MIR::Let.new(temp, receiver, true, nil, nil),
         MIR::BreakStmt.new(label,
-          MIR::MethodCall.new(MIR::Ident.new(temp), "next", [], true,
+          MIR::MethodCall.new(MIR::Ident.new(temp), result_t.stream_step? ? "nextStep" : "next", [], true,
             MIR::CallableContract.no_ownership(0), plan.result_alloc)),
       ])
       block.result_type = Type.new(result_t)
       return block
     end
 
-    MIR::MethodCall.new(receiver, "next", [], true, MIR::CallableContract.no_ownership(0),
+    MIR::MethodCall.new(receiver, result_t.stream_step? ? "nextStep" : "next", [], true, MIR::CallableContract.no_ownership(0),
       plan.result_alloc)
   end
 

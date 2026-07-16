@@ -17,13 +17,13 @@ RSpec.describe "EASY automatic indirection" do
 
   it "requires an explicit topology choice for a unique recursive edge even in EASY" do
     expect { transpile(recursive_source, mode: :easy) }
-      .to raise_error(/recursive field Node.next.*@node.*@indirect.*@multiowned.*@shared.*@link/m)
+      .to raise_error(/recursive field Node.next.*@node.*@boxed.*@multiowned.*@shared.*@link/m)
   end
 
   it "requires explicit recursive layout in DEFAULT and STRICT" do
     %i[default strict].each do |mode|
       expect { transpile(recursive_source, mode: mode) }
-        .to raise_error(/recursive field Node.next.*@node.*@indirect/m)
+        .to raise_error(/recursive field Node.next.*@node.*@boxed/m)
     end
   end
 
@@ -38,7 +38,7 @@ RSpec.describe "EASY automatic indirection" do
 
   it "does not box recursion already bounded by a collection" do
     source = <<~CLEAR
-      STRUCT Node { children: Node[]@list }
+      STRUCT Node { children: []Node }
       FN main() RETURNS Void -> RETURN; END
     CLEAR
     zig = transpile(source, mode: :easy)
@@ -49,7 +49,7 @@ RSpec.describe "EASY automatic indirection" do
   it "elides construction only for an explicit indirect callee ABI in EASY" do
     source = <<~CLEAR
       STRUCT Foo { id: Int64 }
-      FN read(x: Foo@indirect) RETURNS Int64 -> RETURN x.id; END
+      FN read(x: Foo@boxed) RETURNS Int64 -> RETURN x.id; END
       FN main() RETURNS Void -> ASSERT read(Foo{ id: 1 }) == 1; END
     CLEAR
     expect { transpile(source, mode: :easy) }.not_to raise_error
@@ -59,11 +59,11 @@ RSpec.describe "EASY automatic indirection" do
   it "moves a TAKES parameter into an inline list without a deep COPY" do
     source = <<~CLEAR
       STRUCT Foo { name: String }
-      FN add!(TAKES f: Foo, MUTABLE items: Foo[]@list) RETURNS Void ->
+      FN add!(TAKES f: Foo, MUTABLE items: []Foo) RETURNS Void ->
         items.append(f);
       END
       FN main() RETURNS Void ->
-        MUTABLE items: Foo[]@list = [];
+        MUTABLE items: []Foo = [];
         f = Foo{ name: COPY "owned" };
         add!(f, items);
         ASSERT items.length() == 1;
@@ -81,7 +81,7 @@ RSpec.describe "EASY automatic indirection" do
     source = <<~CLEAR
       STRUCT Foo { value: Int64 }
       FN main() RETURNS Void ->
-        MUTABLE items: Foo[]@list:indirect = [];
+        MUTABLE items: []@boxed Foo = [];
         items.append(Foo{ value: 1 });
       END
     CLEAR
@@ -91,11 +91,11 @@ RSpec.describe "EASY automatic indirection" do
     expect(zig).not_to include("std.ArrayListUnmanaged(*Foo)")
   end
 
-  it "models element-level @indirect independently from collection layout" do
+  it "models element-level @boxed independently from collection layout" do
     source = <<~CLEAR
       STRUCT Foo { value: Int64 }
       FN main() RETURNS Void ->
-        MUTABLE items: Foo@indirect[]@list = [];
+        MUTABLE items: []Foo@boxed = [];
       END
     CLEAR
 
@@ -108,7 +108,7 @@ RSpec.describe "EASY automatic indirection" do
       source = File.join(dir, "main.clear")
       binary = File.join(dir, "main")
       File.write(source, <<~CLEAR)
-        STRUCT Node { value: Int64, name: String, next: ?Node@indirect }
+        STRUCT Node { value: Int64, name: String, next: ?Node@boxed }
         FN main() RETURNS Void ->
           leaf = Node{ value: 1, name: COPY "leaf", next: NIL };
           root = Node{ value: 2, name: COPY "root", next: leaf };

@@ -39,11 +39,17 @@ module Capabilities
     errors
   end
 
-  sig { params(node: AST::Node, type: Type, error_handler: T.untyped).returns(NilClass) }
+  sig do
+    params(
+      node: AST::Node,
+      type: Type,
+      error_handler: T.nilable(T.proc.params(node: AST::Node, message: String).void),
+    ).returns(NilClass)
+  end
   def self.validate!(node, type, &error_handler)
     errs = errors_for(type)
     return if errs.empty?
-    error_handler.call(node, errs.first) if error_handler
+    error_handler.call(node, T.must(errs.first)) if error_handler
     nil
   end
 
@@ -69,7 +75,7 @@ module CapabilityHelper
     extend T::Sig
     extend T::Helpers
 
-  requires_ancestor { SemanticAnnotator }
+  requires_ancestor { Annotator::Phases::TypeAnalysisSession }
 
   class PredicateContext < T::Struct
     const :kind, Symbol
@@ -112,7 +118,7 @@ module CapabilityHelper
   # rest of the WITH logic doesn't have to.
   sig { params(var_node: AST::Locatable).returns(T.nilable(Symbol)) }
   def cap_var_sync(var_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     sym_sync = var_node.symbol&.sync
     return sym_sync if sym_sync
     var_node.full_type!(context: "WITH capability sync target").sync
@@ -120,7 +126,7 @@ module CapabilityHelper
 
   sig { params(var_node: AST::Locatable).returns(T.nilable(Symbol)) }
   def cap_var_storage(var_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     sym = var_node.symbol
     return sym.storage if sym
     var_node.full_type!(context: "WITH capability storage target").ownership_storage
@@ -130,7 +136,7 @@ module CapabilityHelper
   # symbol binding has completed. Mirrors cap_var_sync / cap_var_storage.
   sig { params(var_node: AST::Locatable).returns(T.nilable(Symbol)) }
   def cap_var_layout(var_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     sym_layout = var_node.symbol&.layout
     return sym_layout if sym_layout
     var_node.full_type!(context: "WITH capability layout target").layout
@@ -138,7 +144,7 @@ module CapabilityHelper
 
   sig { params(var_node: AST::Locatable).returns(String) }
 	  def cap_var_label(var_node)
-	    T.bind(self, SemanticAnnotator) rescue nil
+	    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
 	    case var_node
 	    when AST::Identifier then var_node.name
 	    when AST::GetField then var_node.field.to_s
@@ -150,7 +156,7 @@ module CapabilityHelper
   # Validate that a typed capability transition is legal for its target.
   sig { params(node: AST::WithBlock, fact: WithCapabilityFact).void }
   def validate_capability_transition!(node, fact)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     var_node = fact.var_node
     var_type = fact.resolved_type
     unless valid_capability_target?(fact.capability, var_node)
@@ -234,7 +240,7 @@ module CapabilityHelper
 	        name = fact.target_label
 	        storage = fact.storage
 	        actual = if snapshot_sync && snapshot_layout == :indirect
-	          "@#{snapshot_layout}:#{snapshot_sync}"
+	          "@boxed:#{snapshot_sync}"
 	        elsif snapshot_sync
 	          "@#{snapshot_sync}"
 	        elsif storage
@@ -249,7 +255,7 @@ module CapabilityHelper
               description_code: :WITH_ADD_VERSIONED
             ),
             FixableHelper::CapabilityFixCandidate.new(
-              sigil: "@indirect:atomic",
+              sigil: "@boxed:atomic",
               description_code: :WITH_ADD_INDIRECT_ATOMIC
             ),
           ],
@@ -329,7 +335,7 @@ module CapabilityHelper
   # another module / file; `clear fix` will surface only the :auto fix.
   sig { params(node: AST::WithBlock, fact: WithCapabilityFact, var_type: Type).returns(NilClass) }
   def emit_view_not_observable_finding!(node, fact, var_type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     name = fact.target_label
     msg = "WITH VIEW requires an `@observable` source, but '#{name}' has type #{var_type.resolved}. " \
           "Use `WITH MATERIALIZED VIEW` for non-observable aggregates, or annotate the binding as `~T@observable`."
@@ -360,7 +366,7 @@ module CapabilityHelper
   # active context's :kind so each surface gets its own diagnostic.
   sig { params(node: AST::Identifier).returns(NilClass) }
   def predicate_identifier_allowed!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     ctx = current_predicate_context
     return unless ctx
     return if %w[TRUE FALSE].include?(node.name)
@@ -414,10 +420,10 @@ module CapabilityHelper
 
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).void }
   def record_predicate_call_site!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     ctx = current_predicate_context
     return unless ctx
-    predicate_call_sites_store << PredicateCallSite.new(
+    predicate_call_sites << PredicateCallSite.new(
       kind: ctx.kind,
       with_node: ctx.with_node,
       fn_node: ctx.fn_node,
@@ -427,9 +433,19 @@ module CapabilityHelper
     )
   end
 
+end
+
+# Deferred predicate purity validation. Predicate call sites are collected by
+# CapabilityHelper while expressions are typed, then checked only after effect
+# and fallibility propagation has reached a fixed point.
+module PredicateAudit
+  extend T::Sig
+
+  PredicateCallSite = CapabilityHelper::PredicateCallSite
+
   sig { void }
   def validate_predicate_purity!
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     predicate_call_sites_store.each do |site|
       call = site.call
       callee = site.callee
@@ -453,14 +469,14 @@ module CapabilityHelper
 
   sig { returns(T::Array[PredicateCallSite]) }
   def predicate_call_sites_store
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     predicate_call_sites
   end
   private :predicate_call_sites_store
 
   sig { params(call: T.any(AST::FuncCall, AST::MethodCall), callee: String).returns(T.nilable(String)) }
   def predicate_impurity_reason(call, callee)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
     call_declared_impurity_reason(call) ||
       matched_stdlib_impurity_reason(call) ||
       semantic_function_impurity_reason(callee)
@@ -468,7 +484,7 @@ module CapabilityHelper
 
   sig { params(call: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(String)) }
   def call_declared_impurity_reason(call)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     return "is an extern call" if call.extern_call
     extern_effects = call.extern_effects
@@ -481,7 +497,7 @@ module CapabilityHelper
 
   sig { params(call: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(String)) }
   def matched_stdlib_impurity_reason(call)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     return nil unless call.matched_stdlib_def
 
@@ -497,7 +513,7 @@ module CapabilityHelper
 
   sig { params(callee: String).returns(T.nilable(String)) }
   def semantic_function_impurity_reason(callee)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
     fn_nodes = function_node_map
     fn = fn_nodes[callee]
@@ -508,10 +524,18 @@ module CapabilityHelper
     "has effects #{effects.map { |e| EffectTracker.display(e) }.sort.join(', ')}"
   end
   private :semantic_function_impurity_reason
+  private :predicate_impurity_reason
+  private :validate_predicate_purity!
+
+end
+
+
+module CapabilityHelper
+  extend T::Sig
 
   sig { params(node: AST::WithBlock).void }
   def validate_and_visit_with_guards!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     capability_plan = CapabilityPlan.require_for(node)
     caps = capability_plan.all
     guarded = capability_plan.guarded
@@ -572,7 +596,7 @@ module CapabilityHelper
   # raising); the implicit-RETURNS case is caught here.
   sig { params(fn_node: AST::FunctionDef).void }
   def visit_pre_clauses!(fn_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     pre_clauses = fn_node.pre_clauses || []
     return if pre_clauses.empty?
 
@@ -634,7 +658,7 @@ module CapabilityHelper
   # NOT require the function to return an error union.
   sig { params(fn_node: AST::FunctionDef).returns(T.nilable(Scope)) }
   def visit_post_clauses!(fn_node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     post_clauses = fn_node.respond_to?(:post_clauses) ? (fn_node.post_clauses || []) : []
     return if post_clauses.empty?
 
@@ -704,7 +728,7 @@ module CapabilityHelper
   # the alias's SymbolEntry. Lookup-only — no AST re-walking.
   sig { params(node: AST::WithBlock).returns(NilClass) }
   def validate_with_guard_no_body_mutation!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     capability_plan = CapabilityPlan.require_for(node)
     return if capability_plan.guarded.empty?
 
@@ -720,7 +744,7 @@ module CapabilityHelper
 
   sig { params(alias_name: String).returns(T::Boolean) }
   def alias_mutated?(alias_name)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     scope = lookup_scope_for(alias_name)
     return false unless scope
     !!scope.resolve_entry(alias_name)&.mutated
@@ -735,7 +759,7 @@ module CapabilityHelper
   # @param expanded [Array] accumulator for resolved capabilities
   sig { params(node: AST::WithBlock, cap: AST::Capability, expanded: WithCapabilityExpansion).void }
   def acquire_capability!(node, cap, expanded)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     var_node = cap[:var_node]
     visit(var_node)
     cap[:resolved_type] = var_node.full_type!(context: "WITH resolved capability target")
@@ -853,7 +877,7 @@ module CapabilityHelper
 
   sig { params(cap: AST::Capability).returns(WithCapabilityFact) }
   def with_capability_fact(cap)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     request = CapabilityPlan::CapabilityRequest.from_ast(cap)
     var_node = T.cast(cap[:var_node], AST::Locatable)
 	    var_name = CapabilityPlan.var_name_for(var_node)
@@ -896,7 +920,7 @@ module CapabilityHelper
   # For all others, delegates to scope.declare_with_new_capability.
 	  sig { params(fact: WithCapabilityFact).returns(T.nilable(String)) }
 	  def declare_capability_scope!(fact)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     declare_unwrapped_capability_alias!(fact) if fact.unwraps_sync_alias?
     declare_capability_binding_or_error!(fact)
     declare_capability_projection!(fact)
@@ -905,7 +929,7 @@ module CapabilityHelper
 
   sig { params(fact: WithCapabilityFact).void }
   def declare_capability_binding_or_error!(fact)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return if current_scope.declare_with_new_capability(fact.source)
 
     error!(fact.var_node, :WITH_CAP_BINDING_LOST,
@@ -914,7 +938,7 @@ module CapabilityHelper
 
   sig { params(fact: WithCapabilityFact).void }
   def declare_capability_projection!(fact)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     case fact.capability
     when :RESTRICT
       declare_restrict_capability!(fact)
@@ -929,7 +953,7 @@ module CapabilityHelper
 
   sig { params(fact: WithCapabilityFact).void }
   def declare_unwrapped_capability_alias!(fact)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     alias_name = fact.alias_name
     inner_type = unwrapped_capability_alias_type(fact)
     # Synchronization wrappers are heap-resident and the alias points into
@@ -946,7 +970,7 @@ module CapabilityHelper
 
   sig { params(fact: WithCapabilityFact).returns(Type) }
   def unwrapped_capability_alias_type(fact)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     source_type = fact.field_target ?
       fact.var_node.full_type!(context: "WITH capability field alias") :
       fact.declared_source_type
@@ -955,7 +979,7 @@ module CapabilityHelper
 
   sig { params(fact: WithCapabilityFact).void }
   def declare_restrict_capability!(fact)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     ownership_graph.borrow("__restrict_#{fact.var_name}", fact.var_name, mutable: true)
     mark_var_mutated(fact.var_name) if fact.alias_mutable
     declare_restrict_alias!(fact) if fact.declares_plain_restrict_alias?
@@ -963,7 +987,7 @@ module CapabilityHelper
 
   sig { params(fact: WithCapabilityFact).void }
   def declare_restrict_alias!(fact)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     alias_name = fact.alias_name
     resolved_type = capability_alias_type(capability_source_type(fact))
     current_scope.declare(alias_name, nil, resolved_type, fact.alias_mutable, false, nil, :stack)
@@ -976,7 +1000,7 @@ module CapabilityHelper
 
   sig { params(fact: WithCapabilityFact).void }
   def declare_view_capability!(fact)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     bind_type = view_capability_alias_type(fact)
     alias_name = fact.alias_name
     current_scope.declare(alias_name, nil, bind_type, false, false, nil, :stack)
@@ -992,7 +1016,7 @@ module CapabilityHelper
 
   sig { params(alias_name: String).void }
   def declare_view_borrow_constraints!(alias_name)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     sym = current_scope.local_entry!(alias_name)
     sym.mark_non_escaping!
     sym.mark_borrowed_alias!
@@ -1000,7 +1024,7 @@ module CapabilityHelper
 
   sig { params(fact: WithCapabilityFact).void }
   def declare_snapshot_capability!(fact)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     alias_name = fact.alias_name
     inner_type = Type.new(fact.resolved_type).bare_data_type
     current_scope.declare(alias_name, nil, inner_type, fact.alias_mutable, false, nil, :stack)
@@ -1013,7 +1037,7 @@ module CapabilityHelper
 
   sig { params(fact: WithCapabilityFact).void }
   def declare_borrowed_capability!(fact)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     qualifier = fact.borrowed_rejection_qualifier
     emit_borrowed_rejection!(fact, qualifier) if qualifier
     alias_name = fact.alias_name
@@ -1029,7 +1053,7 @@ module CapabilityHelper
 
   sig { params(fact: WithCapabilityFact, qualifier: String).void }
   def emit_borrowed_rejection!(fact, qualifier)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     remediation = "BORROWED guarantees the data is stable, but #{qualifier} data can be " \
                   "modified concurrently. Use WITH #{fact.var_name} { } to access it safely instead."
     error!(fact.var_node, :WITH_BORROWED_ON_QUALIFIED_VAR,
@@ -1043,7 +1067,7 @@ module CapabilityHelper
 
   sig { params(type: Type).returns(Type) }
   def capability_alias_type(type)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     t = Type.new(type)
     if t.any_sync? || t.ownership != :affine
       t.bare_data_type
@@ -1054,6 +1078,7 @@ module CapabilityHelper
 
   class CaptureAnalysis < T::Struct
     extend T::Sig
+    include AST::CaptureAnalysisValue
 
     prop :has_local, T::Boolean, default: false
     prop :has_rc, T::Boolean, default: false
@@ -1106,11 +1131,11 @@ module CapabilityHelper
     CaptureAnalysis.new
   end
 
-  sig { params(is_parallel: T.nilable(T::Boolean), mark_moves: T::Boolean, blk: T.untyped).returns(CapabilityHelper::CaptureAnalysis) }
+  sig { params(is_parallel: T.nilable(T::Boolean), mark_moves: T::Boolean, blk: T.proc.void).returns(CapabilityHelper::CaptureAnalysis) }
   def with_fiber_capture_analysis(is_parallel: false, mark_moves: false, &blk)
-    T.bind(self, SemanticAnnotator)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     ctx = T.let(nil, T.nilable(CaptureContext))
-    state = T.let(phase_receiver_state, SemanticAnnotator::ReceiverState)
+    state = T.let(phase_audit_inputs, Annotator::Phases::CapabilityAuditInputs)
     ctx = CaptureContext.new(
       analysis: new_capture_analysis,
       outer_scope: current_scope,
@@ -1128,8 +1153,8 @@ module CapabilityHelper
 
   sig { returns(T.nilable(CapabilityHelper::CaptureContext)) }
   def current_capture_context
-    T.bind(self, SemanticAnnotator)
-    phase_receiver_state.capture_stack.last
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    phase_audit_inputs.capture_stack.last
   end
 
   sig { params(name: T.nilable(String)).void }
@@ -1149,7 +1174,7 @@ module CapabilityHelper
 
   sig { params(node: AST::Identifier).void }
   def record_capture_identifier!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     ctx = current_capture_context
     return unless ctx
     name = node.name
@@ -1178,7 +1203,7 @@ module CapabilityHelper
 
   sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
   def record_capture_info!(ctx, name, info, node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     result = ctx.analysis
     result.has_outer_ref = true
     unless result.captures.key?(name)
@@ -1234,8 +1259,8 @@ module CapabilityHelper
 
   sig { params(ctx: CapabilityHelper::CaptureContext, name: String, info: SymbolEntry, node: AST::Identifier).void }
   def record_capture_move!(ctx, name, info, node)
-    T.bind(self, SemanticAnnotator) rescue nil
-    return unless ctx.mark_moves && phase_receiver_state.capture_move_suppression_depth.zero?
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    return unless ctx.mark_moves && phase_audit_inputs.capture_move_suppression_depth.zero?
     return unless ctx.outer_scope.owned_names.include?(name)
     classify_ownership!(info) unless info.ownership_kind
     if info.capture_move_required?(ownership_graph.live?(name))
@@ -1243,18 +1268,22 @@ module CapabilityHelper
     end
   end
 
-  sig { params(blk: T.untyped).returns(T.untyped) }
+  sig do
+    type_parameters(:Result)
+      .params(blk: T.proc.returns(T.type_parameter(:Result)))
+      .returns(T.type_parameter(:Result))
+  end
   def without_capture_moves(&blk)
-    T.bind(self, SemanticAnnotator)
-    phase_receiver_state.capture_move_suppression_depth += 1
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    phase_audit_inputs.capture_move_suppression_depth += 1
     blk.call
   ensure
-    phase_receiver_state.capture_move_suppression_depth -= 1
+    phase_audit_inputs.capture_move_suppression_depth -= 1
   end
 
   sig { params(node: AST::ConcurrentOp, analysis: CapabilityHelper::CaptureAnalysis, is_parallel: T::Boolean, is_pinned: T::Boolean).returns(T.nilable(CapabilityHelper::CaptureAnalysis)) }
   def validate_capture_analysis!(node, analysis, is_parallel, is_pinned)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
 
     if is_parallel
       if analysis.has_local
@@ -1292,7 +1321,6 @@ module CapabilityHelper
   private :emit_view_not_observable_finding!
   private :new_capture_analysis
   private :non_escaping_fiber_capture?
-  private :predicate_impurity_reason
   private :record_capture_move!
   private :set_capture_close_plan_when
   private :unwrapped_capability_alias_type
@@ -1339,7 +1367,7 @@ module CapabilityAudit
 
   sig { returns(BindingAuditStore) }
   def capability_audit_init!
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     store = capability_audit_store
     store.clear
     store
@@ -1348,7 +1376,7 @@ module CapabilityAudit
   # Record a capability binding for later audit.
   sig { params(var_name: String, node: AST::Locatable, final_type: T.any(Type, Symbol), storage: Symbol).returns(T.nilable(BindingAuditRecord)) }
   def record_capability_binding(var_name, node, final_type, storage)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fn_ctx = current_fn_ctx
     return unless fn_ctx
     fn_name = fn_ctx.name
@@ -1387,7 +1415,7 @@ module CapabilityAudit
 
   sig { params(var_name: String).void }
   def audit_mark_mutated(var_name)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fn_name = current_fn_ctx&.name
     return unless fn_name
     record = capability_audit_store[capability_audit_key(fn_name, var_name)]
@@ -1396,17 +1424,27 @@ module CapabilityAudit
 
   sig { params(var_name: String, parallel: T::Boolean).void }
   def audit_mark_captured(var_name, parallel:)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fn_name = current_fn_ctx&.name
     return unless fn_name
     record = capability_audit_store[capability_audit_key(fn_name, var_name)]
     record&.mark_captured!(parallel: parallel)
   end
 
+end
+
+
+# Final capability-usage advisory pass. It consumes the binding records built
+# during type analysis but owns no scope or traversal state.
+module CapabilityUsageAudit
+  extend T::Sig
+
+  BindingAuditStore = T.type_alias { CapabilityAudit::BindingAuditStore }
+
   sig { returns(BindingAuditStore) }
   def finalize_capability_audit!
-    T.bind(self, SemanticAnnotator) rescue nil
-    capability_audit_store.each_value do |info|
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
+    capability_audit.each_value do |info|
       loc = info.line ? " (line #{info.line})" : ""
       sync = info.sync
       own  = info.ownership
@@ -1426,10 +1464,17 @@ module CapabilityAudit
       end
     end
   end
+  private :finalize_capability_audit!
+
+end
+
+
+module CapabilityAudit
+  extend T::Sig
 
   sig { returns(BindingAuditStore) }
   def capability_audit_store
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     capability_audit
   end
   private :capability_audit_store

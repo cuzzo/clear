@@ -1,0 +1,50 @@
+{
+  "schema_version": 2,
+  "tool": "nil-kill",
+  "root": ".",
+  "languages": ["python"],
+  "static": {
+    "files": [
+      {
+        "path": "src/sample.py",
+        "language": "python"
+      }
+    ],
+    "methods": [],
+    "fields": [],
+    "facts": {
+      "dead_nil_checks": [
+        {
+          "code": "value is None",
+          "kind": "nil_check",
+          "line": 8,
+          "path": "src/sample.py",
+          "reason": "value has a statically non-null type"
+        }
+      ],
+      "deterministic_guards": [
+        {
+          "code": "isinstance(name, str)",
+          "line": 12,
+          "path": "src/sample.py",
+          "predicate_kind": "class_guard",
+          "proof_tier": "static_proven",
+          "reason": "name has static type str",
+          "truth_value": true
+        },
+        {
+          "code": "count is None",
+          "line": 16,
+          "path": "src/sample.py",
+          "predicate_kind": "nil_check",
+          "proof_tier": "static_proven",
+          "reason": "count has static type int",
+          "truth_value": false
+        }
+      ]
+    }
+  },
+  "runtime": {},
+  "actions": [],
+  "diagnostics": []
+}

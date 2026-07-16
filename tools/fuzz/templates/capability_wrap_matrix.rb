@@ -81,7 +81,7 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
     <<~CHT
       STRUCT Counter { value: Int64 }
       FN main() RETURNS Void ->
-          MUTABLE c = Counter{ value: 1_i64 } @indirect:atomic;
+          MUTABLE c = Counter{ value: 1_i64 } @boxed:atomic;
         WITH SNAPSHOT c AS MUTABLE x {
             x.value = 2_i64;
             ASSERT x.value == 2_i64, "atomic-ptr exclusive mutate";
@@ -170,7 +170,7 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
     <<~CHT
       STRUCT Counter { value: Int64 }
       FN main() RETURNS Void ->
-          c = Counter{ value: 1_i64 } @indirect:atomic;
+          c = Counter{ value: 1_i64 } @boxed:atomic;
           _ = c.value;
           RETURN;
       END

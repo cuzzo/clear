@@ -3,6 +3,84 @@
 require_relative "spec_helper"
 
 RSpec.describe NilKill::SlotCoverage do
+  it "matches singleton methods to their normalized signature definitions" do
+    path, = repo_tmp_file("slot_coverage_singleton_fixture.rb", <<~RUBY)
+      module SlotCoverageSingletonFixture
+        sig { params(value: String).returns(Integer) }
+        def self.measure(value)
+          value.length
+        end
+      end
+    RUBY
+
+    summary = described_class.new([path]).summaries.fetch(0)
+
+    expect(summary.fetch("params")).to include("total" => 1, "strong" => 1, "untyped" => 0)
+    expect(summary.fetch("returns")).to include("total" => 1, "strong" => 1, "untyped" => 0)
+  end
+
+  it "keeps the richer signature when FactMine emits duplicate path forms" do
+    coverage = described_class.new([])
+    sparse = {
+      "kind" => "method_signature", "path" => "sample.rb", "owner" => "Sample",
+      "name" => "initialize", "params" => [],
+    }
+    rich = sparse.merge(
+      "path" => File.join(NilKill::ROOT, "sample.rb"),
+      "params" => [{ "name" => "value", "type" => "String" }],
+      "return_type" => "NilClass"
+    )
+    evidence = { "facts" => { "type_definitions" => [rich, sparse] } }
+    coverage.send(:relativize_paths!, evidence, NilKill::ROOT)
+
+    index = coverage.send(:method_signature_index, evidence)
+
+    expect(index.fetch(["sample.rb", "Sample", "initialize"])).to eq(rich)
+  end
+
+  it "uses types carried directly by struct declarations" do
+    coverage = described_class.new([])
+    evidence = {
+      "facts" => {
+        "type_definitions" => [],
+        "struct_declarations" => [{
+          "path" => "sample.rb", "class" => "Sample::Record",
+          "fields" => ["name"], "field_types" => { "name" => "String" },
+        }],
+      },
+    }
+
+    index = coverage.send(:field_type_index, evidence)
+    type = coverage.send(:field_type_for, index, {
+      "path" => "sample.rb", "owner" => "Sample::Record", "name" => "name",
+    })
+
+    expect(type).to eq("String")
+  end
+
+  it "normalizes structured FactMine types before measuring field strength" do
+    coverage = described_class.new([])
+    evidence = {
+      "facts" => {
+        "type_definitions" => [{
+          "kind" => "method_signature", "path" => "sample.rb",
+          "owner" => "Sample::Record", "name" => "items",
+          "return_type" => {
+            "kind" => "Array",
+            "data" => { "kind" => "Primitive", "data" => "String" },
+          },
+        }],
+        "struct_declarations" => [{
+          "path" => "sample.rb", "class" => "Sample::Record", "fields" => ["items"],
+        }],
+      },
+    }
+
+    types = coverage.resolved_struct_field_types(evidence)
+
+    expect(types.fetch(["Sample::Record", "items"])).to eq("T::Array[String]")
+  end
+
   it "does not assign built-in types from repeated project slot names" do
     path, = repo_tmp_file("slot_coverage_names_fixture.rb", <<~RUBY)
       class SlotCoverageNamesFixture

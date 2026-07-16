@@ -162,6 +162,12 @@ module Espalier
 
       time = metrics[:big_o] || metrics["big_o"]
       space = metrics[:big_o_space] || metrics["big_o_space"] || "O(1)"
+      known_time = metrics[:big_o_known_component] || metrics["big_o_known_component"] || time
+      known_space = metrics[:big_o_space_known_component] || metrics["big_o_space_known_component"] || space
+      time_complete = metrics.key?(:big_o_complete) ? metrics[:big_o_complete] : metrics["big_o_complete"]
+      space_complete = metrics.key?(:big_o_space_complete) ? metrics[:big_o_space_complete] : metrics["big_o_space_complete"]
+      time_complete = time != "unknown" if time_complete.nil?
+      space_complete = space != "unknown" if space_complete.nil?
       return nil if time.to_s.empty?
 
       dynamic = metrics.key?(:big_o_dynamic) ? metrics[:big_o_dynamic] : metrics["big_o_dynamic"]
@@ -169,14 +175,20 @@ module Espalier
       trigger = metrics[:complexity_trigger] || metrics["complexity_trigger"]
       warnings = Array(metrics[:big_o_warnings] || metrics["big_o_warnings"])
       unknowns = Array(metrics[:big_o_unknowns] || metrics["big_o_unknowns"])
+      variables = Array(metrics[:big_o_variables] || metrics["big_o_variables"])
       owner = mod[:module] || mod["module"]
       function_name = fn[:name] || fn["name"]
       subject_name = "#{owner}##{function_name}"
+      estimate = if time_complete && space_complete
+                   "estimated runtime #{time} and auxiliary space #{space}"
+                 else
+                   "incomplete complexity evidence (known runtime component #{known_time}, known auxiliary-space component #{known_space})"
+                 end
 
-      Decomplex::Sarif.result(
+      result = Decomplex::Sarif.result(
         rule_id: "complexity.observation",
         level: "note",
-        message: "#{subject_name} has estimated runtime #{time} and auxiliary space #{space}",
+        message: "#{subject_name} has #{estimate}",
         path: mod[:file] || mod["file"],
         line: fn[:line] || fn["line"] || span_line(fn, 0) || 1,
         end_line: span_line(fn, 2),
@@ -188,15 +200,48 @@ module Espalier
             "subject_name" => subject_name,
             "time" => time,
             "auxiliary_space" => space,
+            "known_time_component" => known_time,
+            "known_auxiliary_space_component" => known_space,
+            "time_complete" => time_complete,
+            "auxiliary_space_complete" => space_complete,
             "dynamic" => dynamic,
             "basis" => "espalier-static",
-            "confidence" => unknowns.empty? ? "static-lower-bound" : "partial",
+            "confidence" => time_complete && space_complete ? "static-lower-bound" : "partial",
             "triggers" => [trigger].compact,
             "warnings" => warnings,
-            "unknown_operations" => unknowns
+            "unknown_operations" => unknowns,
+            "variables" => variables
           }
         }
       )
+      related = complexity_related_locations(variables)
+      result["relatedLocations"] = related unless related.empty?
+      result
+    end
+
+    def complexity_related_locations(variables)
+      variables.filter_map.with_index(1) do |variable, index|
+        path = variable[:path] || variable["path"]
+        span = Array(variable[:span] || variable["span"])
+        next if path.to_s.empty? || span.empty?
+
+        symbol = variable[:symbol] || variable["symbol"]
+        name = variable[:name] || variable["name"]
+        kind = variable[:source_kind] || variable["source_kind"]
+        {
+          "id" => index,
+          "message" => { "text" => "#{symbol} is the size of `#{name}` (#{kind})" },
+          "physicalLocation" => {
+            "artifactLocation" => { "uri" => Decomplex::Sarif.normalize_path(path) },
+            "region" => {
+              "startLine" => [span[0].to_i, 1].max,
+              "startColumn" => span[1] ? span[1].to_i + 1 : nil,
+              "endLine" => span[2]&.to_i,
+              "endColumn" => span[3] ? span[3].to_i + 1 : nil
+            }.compact
+          }
+        }
+      end
     end
 
     def span_line(fn, index)

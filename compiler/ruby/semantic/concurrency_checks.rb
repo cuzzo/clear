@@ -171,7 +171,7 @@ module ConcurrencyChecks
           next unless sig.requires.key?(pname)
           arg = node.args[idx]
           next unless arg
-          arg_name = arg.respond_to?(:name) ? arg.name : nil
+          arg_name = arg.respond_to?(:name) ? T.unsafe(arg).name : nil
           next unless arg_name && held_params.include?(arg_name)
 
           error_handler.call(node,
@@ -196,7 +196,7 @@ module ConcurrencyChecks
   end
 
   # Names of function parameters held by a WithBlock's bindings.
-  sig { params(with_block: T.untyped, fn: T.untyped).returns(T::Set[String]) }
+  sig { params(with_block: AST::WithBlock, fn: AST::FunctionDef).returns(T::Set[String]) }
   def self.collect_held_params(with_block, fn)
     return Set.new unless fn.respond_to?(:params)
     param_names = fn.params.map { |p| p.name.to_s }.to_set

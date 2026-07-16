@@ -56,6 +56,7 @@ module NilKill
         evidence["diagnostics"]["nil_origins"].first(20).each { |o| lines << "- #{o["origin"]}: #{o["count"]}" }
       end
       append_callsite_pressure(lines, actions)
+      append_type_dependency_pressure(lines, evidence)
       append_return_origin_report(lines, evidence)
       append_param_origin_report(lines, evidence)
       append_foreign_class_pressure(lines, evidence)
@@ -273,7 +274,15 @@ module NilKill
     def sarif_static_findings(evidence)
       return [] unless Schema::EvidenceBundle.v2?(evidence)
 
-      methods = Array(evidence.dig("static", "methods")).flat_map { |method| static_method_findings(method) }
+      return_origins = static_return_origin_index(evidence)
+      methods = Array(evidence.dig("static", "methods")).flat_map do |method|
+        key = [
+          static_identity_path(evidence, method["path"]),
+          method["owner"],
+          method["name"].to_s.sub(/\Aself\./, ""),
+        ]
+        static_method_findings(method, return_origin: return_origins[key])
+      end
       fields = Array(evidence.dig("static", "fields")).filter_map { |field| static_field_finding(field) }
       aliases = static_alias_recommendations(evidence).map { |recommendation| static_alias_finding(recommendation) }
       methods + fields + aliases
@@ -285,7 +294,7 @@ module NilKill
       Array(facts && facts["alias_recommendations"])
     end
 
-    def static_method_findings(method)
+    def static_method_findings(method, return_origin: nil)
       signature = method["signature"].to_s
       return [] if signature.empty?
 
@@ -306,11 +315,19 @@ module NilKill
         }
       end
       if static_nullable_signature?(signature)
+        false_nullable = static_nullable_return_signature?(method, signature) &&
+          static_origin_proves_non_nil_return?(return_origin)
         findings << {
-          "kind" => "nullable_signature",
-          "level" => "note",
-          "message" => "nilability pressure: #{static_member_label(method)} has `#{signature}`; " \
-                       "confirm absence is meaningful, otherwise tighten the contract or use an empty collection/value",
+          "kind" => false_nullable ? "false_nullable_return" : "nullable_signature",
+          "level" => false_nullable ? "warning" : "note",
+          "message" => if false_nullable
+            source_lines = Array(return_origin["sources"]).filter_map { |source| source["line"] }.uniq.sort
+            "false-nilable return: #{static_member_label(method)} declares a nullable return, but every " \
+              "resolved return path is non-nil (#{source_lines.map { |line| "line #{line}" }.join(', ')}); tighten the return contract"
+          else
+            "nilability pressure: #{static_member_label(method)} has `#{signature}`; " \
+              "confirm absence is meaningful, otherwise tighten the contract or use an empty collection/value"
+          end,
           "path" => method["path"],
           "line" => method["line"],
           "static_kind" => method["kind"] || "method",
@@ -318,9 +335,74 @@ module NilKill
           "owner" => method["owner"],
           "name" => method["name"],
           "signature" => signature,
+          "return_evidence" => false_nullable ? return_origin : nil,
         }
       end
       findings
+    end
+
+    def static_return_origin_index(evidence)
+      facts = evidence.dig("static", "facts")
+      facts = evidence.dig("static", "language_extensions", "nil_kill_static_evidence", "facts") unless facts.is_a?(Hash)
+      Array(facts && facts["return_origins"]).each_with_object({}) do |origin, index|
+        key = [
+          static_identity_path(evidence, origin["path"]),
+          origin["class"],
+          origin["method"].to_s.sub(/\Aself\./, ""),
+        ]
+        current = index[key]
+        index[key] = origin if current.nil? || (current["confidence"] != "strong" && origin["confidence"] == "strong")
+      end
+    end
+
+    def static_identity_path(evidence, path)
+      value = path.to_s.tr("\\", "/")
+      root = evidence["root"].to_s
+      return value if value.empty? || root.empty?
+
+      root_path = File.expand_path(root)
+      expanded_path = File.expand_path(value, root_path)
+      return "." if expanded_path == root_path
+
+      prefix = root_path.end_with?(File::SEPARATOR) ? root_path : "#{root_path}#{File::SEPARATOR}"
+      return expanded_path.delete_prefix(prefix).tr("\\", "/") if expanded_path.start_with?(prefix)
+
+      value
+    end
+
+    def static_nullable_return_signature?(method, signature)
+      return_type = method["return_type"]
+      return_type ||= method["source"]["return_type"] if method["source"].is_a?(Hash)
+      return static_nullable_signature?(return_type) unless return_type.to_s.empty?
+
+      case method["language"].to_s
+      when "ruby"
+        signature.match?(/\breturns\(\s*T\.nilable\b/)
+      when "python"
+        arrow = signature.split("->", 2)[1]
+        !arrow.to_s.empty? && static_nullable_signature?(arrow)
+      when "typescript", "javascript"
+        result = signature.match(/\)\s*:\s*(.+)\z/)&.[](1)
+        !result.to_s.empty? && static_nullable_signature?(result)
+      else
+        false
+      end
+    end
+
+    def static_origin_proves_non_nil_return?(origin)
+      return false unless origin.is_a?(Hash)
+      return false unless origin["confidence"] == "strong"
+      return false unless Array(origin["blockers"]).empty?
+      return false if Array(origin["sources"]).empty?
+
+      candidate = origin["candidate_type"]
+      kind = candidate.respond_to?(:kind) ? candidate.kind : candidate.is_a?(Hash) ? candidate["kind"] : nil
+      return false if %w[Untyped NilClass Nilable Union].include?(kind.to_s)
+
+      Array(origin["sources"]).all? do |source|
+        source_kind = source["type"].respond_to?(:kind) ? source["type"].kind : source.dig("type", "kind")
+        !source_kind.nil? && !%w[Untyped NilClass Nilable Union].include?(source_kind.to_s)
+      end
     end
 
     def static_field_finding(field)
@@ -365,7 +447,7 @@ module NilKill
     end
 
     def static_untyped_signature?(signature)
-      signature.to_s.match?(/\b(?:T\.untyped|typing\.Any|Any|any|unknown)\b/)
+      signature.to_s.match?(/\bT\.untyped\b|\btyping\.Any\b|\bAny\b|(?<!\.)\bany\b|\bunknown\b/)
     end
 
     def static_nullable_signature?(signature)
@@ -1071,6 +1153,33 @@ module NilKill
       end
     end
 
+    def append_type_dependency_pressure(lines, evidence)
+      pressure = type_dependency_pressure(evidence).select do |row|
+        !row.dig("candidate_data", "candidate_kind").to_s.empty?
+      end
+      lines << ""
+      lines << "## Type Dependency Unlock Pressure"
+      lines << "- definite lower bound: each row counts only slots that become resolvable from this annotation alone"
+      lines << "- conjunctive joins are excluded unless the same annotation satisfies every unresolved input"
+      if pressure.empty?
+        lines << "- none"
+        return
+      end
+      pressure.first(30).each do |row|
+        candidate = row["candidate_data"]
+        counts = row["counts"]
+        location = [candidate["file"], candidate["line"]].compact.join(":")
+        label = candidate["label"] || candidate["name"] || row["candidate"]
+        kind = candidate["candidate_kind"] || candidate["kind"]
+        breakdown = %w[flow_read return param].filter_map do |target_kind|
+          count = counts[target_kind].to_i
+          "#{count} #{target_kind.tr("_", " ")}" if count.positive?
+        end
+        suffix = breakdown.empty? ? "dependent facts" : breakdown.join(", ")
+        lines << "- #{location} #{label} (#{kind}); definitely unlocks #{row["unlocked_ids"].size} #{suffix}"
+      end
+    end
+
     def untyped_return_origins(evidence)
       untyped = Array(evidence.dig("facts", "existing_sigs")).each_with_object(Set.new) do |method, set|
         next unless extract_return_type(method["sig"].to_s) == "T.untyped"
@@ -1120,50 +1229,37 @@ module NilKill
 
     def return_cascade_pressure(origins, evidence)
       usage = return_usage_by_name(evidence)
-      method_name_counts = return_method_name_counts(evidence)
-      methods = origins.each_with_object({}) do |origin, lookup|
-        key = return_method_key(origin)
-        deps = return_unresolved_dependencies(origin)
-        next if deps.empty?
-        lookup[key] = {
-          "origin" => origin,
-          "deps" => deps,
-          "method_token" => return_method_token(origin),
-          "method_name" => origin["method"].to_s,
-        }
+      indexed_origins = Array(evidence.dig("facts", "return_origins"))
+      indexed_keys = indexed_origins.map { |origin| return_method_key(origin) }.to_set
+      requested_keys = origins.map { |origin| return_method_key(origin) }.to_set
+      rows = if requested_keys.subset?(indexed_keys)
+        type_dependency_pressure(evidence)
+      else
+        facts = Hash(evidence["facts"]).merge("return_origins" => origins)
+        FlowGraph.dependencies_from_evidence(evidence.merge("facts" => facts)).unlock_pressure
       end
-      roots = methods.values.flat_map { |entry| entry["deps"].select { |dep| dep.start_with?("root:") } }.uniq
-      param_flows = Array(evidence.dig("facts", "param_origins")).select { |origin| %w[typed_return untyped_return].include?(origin["origin_kind"]) }
-      param_flows_by_source = param_flows.group_by { |flow| flow["source_method"].to_s }
-      roots.each_with_object({}) do |root_dep, pressure|
-        resolved = Set[root_dep]
-        unlocked = Set.new
-        changed = true
-        while changed
-          changed = false
-          methods.each do |key, entry|
-            next if unlocked.include?(key)
-            next unless entry["deps"].all? { |dep| resolved.include?(dep) }
-            unlocked << key
-            resolved << entry["method_token"]
-            resolved << "root:untyped callee #{entry["method_name"]}" if unambiguous_return_name?(entry["method_name"], method_name_counts)
-            changed = true
-          end
+      requested_methods = origins.map { |origin| origin["method"].to_s }.to_set
+      rows.each_with_object({}) do |row, pressure|
+        candidate = row["candidate_data"]
+        next unless candidate["kind"] == "return_root"
+        returns = row["unlocked_nodes"].select do |node|
+          node["kind"] == "return" && requested_keys.include?(node["label"])
         end
-        next if unlocked.empty?
-        direct = methods.select { |key, entry| entry["deps"].include?(root_dep) && unlocked.include?(key) }.keys.to_set
-        cascade = unlocked - direct
-        method_names = unlocked.map { |key| methods[key]["method_name"] }.select { |name| unambiguous_return_name?(name, method_name_counts) }.to_set
-        params = method_names.flat_map { |name| Array(param_flows_by_source[name]) }
-          .map { |flow| "#{flow["path"]}:#{flow["line"]} #{flow["callee"]}(#{flow["slot"]})" }.to_set
-        root = root_dep.delete_prefix("root:")
+        next if returns.empty?
+        return_ids = returns.map { |node| node["id"] }.to_set
+        direct = (row["direct_ids"].to_set & return_ids)
+        params = row["unlocked_nodes"].select do |node|
+          node["kind"] == "param" && requested_methods.include?(node["source_method"].to_s)
+        end
+          .map { |node| node["label"] }.compact.to_set
+        root = candidate["label"]
         pressure[root] = {
-          "returns" => unlocked,
+          "returns" => return_ids,
           "direct" => direct,
-          "cascade" => cascade,
+          "cascade" => return_ids - direct,
           "params" => params,
           "suggestion" => root_return_suggestion(root, nil, usage),
-          "examples" => unlocked.first(6).to_a,
+          "examples" => returns.map { |node| node["label"] }.compact.first(6),
         }
       end.sort_by { |_root, data| [-data["returns"].size, -data["cascade"].size, -data["params"].size] }
     end
@@ -1219,49 +1315,8 @@ module NilKill
       end
     end
 
-    def return_method_name_counts(evidence)
-      Array(evidence["methods"]).each_with_object(Hash.new(0)) do |method, counts|
-        source = method["source"] || method
-        name = source["method"]
-        counts[name.to_s] += 1 if name
-      end
-    end
-
-    def unambiguous_return_name?(name, method_name_counts)
-      count = method_name_counts[name.to_s]
-      count.nil? || count <= 1
-    end
-
-    def return_unresolved_dependencies(origin)
-      deps = Set.new
-      Array(origin["sources"]).each do |source|
-        case source["kind"]
-        when "call_untyped"
-          deps << "root:untyped callee #{source["callee"]}"
-        when "setter_assignment_unknown"
-          deps << "root:setter assignment #{source["callee"]}"
-        when "nil"
-          deps << "root:nil return at #{origin["path"]}:#{source["line"] || origin["line"]}"
-        when "unknown"
-          deps << "root:unknown expression at #{origin["path"]}:#{source["line"] || origin["line"]}"
-        end
-      end
-      Array(origin["blockers"]).each do |blocker|
-        if blocker.include?("untyped callee") || blocker.include?("unknown return") || blocker.include?("safe navigation") ||
-            blocker.include?("setter assignment")
-          deps << "root:#{blocker}"
-        end
-      end
-      deps.delete(return_method_token(origin))
-      deps
-    end
-
     def return_method_key(origin)
       "#{origin["path"]}:#{origin["line"]} #{origin["class"]}##{origin["method"]}"
-    end
-
-    def return_method_token(origin)
-      "method:#{origin["method"]}"
     end
 
     def root_return_suggestion(root, source, usage = {})
@@ -2248,7 +2303,9 @@ module NilKill
     # whenever the body actually executes).
     def collect_ran?(idx, rel_path, lo, hi)
       return false unless idx
-      ls = idx[rel_path.to_s]
+      path = rel_path.to_s
+      path = NilKill.rel(File.expand_path(path, ROOT)) if Pathname.new(path).absolute?
+      ls = idx[path]
       return false unless ls
       lo = lo.to_i
       hi = (hi || lo).to_i
@@ -2283,6 +2340,7 @@ module NilKill
     # inherently untraceable arg. Mirrors the exact NoEvidence gate of
     # the cause classifiers so the counts reconcile.
     def untyped_evidence_gaps(evidence)
+      enforce_trace_plan_coverage!(evidence)
       ml = Array(evidence["methods"]).each_with_object({}) do |m, h|
         s = m["source"]
         h[[s["path"], s["line"]]] = m if s
@@ -2341,7 +2399,7 @@ module NilKill
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
           next if strong_static.include?([decl["class"].to_s, field.to_s])
-          type = decl.dig("field_types", field.to_s) || rbi[[decl["class"], field]]
+          type = struct_declared_type(decl, field, rbi)
           next if type && !untyped_type?(strip_nilable(type.to_s))
           observed = rt[[decl["class"].to_s, field.to_s]].uniq
           non_nil = observed.reject { |c| c == "NilClass" || c.to_s.empty? }
@@ -2356,6 +2414,58 @@ module NilKill
       end
       enforce_no_hard_gaps!(gaps)
       gaps
+    end
+
+    # Validate instrumentation before inference can hide a missing runtime
+    # record by resolving the sampled slot from static evidence. The trace
+    # plan samples a method when at least one traceable parameter or its
+    # return remains weak. If that method's body ran during this collect, a
+    # source-wrapped record is mandatory regardless of the actions inferred
+    # later. Keeping this check at the method/coverage boundary makes the
+    # negative control non-vacuous and uses the same facts as TracePlan rather
+    # than rediscovering source structure with another walker.
+    def enforce_trace_plan_coverage!(evidence)
+      coverage = collect_coverage_index(evidence)
+      return unless coverage
+
+      recorded = Array(evidence["methods"]).each_with_object(Set.new) do |method, out|
+        source = method["source"]
+        next unless source && method["calls"].to_i.positive?
+
+        out << [source["path"].to_s, source["line"].to_i]
+      end
+      missing = (Array(evidence.dig("facts", "existing_sigs")) +
+                 Array(evidence.dig("facts", "unsigned_methods"))).filter_map do |method|
+        next unless trace_plan_samples_method?(method)
+        next if recorded.include?([method["path"].to_s, method["line"].to_i])
+        next unless collect_ran?(coverage, method["path"], method["line"], method["end_line"])
+
+        owner = method["class"].to_s
+        name = method["method"].to_s
+        {
+          "cat" => "Methods",
+          "text" => "#{method["path"]}:#{method["line"]} `#{owner}##{name}`",
+        }
+      end
+      return if missing.empty?
+
+      sample = missing.first(20).map { |gap| gap["text"] }
+      more = missing.size > 20 ? " (+#{missing.size - 20} more)" : ""
+      raise "nil-kill: #{missing.size} collect_ran_untraced -- " \
+            "#{EVIDENCE_GAP_HARD["collect_ran_untraced"]}. This MUST be zero " \
+            "(see spec/zero_evidence_gap_guarantee_spec.rb). Offenders: #{sample.join("; ")}#{more}"
+    end
+
+    def trace_plan_samples_method?(method)
+      signature = method["sig"].to_s
+      untraceable = Array(method["untraceable_params"]).map(&:to_s).to_set
+      samples_param = extract_param_entries(signature).any? do |name, type|
+        !untraceable.include?(name.to_s) && !NilKill.strong_trace_type?(type)
+      end
+      return true if samples_param
+
+      return_type = extract_return_type(signature)
+      !signature.match?(/\bvoid\b/) && !NilKill.strong_trace_type?(return_type)
     end
 
     # Neither collect_ran_untraced nor never_run is a report column:
@@ -2546,13 +2656,13 @@ module NilKill
         rt = extract_return_type(m["sig"].to_s)
         tally.("Returns", rt) if rt
       end
-      rbi_types = struct_rbi_types
+      rbi_types = struct_field_types(evidence)
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
-          tally.("Struct/class fields & ivars", rbi_types[[decl["class"], field]] || "T.untyped")
+          tally.("Struct/class fields & ivars", struct_declared_type(decl, field, rbi_types) || "T.untyped")
         end
       end
-      Array(evidence.dig("facts", "tlet_sites")).each do |s|
+      state_tlet_sites(evidence).each do |s|
         next unless s["tlet"] && s["type"]
         tally.("Struct/class fields & ivars", s["type"])
       end
@@ -2626,10 +2736,10 @@ module NilKill
         end
       end
 
-      rbi_types = struct_rbi_types
+      rbi_types = struct_field_types(evidence)
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
-          type = rbi_types[[decl["class"], field]] || "T.untyped"
+          type = struct_declared_type(decl, field, rbi_types) || "T.untyped"
           next unless untyped_type?(strip_nilable(type.to_s))
 
           add.(field, "field", "#{decl["path"]}:#{decl["line"]} #{decl["class"]}.#{field}")
@@ -2682,7 +2792,13 @@ module NilKill
       sigs.each do |method|
         rec = method_lookup[[method["path"], method["line"]]]
         extract_param_entries(method["sig"].to_s).each_with_index do |(name, type), idx|
-          next unless type == "T.untyped"
+          inner = strip_nilable(type.to_s)
+          next if collection_typed?(type)
+          next unless inner.include?("T.untyped")
+          if inner != "T.untyped"
+            rows["Param inputs"]["WeakEvidence"] += 1
+            next
+          end
           classes = Array(rec&.dig("params_ok", name))
           classes = Array(rec&.dig("params_by_name", name)) if classes.empty?
           slot_origins = Array(origins_by_callee[method["method"].to_s]).select do |o|
@@ -2690,7 +2806,14 @@ module NilKill
           end
           rows["Param inputs"][classify_param_untyped_cause(method, name, classes, rec, slot_origins)] += 1
         end
-        next unless extract_return_type(method["sig"].to_s) == "T.untyped"
+        return_type = extract_return_type(method["sig"].to_s).to_s
+        return_inner = strip_nilable(return_type)
+        next if collection_typed?(return_type)
+        next unless return_inner.include?("T.untyped")
+        if return_inner != "T.untyped"
+          rows["Returns"]["WeakEvidence"] += 1
+          next
+        end
         rows["Returns"][classify_return_untyped_cause(method, rec, unused)] += 1
       end
 
@@ -2839,11 +2962,13 @@ module NilKill
     def classify_struct_ivar_untyped!(bucket, evidence)
       # Explicit `T.let(x, T.untyped)` -- a deliberate untyped
       # declaration that is almost always narrowable.
-      Array(evidence.dig("facts", "tlet_sites")).each do |site|
-        next unless site["tlet"] && site["type"].to_s == "T.untyped"
-        bucket["Refused/Pending"] += 1
+      state_tlet_sites(evidence).each do |site|
+        next unless site["tlet"]
+        type = strip_nilable(site["type"].to_s)
+        next if collection_typed?(site["type"].to_s) || !type.include?("T.untyped")
+        bucket[type == "T.untyped" ? "Refused/Pending" : "WeakEvidence"] += 1
       end
-      rbi_types = struct_rbi_types
+      rbi_types = struct_field_types(evidence)
       # Honest PropagationGap signal (same fix as returns/params): a
       # struct field is genuinely propagation-resolvable ONLY if there
       # is a concrete `add_struct_field_sig` action for it -- i.e. the
@@ -2869,11 +2994,16 @@ module NilKill
       end
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
-          type = rbi_types[[decl["class"], field]]
+          type = struct_declared_type(decl, field, rbi_types)
           inner = strip_nilable(type.to_s)
+          next if collection_typed?(type.to_s)
           # "missing" (no RBI type) and plain untyped both count here;
           # weak-collection goes to the Arrays/Sets/Hashmaps row.
-          next if type && !untyped_type?(inner)
+          next if type && !inner.include?("T.untyped")
+          if type && inner != "T.untyped"
+            bucket["WeakEvidence"] += 1
+            next
+          end
           observed = rt[[decl["class"].to_s, field.to_s]].uniq
           non_nil = observed.reject { |c| c == "NilClass" || c.to_s.empty? }
           useful = non_nil.select { |c| NilKill.useful_type?(c) && !weak_collection_type?(c) }
@@ -2982,10 +3112,10 @@ module NilKill
                      rec_elems.(hits) + Array(mrec && mrec["return_elem"]) + Array(mrec && mrec["return_kv"]).flatten,
                      hits.flat_map { |r| Array(r["elem_shapes"]) } + Array(mrec && mrec["return_elem_shapes"]) + Array(mrec && mrec["return_kv_shapes"]).flatten)
       end
-      rbi_types = struct_rbi_types
+      rbi_types = struct_field_types(evidence)
       Array(evidence.dig("facts", "struct_declarations")).each do |decl|
         Array(decl["fields"]).each do |field|
-          next unless seen.(rbi_types[[decl["class"], field]].to_s)
+          next unless seen.(struct_declared_type(decl, field, rbi_types).to_s)
           recs = struct_idx["#{decl["class"]}.#{field}"] + sfr[[decl["class"].to_s, field.to_s]]
           slots << mk.("#{decl["path"]}:#{decl["line"]}", "#{decl["class"]}.#{field}",
                        rec_elems.(recs), recs.flat_map { |r| Array(r["elem_shapes"]) })
@@ -3756,11 +3886,11 @@ module NilKill
     end
 
     def append_struct_field_coverage(lines, declarations, accumulator: nil)
-      rbi_types = struct_rbi_types
+      rbi_types = struct_field_types(@evidence || {})
       counts = empty_type_counts.merge("missing" => 0)
       declarations.each do |decl|
         Array(decl["fields"]).each do |field|
-          type = rbi_types[[decl["class"], field]]
+          type = struct_declared_type(decl, field, rbi_types)
           if type
             classify_type!(counts, type)
           else
@@ -3778,13 +3908,13 @@ module NilKill
     end
 
     def append_struct_field_breakdown(lines, declarations, runtime, static)
-      rbi_types = struct_rbi_types
+      rbi_types = struct_field_types(@evidence || {})
       candidates = struct_field_candidates(runtime, static).each_with_object({}) { |c, h| h[[c["class"], c["field"]]] = c }
       buckets = Hash.new { |h, k| h[k] = [] }
       declarations.each do |decl|
         Array(decl["fields"]).each do |field|
           key = [decl["class"], field]
-          type = rbi_types[key]
+          type = struct_declared_type(decl, field, rbi_types)
           candidate = candidates[key]
           bucket =
             if type.nil?
@@ -3827,25 +3957,59 @@ module NilKill
     end
 
     def struct_rbi_types
-      types = {}
-      Dir.glob(File.join(ROOT, "sorbet", "rbi", "**", "*.rbi")).each do |path|
-        klass = nil
-        pending_type = nil
-        File.readlines(path).each do |line|
-          if line =~ /^\s*class\s+([A-Z]\S*)/
-            klass = $1
-          elsif klass && line =~ /^\s*sig\s*\{\s*returns\((.+)\)\s*\}/
-            pending_type = $1.strip
-          elsif klass && pending_type && line =~ /^\s*def\s+([a-zA-Z_]\w*)\b/
-            types[[klass, $1]] = pending_type
-            pending_type = nil
-          elsif line =~ /^\s*end\s*$/
-            klass = nil
-            pending_type = nil
-          end
-        end
+      StructFieldTypeIndex.from_rbi(ROOT)
+    end
+
+    def struct_field_types(evidence)
+      source_types = SlotCoverage.new([]).resolved_struct_field_types(evidence)
+      struct_rbi_types.merge(source_types) do |_slot, rbi_type, source_type|
+        source_strength = type_strength(source_type)
+        rbi_strength = type_strength(rbi_type)
+        source_strength >= rbi_strength ? source_type : rbi_type
       end
-      types
+    end
+
+    def type_strength(type)
+      inner = strip_nilable(type.to_s)
+      return 0 if inner.empty? || untyped_type?(inner)
+      return 1 if weak_type?(inner)
+
+      2
+    end
+
+    # FactMine records all T.let sites, including locals and constants. Only
+    # dependency roots classified as instance fields belong in the structural
+    # field/ivar denominator. Root identity also deduplicates repeated writes
+    # to the same ivar.
+    def state_tlet_sites(evidence)
+      sites = Array(evidence.dig("facts", "tlet_sites"))
+      canonical = ->(path) { File.expand_path(path.to_s, ROOT) }
+      by_location = sites.group_by { |site| [canonical.call(site["path"]), site["line"].to_i] }
+      seen = Set.new
+      Array(evidence.dig("facts", "type_dependencies")).filter_map do |dependency|
+        next unless dependency["candidate"] && dependency["candidate_kind"] == "instance_field"
+        next unless seen.add?(dependency["id"].to_s)
+
+        site = Array(by_location[[canonical.call(dependency["file"]), dependency["line"].to_i]]).find { |candidate| candidate["tlet"] }
+        next unless site
+
+        site.merge("name" => dependency["name"], "owner" => dependency["owner"])
+      end
+    end
+
+    # FactMine carries the field type beside each declaration. That is the
+    # primary source of truth: generated accessor RBI is an optional fallback,
+    # and can legitimately lag a newly indexed source declaration. Treating a
+    # missing RBI accessor as an untyped source field made the hygiene report
+    # disagree with both the trace plan and the evidence-gap invariant.
+    def struct_declared_type(declaration, field, rbi_types = struct_rbi_types)
+      field_types = declaration["field_types"] || {}
+      direct = field_types[field.to_s] || field_types[field.to_sym]
+      effective = rbi_types[[declaration["class"], field]]
+      return effective if type_strength(effective) > type_strength(direct)
+      return direct unless direct.to_s.empty?
+
+      effective
     end
 
     def append_struct_field_candidates(lines, runtime, static)
@@ -3916,10 +4080,16 @@ module NilKill
     def struct_slot_type(slot)
       classes = Array(slot["classes"]).compact.reject(&:empty?)
       if classes == ["Array"] && !slot["elem_classes"].empty?
-        elem = NilKill.sorbet_type(slot["elem_classes"], allow_nilable: true)
+        elem = NilKill.sorbet_type(slot["elem_classes"], allow_nilable: true, collapse_nodes: false)
         return elem == "T.untyped" ? "T::Array[T.untyped]" : "T::Array[#{elem}]"
       end
-      NilKill.sorbet_type(classes, allow_nilable: true)
+      # A struct field is a semantic contract, not merely a telemetry
+      # distribution. Collapsing two observed concrete variants to the broad
+      # AST::Node/MIR::Node family loses the exact methods consumers rely on
+      # and can make an otherwise valid RBI produce hundreds of Sorbet errors.
+      # Preserve bounded concrete unions here; if the union exceeds policy,
+      # leave the field unresolved for an explicit protocol/type alias.
+      NilKill.sorbet_type(classes, allow_nilable: true, collapse_nodes: false)
     end
 
     def append_hash_shape_candidates(lines, shapes)
@@ -3948,6 +4118,7 @@ module NilKill
       append_hash_record_struct_candidates(lines, evidence)
       append_collection_slot_candidates(lines, evidence, slots)
       append_collection_blocker_pressure(lines, evidence, slots)
+      append_hot_runtime_collection_slots(lines, evidence)
       append_runtime_collection_observations(lines, Array(evidence.dig("facts", "collection_runtime")))
       append_collection_index_lookup_report(lines, Array(evidence.dig("facts", "collection_index_lookups")))
     end
@@ -4504,6 +4675,14 @@ module NilKill
       @flow_graph ||= FlowGraph.from_evidence(evidence)
     end
 
+    def type_dependency_pressure(evidence = @evidence)
+      if evidence.equal?(@evidence)
+        @type_dependency_pressure ||= FlowGraph.dependencies_from_evidence(evidence).unlock_pressure
+      else
+        FlowGraph.dependencies_from_evidence(evidence).unlock_pressure
+      end
+    end
+
     def hash_record_lookup?(lookup)
       key = hash_record_lookup_key(lookup)
       return false unless key
@@ -4815,6 +4994,87 @@ module NilKill
       end
     end
 
+    # Collection tracing already records call counts plus the bounded shapes
+    # it inspected. Weighting calls by those shapes approximates sampler work
+    # without adding a timer, hook, or counter to the traced workload.
+    def append_hot_runtime_collection_slots(lines, evidence)
+      lines << ""
+      lines << "### Hot Runtime Collection Slots"
+      lines << "- estimated from existing collection observations and sampled shape complexity; this adds no runtime tracing"
+      rows = hot_runtime_collection_slots(evidence)
+      if rows.empty?
+        lines << "- none"
+        return
+      end
+
+      rows.first(30).each do |row|
+        lines << "- #{row["path"]}:#{row["line"]} #{row["owner_kind"]} #{row["name"]}; #{row["kind"]}; #{row["sampling_pressure"]} sampling-pressure score, #{row["calls"]} total observation(s), #{row["max_process_calls"]} max in one process"
+        unless row["mutation_sites"].empty?
+          top = row["mutation_sites"].sort_by { |site, count| [-count, site] }.first(3)
+          lines << "  - mutation sites: #{top.map { |site, count| "#{site} (#{count})" }.join(", ")}"
+        end
+      end
+    end
+
+    def hot_runtime_collection_slots(evidence)
+      grouped = Array(evidence.dig("facts", "collection_runtime")).group_by do |row|
+        [
+          collection_runtime_path_key(row["path"]),
+          row["line"].to_i,
+          row["owner_kind"].to_s,
+          row["name"].to_s,
+          row["kind"].to_s,
+        ]
+      end
+      grouped.map do |(path, line, owner_kind, name, kind), rows|
+        mutation_sites = Hash.new(0)
+        rows.each do |row|
+          Hash(row["mutation_sites"]).each { |site, count| mutation_sites[site] += count.to_i }
+        end
+        process_work = rows.map do |row|
+          row["calls"].to_i * collection_shape_work_per_observation(row)
+        end
+        {
+          "path" => path,
+          "line" => line,
+          "owner_kind" => owner_kind,
+          "name" => name,
+          "kind" => kind,
+          "calls" => rows.sum { |row| row["calls"].to_i },
+          "max_process_calls" => rows.map { |row| row["calls"].to_i }.max.to_i,
+          "sampling_pressure" => process_work.sum,
+          "max_process_sampling_pressure" => process_work.max.to_i,
+          "processes" => rows.size,
+          "mutation_sites" => mutation_sites,
+        }
+      end.sort_by do |row|
+        [-row["sampling_pressure"], -row["calls"], -row["max_process_sampling_pressure"], row["path"], row["line"], row["name"]]
+      end
+    end
+
+    def collection_shape_work_per_observation(row)
+      scalar_classes = %w[elem_classes key_classes value_classes].sum do |key|
+        Array(row[key]).size
+      end
+      nested_shapes = %w[elem_shapes key_shapes value_shapes].sum do |key|
+        Array(row[key]).sum { |shape| collection_shape_complexity(shape) }
+      end
+      1 + scalar_classes + nested_shapes
+    end
+
+    def collection_shape_complexity(shape)
+      shape = Hash(shape)
+      case shape["kind"]
+      when "array", "set"
+        1 + Array(shape["elements"]).sum { |child| collection_shape_complexity(child) }
+      when "hash"
+        1 + Array(shape["keys"]).sum { |child| collection_shape_complexity(child) } +
+          Array(shape["values"]).sum { |child| collection_shape_complexity(child) }
+      else
+        1
+      end
+    end
+
     def collection_origin_label(origin)
       origin ||= {}
       case origin["kind"]
@@ -4936,7 +5196,7 @@ module NilKill
     # unknown. Counted in "weak" already; this sub-bucket lets us report the
     # primitive-collection-with-untyped-element pressure across all slot kinds.
     def weak_collection_type?(type)
-      type.to_s.match?(/\AT::(?:Array|Hash|Enumerable|Set)\b.*\[T\.untyped/)
+      type.to_s.match?(/\AT::(?:Array|Hash|Enumerable|Set)\b.*T\.untyped/)
     end
 
     def extract_param_types(sig)

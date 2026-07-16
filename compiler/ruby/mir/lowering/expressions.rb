@@ -136,11 +136,17 @@ module MIRLoweringExpressions
     const :type_info, Type
     const :target_name, T.nilable(String)
     const :needs_mut_ref, T::Boolean
+    const :rank_indices, T.nilable(T::Array[MIR::Node]), default: nil
 
     sig { returns(T::Boolean) }
     def optional?
       optional
     end
+  end
+
+  class RankCoordinates < T::Struct
+    const :dimensions, MIR::Node
+    const :indices, MIR::ArrayInit
   end
 
   INTEGER_LITERAL_CASTS = T.let({
@@ -326,7 +332,12 @@ module MIRLoweringExpressions
     right = lower(node.right)
     case node.op
     when :NOT, "!" then MIR::UnaryOp.new("!", right)
-    when :EXISTS then MIR::BinOp.new("!=", right, MIR::Lit.new("null"))
+    when :EXISTS
+      if Type.from_node!(node.right).stream_step?
+        MIR::MethodCall.new(right, "isItem", [], false, MIR::CallableContract.no_ownership(0))
+      else
+        MIR::BinOp.new("!=", right, MIR::Lit.new("null"))
+      end
     when :IS_OK then MIR::FallibleOk.new(strip_try(right))
     when :IS_READY then MIR::FutureReady.new(right)
     when :SUB, "-" then MIR::UnaryOp.new("-", right)
@@ -418,7 +429,7 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     BinaryOperandFacts.new(
       node: node,
-      op: T.cast(node.op, Symbol),
+      op: node.op,
       left: T.cast(lower(node.left), MIR::Node),
       right: T.cast(lower(node.right), MIR::Node),
       left_type: Type.from_node!(node.left, context: "binary lhs"),
@@ -562,7 +573,7 @@ module MIRLoweringExpressions
     emitter = BINARY_PLAN_EMITTERS[plan.kind]
     raise "MIRLowering: unknown binary operation plan #{plan.kind}" unless emitter
 
-    T.cast(__send__(emitter, plan), MIR::Node)
+    T.cast(public_send(emitter, plan), MIR::Node)
   end
 
   sig { params(plan: BinaryOperationPlan).returns(MIR::Call) }
@@ -704,7 +715,9 @@ module MIRLoweringExpressions
 
   sig { params(node: AST::Node).returns(MIR::Node) }
   def lower_boolean_operand(node)
-    lowered = T.cast(T.unsafe(self).__send__(:lower, node), MIR::Node)
+    T.bind(self, MIRLowering) rescue nil
+
+    lowered = T.cast(lower(node), MIR::Node)
     return lowered unless Type.from_node!(node, context: "logical operand").optional?
 
     MIR::BinOp.new("!=", lowered, MIR::Lit.new("null"))
@@ -1209,7 +1222,7 @@ module MIRLoweringExpressions
     target_type_sym = ti.resolved.to_s.to_sym
     union_schema = union_schemas.dig(target_type_sym)
     union_variants = union_schema.is_a?(Schemas::UnionSchema) ? union_schema.variants : nil
-    field_str = node.field.to_s
+    field_str = node.tuple_position.nil? ? node.field.to_s : "@\"#{node.tuple_position}\""
     union_payload = union_variants && (union_variants.key?(node.field) ||
                                        union_variants.key?(field_str) ||
                                        union_variants.key?(field_str.to_sym))
@@ -1251,16 +1264,16 @@ module MIRLoweringExpressions
 
     if ex.kind
       kind = ex.kind.to_s
-      if ex.error_name
-        error_name = ex.error_name.to_s
-        name_id = AST.id_of_type(ex.error_name.to_sym)
+      if (explicit_error_name = ex.error_name)
+        error_name = explicit_error_name
+        name_id = AST.id_of_type(explicit_error_name.to_sym)
       else
         clear_type = true
       end
-    elsif ex.error_name && AST.error_type?(ex.error_name.to_sym)
-      kind = AST.kind_of_type(ex.error_name.to_sym).to_s
-      error_name = ex.error_name.to_s
-      name_id = AST.id_of_type(ex.error_name.to_sym)
+    elsif (explicit_error_name = ex.error_name) && AST.error_type?(explicit_error_name.to_sym)
+      kind = AST.kind_of_type(explicit_error_name.to_sym).to_s
+      error_name = explicit_error_name
+      name_id = AST.id_of_type(explicit_error_name.to_sym)
     end
 
     OrElseExitFacts.new(
@@ -1376,16 +1389,21 @@ module MIRLoweringExpressions
     target = optional ? MIR::Ident.new("_r") : T.cast(lower(target_node), MIR::Node)
     target_type = Type.from_node!(target_node, context: "index target")
     target_type = T.must(target_type.wrapped_type) if implicit_safe_nav
+    rank_indices = if target_type.rank?
+      index_nodes = node.index.is_a?(AST::TupleLit) ? node.index.items : [node.index]
+      index_nodes.map { |index_node| T.cast(lower(index_node), MIR::Node) }
+    end
 
     IndexAccessPlan.new(
       target: target,
-      index: T.cast(lower(node.index), MIR::Node),
+      index: rank_indices ? T.must(rank_indices.first) : T.cast(lower(node.index), MIR::Node),
       optional: optional,
       optional_source: optional_source,
       target_ast: target_ast,
       type_info: target_type,
       target_name: target_node.is_a?(AST::Identifier) ? target_node.name : nil,
       needs_mut_ref: node.needs_mut_ref == true,
+      rank_indices: rank_indices,
     )
   end
 
@@ -1403,6 +1421,8 @@ module MIRLoweringExpressions
     target = plan.target
     index = plan.index
     ti = plan.type_info
+    return rank_index_value(target, ti, T.must(plan.rank_indices)) if ti.rank?
+
     if ti.rc_map? && !bc_target?
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
@@ -1460,6 +1480,28 @@ module MIRLoweringExpressions
     else
       index_collection_value(target, index, plan)
     end
+  end
+
+  sig { params(target: MIR::Node, type_info: Type, indices: T::Array[MIR::Node]).returns(MIR::RuntimeCall) }
+  def rank_index_value(target, type_info, indices)
+    T.bind(self, MIRLowering) rescue nil
+    coordinates = rank_coordinates(target, type_info, indices)
+    MIR::RuntimeCall.new(MIR::RuntimeCalls.rank_get_spec, [target, coordinates.dimensions, coordinates.indices])
+  end
+
+  sig { params(target: MIR::Node, type_info: Type, indices: T::Array[MIR::Node]).returns(RankCoordinates) }
+  def rank_coordinates(target, type_info, indices)
+    T.bind(self, MIRLowering) rescue nil
+    rank = type_info.rank
+    cast_indices = indices.map { |index| MIR::Cast.new(index, "usize", :intCast) }
+    index_array = MIR::ArrayInit.new("usize", rank.to_s, cast_indices)
+    dimensions = if type_info.fixed_rank?
+      items = type_info.rank_dimensions.map { |dimension| MIR::Lit.new(T.cast(dimension, Integer).to_s) }
+      MIR::ArrayInit.new("usize", rank.to_s, items)
+    else
+      MIR::FieldGet.new(target, "shape")
+    end
+    RankCoordinates.new(dimensions: dimensions, indices: index_array)
   end
 
   sig { params(target: MIR::Node, index: MIR::Node, plan: IndexAccessPlan).returns(MIR::Node) }
@@ -1618,14 +1660,16 @@ module MIRLoweringExpressions
 
   sig { params(val: MIR::Node, ft: T.nilable(Type), borrowed_field: T::Boolean, sink_alloc: Symbol, ast_node: T.nilable(AST::Node)).returns(MIR::Node) }
   def aggregate_dynamic_slice_field_value(val, ft, borrowed_field, sink_alloc, ast_node = nil)
+    T.bind(self, MIRLowering) rescue nil
+
     return val unless aggregate_field_wants_dynamic_slice?(ft)
     return MIR::ItemsAccess.new(val, true) if borrowed_field
 
-    source = T.cast(T.unsafe(self).__send__(:mir_produces_owned_result?, val) && !val.is_a?(MIR::Ident) ?
-      T.unsafe(self).__send__(:hoist_alloc, val, ast_node, err_cleanup: true) : val, MIR::Node)
-    T.cast(T.unsafe(self).__send__(:with_ownership_consumption,
+    source = mir_produces_owned_result?(val) && !val.is_a?(MIR::Ident) ?
+      hoist_alloc(val, ast_node, err_cleanup: true) : val
+    T.cast(with_ownership_consumption(
       MIR::OwnedSlice.new(source, sink_alloc),
-      T.unsafe(self).__send__(:mir_ident_names, source),
+      mir_ident_names(source),
       "MIR::OwnedSlice",
       target_alloc: sink_alloc,
     ), MIR::OwnedSlice)
@@ -1676,7 +1720,7 @@ module MIRLoweringExpressions
         end
         end
       end
-      # @indirect field: hoist HeapCreate to a named temp so it is a Let-init,
+      # @boxed field: hoist HeapCreate to a named temp so it is a Let-init,
       # not an anonymous sub-expression (INV-H).
       if v.needs_heap_create
         zig_t = transpile_type(v.full_type!.resolved.to_s)
@@ -1731,7 +1775,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::UnionVariantLit).returns(MIR::Node) }
   def lower_union_variant_lit(node)
     T.bind(self, MIRLowering) rescue nil
-    # Collect hoisted statements for @indirect fields (same pattern as lower_struct_lit).
+    # Collect hoisted statements for @boxed fields (same pattern as lower_struct_lit).
     hoisted = T.let([], T::Array[MIR::Node])
     variant_alloc = alloc_for_node(node)
     variant_field_types = union_variant_lit_field_types(node)
@@ -1750,12 +1794,12 @@ module MIRLoweringExpressions
         hoist_alloc(materialized, v, err_cleanup: true)
         end
       end
-      # @indirect is signalled by the annotator's needs_heap_create stamp
+      # @boxed is signalled by the annotator's needs_heap_create stamp
       # (same single source the struct-literal path reads).
       if v.needs_heap_create
         field_sym = Type.from_node!(v, context: "indirect union field").resolved
         zig_t = transpile_type(field_sym.to_s)
-        # @indirect union fields: HeapCreate emits __p.* = val (shallow copy).
+        # @boxed union fields: HeapCreate emits __p.* = val (shallow copy).
         # Borrowed field access has no owned local to transfer, so the
         # indirect cell needs an independent copy. Identifier payloads move
         # into the cell and are guarded by ordinary ownership transfer marks.
@@ -1956,7 +2000,8 @@ module MIRLoweringExpressions
       MIR::BinOp.new("+", MIR::Cast.new(end_expr, "usize", :intCast), MIR::Lit.new("1"))
     end
 
-    elem_zig = node.target.full_type!.element_type ? Type.new(node.target.full_type!.element_type).zig_type : "u8"
+    element_type = node.target.full_type!.element_type
+    elem_zig = element_type ? Type.new(element_type).zig_type : "u8"
     MIR::SliceExpr.new(target, start_cast, end_cast, elem_zig)
   end
 
@@ -2066,7 +2111,7 @@ module MIRLoweringExpressions
     lt = type_info_for(left)
     rt = type_info_for(right)
 
-    if (lt&.string_comparable_with?(rt)) || (rt&.string_comparable_with?(lt))
+    if lt.string_comparable_with?(rt) || rt.string_comparable_with?(lt)
       return ["expectEqualStrings", []]
     end
 
@@ -2106,8 +2151,9 @@ module MIRLoweringExpressions
     rt = MIR::Ident.new(runtime_binding_name)
     kind = (node.kind || :Unknown).to_s
     # error_name is a u32 id into the per-program ErrorName enum.
-    name_expr = if node.error_name && !node.error_name.empty?
-      MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), node.error_name))
+    error_name = node.error_name
+    name_expr = if error_name && !error_name.empty?
+      MIR::EnumOrdinal.new(MIR::FieldGet.new(MIR::Ident.new("ErrorName"), error_name))
     else
       MIR::Lit.new("0")
     end

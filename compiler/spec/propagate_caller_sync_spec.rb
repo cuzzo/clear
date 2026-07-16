@@ -29,7 +29,7 @@ RSpec.describe EscapeAnalysis do
   end
 
   def body_summaries_from(annotator)
-    annotator.send(:function_body_summaries)
+    T.must(annotator.semantic_index).body_summaries
   end
 
   it "stamps entry.sync on a callee param when one caller passes a @shared:locked binding" do

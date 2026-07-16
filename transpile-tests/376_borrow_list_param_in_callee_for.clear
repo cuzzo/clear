@@ -4,7 +4,7 @@
 # inside the callee, and any change to that path's emission must
 # keep this case working.
 
-FN sumDoubled(xs: Int64[]@list) RETURNS Int64 ->
+FN sumDoubled(xs: []Int64) RETURNS Int64 ->
     MUTABLE total: Int64 = 0_i64;
     FOR x IN xs DO
         total = total + x * 2_i64;
@@ -13,7 +13,7 @@ FN sumDoubled(xs: Int64[]@list) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE vals: Int64[]@list = List[];
+    MUTABLE vals: []Int64 = List[];
     vals.append(1_i64);
     vals.append(2_i64);
     vals.append(3_i64);

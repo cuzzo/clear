@@ -5,7 +5,7 @@
 
 FN processCommand(cmd: String) RETURNS !String ->
     # Simulate work: build a large list, join, return a summary
-    MUTABLE parts: String[]@list = [];
+    MUTABLE parts: []String = [];
     FOR i IN (1_i64 ..= 50) -> parts.append(i.toString());
     data = join(parts, ",");
     RETURN ":${data.length().toString()}\r\n";

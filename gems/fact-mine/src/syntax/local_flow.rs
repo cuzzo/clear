@@ -25,6 +25,10 @@ pub struct MethodSummary {
     pub node: Node,
     pub statements: Vec<Statement>,
     pub boundaries: Vec<Boundary>,
+    #[serde(default, skip_serializing)]
+    pub params: BTreeSet<String>,
+    #[serde(default)]
+    pub param_types: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -105,12 +109,14 @@ pub(crate) fn local_methods_from_normalized(
     lines: &[String],
     root: &Node,
     functions: &[FunctionDef],
+    method_param_types: &BTreeMap<String, BTreeMap<String, String>>,
     behavior: &dyn NormalizedLanguageBehavior,
 ) -> Vec<MethodSummary> {
     let mut detector = LocalFlow::new(
         file.to_string(),
         lines.to_vec(),
         method_metadata(file, functions),
+        method_param_types.clone(),
         behavior,
     );
     let mut methods = detector.scan(root);
@@ -201,6 +207,7 @@ struct LocalFlow<'a> {
     file: String,
     lines: Vec<String>,
     methods_by_span: BTreeMap<Span, MethodMetadata>,
+    method_param_types: BTreeMap<String, BTreeMap<String, String>>,
     behavior: &'a dyn NormalizedLanguageBehavior,
 }
 
@@ -209,12 +216,14 @@ impl<'a> LocalFlow<'a> {
         file: String,
         lines: Vec<String>,
         methods_by_span: BTreeMap<Span, MethodMetadata>,
+        method_param_types: BTreeMap<String, BTreeMap<String, String>>,
         behavior: &'a dyn NormalizedLanguageBehavior,
     ) -> Self {
         Self {
             file,
             lines,
             methods_by_span,
+            method_param_types,
             behavior,
         }
     }
@@ -282,6 +291,10 @@ impl<'a> LocalFlow<'a> {
             .enumerate()
             .map(|(index, stmt)| self.statement_summary(stmt, index, &local_names))
             .collect::<Vec<_>>();
+        let param_types = self.param_types_for(owner, &name);
+        let params = metadata
+            .map(|metadata| metadata.params.clone())
+            .unwrap_or_default();
         MethodSummary {
             id: format!("{}#{}", owner, name),
             owner: owner.to_string(),
@@ -292,7 +305,24 @@ impl<'a> LocalFlow<'a> {
             node: node.clone(),
             boundaries: self.structural_boundaries(&statements),
             statements,
+            params,
+            param_types,
         }
+    }
+
+    fn param_types_for(&self, owner: &str, name: &str) -> BTreeMap<String, String> {
+        let null_key = format!("{owner}\0{name}");
+        let colon_key = if owner.is_empty() || owner == "(top-level)" {
+            name.to_string()
+        } else {
+            format!("{owner}::{name}")
+        };
+        self.method_param_types
+            .get(&null_key)
+            .or_else(|| self.method_param_types.get(&colon_key))
+            .or_else(|| self.method_param_types.get(name))
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn statement_summary(
@@ -475,11 +505,17 @@ impl<'a> LocalFlow<'a> {
                 }
             }
         });
-        reads.extend(textual_local_reads(
-            &ast::slice(node, &self.lines),
-            local_names,
-            writes,
-        ));
+        // Text scanning is a fallback for adapters whose normalized tree does
+        // not expose local reads. Mixing it into structural evidence lets
+        // identifiers in comments and string fragments masquerade as data
+        // dependencies even when the AST already supplied the real reads.
+        if reads.is_empty() {
+            reads.extend(textual_local_reads(
+                &ast::slice(node, &self.lines),
+                local_names,
+                writes,
+            ));
+        }
         reads.into_iter().collect()
     }
 
@@ -603,11 +639,12 @@ fn textual_local_writes(source: &str, behavior: &dyn NormalizedLanguageBehavior)
         || trimmed_lhs.starts_with("$this->")
         || trimmed_lhs.starts_with('@');
 
-    if !is_state_write && (lhs.contains('.')
-        || lhs.contains("->")
-        || lhs.contains('[')
-        || lhs.contains('(')
-        || lhs.contains(')'))
+    if !is_state_write
+        && (lhs.contains('.')
+            || lhs.contains("->")
+            || lhs.contains('[')
+            || lhs.contains('(')
+            || lhs.contains(')'))
     {
         return Vec::new();
     }
@@ -708,15 +745,15 @@ fn identifiers_with_positions(source: &str) -> Vec<IdentifierSpan> {
     let mut out = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
-        let has_prefix = if index + 5 <= bytes.len() && &bytes[index..index+5] == b"self." {
+        let has_prefix = if index + 5 <= bytes.len() && &bytes[index..index + 5] == b"self." {
             Some(5)
-        } else if index + 5 <= bytes.len() && &bytes[index..index+5] == b"this." {
+        } else if index + 5 <= bytes.len() && &bytes[index..index + 5] == b"this." {
             Some(5)
-        } else if index + 6 <= bytes.len() && &bytes[index..index+6] == b"self->" {
+        } else if index + 6 <= bytes.len() && &bytes[index..index + 6] == b"self->" {
             Some(6)
-        } else if index + 6 <= bytes.len() && &bytes[index..index+6] == b"this->" {
+        } else if index + 6 <= bytes.len() && &bytes[index..index + 6] == b"this->" {
             Some(6)
-        } else if index + 7 <= bytes.len() && &bytes[index..index+7] == b"$this->" {
+        } else if index + 7 <= bytes.len() && &bytes[index..index + 7] == b"$this->" {
             Some(7)
         } else {
             None
@@ -936,6 +973,8 @@ mod tests {
             node: empty_node(),
             statements: Vec::new(),
             boundaries: Vec::new(),
+            params: BTreeSet::new(),
+            param_types: BTreeMap::new(),
         }];
 
         let mut doc2: Document =
@@ -950,6 +989,8 @@ mod tests {
             node: empty_node(),
             statements: Vec::new(),
             boundaries: Vec::new(),
+            params: BTreeSet::new(),
+            param_types: BTreeMap::new(),
         }];
 
         let methods = scan_documents(&[doc1, doc2]);
@@ -970,6 +1011,7 @@ mod tests {
                 "end".to_string(),
             ],
             BTreeMap::new(),
+            BTreeMap::new(),
             behavior,
         );
         let boundary = detector.source_boundary(3, 3).unwrap();
@@ -983,6 +1025,7 @@ mod tests {
         let detector = LocalFlow::new(
             "foo.rb".to_string(),
             vec!["def self.foo".to_string(), "def receiver.bar".to_string()],
+            BTreeMap::new(),
             BTreeMap::new(),
             behavior,
         );
@@ -1046,6 +1089,7 @@ mod tests {
         let detector = LocalFlow::new(
             "foo.rb".to_string(),
             vec!["".to_string()],
+            BTreeMap::new(),
             BTreeMap::new(),
             behavior,
         );
@@ -1128,6 +1172,7 @@ mod tests {
             "foo.rb".to_string(),
             vec!["x = y".to_string()],
             BTreeMap::new(),
+            BTreeMap::new(),
             behavior,
         );
         let node = Node {
@@ -1171,11 +1216,55 @@ mod tests {
     }
 
     #[test]
+    fn structural_reads_exclude_comment_only_identifiers() {
+        let behavior = crate::syntax::ruby::behavior();
+        let detector = LocalFlow::new(
+            "foo.rb".to_string(),
+            vec!["result = caps # outer_ref is illustrative".to_string()],
+            BTreeMap::new(),
+            BTreeMap::new(),
+            behavior,
+        );
+        let rhs = Node {
+            r#type: "LVAR".to_string(),
+            children: vec![Child::Symbol("caps".to_string())],
+            first_lineno: 1,
+            first_column: 9,
+            last_lineno: 1,
+            last_column: 13,
+            text: "caps".to_string(),
+        };
+        let node = Node {
+            r#type: "LASGN".to_string(),
+            children: vec![
+                Child::Symbol("result".to_string()),
+                Child::Node(Box::new(rhs)),
+            ],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 41,
+            text: "result = caps # outer_ref is illustrative".to_string(),
+        };
+        let local_names = BTreeSet::from([
+            "caps".to_string(),
+            "outer_ref".to_string(),
+            "result".to_string(),
+        ]);
+        let writes = BTreeSet::from(["result".to_string()]);
+        let reads = detector.local_reads(&node, &local_names, &writes);
+
+        assert!(reads.contains("caps"));
+        assert!(!reads.contains("outer_ref"));
+    }
+
+    #[test]
     fn test_assignment_dependencies_same() {
         let behavior = crate::syntax::ruby::behavior();
         let detector = LocalFlow::new(
             "foo.rb".to_string(),
             vec!["x = x".to_string()],
+            BTreeMap::new(),
             BTreeMap::new(),
             behavior,
         );

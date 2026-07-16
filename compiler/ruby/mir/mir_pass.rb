@@ -66,7 +66,7 @@ class MIRPass
   sig { returns(EscapeAnalysis::EscapePlacementFacts) }
   attr_reader :escape_placement_facts
 
-  sig { params(fn_nodes: FnNodes, schema_lookup: Proc, body_summaries: T::Hash[String, Annotator::Phases::FunctionBodySummary], hoist_bindings: T.nilable(HoistBindings)).void }
+  sig { params(fn_nodes: FnNodes, schema_lookup: Type::SchemaLookup, body_summaries: T::Hash[String, Annotator::Phases::FunctionBodySummary], hoist_bindings: T.nilable(HoistBindings)).void }
   def initialize(fn_nodes:, schema_lookup:, body_summaries: {}, hoist_bindings: nil)
     @fn_nodes = T.let(fn_nodes, FnNodes)
     @schema_lookup = schema_lookup
@@ -76,6 +76,7 @@ class MIRPass
     @cleanup_plans = T.let({}, T::Hash[String, CleanupClassifier::CleanupClassificationPlan])
     @escape_placement_facts = T.let(EscapeAnalysis::EscapePlacementFacts.new, EscapeAnalysis::EscapePlacementFacts)
     @can_fail_fns = T.let(self.class.fallible_function_names(fn_nodes), T::Set[String])
+    @current_transform_fn = T.let(nil, T.nilable(AST::FunctionDef))
   end
 
   sig { params(fn_nodes: FnNodes).returns(T::Set[String]) }
@@ -109,7 +110,6 @@ class MIRPass
     # typed placement table explaining which phase forced each heap placement.
     escape_result = EscapeAnalysis.apply_with_facts!(@fn_nodes, @schema_lookup, @body_summaries, @hoist_bindings)
     @escape_placement_facts = escape_result.placements
-    @bg_heap_upgraded = T.let(escape_result.bg_heap, T.untyped)
     BgCaptureClassifier.classify_all!(@fn_nodes, schema_lookup: @schema_lookup)
     pass_state.mark!(:escape_analyzed)
 
@@ -159,7 +159,7 @@ class MIRPass
     # as the FunctionDef.
     @fn_nodes.each_value do |fn|
       sig = FunctionSignature.from_function_def(fn)
-      FunctionSignature.sync_signature_from_function_def!(sig, fn) if sig.is_a?(FunctionSignature)
+      sig.sync_from_function_def!(fn) if sig.is_a?(FunctionSignature)
     end
     pass_state.mark!(:mir_pass_complete)
     nil
@@ -399,14 +399,13 @@ class MIRPass
     pre_mark_bg_resource_captures!(function, cleanup_facts)
     dataflow = OwnershipDataflow.analyze(function, can_fail_fns: plan.can_fail_fns, schema_lookup: @schema_lookup)
     dataflow.cleanup_decisions!(function, cleanup_facts)
-    @last_dataflow = T.let(dataflow, T.untyped)
     mark_returned_cleanup_bindings!(function, cleanup_facts)
     function.cleanup_bindings = cleanup_facts.bindings
     CleanupClassifier.stamp_field_pre_cleanups!(function.body, cleanup_facts, schema_lookup: @schema_lookup)
 
-    @current_transform_fn = T.let(function, T.untyped)
+    @current_transform_fn = function
     function.body = transform_body(function.body, WalkCtx.new(cleanup_facts: cleanup_facts))
-    @current_transform_fn = T.let(nil, T.untyped)
+    @current_transform_fn = nil
     stamp_moved_guard_info!(function, cleanup_facts)
     nil
   end
@@ -444,9 +443,8 @@ class MIRPass
 
   # Recursively transform a statement list, inserting MIR nodes.
   # Returns a new array (does not mutate the input).
-  sig { params(stmts: T::Array[T.untyped], ctx: MIRPass::WalkCtx).returns(T::Array[T.untyped]) }
+  sig { params(stmts: T::Array[AST::Node], ctx: MIRPass::WalkCtx).returns(T::Array[T.untyped]) }
   def transform_body(stmts, ctx)
-    return stmts unless stmts.is_a?(Array)
     result = []
     cleanup_facts = ctx.cleanup_facts
     stmts.each do |stmt|
@@ -730,7 +728,8 @@ class MIRPass
     stmt.cases.each do |c|
       next unless c.binding
 
-      facts.with_live_entry_for(c.binding) do |as_entry|
+      binding = T.must(c.binding)
+      facts.with_live_entry_for(binding) do |as_entry|
         has_as_cleanup = true
 
         # Insert MIR nodes at the start of case body for checker coverage.
@@ -739,13 +738,14 @@ class MIRPass
         if has_source_cleanup
           mir_prefix << MIR::SuppressCleanup.new(stmt.token, expr.name.to_s)
         end
-        alloc_type = if c.destructure.is_a?(AST::Locatable)
-          c.destructure.full_type!(context: "match AS allocation marker")
+        destructure = c.destructure
+        alloc_type = if destructure
+          destructure.full_type!(context: "match AS allocation marker")
         else
           Type.from_node!(expr, context: "match AS allocation marker")
         end
-        mir_prefix << alloc_marker(c.binding.to_s, as_entry.alloc, alloc_type)
-        drop = MIR::Drop.new(stmt.token, c.binding.to_s)
+        mir_prefix << alloc_marker(binding, as_entry.alloc, alloc_type)
+        drop = MIR::Drop.new(stmt.token, binding)
         drop.cleanup_entry = as_entry
         mir_prefix << drop
         c.body = mir_prefix + c.body

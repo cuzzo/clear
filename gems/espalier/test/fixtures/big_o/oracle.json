@@ -1,6 +1,31 @@
 {
+  "state_replay.rb": {
+    "parse_statement": "O(2^N)",
+    "speculate": "O(2^N)",
+    "parse_value": "O(2^N)"
+  },
+  "state_replay.py": {
+    "parse_statement": "O(2^N)",
+    "speculate": "O(2^N)",
+    "parse_value": "O(2^N)"
+  },
+  "receiver_state_rescan.rb": {
+    "cleanup_decisions": "O(N*M*K)",
+    "block_exit_cleanup_summary": "O(N*M)",
+    "block_exit_cleanup_summaries": "O(N*M)"
+  },
+  "recursive_suffix_rescan.rb": {
+    "walk": "O(N^2)",
+    "scan_remaining": "O(N)"
+  },
+  "recursive_suffix_rescan.py": {
+    "walk": "O(N^2)",
+    "scan_remaining": "O(N)"
+  },
   "ruby_product.rb": {
-    "cartesian_product": "O(N^2)",
+    "cartesian_product": "O(N*M)",
+    "same_domain_product": "O(N^2)",
+    "three_domain_product": "O(N*M*K)",
     "fixed_matrix": "O(1)"
   },
   "hierarchical.rs": {
@@ -29,8 +54,8 @@
   },
   "fixpoint.rb": {
     "settle": "O(N^2)",
-    "settle_groups": "O(N^3)",
-    "settle_groups_with_object": "O(N^3)"
+    "settle_groups": "O(N^2*M)",
+    "settle_groups_with_object": "O(N^2*M)"
   },
   "normalized_domains.rb": {
     "indexed_children": "O(N)",

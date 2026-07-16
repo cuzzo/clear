@@ -34,8 +34,8 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
       expect(with_block).not_to be_nil
       expect(with_block.arms).not_to be_nil
       expect(with_block.arms.size).to eq(2)
-      expect(with_block.arms[0][:family]).to eq(:VERSIONED)
-      expect(with_block.arms[1][:family]).to eq(:ATOMIC)
+      expect(with_block.arms[0].family).to eq(:VERSIONED)
+      expect(with_block.arms[1].family).to eq(:ATOMIC)
     end
 
     it "VERSIONED arm preserves the ON MvccConflict clause" do
@@ -50,8 +50,8 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
       CLEAR
       fn = parse(src)
       with_block = fn.body.find { |s| s.is_a?(AST::WithBlock) }
-      versioned_arm = with_block.arms.find { |a| a[:family] == :VERSIONED }
-      expect(versioned_arm[:lock_error_clauses]).not_to be_empty
+      versioned_arm = with_block.arms.find { |a| a.family == :VERSIONED }
+      expect(versioned_arm.lock_error_clauses).not_to be_empty
     end
 
     it "ATOMIC arm has NO ON MvccConflict clause" do
@@ -66,8 +66,8 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
       CLEAR
       fn = parse(src)
       with_block = fn.body.find { |s| s.is_a?(AST::WithBlock) }
-      atomic_arm = with_block.arms.find { |a| a[:family] == :ATOMIC }
-      expect(atomic_arm[:lock_error_clauses]).to be_empty
+      atomic_arm = with_block.arms.find { |a| a.family == :ATOMIC }
+      expect(atomic_arm.lock_error_clauses).to be_empty
     end
 
     it "snapshot_mode is :transaction when alias is MUTABLE (regardless of MATCH)" do
@@ -127,10 +127,10 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
       CLEAR
       fn = parse(src)
       with_block = fn.body.find { |s| s.is_a?(AST::WithBlock) }
-      versioned_arm = with_block.arms.find { |a| a[:family] == :VERSIONED }
-      atomic_arm    = with_block.arms.find { |a| a[:family] == :ATOMIC }
-      expect(versioned_arm[:body].size).to eq(2)
-      expect(atomic_arm[:body].size).to eq(1)
+      versioned_arm = with_block.arms.find { |a| a.family == :VERSIONED }
+      atomic_arm    = with_block.arms.find { |a| a.family == :ATOMIC }
+      expect(versioned_arm.body.size).to eq(2)
+      expect(atomic_arm.body.size).to eq(1)
     end
   end
 

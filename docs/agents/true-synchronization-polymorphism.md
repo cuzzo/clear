@@ -43,9 +43,9 @@ families is allowed (`REQUIRES x: LOCKED | SNAPSHOTTED`).
 | Family | Admits | Mono/Poly | IO allowed in body? |
 |---|---|---|---|
 | `LOCKED` | `@locked`, `@writeLocked` | poly (2 axes) | yes |
-| `SNAPSHOTTED` | `@versioned`, `@atomic`, `@indirect:atomic` | poly (2 axes) | **no** |
+| `SNAPSHOTTED` | `@versioned`, `@atomic`, `@boxed:atomic` | poly (2 axes) | **no** |
 | `VERSIONED` | `@versioned` only | mono (1 axis) | **no** |
-| `ATOMIC` | `@atomic`, `@indirect:atomic` | mono (1 axis) | **no** |
+| `ATOMIC` | `@atomic`, `@boxed:atomic` | mono (1 axis) | **no** |
 
 `SNAPSHOTTED` is the recommended umbrella for retry-style sync.
 `VERSIONED` and `ATOMIC` are escape hatches when memory or behavior
@@ -62,7 +62,7 @@ typically overly restrictive — out of scope for this milestone.
 | `:write_locked` | reader/writer lock |
 | `:versioned` | MVCC / multi-version snapshot transaction |
 | `:atomic` | atomic primitive (Int64 / Float64 / Bool) |
-| `:indirect:atomic` | atomic pointer (struct via `*AtomicPtr(T)`) |
+| `:boxed:atomic` | atomic pointer (struct via `*AtomicPtr(T)`) |
 
 `@local` (compiler-proven confinement, no synchronization) is supported
 elsewhere but does not participate in the polymorphism work; bindings
@@ -156,7 +156,7 @@ The annotator (#326) checks two things at every WITH site:
 
 ### IO restriction
 
-Inside any retry-prone family body — concrete `@versioned` / `@atomic` / `@indirect:atomic` WITH, or any WITH POLYMORPHIC where one of those axes is admissible — the body must not have the `:io` effect. The runtime re-executes the body on internal commit retry; IO would be silently re-issued. (Allocation is allowed; it is wasteful on retry but correct.)
+Inside any retry-prone family body — concrete `@versioned` / `@atomic` / `@boxed:atomic` WITH, or any WITH POLYMORPHIC where one of those axes is admissible — the body must not have the `:io` effect. The runtime re-executes the body on internal commit retry; IO would be silently re-issued. (Allocation is allowed; it is wasteful on retry but correct.)
 
 `@locked` / `@writeLocked` bodies are *not* subject to this restriction; once the lock is held, the body runs once.
 
@@ -181,7 +181,7 @@ A future `--strict-sync` flag (out of scope; task only stubbed) promotes the war
 |---|---|
 | `@locked` / `@writeLocked` | `LockTimeout`, `Deadlock`, `LockCycle` |
 | `@versioned` | `MvccConflict` |
-| `@atomic` / `@indirect:atomic` | `AtomicConflict` |
+| `@atomic` / `@boxed:atomic` | `AtomicConflict` |
 
 REQUIRES family error union (the function's signature `!T`):
 
@@ -416,7 +416,7 @@ This unblocks:
 - The SNAPSHOT MUTABLE catch-handler's Zig error name needs to be
   comptime-dispatched per actual cell type (today the lowering picks
   one error name based on the REQUIRES-seed; for `REQUIRES x:
-  VERSIONED | ATOMIC` passed an `@indirect:atomic` cell, the emitted
+  VERSIONED | ATOMIC` passed an `@boxed:atomic` cell, the emitted
   Zig has the wrong error name in the catch arm).
 
 ## Acceptance criteria
@@ -465,7 +465,7 @@ Use this list to verify completion at the end of the milestone. Each item maps t
 
 ### Lowering
 
-- [ ] `WITH POLYMORPHIC` lowers to comptime `@hasDecl` dispatch covering all admissible families (incl. primitive `@shared:atomic` special case). **Partial**: works for SNAPSHOT MUTABLE on @versioned and @indirect:atomic via the existing comptime arc-unwrap; the multi-family case (`REQUIRES x: VERSIONED | LOCKED`) needs Gate 3 above.
+- [ ] `WITH POLYMORPHIC` lowers to comptime `@hasDecl` dispatch covering all admissible families (incl. primitive `@shared:atomic` special case). **Partial**: works for SNAPSHOT MUTABLE on @versioned and @boxed:atomic via the existing comptime arc-unwrap; the multi-family case (`REQUIRES x: VERSIONED | LOCKED`) needs Gate 3 above.
 - [x] Per-WITH `ON` clauses precede program SYNC POLICY precede system default at every WITH site (verified by spec).
 
 ### Call-site error collapsing

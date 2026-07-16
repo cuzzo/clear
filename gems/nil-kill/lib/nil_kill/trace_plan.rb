@@ -11,17 +11,27 @@ module NilKill
       @methods = {}
       @tlets = {}
       @struct_fields = {}
+      @state_write_site_owners = {}
     end
 
     def write(path)
       files = NilKill.target_files
       unless files.empty?
-        static = StaticEvidence.build(files, root: ROOT, language: :ruby, include_annotations: false)
+        static = StaticEvidence.build_trace_plan(files, root: ROOT)
         static.fetch("methods", []).each { |method| add_static_method(method) }
         facts = Hash(static["facts"])
-        Array(facts["tlet_sites"]).each { |site| add_tlet(site) }
+        tlet_types = Array(facts["tlet_sites"]).to_h do |site|
+          add_tlet(site)
+          [[File.expand_path(site["path"], ROOT), site["line"].to_i], site["type"]]
+        end
         Array(facts["struct_declarations"]).each { |decl| add_struct_decl(decl) }
+        static.fetch("fields", []).each { |field| add_static_field(field, tlet_types) }
         Array(facts["state_type_records"]).each { |field| add_static_state_type(field) }
+        # Flow-derived state records are intentionally conservative and may
+        # report T.untyped for assignments to a field whose declaration is
+        # already strong. The declaration is the enforceable Sorbet contract,
+        # so apply it last and let it suppress redundant runtime sampling.
+        Array(facts["type_definitions"]).each { |definition| add_static_type_definition(definition) }
       end
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, JSON.pretty_generate({
@@ -32,6 +42,7 @@ module NilKill
         "methods" => @methods,
         "tlets" => @tlets,
         "struct_fields" => @struct_fields,
+        "state_write_sites" => state_write_sites,
       }))
     end
 
@@ -48,12 +59,13 @@ module NilKill
         params[name] = !NilKill.strong_trace_type?(type)
       end
       return_type = NilKill.extract_return_type(method["sig"])
-      sample_return = !method["sig"].to_s.include?(".void") && !NilKill.strong_trace_type?(return_type)
+      sample_return = !void_signature?(method["sig"]) && !NilKill.strong_trace_type?(return_type)
+      sample_method = params.values.any? || sample_return
       @methods[key] = {
-        "frame" => true,
+        "frame" => sample_method,
         "params" => params,
         "return" => sample_return,
-        "sample" => params.values.any? || sample_return,
+        "sample" => sample_method,
       }
     end
 
@@ -66,7 +78,8 @@ module NilKill
         [name.to_s, !NilKill.strong_trace_type?(type)]
       end
       return_type = NilKill.extract_return_type(signature)
-      sample_return = !signature.include?(".void") && !NilKill.strong_trace_type?(return_type)
+      sample_return = !void_signature?(signature) && !NilKill.strong_trace_type?(return_type)
+      sample_method = params.values.any? || sample_return
       name = method_name(method)
       key = [
         method["owner"].to_s,
@@ -76,10 +89,10 @@ module NilKill
         method["line"],
       ].join("\0")
       @methods[key] = {
-        "frame" => true,
+        "frame" => sample_method,
         "params" => params,
         "return" => sample_return,
-        "sample" => params.values.any? || sample_return,
+        "sample" => sample_method,
       }
     end
 
@@ -91,8 +104,11 @@ module NilKill
     end
 
     def add_struct_decl(decl)
+      field_types = Hash(decl["field_types"])
       decl.fetch("fields", []).each do |field|
-        @struct_fields[[decl["class"], field.to_s].join("\0")] = true
+        type = field_types[field.to_s]
+        @struct_fields[[decl["class"], field.to_s].join("\0")] =
+          type.to_s.empty? || !NilKill.strong_trace_type?(type)
       end
     end
 
@@ -113,6 +129,41 @@ module NilKill
       @struct_fields[[klass, name].join("\0")] = !NilKill.strong_trace_type?(type)
     end
 
+    def add_static_type_definition(definition)
+      return unless definition["kind"].to_s == "state_field"
+
+      klass = definition["owner"].to_s
+      name = definition["name"].to_s.sub(/\A@/, "")
+      type = definition["declared_type"].to_s
+      return if klass.empty? || name.empty? || type.empty?
+
+      @struct_fields[[klass, name].join("\0")] = !NilKill.strong_trace_type?(type)
+    end
+
+    def add_static_field(field, tlet_types)
+      klass = field["owner"].to_s
+      name = (field["name"] || field["field"]).to_s.sub(/\A@/, "")
+      path = File.expand_path(field["path"], ROOT)
+      unless klass.empty? || name.empty?
+        site_key = [path, field["line"].to_i, name].join("\0")
+        @state_write_site_owners[site_key] = [klass, name].join("\0")
+      end
+      type = field["declared_type"]
+      type = tlet_types[[path, field["line"].to_i]] if type.to_s.empty?
+      return if klass.empty? || name.empty? || type.to_s.empty?
+
+      @struct_fields[[klass, name].join("\0")] = !NilKill.strong_trace_type?(type)
+    end
+
+    # Exact source sites let the rewriter omit the recorder call entirely for
+    # a state slot whose final enforceable contract is strong. Unknown sites
+    # are deliberately absent and therefore remain sampled.
+    def state_write_sites
+      @state_write_site_owners.to_h do |site_key, owner_key|
+        [site_key, @struct_fields.fetch(owner_key, true)]
+      end
+    end
+
     def method_name(method)
       method["name"].to_s.sub(/\Aself\./, "")
     end
@@ -124,6 +175,10 @@ module NilKill
       return "function" if raw == "function" || method["owner"].to_s.empty?
 
       "instance"
+    end
+
+    def void_signature?(signature)
+      signature.to_s.match?(/\bvoid\b/)
     end
   end
 end

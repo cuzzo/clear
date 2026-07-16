@@ -101,6 +101,42 @@ RSpec.describe Lexer do
         # Line 4: IF
         expect_token(tokens[1], :KEYWORD, "IF", 4, 1)
       end
+
+      it "decodes hexadecimal and Unicode escapes" do
+        token = Lexer.new('"\\x41\\u{1F642}"').tokenize.first
+
+        expect(token).to have_attributes(type: :STRING, value: "A🙂", line: 1, column: 1)
+      end
+
+      it "decodes every single-character escape and preserves unknown escapes" do
+        escapes = {
+          "\"\\n\"" => "\n", "\"\\t\"" => "\t", "\"\\\"\"" => "\"",
+          "\"\\\\\"" => "\\", "\"\\r\"" => "\r", "\"\\0\"" => "\0",
+          "\"\\q\"" => "\\q",
+        }
+
+        escapes.each do |source, value|
+          expect(Lexer.new(source).tokenize.first.value).to eq(value)
+        end
+      end
+
+      it "rejects malformed hexadecimal and Unicode escapes" do
+        expect { Lexer.new('"\\x1"').tokenize }
+          .to raise_error(Lexer::Error, /\\x requires exactly 2 hex digits/)
+        expect { Lexer.new('"\\u1234"').tokenize }
+          .to raise_error(Lexer::Error, /\\u requires \{hex\}/)
+        expect { Lexer.new('"\\u{}"').tokenize }
+          .to raise_error(Lexer::Error, /invalid \\u\{\} escape/)
+        expect { Lexer.new('"\\u{1234"').tokenize }
+          .to raise_error(Lexer::Error, /unclosed \\u\{\}/)
+      end
+
+      it "rejects strings ending immediately after an escape or bare dollar" do
+        expect { Lexer.new("\"trailing\\").tokenize }
+          .to raise_error(Lexer::Error, /Unclosed string/)
+        expect { Lexer.new('"trailing $').tokenize }
+          .to raise_error(Lexer::Error, /Unclosed string/)
+      end
     end
 
     describe "Prefixed Integer Literals (0x, 0o, 0b)" do
@@ -160,15 +196,93 @@ RSpec.describe Lexer do
       it "allows hex + suffix with separator in the hex body" do
         expect_token(Lexer.new("0xFF_FF_u32").tokenize[0],  :UINT32, 0xFFFF, 1, 1)
       end
+
+      it "emits every supported explicit numeric type" do
+        expected = {
+          "1_u8" => [:BYTE, 1],
+          "1_i8" => [:INT8, 1],
+          "1_i16" => [:INT16, 1],
+          "1_i32" => [:INT32, 1],
+          "1_i64" => [:INT64, 1],
+          "1_u16" => [:UINT16, 1],
+          "1_u32" => [:UINT32, 1],
+          "1_u64" => [:UINT64, 1],
+          "1_f32" => [:FLOAT32, 1.0],
+          "1_f64" => [:NUMBER, 1.0],
+        }
+
+        expected.each do |source, (type, value)|
+          expect(Lexer.new(source).tokenize.first).to have_attributes(type: type, value: value)
+        end
+      end
+
+      it "checks the upper boundary of every integer suffix" do
+        accepted = {
+          "255_u8" => :BYTE,
+          "127_i8" => :INT8,
+          "32767_i16" => :INT16,
+          "65535_u16" => :UINT16,
+          "2147483647_i32" => :INT32,
+          "4294967295_u32" => :UINT32,
+          "9223372036854775807_i64" => :INT64,
+          "18446744073709551615_u64" => :UINT64,
+        }
+        rejected = %w[
+          256_u8 128_i8 32768_i16 65536_u16
+          2147483648_i32 4294967296_u32
+          9223372036854775808_i64 18446744073709551616_u64
+        ]
+
+        accepted.each do |source, type|
+          expect(Lexer.new(source).tokenize.first.type).to eq(type)
+        end
+        rejected.each do |source|
+          expect { Lexer.new(source).tokenize }.to raise_error(Lexer::Error, /overflows/)
+        end
+      end
+
+      it "does not consume a numeric suffix prefix from a longer identifier" do
+        tokens = Lexer.new("1_i8name").tokenize
+
+        expect(tokens.map { |token| [token.type, token.value] }).to eq([
+          [:INT64, 1], [:VAR_ID, "_"], [:VAR_ID, "i8name"], [:EOF, nil]
+        ])
+      end
     end
 
     it "handles complex operators" do
-      lexer = Lexer.new(".. -> |> OR_ELSE OR AND $+")
+      lexer = Lexer.new(".. -> |> OR_ELSE OR AND $+ **")
       tokens = lexer.tokenize
 
       expect(tokens.map(&:type)).to eq([
-        :RANGE, :ARROW, :SMOOTH, :OR_ELSE, :KEYWORD, :KEYWORD, :CHAR, :EOF
+        :RANGE, :ARROW, :SMOOTH, :OR_ELSE, :KEYWORD, :KEYWORD, :CHAR, :CHAR, :EOF
       ])
+      expect(tokens[-2].value).to eq("**")
+    end
+
+    it "emits every punctuation and operator token without prefix collisions" do
+      expected = {
+        "..." => :ELLIPSIS, "..<=" => :RANGE_INCL, "..=" => :RANGE_INCL,
+        "..<" => :RANGE_EXCL, ".." => :RANGE, "->" => :ARROW, "|>" => :SMOOTH,
+        "OR_ELSE" => :OR_ELSE, "==" => :CHAR, ">=" => :CHAR, "<=" => :CHAR,
+        "!=" => :CHAR, "&&" => :LEGACY_LOGICAL, "**" => :CHAR,
+        "||" => :LEGACY_LOGICAL, "$+" => :CHAR, "%*" => :CHAR, "%+" => :CHAR,
+        "%-" => :CHAR, "!*" => :CHAR, "!+" => :CHAR, "!-" => :CHAR,
+        "+=" => :COMPOUND_ASSIGN, "-=" => :COMPOUND_ASSIGN,
+        "*=" => :COMPOUND_ASSIGN, "/=" => :COMPOUND_ASSIGN,
+        "_" => :VAR_ID, "::" => :DOUBLE_COLON, "%" => :PERCENT,
+      }
+      "=+-*/<>&|!.,;(){}[]:?~".chars.each { |char| expected[char] = :CHAR }
+
+      expected.each do |source, type|
+        token = Lexer.new(source).tokenize.first
+        expect(token).to have_attributes(type: type, value: source)
+      end
+    end
+
+    it "rejects an unexpected character with its exact source position" do
+      expect { Lexer.new("\n  `").tokenize }
+        .to raise_error(Lexer::Error, 'Lexer Error: Unexpected char: "`" on line 2:3')
     end
 
     it "handles tight spacing (operators next to identifiers)" do
@@ -182,9 +296,32 @@ RSpec.describe Lexer do
       expect_token(tokens[3], :CHAR,   "+", 1, 4)
       expect_token(tokens[4], :VAR_ID, "y", 1, 5)
     end
-  end
-
   describe "String Interpolation" do
+    it "does not balance braces inside nested strings, escapes, or comments" do
+      sources = [
+        %q!"value ${foo("}")} tail"!,
+        %q!"value ${foo("{")} tail"!,
+        %q!"value ${foo("escaped \" } still string")} tail"!,
+        %q!"value ${foo("""triple } still string""")} tail"!,
+        "\"value \${foo(1 # } ignored\n + 2)} tail\"",
+      ]
+
+      sources.each do |source|
+        expect { Lexer.new(source).tokenize }.not_to raise_error
+      end
+    end
+
+    it "keeps absolute source coordinates for interpolation sub-lexers" do
+      source = "before\n\"value \${\n  answer + 1_i64\n} tail\""
+      answer = Lexer.new(source, file: "sample.clear").tokenize.find { |token| token.value == "answer" }
+
+      expect(answer).not_to be_nil
+      expect(answer.file).to eq("sample.clear")
+      expect([answer.line, answer.column]).to eq([3, 3])
+      expect(source.byteslice(answer.start_offset...answer.end_offset)).to eq("answer")
+      expect([answer.end_line, answer.end_column]).to eq([3, 9])
+    end
+
     it "interpolates a variable in the middle of a string" do
       # Source: "Hello ${name}!"
       # Logic:  "Hello " $+ (name) $+ "!"
@@ -295,6 +432,17 @@ RSpec.describe Lexer do
       inner_values = inner_content.map(&:value)
       expect(inner_values).to include("{", "a", ":", 1.0, "}")
     end
+
+    it "bounds recursively nested interpolation before rescanning can grow without limit" do
+      source = "value"
+      Lexer::MAX_INTERPOLATION_DEPTH.times { source = '"${' + source + '}"' }
+
+      expect { Lexer.new(source).tokenize }.not_to raise_error
+
+      too_deep = '"${' + source + '}"'
+      expect { Lexer.new(too_deep).tokenize }
+        .to raise_error(Lexer::Error, /nesting exceeds 64 levels/)
+    end
   end
 
   describe "Compound Assignment Operators" do
@@ -381,5 +529,6 @@ RSpec.describe Lexer do
       expect(tokens[0].value).to eq("x")
       expect(tokens[1].value).to eq("!=")
     end
+  end
   end
 end

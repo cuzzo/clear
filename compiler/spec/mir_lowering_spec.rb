@@ -1122,7 +1122,7 @@ RSpec.describe MIRLowering do
     it "uses structural IndexGet assignment for the bytecode backend" do
       low, assignment = compile_first_assignment(<<~CLEAR, target: :bc)
         FN main() RETURNS Void ->
-          MUTABLE m: HashMap<Int64> = {};
+          MUTABLE m: {String}Int64 = {};
           m["a"] = 1_i64;
           RETURN;
         END
@@ -1138,7 +1138,7 @@ RSpec.describe MIRLowering do
     it "lowers raw fixed-size array writes to native indexed Set with usize cast" do
       low, assignment = compile_first_assignment(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE xs: Int64[4] = [0_i64, 0_i64, 0_i64, 0_i64];
+          MUTABLE xs: [4]Int64 = [0_i64, 0_i64, 0_i64, 0_i64];
           xs[1_i64] = 7_i64;
           RETURN;
         END
@@ -1155,7 +1155,7 @@ RSpec.describe MIRLowering do
     it "lowers string HashMap writes to structured ShardedMapPut" do
       low, assignment = compile_first_assignment(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE m: HashMap<Int64> = {};
+          MUTABLE m: {String}Int64 = {};
           m["a"] = 1_i64;
           RETURN;
         END
@@ -1177,7 +1177,7 @@ RSpec.describe MIRLowering do
     it "carries numeric HashMap key/value Zig types into ShardedMapPut" do
       low, assignment = compile_first_assignment(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE m: HashMap<Int64, Float64> = {};
+          MUTABLE m: {Int64}Float64 = {};
           m[3_i64] = 4.5;
           RETURN;
         END
@@ -1194,7 +1194,7 @@ RSpec.describe MIRLowering do
     it "uses shard-direct placeholders when lowering inside a shard context" do
       low, assignment = compile_first_assignment(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE m: HashMap<Int64> = {};
+          MUTABLE m: {String}Int64 = {};
           m["a"] = 1_i64;
           RETURN;
         END
@@ -1214,7 +1214,7 @@ RSpec.describe MIRLowering do
     it "keeps list writes on the indexed template path with target metadata" do
       low, assignment = compile_first_assignment(<<~CLEAR)
         FN main() RETURNS Void ->
-          MUTABLE xs: Int64[]@list = [];
+          MUTABLE xs: []Int64 = [];
           xs[0_i64] = 9_i64;
           RETURN;
         END
@@ -1316,7 +1316,7 @@ RSpec.describe MIRLowering do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           n = 4_i64;
-          MUTABLE map: HashMap<Int64>@sharded(4) = {};
+          MUTABLE map: {String}@sharded(4) Int64 = {};
 
           (0..<n) |> SHARD("k:${toString(_)}", map) |> CONCURRENT EACH {
             map[_] = 1_i64;
@@ -1906,7 +1906,7 @@ RSpec.describe MIRLowering do
   describe "indirect aggregate field ownership" do
     it "moves recursive union locals when they are boxed into indirect inline-variant fields" do
       src = <<~CLEAR
-        UNION Node { Nil, One: String, Pair { left: Node @indirect, right: Node @indirect } }
+        UNION Node { Nil, One: String, Pair { left: Node @boxed, right: Node @boxed } }
 
         FN mk() RETURNS !Node ->
             left = Node{ One: COPY "a" };
@@ -2378,10 +2378,10 @@ RSpec.describe MIRLowering do
 
     it "attributes IF-bind alias field map writes to the captured owner" do
       mir = lower_source_mir(<<~CLEAR)
-        STRUCT Env { vars: HashMap<Int64> }
+        STRUCT Env { vars: {String}Int64 }
 
         FN main() RETURNS Void ->
-          MUTABLE pool: Env[4]@pool = [];
+          MUTABLE pool: [Pool(4)]Env = [];
           id: Id<Env> = pool.insert(Env{ vars: {} });
           IF pool[id] EXISTS AS env THEN
             env.vars["a"] = 1_i64;
@@ -3613,7 +3613,7 @@ RSpec.describe MIRLowering do
         END
 
         FN run() RETURNS !Void ->
-          MUTABLE outer: String[]@list = [];
+          MUTABLE outer: []String = [];
           outer.append(inner() OR_ELSE PASS);
           RETURN;
         END

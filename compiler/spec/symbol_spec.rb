@@ -541,7 +541,7 @@ RSpec.describe "String@symbol" do
     it "wraps a symbol payload assigned into an optional union map value" do
       zig = compile_symbol_src(<<~CLEAR)
         UNION TemplateValue { StringValue: String, SymbolValue: String@symbol }
-        FN put_symbol!(MUTABLE out: HashMap<String, ?TemplateValue>, value: String@symbol) RETURNS Void ->
+        FN put_symbol!(MUTABLE out: {String}?TemplateValue, value: String@symbol) RETURNS Void ->
           out[:value] = value;
         END
       CLEAR

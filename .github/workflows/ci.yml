@@ -1491,8 +1491,79 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  generalized-gems-sarif:
-    name: Decomplex / Boobytrap / SlopCop / Espalier / Nil-Kill SARIF
+  # Keep each SARIF producer in its own job. Besides isolating failures, this
+  # makes a producer job directly copyable into a downstream repository.
+  # Native analyzers are the sole shared prerequisite and are built once here.
+  sarif-rust-binaries:
+    name: Build shared SARIF analyzer binaries
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build release binaries once
+        run: |
+          cargo build --release --manifest-path gems/fact-mine/Cargo.toml
+          cargo build --release --manifest-path gems/decomplex/Cargo.toml
+          cargo build --release --manifest-path gems/sql-cov/Cargo.toml
+          mkdir -p tmp/sarif-binaries
+          install -m 755 gems/fact-mine/target/release/fact-mine-rust tmp/sarif-binaries/fact-mine-rust
+          install -m 755 gems/decomplex/target/release/decomplex-rust tmp/sarif-binaries/decomplex-rust
+          install -m 755 gems/sql-cov/target/release/sql-cov tmp/sarif-binaries/sql-cov
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+          if-no-files-found: error
+          retention-days: 1
+
+  decomplex-sarif:
+    name: Decomplex SARIF
+    runs-on: ubuntu-latest
+    needs: [changes, sarif-rust-binaries]
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+      - name: Generate Decomplex report
+        run: |
+          chmod +x tmp/sarif-binaries/decomplex-rust
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+            --repo=. \
+            --base="origin/${{ github.event.pull_request.base.ref }}" \
+            --head=HEAD \
+            --out-dir=tmp/decomplex-sarif \
+            --decomplex-binary=tmp/sarif-binaries/decomplex-rust \
+            --only=decomplex
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/decomplex-sarif/decomplex.sarif
+          category: decomplex
+      - uses: actions/upload-artifact@v4
+        with:
+          name: decomplex-sarif
+          path: tmp/decomplex-sarif
+          if-no-files-found: error
+          retention-days: 7
+
+  boobytrap-sarif:
+    name: Boobytrap SARIF
     runs-on: ubuntu-latest
     needs:
       - changes
@@ -1506,8 +1577,206 @@ jobs:
       - zig-coverage
       - zig-mutants-coverage
       - lineage-rust-coverage
-      - sql-cov-dialects
     if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: gems/boobytrap/go.sum
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - name: Download Ruby coverage artifacts
+        if: ${{ needs['ruby-gems-coverage'].result == 'success' || needs['ruby-unit'].result == 'success' || needs['ruby-integration'].result == 'success' || needs['transpile-tests'].result == 'success' || needs['examples-benchmarks-coverage-shard'].result == 'success' || needs['tools-fuzz-shard'].result == 'success' || needs['bc-lower-coverage-shard'].result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ruby-coverage-*
+          path: tmp/sarif-coverage
+      - name: Download Zig coverage artifacts
+        if: ${{ needs['zig-coverage'].result == 'success' || needs['zig-mutants-coverage'].result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zig-coverage-*
+          path: tmp/sarif-coverage
+      - name: Download Lineage Rust coverage artifact
+        if: ${{ needs['lineage-rust-coverage'].result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: lineage-rust-coverage
+          path: tmp/sarif-coverage/lineage-rust-coverage
+      - name: Generate Boobytrap report
+        run: |
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          coverage_args=()
+          while IFS= read -r path; do
+            coverage_args+=(--coverage="${path}")
+          done < <(
+            find tmp/sarif-coverage -type f \
+              \( -name .resultset.json -o -name cobertura.xml -o -name codecov.json \) \
+              ! -path '*zig-coverage-loom-*' \
+              ! -path '*zig-coverage-vopr-*' \
+              | sort
+          )
+          bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+            --repo=. \
+            --base="origin/${{ github.event.pull_request.base.ref }}" \
+            --head=HEAD \
+            --out-dir=tmp/boobytrap-sarif \
+            --top=80 \
+            --only=boobytrap \
+            "${coverage_args[@]}"
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/boobytrap-sarif/boobytrap.sarif
+          category: boobytrap
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boobytrap-sarif
+          path: tmp/boobytrap-sarif
+          if-no-files-found: error
+          retention-days: 7
+
+  slopcop-sarif:
+    name: SlopCop SARIF
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - ruby-gems-coverage
+      - ruby-unit
+      - ruby-integration
+      - transpile-tests
+      - examples-benchmarks-coverage-shard
+      - tools-fuzz-shard
+      - bc-lower-coverage-shard
+      - zig-coverage
+      - zig-mutants-coverage
+      - lineage-rust-coverage
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: gems/boobytrap/go.sum
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - name: Download Ruby coverage artifacts
+        if: ${{ needs['ruby-gems-coverage'].result == 'success' || needs['ruby-unit'].result == 'success' || needs['ruby-integration'].result == 'success' || needs['transpile-tests'].result == 'success' || needs['examples-benchmarks-coverage-shard'].result == 'success' || needs['tools-fuzz-shard'].result == 'success' || needs['bc-lower-coverage-shard'].result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ruby-coverage-*
+          path: tmp/sarif-coverage
+      - name: Download Zig coverage artifacts
+        if: ${{ needs['zig-coverage'].result == 'success' || needs['zig-mutants-coverage'].result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zig-coverage-*
+          path: tmp/sarif-coverage
+      - name: Download Lineage Rust coverage artifact
+        if: ${{ needs['lineage-rust-coverage'].result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: lineage-rust-coverage
+          path: tmp/sarif-coverage/lineage-rust-coverage
+      - name: Generate SlopCop report
+        run: |
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          coverage_args=()
+          while IFS= read -r path; do
+            coverage_args+=(--coverage="${path}")
+          done < <(
+            find tmp/sarif-coverage -type f \
+              \( -name .resultset.json -o -name cobertura.xml -o -name codecov.json \) \
+              ! -path '*zig-coverage-loom-*' \
+              ! -path '*zig-coverage-vopr-*' \
+              | sort
+          )
+          bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+            --repo=. \
+            --base="origin/${{ github.event.pull_request.base.ref }}" \
+            --head=HEAD \
+            --out-dir=tmp/slopcop-sarif \
+            --top=80 \
+            --only=slopcop \
+            "${coverage_args[@]}"
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/slopcop-sarif/slopcop.sarif
+          category: slopcop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slopcop-sarif
+          path: tmp/slopcop-sarif
+          if-no-files-found: error
+          retention-days: 7
+
+  espalier-sarif:
+    name: Espalier SARIF
+    runs-on: ubuntu-latest
+    needs: [changes, sarif-rust-binaries]
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Tree-sitter grammars
+        run: npm install --legacy-peer-deps
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+      - name: Generate Espalier report
+        env:
+          FACT_MINE_RUST_BINARY: tmp/sarif-binaries/fact-mine-rust
+        run: |
+          chmod +x tmp/sarif-binaries/fact-mine-rust
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+            --repo=. \
+            --base="origin/${{ github.event.pull_request.base.ref }}" \
+            --head=HEAD \
+            --out-dir=tmp/espalier-sarif \
+            --only=espalier
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/espalier-sarif/espalier.sarif
+          category: espalier
+      - uses: actions/upload-artifact@v4
+        with:
+          name: espalier-sarif
+          path: tmp/espalier-sarif
+          if-no-files-found: error
+          retention-days: 7
+
+  nil-kill-sarif:
+    name: Nil-Kill SARIF
+    runs-on: ubuntu-latest
+    needs: [changes, sarif-rust-binaries]
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
     permissions:
       contents: read
       security-events: write
@@ -1519,13 +1788,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y z3
-      - name: Install SQLFluff
-        run: pip install sqlfluff==4.2.2
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-          cache-dependency-path: gems/boobytrap/go.sum
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
@@ -1535,104 +1797,101 @@ jobs:
           node-version: 20
       - name: Install Tree-sitter grammars
         run: npm install --legacy-peer-deps
-      - name: Build Rust binaries
-        run: |
-          cargo build --release --manifest-path gems/fact-mine/Cargo.toml
-          cargo build --release --manifest-path gems/decomplex/Cargo.toml
-          cargo build --release --manifest-path gems/sql-cov/Cargo.toml
-      - name: Download Ruby coverage artifacts
-        if: ${{ needs['ruby-gems-coverage'].result == 'success' || needs['ruby-unit'].result == 'success' || needs['ruby-integration'].result == 'success' || needs['transpile-tests'].result == 'success' || needs['examples-benchmarks-coverage-shard'].result == 'success' || needs['tools-fuzz-shard'].result == 'success' || needs['bc-lower-coverage-shard'].result == 'success' }}
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          pattern: ruby-coverage-*
-          path: tmp/generalized-gems-coverage
-      - name: Download Zig coverage artifacts
-        if: ${{ needs['zig-coverage'].result == 'success' || needs['zig-mutants-coverage'].result == 'success' }}
-        uses: actions/download-artifact@v4
-        with:
-          pattern: zig-coverage-*
-          path: tmp/generalized-gems-coverage
-      - name: Download Lineage Rust coverage artifact
-        if: ${{ needs['lineage-rust-coverage'].result == 'success' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: lineage-rust-coverage
-          path: tmp/generalized-gems-coverage/lineage-rust-coverage
-      - name: Generate ordered SARIF reports
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+      - name: Generate Nil-Kill report
         env:
-          FACT_MINE_RUST_BINARY: ./gems/fact-mine/target/release/fact-mine-rust
+          FACT_MINE_RUST_BINARY: tmp/sarif-binaries/fact-mine-rust
         run: |
+          chmod +x tmp/sarif-binaries/fact-mine-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
-          mkdir -p tmp/generalized-gems-coverage tmp/generalized-gems-sarif
-          coverage_args=()
-          while IFS= read -r path; do
-            coverage_args+=(--coverage="${path}")
-          done < <(
-            find tmp/generalized-gems-coverage -type f \
-              \( -name .resultset.json -o -name cobertura.xml -o -name codecov.json \) \
-              ! -path '*zig-coverage-loom-*' \
-              ! -path '*zig-coverage-vopr-*' \
-              | sort
-          )
           bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
-            --out-dir=tmp/generalized-gems-sarif \
-            --top=80 \
-            --decomplex-binary=./gems/decomplex/target/release/decomplex-rust \
-            "${coverage_args[@]}"
+            --out-dir=tmp/nil-kill-sarif \
+            --only=nil-kill
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/nil-kill-sarif/nil-kill.sarif
+          category: nil-kill
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nil-kill-sarif
+          path: tmp/nil-kill-sarif
+          if-no-files-found: error
+          retention-days: 7
+
+  sql-cov-sarif:
+    name: SQL-COV SARIF
+    runs-on: ubuntu-latest
+    needs: [changes, sarif-rust-binaries, sql-cov-dialects]
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' && needs.sql-cov-dialects.result == 'success' }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+      - name: Generate SQL-COV report
+        run: |
+          chmod +x tmp/sarif-binaries/sql-cov
           ./tools/generate_sql_cov_sarif.rb \
             --repo=. \
-            --out-dir=tmp/generalized-gems-sarif \
+            --out-dir=tmp/sql-cov-sarif \
             --setup=gems/lineage/sql/storage/init_schema.sql \
-            --sql-cov-bin=./gems/sql-cov/target/release/sql-cov
+            --sql-cov-bin=tmp/sarif-binaries/sql-cov
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/sql-cov-sarif/sql-cov.sarif
+          category: sql-cov
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sql-cov-sarif
+          path: tmp/sql-cov-sarif
+          if-no-files-found: error
+          retention-days: 7
+
+  sqlfluff-sarif:
+    name: SQLFluff SARIF
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true') }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - name: Install SQLFluff
+        run: pip install sqlfluff==4.2.2
+      - name: Generate SQLFluff report
+        run: |
           ./tools/generate_sqlfluff_sarif.rb \
             --repo=. \
-            --out-dir=tmp/generalized-gems-sarif \
+            --out-dir=tmp/sqlfluff-sarif \
             --config=.sqlfluff \
             --sql-path=gems/lineage/sql
-      - name: Upload Decomplex SARIF
-        uses: github/codeql-action/upload-sarif@v4
+      - uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: tmp/generalized-gems-sarif/decomplex.sarif
-          category: decomplex
-      - name: Upload Boobytrap SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/generalized-gems-sarif/boobytrap.sarif
-          category: boobytrap
-      - name: Upload SlopCop SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/generalized-gems-sarif/slopcop.sarif
-          category: slopcop
-      - name: Upload Espalier SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/generalized-gems-sarif/espalier.sarif
-          category: espalier
-      - name: Upload Nil-Kill SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/generalized-gems-sarif/nil-kill.sarif
-          category: nil-kill
-      - name: Upload SQL-cov SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/generalized-gems-sarif/sql-cov.sarif
-          category: sql-cov
-      - name: Upload SQLFluff SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/generalized-gems-sarif/sqlfluff.sarif
+          sarif_file: tmp/sqlfluff-sarif/sqlfluff.sarif
           category: sqlfluff
       - uses: actions/upload-artifact@v4
         with:
-          name: generalized-gems-sarif
-          path: |
-            tmp/generalized-gems-sarif/*.sarif
-            tmp/generalized-gems-sarif/*.md
+          name: sqlfluff-sarif
+          path: tmp/sqlfluff-sarif
           if-no-files-found: error
           retention-days: 7
 

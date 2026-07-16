@@ -12,8 +12,66 @@ RSpec.describe "annotator completion phases" do
     ClearParser.new(Lexer.new(source).tokenize, source).parse
   end
 
-  it "initializes builtin environment during annotator construction" do
-    scope = SemanticAnnotator.new.send(:current_scope)
+  def typed_phase(source = "")
+    program = parse(source)
+    resolution = Annotator::Phases::ResolutionPhase.run(
+      program: program, importer: nil, source_dir: Dir.pwd, source_code: source
+    )
+    session = Annotator::Phases::TypeAnalysisSession.new(source_code: source)
+    handoff = Annotator::Phases::TypeAnalysisPhase.run(
+      resolution: resolution, session: session
+    )
+    [session, handoff]
+  end
+
+  def audit_session_for(handoff, source = "")
+    request = handoff.audit_request
+    Annotator::Phases::CapabilityAuditSession.new(
+      typed_program: handoff.typed_program,
+      inputs: request.inputs,
+      source_code: request.source_code || source,
+      language_mode: request.language_mode,
+      strict_test: request.strict_test
+    )
+  end
+
+  def boundary_products(program)
+    registry = Annotator::FunctionRegistry.new
+    program.statements.grep(AST::FunctionDef).each { |fn| registry.nodes[fn.name] = fn }
+    resolution = Annotator::Phases::ResolutionFacts.new(
+      program: program,
+      declarations: Annotator::Phases::DeclarationIndexer.index(program),
+      root_scope: Scope.new,
+      function_registry: registry,
+      type_names: [],
+      function_names: registry.names
+    )
+    typed_program = Annotator::Phases::TypedProgramFacts.new(
+      resolution: resolution,
+      body_summaries: {},
+      typed_node_count: 0,
+      unresolved_node_count: 0,
+      ownership_graph: OwnershipGraph.new
+    )
+    audit = Annotator::Phases::CapabilityAuditReport.new(
+      typed_program: typed_program,
+      checked_functions: registry.names,
+      checked_call_sites: 0,
+      checked_with_sites: 0,
+      violation_count: 0
+    )
+    Annotator::Phases::AnnotationProducts.new(
+      resolution: resolution,
+      typed_program: typed_program,
+      capability_audit: audit
+    )
+  end
+
+  it "initializes builtin environment inside the resolution phase" do
+    session = Annotator::Phases::ResolutionSession.new(
+      importer: nil, source_dir: Dir.pwd, source_code: nil
+    )
+    scope = session.resolve!(AST::Program.new(tok, [])).root_scope
 
     expect(scope.resolve_entry!("argv").type.resolved).to eq(:String)
     expect(scope.types.fetch(:Range).schema).to be_a(Schemas::StructSchema)
@@ -59,12 +117,16 @@ RSpec.describe "annotator completion phases" do
 
     expect(index.program).to eq(program)
     expect(index.root_scope).to eq(annotator.semantic_root_scope)
-    expect(index.function_node("main")).to eq(annotator.function_node_for("main"))
+    expect(index.function_node("main")).to eq(index.function_nodes.fetch("main"))
     expect(index.function_nodes.keys).to include("main")
     expect(index.id_index.definition_id_for("main")&.value).to be > 0
     expect(index.id_index.body_id_for("main")&.value).to be > 0
     expect(index.body_summaries.fetch("main").definition_id).to eq(index.id_index.definition_id_for("main"))
     expect(index.body_summaries.fetch("main").body_id).to eq(index.id_index.body_id_for("main"))
+    expect(index).to be_frozen
+    expect(index.annotation_products).to equal(annotator.annotation_products)
+    expect(index.typed_program).to equal(annotator.annotation_products.typed_program)
+    expect(index.capability_audit).to equal(annotator.annotation_products.capability_audit)
   end
 
   it "publishes typed local and call-site facts in function body summaries" do
@@ -81,7 +143,7 @@ RSpec.describe "annotator completion phases" do
     CLEAR
 
     annotator.annotate!(program)
-    summary = T.must(annotator.function_body_summaries["main"])
+    summary = T.must(T.must(annotator.semantic_index).body_summaries["main"])
 
     expect(summary.definition_id.value).to be > 0
     expect(summary.body_id.value).to be > 0
@@ -109,13 +171,20 @@ RSpec.describe "annotator completion phases" do
     expect {
       annotator.annotate!(second)
     }.to raise_error(CompilerError, /undefined|unknown/i)
-    expect(annotator.semantic_function_nodes).not_to have_key("stale")
+    expect(annotator.annotation_products.resolution&.function_registry&.nodes).not_to have_key("stale")
   end
 
   it "appends synthesized functions during body analysis" do
-    annotator = SemanticAnnotator.new
+    annotator = Annotator::Phases::TypeAnalysisSession.new
     program = AST::Program.new(tok, [])
     index = Annotator::Phases::DeclarationIndexer.index(program)
+    resolution = Annotator::Phases::ResolutionPhase.run(
+      program: program,
+      importer: nil,
+      source_dir: Dir.pwd,
+      source_code: nil
+    )
+    annotator.send(:adopt_resolution_facts!, resolution)
     synthetic = AST::FunctionDef.new(
       tok("generated"),
       "generated",
@@ -132,63 +201,69 @@ RSpec.describe "annotator completion phases" do
     )
     annotator.send(:synthetic_function_definitions) << synthetic
 
-    annotator.analyze_program_bodies!(index, program)
+    annotator.send(:analyze_program_bodies!, index, program)
 
     expect(program.statements).to eq([synthetic])
-    expect(annotator.semantic_function_nodes.fetch("generated")).to eq(synthetic)
+    expect(annotator.send(:semantic_function_nodes).fetch("generated")).to eq(synthetic)
   end
 
   it "skips non-signature function metadata while finalizing summaries" do
-    annotator = SemanticAnnotator.new
+    _type_session, handoff = typed_phase
+    annotator = audit_session_for(handoff)
     fn = AST::FunctionDef.new(tok("helper"), "helper", [], [], Type.new(:Void), nil, [], [], nil, :pub, [], false)
     fn.full_type = Type.new(:Void)
-    annotator.semantic_function_nodes["helper"] = fn
+    annotator.send(:semantic_function_nodes)["helper"] = fn
 
     expect {
       annotator.send(:restamp_function_metadata!)
     }.not_to raise_error
   end
 
-  it "rejects annotation completion if deferred validations remain" do
-    program = AST::Program.new(tok, [])
-    annotator = SemanticAnnotator.new
-    program.full_type = Type.new(:Void)
+  it "drains deferred validations before publishing the audit report" do
+    _type_session, handoff = typed_phase
     with_node = AST::WithBlock.new(tok("WITH"), [], [], [])
     var_node = AST::Identifier.new(tok("cell"), "cell")
     var_node.full_type = Type.new(:Int64)
-    annotator.record_deferred_with_validation!(
-      with_node,
-      capability_transition(AST::Capability.new(capability: :EXCLUSIVE, var_node: var_node))
+    var_node.symbol = SymbolEntry.new(
+      reg: nil, type: Type.new(:Int64), mutable: true, storage: :heap, sync: :locked
+    )
+    handoff.audit_request.inputs.deferred_with_validations << Annotator::Phases::DeferredWithValidation.new(
+      node: with_node,
+      fact: capability_transition(AST::Capability.new(capability: :EXCLUSIVE, var_node: var_node))
     )
 
-    expect {
-      annotator.mark_annotation_complete!(program)
-    }.to raise_error(RuntimeError, /pending deferred validations/)
+    report = Annotator::Phases::CapabilityAuditPhase.run(
+      typed_program: handoff.typed_program,
+      request: handoff.audit_request
+    )
+
+    expect(report).to be_success
+    expect(handoff.audit_request.inputs.deferred_with_validations).to be_empty
   end
 
   it "flushes deferred ATOMIC validations instead of dropping them" do
-    annotator = SemanticAnnotator.new(source_code: "")
+    _type_session, handoff = typed_phase
     with_node = AST::WithBlock.new(tok("WITH"), [], [], [])
     var_node = AST::Identifier.new(tok("cell"), "cell")
     var_node.full_type = Type.new(:Int64)
     var_node.symbol = SymbolEntry.new(reg: nil, type: Type.new(:Int64), mutable: true, storage: :stack)
     var_node.symbol.is_param = true
-    annotator.record_deferred_with_validation!(
-      with_node,
-      capability_transition(AST::Capability.new(capability: :ATOMIC, var_node: var_node))
+    handoff.audit_request.inputs.deferred_with_validations << Annotator::Phases::DeferredWithValidation.new(
+      node: with_node,
+      fact: capability_transition(AST::Capability.new(capability: :ATOMIC, var_node: var_node))
     )
+    annotator = audit_session_for(handoff)
 
-    expect {
-      annotator.run_deferred_validations!
-    }.to raise_error(CompilerError, /WITH ATOMIC requires/)
+      expect {
+        annotator.send(:run_deferred_validations!)
+      }.to raise_error(CompilerError, /WITH ATOMIC requires/)
   end
 
   it "rejects annotation completion if the program remains unstamped" do
     program = AST::Program.new(tok, [])
-    annotator = SemanticAnnotator.new
 
     expect {
-      annotator.mark_annotation_complete!(program)
+      Annotator::Phases::AnnotationBoundary.verify!(program, boundary_products(program))
     }.to raise_error(RuntimeError, /unresolved type info/)
   end
 
@@ -196,10 +271,9 @@ RSpec.describe "annotator completion phases" do
     child = AST::Identifier.new(tok("x"), "x")
     program = AST::Program.new(tok, [child])
     program.full_type = Type.new(:Void)
-    annotator = SemanticAnnotator.new
 
     expect {
-      annotator.mark_annotation_complete!(program)
+      Annotator::Phases::AnnotationBoundary.verify!(program, boundary_products(program))
     }.to raise_error(RuntimeError, /unresolved AST type facts/)
   end
 
@@ -208,10 +282,9 @@ RSpec.describe "annotator completion phases" do
     child.full_type = Type.new(:Auto, auto: true)
     program = AST::Program.new(tok, [child])
     program.full_type = Type.new(:Void)
-    annotator = SemanticAnnotator.new
 
     expect {
-      annotator.mark_annotation_complete!(program)
+      Annotator::Phases::AnnotationBoundary.verify!(program, boundary_products(program))
     }.to raise_error(RuntimeError, /Identifier .* Auto/)
   end
 
@@ -221,24 +294,21 @@ RSpec.describe "annotator completion phases" do
     fn.full_type = FunctionSignature.new(params: [], return_type: Type.new(:Int64))
     program = AST::Program.new(tok, [fn])
     program.full_type = Type.new(:Void)
-    annotator = SemanticAnnotator.new
-    annotator.semantic_function_nodes["identity"] = fn
 
     expect {
-      annotator.mark_annotation_complete!(program)
+      Annotator::Phases::AnnotationBoundary.verify!(program, boundary_products(program))
     }.not_to raise_error
   end
 
   it "rejects annotation completion if a function lacks a signature" do
     program = AST::Program.new(tok, [])
-    annotator = SemanticAnnotator.new
     fn = AST::FunctionDef.new(tok("bad"), "bad", [], [], Type.new(:Void), nil, [], [], nil, :pub, [], false)
+    program.statements << fn
     program.full_type = Type.new(:Void)
     fn.full_type = Type.new(:Void)
-    annotator.semantic_function_nodes["bad"] = fn
 
     expect {
-      annotator.mark_annotation_complete!(program)
+      Annotator::Phases::AnnotationBoundary.verify!(program, boundary_products(program))
     }.to raise_error(RuntimeError, /missing function signature/)
   end
 end

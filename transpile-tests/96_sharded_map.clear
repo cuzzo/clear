@@ -4,7 +4,7 @@
 
 FN main() RETURNS Void ->
     # String-keyed sharded map with 2 shards.
-    MUTABLE counts: HashMap<Int64>@sharded(2) = {};
+    MUTABLE counts: {String}@sharded(2) Int64 = {};
 
     # Put values (routed to shards by key hash).
     counts["alice"] = 10;

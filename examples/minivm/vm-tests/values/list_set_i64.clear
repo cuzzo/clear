@@ -1,5 +1,5 @@
 FN main() RETURNS Int64 ->
-    MUTABLE items: Int64[]@list = [];
+    MUTABLE items: []Int64 = [];
     append(items, 10_i64);
     append(items, 20_i64);
     append(items, 30_i64);

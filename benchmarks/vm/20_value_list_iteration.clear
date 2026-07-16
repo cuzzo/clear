@@ -2,7 +2,7 @@ UNION Val { Nil, Str: String, Num: Float64 }
 
 FN main() RETURNS Void ->
     t0 = timestampMs();
-    MUTABLE items: Val[]@list = List[];
+    MUTABLE items: []Val = List[];
 
     FOR i IN (0_i64 ..< 100000_i64) DO
         m3 = i MOD 3_i64;

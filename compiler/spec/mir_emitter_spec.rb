@@ -1364,6 +1364,21 @@ RSpec.describe MIREmitter do
       expect(zig).to include("if (!__ib_ok_1)")
     end
 
+    it "emits StreamStep extraction in a multi-binding if-bind" do
+      node = MIR::IfBindStmt.new(
+        [
+          { expr: MIR::Ident.new("step_a"), capture: "a", predicate: :stream_item },
+          { expr: MIR::Ident.new("step_b"), capture: "b", predicate: :stream_item },
+        ],
+        [MIR::ReturnStmt.new(MIR::Ident.new("a"))],
+        nil,
+      )
+
+      zig = e.emit(node)
+      expect(zig).to include("const a = switch (step_a) { .Item => |payload| payload, .Closed => break :__ib_1 };")
+      expect(zig).to include("const b = switch (step_b) { .Item => |payload| payload, .Closed => break :__ib_1 };")
+    end
+
     it "covers defensive strategy errors and passthrough cap wrapping" do
       expect { e.emit(MIR::DeepCopy.new(MIR::Ident.new("src"), nil, nil, :unknown, :heap)) }
         .to raise_error(/emit_deep_copy: unhandled strategy :unknown/)

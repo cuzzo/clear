@@ -360,7 +360,7 @@ impl AstNormalizationAdapter for PythonAstAdapter {
         &self,
         node: TreeSitterNode<'tree>,
         source: &str,
-    ) -> Option<(Option<TreeSitterNode<'tree>>, Option<TreeSitterNode<'tree>>)> {
+    ) -> Option<(Vec<TreeSitterNode<'tree>>, Option<TreeSitterNode<'tree>>)> {
         let statement = self
             .exact_single_named_child(node, &["with_statement"], source)
             .unwrap_or(node);
@@ -378,7 +378,24 @@ impl AstNormalizationAdapter for PythonAstAdapter {
             .rev()
             .copied()
             .find(|child| child.kind() == "block");
-        Some((clause, body))
+        let contexts = clause
+            .map(named_children)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|item| {
+                let item = if item.kind() == "with_item" {
+                    named_children(item).into_iter().next().unwrap_or(item)
+                } else {
+                    item
+                };
+                if item.kind() == "as_pattern" {
+                    named_children(item).into_iter().next()
+                } else {
+                    Some(item)
+                }
+            })
+            .collect();
+        Some((contexts, body))
     }
 
     fn leading_owner_target<'tree>(

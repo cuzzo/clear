@@ -3,7 +3,7 @@
 // Same producer-consumer config swap workload as the CLEAR bench:
 // 1 writer publishes a Counter via atomic.Pointer[Counter]; N readers
 // each load the pointer reads_per times and verify the structural
-// invariant `b == a * 2`. Compares the M3 @indirect:atomic surface
+// invariant `b == a * 2`. Compares the M3 @boxed:atomic surface
 // against Go's standard `sync/atomic.Pointer[T]` (Go 1.19+).
 //
 // Build: go build -o bench_go .

@@ -2,7 +2,7 @@
 # (def! a 10) then (def! f (fn* (x) (+ x a))) then (f 5) should be 15.
 # This tests that envGet follows the __p parent chain correctly.
 
-STRUCT Env { vars: HashMap<Value> }
+STRUCT Env { vars: {String}Value }
 
 UNION Value {
     Nil,
@@ -10,11 +10,11 @@ UNION Value {
     Symbol: String,
     NativeFn: String,
     List: Value[],
-    Lambda { params: Value[], body: Value @indirect, envId: Id<Env> },
+    Lambda { params: Value[], body: Value @boxed, envId: Id<Env> },
     EnvRef: Id<Env>
 }
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[10000]@pool) RETURNS !Value EFFECTS REENTRANT ->
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: [Pool(10000)]Env) RETURNS !Value EFFECTS REENTRANT ->
     MUTABLE parentVal: Value = Value.Nil;
     IF pool[envId] EXISTS AS env THEN
         val = COPY (env.vars[name] OR_ELSE Value{ Number: 0.0 - 777777.0 });
@@ -36,7 +36,7 @@ FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[10000]@pool) RETURNS 
 END
 
 FN main() RETURNS Void ->
-    MUTABLE pool: Env[10000]@pool = [];
+    MUTABLE pool: [Pool(10000)]Env = [];
 
     # Create root env and set a=10
     rootId: Id<Env> = pool.insert(Env{ vars: {} });

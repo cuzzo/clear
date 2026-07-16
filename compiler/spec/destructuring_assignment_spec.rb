@@ -31,17 +31,18 @@ RSpec.describe "destructuring assignment" do
       .to eq([["a", "Int32", true], ["b", "Float64", true]])
   end
 
-  it "backtracks speculative destructuring without an assignment operator" do
+  it "classifies destructuring without moving the parser cursor" do
     parser = ClearParser.new(Lexer.new("a, b;").tokenize, "a, b;")
 
-    expect(parser.send(:try_parse_destructuring_assign)).to be_nil
+    expect(parser.send(:destructuring_assignment?)).to eq(true)
+    expect(parser.instance_variable_get(:@pos)).to eq(0)
   end
 
   it "parses destructuring inside value block statements" do
     source = "a, b = [1_i64, 2_i64];"
     parser = ClearParser.new(Lexer.new(source).tokenize, source)
 
-    expect(parser.send(:try_parse_value_block_statement)).to be_a(AST::DestructuringAssignment)
+    expect(parser.send(:parse_statement)).to be_a(AST::DestructuringAssignment)
   end
 
   it "parses control-flow statements inside lambda value blocks before the result" do
@@ -116,7 +117,7 @@ RSpec.describe "destructuring assignment" do
   it "uses fixed identifier shape when destructuring non-literal values" do
     zig = transpile(<<~CLEAR)
       FN main() RETURNS Int64 ->
-        pair: Int64[2] = [13_i64, 14_i64];
+        pair: [2]Int64 = [13_i64, 14_i64];
         a, b = pair;
         RETURN a + b;
       END
@@ -163,7 +164,7 @@ RSpec.describe "destructuring assignment" do
     expect {
       transpile(<<~CLEAR)
         FN main() RETURNS Void ->
-          xs: Int64[]@list = [];
+          xs: []Int64 = [];
           a: Int64, b: Int64 = xs;
           RETURN;
         END

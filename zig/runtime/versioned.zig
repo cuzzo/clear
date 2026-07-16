@@ -650,7 +650,7 @@ pub fn updateMulti(
             }.call;
             try ebr.retireWithDeinit(allocator, old_node, destroy);
             // Record per-cell that THIS commit was multi-cell. The doctor
-            // uses this to reject @shared:versioned -> @indirect:atomic
+            // uses this to reject @shared:versioned -> @boxed:atomic
             // suggestions because AtomicPtr has no multi-pointer CAS.
             if (rt_profile.CLEAR_PROFILE) {
                 mvcc_profile.recordMultiCommit(@intFromPtr(cells[i]), @sizeOf(T));

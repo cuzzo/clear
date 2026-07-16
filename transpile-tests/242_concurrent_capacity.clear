@@ -59,9 +59,9 @@ FN main() RETURNS Void ->
     }
 
     # -------------------------------------------------------
-    # Test 4: capacity on ~T[INF] infinite stream SELECT
+    # Test 4: capacity on a finite [~]T stream SELECT
     # -------------------------------------------------------
-    gen4: ~Int64[INF] = BG STREAM {
+    gen4: [~]Int64 = BG STREAM {
         MUTABLE i4: Int64 = 1;
         WHILE i4 <= 8 DO
             YIELD i4;
@@ -69,10 +69,10 @@ FN main() RETURNS Void ->
         END
     };
     results4 = gen4 |> CONCURRENT(workers: 3, capacity: 8) SELECT _ + 100;
-    ASSERT results4.length() == 8, "capacity on ~T[INF]: 8 items";
+    ASSERT results4.length() == 8, "capacity on [~]T: 8 items";
     MUTABLE sum4: Int64 = 0;
     results4 |> EACH { sum4 = sum4 + _; };
-    ASSERT sum4 == 836, "capacity on ~T[INF]: (1..8)+100 each = 836";
+    ASSERT sum4 == 836, "capacity on [~]T: (1..8)+100 each = 836";
 
     RETURN;
 END

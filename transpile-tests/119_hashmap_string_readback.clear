@@ -2,7 +2,7 @@
 
 UNION Value { Nil, Str: String }
 
-FN readStrDirect!(MUTABLE map: HashMap<Value>) RETURNS !String ->
+FN readStrDirect!(MUTABLE map: {String}Value) RETURNS !String ->
     val = map["t0"] OR_ELSE Value.Nil;
     PARTIAL MATCH val START
         Value.Str AS s -> RETURN COPY s;,
@@ -12,7 +12,7 @@ FN readStrDirect!(MUTABLE map: HashMap<Value>) RETURNS !String ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<Value> = {};
+    MUTABLE map: {String}Value = {};
     map["t0"] = Value{ Str: COPY "hello" };
 
     result = readStrDirect!(map);

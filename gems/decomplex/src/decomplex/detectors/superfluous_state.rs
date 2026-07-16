@@ -18,6 +18,8 @@ pub struct SuperfluousStateFinding {
     pub reader_methods: Vec<String>,
     pub ctorset: bool,
     pub adjacent_sites: Option<Vec<String>>,
+    pub confidence: String,
+    pub confidence_reason: Option<String>,
 }
 
 pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<SuperfluousStateFinding>> {
@@ -26,6 +28,21 @@ pub fn scan_files(files: &[PathBuf], language: Language) -> Result<Vec<Superfluo
 }
 
 pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
+    scan_documents_with_corpus(documents, true)
+}
+
+pub fn scan_documents_with_corpus(documents: &[Document], corpus_complete: bool) -> Vec<SuperfluousStateFinding> {
+    // Public accessor reads are call facts rather than owner-local state reads.
+    // Without points-to proof, a same-named external message or a self message
+    // from a different method is enough to make a `dead_state` verdict unsound.
+    // Exclude same-named self calls so direct recursion does not look like a
+    // field accessor.
+    let accessor_messages: BTreeSet<String> = documents
+        .iter()
+        .flat_map(|document| document.call_sites.iter())
+        .filter(|call| call.receiver != "self" || call.function != call.message)
+        .map(|call| call.message.clone())
+        .collect();
     let semantic_aliases = semantic_alias::scan_documents(documents);
     let sm_report = state_mesh::scan_documents_with_semantic_aliases_and_min_writes(
         documents,
@@ -34,6 +51,7 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
     );
 
     let icf_report = implicit_control_flow::scan_documents(documents);
+    let opaque_state_escapes = opaque_state_escape_functions(documents);
     let mut adjacent_pairs: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
     for proto in &icf_report.ordered_protocols {
         if proto.dependency.contains(&"write_read".to_string()) && proto.protocol.len() >= 2 {
@@ -53,7 +71,20 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
         let self_reads: Vec<_> = row.readers.iter().filter(|r| r.recv == "self").collect();
 
         // ---- Pattern 1: dead state (written, never read) ----
-        if !self_writes.is_empty() && row.readers.is_empty() {
+        if !self_writes.is_empty()
+            && row.readers.is_empty()
+            && !self_writes.iter().any(|writer| {
+                opaque_state_escapes.contains(&(writer.file.clone(), writer.defn.clone()))
+            })
+            && !accessor_messages.contains(norm)
+        {
+            // Absence of a reader is not evidence of dead state when the
+            // selected corpus is open. Readers commonly live in consumers,
+            // tests, or a later compiler stage outside the requested path.
+            // Do not count an unverifiable observation as superfluous state.
+            if !corpus_complete {
+                continue;
+            }
             results.push(SuperfluousStateFinding {
                 field: norm.clone(),
                 score: 0.85,
@@ -75,7 +106,8 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
                 },
                 read_sites: Vec::new(),
                 writer_methods: {
-                    let mut defns: Vec<String> = self_writes.iter().map(|w| w.defn.clone()).collect();
+                    let mut defns: Vec<String> =
+                        self_writes.iter().map(|w| w.defn.clone()).collect();
                     defns.sort();
                     defns.dedup();
                     defns
@@ -83,6 +115,8 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
                 reader_methods: Vec::new(),
                 ctorset: self_writes.iter().all(|w| w.defn == "initialize"),
                 adjacent_sites: None,
+                confidence: "high".to_string(),
+                confidence_reason: None,
             });
             continue;
         }
@@ -146,6 +180,14 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
             continue;
         }
 
+        // A field is not a derived cache merely because one method writes it
+        // and another reads it. That is the normal shape of encapsulated
+        // object state and immutable result records. Require independent
+        // re-derivation evidence before making the eliminability claim.
+        if !intra && adj_bonus == 1.0 && row.re_derivations.is_empty() {
+            continue;
+        }
+
         let classification = if intra {
             "intra_method".to_string()
         } else if adj_bonus > 1.0 {
@@ -179,19 +221,23 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
                 sites
             },
             writer_methods: {
-                let mut defns: Vec<String> = writer_methods.iter().map(|(_, d)| d.clone()).collect();
+                let mut defns: Vec<String> =
+                    writer_methods.iter().map(|(_, d)| d.clone()).collect();
                 defns.sort();
                 defns.dedup();
                 defns
             },
             reader_methods: {
-                let mut defns: Vec<String> = reader_methods.iter().map(|(_, d)| d.clone()).collect();
+                let mut defns: Vec<String> =
+                    reader_methods.iter().map(|(_, d)| d.clone()).collect();
                 defns.sort();
                 defns.dedup();
                 defns
             },
             ctorset,
             adjacent_sites: adj_sites,
+            confidence: "medium".to_string(),
+            confidence_reason: None,
         });
     }
 
@@ -203,6 +249,21 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
     });
 
     results
+}
+
+/// Language adapters emit this normalized effect only when a call can
+/// externally inspect an owned aggregate. The detector merely consumes it.
+fn opaque_state_escape_functions(documents: &[Document]) -> BTreeSet<(String, String)> {
+    documents
+        .iter()
+        .flat_map(|document| {
+            document
+                .semantic_effect_sites
+                .iter()
+                .filter(|site| site.kind == "opaque_state_escape")
+                .map(|site| (site.file.clone(), site.function.clone()))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -241,9 +302,9 @@ mod tests {
     #[test]
     fn test_superfluous_state_edge_cases() {
         // 1. Read-before-write in same method (disqualifies intra-method)
-        // 2. Constructor-set only (ctorset)
+        // 2. Constructor-set state without derivation evidence
         // 3. Score below threshold (< 0.1)
-        // 4. Derived cache (read & write in different methods, not adjacent)
+        // 4. Ordinary state (read & write in different methods, not adjacent)
         // 5. Adjacent call bonus
         let doc: Document = serde_json::from_value(json!({
             "file": "example.rb",
@@ -258,7 +319,7 @@ mod tests {
                 { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "w2", "line": 21, "span": [21, 1, 21, 10], "owner": "Class" },
                 { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "w3", "line": 22, "span": [22, 1, 22, 10], "owner": "Class" },
                 { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "w4", "line": 23, "span": [23, 1, 23, 10], "owner": "Class" },
-                // Derived cache (different methods, no adjacency info)
+                // Ordinary state (different methods, no adjacency/derivation evidence)
                 { "field": "derived", "receiver": "self", "file": "example.rb", "function": "m3", "line": 30, "span": [30, 1, 30, 10], "owner": "Class" },
                 // Adjacent call
                 { "field": "adj", "receiver": "self", "file": "example.rb", "function": "set_val", "line": 40, "span": [40, 1, 40, 10], "owner": "Class" }
@@ -272,7 +333,7 @@ mod tests {
                 { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "r1", "line": 25, "span": [25, 1, 25, 10], "owner": "Class" },
                 { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "r2", "line": 26, "span": [26, 1, 26, 10], "owner": "Class" },
                 { "field": "low_score", "receiver": "self", "file": "example.rb", "function": "r3", "line": 27, "span": [27, 1, 27, 10], "owner": "Class" },
-                // Derived cache read
+                // Ordinary state read
                 { "field": "derived", "receiver": "self", "file": "example.rb", "function": "m4", "line": 35, "span": [35, 1, 35, 10], "owner": "Class" },
                 // Adjacent call read
                 { "field": "adj", "receiver": "self", "file": "example.rb", "function": "get_val", "line": 45, "span": [45, 1, 45, 10], "owner": "Class" }
@@ -303,21 +364,10 @@ mod tests {
         // Validate "low_score" is excluded (base = 1/(12+1) = 0.076 < 0.1)
         assert!(!findings.iter().any(|f| f.field == "low_score"));
 
-        // Validate "rbw" (Read-Before-Write) is classified as derived_cache since it's disqualified from intra_method
-        let rbw = findings.iter().find(|f| f.field == "rbw").unwrap();
-        assert_eq!(rbw.classification, "derived_cache");
-        assert_eq!(rbw.score, 0.5); // base (1/2) * intra_bonus (1) * ctor_penalty (1)
-
-        // Validate "ctor_var" has the 0.33x penalty
-        let ctor = findings.iter().find(|f| f.field == "ctor_var").unwrap();
-        assert!(ctor.ctorset);
-        assert_eq!(ctor.classification, "derived_cache");
-        assert!((ctor.score - 0.165).abs() < 0.01); // base (1/2) * ctor_penalty (0.33) = 0.165
-
-        // Validate "derived" is classified as derived_cache
-        let derived = findings.iter().find(|f| f.field == "derived").unwrap();
-        assert_eq!(derived.classification, "derived_cache");
-        assert_eq!(derived.score, 0.5);
+        // Ordinary state is not eliminable without evidence of re-derivation.
+        assert!(!findings.iter().any(|f| f.field == "rbw"));
+        assert!(!findings.iter().any(|f| f.field == "ctor_var"));
+        assert!(!findings.iter().any(|f| f.field == "derived"));
 
         // Validate "adj" is classified as adjacent_call with a 5.0x bonus
         let adj = findings.iter().find(|f| f.field == "adj").unwrap();
@@ -352,5 +402,80 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].field, "x");
         assert_eq!(results[0].classification, "dead_state");
+    }
+
+    #[test]
+    fn c_aggregate_escape_prevents_false_dead_field() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("state.c");
+        std::fs::write(
+            &file_path,
+            "struct State { int flag; };\nvoid observe(struct State* state);\nvoid update(struct State* state) { state->flag = 1; observe(state); }\n",
+        )
+        .unwrap();
+
+        let findings = scan_files(&[file_path], Language::C).unwrap();
+        assert!(
+            findings.is_empty(),
+            "opaque aggregate call is a possible read: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn accessor_calls_disqualify_dead_state() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "context.rb",
+            "language": "ruby",
+            "state_writes": [
+                { "field": "alloc_count", "receiver": "self", "file": "context.rb", "function": "initialize", "line": 5, "span": [5, 1, 5, 10], "owner": "Context" }
+            ],
+            "state_reads": [],
+            "call_sites": [
+                { "receiver": "ctx", "message": "alloc_count", "file": "consumer.rb", "function": "finish", "owner": "Consumer", "line": 8, "span": [8, 1, 8, 16], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false },
+                { "receiver": "self", "message": "alloc_count", "file": "context.rb", "function": "count", "owner": "Context", "line": 12, "span": [12, 1, 12, 12], "conditional": false, "arguments": [], "control": null, "safe_navigation": false, "block": false }
+            ]
+        })).unwrap();
+
+        let findings = scan_documents(&[doc]);
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.field != "alloc_count"),
+            "a public accessor read must prevent a dead-state verdict"
+        );
+    }
+
+    #[test]
+    fn partial_corpus_omits_dead_state_claim() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "annotator.rb", "language": "ruby",
+            "state_writes": [{ "field": "semantic_index", "receiver": "self", "file": "annotator.rb", "function": "annotate", "line": 10, "span": [10, 1, 10, 20], "owner": "Annotator" }]
+        })).unwrap();
+        let findings = scan_documents_with_corpus(&[doc], false);
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn rederivation_evidence_identifies_a_real_derived_cache() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "cache.rb",
+            "language": "ruby",
+            "state_writes": [
+                { "field": "cache", "receiver": "self", "file": "cache.rb", "function": "refresh", "line": 4, "span": [4, 1, 4, 10], "owner": "Cache" }
+            ],
+            "state_reads": [
+                { "field": "cache", "receiver": "self", "file": "cache.rb", "function": "fetch", "line": 8, "span": [8, 1, 8, 10], "owner": "Cache" }
+            ],
+            "predicate_aliases": [
+                { "name": "cache_valid?", "body": "@cache == source", "file": "cache.rb", "defn": "cache_valid?", "line": 12, "span": [12, 1, 12, 24] }
+            ],
+            "comparison_uses": [
+                { "canon_source": "@cache == source", "file": "cache.rb", "function": "recompute", "line": 16, "raw": "@cache == source", "span": [16, 1, 16, 24], "enclosing_span": [16, 1, 16, 24] }
+            ]
+        })).unwrap();
+
+        let findings = scan_documents(&[doc]);
+        let cache = findings.iter().find(|finding| finding.field == "cache").unwrap();
+        assert_eq!(cache.classification, "derived_cache");
     }
 }

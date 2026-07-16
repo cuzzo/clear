@@ -449,7 +449,7 @@ class OwnershipDataflow
     state[resolve_state_place(state, place)]
   end
 
-  sig { params(cfg: FunctionCFG, fn_node: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
+  sig { params(cfg: FunctionCFG, fn_node: AST::FunctionDef, schema_lookup: T.nilable(Type::SchemaLookup)).void }
   def initialize(cfg, fn_node, schema_lookup: nil)
     @cfg = T.let(cfg, FunctionCFG)
     @fn_node = T.let(fn_node, AST::FunctionDef)
@@ -595,6 +595,7 @@ class OwnershipDataflow
   sig { params(fn_node: AST::FunctionDef, facts: CleanupClassifier::FrozenCleanupFacts).returns(CleanupClassifier::FrozenCleanupFacts) }
   def cleanup_decisions!(fn_node, facts)
     summary = cleanup_summary_by_place
+    block_summaries = block_exit_cleanup_summaries
     ambiguous_names = duplicate_binding_names(fn_node.body || [])
     decision_facts = cleanup_decision_facts(fn_node.body || [])
 
@@ -609,7 +610,7 @@ class OwnershipDataflow
       var = pair.name
       entry = pair.entry
       next unless entry.needs_cleanup?
-      block_entry = block_exit_cleanup_summary(pair.place)
+      block_entry = block_summaries[pair.place]
       df_entry = if block_entry && !block_entry.needs_cleanup
         block_entry
       else
@@ -710,6 +711,16 @@ class OwnershipDataflow
     MIR::LocalBindingAnalysis.binding_decl_name(stmt) == var
   end
 
+  sig { params(node: T.nilable(AST::Node), state: OwnershipState).returns(T::Array[PlaceId]) }
+  def binding_move_places(node, state)
+    collect_binding_move_places(node, state)
+  end
+
+  sig { params(node: T.nilable(AST::Node), state: OwnershipState).returns(T::Array[PlaceId]) }
+  def explicit_move_places(node, state)
+    collect_explicit_move_places(node, state)
+  end
+
   private
 
   sig { params(stmt: AST::Node, var: String).returns(T::Boolean) }
@@ -721,11 +732,6 @@ class OwnershipDataflow
   end
 
   public
-
-  sig { params(place: T.any(String, Symbol, PlaceId)).returns(T.nilable(CleanupDecision)) }
-  def block_exit_cleanup_summary(place)
-    block_exit_cleanup_summaries[PlaceId.from_path(place)]
-  end
 
   sig { returns(T::Hash[PlaceId, CleanupDecision]) }
   def block_exit_cleanup_summaries
@@ -839,8 +845,8 @@ class OwnershipDataflow
 
   # Build CFG + run dataflow for a function node. Returns the analysis.
   # @param can_fail_fns [Set<String>, nil] names of functions that can fail
-  # @param schema_lookup [Proc, nil] type schema resolver for needs_explicit_cleanup
-  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.nilable(T::Set[String]), schema_lookup: T.nilable(Proc)).returns(OwnershipDataflow) }
+  # @param schema_lookup [Type::SchemaLookup, nil] type schema resolver for needs_explicit_cleanup
+  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.nilable(T::Set[String]), schema_lookup: T.nilable(Type::SchemaLookup)).returns(OwnershipDataflow) }
   def self.analyze(fn_node, can_fail_fns: nil, schema_lookup: nil)
     cfg = FunctionCFG.build(fn_node, can_fail_fns: can_fail_fns)
     new(cfg, fn_node, schema_lookup: schema_lookup).analyze!
@@ -1287,7 +1293,6 @@ class OwnershipDataflow
     state.dup
   end
     private :block_exit_cleanup_summaries
-    private :block_exit_cleanup_summary
     private :cleanup_entry_pairs
     private :declares_name?
     private :duplicate_binding_names
@@ -1339,7 +1344,7 @@ class UseAfterMoveChecker
   end
 
   # Convenience: build dataflow + run check in one call.
-  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.nilable(T::Set[String]), schema_lookup: T.nilable(Proc)).returns(T::Array[String]) }
+  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.nilable(T::Set[String]), schema_lookup: T.nilable(Type::SchemaLookup)).returns(T::Array[String]) }
   def self.check(fn_node, can_fail_fns: nil, schema_lookup: nil)
     df = OwnershipDataflow.analyze(fn_node, can_fail_fns: can_fail_fns, schema_lookup: schema_lookup)
     checker = new(fn_node, df)
@@ -1874,12 +1879,12 @@ class BorrowChecker
 
   attr_reader :errors
 
-  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc).returns(T::Array[String]) }
+  sig { params(fn_node: AST::FunctionDef, schema_lookup: Type::SchemaLookup).returns(T::Array[String]) }
   def self.check(fn_node, schema_lookup:)
     new(fn_node, schema_lookup: schema_lookup).check!
   end
 
-  sig { params(fn_node: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
+  sig { params(fn_node: AST::FunctionDef, schema_lookup: T.nilable(Type::SchemaLookup)).void }
   def initialize(fn_node, schema_lookup:)
     @fn_name = T.let(fn_node.name, String)
     @fn_node = T.let(fn_node, AST::FunctionDef)
@@ -1985,7 +1990,7 @@ class BorrowChecker
   sig { params(stmt: AST::Node, token: Lexer::Token, state: BorrowState).void }
   def check_explicit_moves(stmt, token, state)
     owner_state = synthetic_owner_state
-    transfer_collector.send(:collect_explicit_move_places, stmt, owner_state).each do |place|
+    transfer_collector.explicit_move_places(stmt, owner_state).each do |place|
       check_borrowed_move(place.path, token, state)
     end
   end
@@ -2002,7 +2007,7 @@ class BorrowChecker
   # Non-Copy identifiers in ownership-transferring positions are moves.
   sig { params(node: AST::Node).returns(T::Set[String]) }
   def collect_moved_names(node)
-    transfer_collector.send(:collect_binding_move_places, node, synthetic_owner_state).map(&:path).to_set
+    transfer_collector.binding_move_places(node, synthetic_owner_state).map(&:path).to_set
   end
 
   sig { returns(OwnershipDataflow) }

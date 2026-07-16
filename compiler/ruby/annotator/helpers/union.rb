@@ -7,95 +7,11 @@ require "sorbet-runtime"
 module UnionAnalysis
     extend T::Sig
 
-  # Validate that all required methods for a union type exist and have
-  # compatible signatures. Synthesizes default functions for stubs with
-  # default bodies that have no concrete override.
-  sig { params(node: AST::UnionDef).void }
-  def validate_union_methods!(node)
-    T.bind(self, SemanticAnnotator) rescue nil
-    union_name = node.name
-
-    # Detect duplicate method stub declarations.
-    seen_names = T.let({}, T::Hash[String, T::Boolean])
-    method_requirements = T.cast(node.methods || [], T::Array[AST::UnionMethodRequirement])
-    method_requirements.each do |req|
-      if seen_names.key?(req.name)
-        error!(req.token, :UNION_METHOD_DUPLICATE, union: union_name, method: req.name)
-      end
-      seen_names[req.name] = true
-    end
-
-    method_requirements.each do |req|
-      fn_name = req.name
-      req_tok = req.token
-      req_vis = req.visibility
-
-      scope = lookup_scope_for(fn_name)
-      local = scope&.resolve_entry(fn_name)
-
-      if local.nil?
-        if req.has_default_body
-          # No concrete override — synthesize a top-level function from the default body.
-          fn_params = req.params.map(&:to_param)
-          fn_node = AST::FunctionDef.new(
-            req.token, req.name, fn_params, [], req.return_type,
-            nil, req.body, nil, nil, req_vis, nil, nil
-          )
-          queue_synthetic_function!(fn_node)
-          next
-        else
-          error!(req_tok, :UNION_METHOD_MISSING, union: union_name, method: fn_name, fn: fn_name)
-          next
-        end
-      end
-
-      sig = FunctionSignature.unwrap(local.type)
-      unless sig
-        error!(req_tok, :UNION_METHOD_MISSING, union: union_name, method: fn_name, fn: fn_name)
-        next
-      end
-
-      # Visibility check
-      if req_vis != :package
-        actual_vis = sig.visibility || :package
-        unless actual_vis == req_vis
-          vis_label = { pub: "PUB", private: "PRIVATE", package: "package" }
-          error!(req_tok, :UNION_METHOD_WRONG_VISIBILITY, union: union_name, method: fn_name, declared_vis: vis_label[req_vis], fn: fn_name, fn_vis: vis_label[actual_vis])
-        end
-      end
-
-      # Arity check
-      if req.params.length != sig.params.length
-        error!(req_tok, :UNION_METHOD_WRONG_ARITY, union: union_name, method: fn_name, expected_arity: req.params.length, fn: fn_name, got_arity: sig.params.length)
-      end
-
-      # Parameter type checks
-      req.params.each_with_index do |rp, i|
-        req_t  = to_type(rp.type).resolved
-        sp = sig.params[i]
-        next unless sp
-        sig_t  = to_type(sp[:type]).resolved
-        unless req_t == sig_t || req_t == :Any || sig_t == :Any
-          error!(req_tok, :UNION_METHOD_PARAM_TYPE, union: union_name, method: fn_name, index: i + 1, expected: req_t, fn: fn_name, got: sig_t)
-        end
-      end
-
-      # Return type check
-      if req.return_type
-        req_ret = to_type(req.return_type).resolved
-        sig_ret = sig.return_type.resolved
-        unless req_ret == sig_ret || req_ret == :Any || sig_ret == :Any
-          error!(req_tok, :UNION_METHOD_RETURN_TYPE, union: union_name, method: fn_name, expected: req_ret, fn: fn_name, got: sig_ret)
-        end
-      end
-    end
-  end
-
   # Resolve enum or union variant access on a GetField node (TypeName.Variant).
   # Returns true if handled, false if the target is not an enum/union.
   sig { params(node: AST::GetField).returns(T.nilable(T::Boolean)) }
   def resolve_variant_access(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return false unless node.target.is_a?(AST::Identifier)
 
     type_name = node.target.name.to_sym
@@ -137,7 +53,7 @@ module UnionAnalysis
 
   sig { params(node: AST::UnionVariantLit).returns(T.nilable(Symbol)) }
   def visit_UnionVariantLit(node)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     schema = lookup_type_schema(node.union_name.to_sym)
     var_data = validate_union_schema!(node, schema)
     validate_union_fields!(node, T.must(var_data).typed_fields)
@@ -147,14 +63,15 @@ module UnionAnalysis
   # Validate that a union type and variant exist, and that the variant
   # supports inline struct construction (not a unit or single-payload variant).
   # Returns the variant data hash on success.
-  sig { params(node: AST::UnionVariantLit, schema: T.untyped).returns(T.nilable(Schemas::InlineStructVariant)) }
+  sig { params(node: AST::UnionVariantLit, schema: Schemas::SchemaValue).returns(T.nilable(Schemas::InlineStructVariant)) }
   def validate_union_schema!(node, schema)
-    T.bind(self, SemanticAnnotator) rescue {}
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue {}
     if schema.nil?
       error!(node, :UNION_TYPE_UNKNOWN, name: node.union_name)
     end
-    unless Schemas.union?(schema)
+    unless schema.is_a?(Schemas::UnionSchema)
       error!(node, :NOT_A_UNION_TYPE, name: node.union_name)
+      return nil
     end
     unless schema.variants.key?(node.variant_name)
       emit_variant_typo!(
@@ -167,12 +84,13 @@ module UnionAnalysis
     end
 
     var_data = schema.variants[node.variant_name]
-    unless Schemas.inline_struct?(var_data)
+    unless var_data.is_a?(Schemas::InlineStructVariant)
       if var_data.nil?
         error!(node, :UNION_VARIANT_IS_UNIT_NO_FIELDS, variant: node.variant_name, union: node.union_name)
       else
         error!(node, :UNION_VARIANT_NEEDS_PAYLOAD_OBJECT, variant: node.variant_name, union: node.union_name)
       end
+      return nil
     end
 
     var_data
@@ -182,7 +100,7 @@ module UnionAnalysis
   # missing required fields, and type-check each field value.
   sig { params(node: AST::UnionVariantLit, expected_fields: T::Hash[String, Type]).void }
   def validate_union_fields!(node, expected_fields)
-    T.bind(self, SemanticAnnotator) rescue nil
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     node.fields.each_key do |fname|
       unless expected_fields.key?(fname)
         error!(node, :UNION_INLINE_VARIANT_UNKNOWN_FIELD, union: node.union_name, variant: node.variant_name, field: fname)

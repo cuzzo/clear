@@ -512,10 +512,10 @@ class SymbolEntry
     @capabilities = T.let(capabilities, T::Set[Symbol])
     @lifetime = T.let([], T::Array[SymbolEntry])
     @flow = T.let(BindingFlowFacts.new(valid: valid, invalid_reason: invalid_reason), BindingFlowFacts)
-    @sync_families = T.let(nil, T.untyped)
+    @sync_families = T.let(nil, T.nilable(T::Set[Symbol]))
     @scope = T.let(nil, T.nilable(Scope))
     @scope_depth = T.let(nil, T.nilable(Integer))
-    @param_decl_token = T.let(nil, T.untyped)
+    @param_decl_token = T.let(nil, T.nilable(Lexer::Token))
   end
 
   # The laundering seam input is a real bounded union, not untyped:

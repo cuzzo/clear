@@ -39,7 +39,7 @@ module Annotator
 
       sig { params(branches: T::Array[T.proc.returns(BasicObject)], merge_to_parent: T::Boolean).returns(T::Array[BasicObject]) }
       def analyze_control_flow_branches(branches, merge_to_parent: true)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         og_snapshot = ownership_graph.fork_lightweight
         branch_results = T.let([], T::Array[BranchAnalysisResult])
@@ -59,7 +59,7 @@ module Annotator
             next unless snap
             # Lightweight merge: just apply moved states
             snap.each_state do |path, state|
-              node = ownership_graph.nodes[path]
+              node = ownership_graph[path]
               next unless node
               if node.state != state
                 if state == :moved
@@ -80,12 +80,14 @@ module Annotator
 
       sig { params(branch_logic: T.proc.returns(BasicObject), og_snapshot: BranchSnapshot).returns(BranchAnalysisResult) }
       def analyze_control_flow_branch(branch_logic, og_snapshot)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Restore graph to pre-branch state before analyzing each branch.
         ownership_graph.restore_lightweight(og_snapshot) if og_snapshot
-        prev_terminated = @branch_terminated
-        @branch_terminated = false
+        prev_terminated = phase_traversal_state.branch_terminated
+        stream_frame = current_stream_yield_frame
+        prev_stream_closed = stream_frame&.closed
+        phase_traversal_state.branch_terminated = false
 
         begin
           with_new_scope(current_scope) do
@@ -96,21 +98,22 @@ module Annotator
               BranchAnalysisResult.new(
                 drops: branch_logic.call,
                 snapshot: ownership_graph.fork_lightweight,
-                terminated: @branch_terminated,
+                terminated: phase_traversal_state.branch_terminated,
               )
             ensure
               og_pop_scope if pushed_og_scope
             end
           end
         ensure
-          @branch_terminated = prev_terminated
+          phase_traversal_state.branch_terminated = prev_terminated
+          stream_frame.closed = T.must(prev_stream_closed) if stream_frame && !prev_stream_closed.nil?
         end
       end
       private :analyze_control_flow_branch
 
       sig { params(node: AST::BlockExpr).returns(T.nilable(Scope)) }
       def visit_BlockExpr(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         with_new_scope(current_scope) do
           node.body.each { |stmt| visit(stmt) }
@@ -123,7 +126,7 @@ module Annotator
 
       sig { params(node: AST::IfStatement).returns(T.nilable(Symbol)) }
       def visit_IfStatement(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         if node.condition.is_a?(AST::IsA) && node.comptime
           annotate_comptime_is_a!(node.condition)
@@ -163,7 +166,7 @@ module Annotator
 
       sig { params(node: AST::IsA).returns(T.nilable(Symbol)) }
       def visit_IsA(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         unless static_type_expr?(node.left)
           annotate_runtime_is_a!(node)
@@ -177,7 +180,7 @@ module Annotator
 
       sig { params(node: AST::IsA).void }
       def annotate_comptime_is_a!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         annotate_is_a_operand!(node.left, side: "Left")
         annotate_is_a_operand!(node.right, side: "Right")
@@ -186,7 +189,7 @@ module Annotator
 
       sig { params(condition: AST::Node, blk: T.proc.void).void }
       def with_if_is_a_condition(condition, &blk)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         previous = @current_if_is_a_condition
         @current_if_is_a_condition = condition
@@ -197,7 +200,7 @@ module Annotator
 
       sig { params(node: AST::IsA).void }
       def annotate_runtime_is_a!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.left)
         subject_type = node.left.full_type!(context: "runtime IS_A subject")
@@ -248,7 +251,7 @@ module Annotator
         ).returns(String)
       end
       def resolve_runtime_is_a_variant!(node, schema, union_type, union_subst)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         target_names = runtime_is_a_target_names(node.right)
         variant_key = target_names.filter_map { |name| runtime_union_variant_key(schema, name) }.first
@@ -330,7 +333,7 @@ module Annotator
 
       sig { params(node: T.any(AST::Node, Type), type_name: Symbol).void }
       def stamp_runtime_is_a_target!(node, type_name)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         case node
         when Type
@@ -347,7 +350,7 @@ module Annotator
 
       sig { params(node: T.any(AST::Node, Type), side: String).void }
       def annotate_is_a_operand!(node, side:)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return if node.is_a?(Type)
 
@@ -365,7 +368,7 @@ module Annotator
 
       sig { params(node: T.any(AST::Node, Type)).returns(T::Boolean) }
       def static_type_expr?(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         case node
         when Type
@@ -390,24 +393,35 @@ module Annotator
         namespace == "AST"
       end
 
-      sig { params(condition: AST::Node, blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+      sig do
+        type_parameters(:Result)
+          .params(
+            condition: AST::Node,
+            blk: T.proc.returns(T.type_parameter(:Result)),
+          )
+          .returns(T.type_parameter(:Result))
+      end
       def with_comptime_is_a_then_refinement(condition, &blk)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
         refinement = comptime_is_a_type_param_refinement(condition)
         return blk.call unless refinement
 
         type_param = T.cast(refinement[0], Symbol)
         narrowed_type = T.cast(refinement[1], Type)
-        T.unsafe(self).__send__(:with_comptime_type_param_refinement, type_param, narrowed_type) { blk.call }
+        with_comptime_type_param_refinement(type_param, narrowed_type) { blk.call }
       end
 
       sig { params(condition: AST::Node).returns(T.nilable(T::Array[T.untyped])) }
       def comptime_is_a_type_param_refinement(condition)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
         return nil unless condition.is_a?(AST::IsA)
         left = condition.left
         return nil unless left.is_a?(AST::Identifier)
 
         type_param = left.name.to_sym
-        return nil unless T.unsafe(self).__send__(:current_function_type_param?, type_param)
+        return nil unless current_function_type_param?(type_param)
 
         narrowed_type = static_is_a_target_type(condition.right)
         narrowed_type ? [type_param, narrowed_type] : nil
@@ -429,6 +443,8 @@ module Annotator
 
       sig { params(node: AST::IfStatement).void }
       def emit_is_a_needs_comptime_fix!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
         fix = Fix.new(
           description: DiagnosticRegistry.fix_description(:INSERT_COMPTIME_BEFORE_IF),
           confidence: :auto,
@@ -439,7 +455,7 @@ module Annotator
             )
           ],
         )
-        T.unsafe(self).__send__(:fixable!,
+        fixable!(
           node,
           category: :type,
           level: :error,
@@ -451,6 +467,8 @@ module Annotator
 
       sig { params(condition: AST::Node).void }
       def declare_is_a_binding!(condition)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
         return unless condition.is_a?(AST::IsA)
         binding = condition.binding
         return unless binding
@@ -459,20 +477,20 @@ module Annotator
           payload_type = condition.runtime_payload_type
           return unless payload_type
 
-          scope = T.unsafe(self).__send__(:current_scope)
+          scope = current_scope
           scope.declare(binding, nil, payload_type, false, false, nil, :stack)
-          T.unsafe(self).__send__(:og_declare, binding, nil, payload_type)
-          T.unsafe(self).__send__(:classify_ownership!, scope.local_entry!(binding))
+          og_declare(binding, nil, payload_type)
+          classify_ownership!(scope.local_entry!(binding))
           borrow_match_payload_binding!(binding)
           return
         end
 
-        T.unsafe(self).__send__(:current_scope).declare(binding, nil, Type.new(:Type), false, false, nil, :stack)
+        current_scope.declare(binding, nil, Type.new(:Type), false, false, nil, :stack)
       end
 
       sig { params(node: AST::IfBind).returns(Symbol) }
       def visit_IfBind(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         branch_logic = [
           proc {
@@ -495,10 +513,15 @@ module Annotator
                 end
                 T.must(ti.success_type)
               else
-                unless ti.optional?
-                  error!(b.expr, :IF_AS_NEEDS_OPTIONAL, got: b.expr.resolved_type)
+                if ti.stream_step?
+                  b[:predicate] = :stream_item
+                  T.must(ti.stream_step_item_type)
+                else
+                  unless ti.optional?
+                    error!(b.expr, :IF_AS_NEEDS_OPTIONAL, got: b.expr.resolved_type)
+                  end
+                  T.must(ti.wrapped_type)
                 end
-                T.must(ti.wrapped_type)
               end
               if b.expr.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
                 unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
@@ -555,7 +578,7 @@ module Annotator
 
       sig { params(match_node: AST::MatchStatement, pat: AST::StructPattern).void }
       def annotate_struct_pattern!(match_node, pat)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         expr_type = match_node.expr.resolved_type
         primitives = [:Float64, :Bool, :Byte, :Int64, :Float64, :String, :NIL, :BOOLEAN, :Any, :Void]
@@ -595,13 +618,14 @@ module Annotator
               og_declare(f.name, nil, field_type)
             end
           else
-            visit(f.expr)
+            field_expr = T.must(f.expr)
+            visit(field_expr)
 
             if schema
               field_def = schema.fields[f.name]
               ft = field_def&.type
               field_type = ft.is_a?(Type) ? ft.resolved : ft
-              val_type   = f.expr.resolved_type
+              val_type   = field_expr.resolved_type
               is_numeric_promo = (val_type == :Int64 && (field_type == :Float64 || field_type == :Float64))
               unless val_type == field_type || val_type == :Any || field_type == :Any || is_numeric_promo
                 error!(match_node, :MATCH_FIELD_TYPE_MISMATCH, field: f.name, declared: field_type, got: val_type)
@@ -618,7 +642,7 @@ module Annotator
 
       sig { params(pattern: AST::Node).returns(T.nilable(String)) }
       def match_variant_name(pattern)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         case pattern
         when AST::GetField   then pattern.field
@@ -628,14 +652,14 @@ module Annotator
 
       sig { params(arm: AST::MatchCase).returns(T::Array[String]) }
       def match_variant_names(arm)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         [arm.value, *(arm.extra_values || [])].filter_map { |pattern| match_variant_name(pattern) }
       end
 
       sig { params(payload: MatchPayload, union_subst: T::Hash[Symbol, Symbol]).returns(MatchPayload) }
       def normalized_match_payload(payload, union_subst)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return apply_type_subst(payload, union_subst).resolved if payload.is_a?(Type)
         return union_subst.fetch(payload, payload) if payload.is_a?(Symbol)
@@ -645,7 +669,7 @@ module Annotator
 
       sig { params(payload: MatchPayload, union_subst: T::Hash[Symbol, Symbol]).returns(MatchPayload) }
       def normalized_runtime_match_payload(payload, union_subst)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return apply_type_subst(payload, union_subst) if payload.is_a?(Type)
         return union_subst.fetch(payload, payload) if payload.is_a?(Symbol)
@@ -665,7 +689,7 @@ module Annotator
         ).void
       end
       def verify_match_multi_arm_payloads!(node, arm, schema, variant_name, union_subst, kind:, name:)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return unless variant_name
 
@@ -681,7 +705,7 @@ module Annotator
 
       sig { params(node: AST::StructLit, schema: T.any(Schemas::StructSchema, Schemas::UnionSchema)).returns(T::Hash[Symbol, Symbol]) }
       def literal_type_substitution!(node, schema)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         type_params = schema.type_params
         subst = {}
@@ -702,7 +726,7 @@ module Annotator
 
       sig { params(node: AST::StructLit).returns(Symbol) }
       def literal_instance_type(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         if node.type_args&.any?
           :"#{node.name}<#{node.type_args.join(',')}>"
@@ -713,7 +737,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement).returns(MatchSubjectPlan) }
       def match_subject_plan(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         expr_t = Type.new(node.expr.full_type!(context: "MATCH subject"))
         node.string_match = true if expr_t.string?
@@ -761,7 +785,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).void }
       def consume_match_subject_if_takes!(node, plan)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         expr = node.expr
         return unless node.takes && plan.union? && expr.is_a?(AST::Identifier)
 
@@ -775,7 +799,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).returns(T::Array[T.proc.returns(BasicObject)]) }
       def match_branch_logic(node, plan)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         branches = T.let([], T::Array[T.proc.returns(BasicObject)])
         node.cases.each do |match_case|
           branches << Kernel.proc {
@@ -795,7 +819,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan).void }
       def analyze_match_case!(node, match_case, plan)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         case match_case.kind
         when :when
           analyze_when_match_case!(node, match_case)
@@ -809,7 +833,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, match_case: AST::MatchCase).void }
       def analyze_when_match_case!(node, match_case)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         visit(match_case.value)
         return if match_case.value.resolved_type == :Bool
 
@@ -818,7 +842,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan).void }
       def analyze_value_match_case!(node, match_case, plan)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit_match_patterns!(node, match_case)
         validate_match_pattern_types!(node, match_case, plan)
@@ -828,7 +852,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, match_case: AST::MatchCase).void }
       def visit_match_patterns!(node, match_case)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         with_match_pattern_context do
           visit(match_case.value)
           match_case.extra_values&.each do |ev|
@@ -843,7 +867,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan).void }
       def validate_match_pattern_types!(node, match_case, plan)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         [match_case.value, *(match_case.extra_values || [])].each do |pat|
           next if match_pattern_type_matches_subject?(pat, node, plan)
 
@@ -865,7 +889,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan).void }
       def declare_match_payload_binding!(node, match_case, plan)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         binding = match_case.binding
         return unless binding
 
@@ -885,7 +909,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan, variant_name: String, binding: String).void }
       def declare_union_payload_binding!(node, match_case, plan, variant_name, binding)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         raw_payload = match_union_schema(plan).variants[variant_name]
         if raw_payload.nil?
           error!(node, :MATCH_UNIT_CAPTURE, binding: binding, variant: variant_name)
@@ -901,7 +925,7 @@ module Annotator
 
       sig { params(plan: MatchSubjectPlan, variant_name: String, raw_payload: MatchPayload, match_case: AST::MatchCase).returns(Type) }
       def match_payload_binding_type(plan, variant_name, raw_payload, match_case)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         payload = T.must(raw_payload)
         if payload.is_a?(Schemas::InlineStructVariant)
           return Type.new(:"#{plan.type_name}_#{variant_name}")
@@ -917,14 +941,14 @@ module Annotator
 
       sig { params(binding: String).void }
       def borrow_match_payload_binding!(binding)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         T.must(ownership_graph[binding]).kind = :borrowed
         current_scope.entry_for_write!(binding).storage = :borrow
       end
 
       sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan).void }
       def declare_match_destructure_bindings!(node, match_case, plan)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         destructure = match_case.destructure
         return unless destructure && plan.union?
 
@@ -940,7 +964,7 @@ module Annotator
 
       sig { params(plan: MatchSubjectPlan, variant_name: String).returns(T.nilable(MatchSchema)) }
       def match_payload_struct_schema(plan, variant_name)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         raw_payload = match_union_schema(plan).variants[variant_name]
         if Schemas.inline_struct?(raw_payload)
           inline_payload = T.cast(raw_payload, Schemas::InlineStructVariant)
@@ -958,7 +982,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, destructure: AST::StructPattern, payload_schema: MatchSchema, variant_name: String).void }
       def declare_match_destructure_fields!(node, destructure, payload_schema, variant_name)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         struct_schema = T.cast(payload_schema, Schemas::StructSchema)
         destructure.fields.each do |field|
           next unless field.bind?
@@ -974,7 +998,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, field: AST::PatternField, payload_schema: Schemas::StructSchema, variant_name: String).void }
       def emit_unknown_destructure_field!(node, field, payload_schema, variant_name)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         name_tok = field.name_token
         if name_tok
           valid_fields = payload_schema.fields.keys.reject { |k| k.to_s.start_with?("_") }
@@ -991,7 +1015,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).void }
       def reject_duplicate_match_patterns!(node, plan)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         return unless plan.enum? || plan.union?
 
         seen = T.let({}, T::Hash[String, T::Boolean])
@@ -1006,7 +1030,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).void }
       def check_match_exhaustiveness!(node, plan)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         return unless node.exhaustive
 
         unless plan.enum? || plan.union?
@@ -1019,7 +1043,7 @@ module Annotator
 
       sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).void }
       def emit_missing_match_variants!(node, plan)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         return unless plan.enum? || plan.union?
 
         covered = node.cases.flat_map { |match_case| match_variant_names(match_case) }.to_set
@@ -1034,14 +1058,14 @@ module Annotator
 
       sig { params(node: AST::PassStmt).returns(Symbol) }
       def visit_PassStmt(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         stamp_type!(node, :Void)
       end
 
       sig { params(node: AST::MatchStatement).returns(T.nilable(Symbol)) }
       def visit_MatchStatement(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.expr)
         plan = match_subject_plan(node)
@@ -1066,7 +1090,7 @@ module Annotator
 
       sig { params(node: AST::ForRange).returns(T.nilable(Symbol)) }
       def visit_ForRange(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # 1. Type-check range bounds
         visit(node.start_expr)
@@ -1103,7 +1127,7 @@ module Annotator
 
       sig { params(node: AST::ForEach).returns(T.nilable(Symbol)) }
       def visit_ForEach(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # 1. Visit collection to determine element type
         visit(node.collection)
@@ -1111,7 +1135,9 @@ module Annotator
         ct = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
 
         # Determine element type from collection
-        elem_type = if ct.array? || ct.list_collection?
+        elem_type = if ct.dynamic_stream? || (ct.bounded_stream? && ct.canonical_stream?)
+          ct.stream_element_type || ct.tense_type.element_type || :Any
+        elsif ct.array? || ct.list_collection?
           ct.element_type || ct.value_type || :Any
         elsif ct.map?
           # FOR k IN map iterates over keys (strings)
@@ -1143,7 +1169,7 @@ module Annotator
 
       sig { params(node: AST::WhileLoop).returns(T.nilable(Symbol)) }
       def visit_WhileLoop(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # 1. Analyze Condition
         visit(node.condition)
@@ -1154,7 +1180,7 @@ module Annotator
 
         # Effect tracking: WHILE TRUE or any non-trivially-bounded loop.
         if (node.condition.is_a?(AST::Identifier) && node.condition.name == "TRUE") ||
-           (node.condition.is_a?(AST::Literal) && node.condition.value == true)
+           (node.condition.is_a?(AST::Literal) && node.condition.true_boolean?)
           record_effect(EffectTracker::LOOP_UNBOUND)
         end
 
@@ -1199,15 +1225,15 @@ module Annotator
 
       sig { params(node: AST::WhileBindLoop).returns(T.nilable(Symbol)) }
       def visit_WhileBindLoop(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.condition)
         ti = node.condition.full_type!(context: "WHILE AS condition")
-        unless ti.optional?
+        unless ti.optional? || ti.stream_step?
           error!(node.condition, :WHILE_AS_NEEDS_OPTIONAL, got: node.condition.resolved_type)
         end
 
-        unwrapped = ti.wrapped_type
+        unwrapped = ti.stream_step? ? ti.stream_step_item_type : ti.wrapped_type
         if node.condition.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
           unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
         end
@@ -1261,7 +1287,7 @@ module Annotator
         ).void
       end
       def validate_moved_values_not_reused_by_loop!(node, body, pre_loop_states, code:, ignored_name: nil)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         collect_body_identifier_names(body).each do |name|
           next if name == ignored_name
@@ -1277,7 +1303,7 @@ module Annotator
 
       sig { params(name: String).returns(T::Boolean) }
       def captured_move_consumed_by_loop?(name)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         (
           ownership_graph[name]&.move_action == :capture &&
@@ -1287,7 +1313,7 @@ module Annotator
 
       sig { params(name: String).returns(T::Boolean) }
       def loop_value_copyable?(name)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         var_type = current_scope.resolve_entry(name)&.type
         type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
@@ -1301,7 +1327,7 @@ module Annotator
 
       sig { params(node: AST::BreakNode).returns(T.nilable(Symbol)) }
       def visit_BreakNode(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         if current_loop_depth <= 0
           error!(node, :BREAK_OUTSIDE_LOOP)
@@ -1311,7 +1337,7 @@ module Annotator
 
       sig { params(node: AST::ContinueNode).returns(T.nilable(Symbol)) }
       def visit_ContinueNode(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         if current_loop_depth <= 0
           error!(node, :CONTINUE_OUTSIDE_LOOP)

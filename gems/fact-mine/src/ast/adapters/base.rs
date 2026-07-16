@@ -51,15 +51,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         let kind = node.kind();
         match role {
             "root" => kind == "program",
-            "function" => matches!(
-                kind,
-                "method"
-                    | "function_definition"
-                    | "function_declaration"
-                    | "method_definition"
-                    | "method_declaration"
-                    | "function_item"
-            ),
+            "function" => self.function_kind(kind),
             "subshell" => kind == "subshell",
             "operator_assignment" => kind == "operator_assignment",
             "assignment" => matches!(
@@ -115,7 +107,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
             "exceptions" => kind == "exceptions",
             "hash_key_symbol" => kind == "hash_key_symbol",
             "body_statement" => kind == "body_statement",
-            "block_parameters" => kind == "block_parameters",
+            "block_parameters" => matches!(kind, "block_parameters" | "lambda_parameters"),
             "destructured_parameter" => kind == "destructured_parameter",
             "optional_or_keyword_parameter" => {
                 matches!(kind, "optional_parameter" | "keyword_parameter")
@@ -356,6 +348,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
                 | "method_declaration"
                 | "function_item"
         )
+    }
+
+    /// Supplies an expression-bodied function body for grammars whose
+    /// declarations do not use the common `body` field (for example C#
+    /// expression-bodied properties). Keeping this in the grammar adapter
+    /// prevents consumers from having to special-case language node names.
+    fn function_body<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
     }
 
     fn singleton_function_kind(&self, _kind: &str) -> bool {
@@ -994,6 +998,13 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    // Some languages permit direct instance-field reads without an explicit
+    // receiver. Adapters may identify those before the generic local-variable
+    // normalization runs.
+    fn direct_state_identifier(&self, _node: TreeSitterNode<'_>, _source: &str) -> Option<String> {
+        None
+    }
+
     fn constant_identifier_text(&self, _node: TreeSitterNode<'_>, _source: &str) -> Option<String> {
         None
     }
@@ -1041,6 +1052,12 @@ pub(crate) trait AstNormalizationAdapter: Sync {
                 | "function_body"
                 | "statements"
         )
+    }
+
+    // CFG-SPECIFIC: identifies a grammar wrapper around executable control
+    // body statements. The shared normalizer unwraps it before CFG lowering.
+    fn cfg_control_body_wrapper(&self, _node: TreeSitterNode<'_>) -> bool {
+        false
     }
 
     fn const_node_kind(&self, kind: &str) -> bool {
@@ -1468,7 +1485,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         &self,
         _node: TreeSitterNode<'tree>,
         _source: &str,
-    ) -> Option<(Option<TreeSitterNode<'tree>>, Option<TreeSitterNode<'tree>>)> {
+    ) -> Option<(Vec<TreeSitterNode<'tree>>, Option<TreeSitterNode<'tree>>)> {
         None
     }
 

@@ -3,7 +3,7 @@
 # on function return. If frame memory grows unboundedly, this will OOM.
 
 FN buildString(n: Int64) RETURNS !String ->
-    MUTABLE parts: String[]@list = [];
+    MUTABLE parts: []String = [];
     FOR i IN (1_i64 ..= 10) -> parts.append(i.toString());
     RETURN join(parts, ",");
 END

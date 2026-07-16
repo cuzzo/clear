@@ -13,7 +13,7 @@ module Annotator
 
       sig { params(node: AST::FuncCall).void }
       def visit_FuncCall(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         node.args.each { |arg| annotate_call_argument!(node, arg) }
 
@@ -31,7 +31,7 @@ module Annotator
 
       sig { params(node: AST::MethodCall).void }
       def visit_MethodCall(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.object)
         node.args.each { |arg| visit(arg) }
@@ -69,17 +69,19 @@ module Annotator
 
       sig { params(node: AST::MethodCall).void }
       def reject_mutating_borrowed_receiver!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
         return unless node.mutates_receiver
 
-        root = T.unsafe(self).__send__(:root_variable_name, node.object)
+        root = root_variable_name(node.object)
         return unless root
-        return if T.unsafe(self).__send__(:ownership_graph).can_write?(root)
-        T.unsafe(self).__send__(:error!, node, :ASSIGN_WHILE_BORROWED, name: root)
+        return if ownership_graph.can_write?(root)
+        error!(node, :ASSIGN_WHILE_BORROWED, name: root)
       end
 
       sig { params(node: AST::StaticCall).void }
       def visit_StaticCall(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         node.args.each { |arg| visit(arg) }
 
@@ -139,7 +141,7 @@ module Annotator
         end
 
         node.zig_pattern = method_def.intrinsic_pattern
-        stamp_type!(node, method_def.return_def.resolve(nil, node.args, self))
+        stamp_type!(node, method_def.return_def.resolve(nil, node.args))
         node.matched_stdlib_def = method_def
         node.matched_signature = method_def if node.respond_to?(:matched_signature=)
         method_allocates = method_def.emits_allocating?
@@ -153,7 +155,7 @@ module Annotator
 
       sig { params(node: T.any(AST::FuncCall, AST::MethodCall), args: T::Array[AST::Node], matched_def: T.nilable(FunctionSignature)).returns(T.nilable(Type)) }
       def visit_IntrinsicFunc(node, args, matched_def: nil)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         definitions = IntrinsicRegistry.overloads(STD_LIB, node.name)
 
@@ -179,7 +181,7 @@ module Annotator
           return
         end
 
-        stamp_type!(node, matched_def.return_def.resolve(nil, args, self))
+        stamp_type!(node, matched_def.return_def.resolve(nil, args))
 
         node.zig_pattern = matched_def.intrinsic_pattern
         node.matched_stdlib_def = matched_def
@@ -205,7 +207,7 @@ module Annotator
 
       sig { params(parent: AST::FuncCall, arg: AST::Node).void }
       def annotate_call_argument!(parent, arg)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         arg.is_a?(AST::StructLit) ? with_struct_literal_call_argument { visit(arg) } : visit(arg)
         promote_to_expr_if!(parent, arg) if arg.is_a?(AST::IfStatement)
@@ -215,7 +217,7 @@ module Annotator
 
       sig { params(node: AST::FuncCall).void }
       def record_named_call_site!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         return unless node.name.is_a?(String)
 
         record_call_site(node.name)
@@ -234,7 +236,7 @@ module Annotator
 
       sig { params(node: AST::FuncCall).void }
       def record_held_lock_call_site!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         held_lock_types = semantic_held_lock_types
         return if held_lock_types.empty?
         return unless semantic_function_nodes.key?(node.name)
@@ -246,7 +248,7 @@ module Annotator
 
       sig { params(node: AST::MethodCall).returns(T::Boolean) }
       def resolve_extern_method_call!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         obj_type = node.object.full_type!(context: "method receiver")
         return false unless obj_type
@@ -269,7 +271,7 @@ module Annotator
 
       sig { params(method_sig: FunctionSignature).void }
       def record_extern_method_alloc!(method_sig)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         alloc_kind = method_sig.extern_effects&.dig(:alloc)
         fn_ctx = current_fn_ctx
@@ -285,7 +287,7 @@ module Annotator
 
       sig { params(node: AST::MethodCall).returns(T::Boolean) }
       def resolve_intrinsic_method_call!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         intrinsic_defs = STD_LIB[node.name]
         return false unless intrinsic_defs

@@ -135,7 +135,7 @@ module MIRLoweringControlFlow
       then_body = lower_body_with_break(node.then_branch, label)
       else_body = lower_body_with_break(node.else_branch || [], label)
       if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
-      if_stmt.comptime = !!node.comptime
+      if_stmt.comptime = node.comptime
       block = MIR::BlockExpr.new(label, [if_stmt])
       return with_pending(cond_pending, block)
     end
@@ -143,7 +143,7 @@ module MIRLoweringControlFlow
     then_body = lower_body(node.then_branch)
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
     if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
-    if_stmt.comptime = !!node.comptime
+    if_stmt.comptime = node.comptime
     with_pending(cond_pending, if_stmt)
   end
 
@@ -200,7 +200,7 @@ module MIRLoweringControlFlow
       end
       if (capture_cleanup = bind_capture_cleanup(b.expr))
         capture_name = b.name.to_s
-        capture_type = Type.from_node!(b.expr)
+        capture_type = capture_expr_payload_type(b.expr)
         capture_markers << MIR::AllocMark.new(capture_name, :heap, capture_type, :function)
         capture_markers << MIR::Cleanup.new(capture_name, capture_cleanup)
       end
@@ -242,7 +242,9 @@ module MIRLoweringControlFlow
 
   sig { params(target: AST::Node).returns(T::Boolean) }
   def collection_param_receiver?(target)
-    target.is_a?(AST::Identifier) && T.unsafe(self).__send__(:current_function_collection_param?, target.name)
+    T.bind(self, MIRLowering) rescue nil
+
+    target.is_a?(AST::Identifier) && current_function_collection_param?(target.name)
   end
 
   sig do
@@ -254,8 +256,10 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     prev_alias_alloc = capability_state.with_alias_alloc_map
     prev_alias_owner = capability_state.with_alias_owner_map
+    prev_pointer_aliases = T.let(capability_state.if_bind_pointer_aliases, T::Set[String])
     alias_alloc_map = T.let((prev_alias_alloc || {}).dup, IfBindAliasAllocMap)
     alias_owner_map = T.let((prev_alias_owner || {}).dup, IfBindAliasOwnerMap)
+    pointer_aliases = T.let(prev_pointer_aliases.dup, T::Set[String])
 
     node.bindings.each do |binding|
       owner = extract_root_var_name(binding.expr)
@@ -264,15 +268,33 @@ module MIRLoweringControlFlow
       alias_name = binding.name.to_s
       alias_owner_map[alias_name] = owner
       alias_alloc_map[alias_name] = placement_for_node(binding.expr)
+      # Collection get operations expose a borrowed optional pointer. Compact
+      # @node handles are values, so they must retain their value shape.
+      binding_type = Type.from_node!(binding.expr, context: "IF binding pointer shape")
+      pointer_aliases.add(alias_name) if AST.container_borrow?(binding.expr) && !binding_type.node_reference?
     end
 
     capability_state.with_alias_alloc_map = alias_alloc_map
     capability_state.with_alias_owner_map = alias_owner_map
+    capability_state.if_bind_pointer_aliases = pointer_aliases
     blk.call
   ensure
     T.bind(self, MIRLowering) rescue nil
     capability_state.with_alias_alloc_map = prev_alias_alloc
     capability_state.with_alias_owner_map = prev_alias_owner
+    capability_state.if_bind_pointer_aliases = T.must(prev_pointer_aliases)
+  end
+
+  sig { params(expr: AST::Node).returns(Type) }
+  def capture_expr_payload_type(expr)
+    ti = AST.capture_expr_source_type(expr)
+    if ti.stream_step?
+      T.must(ti.stream_step_item_type)
+    elsif ti.error_union?
+      ti.success_type
+    else
+      ti.wrapped_type || ti
+    end
   end
 
   sig { params(expr: AST::Node).returns(T.nilable(CleanupEntry)) }
@@ -282,11 +304,12 @@ module MIRLoweringControlFlow
     # successful payload whose capture must be released at block exit.
     return nil unless AST.capture_expr_owns_result?(expr)
 
-    ti = Type.from_node!(expr)
-    ti = ti.success_type || ti
-    return nil unless ti.any_rc? || (ti.optional? && ti.wrapped_type&.any_rc?)
+    capture_type = capture_expr_payload_type(expr)
+    schema_lookup = T.unsafe(self).mir_schema_lookup
+    return nil unless capture_type.needs_explicit_cleanup?(:heap, schema_lookup)
 
-    CleanupEntry.build(:rc, alloc: :heap, has_moved_guard: false)
+    kind = capture_type.any_rc? ? :rc : :uniform
+    CleanupEntry.build(kind, alloc: :heap, has_moved_guard: false)
   end
 
   # Single-source frame-arena marker injection for every loop shape
@@ -318,15 +341,15 @@ module MIRLoweringControlFlow
         s.scope = scope if MIR::Placement.frame?(s.alloc)
       when MIR::IfStmt, MIR::IfBindStmt
         stamp_loop_frame_alloc_scopes!(s.then_body, scope)
-        stamp_loop_frame_alloc_scopes!(s.else_body, scope) if s.else_body
+        stamp_loop_frame_alloc_scopes!(T.must(s.else_body), scope) if s.else_body
       when MIR::ScopeBlock, MIR::BlockExpr, MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
         stamp_loop_frame_alloc_scopes!(s.body, scope)
       when MIR::SwitchStmt
         s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
-        stamp_loop_frame_alloc_scopes!(s.default_body, scope) if s.default_body
+        stamp_loop_frame_alloc_scopes!(T.must(s.default_body), scope) if s.default_body
       when MIR::IfChain
         s.branches&.each { |b| stamp_loop_frame_alloc_scopes!(b.body, scope) }
-        stamp_loop_frame_alloc_scopes!(s.default_body, scope) if s.default_body
+        stamp_loop_frame_alloc_scopes!(T.must(s.default_body), scope) if s.default_body
       when MIR::WithMatchDispatch
         s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
       end
@@ -348,7 +371,7 @@ module MIRLoweringControlFlow
     body = b.is_a?(Array) ? lower_body(b) : []
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
 
-    tight = node.tight == true
+    tight = node.tight
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: tight)
 
     # Yield check at end of loop body (skip when last stmt is unconditional exit)
@@ -367,7 +390,7 @@ module MIRLoweringControlFlow
     body = lower_body(node.do_branch)
     if (capture_cleanup = bind_capture_cleanup(node.condition))
       capture_name = node.binding_name.to_s
-      capture_type = Type.from_node!(node.condition)
+      capture_type = capture_expr_payload_type(node.condition)
       unless body.any? { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == capture_name }
         body = [
           MIR::AllocMark.new(capture_name, :heap, capture_type, :iteration),
@@ -377,11 +400,31 @@ module MIRLoweringControlFlow
     end
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
 
-    tight = node.tight == true
+    tight = node.tight
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: tight)
 
     if !tight && current_function_has_rt? && !loop_body_exits?(body)
       body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false, MIR::CallableContract.no_ownership(0)), false)
+    end
+
+    if Type.from_node!(node.condition).stream_step?
+      step_name = "__stream_step_#{lowering_counters.next_for_loop_id}"
+      step = MIR::Ident.new(step_name)
+      item_arm = MIR::UnionMatchArm.new(
+        variant: "Item",
+        payload: node.binding_name,
+        body: body,
+      )
+      closed_arm = MIR::UnionMatchArm.new(
+        variant: "Closed",
+        payload: nil,
+        body: [MIR::BreakStmt.new(nil, nil)],
+      )
+      loop_body = cond_pending + [
+        MIR::Let.new(step_name, cond, false, nil, nil),
+        MIR::UnionMatchStmt.new(step, [item_arm, closed_arm], nil),
+      ]
+      return MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, node.mark_per_iter, tight)
     end
 
     MIR::WhileStmt.new(loop_condition_expr(cond, cond_pending), body, node.binding_name, nil, node.mark_per_iter, tight)
@@ -432,7 +475,7 @@ module MIRLoweringControlFlow
     end
     is_mutable = node.is_mutable == true
     mark_per_iter = node.mark_per_iter == true ? true : nil
-    tight = node.tight == true
+    tight = node.tight
 
     body = prepend_loop_mark(body, mark_per_iter: mark_per_iter, tight: tight)
 
@@ -494,6 +537,19 @@ module MIRLoweringControlFlow
         false, nil, nil)
       full_body = [skip_dead, value_bind] + body
       loop_stmt = MIR::ForStmt.new(slots_iter, slot_var, full_body, nil, mark_per_iter, tight)
+    elsif ct.canonical_stream? && (ct.dynamic_stream? || ct.bounded_stream?)
+      step_name = "__stream_step_#{lowering_counters.next_for_loop_id}"
+      next_step = MIR::MethodCall.new(coll, "nextStep", [], true, MIR::CallableContract.no_ownership(0))
+      item_arm = MIR::UnionMatchArm.new(variant: "Item", payload: var, body: body)
+      closed_arm = MIR::UnionMatchArm.new(
+        variant: "Closed", payload: nil, body: [MIR::BreakStmt.new(nil, nil)])
+      loop_stmt = MIR::WhileStmt.new(
+        MIR::Lit.new("true"),
+        [
+          MIR::Let.new(step_name, next_step, false, nil, nil),
+          MIR::UnionMatchStmt.new(MIR::Ident.new(step_name), [item_arm, closed_arm], nil),
+        ],
+        nil, nil, mark_per_iter, tight)
     elsif ct.dynamic_stream? || ct.open_stream?
       # Finite/open stream (~T[] / ~?T[]): next() returns ?T; while-loop with optional capture.
       loop_stmt = MIR::WhileStmt.new(
@@ -586,9 +642,11 @@ module MIRLoweringControlFlow
 
   sig { params(mir: MIR::Node).returns(T::Boolean) }
   def for_each_owned_collection_source?(mir)
+    T.bind(self, MIRLowering) rescue nil
+
     return for_each_owned_collection_source?(mir.expr) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
     return true if mir.is_a?(MIR::Call) && mir.owned_return?
-    T.unsafe(self).__send__(:mir_allocates?, mir)
+    mir_allocates?(mir)
   end
 
   sig { params(mir: MIR::Node, type_info: Type).returns(Symbol) }
@@ -640,7 +698,7 @@ module MIRLoweringControlFlow
       comparison: cmp,
       iter_var: iter_var,
       mark_per_iter: node.mark_per_iter == true ? true : nil,
-      tight: node.tight == true,
+      tight: node.tight,
     )
   end
 
@@ -804,6 +862,11 @@ module MIRLoweringControlFlow
       t.generic_instance? ? t.generic_base : t.resolved
     end
     is_union = union_schemas.key?(union_lookup)
+    match_ident = T.cast(node.expr, T.nilable(AST::Identifier)) if node.expr.is_a?(AST::Identifier)
+    if is_union && match_ident &&
+        capability_state.if_bind_pointer_aliases.include?(match_ident.name.to_s)
+      subject = MIR::Deref.new(subject)
+    end
     expr_type = node.expr.resolved_type
     expr_type_sym = expr_type.is_a?(Type) ? expr_type.resolved : expr_type
     is_int_match = !!(!is_union && !node.string_match &&
@@ -929,7 +992,9 @@ module MIRLoweringControlFlow
     if facts.is_enum_match
       all_variants = enum_schemas[facts.expr_type_sym]&.map(&:to_s)&.sort || []
       covered = node.cases.flat_map { |c|
-        [c.value.field.to_s, *((c.extra_values || []).map { |ev| ev.field.to_s })]
+        value = T.cast(c.value, AST::GetField)
+        extras = c.extra_values.map { |ev| T.cast(ev, AST::GetField).field.to_s }
+        [value.field.to_s, *extras]
       }.sort
       exhaustive = covered == all_variants
       default = nil if default && exhaustive
@@ -962,12 +1027,13 @@ module MIRLoweringControlFlow
       ast_value = returns[ret_i]
       ret_i += 1
       name = "__tmp_#{lowering_counters.next_tmp_id}"
-      entry = hoist_cleanup_entry(stmt.value, ast_value)
+      return_value = T.must(stmt.value)
+      entry = hoist_cleanup_entry(return_value, ast_value)
       materialized = MIR::BindingMaterialization.new(
         name: name,
-        expr: T.cast(stmt.value, MIR::Node),
+        expr: return_value,
         alloc: :heap,
-        type_info: mir_alloc_mark_type_info(stmt.value, ast_value, context: "unhoisted return allocation"),
+        type_info: mir_alloc_mark_type_info(return_value, ast_value, context: "unhoisted return allocation"),
         mutable: false,
         cleanup_entry: entry,
         cleanup_mode: entry ? :err : :normal,
@@ -1320,7 +1386,7 @@ module MIRLoweringControlFlow
   # Returns true if a MIR::Call node returns a non-Copy union type that needs
   # a cleanup defer when used as a temporary in a non-TAKES argument position.
   # heap_storage? misses these: unions like Value are stack-sized but own heap
-  # memory (via @indirect fields). When returned inline as a non-TAKES argument,
+  # memory (via @boxed fields). When returned inline as a non-TAKES argument,
   # they must be hoisted to a named let with a defer.
   sig { params(expr: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
   def call_union_return_needs_hoist?(expr, ast_node)

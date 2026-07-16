@@ -3,22 +3,22 @@
 # indexing, and iteration. The caller keeps full ownership; the
 # call must not consume or shadow the list.
 
-FN measureLen(xs: Int64[]@list) RETURNS Int64 ->
+FN measureLen(xs: []Int64) RETURNS Int64 ->
     RETURN xs.length();
 END
 
-FN sumAll(xs: Int64[]@list) RETURNS Int64 ->
+FN sumAll(xs: []Int64) RETURNS Int64 ->
     MUTABLE total: Int64 = 0_i64;
     FOR x IN xs DO total = total + x; END
     RETURN total;
 END
 
-FN firstTwo(xs: Int64[]@list) RETURNS Int64 ->
+FN firstTwo(xs: []Int64) RETURNS Int64 ->
     RETURN (xs[0_i64] OR_ELSE 0_i64) + (xs[1_i64] OR_ELSE 0_i64);
 END
 
 FN main() RETURNS Void ->
-    MUTABLE xs: Int64[]@list = List[];
+    MUTABLE xs: []Int64 = List[];
     xs.append(10_i64);
     xs.append(20_i64);
     xs.append(30_i64);

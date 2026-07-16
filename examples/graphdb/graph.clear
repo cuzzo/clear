@@ -14,20 +14,20 @@ STRUCT Edge {
 
 STRUCT Node {
   label: String,
-  edges: Edge[]@list,
+  edges: []Edge,
 }
 
 # Add a node with the given ID and label.
-FN addNode!(MUTABLE nodes: HashMap<Node>, id: String, label: String) RETURNS !Void ->
+FN addNode!(MUTABLE nodes: {String}Node, id: String, label: String) RETURNS !Void ->
   nodes[id] = Node{ label: COPY label, edges: [] };
   RETURN;
 END
 
 # Add a directed edge from -> to with a weight.
-FN addEdge!(MUTABLE nodes: HashMap<Node>, from: String, to: String, weight: Float64) RETURNS !Void ->
+FN addEdge!(MUTABLE nodes: {String}Node, from: String, to: String, weight: Float64) RETURNS !Void ->
   node = nodes[from] OR_ELSE Node{ label: "", edges: [] };
   # Build new edges list (workaround: COPY on list-from-struct is broken)
-  MUTABLE edges: Edge[]@list = [];
+  MUTABLE edges: []Edge = [];
   FOR i IN (0 ..< node.edges.length()) DO
     IF node.edges[i] EXISTS AS edge THEN
       edges.append(Edge{ target: COPY edge.target, weight: edge.weight });
@@ -39,9 +39,9 @@ FN addEdge!(MUTABLE nodes: HashMap<Node>, from: String, to: String, weight: Floa
 END
 
 # Get neighbor labels for a given node.
-FN neighbors!(nodes: HashMap<Node>, id: String) RETURNS !String[]@list ->
+FN neighbors!(nodes: {String}Node, id: String) RETURNS ![]String ->
   node = nodes[id] OR_ELSE Node{ label: "", edges: [] };
-  MUTABLE result: String[]@list = [];
+  MUTABLE result: []String = [];
   FOR i IN (0 ..< node.edges.length()) DO
     IF node.edges[i] EXISTS AS edge THEN
       targetNode = nodes[edge.target] OR_ELSE Node{ label: "?", edges: [] };
@@ -52,38 +52,38 @@ FN neighbors!(nodes: HashMap<Node>, id: String) RETURNS !String[]@list ->
 END
 
 # Get the label of a node by ID.
-FN getLabel(nodes: HashMap<Node>, id: String) RETURNS !String ->
+FN getLabel(nodes: {String}Node, id: String) RETURNS !String ->
   node = nodes[id] OR_ELSE Node{ label: "", edges: [] };
   RETURN node.label;
 END
 
 # Check if a node exists.
-FN hasNode(nodes: HashMap<Node>, id: String) RETURNS !Bool ->
+FN hasNode(nodes: {String}Node, id: String) RETURNS !Bool ->
   node = nodes[id] OR_ELSE Node{ label: "", edges: [] };
   RETURN node.label != "";
 END
 
 # BFS shortest path from source to target. Returns list of node IDs.
 # Returns empty list if no path exists or nodes not found.
-FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS !String[]@list ->
+FN shortestPath!(nodes: {String}Node, source: String, target: String) RETURNS ![]String ->
   IF hasNode(nodes, source) == FALSE THEN
-    MUTABLE empty: String[]@list = [];
+    MUTABLE empty: []String = [];
     RETURN empty;
   END
   IF hasNode(nodes, target) == FALSE THEN
-    MUTABLE empty: String[]@list = [];
+    MUTABLE empty: []String = [];
     RETURN empty;
   END
   IF source == target THEN
-    MUTABLE path: String[]@list = [];
+    MUTABLE path: []String = [];
     path.append(COPY source);
     RETURN path;
   END
 
   # BFS using index into queue (avoids shift/reassign issues with @list)
-  MUTABLE queue: String[]@list = [];
-  MUTABLE visited: HashMap<String> = {};
-  MUTABLE parent: HashMap<String> = {};
+  MUTABLE queue: []String = [];
+  MUTABLE visited: {String}String = {};
+  MUTABLE parent: {String}String = {};
 
   queue.append(COPY source);
   visited[source] = "1";
@@ -115,12 +115,12 @@ FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS !
   END
 
   IF found == FALSE THEN
-    MUTABLE noPath: String[]@list = [];
+    MUTABLE noPath: []String = [];
     RETURN noPath;
   END
 
   # Reconstruct path from target to source
-  MUTABLE path: String[]@list = [];
+  MUTABLE path: []String = [];
   MUTABLE cur = COPY target;
   WHILE cur != source DO
     nextCur = parent[cur] OR_ELSE "";
@@ -130,7 +130,7 @@ FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS !
   path.append(COPY source);
 
   # Reverse path
-  MUTABLE reversed: String[]@list = [];
+  MUTABLE reversed: []String = [];
   FOR ri IN (0 ..< path.length()) DO
     IF path[path.length() - 1 - ri] EXISTS AS pathNode THEN reversed.append(COPY pathNode); END
   END
@@ -138,10 +138,10 @@ FN shortestPath!(nodes: HashMap<Node>, source: String, target: String) RETURNS !
 END
 
 # DFS traversal from a start node. Returns visited node IDs in DFS order.
-FN dfs!(nodes: HashMap<Node>, start: String) RETURNS !String[]@list ->
-  MUTABLE stack: String[]@list = [];
-  MUTABLE visited: HashMap<String> = {};
-  MUTABLE result: String[]@list = [];
+FN dfs!(nodes: {String}Node, start: String) RETURNS ![]String ->
+  MUTABLE stack: []String = [];
+  MUTABLE visited: {String}String = {};
+  MUTABLE result: []String = [];
 
   stack.append(COPY start);
 
@@ -151,7 +151,7 @@ FN dfs!(nodes: HashMap<Node>, start: String) RETURNS !String[]@list ->
     # Pop from end of stack
     top = COPY (stack[stack.length() - 1] OR_ELSE "");
     # Shrink stack by rebuilding without last element
-    MUTABLE newStack: String[]@list = [];
+    MUTABLE newStack: []String = [];
     FOR si IN (0 ..< stack.length() - 1) DO
       IF stack[si] EXISTS AS stackNode THEN newStack.append(COPY stackNode); END
     END
@@ -180,13 +180,13 @@ FN dfs!(nodes: HashMap<Node>, start: String) RETURNS !String[]@list ->
 END
 
 # Count nodes reachable from a start node (connected component size).
-FN componentSize!(nodes: HashMap<Node>, start: String) RETURNS !Int64 ->
-  reachable: String[]@list = dfs!(nodes, start);
+FN componentSize!(nodes: {String}Node, start: String) RETURNS !Int64 ->
+  reachable: []String = dfs!(nodes, start);
   RETURN reachable.length();
 END
 
 FN main() RETURNS Void ->
-  MUTABLE nodes: HashMap<Node> = {};
+  MUTABLE nodes: {String}Node = {};
 
   # Add nodes
   addNode!(nodes, "a", "Alice");
@@ -216,29 +216,29 @@ FN main() RETURNS Void ->
   ASSERT carolNeighbors.empty?(), "Carol has 0 neighbors";
 
   # Shortest path tests
-  pathAC: String[]@list = shortestPath!(nodes, "a", "c");
+  pathAC: []String = shortestPath!(nodes, "a", "c");
   ASSERT pathAC.length() == 2, "path a->c has 2 nodes";
   ASSERT pathAC[0] == "a", "path starts at a";
   ASSERT pathAC[1] == "c", "path ends at c";
 
-  pathAB: String[]@list = shortestPath!(nodes, "a", "b");
+  pathAB: []String = shortestPath!(nodes, "a", "b");
   ASSERT pathAB.length() == 2, "path a->b has 2 nodes";
 
   # Self-path
-  pathAA: String[]@list = shortestPath!(nodes, "a", "a");
+  pathAA: []String = shortestPath!(nodes, "a", "a");
   ASSERT pathAA.length() == 1, "self-path has 1 node";
   ASSERT pathAA[0] == "a", "self-path is source";
 
   # No reverse path (c has no outgoing edges)
-  pathCA: String[]@list = shortestPath!(nodes, "c", "a");
+  pathCA: []String = shortestPath!(nodes, "c", "a");
   ASSERT pathCA.empty?(), "no path c->a";
 
   # DFS traversal tests
-  dfsFromA: String[]@list = dfs!(nodes, "a");
+  dfsFromA: []String = dfs!(nodes, "a");
   ASSERT dfsFromA.length() == 3, "DFS from a visits 3 nodes";
   ASSERT dfsFromA[0] == "a", "DFS starts at a";
 
-  dfsFromC: String[]@list = dfs!(nodes, "c");
+  dfsFromC: []String = dfs!(nodes, "c");
   ASSERT dfsFromC.length() == 1, "DFS from c visits 1 node (no outgoing)";
 
   # Component size
@@ -250,7 +250,7 @@ FN main() RETURNS Void ->
   # ================================================================
   # Concurrent tests: BG fibers add nodes/edges simultaneously
   # ================================================================
-  MUTABLE cNodes: HashMap<Node> @sharded(4):writeLocked = {};
+  MUTABLE cNodes: {String}@sharded(4):writeLocked Node = {};
 
   # Concurrent node creation: 3 BG fibers each add a node
   p1 = BG {addNode!(cNodes, "x", "Xena");};
@@ -280,7 +280,7 @@ FN main() RETURNS Void ->
   ASSERT yNeighbors.length() == 1, "concurrent: y has 1 neighbor";
 
   # Concurrent read while structure is stable
-  pathXZ: String[]@list = shortestPath!(cNodes, "x", "z");
+  pathXZ: []String = shortestPath!(cNodes, "x", "z");
   ASSERT pathXZ.length() == 2, "concurrent: path x->z has 2 nodes";
 
   print("graphdb: concurrent tests PASSED");

@@ -2,7 +2,9 @@
 
 CLEAR's pipeline system lets you transform, filter, aggregate, and iterate collections using the smooth operator (`|>`).
 
-Every pipeline operator works on arrays, `@list`, `@pool`, sharded collections, `@pool:soa`, streams `~T[]`, etc - the same syntax regardless of the underlying storage.
+Every pipeline operator works on arrays, lists, pools, sharded collections,
+`@soa` layers, streams `[~]T`, and other supported collection nodes with the
+same operator syntax.
 
 `_` is the placeholder value for the value being iterated over.
 
@@ -19,7 +21,7 @@ entities
   |> EACH { _.health = _.health - 1.0; };
 ```
 
-This document describes both the collection pipeline model and the stream/future pipeline surface. The full operator set is supported for finite streams (`~T[]`, `~T[N]`); infinite streams (`~T[INF]`) require `LIMIT` to bound them and then support all non-materialization operators.
+This document describes both the collection pipeline model and the stream/future pipeline surface. The full operator set is supported for finite streams (`[~]T`, `[~N]T`); infinite streams (`[~INF]T`) require `LIMIT` to bound them and then support all non-materialization operators.
 
 ## The Smooth Operator (`|>`)
 
@@ -144,7 +146,7 @@ Inside pipeline expressions, `_` refers to the current element. For struct eleme
 
 ```ruby clear
 # _ is the element itself (for scalar collections)
-nums: Float64[] = [1.0, 3.0, 7.0, 9.0];
+nums: []Float64 = [1.0, 3.0, 7.0, 9.0];
 
 big = nums 
   |> WHERE _ > 5.0;
@@ -178,14 +180,14 @@ pool
 
 | Operator | Syntax | Returns | Description |
 |---|---|---|---|
-| **SELECT** | `list \|> SELECT expr` | `ExprType[]` | Project each element through an expression |
-| **WHERE** | `list \|> WHERE pred` | `ElemType[]` | Keep elements matching a boolean predicate |
-| **ORDER_BY** | `list \|> ORDER_BY key` | `ElemType[]` | Sort by key expression |
-| **LIMIT** | `list \|> LIMIT n` | `ElemType[]` | First N elements |
-| **SKIP** | `list \|> SKIP n` | `ElemType[]` | Drop first N elements, return rest |
-| **DISTINCT** | `list \|> DISTINCT key` | `ElemType[]` | Unique by key (first occurrence wins) |
-| **UNNEST** | `list \|> UNNEST expr` | `InnerType[]` | Flatten nested arrays (flatmap) |
-| **INDEX** | `list \|> INDEX key` | `HashMap<ElemType[]>` | Group into a hashmap by key |
+| **SELECT** | `list \|> SELECT expr` | `[]ExprType` | Project each element through an expression |
+| **WHERE** | `list \|> WHERE pred` | `[]ElemType` | Keep elements matching a boolean predicate |
+| **ORDER_BY** | `list \|> ORDER_BY key` | `[]ElemType` | Sort by key expression |
+| **LIMIT** | `list \|> LIMIT n` | `[]ElemType` | First N elements |
+| **SKIP** | `list \|> SKIP n` | `[]ElemType` | Drop first N elements, return rest |
+| **DISTINCT** | `list \|> DISTINCT key` | `[]ElemType` | Unique by key (first occurrence wins) |
+| **UNNEST** | `list \|> UNNEST expr` | `[]InnerType` | Flatten nested arrays (flatmap) |
+| **INDEX** | `list \|> INDEX key` | `{Key}[]ElemType` | Group into a map by key |
 
 SELECT accepts any expression, including struct literals. This lets you project into a different struct type in one step:
 
@@ -193,7 +195,7 @@ SELECT accepts any expression, including struct literals. This lets you project 
 STRUCT Raw     { id: Int64, score: Float64 }
 STRUCT Summary { key: Int64, normalized: Float64 }
 
-raws: Raw[] = [Raw{ id: 1, score: 100.0 }, Raw{ id: 2, score: 200.0 }];
+raws: []Raw = [Raw{ id: 1, score: 100.0 }, Raw{ id: 2, score: 200.0 }];
 
 summaries = raws |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 };
 
@@ -201,7 +203,7 @@ ASSERT summaries[0].key == 1, "id preserved";
 ASSERT summaries[1].normalized == 2.0, "score normalized";
 ```
 
-The result type is inferred from the expression - `Summary[]` above, not `Raw[]`.
+The result type is inferred from the expression - `[]Summary` above, not `[]Raw`.
 
 **Pipeline fusion with SELECT T{}:** SELECT composes with WHERE and aggregates in a single fused loop - no intermediate list allocation:
 
@@ -237,7 +239,7 @@ When SELECT precedes a fold or WHERE, the compiler binds the projected value to 
 The return type is driven by the expression type. SUM widens small integers to `Int64`/`UInt64`; floats stay at their original width (`Float32` stays `Float32`). AVERAGE always returns `Float64`. MIN and MAX preserve the exact expression type. REDUCE is the general fold - `acc` is the mutable accumulator, `_` is the current element:
 
 ```ruby clear
-nums: Float64[] = [2.0, 3.0, 4.0];
+nums: []Float64 = [2.0, 3.0, 4.0];
 
 product = nums 
   |> REDUCE(1.0) acc * _;
@@ -259,7 +261,7 @@ ASSERT product == 24.0, "REDUCE multiplies 2*3*4";
 | Operator | Syntax | Returns | Description |
 |---|---|---|---|
 | **EACH** | `list \|> EACH { body }` | `Void` | Iterate with mutable `_`; side-effect only |
-| **TAP** | `list \|> TAP { body }` | `ElemType[]` | Observe each element (read-only `_`), pass collection through |
+| **TAP** | `list \|> TAP { body }` | `[]ElemType` | Observe each element (read-only `_`), pass collection through |
 
 EACH is the only operator where `_` is mutable. Use it for in-place updates:
 
@@ -281,10 +283,10 @@ result = scores
 
 ### WINDOW (Sliding Window)
 
-WINDOW produces a sliding window of size N over the collection. `_` inside the body is the sub-slice (a `Float64[]` or `ElemType[]` of length N). The result is an array of the body expression evaluated per window.
+WINDOW produces a sliding window of size N over the collection. `_` inside the body is the sub-slice (an `[]Float64` or `[]ElemType` of length N). The result is an array of the body expression evaluated per window.
 
 ```ruby clear
-data: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
+data: []Float64 = [1.0, 2.0, 3.0, 4.0, 5.0];
 
 # Each window is a 3-element slice; body projects to window length
 lengths = data |> WINDOW(3) _.length();
@@ -299,35 +301,35 @@ Number of result windows = `max(0, len - size + 1)`. A window larger than the li
 
 ### WINDOW (Batch / Tumbling Window)
 
-`WINDOW(size: N)`, `WINDOW(time: 'Xms')`, or `WINDOW(size: N, time: 'Xms')` produces non-overlapping batches. `_` inside the body is a `T[]` batch. The result is a heap-allocated list of the body expression evaluated per batch.
+`WINDOW(size: N)`, `WINDOW(time: 'Xms')`, or `WINDOW(size: N, time: 'Xms')` produces non-overlapping batches. `_` inside the body is a `[]T` batch. The result is a heap-allocated list of the body expression evaluated per batch.
 
 Flush conditions (checked after every item):
 - `size: N` - flush when the batch accumulates N items
 - `time: 'Xms'` - flush when elapsed time since the first item in the batch >= timeout; time units: `ms`, `s`, `min`, `h`
 - Both specified - flush on whichever fires first (first-of-either)
 
-A partial batch at the end is always included. Works on all source types: arrays, `~T[]`, `~T[N]`, and `~T[INF]`.
+A partial batch at the end is always included. Works on all source types: arrays, `[~]T`, `[~N]T`, and `[~INF]T`.
 
 ```ruby clear
-FN sumBatch(batch: Int64[]) RETURNS Int64 ->
+FN sumBatch(batch: []Int64) RETURNS Int64 ->
     MUTABLE s: Int64 = 0;
     batch |> EACH { s = s + _; };
     RETURN s;
 END
 
 # Array source, size-only: [1..7] -> [1,2,3], [4,5,6], [7]
-arr: Int64[] = [1, 2, 3, 4, 5, 6, 7];
+arr: []Int64 = [1, 2, 3, 4, 5, 6, 7];
 sums = arr |> WINDOW(size: 3) sumBatch(_);
 ASSERT sums.length() == 3;   # 3 batches
 ASSERT sums[2] == 7;         # partial final batch
 
-# Open stream, size + time (first-of-either)
-gen: ~?Int64[] = BG STREAM { MUTABLE i: Int64 = 1; WHILE i <= 10 DO YIELD i; i = i + 1; END };
+# Finite stream, size + time (first-of-either)
+gen: [~]Int64 = BG STREAM { MUTABLE i: Int64 = 1; WHILE i <= 10 DO YIELD i; i = i + 1; END };
 sums2 = gen |> WINDOW(size: 4, time: "500ms") sumBatch(_);
 ASSERT sums2.length() == 3;  # [1-4], [5-8], [9-10]
 
 # Time-only: entire array arrives fast, all items in one final batch
-arr2: Int64[] = [100, 200, 300];
+arr2: []Int64 = [100, 200, 300];
 lens = arr2 |> WINDOW(time: "1s") _.length();
 ASSERT lens[0] == 3;  # one batch of 3
 ```
@@ -343,7 +345,7 @@ STRUCT User { id: Int64, name: String }
 STRUCT Order { userId: Int64, amount: Float64 }
 
 results = users |> JOIN(orders) %(u, o) -> u.id == o.userId;
-# results: JoinResult_User_Order[]
+# results: []JoinResult_User_Order
 # results[i].left  -- the User
 # results[i].right -- ?Order (NIL if no match)
 ```
@@ -359,10 +361,10 @@ Pipelines over futures/streams are currently supported in a narrower subset than
 | Type | Meaning | `NEXT` result | Pipeline support |
 |---|---|---|---|
 | `~T` | Single future value | `T` | Not a pipeline source |
-| `~?T[]` | Open stream | `?T` | Not a pipeline source yet |
-| `~T[]` | Finite dynamic stream | `?T` | Full non-concurrent operator set (see table) |
-| `~T[N]` | Finite bounded stream | `?T` | Full non-concurrent operator set plus `CONCURRENT EACH/SELECT/WHERE` |
-| `~T[INF]` | Infinite stream | `T` | Fusible stages + all terminals via `LIMIT` |
+| `[~]?T` | Finite stream of optional items | `StreamStep<?T>` | Same finite-stream operators; optionality belongs to each item |
+| `[~]T` | Finite dynamic stream | `StreamStep<T>` | Full non-concurrent operator set (see table) |
+| `[~N]T` | Finite bounded stream | `StreamStep<T>` | Full non-concurrent operator set plus `CONCURRENT EACH/SELECT/WHERE` |
+| `[~INF]T` | Infinite stream | `T` | Fusible stages + all terminals via `LIMIT` |
 
 ### Operator support matrix
 
@@ -370,20 +372,20 @@ The columns are the three pipeline-capable stream types. "Stage" operators filte
 
 #### Stages (fusible, zero intermediate allocations)
 
-| Operator | `~T[]` | `~T[N]` | `~T[INF]` |
+| Operator | `[~]T` | `[~N]T` | `[~INF]T` |
 |---|---|---|---|
 | `WHERE` | yes | yes | yes (LIMIT must appear in chain) |
 | `SELECT` | yes | yes | yes (LIMIT must appear in chain) |
 | `SKIP` | yes | yes | yes (LIMIT must appear in chain) |
 | `TAKE_WHILE` | yes | yes | yes (LIMIT must appear in chain) |
-| `LIMIT` | yes | yes | yes - converts stream to `T[]` |
+| `LIMIT` | yes | yes | yes - converts stream to `[]T` |
 | `TAP` | yes | yes | not yet |
 
 `LIMIT` can appear anywhere in the chain relative to other fusible stages. The compiler fuses the entire chain into a single while loop - `counter |> WHERE _ > 0 |> LIMIT 5 |> EACH` and `counter |> LIMIT 5 |> WHERE _ > 0 |> EACH` both work; they differ only in whether LIMIT counts pre- or post-filter items.
 
 #### Fold terminals (produce a scalar or optional value)
 
-| Operator | `~T[]` | `~T[N]` | `~T[INF]` |
+| Operator | `[~]T` | `[~N]T` | `[~INF]T` |
 |---|---|---|---|
 | `EACH` | yes | yes | via LIMIT |
 | `SUM` | yes | yes | via LIMIT |
@@ -396,7 +398,7 @@ The columns are the three pipeline-capable stream types. "Stage" operators filte
 | `FIND` | yes | yes | via LIMIT |
 | `REDUCE` | yes | yes | via LIMIT |
 
-"via LIMIT" means LIMIT must appear earlier in the same pipeline chain. LIMIT converts `~T[INF]` to `T[]` (a regular list); the fold terminal then operates on that list. Example: `counter |> WHERE _ > 0 |> LIMIT 5 |> SUM _`.
+"via LIMIT" means LIMIT must appear earlier in the same pipeline chain. LIMIT converts `[~INF]T` to `[]T` (a regular list); the fold terminal then operates on that list. Example: `counter |> WHERE _ > 0 |> LIMIT 5 |> SUM _`.
 
 #### Materialization terminals (produce a new collection)
 
@@ -404,9 +406,9 @@ These operators consume the stream and produce a new heap-allocated collection.
 `DISTINCT` and `INDEX` are fully supported for all stream types; others require
 materializing first with `.toList()`.
 
-| Operator | `~T[]` | `~T[N]` | `~T[INF]` |
+| Operator | `[~]T` | `[~N]T` | `[~INF]T` |
 |---|---|---|---|
-| `DISTINCT` | yes - returns `T[]@set` | yes - returns `T[]@set` | via LIMIT - returns `T[]@set` |
+| `DISTINCT` | yes - returns `[Set]T` | yes - returns `[Set]T` | via LIMIT - returns `[Set]T` |
 | `INDEX` | yes | yes | via LIMIT |
 | `ORDER_BY` | not yet | not yet | not yet |
 | `UNNEST` | not yet | not yet | not yet |
@@ -415,13 +417,13 @@ materializing first with `.toList()`.
 | `JOIN` | not yet | not yet | not yet |
 
 "via LIMIT" means `LIMIT` must appear earlier in the chain (same rule as fold terminals).
-`DISTINCT` returns `T[]@set` (a Set), supporting `.count()` and `.contains?()`.
+`DISTINCT` returns `[Set]T` (a Set), supporting `.count()` and `.contains?()`.
 
 If you need `ORDER_BY`, `UNNEST`, sliding `WINDOW(N)`, or `JOIN` on a stream, materialize first.
 The batching `WINDOW(size:, time:)` operator works directly on streams without materialization.
 
 ```ruby clear illustrative
-s: ~Int64[] = 0 ..< 10;
+s: [~]Int64 = 0 ..< 10;
 vals = s.toList();
 total = vals 
   |> WHERE _ > 3 
@@ -430,36 +432,38 @@ total = vals
 
 #### Concurrent operators
 
-| Operator | `~T[]` | `~T[N]` | `~T[INF]` |
+| Operator | `[~]T` | `[~N]T` | `[~INF]T` |
 |---|---|---|---|
 | `CONCURRENT EACH` | not yet | yes | not yet |
 | `CONCURRENT SELECT` | not yet | yes | not yet |
 | `CONCURRENT WHERE` | not yet | yes | not yet |
 
-`~T[N]` concurrent pipelines are native: they consume promise slots directly without materializing through `.toList()`, and lower through MIR-visible builtin helpers. Example:
+`[~N]T` concurrent pipelines are native: they consume promise slots directly without materializing through `.toList()`, and lower through MIR-visible builtin helpers. Example:
 
 ```ruby clear illustrative
-nums: ~Float64[4] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }, BG { 4.0; }];
+nums: [~4]Float64 = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }, BG { 4.0; }];
 
 doubled = nums 
   |> CONCURRENT(workers: 2) SELECT _ * 2.0;
 ```
 
-Direct range expressions still use the non-concurrent path unless first bound as `~T[N]`.
+Direct range expressions still use the non-concurrent path unless first bound as `[~N]T`.
 
-### Open streams
+### Finite streams with optional items
 
-Open streams (`~?T[]`) are still `NEXT`-driven only:
+`[~]?T` preserves optional items independently from completion:
 
 ```ruby clear illustrative
-gen: ~?Int64[] = BG STREAM {
+gen: [~]?Int64 = BG STREAM YIELDS ?Int64 {
     YIELD 1;
+    YIELD NIL;
     YIELD 2;
+    CLOSE;
 };
 
-v1 = NEXT gen;
-v2 = NEXT gen;
-v3 = NEXT gen;     # NIL
+WHILE NEXT gen EXISTS AS item DO
+    print(item);    # item is ?Int64; NIL is data
+END
 ```
 
 ### SKIP and LIMIT (Pagination)
@@ -501,7 +505,7 @@ Every operator works on every collection type:
 
 ```ruby clear illustrative
 # Array
-nums: Float64[] = [1, 2, 3];
+nums: []Float64 = [1, 2, 3];
 total = nums 
   |> SUM _;
 
@@ -511,22 +515,22 @@ avg = data
   |> AVERAGE _.value;
 
 # Pool
-MUTABLE pool: Entity[1000]@pool = [];
+MUTABLE pool: [Pool(1000)]Entity = [];
 alive = pool 
   |> WHERE _.health > 0;
 
 # Pool with SOA (field-slice iteration — cache-optimal)
-MUTABLE soa_pool: Entity[1000]@pool:soa = [];
+MUTABLE soa_pool: [Pool(1000)]@soa Entity = [];
 total_hp = soa_pool 
   |> SUM _.health;  # iterates only the health array
 
 # List with SOA
-MUTABLE soa_list: Entity[]@list:soa = [];
+MUTABLE soa_list: [List]@soa Entity = [];
 avg = soa_list 
   |> AVERAGE _.health;   # contiguous f64 slice
 
 # Sharded (parallel EACH via DO blocks)
-MUTABLE sharded: Entity[10000]@pool:sharded(4) = [];
+MUTABLE sharded: [Pool(10000)]@sharded(4) Entity = [];
 sharded 
   |> EACH { _.processed = TRUE; };
 ```
@@ -550,11 +554,11 @@ This eliminates the allocation and iteration overhead of intermediate lists. Sta
 
 ## SOA Optimization
 
-When a `@pool:soa` is used in a pipeline, the compiler rewrites field accesses to iterate directly over contiguous field arrays instead of striding over whole structs. This happens automatically for all operators — no syntax change needed.
+When a `[Pool(N)]@soa T` is used in a pipeline, the compiler rewrites field accesses to iterate directly over contiguous field arrays instead of striding over whole structs. This happens automatically for all operators — no syntax change needed.
 
 ```ruby clear
 STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-MUTABLE pool: Entity[10000]@pool:soa = [];
+MUTABLE pool: [Pool(10000)]@soa Entity = [];
 
 # SUM _.health iterates only the health array (contiguous f64[]).
 # Without :soa, it would load all 5 fields per element.
@@ -576,7 +580,7 @@ NOTE: Pipeline accesses 1 of 5 fields (health). Consider @soa
 The `CONCURRENT` modifier currently parallelizes collection pipelines for `SELECT`, `WHERE`, and `EACH`:
 
 ```ruby clear illustrative
-MUTABLE data: Score[10000]@pool:sharded(4) = [];
+MUTABLE data: [Pool(10000)]@sharded(4) Score = [];
 
 # Parallel WHERE: one fiber per shard
 results = data 
@@ -598,12 +602,12 @@ Options:
 
 | Source kind | `CONCURRENT SELECT` | `CONCURRENT WHERE` | `CONCURRENT EACH` |
 |---|---|---|---|
-| Arrays / `@list` / `@pool` / `@pool:soa` | Yes | Yes | Yes |
+| Arrays / lists / pools / `@soa` pools | Yes | Yes | Yes |
 | `@sharded(...)` collections | Yes | Yes | Yes |
-| Finite streams `~T[]` | Not yet | Not yet | Not yet |
-| Bounded streams `~T[N]` | Yes | Yes | Yes |
-| Open streams `~?T[]` | Not yet | Not yet | Not yet |
-| Infinite streams `~T[INF]` | Not yet | Not yet | Not yet |
+| Finite streams `[~]T` | Not yet | Not yet | Not yet |
+| Bounded streams `[~N]T` | Yes | Yes | Yes |
+| Finite optional-item streams `[~]?T` | Not yet | Not yet | Not yet |
+| Infinite streams `[~INF]T` | Not yet | Not yet | Not yet |
 
 So today:
 

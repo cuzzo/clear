@@ -1,5 +1,6 @@
 pub(crate) mod c;
 pub(crate) mod complexity_facts;
+pub mod cfg;
 pub(crate) mod clone_similarity;
 pub(crate) mod complexity;
 pub(crate) mod cpp;
@@ -134,6 +135,8 @@ pub struct Document {
     pub file: String,
     pub language: Language,
     #[serde(default)]
+    pub source_digest: String,
+    #[serde(default)]
     pub function_defs: Vec<FunctionDef>,
     #[serde(default)]
     pub owner_defs: Vec<OwnerDef>,
@@ -166,6 +169,28 @@ pub struct Document {
     #[serde(default)]
     pub path_condition_sites: Vec<PathConditionSite>,
     #[serde(default)]
+    pub control_flow_nodes: Vec<cfg::ControlFlowNode>,
+    #[serde(default)]
+    pub control_flow_edges: Vec<cfg::ControlFlowEdge>,
+    #[serde(default)]
+    pub control_flow_metrics: Vec<cfg::ControlFlowMetric>,
+    #[serde(default)]
+    pub places: Vec<cfg::Place>,
+    #[serde(default)]
+    pub node_effects: Vec<cfg::NodeEffect>,
+    #[serde(default)]
+    pub reachability: Vec<cfg::ReachabilityFact>,
+    #[serde(default)]
+    pub dominators: Vec<cfg::DominatorFact>,
+    #[serde(default)]
+    pub reaching_definitions: Vec<cfg::ReachingDefinitionFact>,
+    #[serde(default)]
+    pub def_use: Vec<cfg::DefUseFact>,
+    #[serde(default)]
+    pub liveness: Vec<cfg::LivenessFact>,
+    #[serde(default)]
+    pub flow_types: Vec<cfg::FlowTypeFact>,
+    #[serde(default)]
     pub protocol_method_effects: Vec<ProtocolMethodEffect>,
     #[serde(default)]
     pub protocol_call_paths: Vec<ProtocolMethodPath>,
@@ -179,6 +204,8 @@ pub struct Document {
     pub immutable_struct_reader_types: BTreeMap<String, BTreeMap<String, String>>,
     #[serde(default)]
     pub type_aliases: BTreeMap<String, String>,
+    #[serde(default)]
+    pub type_alias_lines: BTreeMap<String, usize>,
     #[serde(default)]
     pub method_param_types: BTreeMap<String, BTreeMap<String, String>>,
     #[serde(default)]
@@ -196,6 +223,8 @@ pub struct FunctionDef {
     pub visibility: Option<String>,
     pub params: Vec<String>,
     #[serde(default)]
+    pub callback_params: Vec<String>,
+    #[serde(default)]
     pub signature: String,
 }
 
@@ -204,6 +233,10 @@ pub struct OwnerDef {
     pub file: String,
     pub name: String,
     pub kind: String,
+    /// Normalized language fact: this declaration may reopen/extend another
+    /// declaration with the same name.
+    #[serde(default)]
+    pub reopenable: bool,
     pub line: usize,
     pub span: Span,
 }
@@ -237,6 +270,10 @@ pub struct StateDeclaration {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StateWrite {
     pub field: String,
+    /// Canonical owner-qualified identity when the language can prove that a
+    /// bare field spelling is not globally unique.
+    #[serde(default)]
+    pub identity: String,
     pub receiver: String,
     pub file: String,
     pub function: String,
@@ -248,12 +285,22 @@ pub struct StateWrite {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StateRead {
     pub field: String,
+    /// Canonical owner-qualified identity when the language can prove that a
+    /// bare field spelling is not globally unique.
+    #[serde(default)]
+    pub identity: String,
     pub receiver: String,
     pub file: String,
     pub function: String,
     pub line: usize,
     pub span: Span,
     pub owner: String,
+}
+
+pub fn receiver_targets_owner(receiver: &str, owner: &str) -> bool {
+    // Language adapters normalize an explicit owner receiver to `self`.
+    // Source-language spellings must not leak into this shared predicate.
+    receiver == "self" || (!owner.is_empty() && receiver == owner)
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -331,6 +378,8 @@ pub struct DispatchSite {
 pub struct SemanticEffectSite {
     pub kind: String,
     pub detail: String,
+    #[serde(default)]
+    pub receiver_scope: String,
     pub file: String,
     pub function: String,
     pub line: usize,

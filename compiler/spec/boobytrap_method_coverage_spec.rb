@@ -34,7 +34,7 @@ RSpec.describe "Boobytrap-ranked method coverage gaps" do
   end
 
   def annotator
-    SemanticAnnotator.new(source_code: "LET counter @locked: Int64 = 0;\n")
+    Annotator::Phases::TypeAnalysisSession.new(source_code: "LET counter @locked: Int64 = 0;\n")
   end
 
   def lowering

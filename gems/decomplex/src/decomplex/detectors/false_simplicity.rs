@@ -63,6 +63,9 @@ fn class_records_for_document(document: &Document) -> (Vec<ClassRec>, Vec<Hit>) 
     let mut hits = Vec::new();
 
     for owner in &document.owner_defs {
+        if !owner.reopenable {
+            continue;
+        }
         let canonical = owner.name.trim_start_matches("::").to_string();
         if canonical.is_empty() {
             continue;
@@ -102,6 +105,7 @@ fn hits_for_document(document: &Document) -> Vec<Hit> {
     document
         .semantic_effect_sites
         .iter()
+        .filter(|site| !(site.kind == "hidden_mutation" && site.receiver_scope == "owned_local"))
         .map(|site| Hit {
             kind: site.kind.clone(),
             detail: site.detail.clone(),
@@ -220,6 +224,7 @@ impl Report {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::fs;
 
     #[test]
     fn test_false_simplicity_gaps() {
@@ -275,12 +280,74 @@ mod tests {
             "type_aliases": {},
             "method_param_types": {},
             "state_param_origins": []
-        })).unwrap();
+        }))
+        .unwrap();
 
         let res = scan_documents(&[doc]);
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].detail, "test");
         assert_eq!(res[0].sites, vec!["foo.rb:(top-level):10"]);
     }
-}
 
+    #[test]
+    fn non_reopenable_duplicate_types_are_not_monkey_patches() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("theme.ts");
+        std::fs::write(
+            &file_path,
+            "class Theme { first() {} }\nclass Theme { second() {} }\n",
+        )
+        .unwrap();
+
+        let findings = scan_files(&[file_path], Language::TypeScript).unwrap();
+        assert!(findings.iter().all(|finding| finding.kind != "monkeypatch"));
+    }
+
+    #[test]
+    fn excludes_local_collection_mutation_but_keeps_boundary_mutation() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "foo.rb",
+            "language": "ruby",
+            "semantic_effect_sites": [
+                {
+                    "file": "foo.rb", "function": "build", "kind": "hidden_mutation",
+                    "detail": "<<", "receiver_scope": "owned_local", "line": 2,
+                    "span": [2, 2, 2, 12]
+                },
+                {
+                    "file": "foo.rb", "function": "update", "kind": "hidden_mutation",
+                    "detail": "<<", "receiver_scope": "parameter", "line": 8,
+                    "span": [8, 2, 8, 12]
+                }
+            ]
+        })).unwrap();
+
+        let rows = scan_documents(&[doc]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].sites, vec!["foo.rb:update:8"]);
+    }
+
+    #[test]
+    fn ruby_bang_accessors_are_not_mutations_but_known_destructive_calls_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("checked_access.rb");
+        fs::write(
+            &file,
+            r#"
+class Example
+  def inspect(token, items)
+    token.text!
+    items.sort!
+  end
+end
+"#,
+        )
+        .unwrap();
+
+        let rows = scan_files(&[file], Language::Ruby).unwrap();
+        let details = rows.iter().map(|row| row.detail.as_str()).collect::<Vec<_>>();
+
+        assert!(!details.contains(&"text!"));
+        assert!(details.contains(&"sort!"));
+    }
+}

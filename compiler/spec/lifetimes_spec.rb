@@ -323,7 +323,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "succeeds" do
-        annotator = SemanticAnnotator.new
+        annotator = Annotator::Phases::TypeAnalysisSession.new
         expect(annotator.send(:get_lifetime_path, func_def)).to eq("r.foo.bar")
         expect(result).to eq(:Bar)
       end

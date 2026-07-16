@@ -1,10 +1,10 @@
-# Test: promoteFields follows through @indirect pointers.
-# A function returns a union with an @indirect field containing a frame-allocated
+# Test: promoteFields follows through @boxed pointers.
+# A function returns a union with an @boxed field containing a frame-allocated
 # string. promoteFields must promote the string through the *T pointer to heap.
 
 UNION Value {
     Nil, Str: String,
-    Wrapped { inner: String @indirect },
+    Wrapped { inner: String @boxed },
     Error { errMsg: String, errKind: String },
 }
 

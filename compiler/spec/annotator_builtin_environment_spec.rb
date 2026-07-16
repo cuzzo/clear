@@ -4,8 +4,8 @@ require_relative "../ruby/annotator/annotator" unless defined?(SemanticAnnotator
 
 RSpec.describe "annotator builtin environment" do
   it "registers globals and builtin resource types from stdlib environment data" do
-    annotator = SemanticAnnotator.new(source_code: "")
-    scope = annotator.semantic_root_scope
+    session = Annotator::Phases::ResolutionSession.new(importer: nil, source_dir: Dir.pwd, source_code: "")
+    scope = session.resolve!(AST::Program.new(nil, [])).root_scope
 
     argv = scope.resolve_entry("argv")
     expect(argv).not_to be_nil

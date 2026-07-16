@@ -33,11 +33,8 @@ RSpec.describe FsmTransform::Liveness do
     n
   end
 
-  # Build a fake call AST node flagged as IO-suspending.
-  def io_call(name, args, stdlib_def)
-    fc = Struct.new(:name, :args, :receiver, :matched_stdlib_def, :full_type).new(
-      name, args, nil, stdlib_def, :Void)
-    fc
+  def io_call(name, args, _stdlib_def)
+    AST::FuncCall.new(nil, name, args).tap { |call| call.full_type = :Void }
   end
 
   describe "cross-segment promotion" do
@@ -75,8 +72,8 @@ RSpec.describe FsmTransform::Liveness do
     it "flags a pre-decl referenced by the suspend call receiver" do
       pre_file = bind_decl("file", AST::Literal.new("{}", :File), full_type: :File)
       receiver = ident("file")
-      call = io_call("read", [], io_def)
-      call.receiver = receiver
+      call = AST::MethodCall.new(nil, receiver, "read", [])
+      call.full_type = :Void
       seg0 = FsmTransform::Segments::Segment.new(0, [pre_file],
         FsmTransform::Segments::IoSuspend.new(call, io_def, nil))
       seg1 = FsmTransform::Segments::Segment.new(1, [],

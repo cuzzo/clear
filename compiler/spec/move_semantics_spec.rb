@@ -20,14 +20,14 @@ RSpec.describe "Move semantics for heap-owning types" do
   describe "list.append moves the value" do
     let(:zig) do
       transpile(<<~CLEAR)
-        FN makeMap() RETURNS !HashMap<Int64> ->
-            MUTABLE m: HashMap<Int64> = {};
+        FN makeMap() RETURNS !{String}Int64 ->
+            MUTABLE m: {String}Int64 = {};
             m["a"] = 1_i64;
             RETURN m;
         END
         FN main() RETURNS Void ->
             MUTABLE m = makeMap();
-            MUTABLE items: HashMap<Int64>[]@list = List[];
+            MUTABLE items: []{String}Int64 = List[];
             items.append(m);
             RETURN;
         END
@@ -49,12 +49,12 @@ RSpec.describe "Move semantics for heap-owning types" do
       zig = transpile(<<~CLEAR)
         UNION Value { Num: Float64, Items: Int64[] }
         FN makeItems() RETURNS !Value ->
-            MUTABLE items: Int64[]@list = List[];
+            MUTABLE items: []Int64 = List[];
             items.append(1_i64);
             RETURN Value{ Items: items };
         END
         FN main() RETURNS Void ->
-            MUTABLE env: HashMap<Value> = {};
+            MUTABLE env: {String}Value = {};
             env["x"] = makeItems();
             env["x"] = Value.Num;
             RETURN;
@@ -98,9 +98,9 @@ RSpec.describe "Move semantics for heap-owning types" do
   describe "struct field assignment moves value" do
     let(:zig) do
       transpile(<<~CLEAR)
-        STRUCT Container { data: HashMap<Int64> }
+        STRUCT Container { data: {String}Int64 }
         FN main() RETURNS Void ->
-            MUTABLE m: HashMap<Int64> = {};
+            MUTABLE m: {String}Int64 = {};
             m["x"] = 1_i64;
             MUTABLE c = Container{ data: m };
             RETURN;
@@ -134,7 +134,7 @@ RSpec.describe "Move semantics for heap-owning types" do
     it "marks copied map literal values moved after put" do
       zig = transpile(<<~CLEAR)
         FN run(flag: Bool) RETURNS !Int64 ->
-            x: HashMap<String> = {"a": COPY "aa", "b": COPY "bb"};
+            x: {String}String = {"a": COPY "aa", "b": COPY "bb"};
             IF flag THEN RAISE "stop"; END
             RETURN x.count();
         END
@@ -158,7 +158,7 @@ RSpec.describe "Move semantics for heap-owning types" do
       transpile(<<~CLEAR)
         UNION Value { Num: Float64, Items: Int64[] }
         FN main() RETURNS Void ->
-            MUTABLE items: Int64[]@list = List[];
+            MUTABLE items: []Int64 = List[];
             items.append(1_i64);
             v = Value{ Items: items };
             RETURN;
@@ -183,7 +183,7 @@ RSpec.describe "Move semantics for heap-owning types" do
       transpile(<<~CLEAR)
         UNION Value { Num: Float64, Items: Int64[] }
         FN makeItems() RETURNS !Value ->
-            MUTABLE items: Int64[]@list = List[];
+            MUTABLE items: []Int64 = List[];
             items.append(1_i64);
             RETURN Value{ Items: items };
         END
@@ -210,7 +210,7 @@ RSpec.describe "Move semantics for heap-owning types" do
             RETURN items.length();
         END
         FN main() RETURNS Void ->
-            MUTABLE vals: Int64[]@list = List[];
+            MUTABLE vals: []Int64 = List[];
             vals.append(1_i64);
             n = consume(vals);
             RETURN;
@@ -236,12 +236,12 @@ RSpec.describe "Move semantics for heap-owning types" do
       zig = transpile(<<~CLEAR)
         UNION Value { Num: Float64, Items: Int64[] }
         FN makeItems() RETURNS !Value ->
-            MUTABLE items: Int64[]@list = List[];
+            MUTABLE items: []Int64 = List[];
             items.append(1_i64);
             RETURN Value{ Items: items };
         END
         FN main() RETURNS Void ->
-            MUTABLE results: Value[]@list = List[];
+            MUTABLE results: []Value = List[];
             results.append(makeItems());
             RETURN;
         END

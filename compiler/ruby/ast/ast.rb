@@ -7,13 +7,18 @@ require_relative "struct_field"
 require_relative "type"
 require_relative "schemas"
 require_relative "lexer"
-require_relative "../annotator/helpers/function_signature"
+require_relative "function_signature_forward"
 
 # ==========================================
 # AST
 # ==========================================
 module AST
   extend T::Sig
+
+  # Load-order-safe protocol for capture analyses attached to fiber-like AST
+  # nodes. CapabilityHelper defines the concrete record after the AST loads.
+  module CaptureAnalysisValue
+  end
 
   RawBody = T.type_alias { T::Array[AST::Node] }
   HashLitPairs = T.type_alias { T::Hash[AST::Node, AST::Node] }
@@ -54,6 +59,26 @@ module AST
     const :collection, Symbol
     const :soa, T::Boolean, default: false
     const :shard_count, T.nilable(Integer), default: nil
+  end
+
+  # Source span for an EFFECTS clause. This remains attached to the function
+  # so diagnostics can replace the original clause precisely.
+  class EffectSpan < T::Struct
+    const :start_token, Lexer::Token
+    const :end_token, Lexer::Token
+  end
+
+
+  # Immutable half-open source range retained by syntax nodes. Offsets are
+  # absolute bytes within +file+; line/column coordinates are one-based.
+  class SourceRange < T::Struct
+    const :file, T.nilable(String), default: nil
+    const :start_offset, Integer
+    const :end_offset, Integer
+    const :start_line, Integer
+    const :start_column, Integer
+    const :end_line, Integer
+    const :end_column, Integer
   end
 
   sig { params(node: AST::Locatable, value: SyntheticTypeInput, context: String).returns(Type) }
@@ -516,9 +541,17 @@ module AST
       return false if signature&.respond_to?(:return_lifetime) && !signature.return_lifetime.empty?
     end
 
-    call?(node) || node.is_a?(AST::ResolveNode) ||
+    call?(node) || node.is_a?(AST::NextExpr) || node.is_a?(AST::ResolveNode) ||
       node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode) ||
       node.is_a?(AST::MoveNode) || node.is_a?(AST::ShareNode)
+  end
+
+  # IS_OK annotation exposes the successful payload as the expression's
+  # regular type while retaining the fallible source type for capture logic.
+  sig { params(node: AST::Node).returns(Type) }
+  def self.capture_expr_source_type(node)
+    fallible = node.respond_to?(:error_union_type) ? T.unsafe(node).error_union_type : nil
+    fallible || Type.from_node!(node, context: "capture expression")
   end
 
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
@@ -668,8 +701,13 @@ module AST
       slots << BodySlot.new(node.else_branch, ->(body) { node.else_branch = body }) if node.else_branch && !node.else_branch.empty?
     when WhileLoop, WhileBindLoop
       slots << BodySlot.new(node.do_branch, ->(body) { node.do_branch = body }) if node.do_branch
-    when ForRange, ForEach, WithBlock, BgBlock, BgStreamBlock
+    when ForRange, ForEach, BgBlock, BgStreamBlock
       slots << BodySlot.new(node.body, ->(body) { node.body = body }) if node.body
+    when WithBlock
+      slots << BodySlot.new(node.body, ->(body) { node.body = body }) if node.body
+      node.arms&.each do |arm|
+        slots << BodySlot.new(arm.body, ->(body) { arm.body = body })
+      end
     when MatchStatement
       node.cases.each { |match_case| slots << BodySlot.new(match_case.body, ->(body) { match_case.body = body }) if match_case.body }
       slots << BodySlot.new(node.default_case, ->(body) { node.default_case = body }) if node.default_case
@@ -878,7 +916,7 @@ module AST
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
-  sig { params(body: RawBody, block: T.proc.params(analysis: T.untyped).void).void }
+  sig { params(body: RawBody, block: T.proc.params(analysis: CaptureAnalysisValue).void).void }
   def self.each_capture_analysis(body, &block)
     each_bg_block(body) do |bg|
       yield bg.capture_analysis if bg.capture_analysis
@@ -893,7 +931,7 @@ module AST
     end
   end
 
-  sig { params(node: T.nilable(AST::Node), block: T.proc.params(analysis: T.untyped).void).void }
+  sig { params(node: T.nilable(AST::Node), block: T.proc.params(analysis: CaptureAnalysisValue).void).void }
   def self.expr_each_concurrent_capture(node, &block)
     case node
     when ConcurrentOp
@@ -950,6 +988,29 @@ module AST
     def column; token.column; end
     sig { void }
     def token_value; token.value; end
+
+    sig { returns(AST::SourceRange) }
+    def source_range
+      stored = @source_range
+      return stored if stored
+
+      start_offset = token.start_offset || 0
+      end_offset = token.end_offset || (start_offset + token.value.to_s.bytesize)
+      AST::SourceRange.new(
+        file: token.file,
+        start_offset: start_offset,
+        end_offset: end_offset,
+        start_line: token.line,
+        start_column: token.column,
+        end_line: token.end_line || token.line,
+        end_column: token.end_column || (token.column + token.value.to_s.length),
+      )
+    end
+
+    sig { params(range: AST::SourceRange).void }
+    def source_range=(range)
+      @source_range = T.let(range, T.nilable(AST::SourceRange))
+    end
 
     sig { returns(T.nilable(Type)) }
     def coerced_type_object
@@ -1230,11 +1291,13 @@ module AST
     #
     sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
     def coerce!(declared_type)
-      # fn_type metadata must not be flattened to a surface symbol: function
-      # params/returns are stored in the Type object, including for ?FN.
+      # Function metadata and node-local capabilities cannot be reduced to a
+      # flat `resolved` symbol without loss. Ordinary inferred values retain
+      # the historical root-capability projection below.
       if @type_object && (declared_type.nil? || declared_type == :Any)
         inferred_type = @type_object
-        if inferred_type.fn_type? || (inferred_type.optional? && inferred_type.wrapped_type&.fn_type?)
+        if inferred_type.fn_type? || (inferred_type.optional? && inferred_type.wrapped_type&.fn_type?) ||
+            TypeExpressionTree.nested_capabilities?(inferred_type.shape.expression)
           return [inferred_type, nil]
         end
       end
@@ -1331,6 +1394,9 @@ module AST
         vt = node_value.type_object
         t.merge_capabilities_from!(vt)
       end
+      # Rank topology belongs to the declared comma dimensions. A List[]
+      # initializer is construction syntax, not an @list capability.
+      t.collection = nil if type_obj.rank?
 
       self.full_type = t
 
@@ -1565,8 +1631,23 @@ module AST
   end
 
   Program      = Struct.new(:token, :statements) do
+    extend T::Sig
     include Locatable
-    attr_accessor :language_mode
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      @language_mode = T.let(:default, Symbol)
+    end
+
+    sig { returns(Symbol) }
+    def language_mode = @language_mode
+
+    sig { params(value: Symbol).void }
+    def language_mode=(value)
+      @language_mode = value
+    end
+
     # Resolved program-level SYNC POLICY, either user-written or the baked-in
     # default. Lowering reads this when filling unhandled WITH error slots.
     attr_accessor :sync_policy
@@ -1661,7 +1742,7 @@ module AST
                                  #     view over fn.effects + fn.can_fail
     attr_accessor :inferred_effects  # alias of effect_set; used by formatter
     # tail_call is true for EFFECTS REENTRANT:TAIL_CALL or routed THUNK tail recursion.
-    # Phase 4f.2: { start_tok:, end_tok: } pair covering the full
+    # Phase 4f.2: EffectSpan covering the full
     # `EFFECTS REENTRANT[:VARIANT]` clause text. Used by `clear fix`
     # to swap variants (e.g., `:THUNK` -> plain or `:NOT_LOGICAL`).
     # Phase 4f.3: positive Int from `EFFECTS REENTRANT:MAX_DEPTH(N)`.
@@ -2031,6 +2112,11 @@ module AST
     def full_type
       @type_object ||= Type.new(LITERAL_VALUE_TYPE.fetch(self[:type], :Any))
     end
+
+    sig { returns(T::Boolean) }
+    def true_boolean?
+      self[:type] == :BOOLEAN && self[:value] == true
+    end
   end
   ListLit      = Struct.new(:token, :items, :storage, :constructor_options) {
     extend T::Sig
@@ -2084,6 +2170,31 @@ module AST
       [res, nil]
     end
   }
+  TupleLit     = Struct.new(:token, :items, :storage) do
+    extend T::Sig
+    include Locatable
+
+    sig { returns(T::Array[AST::Node]) }
+    def items
+      self[:items]
+    end
+
+    sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
+    def coerce!(declared_type)
+      return super(declared_type) if declared_type.nil? || declared_type == :Any
+
+      target = declared_type.is_a?(FunctionSignature) ? Type.from_function_signature(declared_type) : Type.new(declared_type)
+      return super(declared_type) unless target.tuple?
+      return [nil, "Tuple arity mismatch: expected #{target.generic_args.length}, got #{items.length}"] if target.generic_args.length != items.length
+
+      items.zip(target.generic_args).each do |item, item_type|
+        _coerced, error = item.coerce!(item_type)
+        return [nil, error] if error
+      end
+      self.coerced_type = target
+      [target, nil]
+    end
+  end
   DefaultArrayLit = Struct.new(:token, :type_info, :storage) do
     extend T::Sig
     include Locatable
@@ -2109,10 +2220,23 @@ module AST
   StructLit    = Struct.new(:token, :name, :fields, :storage, :type_args) do
     extend T::Sig
     include Locatable
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      @field_tokens = T.let({}, T::Hash[String, Lexer::Token])
+    end
+
     # Parallel map of field_name (String) -> the lexer Token that parsed
     # the name. Populated by the parser so `clear fix` can locate a
     # misspelled field-name for a fixable edit span.
-    attr_accessor :field_tokens
+    sig { returns(T::Hash[String, Lexer::Token]) }
+    def field_tokens = @field_tokens
+
+    sig { params(value: T::Hash[String, Lexer::Token]).void }
+    def field_tokens=(value)
+      @field_tokens = value
+    end
     # Set of field names the schema marks BORROWED, stamped by the
     # annotator. MIR lowering reads this instead of re-resolving the
     # struct schema (single-source-of-truth: the annotator already
@@ -2156,6 +2280,21 @@ module AST
     include HasBodies
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [then_branch, else_branch].compact
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:comptime] = !!self[:comptime]
+    end
+
+    sig { returns(T::Boolean) }
+    def comptime = self[:comptime]
+
+    sig { params(value: T::Boolean).void }
+    def comptime=(value)
+      self[:comptime] = value
+    end
+
     attr_accessor :expr_mode           # true when used as an expression (x = IF ...)
     attr_accessor :then_result_type    # Type of last value expression in then_branch
     attr_accessor :else_result_type    # Type of last value expression in else_branch
@@ -2187,6 +2326,21 @@ module AST
     include DeferredDropsField
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [do_branch].compact
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:tight] = !!self[:tight]
+    end
+
+    sig { returns(T::Boolean) }
+    def tight = self[:tight]
+
+    sig { params(value: T::Boolean).void }
+    def tight=(value)
+      self[:tight] = value
+    end
+
     attr_accessor :mark_per_iter
   end
   WhileBindLoop = Struct.new(:token, :condition, :binding_name, :binding_token, :do_branch, :deferred_drops) do
@@ -2265,10 +2419,21 @@ module AST
     # assignment — writes go through visit_assignment_field's
     # auto-lock path instead.
     attr_accessor :is_assignment_lhs
-    # Set by visit_GetField when this reads an @indirect (heap-boxed) field:
+    # Set by visit_GetField when this reads an @boxed (heap-boxed) field:
     # the value is a one-level pointer that lower_get_field must deref.
     attr_accessor :indirect_field
     attr_accessor :safe_nav_chain
+    # Zero-based Tuple position for `value._0`, `value._1`, ... . Kept
+    # separate from field text so lowering never treats Tuple access as a
+    # nominal struct lookup.
+    sig { returns(T.nilable(Integer)) }
+    def tuple_position
+      @tuple_position = T.let(@tuple_position, T.nilable(Integer))
+    end
+    sig { params(value: T.nilable(Integer)).returns(T.nilable(Integer)) }
+    def tuple_position=(value)
+      @tuple_position = T.let(value, T.nilable(Integer))
+    end
     sig { returns(T::Boolean) }
     def wildcard?; field == '*' end
     sig { returns(String) }
@@ -2298,6 +2463,13 @@ module AST
     include Locatable
   end
   Require      = Struct.new(:token, :path) { include Locatable }
+  class WithMatchArm < T::Struct
+    const :family, Symbol
+    prop :body, RawBody, factory: -> { [] }
+    prop :lock_error_clauses, T::Array[ErrorClause], factory: -> { [] }
+    const :token, T.nilable(Lexer::Token), default: nil
+  end
+
   # lock_error_clause: optional ErrorClause describing ON TIMEOUT / RETRY
   # handling for EXCLUSIVE / write_locked_read captures.
   # retries > 0 means RETRY(N) THEN <action>; retries nil/0 means plain ON TIMEOUT <action>.
@@ -2311,6 +2483,7 @@ module AST
     def initialize(*args)
       super
       self[:capabilities] = [] if self[:capabilities].nil?
+      @arms = T.let(nil, T.nilable(T::Array[AST::WithMatchArm]))
     end
 
     sig { params(val: T::Array[AST::Capability]).void }
@@ -2319,17 +2492,27 @@ module AST
     end
 
     sig { returns(T::Array[RawBody]) }
-    def child_bodies = [body].compact
+    def child_bodies
+      bodies = T.let([body].compact, T::Array[RawBody])
+      match_arms = arms
+      bodies.concat(match_arms.map(&:body)) if match_arms
+      bodies
+    end
     attr_accessor :lock_error_clause
     # Per-WITH opt-out from a static nested-lock check. Hash shape:
     #   { kind: :deadlock | :lock_cycle, token: Token }
     # nil = no opt-out; annotator rejects violating nesting.
     attr_accessor :deadlock_escape
     # Arms for the WITH MATCH form. nil for plain WITH (single-family).
-    # Array of { family: Symbol, body: [stmts], lock_error_clauses: [clause, ...], token: Token }.
     # Single-family WITH is a one-arm WithMatch internally; the parser
     # leaves arms nil when no MATCH keyword was used.
-    attr_accessor :arms
+    sig { returns(T.nilable(T::Array[AST::WithMatchArm])) }
+    def arms = @arms
+
+    sig { params(value: T.nilable(T::Array[AST::WithMatchArm])).void }
+    def arms=(value)
+      @arms = value
+    end
     # :view is a cheap immutable borrow on ~T@observable; :materialized_view is
     # an owned snapshot on any ~T aggregate. nil for traditional capability blocks.
     attr_accessor :view_kind
@@ -2921,6 +3104,22 @@ module AST
     attr_accessor :spawn_form
     attr_accessor :fsm_ineligible_reason
     attr_accessor :fsm_suspend_points
+
+    sig { returns(T.nilable(Type)) }
+    def declared_yield_type
+      @declared_yield_type
+    end
+
+    sig { returns(T.nilable(Lexer::Token)) }
+    def yields_token
+      @yields_token
+    end
+
+    sig { params(type: T.nilable(Type), token: T.nilable(Lexer::Token)).void }
+    def set_yield_contract(type, token)
+      @declared_yield_type = T.let(type, T.nilable(Type))
+      @yields_token = T.let(token, T.nilable(Lexer::Token))
+    end
   end
 
   # YieldExpr: push a value into the enclosing BG STREAM's buffer.
@@ -2933,6 +3132,13 @@ module AST
     def expr
       self[:expr]
     end
+  end
+
+  # CloseStream: explicitly terminate the enclosing finite BG STREAM.
+  # Completion is a control event and carries no item payload.
+  CloseStream       = Struct.new(:token) do
+    include Locatable
+    include StatementVoidType
   end
 
   # NextExpr: consume a Promise (~T), blocking the current fiber until the result is ready.
@@ -2995,6 +3201,20 @@ module AST
     include DeferredDropsField
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:tight] = !!self[:tight]
+    end
+
+    sig { returns(T::Boolean) }
+    def tight = self[:tight]
+
+    sig { params(value: T::Boolean).void }
+    def tight=(value)
+      self[:tight] = value
+    end
   end
 
   # ForEach: FOR var IN collection DO body END
@@ -3007,7 +3227,20 @@ module AST
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [body].compact
     attr_accessor :mark_per_iter
-    attr_accessor :tight
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      @tight = T.let(false, T::Boolean)
+    end
+
+    sig { returns(T::Boolean) }
+    def tight = @tight
+
+    sig { params(value: T::Boolean).void }
+    def tight=(value)
+      @tight = value
+    end
   end
 
   # ── Test Framework ───────────────────────────────────────────────
@@ -3370,12 +3603,12 @@ module MIR
 
     sig { returns(Symbol) }
     def alloc!
-      T.cast(alloc, Symbol)
+      alloc
     end
 
     sig { returns(String) }
     def zig_type!
-      T.cast(zig_type, String)
+      zig_type
     end
   end
 

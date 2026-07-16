@@ -4,7 +4,7 @@ require "sorbet-runtime"
 require_relative "migration_suggester_helpers"
 
 # Static eligibility detector for migrating struct-shaped locked/versioned
-# bindings to `@indirect:atomic`.
+# bindings to `@boxed:atomic`.
 #
 # This is a TOOL, not an annotator pass. It runs from `clear doctor`
 # combined with profile data, surfacing migration candidates only when both
@@ -48,7 +48,7 @@ module AtomicPtrMigrationSuggester
 
   # Eligibility: STRUCT under :locked / :write_locked / :versioned sync. The
   # doctor gates :versioned candidates further with mvcc-profile signals.
-  sig { params(node: AST::Node, _annotator: SemanticAnnotator).returns(T.nilable(Hash)) }
+  sig { params(node: AST::Node, _annotator: Annotator::Phases::TypeAnalysisSession).returns(T.nilable(Hash)) }
   def self.candidate_decl_info(node, _annotator)
     return nil unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
     return nil unless node.name.is_a?(String)

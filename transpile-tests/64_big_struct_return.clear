@@ -1,5 +1,5 @@
 STRUCT Big {
-    x: Float64[3]
+    x: [3]Float64
 }
 
 FN build() RETURNS Big ->

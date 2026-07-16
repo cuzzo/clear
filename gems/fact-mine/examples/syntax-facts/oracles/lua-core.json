@@ -345,20 +345,7 @@
       ],
       "language": "lua",
       "owners": [],
-      "predicate_bodies": [
-        {
-          "body": "name or \"missing\"",
-          "line": 13,
-          "name": "process",
-          "owner": "LuaSyntaxFactsCore",
-          "span": [
-            13,
-            0,
-            38,
-            3
-          ]
-        }
-      ],
+      "predicate_bodies": [],
       "semantic_effects": [
         {
           "detail": "print",

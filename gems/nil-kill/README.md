@@ -13,7 +13,7 @@ You can often times resolve one `nil` or type ambiguity and remove hundreds nil 
 
 Nil-kill helps you prioritize your efforts by *pressure*.
 
-### Nil-kill's Four Types of Pressure
+### Nil-kill's Five Types of Pressure
 
 1. Nil pressure: where `nil` originates and how many nil guards it
    causes.
@@ -23,6 +23,11 @@ Nil-kill helps you prioritize your efforts by *pressure*.
    ad hoc enum.
 4. Primitive pressure: when code uses a hashmap as an ad hoc struct or
    an array as an ad hoc tuple.
+5. Type dependency pressure: which single missing annotation definitely
+   unlocks the most downstream reads, definitions, parameters, and returns.
+   This is replayed from FactMine's CFG/DFG facts; branch joins are treated as
+   conjunctive, so Nil-kill does not award speculative credit when another
+   unresolved input would still block the result.
 
 ## How well does it work?
 
@@ -69,12 +74,30 @@ Its provider interface is designed so other language rewriters can be
 added without changing Nil-kill's analyzer.
 
 > [!WARNING]
-> `nil-kill collect -- <command>` runs `<command>` roughly **5-10x
-> slower** than running it uninstrumented, scaling with how
-> collection-mutation-heavy the traced code is. This is expected:
-> `collect` is a one-time evidence-gathering pass, not a steady state.
-> Run `nil-kill infer` first when possible; resolving obvious static
-> types makes subsequent collects faster.
+> `nil-kill collect -- <command>` is a deliberately expensive, one-time
+> evidence-gathering pass, not a steady-state test runner. On the 95%+ typed
+> CLEAR Ruby compiler (6,413 examples), the test command takes about **61.5s**
+> normally and **329.5s** under collection: **5.4x total**, or approximately
+> **4m28s added**. Trace planning plus source rewriting accounts for about
+> **12.6s** of that total (4.6s planning, 8.0s rewriting); the traced workload
+> dominates the rest. Smaller, less collection-heavy suites can be closer to
+> 3.5x. Run `nil-kill infer` and apply its changes with
+> [Auto-Type](../auto-type/README.md) before collecting again, then prefer a
+> representative production replay or focused tests over repeatedly collecting
+> an entire suite.
+
+Nil-Kill's trace plan omits method boundaries, T.let sites, and state fields
+whose contracts are already strong. Unknown and weak slots are retained
+conservatively, including weak generic payloads such as
+`T::Array[T.untyped]`. See [Resolved Runtime Trace Elision](docs/agents/resolved-trace-elision.md)
+for the safety boundary and CLEAR compiler measurements.
+
+For the CLEAR compiler, planning elides 5,799 of 5,931 methods (97.8%) and 373
+of 1,055 indexed state-write sites. Further annotations only reduce collection
+time when they resolve the *hot remaining slots*. The current residual is
+concentrated in deliberately heterogeneous `T.untyped` AST collection walkers;
+adding types to cold, already-pruned APIs will not materially change the 5.4x
+measurement.
 
 > SUBPROCESSES: `nil-kill collect` instruments your target source **in place** for the duration of the collect (the pristine tree is snapshotted and restored automatically, including after a crash). There is exactly one copy of every target file, at its real path, and it is always instrumented -- so the wrapped code runs regardless of how it is loaded: `require`, `require_relative`, `Kernel#load`, autoload, an absolute-path require, a bare `ruby file.rb` entrypoint, a re-exec, or any Ruby subprocess your tests/runner spawn. Subprocess collection is therefore **in scope and guaranteed**: a method body that executes is recorded, whatever process or load path reached it. (Non-Ruby subprocesses still execute no Ruby and so produce no Ruby evidence -- there is nothing to record there.)
 

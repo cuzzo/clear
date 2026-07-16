@@ -201,23 +201,20 @@ RSpec.describe "NilKill coverage hardening" do
         src = File.join(dir, "src", "record.rb")
         FileUtils.mkdir_p(File.dirname(src))
         File.write(src, "record = {name: 'Ada'}\n")
-        action = {
-          "kind" => "promote_hash_record_cluster_to_struct",
-          "data" => {
-            "struct_name" => "UserRecord",
-            "pressure" => { "total" => 3 },
-            "producers" => [{ "path" => src }],
-            "consumers" => [{ "path" => src }],
-            "signatures" => [{ "path" => src }],
-            "blockers" => [],
-          },
+        candidate = {
+          "struct_name" => "UserRecord",
+          "total_pressure" => 3,
+          "producers" => [{ "path" => src }],
+          "consumers" => [{ "path" => src }],
+          "signatures" => [{ "path" => src }],
+          "blockers" => [],
         }
 
-        allow(NilKill::Store).to receive(:read).and_return("actions" => [action])
-        store = instance_double(NilKill::Store, actions: [action])
+        allow(NilKill::Store).to receive(:read).and_return("facts" => {})
+        store = instance_double(NilKill::Store, to_h: { "facts" => {} })
         allow(NilKill::Store).to receive(:new).and_return(store)
         allow(NilKill::StaticAnalysis).to receive(:index_store)
-        allow_any_instance_of(NilKill::Infer).to receive(:propose_hash_record_cluster_actions)
+        allow_any_instance_of(NilKill::Report).to receive(:hash_record_struct_candidates).and_return([candidate])
 
         out, = capture_io { NilKill::FocusHashRecord.new(["UserRecord"]).run }
         expect(out).to include("focused hash-record UserRecord", "pressure: 3")
@@ -716,6 +713,8 @@ RSpec.describe "NilKill coverage hardening" do
         cls_name: {},
         method_metadata: {},
         planned_methods_by_class: nil,
+        sampled_tstruct_fields: {},
+        tlet_site_decisions: {},
         targeted_tracepoints: [],
         targeted_tracepoint_keys: Set.new,
         trace_plan_loaded: false,
@@ -776,7 +775,12 @@ RSpec.describe "NilKill coverage hardening" do
           },
         },
         "tlets" => { [file, 40].join("\0") => true },
-        "struct_fields" => { ["User", "name"].join("\0") => true },
+        "struct_fields" => {
+          ["User", "name"].join("\0") => true,
+          ["User", "resolved"].join("\0") => false,
+          ["GenericParts", "generic_args_raw"].join("\0") => true,
+          ["TypeShape::GenericParts", "generic_args_raw"].join("\0") => false,
+        },
       }
       FileUtils.mkdir_p(File.dirname(described_class::TRACE_PLAN_PATH))
       File.write(described_class::TRACE_PLAN_PATH, JSON.dump(plan))
@@ -788,7 +792,12 @@ RSpec.describe "NilKill coverage hardening" do
       expect(described_class.sample_return?(plan["methods"].values.last)).to be(false)
       expect(described_class.sample_tlet?(file, 40)).to be(true)
       expect(described_class.sample_struct_field?("Models::User", "name")).to be(true)
-      expect(described_class.sample_struct_field?("Models::User", "missing")).to be(false)
+      expect(described_class.sample_struct_field?("Models::User", "missing")).to be(true)
+      expect(described_class.sample_state_field?("Models::User", "name")).to be(true)
+      expect(described_class.sample_state_field?("Models::User", "resolved")).to be(false)
+      expect(described_class.sample_state_field?("Models::User", "unknown")).to be(true)
+      expect(described_class.sample_struct_field?("TypeShape::GenericParts", "generic_args_raw")).to be(false)
+      expect(described_class.sample_state_field?("TypeShape::GenericParts", "generic_args_raw")).to be(false)
 
       planned = described_class.planned_methods_by_class
       expect(planned["Worker"].map { |entry| entry[:method_id] }).to eq(["targeted"])
@@ -855,6 +864,20 @@ RSpec.describe "NilKill coverage hardening" do
       struct_key = ["TraceStruct", "values", File.expand_path(target_file, described_class::ROOT), 50]
       expect(described_class.structs.fetch(struct_key)[:array_calls]).to eq(1)
       expect(described_class.tuples).not_to be_empty
+    ensure
+      FileUtils.rm_f(target_file)
+    end
+
+    it "reuses collection shapes when registering sampled boundary owners" do
+      target_file = File.join(described_class::TARGETS.first, "shape_reuse_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "# trace target\n")
+      nested = [{ "id" => [1, 2, 3] }]
+
+      allow(described_class).to receive(:container_shape).and_call_original
+      described_class.record_source_method_call("Worker", "consume", "instance", target_file, 18, { "items" => nested })
+
+      expect(described_class).to have_received(:container_shape).with(nested).once
     ensure
       FileUtils.rm_f(target_file)
     end
@@ -959,16 +982,34 @@ RSpec.describe "NilKill coverage hardening" do
       target_file = File.join(described_class::TARGETS.first, "hook_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))
       File.write(target_file, "# trace target\n")
+      plan = {
+        "target_dirs" => described_class::TARGETS,
+        "tlets" => { [target_file, 7].join("\0") => true },
+        "struct_fields" => %w[
+          OpenStruct.name OpenStruct.age AnonymousStruct.name
+          AnonymousStruct.tags AnonymousData.name AnonymousData.meta
+        ].to_h { |slot| [slot.split(".").join("\0"), true] },
+      }
+      allow(described_class).to receive(:trace_plan).and_return(plan)
 
+      untyped = Object.new
+      untyped.define_singleton_method(:to_s) { "T.untyped" }
       t_module = Module.new do
         def self.let(value, _type, **_kw)
           value
         end
       end
+      t_module.define_singleton_method(:untyped) { untyped }
       stub_const("T", t_module)
       described_class.install_tlet_hook
-      eval("T.let('name', String)", binding, target_file, 7)
+      allow(described_class).to receive(:src_line).and_call_original
+      eval("T.let('known', String)", binding, target_file, 6)
+      eval("T.let('known-again', String)", binding, target_file, 6)
+      expect(described_class.tlets).to be_empty
+
+      eval("T.let('name', T.untyped)", binding, target_file, 7)
       expect(described_class.tlets.values.first[:classes].to_a).to eq(["String"])
+      expect(described_class).to have_received(:src_line).twice
 
       described_class.install_open_struct_hook
       eval("OpenStruct.new(name: 'Ada').tap { |obj| obj[:age] = 42 }", binding, target_file, 12)
@@ -991,6 +1032,46 @@ RSpec.describe "NilKill coverage hardening" do
         data_class.new("Ada", { "id" => 1 })
         expect(described_class.structs.keys.map { |key| key[0] }).to include("AnonymousData")
       end
+    ensure
+      FileUtils.rm_f(target_file)
+    end
+
+    it "computes unresolved T::Struct fields once per class" do
+      target_file = File.join(described_class::TARGETS.first, "tstruct_plan_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "# trace target\n")
+      plan = {
+        "target_dirs" => described_class::TARGETS,
+        "struct_fields" => {
+          ["AnonymousTStruct", "known"].join("\0") => false,
+          ["AnonymousTStruct", "raw"].join("\0") => true,
+        },
+      }
+      allow(described_class).to receive(:trace_plan).and_return(plan)
+
+      props_calls = 0
+      klass = Class.new do
+        attr_reader :known, :raw
+
+        define_method(:initialize) do |known:, raw:|
+          @known = known
+          @raw = raw
+        end
+      end
+      klass.define_singleton_method(:props) do
+        props_calls += 1
+        { known: {}, raw: {} }
+      end
+      klass.instance_variable_set(:@__nil_kill_struct_path, target_file)
+      klass.instance_variable_set(:@__nil_kill_struct_line, 10)
+
+      2.times do
+        described_class.record_tstruct_instance(klass.new(known: "typed", raw: "observed"))
+      end
+
+      expect(props_calls).to eq(1)
+      expect(described_class.structs.keys.map { |key| key[1] }).to eq(["raw"])
+      expect(described_class.structs.values.first[:calls]).to eq(2)
     ensure
       FileUtils.rm_f(target_file)
     end
@@ -1835,9 +1916,25 @@ RSpec.describe "NilKill coverage hardening" do
         report.send(:append_collection_slot_coverage, collection_lines, collection_slots)
         report.send(:append_collection_slot_candidates, collection_lines, evidence, collection_slots)
         report.send(:append_collection_blocker_pressure, collection_lines, evidence, collection_slots)
+        report.send(:append_hot_runtime_collection_slots, collection_lines, evidence)
         report.send(:append_runtime_collection_observations, collection_lines, evidence.dig("facts", "collection_runtime"))
         report.send(:append_collection_index_lookup_report, collection_lines, evidence.dig("facts", "collection_index_lookups"))
-        expect(collection_lines.join("\n")).to include("Weak Collection Slots", "mutation sites", "Runtime Collection", "forwarded return")
+        expect(collection_lines.join("\n")).to include("Weak Collection Slots", "mutation sites", "Runtime Collection", "Hot Runtime Collection Slots", "forwarded return")
+        hot_slots = report.send(:hot_runtime_collection_slots, evidence)
+        expect(hot_slots.first).to include(
+          "path" => rel,
+          "line" => 13,
+          "owner_kind" => "method_return",
+          "name" => "items",
+          "calls" => 4,
+          "max_process_calls" => 4,
+          "sampling_pressure" => 12
+        )
+        nested_shape = {
+          "kind" => "array",
+          "elements" => [{ "kind" => "hash", "keys" => [{ "kind" => "class", "name" => "Symbol" }], "values" => [{ "kind" => "class", "name" => "String" }] }],
+        }
+        expect(report.send(:collection_shape_complexity, nested_shape)).to eq(4)
         expect(report.send(:collection_slot_missing_candidate_reason, collection_slots.find { |slot| slot.dig("method", "method") == "empty_items" })).to include("no element")
         expect(report.send(:collection_origin_label, { "kind" => "array literal", "name" => "records", "path" => rel, "line" => 1 })).to include("array literal")
         expect(report.send(:collection_origin_label, { "kind" => "instance variable", "name" => "@record" })).to include("instance")
@@ -1868,6 +1965,99 @@ RSpec.describe "NilKill coverage hardening" do
         expect(primitive_lines.join("\n")).to include("Primitive Collection Slots")
 
         expect(report.send(:strip_nilable, "T.nilable(String)")).to eq("String")
+      end
+    end
+
+    it "uses declaration field types when generated accessor RBI is absent" do
+      report = described_class.new
+      allow(report).to receive(:struct_rbi_types).and_return({})
+      declaration = {
+          "path" => "compiler/ruby/example.rb",
+          "line" => 10,
+          "class" => "ExampleRecord",
+          "fields" => %w[name tags missing],
+          "field_types" => {
+            "name" => "String",
+            "tags" => "T::Array[T.untyped]",
+          },
+      }
+      evidence = {
+          "methods" => [],
+          "actions" => [],
+          "facts" => {
+            "existing_sigs" => [],
+            "param_origins" => [],
+            "return_origins" => [],
+            "struct_declarations" => [declaration],
+            "struct_field_runtime" => [],
+            "ivar_runtime" => [],
+            "collection_runtime" => [],
+            "tlet_sites" => [],
+          },
+      }
+
+      soundness = report.send(:type_soundness_table, evidence)
+      expect(soundness["Struct/class fields & ivars"]).to include(
+        "total" => 2,
+        "strong" => 1,
+        "untyped" => 1
+      )
+      expect(soundness["Arrays/Sets/Hashmaps"]).to include(
+        "total" => 1,
+        "untyped" => 1
+      )
+
+      causes = report.send(:untyped_cause_table, evidence)
+      expect(causes["Struct/class fields & ivars"]["NoEvidence"]).to eq(1)
+      expect(causes["Arrays/Sets/Hashmaps"]["NoEvidence"]).to eq(1)
+
+      lines = []
+      report.send(:append_struct_field_coverage, lines, [declaration])
+      expect(lines.join("\n")).to include("strong 1", "missing field type 1")
+    end
+
+    it "reconciles nested untyped unions and hash values across soundness and cause tables" do
+      report = described_class.new
+      allow(report).to receive(:struct_rbi_types).and_return({})
+      evidence = {
+        "methods" => [],
+        "actions" => [],
+        "facts" => {
+          "existing_sigs" => [{
+            "path" => "compiler/ruby/example.rb",
+            "line" => 1,
+            "class" => "Example",
+            "method" => "run",
+            "sig" => "sig { params(value: T.any(String, T.untyped), lookup: T::Hash[String, T.untyped]).returns(T.any(Symbol, T.untyped)) }",
+          }],
+          "param_origins" => [],
+          "return_origins" => [],
+          "struct_declarations" => [{
+            "path" => "compiler/ruby/example.rb",
+            "line" => 10,
+            "class" => "Record",
+            "fields" => %w[payload],
+            "field_types" => { "payload" => "T.any(Integer, T.untyped)" },
+          }],
+          "struct_field_runtime" => [],
+          "ivar_runtime" => [],
+          "collection_runtime" => [],
+          "tlet_sites" => [],
+        },
+      }
+
+      soundness = report.send(:type_soundness_table, evidence)
+      causes = report.send(:untyped_cause_table, evidence)
+      cause_total = lambda do |category|
+        NilKill::Report::UNTYPED_CAUSES.sum { |cause| causes[category][cause] }
+      end
+
+      expect(causes["Param inputs"]["WeakEvidence"]).to eq(1)
+      expect(causes["Returns"]["WeakEvidence"]).to eq(1)
+      expect(causes["Struct/class fields & ivars"]["WeakEvidence"]).to eq(1)
+      expect(cause_total.call("Arrays/Sets/Hashmaps")).to eq(1)
+      NilKill::Report::SOUNDNESS_CATEGORIES.each do |category|
+        expect(cause_total.call(category)).to eq(soundness[category]["untyped"])
       end
     end
   end

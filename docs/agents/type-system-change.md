@@ -1,0 +1,1042 @@
+# Inline Pivot Type Architecture
+
+Status: implemented; legacy spellings are in the documented compatibility window
+
+Core domain: type syntax, recursive type representation, collection topology,
+memory layout, stream completion, and polymorphic synchronization
+
+## Purpose
+
+This document turns the Inline Pivot proposal into an implementable CLEAR
+design. It records the pre-change compiler behavior, resolves contradictions
+in the proposal, defines one canonical reading order, and records the staged
+implementation and its compatibility boundary.
+
+This is a type-system replacement, not a parser-only syntax change. The current
+compiler stores a mostly flattened `TypeShape`, reconstructs child types from
+symbols, and overlays collection and capability facts separately. Inline Pivot
+requires a recursive type algebra in which every collection, tense, generic,
+and capability has one explicit node and one owner.
+
+The design must preserve these project constraints:
+
+- deterministic parsing with no speculative backtracking;
+- no second semantic type model or permanent compatibility path;
+- named typed records rather than hashes, tuple protocols, or `T.untyped`;
+- complete ownership, cleanup, escape, MIR, and Zig lowering for every new
+  shape before that shape is accepted generally;
+- source-based tests that compile or annotate CLEAR strings;
+- 100% line coverage for changed executable lines;
+- automatic migration only when the old and new types are semantically
+  equivalent;
+- explicit asynchronous result contracts: `BG STREAM YIELDS T` names the item
+  type; asynchronous joins may widen `T` only with `?` and `!` over the same
+  payload, and never silently synthesize a general union, `~`, or `Any`.
+
+## Pre-Change Audit
+
+The proposal overlaps several implemented features, but the current surface
+and representation differ materially.
+
+| Concern | Current CLEAR | Current implementation consequence |
+| --- | --- | --- |
+| Fixed array | `T[N]` | `TypeShape` stores one array flag, capacity, and raw element symbol. Nested arrays are recovered by reparsing raw symbols. |
+| Dynamic list | `T[]@list`; `List[]` constructor | Collection kind is a capability overlay on an array shape. |
+| Pool | `T[N]@pool` | A fixed-capacity generational pool with `Id<T>` handles; this cannot disappear from the new collection model. |
+| Set | `T[]@set`; `Set[]` constructor | Set is also a collection capability overlay. |
+| Map | `HashMap<V>` or `HashMap<K, V>` | One-argument maps are String-keyed, not Symbol-keyed. |
+| Optional | `?T`; optional container uses `?(T[])` | `?T[]` currently means a collection of optional elements. |
+| Fallible | `!T` | The error set is implicit; it is not equivalent to an arbitrary `Result<T, E>`. |
+| Future | `~T` | A tense wrapper around one raw child type. |
+| Streams | `~T[N]`, `~?T[]`, legacy `~T[?]`, `~T[INF]` | Finite stream completion is currently encoded through optionality, which prevents a finite stream from losslessly yielding optional values. |
+| Capabilities | `@versioned`, legacy `@indirect`, `@sharded(N):locked`, and others | Capability facts were flattened into top-level and element-level slots. They could not describe an arbitrary nested layer. |
+| Union | named `UNION Name { ... }` | There is no structural `Union<A, B>` type. An uppercase generic spelling is currently only a nominal generic instance. |
+| Tuple | `Tuple<A, B>` with contextual list literal `[a, b]` | Tuple types and positional access already exist; a distinct `Tuple{...}` literal does not. |
+| Multidimensional arrays | nested `T[N][M]` spellings | The backend models arrays recursively as arrays of arrays, not one flat rank/stride layout. |
+
+Relevant implementation boundaries are:
+
+- `compiler/ruby/ast/parser.rb`: token-level type parsing and capability
+  attachment;
+- `compiler/ruby/ast/type.rb`: `TypeShape`, compatibility, ownership/cleanup
+  classification, stream classification, and Zig type spelling;
+- `compiler/ruby/annotator`: type registration, inference, coercion, stream
+  yield inference, capabilities, and collection operations;
+- `compiler/ruby/mir`: ownership, cleanup, async boundaries, indexing, and
+  literal lowering;
+- `compiler/ruby/backends`: recursive layout rendering and code generation;
+- formatter, LSP, diagnostics, fix rewriter, FactMine, and ruby-to-clear:
+  source spelling and type-fact consumers.
+
+The completed `TypeShape` composition work is a useful phase boundary, but it
+is not the final representation needed here. Adding recursive Inline Pivot
+nodes beside the current flags would recreate the dual-source-of-truth problem
+that the composition work removed.
+
+## Normative Revisions to the Input Specification
+
+The following revisions are required for a coherent language.
+
+### 1. All collection layers read outermost to innermost, left to right
+
+The leftmost layer is the first access operation and therefore the outermost
+container. The layer closest to the payload is the innermost container.
+
+```clear
+[List]{Symbol}T       # list[index][symbol] -> T
+{Symbol}[List]T       # map[symbol][index] -> T
+{Symbol}{Int64}T      # map[symbol][integer] -> T
+```
+
+This preserves the mixed-layout examples and makes declaration order match
+access order. It replaces the contradictory map rule that described the
+rightmost map as outermost. Consequently, the type for a Symbol-keyed outer map
+and Int64-keyed inner map is `{Symbol}{Int64}T`, not `{Int64}{Symbol}T`.
+
+### 2. `[Set]T` is canonical
+
+The proposal describes both braces and brackets for sets but only demonstrates
+`[Set]T`. Braces are reserved for associative key layers; `[Set]T` is the
+canonical set spelling. Sets do not support positional indexing even though
+their layout constructor uses brackets.
+
+### 3. Capability vocabulary remains stable, with one completed rename
+
+The new syntax changes attachment location, not the established capability
+vocabulary.
+
+| Proposed/current spelling | Final canonical CLEAR spelling | Reason |
+| --- | --- | --- |
+| `@mvcc` | `@versioned` | Already implemented with `SNAPSHOT` semantics. `@mvcc` may be accepted temporarily as a fixable alias. |
+| `@indirect` | `@boxed` | Stable heap indirection is now spelled `@boxed`; `@indirect` is accepted only as a fixable compatibility alias. |
+| `@shared:striped` | `@sharded(N):locked` or `@sharded(N):writeLocked` | Shard count and lock policy must remain explicit. There is no safe inferred `N`. |
+
+No auto-fix may invent a shard count. `@sharded` remains the language term;
+`striped` is not introduced as a surface capability. `@boxed` is the only
+canonical stable-indirection spelling; `clear fix --only=type_migration`
+rewrites the temporary `@indirect` alias.
+
+### 4. Capacity hints are not nominal identity
+
+`[List(10)]T` and `[Set(10)]T` request initial allocation capacity. The `10`
+does not participate in assignment compatibility, function overload identity,
+or equality of semantic types. It is retained as construction metadata at an
+allocation site.
+
+A capacity hint on a parameter, return type, type alias, or field is rejected:
+there is no durable guarantee that a value still has that capacity. A binding
+declaration with an initializer is an allocation site and may carry the hint;
+the hint is transferred to that initializer. The canonical parameter type is
+`[List]T` or `[]T`.
+
+Fixed `[10]T`, bounded stream `[~10]T`, and pool `[Pool(10)]T` capacities do
+participate in semantics because they constrain topology or cardinality.
+
+### 5. Pool remains a first-class inline layout
+
+The existing generational pool is a real CLEAR collection with safety and
+performance behavior not supplied by arrays, lists, sets, or maps. Its Inline
+Pivot spelling is:
+
+```clear
+[Pool(1000)]Enemy
+```
+
+The capacity is mandatory and pool indexing continues to use `Id<Enemy>` and
+produce `?Enemy`.
+
+### 6. Finite stream completion is not item optionality
+
+The current `~?T[]` convention uses optionality both for end-of-stream and for
+the item type. That makes a finite stream of `?T` impossible to consume without
+losing information.
+
+Inline Pivot separates the stream state from its item:
+
+```clear
+[~]T          # finite, dynamically bounded stream of definite T
+[~]?T         # finite stream whose yielded item is ?T
+[~10]T        # finite stream with a maximum cardinality of 10
+[~INF]T       # declared non-terminating stream
+[]~T          # list of futures
+~[]T          # future resolving to a list
+```
+
+Internally and at the explicit consumer boundary, a finite stream advances as
+`StreamStep<T> = Item(T) | Closed`. It must not use `?T` as the completion
+sentinel. Pipeline operators may hide `StreamStep`, but a direct `NEXT` on a
+finite stream must expose a closed branch. `NEXT` on a single future remains a
+different operation returning its payload.
+
+The integer in `[~10]T` bounds the number of yielded items; it is not the
+channel/ring-buffer capacity. Buffer sizing remains construction/runtime
+policy. Exceeding a declared maximum is rejected statically when provable and
+checked at runtime otherwise.
+
+### 7. Structural `Union<A, B>` is not assumed
+
+CLEAR currently has named tagged unions declared with `UNION`; it does not have
+an anonymous structural union constructor. Treating `Union<String, Int64>` as
+already defined would silently produce an ordinary nominal generic and skip
+variant/tag semantics.
+
+The stream work therefore uses existing named unions:
+
+```clear
+UNION TextOrInteger {
+  Text: String,
+  Integer: Int64
+}
+
+values = BG STREAM YIELDS ?TextOrInteger {
+  YIELD TextOrInteger{ Text: "one" };
+  YIELD NIL;
+  CLOSE;
+};
+```
+
+Anonymous structural unions may be designed later, but are not smuggled into
+this change through generic syntax.
+
+### 8. The capability limit and example are corrected
+
+The proposed rule says that more than three separate `@` sites is an error and
+that a joined chain such as `@shared:locked` counts as one site. Therefore a
+type with exactly three capability sites is legal under that rule. The example
+claiming otherwise is incorrect.
+
+This design retains the hard limit of three capability-bearing nodes. A fourth
+site is the compile error:
+
+```clear
+[List]@local{Symbol}@versioned[List]@sharded(8){Int64}@shared T
+#       1                  2                     3              4 -> error
+```
+
+The compiler also emits an earlier readability warning for a type with more
+than six explicit access obligations (future, fallible, optional, snapshot,
+lock, ownership unwrap, or stream-close branch). The warning does not change
+type semantics.
+
+## Canonical Surface Syntax
+
+### Linear and set layouts
+
+| Type | Meaning |
+| --- | --- |
+| `[10]T` | Inline fixed array of exactly ten `T` values. |
+| `[List]T` | Dynamic contiguous list of `T`. |
+| `[]T` | Canonical shorthand for `[List]T`. |
+| `[List(10)]T` | List construction with initial capacity ten; allocation-site only. |
+| `[Set]T` | Default dynamic hash set of `T`. |
+| `[Set(10)]T` | Set construction with initial capacity ten; allocation-site only. |
+| `[Pool(1000)]T` | Fixed-capacity generational pool. |
+
+`T[]` is legacy syntax during migration and is not retained as a second
+canonical form.
+
+### Multidimensional layouts
+
+```clear
+[10, 5]T
+[List, List]T
+[10, List]T
+```
+
+A comma-separated rank is one rectangular layout node:
+
+- fixed dimensions use one contiguous flat block;
+- dynamic dimensions use a flat buffer plus shape and stride metadata;
+- every row has the same extent for a given axis;
+- resizing a non-final axis may relocate the flat buffer and is O(total
+  elements);
+- `grid[x, y]` is canonical indexing;
+- `grid[x][y]` is permitted as sugar only if the first operation produces a
+  compiler-owned borrowed row view with a proven lifetime. It never changes the
+  representation into an array of pointers.
+
+Jagged collections are written as nested collection nodes, not a rank:
+
+```clear
+[][List]T       # list whose elements are independent lists
+```
+
+`[List, List]T` and `[][List]T` are intentionally different types.
+Only integer and `List` dimensions participate in a comma-separated rank.
+`Set` and `Pool` must be the sole entry in their layer because neither denotes
+a rectangular axis.
+
+### Maps and nesting
+
+```clear
+{Symbol}T
+{Int64}T
+{Symbol}{Int64}T
+{}T
+{}{}T
+```
+
+`{}T` is shorthand for `{Symbol}T`, and `{}{}T` is shorthand for
+`{Symbol}{Symbol}T`. Mixed explicit/default map layers such as `{}{Int64}T`
+are rejected with an auto-fix to `{Symbol}{Int64}T`; `{Int64}{}T` is fixed to
+`{Int64}{Symbol}T`.
+
+`{Symbol, Int64}T` is invalid. A comma denotes dimensions only inside a linear
+rank. Separate map layers are required because each key is a distinct lookup:
+`{Symbol}{Int64}T`.
+
+This is a deliberate change from the current one-argument `HashMap<V>`, whose
+key is String. Migration must preserve behavior:
+
+```clear
+HashMap<Value>          -> {String}Value
+HashMap<Int64, Value>   -> {Int64}Value
+```
+
+It must not rewrite current `HashMap<Value>` to `{}Value`, because that would
+change String keys to Symbol keys.
+
+Map key types must satisfy a registered `Hashable + Equality` contract.
+Collection, stream, fallible, and optional key nodes are rejected unless a
+future language feature explicitly supplies those contracts.
+
+### Mixed topology
+
+The left-to-right rule applies without exceptions:
+
+```clear
+[List]{Symbol}T     # collection[0][:key]
+{Symbol}[List]T     # collection[:key][0]
+[10, 5]{Symbol}T   # collection[x, y][:key]
+{Symbol}[10, 5]T   # collection[:key][x, y]
+```
+
+### Tenses
+
+Tenses are unary type constructors and bind to the complete type immediately
+to their right:
+
+```clear
+?[]T       # optional list of definite T
+[]?T       # definite list of optional T
+!{Symbol}T # fallible map
+{Symbol}!T # map whose values are fallible
+~[]T       # future list
+[]~T       # list of futures
+```
+
+Parentheses remain available for readability but are not needed to repair an
+ambiguous precedence rule. Prefix constructors build a type tree directly.
+Repeated identical tenses on the same node (`??T`, `!!T`, `~~T`) are errors.
+
+### Capabilities
+
+A capability chain immediately follows the exact node it modifies:
+
+```clear
+{Symbol}@versioned[]T
+{Symbol}[]@versioned T
+[]T@boxed
+[List]@local {Symbol}@shared:locked T
+```
+
+Whitespace is insignificant. The formatter inserts a space after a capability
+chain when needed to make the following node visually distinct.
+
+Capability dimensions remain typed and orthogonal. Duplicate ownership, sync,
+layout, or collection-topology modifiers on one node are errors. Applicability
+is validated against that node, not against the entire flattened type:
+
+- `@versioned` on a map version-controls that map only;
+- `@local` on a list constrains that list's scheduler visibility;
+- `@boxed` on `T` boxes the payload values, not the surrounding list;
+- `@soa` applies only to a compatible struct collection layer;
+- `@sharded(N)` applies only to a sharded collection/map layer.
+
+Top-level capability polymorphism remains possible, but nested capabilities
+cannot simply be erased. A function that traverses a list of versioned maps
+must either name that topology or declare a capability-polymorphic layer. The
+annotator must never pretend that nested synchronization is a top-level wrapper.
+
+## Grammar
+
+The parser should implement a predictive grammar equivalent to the following.
+It must not parse a raw type string with regular expressions and then recover
+children later.
+
+```text
+type             := tense_type
+
+tense_type       := tense tense_type
+                  | layered_type
+
+tense            := "?" | "!" | "~"
+
+layered_type     := layer layer_capabilities? layered_type
+                  | atom atom_capabilities?
+                  | "(" type ")"
+
+layer            := linear_layer
+                  | map_layer
+                  | stream_layer
+
+linear_layer     := "[" linear_dims "]"
+linear_dims      := linear_dim ("," linear_dim)*
+linear_dim       := integer
+                  | "List" ("(" integer ")")?
+                  | "Set" ("(" integer ")")?
+                  | "Pool" "(" integer ")"
+                  | empty
+
+map_layer        := "{" map_key? "}"
+map_key          := type
+
+stream_layer     := "[" "~" (integer | "INF")? "]"
+
+atom             := TYPE_ID generic_args?
+                  | function_type
+                  | tuple_type
+
+generic_args     := "<" type ("," type)* ">"
+tuple_type       := "Tuple" "<" type ("," type)* ">"
+
+layer_capabilities := capability_chain
+atom_capabilities  := capability_chain
+capability_chain   := capability (":" capability)*
+```
+
+The real implementation should use typed parse results for dimensions,
+layers, capability sites, and source spans. Error recovery must advance to a
+known delimiter and remain linear in token count. The grammar has no reason to
+backtrack.
+
+## Recursive Semantic Model
+
+`TypeShape` should become an immutable recursive algebra. Conceptually:
+
+```text
+TypeExpr =
+  Named(name, generic_args)
+  Function(params, result, effects)
+  Tuple(items)
+  Optional(inner)
+  Fallible(inner, error_set)
+  Future(inner)
+  Linear(kind, dimensions, item, allocation_hint, capabilities)
+  Map(key, value, capabilities)
+  Stream(cardinality, item, capabilities)
+```
+
+Capabilities and placement remain separate typed concepts, but capability
+attachment is stored per eligible node rather than in one top-level record plus
+one element record. Each semantic node has a stable ID/fingerprint independent
+of source spelling and Zig rendering.
+
+Required invariants:
+
+- there is exactly one semantic shape tree;
+- child types are `TypeExpr` values, never raw Symbols requiring reparsing;
+- canonical printing walks the tree; it does not read the original raw string;
+- compatibility, cleanup, copyability, escape class, slot size, and Zig/MIR
+  lowering are exhaustive visitors over the same variants;
+- new variants cannot silently fall through as user structs;
+- allocation hints are excluded from semantic identity where specified;
+- type-tree traversal is iterative or depth-guarded.
+
+The current boolean combination (`array`, `map`, `optional`, `tense`,
+`generic_instance`) is not extended with more booleans. That representation
+cannot express arbitrary nested capability sites safely.
+
+## Monadic and Nominal Generic Boundary
+
+Inline Pivot is canonical for compiler-known collection and tense families.
+Nominal generics remain available for user abstractions and shapes that do not
+have an equivalent Inline Pivot form.
+
+Safe canonical auto-fixes include:
+
+```text
+Option<T>       -> ?T
+Future<T>       -> ~T
+List<T>         -> []T
+Set<T>          -> [Set]T
+HashMap<K, V>   -> {K}V
+```
+
+They are allowed only when these names resolve to compiler-owned standard
+types, not user declarations with coincidentally matching names.
+
+`Result<T, E>` is not automatically rewritten to `!T` today. CLEAR's `!T`
+does not encode an arbitrary explicit `E`, so that rewrite can discard type
+information. It becomes fixable only after typed error sets make the two forms
+provably equivalent.
+
+Mixed syntax such as `{Symbol}[]Result<Option<T>, E>` receives a diagnostic if
+the generic subtree is a compiler-known monadic/container family. The fix is
+offered only if every node has an exact Inline Pivot equivalent. Otherwise the
+diagnostic recommends a fully nominal spelling without changing code.
+
+Ordinary generic payloads remain legal:
+
+```clear
+[]Id<User>
+{Symbol}Page<Row>
+```
+
+The rule is about duplicate monadic/container vocabularies, not a blanket ban
+on generic values inside collections.
+
+## Type Complexity Budget
+
+The compiler enforces limits both for readability and for compiler safety.
+
+1. A type may contain at most three capability-bearing nodes. A joined chain
+   on one node counts once.
+2. A parsed type may contain at most 32 semantic nodes. This applies to inline
+   and nominal generic forms equally and prevents generic syntax from becoming
+   a denial-of-service escape hatch.
+3. A single comma-rank collection counts as one semantic collection node;
+   nested collection nodes remain distinct.
+4. The compiler warns when a use requires more than six access obligations.
+   The diagnostic lists them in execution order and suggests a named type or
+   wrapper struct.
+5. Recursive named types are checked through stable IDs and a visited set; type
+   walkers never expand them indefinitely.
+
+The complexity checker consumes the semantic tree, not source punctuation, so
+aliases and whitespace cannot bypass it.
+
+## BG STREAM, YIELD, and CLOSE
+
+### Construction and annotation
+
+`BG STREAM YIELDS T` is the explicit item contract:
+
+```clear
+values = BG STREAM YIELDS ?TextOrInteger {
+  YIELD TextOrInteger{ Text: "one" };
+  YIELD NIL;
+  CLOSE;
+};
+```
+
+`YIELDS` names the yielded item type, not the entire stream wrapper. The
+binding or context determines `[~]`, `[~N]`, or `[~INF]`. The postfix form
+`BG STREAM { ... }: T` is not part of the grammar: it delays the expected type
+until after the body and introduces an unrelated general block-ascription form.
+Without an expected stream type, `BG STREAM` defaults to finite unbounded
+`[~]Item`. Bounded and infinite claims require an expected binding/return type
+or an explicit future extension to the producer header.
+
+`YIELDS` is optional when inference produces one non-future base payload with
+only optional and/or fallible widening: `T`, `?T`, `!T`, and `!?T`. It remains
+legal to spell the contract in those cases. It is required when the item is a
+future (`~T`) or a named union. An expected binding type does not replace that
+source-level declaration: future and union items must be visibly intentional
+at the producer boundary.
+
+### Inference
+
+When `YIELDS T` or an expected binding type is present, the annotator checks
+every `YIELD` against that item type while visiting the body. A named union
+accepts only explicit variant values; a raw value is never injected into a
+variant merely because its payload type matches.
+
+Without an expected item type, the annotator collects full yielded `Type`
+values and performs a controlled tense join. First it separates the semantic
+payload from its tense envelope. All reachable sites must have the same payload
+type, including collection topology, generic arguments, capabilities, error
+type, and ownership meaning, after any existing lossless scalar coercion.
+`Never` sites do not participate.
+
+For that one payload, optionality and fallibility may widen monotonically:
+
+| Sites | Inferred type |
+| --- | --- |
+| `T`, `T` | `T` |
+| `T`, `NIL` or `T`, `?T` | `?T` |
+| `T`, `!T` | `!T` |
+| `!T`, `?T` or `!T`, `NIL` | `!?T` |
+
+This is tense widening, not union inference. It permits a producer to expose
+absence and failure discovered on different paths without inventing a new
+payload type. The join is commutative, associative, and independent of source
+order.
+
+Future is not a widening bit. Two identical `~T` values have a well-defined
+join, but the producer must spell `YIELDS ~T`. Mixing `~T` with `T`, `?T`, or
+`!T` is an error: the compiler must never insert
+an implicit `NEXT`, await, or future lift at an asynchronous boundary. Likewise,
+`T` and an unrelated `K` are an error and never produce an anonymous union,
+common nominal ancestor, protocol, or `Any`.
+
+If unrelated payload types occur, the producer must declare a named union item
+type, add `YIELDS ThatUnion`, and yield explicit variants. The diagnostic must
+name the conflicting types and present that remedy alongside changing the
+conflicting `YIELD` to the same base type. When the exact contract is already
+known, such as homogeneous `~T` or an already constructed named-union value,
+`clear fix` inserts the missing `YIELDS` clause. The current check of
+`yield_types.map(&:resolved)` is insufficient because it discards optional,
+fallible, collection, generic, and capability structure. If fallible types
+later gain explicit error sets, those error sets must also agree or use an
+explicit declared conversion; the join must not invent an error union.
+
+The same controlled tense join applies at every result-producing asynchronous
+boundary: `BG`, `DO`, and `BG STREAM`. An expected type may come from the
+enclosing binding, return position, parameter, or an explicit boundary
+contract. Incompatible payloads or future states are compile errors.
+Effect-only `DO` blocks remain `Void` and do not acquire a result type from
+incidental expressions.
+
+### Termination
+
+`CLOSE;` is a stream-producer statement. It closes the stream exactly once and
+terminates the producer body. Normal fallthrough performs an implicit close so
+cleanup remains exception-safe. A `YIELD` reachable after `CLOSE` is a compile
+error. `CLOSE` outside `BG STREAM` is a compile error.
+
+`[~INF]T` rejects a reachable explicit or implicit normal close unless the
+producer is being cancelled or failing; otherwise its non-termination claim is
+false. A producer whose termination cannot be proven should use `[~]T`.
+
+`RETURN` exits a producer without yielding. It must not be used as an alias for
+`YIELD` in examples or inference.
+
+### Consumption
+
+Finite advancement distinguishes item and completion:
+
+```text
+NEXT finite_stream -> StreamStep<T>
+NEXT future        -> T
+```
+
+The language should provide an ergonomic control-flow form over
+`StreamStep<T>` before removing the legacy optional-sentinel API. Pipelines
+must lower the same tagged completion protocol. A yielded `NIL` is always an
+`Item(NIL)`, never `Closed`.
+
+## Tuples
+
+Tuple types already exist. This change adds a dedicated literal:
+
+```clear
+x: Tuple<Int64, String, Int64> = Tuple{1, "1", 1};
+```
+
+`Tuple{...}` creates an `AST::TupleLit`, not a list or struct literal. Inference
+preserves every positional type. Tuple positions are fields spelled `._0`,
+`._1`, and so on; each returns its exact position type. A position outside the
+declared arity is a compile-time error. Array syntax such as `tuple[0]` is
+always rejected: a heterogeneous product is not a homogeneous fixed array.
+
+During migration, a list literal contextually coerced to `Tuple<...>` remains
+accepted and is auto-fixed to `Tuple{...}`. New code and formatter output use
+the dedicated literal.
+
+## Scope Boundary: Parser Work Versus Semantic Work
+
+The complete Inline Pivot architecture is not a parser-only change. Parsing a
+new spelling without changing the semantic model is safe only when the new
+spelling is an exact alias for an already implemented type. The following
+boundaries are normative:
+
+| Feature | Minimum affected layers | Reason |
+| --- | --- | --- |
+| `[N]T`, `[]T`, and `{K}V` aliases for existing layouts | parser, canonical printer/fixer, source tests | The existing semantic type and lowering can be reused only where layout and defaults are identical. |
+| `BG STREAM YIELDS T` | parser, AST, annotator, diagnostics, formatter | The expected item type must reach the body before its `YIELD` sites are checked. |
+| `?`/`!` asynchronous tense join | annotator and shared type operations | This is a semantic least-upper-bound operation, not syntax. |
+| `Tuple{...}` and `._N` | parser, AST, annotator, MIR literal/field lowering, formatter | A standalone heterogeneous tuple must retain positional types without an expected context, and its field-only access must lower to the backend tuple representation. |
+| Per-layer capabilities | recursive type model, annotator, ownership/cleanup, MIR, backends | The current flattened capability slots cannot identify an arbitrary collection layer. |
+| Flat multidimensional ranks | type/layout model, MIR indexing, runtime checks, backends | Nested arrays are not layout-equivalent to a flat rank with strides. |
+| Optional yielded values plus finite completion | annotator, `StreamStep` MIR/runtime protocol, consumers, backends | A parser cannot distinguish a yielded `NIL` from the old optional completion sentinel. |
+
+Accordingly, the recommended first delivery is deliberately smaller than the
+full Inline Pivot migration: add `YIELDS`, the controlled tense join, and
+`Tuple{...}` by reusing the current tuple and stream machinery wherever its
+semantics are already correct. Do not make the collection syntax general or
+claim flat ranks/per-layer capabilities in that series. This keeps the change
+mostly in the front end, but it is not parser-only.
+
+Tuple support in particular must not add a second tuple representation. The
+compiler already understands `Tuple<A, B>`, cleanup, and backend tuple layout.
+The minimum new path is a distinct `AST::TupleLit` whose
+annotator infers its positional `Type` children and whose MIR lowering emits the
+existing tuple literal form, plus compile-time checked `._N` aliases for the
+backend's positional fields. If current MIR can represent only contextually
+typed list-to-tuple coercion, that lowering is the one small semantic extension
+required; no tuple runtime container is introduced.
+
+## Migration Rules
+
+Migration is staged and source-preserving.
+
+| Legacy type | Inline Pivot output |
+| --- | --- |
+| `T[N]` | `[N]T` |
+| `T[]@list` | `[]T` |
+| `T[N]@pool` | `[Pool(N)]T` |
+| `T[]@set` | `[Set]T` |
+| `HashMap<V>` | `{String}V` |
+| `HashMap<K, V>` | `{K}V` |
+| `~T[N]` | `[~N]T` |
+| `~T[INF]` | `[~INF]T` |
+| `~?T[]` or `~T[?]` used as an open stream | `[~]T` |
+| `?T[]` | `[]?T` |
+| `?(T[])` | `?[]T` |
+| contextual tuple `[a, b]` | `Tuple{a, b}` |
+
+Migration uses the parsed legacy semantic type, not textual substitutions.
+This is essential for nested arrays, optionals, generics, and capabilities.
+
+The compiler follows an expand-contract sequence:
+
+1. parse both surfaces into the new semantic tree;
+2. print only Inline Pivot in formatter/fixes;
+3. warn on legacy spellings after full backend parity;
+4. migrate repository sources and generated ruby-to-clear output;
+5. remove legacy parsing only after corpus and downstream-tool inventories are
+   empty.
+
+Compatibility parsing is temporary and must have a deletion issue and metric.
+No backend may branch on whether a type originated in legacy syntax.
+
+## Recommended Commit Sequence
+
+Every commit below must keep the tree green, include source-level CLEAR tests
+for its behavior, and maintain 100% line coverage for changed executable lines.
+NilKill static mode, Espalier, and Decomplex are recorded at each boundary. A
+parser commit must not make syntax generally available before annotation and
+lowering can preserve its promised semantics.
+
+### First delivery: contracts and tuples
+
+This is the smallest coherent next stream of work. It intentionally does not
+enable Inline Pivot collection spelling, flat ranks, per-layer capabilities, or
+the stream-completion protocol change.
+
+1. `test(types): freeze async join and tuple literal contracts`
+   Add parser/annotation oracles for `YIELDS`, `Tuple{...}`, `T` plus `NIL`,
+   `!T` plus `?T`, unrelated payloads, and future/non-future conflicts. The
+   initially unsupported cases are asserted as diagnostics, not skipped.
+2. `feat(parser): parse YIELDS contracts and tuple literals`
+   Add the minimal typed AST fields/nodes, predictive parsing, source spans,
+   recovery, and parser tests. Do not change tuple or stream runtime layout.
+3. `feat(types): define same-payload asynchronous tense joins`
+   Add one shared type operation implementing the `?`/`!` lattice and rejecting
+   payload or future-state mismatches. Test algebraic properties directly:
+   order independence, associativity, idempotence, and `Never` identity.
+4. `feat(annotator): enforce async result and stream item contracts`
+   Apply the shared join to result-producing `BG`, `DO`, and `BG STREAM`; push
+   `YIELDS T` into the body as its expected type; diagnose every conflicting
+   site without synthesizing a union or `Any`.
+5. `feat(tuples): infer and lower dedicated tuple literals`
+   Infer exact positional types for `AST::TupleLit` and lower it through the
+   existing tuple MIR/backend representation. Add bounded `._N` positional
+   fields, reject array indexing, and reuse ownership, cleanup, and ABI
+   behavior; add no tuple runtime container.
+6. `feat(tools): print and migrate async contracts and tuple literals`
+   Teach the formatter, diagnostics/fixes, LSP spans, and ruby-to-clear to emit
+   `BG STREAM YIELDS T` and `Tuple{...}`. Auto-fix contextual tuple list
+   literals only when equivalence is proven.
+
+The first delivery should touch the parser and AST, shared type/annotation
+logic, the tuple-literal MIR entry point, and syntax-producing tools. It should
+not require changes to tuple storage, backend tuple layout, or
+the runtime. If implementation discovers that those existing tuple paths
+cannot be reused, stop and document the mismatch before widening the change.
+
+### Full Inline Pivot delivery
+
+After the first delivery is stable, complete the architectural work in these
+reviewable commits. A commit may be split mechanically to remain reviewable,
+but the dependency order remains fixed.
+
+7. `test(types): add inline pivot equivalence and rejection oracles`
+8. `refactor(types): replace flattened shapes with recursive type nodes`
+9. `refactor(types): make all type visitors exhaustive over recursive nodes`
+10. `feat(parser): parse and print inline pivot collection layers`
+11. `feat(types): attach capabilities to their exact type layers`
+12. `feat(types): enforce capability and type complexity budgets`
+13. `feat(collections): lower lists sets pools and maps from type nodes`
+14. `feat(collections): lower flat multidimensional ranks and indexing`
+15. `feat(streams): represent cardinality independently of item tenses`
+16. `feat(streams): distinguish finite completion with StreamStep`
+17. `feat(streams): implement CLOSE reachability and lowering`
+18. `feat(tools): migrate sources and normalized type facts to inline pivot`
+19. `refactor(capabilities): rename indirect to boxed` (implemented)
+20. `refactor(types): contract legacy compatibility after the release window`
+
+The `@indirect` to `@boxed` rename was deliberately penultimate so it did not
+obscure structural capability changes. `@sharded(N)` remains canonical; there
+is no `@striped` rename.
+
+## Implementation Plan
+
+Each phase is a separate commit series with a green tree at its boundary.
+
+### Phase 0: Freeze semantics and inventories
+
+- Add syntax-oracle fixtures for every canonical example, invalid example,
+  migration pair, and precedence pair.
+- Inventory every `TypeShape` reader/writer, `Type.new(raw)` reconstruction,
+  type surface printer, Zig type branch, capability propagation site, and
+  stream-classification predicate.
+- Inventory existing `HashMap<V>` uses because their default key is String.
+- Record compiler, formatter, ruby-to-clear, FactMine, NilKill, Decomplex, and
+  Espalier baselines.
+- Add an architecture test forbidding a second structural source of truth.
+
+Exit gate: the normative examples in this document have parser-oracle expected
+trees even though production parsing still uses the old representation.
+
+### Phase 1: Replace flattened TypeShape with the recursive algebra
+
+- Introduce typed immutable variants for named, function, tuple, tense,
+  collection, map, and stream nodes.
+- Make child references concrete semantic nodes rather than raw Symbols.
+- Give every node stable identity, source span, canonical printer support, and
+  exhaustive visitor hooks.
+- Migrate compatibility, copyability, cleanup, escape, slot-size, generic
+  substitution, and type-ID logic.
+- Delete the replaced boolean/raw-child fields in the same series.
+
+Exit gate: old syntax produces the new recursive tree; no caller reconstructs
+children by reparsing `raw`.
+
+### Phase 2: Implement the predictive Inline Pivot parser and printer
+
+- Parse prefix layers, ranks, maps, tenses, generics, and per-node capability
+  chains directly into typed parse records.
+- Add delimiter recovery and precise diagnostics without cursor checkpoint
+  replay.
+- Add canonical surface printing and formatter support.
+- Add temporary legacy-to-tree parsing behind one explicit migration boundary.
+- Update LSP spans, diagnostic anchors, and fix rewriter.
+
+Complexity target: O(tokens) time and O(type depth) space, bounded by the type
+node limit. No parser rule may restart type parsing from an earlier cursor.
+
+### Phase 3: Per-layer capabilities and complexity validation
+
+- Replace flattened top/element capability slots with capability attachment on
+  the eligible semantic node.
+- Define capability compatibility, polymorphic abstraction, ownership poison,
+  cleanup, escape, and scheduler rules recursively.
+- Implement the three-site hard limit, node-depth limit, and access-obligation
+  diagnostic.
+- Accept `@mvcc` only as a fixable alias and print `@versioned`.
+- Keep `@boxed` canonical and accept `@indirect` only through the fixable
+  compatibility boundary.
+- Reject `@shared:striped` with a fix that requests an explicit shard count.
+
+Exit gate: nested capabilities affect exactly their target layer through AST,
+annotation, MIR, and backend output.
+
+### Phase 4: Collection and map lowering
+
+- Lower fixed arrays, lists, sets, pools, and maps from recursive nodes.
+- Preserve current pool/handle safety and collection cleanup behavior.
+- Implement flat multidimensional storage with checked stride calculation,
+  overflow diagnostics, row views, and multi-index MIR.
+- Treat list/set initial capacity as allocation metadata rather than type
+  identity.
+- Implement String-preserving HashMap migration and Symbol shorthand only for
+  new `{}` syntax.
+- Port SOA and sharding to node-local capability attachment.
+
+Exit gate: representative types compile and run through Zig and bytecode, and
+old/new equivalent spellings produce equivalent MIR layouts.
+
+### Phase 5: Stream completion redesign
+
+- Add stream cardinality nodes for finite unbounded, finite bounded, and
+  infinite streams.
+- Add `BG STREAM YIELDS T` as the explicit producer item annotation and
+  reject the postfix `BG STREAM { ... }: T` form.
+- Propagate expected item types from `YIELDS`, bindings, returns, and argument
+  positions into the stream body before visiting any `YIELD`.
+- Add `StreamStep<T>` to MIR/runtime finite advancement.
+- Add the ergonomic finite-stream consumer control form and migrate pipelines.
+- Add `AST::StreamClose`, control-flow reachability rules, implicit close, and
+  exactly-once runtime close.
+- Implement the shared controlled tense join for `BG`, result-producing `DO`,
+  and `BG STREAM`: identical semantic payloads may accumulate `?` and `!`, but
+  may not mix `~` states or infer payload unions, common ancestors, protocols,
+  or `Any`.
+- Require named unions and explicit variant construction for heterogeneous
+  stream items. Do not inject raw payload values into union variants.
+- Migrate `~?T[]`, `~T[?]`, `~T[N]`, and `~T[INF]` without changing behavior.
+
+Exit gate:
+
+- `[~]?T` can yield both `NIL` and a closed event and consumers distinguish
+  them in source and runtime tests;
+- both an annotated `BG STREAM YIELDS ?T` and an unannotated `T`/`NIL`
+  producer are accepted; the latter infers `?T`;
+- an unannotated producer with `!T` and `?T` sites infers `!?T`;
+- homogeneous future items and named-union items are rejected without
+  `YIELDS`, with an exact insertion fix when the contract is knowable;
+- `T`/`K`, `T`/`~T`, and `!T`/`~T` producer sites are rejected;
+- heterogeneous unannotated `BG`, `DO`, and `BG STREAM` boundaries fail with
+  diagnostics naming every conflicting terminal site;
+- a declared union accepts explicit variants and rejects implicit raw-payload
+  injection;
+- no async inference path constructs a payload `Union` or `Any`; `Optional`
+  and `Fallible` arise only through the same-payload tense lattice;
+- parser, annotator, MIR, Zig, bytecode, formatter, and ruby-to-clear agree on
+  the `YIELDS` contract.
+
+### Phase 6: Tuple literal and generic-boundary enforcement
+
+- Add `AST::TupleLit`, parser support, exact positional inference, MIR lowering,
+  Zig emission, cleanup, copyability, bounded `._N` field aliases, and explicit
+  rejection of Tuple array indexing.
+- Auto-fix contextual tuple list literals.
+- Register compiler-owned monadic/container generics and implement only
+  equivalence-proven fixes.
+- Diagnose mixed standard/generic monadic forms without rewriting `Result<T,E>`
+  unsafely.
+
+Exit gate: tuple construction is no longer dependent on expected-type context,
+and no generic auto-fix loses error or capability semantics.
+
+### Phase 7: Repository migration and downstream tools
+
+- Run `clear fix` over compiler tests, examples, stdlib, docs, and transpile
+  fixtures in reviewable groups.
+- Update ruby-to-clear to emit canonical Inline Pivot syntax from the semantic
+  tree, not by string rewriting.
+- Update FactMine normalized type facts so analyzers see topology, rank,
+  cardinality, and per-layer capabilities cross-language.
+- Update NilKill collection/type facts, Decomplex type-pressure facts, and
+  Espalier cost models for ranks, sets, maps, and streams.
+- Update public documentation and migration notes.
+
+Exit gate: repository and generated CLEAR use canonical spelling outside
+explicit migration fixtures and compatibility-only cases whose semantics
+cannot be preserved by a local rewrite.
+
+### Phase 8: Contract legacy syntax
+
+- Make legacy spellings errors with fixes for one release window.
+- Keep the semantics-preserving `@indirect` to `@boxed` fix during one release
+  window, then remove the alias.
+- Remove legacy parser branches, aliases, raw-string reconstruction, and stale
+  diagnostics.
+- Remove the migration feature flag and inventory.
+- Re-run fuzzing with deeply nested, malformed, and capability-heavy types.
+
+Exit gate after the compatibility window: one parser surface, one semantic
+tree, one canonical printer, and one backend path remain.
+
+## Implemented Outcome and Compatibility Boundary
+
+The compiler now has one recursive semantic type expression tree for named
+types, tuples, tenses, linear collections, maps, streams, and node-local
+capabilities. Inline Pivot parsing is predictive and does not checkpoint,
+restore, or replay the token cursor. Annotation, compatibility, ownership,
+cleanup, MIR, and backend paths consume that tree.
+
+The delivered surface includes:
+
+- `[N]T`, `[]T`, `[List(N)]T`, `[Set]T`, `[Pool(N)]T`, and flat ranks;
+- `{K}V` maps and left-to-right mixed collection composition;
+- node-local capability attachment with a three-site complexity limit;
+- `Tuple<T, K>`, `Tuple{...}`, checked `._N` access, and no tuple indexing;
+- `[~]T`, `[~N]T`, and `[~INF]T` with completion distinct from optional data;
+- `BG STREAM YIELDS T`, controlled optional/fallible inference, and rejection
+  of implicit heterogeneous unions;
+- canonical `@boxed`, canonical `@sharded(N)`, and no `@striped` surface.
+
+Two legacy families intentionally remain behind the compatibility parser for
+one release window:
+
+1. Bare `T[]` is a slice/view in legacy CLEAR, while canonical `[]T` is an
+   owned list. A local spelling rewrite would change ownership, so it is not
+   auto-fixed until a canonical slice/view spelling is approved.
+2. Legacy async spellings such as `~T[N]`, `~?T[]`, and `~T[]@list` overload
+   future, stream, and collection behavior. They require whole-program `NEXT`
+   migration and are not rewritten from an annotation alone.
+
+This is source compatibility, not a second semantic model: both paths produce
+the same recursive tree and canonical printers emit only the new surface. The
+compatibility branches may be deleted after those source contracts have a
+semantics-preserving migration.
+
+## Test and Measurement Requirements
+
+At every phase:
+
+- run Sorbet and parser/annotator/MIR/backend focused specs;
+- test changed behavior primarily with CLEAR source strings;
+- maintain 100% line coverage for changed executable lines and cover every new
+  diagnostic/fix branch;
+- run compiler syntax and semantic oracles;
+- run relevant Zig/bytecode integration and runtime tests;
+- run FactMine, NilKill static mode, Decomplex, and Espalier and compare deltas;
+- investigate analyzer findings in new code before proceeding;
+- record material architectural improvements that the analyzers fail to
+  recognize as detector gaps;
+- run `git diff --check` and architecture guardrails before each commit.
+
+Required adversarial tests include:
+
+- maximum legal and first illegal type depth/capability counts;
+- malformed delimiters and generic/map nesting with linear parser work;
+- old/new map default-key preservation;
+- multidimensional extent and stride overflow;
+- optional container versus optional element at every layer;
+- optional explicit `BG STREAM YIELDS T`, plus required `YIELDS` for future and
+  named-union items even when an expected binding type exists;
+- rejection of postfix `BG STREAM { ... }: T` syntax;
+- same-payload `T`/`NIL` and `!T`/`?T` asynchronous sites that must infer `?T`
+  and `!?T`, respectively, independent of source order;
+- unrelated-payload and mixed-future `BG`, `DO`, and `BG STREAM` terminal
+  sites that must not infer `Union`, a common ancestor, a protocol, `Any`, or
+  an implicit await/lift;
+- explicit named-union variants versus rejected raw-payload injection;
+- unannotated `T`/`NIL` yields versus annotated `YIELDS ?T`, both accepted with
+  the same item type;
+- yielded `NIL` followed by `CLOSE`;
+- close on every control-flow path, duplicate close, and yield-after-close;
+- nested capability ownership/cleanup across BG, DO, BG STREAM, fields, returns,
+  and FFI;
+- generic aliases whose names resemble standard Option/Result/List types;
+- tuple cleanup, out-of-range positional-field rejection, and rejection of all
+  heterogeneous array-style Tuple indexing.
+
+## Risks and Non-Goals
+
+- This design does not introduce anonymous structural unions.
+- This design does not infer payload unions or `Any` at asynchronous
+  boundaries. It infers only optional and fallible tenses over one identical
+  payload, and never inserts an implicit future transition.
+- This design does not infer a sharding count or synchronization policy.
+- This design does not treat initial list/set capacity as a durable contract.
+- This design does not preserve both old and new type models internally.
+- This design does not promise that every multidimensional resize is cheap;
+  rectangular flat storage makes some operations O(total elements).
+- This design does not use `?T` as a finite-stream completion sentinel.
+- This design does not auto-fix a generic type unless semantic equivalence is
+  proven from compiler-owned definitions.
+
+The highest implementation risk is not parsing. It is ensuring that ownership,
+cleanup, escape, capability, MIR, and backend visitors become exhaustive over
+the recursive type tree without temporary fallback behavior. The phase order
+therefore establishes the semantic representation before enabling the new
+surface generally.
+
+## Final Recommendation
+
+Proceed with Inline Pivot using the revisions above. The syntax becomes
+materially clearer once every prefix layer reads in access order and stream
+completion is separated from optional values. Do not implement the proposal as
+string syntax over the current flattened `TypeShape`; that would make nested
+capabilities and mixed topology unreliable and would leave ruby-to-clear with a
+harder translation target.
+
+The first implementation milestone should be the recursive semantic tree plus
+oracles, not collection parser branches. If that milestone cannot delete the
+raw child-symbol reconstruction path, stop and redesign before adding surface
+syntax.

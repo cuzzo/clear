@@ -33,8 +33,8 @@ RSpec.describe "alloc_fault (allocation FAULT axis)" do
 
   it "is true for a function that allocates (list append)" do
     ast = annotate(<<~CLEAR)
-      FN build() RETURNS Int64[]@list ->
-        MUTABLE xs: Int64[]@list = [];
+      FN build() RETURNS []Int64 ->
+        MUTABLE xs: []Int64 = [];
         xs.append(7_i64);
         RETURN xs;
       END
@@ -44,8 +44,8 @@ RSpec.describe "alloc_fault (allocation FAULT axis)" do
 
   it "propagates transitively through a bare (non-absorbed) call" do
     ast = annotate(<<~CLEAR)
-      FN build() RETURNS Int64[]@list ->
-        MUTABLE xs: Int64[]@list = [];
+      FN build() RETURNS []Int64 ->
+        MUTABLE xs: []Int64 = [];
         xs.append(7_i64);
         RETURN xs;
       END
@@ -59,8 +59,8 @@ RSpec.describe "alloc_fault (allocation FAULT axis)" do
 
   it "does NOT propagate when the alloc callee's fault channel is OR_ELSE-absorbed (#11 authority)" do
     ast = annotate(<<~CLEAR)
-      FN build() RETURNS Int64[]@list ->
-        MUTABLE xs: Int64[]@list = [];
+      FN build() RETURNS []Int64 ->
+        MUTABLE xs: []Int64 = [];
         xs.append(7_i64);
         RETURN xs;
       END

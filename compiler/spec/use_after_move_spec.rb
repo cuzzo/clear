@@ -29,7 +29,7 @@ RSpec.describe UseAfterMoveChecker do
     expect_error(<<~CLEAR, /USE AFTER MOVE/)
       UNION Value { Num: Float64, List: Int64[] }
       FN makeList() RETURNS Value ->
-          MUTABLE items: Int64[]@list = List[];
+          MUTABLE items: []Int64 = List[];
           items.append(1_i64);
           RETURN Value{ List: items };
       END
@@ -50,7 +50,7 @@ RSpec.describe UseAfterMoveChecker do
       UNION Value { Num: Float64, List: Int64[] }
       FN main() RETURNS Void ->
           MUTABLE v = Value{ Num: 1.0 };
-          MUTABLE items: Value[]@list = List[];
+          MUTABLE items: []Value = List[];
           items.append(GIVE v);
           items.append(v);
           RETURN;
@@ -62,7 +62,7 @@ RSpec.describe UseAfterMoveChecker do
     expect_error(<<~CLEAR, /USE AFTER MOVE.*`item`.*already TOOK.*line 5/m)
       STRUCT Item { v: Int64 }
       FN main() RETURNS Void ->
-          MUTABLE pool: Item[10]@pool = [];
+          MUTABLE pool: [Pool(10)]Item = [];
           item = Item{ v: 1 };
           pool.insert(item);
           x = item.v;
@@ -72,7 +72,7 @@ RSpec.describe UseAfterMoveChecker do
   end
 
   it "maps move actions to user-facing phrases (active and passive forms)" do
-    annotator = SemanticAnnotator.new
+    annotator = Annotator::Phases::TypeAnalysisSession.new
 
     # Active form is used by USE_OF_MOVED_VALUE — the consumer is the
     # subject of the sentence ("`process(GIVE msg)` already GAVE it away").
@@ -94,9 +94,9 @@ RSpec.describe UseAfterMoveChecker do
   # =========================================================================
   it "preserves explicit affine field-store moves in STRICT" do
     expect_error(<<~CLEAR, /USE AFTER MOVE.*`m`/m)
-      STRUCT Container { data: HashMap<Int64> }
+      STRUCT Container { data: {String}Int64 }
       FN main() RETURNS Void ->
-          MUTABLE m: HashMap<Int64> = {};
+          MUTABLE m: {String}Int64 = {};
           m["x"] = 1_i64;
           c1 = Container{ data: m };
           c2 = Container{ data: m };
@@ -133,7 +133,7 @@ RSpec.describe UseAfterMoveChecker do
           RETURN items.length();
       END
       FN main() RETURNS Void ->
-          MUTABLE vals: Int64[]@list = List[];
+          MUTABLE vals: []Int64 = List[];
           vals.append(1_i64);
           n = consume(GIVE vals);
           n2 = consume(vals);
@@ -194,7 +194,7 @@ RSpec.describe UseAfterMoveChecker do
           RETURN items.length();
       END
       FN main() RETURNS Void ->
-          MUTABLE vals: Int64[]@list = List[];
+          MUTABLE vals: []Int64 = List[];
           vals.append(1_i64);
           n = consume(GIVE vals);
           RETURN;
@@ -236,7 +236,7 @@ RSpec.describe UseAfterMoveChecker do
     expect_no_error(<<~CLEAR)
       UNION Value { Num: Float64, List: Int64[] }
       FN makeList() RETURNS !Value ->
-          MUTABLE items: Int64[]@list = List[];
+          MUTABLE items: []Int64 = List[];
           items.append(1_i64);
           RETURN Value{ List: items };
       END
@@ -249,13 +249,13 @@ RSpec.describe UseAfterMoveChecker do
   end
 
   # =========================================================================
-  # Union with @indirect inline struct variant is non-Copy.
-  # @indirect creates a *T heap pointer - by-value copy creates shared
+  # Union with @boxed inline struct variant is non-Copy.
+  # @boxed creates a *T heap pointer - by-value copy creates shared
   # ownership of the same pointer, which is an illegal state (double-free).
   # =========================================================================
-  it "raises on use after move for union with @indirect struct variant" do
+  it "raises on use after move for union with @boxed struct variant" do
     expect_error(<<~CLEAR, /USE AFTER MOVE/)
-      UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+      UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
       FN makeLambda!() RETURNS Value ->
           RETURN Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
       END

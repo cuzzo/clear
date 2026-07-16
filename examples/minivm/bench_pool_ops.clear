@@ -3,7 +3,7 @@
 
 REQUIRE "types.clear";
 
-FN run!(MUTABLE pool: Env[200000]@pool) RETURNS Int64
+FN run!(MUTABLE pool: [Pool(200000)]Env) RETURNS Int64
   REQUIRES pool: LOCKED
 ->
     MUTABLE total: Int64 = 0;
@@ -35,7 +35,7 @@ FN run!(MUTABLE pool: Env[200000]@pool) RETURNS Int64
 END
 
 FN main() RETURNS Void ->
-    MUTABLE pool: Env[200000]@pool:shared:locked = [];
+    MUTABLE pool: [Pool(200000)]@shared:locked Env = [];
     startMs = timestampMs();
     total = run!(pool);
     endMs = timestampMs();

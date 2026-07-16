@@ -4,7 +4,7 @@
 UNION Val {
     Nil,
     Str: String,
-    Lambda { params: Val[], body: Val @indirect, envId: Int64 }
+    Lambda { params: Val[], body: Val @boxed, envId: Int64 }
 }
 
 FN getStr(v: Val) RETURNS String ->
@@ -22,7 +22,7 @@ END
 
 # Case 2: heap-allocated via COPY
 FN makeFromHeap!() RETURNS !Val ->
-    MUTABLE params: Val[]@list = List[];
+    MUTABLE params: []Val = List[];
     params.append(Val{ Str: "x" });
     RETURN Val.Lambda{ params: COPY params, body: Val{ Str: "body" }, envId: 0 };
 END

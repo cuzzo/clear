@@ -37,6 +37,17 @@ test "Set(Rc(T)) uses handle identity and releases removed keys" {
     CheatLib.rcRelease(u64, allocator, item);
 }
 
+test "Set.initCapacity reserves buckets without inserting values" {
+    const allocator = std.testing.allocator;
+    var set = try CheatLib.Set(u64).initCapacity(allocator, 32);
+    defer set.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 0), set.inner.count());
+    try std.testing.expect(set.inner.capacity() >= 32);
+    try set.insert(allocator, 7);
+    try std.testing.expect(set.contains(7));
+}
+
 const PromiseTestState = struct {
     promise: CheatLib.Promise(f64),
     result: f64 = 0.0,
@@ -333,6 +344,44 @@ test "BoundedStream(i64,3): deinit() drains unconsumed promises (early-exit simu
 
     try std.testing.expectEqual(@as(usize, 3), state.stream.head);
     // DebugAllocator will fail the test if any Promise.Inner was leaked.
+}
+
+test "StreamStep keeps optional items distinct from completion" {
+    const Step = CheatLib.StreamStep(?i64);
+    const nil_item: Step = .{ .Item = null };
+    const value_item: Step = .{ .Item = 42 };
+    const closed: Step = .Closed;
+
+    try std.testing.expect(nil_item.isItem());
+    try std.testing.expect(value_item.isItem());
+    try std.testing.expect(!closed.isItem());
+    switch (nil_item) {
+        .Item => |item| try std.testing.expect(item == null),
+        .Closed => return error.TestUnexpectedResult,
+    }
+}
+
+test "Stream deinit recursively cleans unconsumed owned items" {
+    const allocator = std.testing.allocator;
+    const Payload = struct { bytes: []u8 };
+
+    var global_ctx = ebr.EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+
+    var stream = try CheatLib.Stream(Payload).spawnNew(allocator, &sched);
+    try stream.push(.{ .bytes = try allocator.dupe(u8, "buffered") });
+    stream.close();
+    stream.deinit();
+}
+
+test "cleanup does not write through immutable aggregate storage" {
+    const Aggregate = struct { std.ArrayListUnmanaged(i64), bool };
+    const value: Aggregate = .{ .empty, true };
+    CheatLib.cleanup(@TypeOf(value), std.testing.allocator, &value);
 }
 
 test {

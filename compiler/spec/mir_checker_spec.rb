@@ -1560,8 +1560,12 @@ RSpec.describe MIRChecker do
         checker.send(:check_linear_stmt!, stmt, nested_state.copy)
       end
 
-      ctx = Object.new
-      ctx.define_singleton_method(:run_body) { [MIR::ExprStmt.new(MIR::Lit.new("1"), false)] }
+      ctx = MIR::FsmB1CtxStruct.new(
+        "__Ctx",
+        "CheatLib.Promise(void)",
+        [],
+        MIR::FsmStep.new(0, 0, "__rt", false, [MIR::ExprStmt.new(MIR::Lit.new("1"), false)]),
+      )
       checker.send(:check_linear_stmt!, MIR::FsmB1Body.new("__blk", ctx, nil), nested_state.copy)
 
       duplicate = checker.check_fn!(fn_def("dup_alloc", [

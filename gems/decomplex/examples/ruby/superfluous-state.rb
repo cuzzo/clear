@@ -26,7 +26,8 @@ class SuperfluousStateExample
     read_adjacent
   end
 
-  # 4. derived_cache: written in one method, read in multiple other methods.
+  # 4. Ordinary encapsulated state: cross-method reads alone do not prove that
+  # the field is a derived cache or can be eliminated.
   def write_cache
     @cache_state = 300
   end

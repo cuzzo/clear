@@ -143,18 +143,31 @@ module FixCollector
 
   @findings = T.let([], T::Array[FixableFinding])
   @enabled = T.let(false, T::Boolean)
+  @type_migrations_enabled = T.let(false, T::Boolean)
 
   sig { returns(T::Array[FixableFinding]) }
   def self.enable!
     @findings.clear
     @enabled = true
+    @type_migrations_enabled = false
     @findings
+  end
+
+  sig { void }
+  def self.enable_type_migrations!
+    @type_migrations_enabled = true if @enabled
+  end
+
+  sig { returns(T::Boolean) }
+  def self.type_migrations_enabled?
+    @enabled && @type_migrations_enabled
   end
 
   sig { void }
   def self.disable!
     @findings.clear
     @enabled = false
+    @type_migrations_enabled = false
   end
 
   sig { returns(T::Boolean) }
@@ -162,9 +175,10 @@ module FixCollector
     @enabled
   end
 
-  sig { params(finding: FixableFinding).void }
+  sig { params(finding: FixableFinding).returns(T::Array[FixableFinding]) }
   def self.push(finding)
     @findings << finding if @enabled
+    @findings
   end
 
   sig { returns(T::Array[FixableFinding]) }

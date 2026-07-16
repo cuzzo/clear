@@ -10,8 +10,20 @@ module Annotator
       extend T::Sig
 
       sig { params(program: AST::Program).void }
-      def finalize_program_semantics!(program)
-        T.bind(self, SemanticAnnotator)
+      def finalize_program_type!(program)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        stamp_program_result_type!(program)
+      end
+
+    end
+
+    module ProgramCapabilityAudit
+      extend T::Sig
+
+      sig { params(program: AST::Program).void }
+      def finalize_program_audit!(program)
+        T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
         check_indirect_reentrancy!
         validate_not_logical_recursion!
@@ -34,25 +46,30 @@ module Annotator
         finalize_async_execution_shapes!(program)
 
         restamp_function_metadata!
-        stamp_program_result_type!(program)
       end
+      private :finalize_program_audit!
 
       sig { void }
       def restamp_function_metadata!
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
         semantic_function_nodes.each_value do |fn|
           signature = FunctionSignature.unwrap(fn.full_type!(context: "program function signature"))
           next unless signature
 
-          FunctionSignature.sync_signature_from_function_def!(signature, fn)
+          signature.sync_from_function_def!(fn)
         end
       end
       private :restamp_function_metadata!
 
+    end
+
+    module ProgramFinalization
+      extend T::Sig
+
       sig { params(program: AST::Program).void }
       def stamp_program_result_type!(program)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         final_statement = program.statements.last
         if final_statement

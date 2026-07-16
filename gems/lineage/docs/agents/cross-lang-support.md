@@ -38,6 +38,7 @@ artifacts, repeat `--coverage path/to/artifact` or `--sarif-input path/to/dir`.
 | --- | --- | --- | --- | --- | --- |
 | Python | `https://github.com/Textualize/rich` | `/tmp/lineage-one-line-repos/rich` | `/tmp/lineage-one-line-repos/rich/lineage.db` | `18101` | Complete |
 | TypeScript | `https://github.com/colinhacks/zod` | `/tmp/lineage-one-line-repos/zod` | `/tmp/lineage-one-line-repos/zod/lineage.db` | `18102` | Complete |
+| JavaScript | `https://github.com/fastify/fastify` | `/tmp/fastify` | `/tmp/fastify/lineage.db` | `18111` | Added for analyzer validation |
 | Go | `https://github.com/junegunn/fzf` | `/tmp/lineage-one-line-repos/fzf` | `/tmp/lineage-one-line-repos/fzf/lineage.db` | `18103` | Complete, partial Go coverage |
 | Lua | `https://github.com/luarocks/luarocks` | `/tmp/lineage-one-line-repos/luarocks` | `/tmp/lineage-one-line-repos/luarocks/lineage.db` | `18104` | Complete, no coverage artifact |
 | C | `https://github.com/libuv/libuv` | `/tmp/lineage-one-line-repos/libuv` | `/tmp/lineage-one-line-repos/libuv/lineage.db` | `18105` | Complete, no coverage artifact |

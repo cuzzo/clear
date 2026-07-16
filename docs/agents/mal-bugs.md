@@ -7,9 +7,9 @@ the program explicitly uses an unsafe/raw escape hatch.
 
 ## CLEAR Bugs To Reduce
 
-### `@indirect` recursive-union closure body ownership
+### `@boxed` recursive-union closure body ownership
 
-The original `Value.Lambda { params: Value[], body: Value @indirect, envId }`
+The original `Value.Lambda { params: Value[], body: Value @boxed, envId }`
 shape was not stable once closures were copied through env maps and returned
 from eval. The practical symptom was allocator/double-free style failure around
 lambda bodies. The step4 workaround stores lambda metadata in an environment and
@@ -17,17 +17,17 @@ re-parses the body text on invocation, which avoids the problematic owned AST
 copy path but is not the right long-term representation.
 
 Why this matters: step5 TCO should store and tail-call the parsed body AST. If
-`@indirect` recursive union payloads cannot be safely copied/stored in maps, MAL
+`@boxed` recursive union payloads cannot be safely copied/stored in maps, MAL
 and similar interpreters need either a compiler/runtime fix or a documented
 ownership pattern.
 
 Next step: reduce to a small test that stores a union variant with an
-`@indirect` recursive payload inside `HashMap<Value>` or `@pool`, copies it out,
+`@boxed` recursive payload inside `HashMap<Value>` or `@pool`, copies it out,
 and then lets both containers clean up.
 
 Repro: `transpile-tests/520_mal_indirect_lambda_body_cleanup.clear`
 
-Current status: fixed by marking inline-struct union `@indirect` fields as
+Current status: fixed by marking inline-struct union `@boxed` fields as
 heap/runtime-using during annotation, and by deep-copying cleanup-needing union
 values read from containers before assigning them into owned locals.
 

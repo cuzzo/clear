@@ -8,7 +8,7 @@ module Annotator
 
       sig { params(node: AST::VarDecl).void }
       def visit_VarDecl(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         prepare_implicit_ownership_transport!(node)
         visit_declaration_value!(node)
@@ -30,7 +30,7 @@ module Annotator
 
       sig { params(node: DeclarationNode).returns(T.nilable(Type)) }
       def promote_pipe_to_observable_dest!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return unless node.respond_to?(:type) && node.type
         return unless node.value
@@ -74,7 +74,7 @@ module Annotator
 
       sig { params(node: DeclarationNode, mutable_flag: T::Boolean).void }
       def finalize_decl_node!(node, mutable_flag)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         value = T.must(node.value)
         verify_unrestricted!(node)
@@ -83,6 +83,7 @@ module Annotator
 
         declared_type = node.type
         validate_type_annotation!(node, declared_type) if declared_type
+        validate_rank_initializer!(node, declared_type) if declared_type
         validate_stream_type!(node)
 
         promote_pipe_to_observable_dest!(node)
@@ -219,7 +220,7 @@ module Annotator
         og_declare(node.name, node, node_type)
         establish_inferred_alias!(node, sym)
         register_container_borrow!(node)
-        # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
+        # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@boxed fields).
         if !node_type.implicitly_copyable? { |t| lookup_type_schema(t) }
           current_fn_ctx&.record_heap_use!
         end
@@ -229,9 +230,24 @@ module Annotator
         nil
       end
 
+      sig { params(node: DeclarationNode, declared_type: Type).void }
+      def validate_rank_initializer!(node, declared_type)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        return unless declared_type.rank?
+        return unless node.value.is_a?(AST::ListLit)
+
+        item_count = node.value.items.length
+        if declared_type.fixed_rank? && item_count != T.must(declared_type.capacity)
+          error!(node, :RANK_LITERAL_SIZE, expected: T.must(declared_type.capacity), got: item_count)
+        end
+        if declared_type.dynamic_rank? && item_count != 0
+          error!(node, :RANK_DYNAMIC_LITERAL_NEEDS_SHAPE)
+        end
+      end
+
       sig { params(node: DeclarationNode).returns(T::Boolean) }
       def validate_observable_binding_initializer!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return true unless node.type&.future? && node.type.observable?
 
@@ -252,7 +268,7 @@ module Annotator
 
       sig { params(node: DeclarationNode).returns(T::Array[Fix]) }
       def observable_binding_drop_fixes(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         fixes = T.let([], T::Array[Fix])
         obs_tok = node.type.observable_token if node.type.respond_to?(:observable_token)
@@ -280,7 +296,7 @@ module Annotator
 
       sig { params(node: AST::BindExpr).void }
       def visit_BindExpr(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         prepare_implicit_ownership_transport!(node) if bind_declares_new_symbol?(node, current_scope)
         visit_declaration_value!(node)
@@ -299,7 +315,7 @@ module Annotator
 
       sig { params(node: DeclarationNode).void }
       def visit_declaration_value!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Fixed-array list literals must be storage-stamped before visiting so
         # downstream list analysis sees the intended stack placement.
@@ -317,7 +333,7 @@ module Annotator
 
       sig { params(node: DeclarationNode).void }
       def prepare_implicit_ownership_transport!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         plan = T.unsafe(node).ownership_transport_plan
         # STRICT preserves CLEAR's explicit affine contract: a plain
         # non-Copy assignment is a move. Ownership inference is a
@@ -414,7 +430,7 @@ module Annotator
 
       sig { params(facts: OwnershipTransportFacts).void }
       def finalize_ownership_transport_facts!(facts)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         facts.decisions.each do |decision|
           node = decision.alias_fact.declaration
           T.unsafe(node).ownership_transport_plan = decision.plan
@@ -442,7 +458,7 @@ module Annotator
 
       sig { params(decision: OwnershipTransportFacts::TransferDecision).void }
       def finalize_pending_transfer!(decision)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         transfer = decision.transfer
         source = transfer.source
         if decision.materialize
@@ -487,7 +503,7 @@ module Annotator
 
       sig { params(node: DeclarationNode, symbol: SymbolEntry).void }
       def establish_inferred_alias!(node, symbol)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         plan = T.unsafe(node).ownership_transport_plan
         return unless plan.is_a?(OwnershipTransportPlan)
         return if language_mode == :strict
@@ -506,7 +522,7 @@ module Annotator
 
       sig { params(node: AST::VarDecl).void }
       def finalize_var_declaration!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         promote_declaration_value!(node)
         finalize_decl_node!(node, node.mutable)
@@ -516,7 +532,7 @@ module Annotator
 
       sig { params(node: DeclarationNode).void }
       def promote_declaration_value!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
         promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
@@ -529,7 +545,7 @@ module Annotator
 
       sig { params(node: AST::BindExpr).void }
       def finalize_bind_declaration!(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         promote_declaration_value!(node)
         node.mode = :decl
@@ -550,7 +566,7 @@ module Annotator
 
       sig { params(node: AST::BindExpr, scope: Scope).void }
       def reject_immutable_bind_assignment!(node, scope)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         node.symbol = scope.resolve_entry(node.name)
         stamp_type!(node, scope.resolve_type(node.name))
@@ -559,7 +575,7 @@ module Annotator
 
       sig { params(node: AST::BindExpr, scope: Scope).void }
       def finalize_bind_assignment!(node, scope)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         node.mode = :assign
         verify_unrestricted!(node)
@@ -579,7 +595,7 @@ module Annotator
 
       sig { params(node: AST::BindExpr, target_sync: T.nilable(Symbol)).void }
       def stamp_atomic_bind_assignment!(node, target_sync)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return unless target_sync == :atomic
 
@@ -590,7 +606,7 @@ module Annotator
 
       sig { params(node: AST::BindExpr).returns(T.nilable(Symbol)) }
       def atomic_bind_operation(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Atomic compound assignments must become fetch ops; load+add+store
         # would lose atomicity.
@@ -610,7 +626,7 @@ module Annotator
 
       sig { params(node: AST::Identifier).returns(T.nilable(SymbolEntry)) }
       def visit_Identifier(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         predicate_identifier_allowed!(node)
 
@@ -661,7 +677,7 @@ module Annotator
 
         # 3. Liveness
         if ownership_graph.moved?(node.name)
-          emit_use_of_moved_error!(node, T.must(ownership_graph.nodes[node.name]))
+          emit_use_of_moved_error!(node, T.must(ownership_graph[node.name]))
         end
 
         # 5. Mark variable as read so the transpiler can skip `_ = &x` suppression.
@@ -681,7 +697,7 @@ module Annotator
 
       sig { params(entry: SymbolEntry).returns(T.nilable(Symbol)) }
       def classify_ownership!(entry)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return unless entry
         type_obj = entry.type
@@ -716,7 +732,7 @@ module Annotator
 
       sig { params(var_name: String, value_node: AST::Node).void }
       def track_union_alias(var_name, value_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return unless value_node.is_a?(AST::FuncCall) || value_node.is_a?(AST::MethodCall)
         ret_type = value_node.full_type!(context: "union alias return")
@@ -747,7 +763,7 @@ module Annotator
 
       sig { params(storage: Symbol, node: DeclarationNode).returns(T.nilable(Integer)) }
       def accumulate_stack_bytes(storage, node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         fn_ctx = current_fn_ctx
         return unless storage == :stack && fn_ctx
@@ -758,7 +774,7 @@ module Annotator
 
       sig { params(name: String).void }
       def mark_var_mutated(name)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         scope = lookup_scope_for(name)
         return unless scope
@@ -780,7 +796,7 @@ module Annotator
 
       sig { params(name: String).void }
       def mark_var_mutated_via_call(name)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         scope = lookup_scope_for(name)
         return unless scope
@@ -796,7 +812,7 @@ module Annotator
 
       sig { params(node: T.any(AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Identifier)).returns(T.nilable(String)) }
       def chain_root_name(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         curr = T.let(node, T.any(AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Identifier))
         while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex) || curr.is_a?(AST::OptionalUnwrap)
@@ -811,7 +827,7 @@ module Annotator
 
       sig { params(node: AST::Assignment).returns(T.nilable(Symbol)) }
       def visit_Assignment(node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
 
         # If the assignment target is a `@locked` / `@writeLocked` field
@@ -821,7 +837,7 @@ module Annotator
         # so visit_GetField's CAP_FIELD_NEEDS_WITH_EXCLUSIVE check skips
         # the in-RHS read of the same `@locked` binding (it's safe under
         # the auto-lock).
-        previous_auto_lock = phase_receiver_state.auto_locked_assign_name
+        previous_auto_lock = phase_traversal_state.auto_locked_assign_name
         auto_lock_name = T.let(previous_auto_lock, T.nilable(String))
         target = node.name
         if target.is_a?(AST::GetField) && target.target.is_a?(AST::Identifier)
@@ -835,11 +851,11 @@ module Annotator
           end
         end
 
-        phase_receiver_state.auto_locked_assign_name = auto_lock_name
+        phase_traversal_state.auto_locked_assign_name = auto_lock_name
         begin
           visit(node.value)
         ensure
-          phase_receiver_state.auto_locked_assign_name = previous_auto_lock
+          phase_traversal_state.auto_locked_assign_name = previous_auto_lock
         end
         promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
         promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
@@ -872,7 +888,7 @@ module Annotator
 
       sig { params(identifier: AST::Identifier, node: AST::Assignment).returns(T::Boolean) }
       def visit_assignment_variable(identifier, node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         var_name = identifier.name
         scope = current_scope
@@ -908,7 +924,7 @@ module Annotator
 
       sig { params(index_node: AST::GetIndex, assignment_node: AST::Assignment).returns(NilClass) }
       def visit_assignment_index(index_node, assignment_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(index_node)
 
@@ -961,7 +977,7 @@ module Annotator
 
       sig { params(field_node: AST::GetField, assignment_node: AST::Assignment).returns(T.nilable(Symbol)) }
       def visit_assignment_field(field_node, assignment_node)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Field writes go through the auto-lock path, not the WITH-required
         # diagnostic used for reads.
@@ -1019,7 +1035,7 @@ module Annotator
 
       sig { params(node: T.any(AST::Assignment, AST::BindExpr), target_type: T.nilable(Type::TypeInput), value_type: T.nilable(Type::TypeInput)).void }
       def validate_assignment_type(node, target_type, value_type)
-        T.bind(self, SemanticAnnotator)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return if target_type.nil?
 

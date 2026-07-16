@@ -95,7 +95,7 @@ module MIRLoweringVariables
       pt.shared? && pt.resolved == ret.resolved
     end
     return nil unless params.size == 1
-    name = params.first[:name]
+    name = T.must(params.first).name
     zig_name = mutable_scalar_params.include?(name) ? "_m_#{name}" : name
     "@TypeOf(#{zig_name})"
   end
@@ -400,8 +400,10 @@ module MIRLoweringVariables
 
   sig { params(safe_name: String, node: AST::VarDecl, facts: VarDeclFacts, init: MIR::Node).returns(T.nilable(String)) }
   def var_decl_suppression(safe_name, node, facts, init)
+    T.bind(self, MIRLowering) rescue nil
+
     lowering = T.unsafe(self)
-    return nil unless T.unsafe(self).__send__(:current_function_context)
+    return nil unless current_function_context
 
     owned_cleanup_value = (facts.has_mir_drop ||
                            (lowering.mir_allocates?(init) && lowering.ownership_bearing_type?(facts.ft))) == true
@@ -593,6 +595,11 @@ module MIRLoweringVariables
       return place_value_for_destination(placed, rhs, decl_alloc, ft)
     end
 
+    if ft.dynamic_rank? && rhs_unwrapped.is_a?(AST::ListLit) && rhs_unwrapped.items.empty?
+      inner = MIR::ContainerInit.new(bare_zig, :grid_empty, decl_alloc, nil)
+      return has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
+    end
+
     if ft.pool?
       return lower(node.value) if rhs_unwrapped.is_a?(AST::MoveNode) || AST.call?(rhs_unwrapped) || !rhs_unwrapped.is_a?(AST::ListLit)
       inner = MIR::ContainerInit.new(bare_zig, :pool, decl_alloc, ft.capacity)
@@ -602,7 +609,8 @@ module MIRLoweringVariables
     if ft.set_collection?
       return lower(node.value) if rhs.is_a?(AST::BinaryOp) && rhs.smooth?
       return lower(node.value) if rhs_unwrapped.is_a?(AST::MoveNode) || AST.call?(rhs_unwrapped) || !rhs_unwrapped.is_a?(AST::ListLit)
-      inner = MIR::ContainerInit.new(bare_zig, :set_empty, nil, nil)
+      hint = ft.allocation_hint
+      inner = MIR::ContainerInit.new(bare_zig, hint ? :set_capacity : :set_empty, decl_alloc, hint)
       return has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
     end
 
@@ -615,9 +623,8 @@ module MIRLoweringVariables
       end
       return lower(node.value) unless rhs_unwrapped.is_a?(AST::ListLit)
       return with_expected_type(ft) { lower(node.value) } unless rhs_unwrapped.items.empty?
-      ft_capacity = ft.capacity
-      init_kind = ft_capacity.is_a?(Integer) && ft_capacity > 0 ? :list_capacity : :array_list_empty
-      init_capacity = init_kind == :list_capacity ? ft_capacity : nil
+      init_capacity = ft.allocation_hint
+      init_kind = init_capacity ? :list_capacity : :array_list_empty
       inner = MIR::ContainerInit.new(bare_zig, init_kind, decl_alloc, init_capacity)
       return has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
     end
@@ -878,10 +885,10 @@ module MIRLoweringVariables
   def fallible_self_fallback_reassign?(name, value)
     expr = value
     expr = expr.expr if expr.is_a?(MIR::Cast)
-    expr.is_a?(MIR::TryCatch) &&
-      expr.capture.nil? &&
-      expr.catch_body.is_a?(MIR::Ident) &&
-      expr.catch_body.name.to_s == name.to_s
+    return false unless expr.is_a?(MIR::TryCatch) && expr.capture.nil?
+
+    catch_body = expr.catch_body
+    catch_body.is_a?(MIR::Ident) && catch_body.name.to_s == name.to_s
   end
 
   # Emit `cell.<op>(arg)` for atomic assignments. The annotator stamped
@@ -1120,6 +1127,17 @@ module MIRLoweringVariables
 
     receiver_type = Type.new(ti)
 
+    if receiver_type.rank?
+      target = MIR::AddressOf.new(T.cast(lower(target_node), MIR::Node))
+      index_nodes = node.name.index.is_a?(AST::TupleLit) ? node.name.index.items : [node.name.index]
+      lowered_indices = index_nodes.map { |index_node| T.cast(lower(index_node), MIR::Node) }
+      coordinates = rank_coordinates(target, receiver_type, lowered_indices)
+      value = T.cast(lower(node.value), MIR::Node)
+      call = MIR::RuntimeCall.new(MIR::RuntimeCalls.rank_set_spec,
+        [target, coordinates.dimensions, coordinates.indices, value])
+      return MIR::ExprStmt.new(call, false)
+    end
+
     # Raw fixed-size arrays (`Int64[N]`): emit native Zig indexed assignment.
     # The CheatLib.setAt template takes `container: anytype` and copies the
     # array by value -- the helper sees a const local and `container[i] = v`
@@ -1352,7 +1370,7 @@ module MIRLoweringVariables
       IntrinsicTemplateKind::Zig
     end
     resolved_allocs = indexed_assignment_allocs(op, target_node, assignment)
-    receiver_alloc = send(:placement_for_node, target_node)
+    receiver_alloc = placement_for_node(target_node)
     IndexedAssignmentDispatch.new(
       target_var: target_var,
       shard_direct: shard_direct,

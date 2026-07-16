@@ -78,43 +78,43 @@ RSpec.describe "pipeline legacy matrix" do
       ];
     CLEAR
     "list:item" => <<~CLEAR,
-      MUTABLE items: Item[]@list = [];
+      MUTABLE items: []Item = [];
       items.append(Item{ value: 1.0, other: 10.0, id: 1_i64 });
       items.append(Item{ value: 2.0, other: 20.0, id: 2_i64 });
       items.append(Item{ value: 3.0, other: 30.0, id: 3_i64 });
     CLEAR
     "pool:item" => <<~CLEAR,
-      MUTABLE items: Item[16]@pool = [];
+      MUTABLE items: [Pool(16)]Item = [];
       items.insert(Item{ value: 1.0, other: 10.0, id: 1_i64 });
       items.insert(Item{ value: 2.0, other: 20.0, id: 2_i64 });
       items.insert(Item{ value: 3.0, other: 30.0, id: 3_i64 });
     CLEAR
     "soa-list:item" => <<~CLEAR,
-      MUTABLE items: Item[]@list:soa = [];
+      MUTABLE items: []@soa Item = [];
       items.append(Item{ value: 1.0, other: 10.0, id: 1_i64 });
       items.append(Item{ value: 2.0, other: 20.0, id: 2_i64 });
       items.append(Item{ value: 3.0, other: 30.0, id: 3_i64 });
     CLEAR
     "soa-pool:item" => <<~CLEAR,
-      MUTABLE items: Item[16]@pool:soa = [];
+      MUTABLE items: [Pool(16)]@soa Item = [];
       items.insert(Item{ value: 1.0, other: 10.0, id: 1_i64 });
       items.insert(Item{ value: 2.0, other: 20.0, id: 2_i64 });
       items.insert(Item{ value: 3.0, other: 30.0, id: 3_i64 });
     CLEAR
     "sharded-list:item" => <<~CLEAR,
-      MUTABLE items: Item[]@list:sharded(2) = [];
+      MUTABLE items: []@sharded(2) Item = [];
       items.append(Item{ value: 1.0, other: 10.0, id: 1_i64 });
       items.append(Item{ value: 2.0, other: 20.0, id: 2_i64 });
       items.append(Item{ value: 3.0, other: 30.0, id: 3_i64 });
     CLEAR
     "sharded-pool:item" => <<~CLEAR,
-      MUTABLE items: Item[16]@pool:sharded(2) = [];
+      MUTABLE items: [Pool(16)]@sharded(2) Item = [];
       items.insert(Item{ value: 1.0, other: 10.0, id: 1_i64 });
       items.insert(Item{ value: 2.0, other: 20.0, id: 2_i64 });
       items.insert(Item{ value: 3.0, other: 30.0, id: 3_i64 });
     CLEAR
     "set:int" => <<~CLEAR,
-      MUTABLE items: Int64[]@set = Set[];
+      MUTABLE items: [Set]Int64 = Set[];
       items.insert(1_i64);
       items.insert(2_i64);
       items.insert(3_i64);

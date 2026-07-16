@@ -58,7 +58,8 @@ class AggregatorTest < Minitest::Test
     aggregator = Espalier::Aggregator.new(
       decomplex_data: decomplex_data,
       nil_kill_data: nil_kill_data,
-      risk_data: risk_data
+      risk_data: risk_data,
+      closed_world: true
     )
 
     modules.first[:ivar_properties] = {
@@ -102,6 +103,37 @@ class AggregatorTest < Minitest::Test
     assert_equal :high, helper[:quality_metrics][:privacy_confidence]
   end
 
+  def test_propagates_impurity_to_callers_to_a_fixed_point
+    modules = [{
+      type: :class,
+      name: "Pipeline",
+      file: "pipeline.rb",
+      states: %w[@value].to_set,
+      methods: [
+        {
+          name: "run", effects: {reads: Set.new, writes: Set.new},
+          delegations: [{receiver: "self", message: "step", type: :always}],
+        },
+        {
+          name: "step", effects: {reads: Set.new, writes: Set.new},
+          delegations: [{receiver: "self", message: "store", type: :always}],
+        },
+        {
+          name: "store", effects: {reads: Set.new, writes: %w[@value].to_set},
+          delegations: [{receiver: "self", message: "step", type: :conditional}],
+        },
+      ],
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions].to_h do |function|
+      [function[:name], function]
+    end
+
+    assert_equal %w[@value], functions["run"][:EFFECTS][:writes]
+    assert_equal %w[@value], functions["step"][:EFFECTS][:writes]
+    assert_equal %w[@value], functions["store"][:EFFECTS][:writes]
+  end
+
   def test_formatter_json_is_sarif
     manifest = [
       {
@@ -140,7 +172,10 @@ class AggregatorTest < Minitest::Test
               big_o: "O(N log N)",
               big_o_space: "O(N)",
               big_o_dynamic: true,
-              complexity_trigger: "sort names"
+              complexity_trigger: "sort names",
+              big_o_variables: [
+                { symbol: "N", name: "names", source_kind: "parameter", path: "lib/conn.rb", span: [14, 15, 14, 20] }
+              ]
             }
           }
         ]
@@ -164,6 +199,9 @@ class AggregatorTest < Minitest::Test
     assert_equal "O(N log N)", complexity.dig("properties", "complexity", "time")
     assert_equal "O(N)", complexity.dig("properties", "complexity", "auxiliary_space")
     assert_equal ["sort names"], complexity.dig("properties", "complexity", "triggers")
+    assert_equal "names", complexity.dig("properties", "complexity", "variables", 0, "name")
+    assert_equal "N is the size of `names` (parameter)", complexity.dig("relatedLocations", 0, "message", "text")
+    assert_equal 14, complexity.dig("relatedLocations", 0, "physicalLocation", "region", "startLine")
     refute run.fetch("results").any? { |result|
       result.fetch("ruleId") == "espalier.function" &&
         result.dig("properties", "function", "name") == "sort_names"
@@ -271,6 +309,9 @@ class AggregatorTest < Minitest::Test
     fn = manifest.first[:functions].first
 
     assert_equal "O(N log N)", fn[:quality_metrics][:big_o]
+    assert_equal "O(N log N)", fn[:quality_metrics][:big_o_known_component]
+    assert_equal true, fn[:quality_metrics][:big_o_complete]
+    assert_equal true, fn[:quality_metrics][:big_o_space_complete]
     refute fn[:quality_metrics].key?(:big_o_unknowns)
   end
 
@@ -865,6 +906,105 @@ class AggregatorTest < Minitest::Test
       refute_equal "O(N^3)", fn[:quality_metrics][:big_o]
       refute Array(fn[:quality_metrics][:big_o_warnings]).any? { |warning| warning.include?("nested loop containment depth 3") }
     end
+  end
+
+  def test_big_o_propagates_resolved_cross_owner_calls_end_to_end
+    caller_fact = {
+      "line" => 2, "parameters" => [], "collection_parameters" => [],
+      "iterations" => [], "allocations" => [], "size_domains" => [],
+      "recursion" => { "calls" => 0 },
+      "call_contexts" => [{
+        "line" => 3, "message" => "work", "execution_multiplicity" => "O(1)",
+        "argument_cardinality_relation" => "same", "power" => 0
+      }]
+    }
+    target_fact = {
+      "line" => 10, "parameters" => ["items"], "collection_parameters" => ["items"],
+      "iterations" => [{
+        "line" => 11, "power" => 1, "execution_multiplicity" => "O(N)",
+        "cardinality_relation" => "independent_of", "bound_classification" => "input"
+      }],
+      "allocations" => [], "call_contexts" => [], "size_domains" => [],
+      "recursion" => { "calls" => 0 }
+    }
+    modules = [
+      {
+        type: :class, name: "Caller", file: "caller.rb", states: Set.new,
+        methods: [{
+          name: "run", signature: "def run", parameters: [], visibility: :public,
+          line: 2, span: [2, 0, 4, 3], effects: { reads: Set.new, writes: Set.new },
+          complexity_facts: [caller_fact],
+          delegations: [{
+            receiver: "Target", message: "work", line: 3, type: :always,
+            target_owner: "Target", target_method: "self.work", target_id: "target-work"
+          }]
+        }]
+      },
+      {
+        type: :class, name: "Target", file: "target.rb", states: Set.new,
+        methods: [{
+          id: "target-work", name: "self.work", signature: "def self.work", parameters: ["items"],
+          visibility: :public, line: 10, span: [10, 0, 12, 3],
+          effects: { reads: Set.new, writes: Set.new }, complexity_facts: [target_fact],
+          delegations: []
+        }]
+      }
+    ]
+
+    manifest = Espalier::Aggregator.new.aggregate(modules)
+    caller = manifest.find { |mod| mod[:module] == "Caller" }[:functions].first
+    assert_equal "O(N)", caller[:quality_metrics][:big_o]
+    assert caller[:quality_metrics][:big_o_complete]
+    assert caller[:quality_metrics][:big_o_space_complete]
+    refute_includes Array(caller[:quality_metrics][:big_o_unknowns]), "Target#work"
+  end
+
+  def test_big_o_consumes_normalized_constant_call_cost_without_source_guessing
+    modules = [{
+      type: :class, name: "Source", file: "source.rb", states: Set.new,
+      methods: [{
+        name: "run", signature: "def run", parameters: [], visibility: :public,
+        line: 2, span: [2, 0, 4, 3], effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          receiver: "Generated", message: "new", line: 3, type: :always,
+          known_time_complexity: "O(1)", known_space_complexity: "O(1)"
+        }]
+      }]
+    }]
+
+    function = Espalier::Aggregator.new.aggregate(modules).first[:functions].first
+    assert_equal "O(1)", function[:quality_metrics][:big_o]
+    assert_equal "O(1)", function[:quality_metrics][:big_o_space]
+    assert function[:quality_metrics][:big_o_complete]
+    assert function[:quality_metrics][:big_o_space_complete]
+    refute_includes Array(function[:quality_metrics][:big_o_unknowns]), "Generated#new"
+  end
+
+  def test_resolved_recursion_uses_stack_safe_component_analysis
+    chain_length = 5_000
+    methods = Array.new(chain_length) do |index|
+      target = index + 1
+      {
+        name: "m#{index}", line: index + 1,
+        delegations: target < chain_length ? [{
+          message: "m#{target}", line: index + 1,
+          target_owner: "Chain", target_method: "m#{target}"
+        }] : []
+      }
+    end
+    methods[-1][:delegations] << {
+      message: "m2500", line: chain_length,
+      target_owner: "Chain", target_method: "m2500"
+    }
+
+    recursive = Espalier::Aggregator.new.send(
+      :recursive_resolved_edges,
+      [{ name: "Chain", methods: methods }]
+    )
+
+    refute recursive[["Chain", "m2499", "Chain", "m2500"]]
+    assert recursive[["Chain", "m2500", "Chain", "m2501"]]
+    assert recursive[["Chain", "m4999", "Chain", "m2500"]]
   end
 
 end

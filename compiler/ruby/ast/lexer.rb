@@ -3,11 +3,82 @@ require "sorbet-runtime"
 
 require 'strscan'
 require 'set'
+require_relative "frontend_resource_budget"
 
 class Lexer
     extend T::Sig
 
-  Token = Struct.new(:type, :value, :line, :column)
+  MAX_INTERPOLATION_DEPTH = 64
+
+  class Error < StandardError; end
+
+  # Half-open source range: start is inclusive and end is immediately after
+  # the token. The first four fields remain in their historical positions so
+  # direct Token.new calls in compiler clients stay source-compatible.
+  Token = Struct.new(
+    :type, :value, :line, :column,
+    :file, :start_offset, :end_offset, :end_line, :end_column,
+  )
+
+  class TokenPayloadError < TypeError; end
+
+  class Token
+    extend T::Sig
+
+    TEXT_TYPES = T.let(%i[
+      ARROW CHAR COMPOUND_ASSIGN DOUBLE_COLON ELLIPSIS KEYWORD LEGACY_LOGICAL
+      OR_ELSE PERCENT RANGE RANGE_EXCL RANGE_INCL SMOOTH STRING TYPE_ID VAR_ID
+    ].freeze, T::Array[Symbol])
+    INTEGER_TYPES = T.let(%i[
+      BYTE INT8 INT16 INT32 INT64 PREFIXED_INT UINT16 UINT32 UINT64
+    ].freeze, T::Array[Symbol])
+    FLOAT_TYPES = T.let(%i[FLOAT32 NUMBER].freeze, T::Array[Symbol])
+
+    sig { returns(String) }
+    def text!
+      payload = value
+      return payload if TEXT_TYPES.include?(type) && payload.is_a?(String)
+
+      raise TokenPayloadError, payload_error("text", "String")
+    end
+
+    sig { returns(Integer) }
+    def integer!
+      payload = value
+      return payload if INTEGER_TYPES.include?(type) && payload.is_a?(Integer)
+
+      raise TokenPayloadError, payload_error("integer", "Integer")
+    end
+
+    sig { returns(Float) }
+    def float!
+      payload = value
+      return payload if FLOAT_TYPES.include?(type) && payload.is_a?(Float)
+
+      raise TokenPayloadError, payload_error("float", "Float")
+    end
+
+    sig { returns(Integer) }
+    def start_line = line
+
+    sig { returns(Integer) }
+    def start_column = column
+
+    sig { returns(Integer) }
+    def byte_length
+      return end_offset - start_offset if start_offset && end_offset
+
+      value.to_s.bytesize
+    end
+
+    private
+
+    sig { params(accessor: String, expected_class: String).returns(String) }
+    def payload_error(accessor, expected_class)
+      "#{type.inspect} token at #{line}:#{column} has no #{accessor} payload " \
+        "(expected #{expected_class}, got #{value.class})"
+    end
+  end
 
   # We use a hash for O(1) lookups
   KEYWORDS = T.let(%w[
@@ -28,25 +99,49 @@ class Lexer
       MATCH PARTIAL START DEFAULT WHEN
       PUB PRIVATE
       EXTERN FROM EFFECTS CLOSE REQUIRES
-      STREAM YIELD
+      STREAM YIELD YIELDS
       TIGHT
       TEST THAT STUB BENCHMARK SMASH PROFILE ASSERT_RAISES CAPTURES SEQUENCE
       PENDING BEFORE AFTER LET TAGS
     ].to_set, T::Set[String])
 
-  sig { params(source: String).void }
-  def initialize(source)
+  sig do
+    params(
+      source: String,
+      interpolation_depth: Integer,
+      file: T.nilable(String),
+      start_line: Integer,
+      start_column: Integer,
+      start_offset: Integer,
+      budget: T.nilable(FrontendResourceBudget),
+    ).void
+  end
+  def initialize(source, interpolation_depth: 0, file: nil, start_line: 1, start_column: 1, start_offset: 0, budget: nil)
+    source = source.dup.force_encoding(Encoding::UTF_8)
+    raise Error, "Lexer Error: source is not valid UTF-8" unless source.valid_encoding?
+
     @s = T.let(StringScanner.new(source), StringScanner)
-    @line = T.let(1, Integer)
-    @column = T.let(1, Integer)
+    @line = T.let(start_line, Integer)
+    @column = T.let(start_column, Integer)
+    @base_offset = T.let(start_offset, Integer)
+    @file = T.let(file, T.nilable(String))
+    @budget = T.let(budget || FrontendResourceBudget.new, FrontendResourceBudget)
+    begin
+      @budget.check_source!(source)
+    rescue FrontendResourceBudget::Exceeded => e
+      raise Error, "Lexer Error: frontend #{e.kind} resource limit exceeded (limit #{e.limit})"
+    end
     @tokens = T.let([], T::Array[Token])
+    @interpolation_depth = T.let(interpolation_depth, Integer)
   end
 
   sig { returns(T::Array[Token]) }
   def tokenize
     until @s.eos?
       # 1. Snapshot start column before scanning
+      start_line = @line
       start_col = @column
+      start_offset = current_offset
 
       case
       # --- SKIPPABLE (No Token Generated) = MANUAL ADVANCE!!!
@@ -137,7 +232,7 @@ class Lexer
         case suffix
         when 'f32' then add(:FLOAT32, val, start_col)
         when 'f64' then add(:NUMBER, val, start_col)
-        else raise "Lexer Error: Unknown float suffix '_#{suffix}' at line #{@line}:#{@column}"
+        else raise Error, "Lexer Error: Unknown float suffix '_#{suffix}' at line #{@line}:#{@column}"
         end
 
       when @s.scan(/\d+(?:_\d+)*\.\d+(?:_\d+)*/)
@@ -152,24 +247,26 @@ class Lexer
 
       when @s.scan(/"/)
         advance_pos(@s.matched) # Advance past the opening quote
-        read_interpolated_string(start_col)
+        read_interpolated_string(start_line, start_col, start_offset)
 
       else
-        raise "Unexpected char: #{@s.peek(1)} on line #{@line}:#{@column}"
+        raise Error, "Lexer Error: Unexpected char: #{@s.peek(1).inspect} on line #{@line}:#{@column}"
       end
     end
 
     # Manually push EOF (don't use add() here as there is nothing matched)
-    @tokens << Token.new(:EOF, nil, @line, @column)
+    @tokens << source_token(:EOF, nil, @line, @column, current_offset, @line, @column, current_offset)
     @tokens
   end
 
   private
 
-  sig { params(start_col: Integer).void }
-  def read_interpolated_string(start_col)
+  sig { params(start_line: Integer, start_col: Integer, start_offset: Integer).void }
+  def read_interpolated_string(start_line, start_col, start_offset)
     buffer = ""
-    chunk_start_col = T.let(start_col, Integer) # Track where the *current* text buffer started
+    chunk_start_line = T.let(start_line, Integer)
+    chunk_start_col = T.let(start_col, Integer)
+    chunk_start_offset = T.let(start_offset, Integer)
 
     loop do
       # Scan until we hit a quote, backslash, or interpolation start ($)
@@ -194,16 +291,16 @@ class Lexer
         when '0'  then buffer << "\0"   # actual null byte (0x00)
         when 'x'                        # \xHH hex byte
           hex = @s.scan(/[0-9a-fA-F]{2}/)
-          raise "Lexer Error: \\x requires exactly 2 hex digits at line #{@line}:#{@column}" unless hex
+          raise Error, "Lexer Error: \\x requires exactly 2 hex digits at line #{@line}:#{@column}" unless hex
           advance_pos(hex)
           buffer << hex.to_i(16).chr
         when 'u'                        # \u{HHHH} unicode codepoint -> UTF-8
-          raise "Lexer Error: \\u requires {hex} at line #{@line}:#{@column}" unless @s.peek(1) == '{'
+          raise Error, "Lexer Error: \\u requires {hex} at line #{@line}:#{@column}" unless @s.peek(1) == '{'
           @s.getch; advance_pos('{')
           hex = @s.scan(/[0-9a-fA-F]{1,6}/)
-          raise "Lexer Error: invalid \\u{} escape at line #{@line}:#{@column}" unless hex
+          raise Error, "Lexer Error: invalid \\u{} escape at line #{@line}:#{@column}" unless hex
           advance_pos(hex)
-          raise "Lexer Error: unclosed \\u{} at line #{@line}:#{@column}" unless @s.peek(1) == '}'
+          raise Error, "Lexer Error: unclosed \\u{} at line #{@line}:#{@column}" unless @s.peek(1) == '}'
           @s.getch; advance_pos('}')
           buffer << hex.to_i(16).chr(Encoding::UTF_8)
         else buffer << '\\' << (ch || '')
@@ -216,15 +313,24 @@ class Lexer
         # End of String
         @s.getch # Consume "
         advance_pos('"')
-        @tokens << Token.new(:STRING, buffer, @line, chunk_start_col)
+        @tokens << source_token(:STRING, buffer, chunk_start_line, chunk_start_col,
+          chunk_start_offset, @line, @column, current_offset)
         break
 
       elsif @s.peek(2) == '${'
         # String interpolation: ${expr}
         # Desugared to concatenation: "..." $+ (expr) $+ "..."
 
+        if @interpolation_depth >= MAX_INTERPOLATION_DEPTH
+          raise Error, "Lexer Error: string interpolation nesting exceeds #{MAX_INTERPOLATION_DEPTH} levels"
+        end
+
         # 1. Emit current buffer
-        @tokens << Token.new(:STRING, buffer, @line, chunk_start_col)
+        interpolation_line = @line
+        interpolation_col = @column
+        interpolation_offset = current_offset
+        @tokens << source_token(:STRING, buffer, chunk_start_line, chunk_start_col,
+          chunk_start_offset, @line, @column, current_offset)
         buffer = ""
 
         # 2. Consume ${
@@ -232,28 +338,47 @@ class Lexer
         advance_pos('${')
 
         # 3. Inject connector tokens: $+ (
-        @tokens << Token.new(:CHAR, '$+', @line, @column)
-        @tokens << Token.new(:CHAR, '(', @line, @column)
+        @tokens << source_token(:CHAR, '$+', interpolation_line, interpolation_col,
+          interpolation_offset, interpolation_line, interpolation_col, interpolation_offset)
+        @tokens << source_token(:CHAR, '(', interpolation_line, interpolation_col,
+          interpolation_offset, interpolation_line, interpolation_col, interpolation_offset)
 
         # 4. Sub-lex the expression inside braces
+        expr_line = @line
+        expr_column = @column
+        expr_offset = current_offset
         expr_source = extract_balanced_brace_content
-        sub_lexer = Lexer.new(expr_source)
-        sub_tokens = sub_lexer.tokenize
-        sub_tokens.pop if T.must(sub_tokens.last).type == :EOF
+        sub_lexer = Lexer.new(
+          expr_source,
+          interpolation_depth: @interpolation_depth + 1,
+          file: @file,
+          start_line: expr_line,
+          start_column: expr_column,
+          start_offset: expr_offset,
+          budget: @budget,
+        )
+        sub_tokens = @budget.nested { sub_lexer.tokenize }
+        sub_tokens.pop
         @tokens.concat(sub_tokens)
 
         # 5. Inject closer tokens: ) $+
-        @tokens << Token.new(:CHAR, ')', @line, @column)
-        @tokens << Token.new(:CHAR, '$+', @line, @column)
+        @tokens << source_token(:CHAR, ')', @line, @column, current_offset,
+          @line, @column, current_offset)
+        @tokens << source_token(:CHAR, '$+', @line, @column, current_offset,
+          @line, @column, current_offset)
 
+        chunk_start_line = @line
         chunk_start_col = @column
+        chunk_start_offset = current_offset
 
       elsif @s.peek(1) == '$'
         # Bare $ (not followed by {) — literal character
         buffer << @s.getch
         advance_pos('$')
       else
-        raise "Lexer Error: Unclosed string starting at line #{start_col}" if @s.eos?
+        if @s.eos?
+          raise Error, "Lexer Error: Unclosed string starting at line #{start_line}:#{start_col}"
+        end
       end
     end
   end
@@ -262,46 +387,107 @@ class Lexer
   def extract_balanced_brace_content
     content = ""
     depth = 1
+    state = T.let(:code, Symbol)
+    escaped = T.let(false, T::Boolean)
 
     until @s.eos?
-      # Scan safe chars
-      text = @s.scan(/[^\{\}]+/)
-      if text
-        content << text
-        advance_pos(text)
+      if state == :code && @s.peek(3) == '"""'
+        raw = T.must(@s.scan(/"""/))
+        content << raw
+        advance_pos(raw)
+        state = :triple_string
+        next
       end
 
-      if @s.peek(1) == '{'
+      ch = @s.getch
+      break unless ch
+
+      if state == :comment
+        content << ch
+        advance_pos(ch)
+        state = :code if ch == "\n"
+        next
+      end
+
+      if state == :string
+        content << ch
+        advance_pos(ch)
+        if escaped
+          escaped = false
+        elsif ch == '\\'
+          escaped = true
+        elsif ch == '"'
+          state = :code
+        end
+        next
+      end
+
+      if state == :triple_string
+        content << ch
+        advance_pos(ch)
+        if ch == '"' && @s.peek(2) == '""'
+          tail = T.must(@s.scan(/""/))
+          content << tail
+          advance_pos(tail)
+          state = :code
+        end
+        next
+      end
+
+      if ch == '#'
+        state = :comment
+      elsif ch == '"'
+        state = :string
+      elsif ch == '{'
         depth += 1
-        content << @s.getch
-        advance_pos('{')
-      elsif @s.peek(1) == '}'
+      elsif ch == '}'
         depth -= 1
         if depth == 0
-          @s.getch # Consume final closing brace
-          advance_pos('}')
+          advance_pos(ch)
           return content
-        else
-          content << @s.getch
-          advance_pos('}')
         end
       end
+      content << ch
+      advance_pos(ch)
     end
 
-    raise "Lexer Error: Unclosed interpolation %{...}"
+    raise Error, "Lexer Error: Unclosed interpolation %{...}"
   end
 
   sig { params(type: Symbol, val: T.any(Float, Integer, String), col: Integer).returns(Integer) }
   def add(type, val, col)
-    @tokens << Token.new(type, val, @line, col)
+    start_line = @line
+    start_offset = current_offset - @s.matched.bytesize
     # Automatically update position based on the last matched string
     advance_pos(@s.matched)
+    @tokens << source_token(type, val, start_line, col, start_offset,
+      @line, @column, current_offset)
+    current_offset
+  end
+
+  sig { returns(Integer) }
+  def current_offset
+    @base_offset + @s.pos
+  end
+
+  sig do
+    params(
+      type: Symbol,
+      value: T.untyped,
+      line: Integer,
+      column: Integer,
+      start_offset: Integer,
+      end_line: Integer,
+      end_column: Integer,
+      end_offset: Integer,
+    ).returns(Token)
+  end
+  def source_token(type, value, line, column, start_offset, end_line, end_column, end_offset)
+    Token.new(type, value, line, column, @file, start_offset, end_offset, end_line, end_column)
   end
 
   sig { params(str: String).returns(Integer) }
   def advance_pos(str)
-    return unless str # Guard clause for safety
-
     newlines = str.count("\n")
     if newlines > 0
       @line += newlines
@@ -340,9 +526,9 @@ class Lexer
   sig { params(val: Integer, suffix: String, start_col: Integer).returns(T.nilable(Integer)) }
   def add_prefixed_int(val, suffix, start_col)
     range = INT_SUFFIX_RANGES[suffix]
-    raise "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}" unless range || suffix == 'f32' || suffix == 'f64'
+    raise Error, "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}" unless range || suffix == 'f32' || suffix == 'f64'
     if range && !range.include?(val)
-      raise "Lexer Error: Literal #{@s.matched} overflows #{suffix} (range #{range})"
+      raise Error, "Lexer Error: Literal #{@s.matched} overflows #{suffix} (range #{range})"
     end
     case suffix
     when 'i64' then add(:INT64,   val,        start_col)

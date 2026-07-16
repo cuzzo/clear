@@ -32,7 +32,7 @@ A binding's value ESCAPES its declaring frame-scope iff it flows to one of:
 4. **TAKES** — the value is passed as a TAKES argument to a callee.
 5. **INHERENTLY-HEAP** — heap by construction: any sync/ownership wrapper
    (Locked, RwLocked, Versioned, AlwaysMutable, Arc, Rc, link), sharded /
-   striped collections, `@set`, string/striped HashMaps, `@indirect`,
+   striped collections, `@set`, string/striped HashMaps, `@boxed`,
    and streams / promises / observables.
 
 Frame-scopes (reclaim points) are: the function body, every loop body, and

@@ -67,7 +67,7 @@ module LSP
     sig { params(result: LSP::AnalysisResult, position: LspPosition, source: String).returns(T.nilable(FindingLike)) }
     def self.find_overlapping(result, position, source)
       candidates = result.findings.dup
-      candidates << result.fatal_error if result.fatal?
+      candidates << T.must(result.fatal_error) if result.fatal?
 
       # Pass 1 — strict range overlap. Wins for every finding whose
       # token squigglesthe cursor sits on.
@@ -89,7 +89,7 @@ module LSP
         [f, (diag[:range][:start][:character] - cursor_char).abs]
       end
       return nil if same_line.empty?
-      same_line.min_by { |_, dist| dist }.first
+      T.must(same_line.min_by { |_, dist| dist }).first
     end
 
     sig { params(position: LspPosition, key: Symbol).returns(Integer) }
@@ -97,7 +97,13 @@ module LSP
       T.must(position[key] || position[key.to_s])
     end
 
-    sig { params(diag: RPC::OutboundMessage, entry: T.untyped, example: T.untyped).returns(String) }
+    sig do
+      params(
+        diag: RPC::OutboundMessage,
+        entry: T.nilable(DiagnosticRegistry::DiagnosticEntry),
+        example: T.nilable(DiagnosticExamples::Example),
+      ).returns(String)
+    end
     def self.build_markdown(diag, entry, example)
       lines = []
       lines << header_line(diag, entry)
@@ -115,22 +121,25 @@ module LSP
       end
 
       if example
-        if example[:bad]
+        bad = T.cast(example[:bad], T.nilable(String))
+        fix = T.cast(example[:fix], T.nilable(String))
+        good = T.cast(example[:good], T.nilable(String))
+        if bad
           lines << ""
           lines << "**Example (bad):**"
           lines << "```clear"
-          lines << example[:bad].rstrip
+          lines << bad.rstrip
           lines << "```"
         end
-        if example[:fix] && !example[:fix].empty?
+        if fix && !fix.empty?
           lines << ""
-          lines << "**Fix prose:** #{example[:fix].gsub("\n", " ")}"
+          lines << "**Fix prose:** #{fix.gsub("\n", " ")}"
         end
-        if example[:good]
+        if good
           lines << ""
           lines << "**Example (good):**"
           lines << "```clear"
-          lines << example[:good].rstrip
+          lines << good.rstrip
           lines << "```"
         end
       end
@@ -138,7 +147,7 @@ module LSP
       lines.join("\n")
     end
 
-    sig { params(diag: RPC::OutboundMessage, entry: T.untyped).returns(String) }
+    sig { params(diag: RPC::OutboundMessage, entry: T.nilable(DiagnosticRegistry::DiagnosticEntry)).returns(String) }
     def self.header_line(diag, entry)
       severity = severity_label(diag[:severity])
       code     = diag[:code]

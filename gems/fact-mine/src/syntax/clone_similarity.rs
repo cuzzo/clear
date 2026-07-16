@@ -267,6 +267,7 @@ fn normalized_public_node_type(node: &Node) -> String {
         "IF" => "if",
         "UNLESS" => "unless",
         "CASE" | "CASE2" => "case",
+        "MATCH" | "MATCH2" | "MATCH3" => "match",
         "WHEN" => "when",
         "CALL" | "QCALL" | "FCALL" | "VCALL" | "OPCALL" => "call",
         "LIST" => "argument_list",
@@ -333,7 +334,7 @@ fn normalized_identifier_text(text: &str) -> bool {
 }
 
 const NORMALIZED_CLONE_CANDIDATE_TYPES: &[&str] = &[
-    "DEFN", "DEFS", "BLOCK", "IF", "UNLESS", "CASE", "CASE2", "WHEN", "AND", "OR", "FOR", "WHILE",
+    "DEFN", "DEFS", "BLOCK", "IF", "UNLESS", "CASE", "CASE2", "MATCH", "MATCH2", "MATCH3", "WHEN", "AND", "OR", "FOR", "WHILE",
     "UNTIL", "ITER", "CALL", "QCALL", "FCALL", "VCALL", "OPCALL", "OP_ASGN1", "OP_ASGN2",
     "ATTRASGN", "HASH", "LIST",
 ];

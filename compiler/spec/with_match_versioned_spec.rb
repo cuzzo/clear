@@ -49,7 +49,7 @@ RSpec.describe "MVCC L7: WITH MATCH @versioned arm" do
       ast = parse(src)
       with_block = ast.statements.first.body.first
       expect(with_block.arms.length).to eq(1)
-      expect(with_block.arms.first[:family]).to eq(:VERSIONED)
+      expect(with_block.arms.first.family).to eq(:VERSIONED)
     end
 
     it "accepts polymorphic WHEN VERSIONED + WHEN LOCKED arms" do
@@ -65,7 +65,7 @@ RSpec.describe "MVCC L7: WITH MATCH @versioned arm" do
       CHT
       ast = parse(src)
       arms = ast.statements.first.body.first.arms
-      expect(arms.map { |a| a[:family] }).to eq([:VERSIONED, :LOCKED])
+      expect(arms.map(&:family)).to eq([:VERSIONED, :LOCKED])
     end
   end
 

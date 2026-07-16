@@ -3,6 +3,20 @@
 require_relative "spec_helper"
 
 RSpec.describe AutoType::Loop do
+  it "restores a generated file to absence after failed verification" do
+    path = File.join(NilKill::ROOT, "tmp", "auto-type-spec", "missing-generated.rbi")
+    FileUtils.rm_f(path)
+    loop = described_class.allocate
+    action = { "kind" => "add_struct_field_sig", "path" => NilKill.rel(path), "data" => {} }
+
+    snapshot = loop.send(:snapshot_files, [action])
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, "generated")
+    loop.send(:restore_files, snapshot)
+
+    expect(File).not_to exist(path)
+  end
+
   def loop_instance
     described_class.allocate.tap do |loop|
       loop.instance_variable_set(:@skipped, Set.new)
@@ -45,6 +59,27 @@ RSpec.describe AutoType::Loop do
     expect(loop.send(:narrow_generic_review_actions, evidence).map { |action| action["path"] }).to eq(["src/generic.rb"])
     expect(loop.send(:narrow_tlet_review_actions, evidence).map { |action| action["path"] }).to eq(["src/tlet.rb"])
     expect(loop.send(:struct_rbi_review_actions, evidence).map { |action| action["path"] }).to eq(["sorbet/rbi/fields.rbi"])
+  end
+
+  it "does not re-verify exact struct RBI contracts on the next loop iteration" do
+    path, rel = repo_tmp_file("existing_struct_fields.rbi", <<~RBI)
+      # typed: true
+      class AST::Node
+        sig { returns(Lexer::Token) }
+        def token; end
+      end
+    RBI
+    actions = [
+      { "kind" => "add_struct_field_sig", "confidence" => "review", "path" => rel, "line" => 1,
+        "data" => { "target" => "rbi", "class" => "AST::Node", "field" => "token", "type" => "Lexer::Token" } },
+      { "kind" => "add_struct_field_sig", "confidence" => "review", "path" => rel, "line" => 1,
+        "data" => { "target" => "rbi", "class" => "AST::Node", "field" => "name", "type" => "String" } },
+    ]
+
+    selected = loop_instance.send(:struct_rbi_review_actions, { "actions" => actions })
+
+    expect(selected.map { |action| action.dig("data", "field") }).to eq(["name"])
+    expect(File.read(path)).to include("def token; end")
   end
 
   it "recognizes RSpec load-failure output as verifier failure material" do

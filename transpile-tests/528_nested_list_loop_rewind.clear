@@ -1,12 +1,12 @@
 # Regression: a nested-@list-field append on a loop-rewind-heap-
 # promoted root must use the root's allocator, not :frame.
-STRUCT Handle { values: Int64[]@list }
+STRUCT Handle { values: []Int64 }
 
 FN run(n: Int64) RETURNS !Int64 ->
-    MUTABLE handles: Handle[]@list = List[];
+    MUTABLE handles: []Handle = List[];
     MUTABLE i: Int64 = 0_i64;
     WHILE i < n DO
-        MUTABLE scratch: Int64[]@list = List[];
+        MUTABLE scratch: []Int64 = List[];
         scratch.append(i);
         scratch.append(i + 1_i64);
         handles.append(Handle{ values: [] });

@@ -1,8 +1,8 @@
 # Repro: returning a heap-backed list from a helper and keeping it in the
 # caller should not leak under the debug allocator.
 
-FN makeNumbers() RETURNS !Int64[]@list ->
-  MUTABLE xs: Int64[]@list = [];
+FN makeNumbers() RETURNS ![]Int64 ->
+  MUTABLE xs: []Int64 = [];
   xs.append(2);
   RETURN xs;
 END

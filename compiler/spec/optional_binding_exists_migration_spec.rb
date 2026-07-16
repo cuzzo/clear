@@ -126,4 +126,30 @@ RSpec.describe "EXISTS optional-binding migration" do
       FixCollector.disable!
     end
   end
+
+  it "keeps legacy grouped and ELSE forms parseable while collecting their fixes" do
+    FixCollector.enable!
+    begin
+      grouped = parse("IF (maybe AS value) THEN PASS; END").statements.first
+      with_else = parse("IF maybe AS value THEN PASS; ELSE PASS; END").statements.first
+
+      expect(grouped).to be_a(AST::IfStatement)
+      expect(with_else).to be_a(AST::IfBind)
+      expect(with_else.else_branch.first).to be_a(AST::PassStmt)
+      expect(FixCollector.drain.length).to eq(2)
+    ensure
+      FixCollector.disable!
+    end
+  end
+
+  it "rejects ambiguous legacy multi-bindings even while collecting fixes" do
+    FixCollector.enable!
+    begin
+      expect {
+        parse("IF maybe AS value AND other AS second THEN PASS; END")
+      }.to raise_error(ParserError, /Multiple optional bindings/)
+    ensure
+      FixCollector.disable!
+    end
+  end
 end

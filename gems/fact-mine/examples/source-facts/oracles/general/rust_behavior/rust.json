@@ -54,15 +54,9 @@
           ]
         },
         {
-          "co_uses": [
-            [
-              "input",
-              "local"
-            ]
-          ],
+          "co_uses": [],
           "dependencies": [],
           "reads": [
-            "input",
             "local"
           ],
           "writes": []
@@ -769,18 +763,12 @@
             ]
           },
           {
-            "co_uses": [
-              [
-                "input",
-                "local"
-              ]
-            ],
+            "co_uses": [],
             "dependencies": [],
             "end_line": 14,
             "index": 3,
             "line": 12,
             "reads": [
-              "input",
               "local"
             ],
             "source": "if local.is_none() { panic!(\"missing input\"); }",

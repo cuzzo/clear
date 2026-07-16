@@ -1,4 +1,20 @@
 {
+  "state_replay.rb": {
+    "parse_statement": "O(N)",
+    "speculate": "O(N)",
+    "parse_value": "O(N)"
+  },
+  "state_replay.py": {
+    "parse_statement": "O(N)",
+    "speculate": "O(N)",
+    "parse_value": "O(N)"
+  },
+  "recursive_suffix_rescan.rb": {
+    "walk": "O(N)"
+  },
+  "recursive_suffix_rescan.py": {
+    "walk": "O(N)"
+  },
   "mutual_recursion.rb": {
     "mutual_a": "unknown",
     "mutual_b": "unknown",

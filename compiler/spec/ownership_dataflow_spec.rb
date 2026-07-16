@@ -40,7 +40,7 @@ RSpec.describe OwnershipDataflow do
       src = <<~SRC
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           b = a;
           RETURN;
         END
@@ -81,9 +81,9 @@ RSpec.describe OwnershipDataflow do
     it "detects maybe_moved through if-then branch" do
       src = <<~SRC
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           IF TRUE THEN
             consume!(GIVE a);
           END
@@ -98,9 +98,9 @@ RSpec.describe OwnershipDataflow do
     it "detects moved through both branches" do
       src = <<~SRC
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           IF TRUE THEN
             consume!(GIVE a);
           ELSE
@@ -117,7 +117,7 @@ RSpec.describe OwnershipDataflow do
       src = <<~SRC
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           IF TRUE THEN
             x = 1;
           END
@@ -134,7 +134,7 @@ RSpec.describe OwnershipDataflow do
       src = <<~SRC
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           RETURN;
         END
       SRC
@@ -148,7 +148,7 @@ RSpec.describe OwnershipDataflow do
       src = <<~SRC
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           RETURN;
         END
       SRC
@@ -181,9 +181,9 @@ RSpec.describe OwnershipDataflow do
     it "reports has_moved_guard for maybe_moved variables" do
       src = <<~SRC
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           IF TRUE THEN
             consume!(a);
           END
@@ -199,9 +199,9 @@ RSpec.describe OwnershipDataflow do
     it "marks cleanup facts guarded when dataflow finds a partial move" do
       src = <<~SRC
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           IF TRUE THEN
             consume!(a);
           END
@@ -229,11 +229,35 @@ RSpec.describe OwnershipDataflow do
       expect(entry.has_moved_guard?).to be(true)
     end
 
+    it "computes block-exit cleanup summaries once for all bindings" do
+      fn_node = annotated_function(<<~SRC, "main")
+        STRUCT User { id: Int64 }
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+          a: User @boxed = User{ id: 1 };
+          b: User @boxed = User{ id: 2 };
+          IF TRUE THEN consume!(a); END
+          IF FALSE THEN consume!(b); END
+          RETURN;
+        END
+      SRC
+      facts = CleanupClassifier::FrozenCleanupFacts.from_bindings(
+        CleanupClassifier.classify(fn_node, schema_lookup: ->(_name) { nil }),
+      )
+      dataflow = OwnershipDataflow.analyze(fn_node)
+
+      expect(facts.entry_for("a")).not_to be_nil
+      expect(facts.entry_for("b")).not_to be_nil
+      expect(dataflow).to receive(:block_exit_cleanup_summaries).once.and_call_original
+
+      dataflow.cleanup_decisions!(fn_node, facts)
+    end
+
     it "reports no cleanup for fully moved variables" do
       src = <<~SRC
         STRUCT User { id: Int64 }
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           b = a;
           RETURN;
         END
@@ -248,7 +272,7 @@ RSpec.describe OwnershipDataflow do
     it "tracks TAKES param as owned" do
       src = <<~SRC
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
       SRC
       df = analyze(src, "consume!")
       expect(df.exit_states["u"]).to eq(:owned)
@@ -257,9 +281,9 @@ RSpec.describe OwnershipDataflow do
     it "treats explicit GIVE calls as linear-scope moves for heap values" do
       fn_node = annotated_function(<<~SRC, "main")
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @indirect) RETURNS Void -> RETURN; END
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
-          a: User @indirect = User{ id: 1 };
+          a: User @boxed = User{ id: 1 };
           consume!(GIVE a);
           RETURN;
         END

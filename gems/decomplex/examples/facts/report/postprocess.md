@@ -15,8 +15,10 @@
 - [Redundant Nil Guards (0)](#redundant-nil-guards-0)
 - [State Heatmap (0)](#state-heatmap-0)
 - [Superfluous State (0)](#superfluous-state-0)
+- [Declared Type Pressure (0)](#declared-type-pressure-0)
 - [State-Based Branch Density (1)](#statebased-branch-density-1)
 - [Temporal Ordering Pressure (0)](#temporal-ordering-pressure-0)
+- [Scoped State Restoration (0)](#scoped-state-restoration-0)
 - [Missing Abstractions (1)](#missing-abstractions-1)
 - [Reification Misses (1)](#reification-misses-1)
 - [Semantic Predicate Aliases (1)](#semantic-predicate-aliases-1)
@@ -105,6 +107,11 @@ _state fields that could be eliminated entirely (dead state / intra-method pass-
 
 None.
 
+## Declared Type Pressure (0)
+_normalized declared-type shapes where multiple pressures converge (wide/nested unions, unknown leaves, collection depth, and nilability)_
+
+None.
+
 ## State-Based Branch Density (1)
 _branch decisions over mutable/object state -- state + control-flow pressure_
 
@@ -113,6 +120,11 @@ _branch decisions over mutable/object state -- state + control-flow pressure_
 
 ## Temporal Ordering Pressure (0)
 _public mutable lifecycle surfaces that create implicit state-machine ordering_
+
+None.
+
+## Scoped State Restoration (0)
+_temporary mutable-state scopes with a proven restoration bypass, or a lower-confidence unprotected call before restoration_
 
 None.
 
@@ -221,7 +233,7 @@ None.
 
 ## Run Summary
 - Files analyzed: 1
-- Detectors: 26 (all shipped, self-tested)
+- Detectors: 28 (all shipped, self-tested)
 - Convergence: 1 unit(s) flagged by >=2 independent detectors
 - Root-cause clusters: 6 (one fix collapses each)
 - Total candidates: 11

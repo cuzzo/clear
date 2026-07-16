@@ -19,7 +19,7 @@ FN bumpValue!(MUTABLE c: Counter) RETURNS !Void
 END
 
 FN main() RETURNS Void ->
-    MUTABLE cfg = Counter{ value: 0 } @indirect:atomic;
+    MUTABLE cfg = Counter{ value: 0 } @boxed:atomic;
     bumpValue!(cfg);
     bumpValue!(cfg);
     bumpValue!(cfg);
