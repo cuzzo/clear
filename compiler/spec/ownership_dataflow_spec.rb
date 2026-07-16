@@ -229,6 +229,30 @@ RSpec.describe OwnershipDataflow do
       expect(entry.has_moved_guard?).to be(true)
     end
 
+    it "computes block-exit cleanup summaries once for all bindings" do
+      fn_node = annotated_function(<<~SRC, "main")
+        STRUCT User { id: Int64 }
+        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+          a: User @boxed = User{ id: 1 };
+          b: User @boxed = User{ id: 2 };
+          IF TRUE THEN consume!(a); END
+          IF FALSE THEN consume!(b); END
+          RETURN;
+        END
+      SRC
+      facts = CleanupClassifier::FrozenCleanupFacts.from_bindings(
+        CleanupClassifier.classify(fn_node, schema_lookup: ->(_name) { nil }),
+      )
+      dataflow = OwnershipDataflow.analyze(fn_node)
+
+      expect(facts.entry_for("a")).not_to be_nil
+      expect(facts.entry_for("b")).not_to be_nil
+      expect(dataflow).to receive(:block_exit_cleanup_summaries).once.and_call_original
+
+      dataflow.cleanup_decisions!(fn_node, facts)
+    end
+
     it "reports no cleanup for fully moved variables" do
       src = <<~SRC
         STRUCT User { id: Int64 }

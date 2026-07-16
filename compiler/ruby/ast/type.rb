@@ -268,6 +268,7 @@ class TypeShape
       parsed = OptionalTypeExpression.new(inner: TypeExpressionParser.parse(wrapped)) unless wrapped.nil?
     end
     @expression = T.let(parsed, TypeExpression)
+    @legacy_raw = T.let(render_legacy_raw(parsed), Raw)
   end
 
   sig { params(core_str: String, auto: T::Boolean).returns(TypeShape) }
@@ -296,7 +297,13 @@ class TypeShape
 
   sig { returns(Raw) }
   def raw
-    current = expression
+    @legacy_raw
+  end
+
+  private
+
+  sig { params(current: TypeExpression).returns(Raw) }
+  def render_legacy_raw(current)
     return current.signature if current.is_a?(FunctionTypeExpression)
 
     root_caps = TypeExpressionTree.root_capabilities(current)
@@ -306,6 +313,8 @@ class TypeShape
     )
     TypeExpressionPrinter.legacy(shape_only).to_sym
   end
+
+  public
 
   sig { returns(Symbol) }
   def resolved

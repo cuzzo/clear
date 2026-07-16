@@ -677,7 +677,7 @@ module Annotator
 
         # 3. Liveness
         if ownership_graph.moved?(node.name)
-          emit_use_of_moved_error!(node, T.must(ownership_graph.nodes[node.name]))
+          emit_use_of_moved_error!(node, T.must(ownership_graph[node.name]))
         end
 
         # 5. Mark variable as read so the transpiler can skip `_ = &x` suppression.

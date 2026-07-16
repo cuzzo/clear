@@ -377,11 +377,13 @@ class OwnershipGraph
   sig { params(other: OwnershipGraph).returns(T::Array[String]) }
   def merge(other)
     errors = T.let([], T::Array[String])
-    all_paths = (nodes.keys + other.nodes.keys).uniq
+    own_nodes = nodes
+    other_nodes = other.nodes
+    all_paths = (own_nodes.keys + other_nodes.keys).uniq
 
     all_paths.each do |path|
-      mine = node_for(path)
-      theirs = other.nodes[path]
+      mine = own_nodes[path]
+      theirs = other_nodes[path]
       next unless mine && theirs
 
       if mine.state != theirs.state

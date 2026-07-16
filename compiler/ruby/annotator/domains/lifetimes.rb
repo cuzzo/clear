@@ -1208,7 +1208,7 @@ module Annotator
         vt = node.full_type!(context: "move candidate")
         return if current_function_type_param?(vt.resolved)
         return if vt.implicitly_copyable? { |t| lookup_type_schema(t) }
-        existing = ownership_graph.nodes[node.name]
+        existing = ownership_graph[node.name]
         if existing&.specific_move_action?
           # An earlier visitor (typically visit_GiveNode) already stamped
           # the move site with a more-specific action like `:give`. Don't
@@ -1235,7 +1235,7 @@ module Annotator
         return if current_function_type_param?(vt.resolved)
         return if vt.primitive? || vt.id_handle?
 
-        existing = ownership_graph.nodes[node.name]
+        existing = ownership_graph[node.name]
         if existing&.specific_move_action?
           existing.move_consumer_param_type = consumer_param_type if consumer_param_type && existing.move_consumer_param_type.nil?
           node.was_moved = true

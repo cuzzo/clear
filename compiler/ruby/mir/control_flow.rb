@@ -595,6 +595,7 @@ class OwnershipDataflow
   sig { params(fn_node: AST::FunctionDef, facts: CleanupClassifier::FrozenCleanupFacts).returns(CleanupClassifier::FrozenCleanupFacts) }
   def cleanup_decisions!(fn_node, facts)
     summary = cleanup_summary_by_place
+    block_summaries = block_exit_cleanup_summaries
     ambiguous_names = duplicate_binding_names(fn_node.body || [])
     decision_facts = cleanup_decision_facts(fn_node.body || [])
 
@@ -609,7 +610,7 @@ class OwnershipDataflow
       var = pair.name
       entry = pair.entry
       next unless entry.needs_cleanup?
-      block_entry = block_exit_cleanup_summary(pair.place)
+      block_entry = block_summaries[pair.place]
       df_entry = if block_entry && !block_entry.needs_cleanup
         block_entry
       else
@@ -721,11 +722,6 @@ class OwnershipDataflow
   end
 
   public
-
-  sig { params(place: T.any(String, Symbol, PlaceId)).returns(T.nilable(CleanupDecision)) }
-  def block_exit_cleanup_summary(place)
-    block_exit_cleanup_summaries[PlaceId.from_path(place)]
-  end
 
   sig { returns(T::Hash[PlaceId, CleanupDecision]) }
   def block_exit_cleanup_summaries
@@ -1287,7 +1283,6 @@ class OwnershipDataflow
     state.dup
   end
     private :block_exit_cleanup_summaries
-    private :block_exit_cleanup_summary
     private :cleanup_entry_pairs
     private :declares_name?
     private :duplicate_binding_names

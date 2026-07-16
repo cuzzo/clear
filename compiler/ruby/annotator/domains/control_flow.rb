@@ -59,7 +59,7 @@ module Annotator
             next unless snap
             # Lightweight merge: just apply moved states
             snap.each_state do |path, state|
-              node = ownership_graph.nodes[path]
+              node = ownership_graph[path]
               next unless node
               if node.state != state
                 if state == :moved

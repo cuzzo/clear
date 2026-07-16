@@ -320,7 +320,7 @@ RSpec.describe TypeShape do
     shape = described_class.from_core("!?HashMap<Symbol,String[]>")
 
     expect(shape.expression).to be_a(FallibleTypeExpression)
-    expect(shape.instance_variables.sort).to eq([:@auto, :@expression])
+    expect(shape.instance_variables.sort).to eq([:@auto, :@expression, :@legacy_raw])
     expect(shape.error_union).to be(true)
     expect(shape.optional).to be(true)
     expect(shape.map).to be(true)
@@ -343,6 +343,16 @@ RSpec.describe TypeShape do
     expect(tuple.generic_instance).to be(true)
     expect(tuple.generic_base_raw).to eq(:Tuple)
     expect(tuple.generic_args_raw).to eq([:Int64, :"?String"])
+  end
+
+  it "renders the legacy shape once and reuses it for repeated projections" do
+    shape = described_class.from_core("?Tuple<Int64,String>[10]")
+    expect(TypeExpressionPrinter).not_to receive(:legacy)
+
+    3.times do
+      expect(shape.raw).to eq(:"?Tuple<Int64,String>[10]")
+      expect(shape.resolved).to eq(:"?Tuple<Int64,String>[10]")
+    end
   end
 
   it "projects future, optional, function, and copy accessors" do

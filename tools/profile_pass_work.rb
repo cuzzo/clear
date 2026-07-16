@@ -47,7 +47,15 @@ require "semantic/pass_state"
 module PassWorkProfilerTool
   extend T::Sig
 
-  sig { params(kind: String, units: Integer, block: T.proc.returns(Object)).returns(Object) }
+  sig do
+    type_parameters(:Result)
+      .params(
+        kind: String,
+        units: Integer,
+        block: T.proc.returns(T.type_parameter(:Result)),
+      )
+      .returns(T.type_parameter(:Result))
+  end
   def self.measure_work(kind, units, &block)
     profiler = PassWorkProfiler.current
     return block.call unless profiler
@@ -174,17 +182,20 @@ module PassWorkProfilerTool
 
     sig { params(scope: T.untyped, block: T.untyped).returns(T.untyped) }
     def with_new_scope(scope = nil, &block)
-      stack = T.cast(instance_variable_get(:@scope_stack), T::Array[T.untyped])
+      started = T.let(nil, T.nilable(Float))
+      stack = T.cast(T.unsafe(self).send(:scope_stack_for_helper), T::Array[T.untyped])
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       PassWorkProfilerTool.measure_work("Scope.with_new_scope", 1) do
         super(scope, &block)
       end
     ensure
-      PassWorkProfiler.current&.record_walk(
-        "Scope.with_new_scope",
-        1,
-        Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-      )
+      if started
+        PassWorkProfiler.current&.record_walk(
+          "Scope.with_new_scope",
+          1,
+          Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+        )
+      end
       PassWorkProfiler.current&.record_walk("Scope.stack_depth_entered", stack.length, 0.0) if stack
     end
 
@@ -362,6 +373,32 @@ module PassWorkProfilerTool
     end
   end
 
+  module TypeShapeInstrumentation
+    extend T::Sig
+
+    sig { returns(TypeShape::Raw) }
+    def raw
+      PassWorkProfilerTool.measure_work("TypeShape.raw", 1) { super }
+    end
+
+    sig { returns(Symbol) }
+    def resolved
+      PassWorkProfilerTool.measure_work("TypeShape.resolved", 1) { super }
+    end
+  end
+
+  module CleanupSummaryInstrumentation
+    extend T::Sig
+
+    sig { returns(T::Hash[OwnershipDataflow::PlaceId, OwnershipDataflow::CleanupDecision]) }
+    def block_exit_cleanup_summaries
+      block_out = T.cast(instance_variable_get(:@block_out), T::Hash[Integer, T.untyped])
+      units = block_out.each_value.sum { |state| state.respond_to?(:length) ? state.length : 0 }
+      PassWorkProfilerTool.measure_work("OwnershipDataflow.block_exit_cleanup_summaries", units) { super }
+    end
+    private :block_exit_cleanup_summaries
+  end
+
   module EscapeAnalysisInstrumentation
     extend T::Sig
 
@@ -370,8 +407,8 @@ module PassWorkProfilerTool
       PassWorkProfiler.current&.measure("mir.escape_analysis", ast_root: fn_nodes) { super }
     end
 
-    sig { params(fn_nodes: T.untyped).returns(T.untyped) }
-    def propagate_caller_sync!(fn_nodes)
+    sig { params(fn_nodes: T.untyped, body_summaries: T.untyped).returns(T.untyped) }
+    def propagate_caller_sync!(fn_nodes, body_summaries)
       label = PassWorkProfilerTool.current_stage_label == "mir.escape_analysis" ?
         "mir.caller_sync" :
         "annotator.caller_sync"
@@ -627,8 +664,10 @@ module PassWorkProfilerTool
     OwnershipDataflow.singleton_class.prepend(OwnershipDataflowInstrumentation)
     FunctionCFG.singleton_class.prepend(CFGInstrumentation)
     OwnershipDataflow.prepend(OwnershipDataflowInstanceInstrumentation)
+    OwnershipDataflow.prepend(CleanupSummaryInstrumentation)
     MIRLowering.prepend(MIRLoweringInstrumentation)
     OwnershipGraph.prepend(OwnershipGraphInstrumentation)
+    TypeShape.prepend(TypeShapeInstrumentation)
   end
 
   sig { returns(T.nilable(String)) }
@@ -713,7 +752,7 @@ module PassWorkProfilerTool
         when AST::UnionDef
           union_schemas[stmt.name.to_sym] = Schemas::UnionSchema.new(
             variants: stmt.variants,
-            type_params: stmt.type_params&.any? ? stmt.type_params.map(&:to_sym) : nil,
+            type_params: stmt.type_params.map(&:to_sym),
             visibility: stmt.visibility || :package
           )
         end
