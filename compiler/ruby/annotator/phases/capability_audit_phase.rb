@@ -4,6 +4,8 @@
 require "sorbet-runtime"
 
 require_relative "annotation_products"
+require_relative "capability_audit_session"
+require_relative "phase_handoffs"
 
 module Annotator
   module Phases

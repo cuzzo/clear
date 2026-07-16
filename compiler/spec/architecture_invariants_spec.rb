@@ -118,9 +118,10 @@ RSpec.describe "architecture invariants: annotator shell" do
   end
 
   it "keeps program orchestration out of AST visitor dispatch" do
-    visitor_names = source("compiler/ruby/annotator/annotator.rb").scan(/^\s*def (visit_[A-Z]\w*)/).flatten
+    type_session = source("compiler/ruby/annotator/phases/type_analysis_session.rb")
+    visitor_names = type_session.scan(/^\s*def (visit_[A-Z]\w*)/).flatten
     expect(visitor_names).not_to include("visit_Program")
-    expect(source("compiler/ruby/annotator/annotator.rb")).to include("AnnotationPipeline.run")
+    expect(type_session).to include("AnnotationPipeline.run")
   end
 
   it "keeps annotator error hints registry-backed" do
@@ -151,7 +152,7 @@ end
 RSpec.describe "architecture invariants: ownership transport facts" do
   it "records ownership facts through normal annotation without a custom AST walker" do
     facts = File.read(File.join(ARCH_ROOT, "compiler/ruby/semantic/ownership_transport.rb"))
-    annotator = File.read(File.join(ARCH_ROOT, "compiler/ruby/annotator/annotator.rb"))
+    annotator = File.read(File.join(ARCH_ROOT, "compiler/ruby/annotator/phases/type_analysis_session.rb"))
     finalizer = File.read(File.join(ARCH_ROOT, "compiler/ruby/annotator/domains/variables.rb"))
     finalization_methods = finalizer[/def finalize_ownership_transport_facts!.*?(?=sig \{ params\(node: DeclarationNode)/m]
 
@@ -817,7 +818,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
         next if line.strip.start_with?("#")
         next unless line.match?(/\.full_type\s*=(?![=~])/)
         next if [
-          "compiler/ruby/annotator/annotator.rb",
+          "compiler/ruby/annotator/phases/type_analysis_session.rb",
           "compiler/ruby/annotator/phases/resolution_phase.rb",
         ].include?(rel) && line.include?("node.full_type = T.cast(value, AST::SyntheticTypeInput)")
         "#{rel}:#{idx + 1}: #{line.strip}"
@@ -830,7 +831,7 @@ RSpec.describe "architecture invariants: post-annotation type access" do
   end
 
   it "keeps the annotator stamp boundary typed and fail-closed" do
-    annotator = source("compiler/ruby/annotator/annotator.rb")
+    annotator = source("compiler/ruby/annotator/phases/type_analysis_session.rb")
     expect(annotator).to include("def stamp_type!(node, value)")
     expect(annotator).to include("type_parameters(:Stamp)")
     expect(annotator).to include("value: T.type_parameter(:Stamp)")
