@@ -584,7 +584,6 @@ module Annotator
           arg_types = ufcs_args.map { |arg| arg.resolved_type }.join(", ")
           error!(node, :INTRINSIC_NO_OVERLOAD,
             name: node.name, args: arg_types, candidates: sigs)
-          return true
         end
 
         visit_IntrinsicFunc(node, ufcs_args, matched_def: matched_def)
