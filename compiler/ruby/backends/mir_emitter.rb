@@ -120,6 +120,7 @@ class MIREmitter
     when MIR::Comment          then "// #{node.text}"
     when MIR::Suppress         then "_ = &#{node.name};"
     when MIR::PubConst         then "pub const #{node.name} = #{node.value};"
+    when MIR::ProtocolAdapterDef then emit_protocol_adapter_def(node)
 
     # --- Memory operations ---
     when MIR::HeapCreate       then emit_heap_create(node)
@@ -531,6 +532,71 @@ class MIREmitter
       raise "unsupported Map protocol operation #{node.operation}"
     end
   end
+
+  sig { params(node: MIR::ProtocolAdapterDef).returns(String) }
+  def emit_protocol_adapter_def(node)
+    facts_name = "__clearProtocolFacts_#{node.protocol}"
+    facts_cases = node.conformances.map do |conformance|
+      protocol_conformance_branch(conformance) do |bindings|
+        fields = node.associated_types.map do |name|
+          value = conformance.associated_types.fetch(name)
+          "pub const #{name} = #{value};"
+        end.join(" ")
+        "#{bindings}return struct { #{fields} };"
+      end
+    end
+    facts_body = (facts_cases + ["@compileError(\"No #{node.protocol} conformance for \" ++ @typeName(T));"]).join("\n    ")
+    facts = "fn #{facts_name}(comptime T: type) type {\n    #{facts_body}\n}"
+
+    operations = node.requirements.map do |requirement|
+      params = (1...requirement.argument_count).map { |index| "arg#{index}: anytype" }
+      all_params = ["comptime T: type", "rt: *Runtime", "self: anytype"] + params
+      branches = node.conformances.filter_map do |conformance|
+        target = conformance.operations[requirement.name]
+        next unless target
+
+        protocol_conformance_branch(conformance) do |bindings|
+          type_args = conformance.type_params
+          call_args = type_args + ["rt", "self"] + (1...requirement.argument_count).map { |index| "arg#{index}" }
+          "#{bindings}return #{target}(#{call_args.join(', ')});"
+        end
+      end
+      suppressions = if branches.empty?
+        (["rt", "self"] + (1...requirement.argument_count).map { |index| "arg#{index}" })
+          .map { |name| "_ = #{name};" }
+      else
+        []
+      end
+      body = (suppressions + branches + ["@compileError(\"No #{node.protocol}.#{requirement.name} conformance for \" ++ @typeName(T));"]).join("\n    ")
+      "fn __clearProtocol_#{node.protocol}_#{protocol_zig_name(requirement.name)}(#{all_params.join(', ')}) #{requirement.return_type} {\n    #{body}\n}"
+    end
+    ([facts] + operations).join("\n\n")
+  end
+
+  sig do
+    params(
+      conformance: MIR::ProtocolConformanceCase,
+      block: T.proc.params(bindings: String).returns(String),
+    ).returns(String)
+  end
+  def protocol_conformance_branch(conformance, &block)
+    if conformance.owner_type
+      return "if (T == #{conformance.owner_type}) { #{block.call("")} }"
+    end
+
+    marker = T.must(conformance.owner_marker)
+    bindings = conformance.type_params.each_with_index.map do |name, index|
+      "const #{name} = T.__clear_type_args[#{index}]; "
+    end.join
+    "if (comptime @typeInfo(T) == .@\"struct\" and @hasDecl(T, \"#{marker}\")) { #{block.call(bindings)} }"
+  end
+  private :protocol_conformance_branch
+
+  sig { params(name: String).returns(String) }
+  def protocol_zig_name(name)
+    name.end_with?("!", "?") ? T.must(name[0...-1]) : name
+  end
+  private :protocol_zig_name
 
   # Pick the Zig template the lowering committed to. template_kind is
   # set on the node by mir_lowering after inspecting shard_context and

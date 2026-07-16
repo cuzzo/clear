@@ -567,6 +567,30 @@ module DiagnosticRegistry
       summary: "The projection is not declared by the parameter's protocol.",
       fix_hint: "Use one of the listed associated types.",
     },
+    GENERIC_AMBIGUOUS_ASSOCIATED_TYPE: {
+      severity: :error, category: :type,
+      template: "Cannot resolve %{owner}::%{member}: it is declared by multiple bounds (%{protocols}).",
+      summary: "An associated projection must identify one protocol declaration.",
+      fix_hint: "Use protocols with distinct associated-type names, or remove the redundant bound.",
+    },
+    GENERIC_PROTOCOL_METHOD_UNKNOWN: {
+      severity: :error, category: :type,
+      template: "%{protocols} has no METHOD named '%{name}'. Available: %{available}.",
+      summary: "A constrained generic value exposes only methods declared by its protocols.",
+      fix_hint: "Use a listed METHOD, strengthen the protocol, or call a free FN with prefix syntax.",
+    },
+    GENERIC_PROTOCOL_METHOD_AMBIGUOUS: {
+      severity: :error, category: :type,
+      template: "METHOD '%{name}' is declared by multiple bounds: %{protocols}.",
+      summary: "Static protocol dispatch requires one unambiguous requirement.",
+      fix_hint: "Use protocols with distinct method names or split this operation behind a named adapter FN.",
+    },
+    CONFORMANCE_BINDERS_CANNOT_INFER: {
+      severity: :error, category: :type,
+      template: "Cannot infer %{owner}'s %{expected} generic binder(s) from the protocol arguments; found %{got}.",
+      summary: "A generic conformance must bind every owner slot exactly once.",
+      fix_hint: "Name the missing binders before the protocol, for example `IMPLEMENTATION<T> Protocol FOR %{owner}`.",
+    },
     GENERIC_MAP_KEY_MISMATCH: {
       severity: :error, category: :type,
       template: "Map protocol indexing expects %{expected}, but this key is %{actual}.",

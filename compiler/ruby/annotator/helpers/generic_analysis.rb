@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 require_relative "../../ast/ast"
+require_relative "../protocol_projection_resolver"
 
 # ==========================================
 # GENERIC ANALYSIS
@@ -97,8 +98,12 @@ module GenericAnalysis
   sig { params(node: AnnotationNode, type_obj: Type, is_param: T::Boolean).returns(NilClass) }
   def validate_type_annotation!(node, type_obj, is_param: false)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    return if type_obj.fn_type?
+    if type_obj.fn_type?
+      resolve_associated_projection_protocols!(node, type_obj)
+      return
+    end
 
+    resolve_associated_projection_protocols!(node, type_obj)
     facts = type_annotation_facts(node, type_obj, is_param)
     validate_param_annotation_capabilities!(facts)
     validate_collection_annotation_capabilities!(facts)
@@ -391,11 +396,11 @@ module GenericAnalysis
   def validate_bound_types!(node, parameter, argument, bounds)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
     bounds.each do |bound|
-      next unless bound.resolved == :Map
-      next if argument.map? || generic_parameter_has_map_bound?(argument.resolved)
+      protocol = protocol_base_name(bound)
+      next if type_conforms_to_protocol?(argument, protocol)
 
       error!(node, :GENERIC_PROTOCOL_BOUND_FAILED,
-        parameter: parameter, actual: Type.surface_name(argument), protocol: "Map")
+        parameter: parameter, actual: Type.surface_name(argument), protocol: protocol)
     end
     shared = bounds.any?(&:polymorphic_shared?)
     if shared && !argument.shared? && !generic_parameter_has_shared_map_bound?(argument.resolved)
@@ -413,16 +418,87 @@ module GenericAnalysis
     unless current_function_type_params.include?(owner)
       error!(node, :GENERIC_PROJECTION_UNKNOWN_OWNER, owner: owner, member: member)
     end
-    unless generic_parameter_has_map_bound?(owner)
-      error!(node, :GENERIC_PROJECTION_NEEDS_PROTOCOL,
-        owner: owner, member: member, protocol: "Map")
-    end
-    return if %i[Key Value].include?(member)
-
-    error!(node, :GENERIC_UNKNOWN_ASSOCIATED_TYPE,
-      owner: owner, member: member, protocol: "Map", available: "Key, Value")
   end
   private :validate_associated_projection!
+
+  sig { params(node: AnnotationNode, type: Type).void }
+  def resolve_associated_projection_protocols!(node, type)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    result = Annotator::ProtocolProjectionResolver.new(semantic_protocols).resolve(
+      type.shape.expression,
+      current_function_generic_params,
+    )
+    issue = result.issues.first
+    error!(node, issue.code, **issue.arguments) if issue
+    type.replace_shape!(type.shape.with_expression(result.expression))
+  end
+  private :resolve_associated_projection_protocols!
+
+  sig { params(name: Symbol).returns(T::Array[String]) }
+  def generic_parameter_protocol_names(name)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    param = current_function_generic_params.find { |candidate| candidate.name.to_sym == name }
+    return [] unless param
+
+    param.bounds.map { |bound| protocol_base_name(bound.type) }
+  end
+  private :generic_parameter_protocol_names
+
+  sig { params(type: Type).returns(String) }
+  def protocol_base_name(type)
+    (type.generic_instance? ? type.generic_base : type.resolved).to_s
+  end
+  private :protocol_base_name
+
+  sig { params(argument: Type, protocol: String).returns(T::Boolean) }
+  def type_conforms_to_protocol?(argument, protocol)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    return argument.map? || generic_parameter_has_map_bound?(argument.resolved) if protocol == "Map"
+    return true if generic_parameter_protocol_names(argument.resolved).include?(protocol)
+
+    !conformance_match(protocol, argument).nil?
+  end
+  private :type_conforms_to_protocol?
+
+  sig { params(protocol: String, concrete: Type).returns(T.nilable(Annotator::Phases::ConformanceMatch)) }
+  def conformance_match(protocol, concrete)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+    semantic_conformance_resolutions.each do |resolution|
+      next unless resolution.protocol.name == protocol
+
+      owner = resolution.declaration.owner_type
+      substitutions = conformance_owner_substitutions(owner, concrete)
+      next unless substitutions
+
+      return Annotator::Phases::ConformanceMatch.new(
+        resolution: resolution,
+        substitutions: substitutions,
+      )
+    end
+    nil
+  end
+  private :conformance_match
+
+  sig { params(pattern: Type, concrete: Type).returns(T.nilable(T::Hash[Symbol, Type])) }
+  def conformance_owner_substitutions(pattern, concrete)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    if pattern.generic_instance?
+      return nil unless concrete.generic_instance? && pattern.generic_base == concrete.generic_base
+      return nil unless pattern.generic_args.length == concrete.generic_args.length
+
+      substitutions = T.let({}, T::Hash[Symbol, Type])
+      pattern.generic_args.zip(concrete.generic_args).each do |parameter, argument|
+        return nil unless parameter && argument
+        substitutions[parameter.resolved] = Type.new(argument)
+      end
+      return substitutions
+    end
+    return {} if pattern.semantic_type_key == concrete.semantic_type_key
+
+    nil
+  end
+  private :conformance_owner_substitutions
 
   sig { params(name: Symbol).returns(T::Boolean) }
   def generic_parameter_has_map_bound?(name)
@@ -590,10 +666,24 @@ module GenericAnalysis
 
       concrete = Type.new(binding)
       projected = case expression.member
-      when :Key then concrete.key_type if concrete.map?
-      when :Value then concrete.value_type if concrete.map?
+      when :Key then concrete.key_type if (expression.protocol.nil? || expression.protocol == :Map) && concrete.map?
+      when :Value then concrete.value_type if (expression.protocol.nil? || expression.protocol == :Map) && concrete.map?
       end
-      return expression unless projected
+      if projected.nil? && expression.protocol && expression.protocol != :Map
+        match = conformance_match(expression.protocol.to_s, concrete)
+        if match
+          associated = match.resolution.associated_types[expression.member]
+          projected = apply_type_subst(associated, match.substitutions) if associated
+        end
+      end
+      unless projected
+        return TypeProjectionExpression.new(
+          owner: concrete.resolved,
+          member: expression.member,
+          protocol: expression.protocol,
+          capabilities: expression.capabilities,
+        )
+      end
 
       TypeExpressionTree.with_root_capabilities(
         projected.shape.expression,

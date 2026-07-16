@@ -2807,6 +2807,7 @@ class MIRLowering
     items << MIR::TypeAlias.new("Runtime", "CheatHeader.Runtime")
     items << MIR::TypeAlias.new("EbrContext", "CheatHeader.EbrContext")
     items << MIR::Import.new("safety", "runtime/../lib/safety.zig", nil) if needs_safety
+    items.concat(lower_protocol_adapters(node))
 
     if use_c_allocator || program_state.used_sharded_map
       items << MIR::PubConst.new("USE_C_ALLOCATOR", "true")
@@ -2836,6 +2837,90 @@ class MIRLowering
     end
     nil
   end
+
+  sig { params(program: AST::Program).returns(T::Array[MIR::ProtocolAdapterDef]) }
+  def lower_protocol_adapters(program)
+    protocols = program.statements.grep(AST::ProtocolDef).to_h { |protocol| [protocol.name, protocol] }
+    conformances = program.statements.grep(AST::ConformanceDef).group_by do |declaration|
+      protocol_base_name_for_lowering(declaration.protocol_type)
+    end
+    protocols.values.map do |protocol|
+      cases = (conformances[protocol.name] || []).map do |declaration|
+        lower_protocol_conformance_case(protocol, declaration)
+      end
+      requirements = protocol.requirements.map do |requirement|
+        MIR::ProtocolRequirementAdapter.new(
+          name: requirement.name,
+          argument_count: requirement.params.length,
+          return_type: protocol_requirement_return_type(protocol, requirement),
+        )
+      end
+      MIR::ProtocolAdapterDef.new(
+        protocol: protocol.name,
+        associated_types: protocol.associated_types.map(&:name),
+        requirements: requirements,
+        conformances: cases,
+      )
+    end
+  end
+  private :lower_protocol_adapters
+
+  sig do
+    params(protocol: AST::ProtocolDef, declaration: AST::ConformanceDef)
+      .returns(MIR::ProtocolConformanceCase)
+  end
+  def lower_protocol_conformance_case(protocol, declaration)
+    generic = declaration.binders.any?
+    associated = protocol.associated_types.each_with_index.to_h do |type, index|
+      binding = T.must(declaration.protocol_type.generic_args[index])
+      [type.name, transpile_type(binding)]
+    end
+    operations = declaration.members.to_h do |member|
+      [member.source_name || member.name, zig_safe_name(member.name)]
+    end
+    owner_name = protocol_base_name_for_lowering(declaration.owner_type)
+    MIR::ProtocolConformanceCase.new(
+      owner_type: generic ? nil : transpile_type(declaration.owner_type),
+      owner_marker: generic ? "__clear_nominal_#{zig_safe_name(owner_name)}" : nil,
+      type_params: declaration.binders.map(&:name),
+      associated_types: associated,
+      operations: operations,
+    )
+  end
+  private :lower_protocol_conformance_case
+
+  sig { params(protocol: AST::ProtocolDef, requirement: AST::ProtocolRequirement).returns(String) }
+  def protocol_requirement_return_type(protocol, requirement)
+    replacements = T.let({}, T::Hash[Symbol, TypeExpression])
+    protocol.associated_types.each do |associated|
+      replacements[associated.name.to_sym] = TypeProjectionExpression.new(
+        owner: :T,
+        member: associated.name.to_sym,
+        protocol: protocol.name.to_sym,
+      )
+    end
+    replacements[:Self] = NamedTypeExpression.new(name: :T)
+    expression = TypeExpressionTree.transform(requirement.return_type.shape.expression) do |candidate|
+      if candidate.is_a?(NamedTypeExpression) && candidate.arguments.empty? && replacements.key?(candidate.name)
+        T.must(replacements[candidate.name])
+      else
+        candidate
+      end
+    end
+    result = Type.new(expression)
+    if result.error_union?
+      payload = result.success_type || Type.new(:Void)
+      return "anyerror!#{transpile_type(payload)}"
+    end
+    transpile_type(result)
+  end
+  private :protocol_requirement_return_type
+
+  sig { params(type: Type).returns(String) }
+  def protocol_base_name_for_lowering(type)
+    (type.generic_instance? ? type.generic_base : type.resolved).to_s
+  end
+  private :protocol_base_name_for_lowering
 
   # Lower a module AST into MIR items for inlining via REQUIRE.
   # Emits only public declarations (types + functions + re-exports).
@@ -3189,7 +3274,11 @@ class MIRLowering
         default_mir = lower_struct_field_default(fd)
         MIR::FieldDef.new(name.to_s, zig_t, default_mir)
       }
-      inner_struct = MIR::StructDef.new(nil, fields_mir, nil, nil)
+      metadata = [
+        MIR::PubConst.new("__clear_nominal_#{zig_safe_name(node.name)}", "true"),
+        MIR::PubConst.new("__clear_type_args", ".{ #{node.type_params.join(', ')} }"),
+      ]
+      inner_struct = MIR::StructDef.new(nil, fields_mir, metadata, nil)
       body = [MIR::ReturnStmt.new(inner_struct)]
       MIR::FnDef.new(node.name, [], "type", body, nil, false, comptime_params)
     else

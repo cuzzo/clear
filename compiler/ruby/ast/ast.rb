@@ -1990,11 +1990,21 @@ module AST
     sig { returns(T::Array[AST::GenericParamDecl]) }
     def binders = self[:binders]
 
+    sig { params(value: T::Array[AST::GenericParamDecl]).void }
+    def binders=(value)
+      self[:binders] = value.dup
+    end
+
     sig { returns(Type) }
     def protocol_type = self[:protocol_type]
 
     sig { returns(Type) }
     def owner_type = self[:owner_type]
+
+    sig { params(value: Type).void }
+    def owner_type=(value)
+      self[:owner_type] = Type.new(value)
+    end
 
     sig { returns(T::Array[AST::FunctionDef]) }
     def members = self[:members]
@@ -2559,6 +2569,7 @@ module AST
     attr_accessor :generic_type_args # Array of inferred type symbols for generic methods
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     attr_accessor :safe_nav_chain    # implicit continuation of an earlier ?. over non-optional members
+    attr_accessor :error_union_type  # full !T requirement result before expression-level propagation unwraps it
     sig { returns(T.nilable(Symbol)) }
     def protocol_operation
       @protocol_operation = T.let(@protocol_operation, T.nilable(Symbol))
@@ -2566,6 +2577,14 @@ module AST
     sig { params(value: Symbol).void }
     def protocol_operation=(value)
       @protocol_operation = value
+    end
+    sig { returns(T.nilable(String)) }
+    def protocol_name
+      @protocol_name = T.let(@protocol_name, T.nilable(String))
+    end
+    sig { params(value: String).void }
+    def protocol_name=(value)
+      @protocol_name = value
     end
     sig { returns(T.nilable(String)) }
     def source_method_name

@@ -487,29 +487,13 @@ module FunctionAnalysis
         substituted = substitute_type_params(signature, subst)
         verify_function_signature!(node, substituted, args)
         T.unsafe(node).matched_signature = substituted if node.respond_to?(:matched_signature=)
-        stamp_type!(node, substituted.return_type)
+        stamp_resolved_call_result!(node, substituted.return_type)
       else
         verify_function_signature!(node, signature, args)
         T.unsafe(node).matched_signature = signature if node.respond_to?(:matched_signature=)
         # Copy the return type so per-call-site mutations (provenance, cleanup_alloc)
         # don't corrupt the function signature's shared Type object.
-        stamp_type!(node, Type.new(signature.return_type))
-        # Auto-propagate (CLEAR's error-handling default): the call's
-        # *expression-level* type is the SUCCESS branch -- a binding
-        # `h = call()` sees `T`, not `!T`. The error union flows
-        # implicitly through the enclosing fn's `!T` return signature
-        # (the codegen's try-wrap performs the unwrap). Per
-        # docs/agents/error-handling.md: "the compiler handles error
-        # propagation for you by default."
-        # The original `!T` is stashed on `error_union_type` so
-        # OR_ELSE handlers (which read the LHS's union to pick
-        # `catch`/`orelse`) can still see the un-stripped form.
-        call_type = node.full_type!(context: "function call result")
-        if call_type.respond_to?(:error_union?) &&
-           call_type.error_union?
-          T.unsafe(node).error_union_type = call_type if node.respond_to?(:error_union_type=)
-          stamp_type!(node, call_type.success_type)
-        end
+        stamp_resolved_call_result!(node, signature.return_type)
       end
 
 
@@ -534,6 +518,22 @@ module FunctionAnalysis
     end
 
     nil
+  end
+
+  # Auto-propagation gives a call expression the success branch T while
+  # retaining its declared !T for OR_ELSE and lowering. All resolved call
+  # families use this boundary so generic and protocol dispatch cannot expose
+  # a different expression type from ordinary calls.
+  sig { params(node: CallNode, return_type: Type).void }
+  def stamp_resolved_call_result!(node, return_type)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    resolved = Type.new(return_type)
+    stamp_type!(node, resolved)
+    return unless resolved.error_union?
+
+    T.unsafe(node).error_union_type = resolved if node.respond_to?(:error_union_type=)
+    T.unsafe(node).can_fail = true if node.respond_to?(:can_fail=)
+    stamp_type!(node, resolved.success_type)
   end
 
   sig { params(signature: FunctionSignature, args: CallArgList).void }

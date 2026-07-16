@@ -1533,6 +1533,10 @@ module MIRLoweringFunctions
       return intercept
     end
 
+    if node.protocol_name
+      return lower_user_protocol_method_call(node)
+    end
+
     if node.protocol_operation
       if node.protocol_operation == :put
         return lower_protocol_map_put_call(node.object, T.must(node.args[0]), T.must(node.args[1]))
@@ -1594,6 +1598,34 @@ module MIRLoweringFunctions
       [obj_mir] + args_mir,
     )
   end
+
+  sig { params(node: AST::MethodCall).returns(MIR::Node) }
+  def lower_user_protocol_method_call(node)
+    T.bind(self, MIRLowering) rescue nil
+
+    signature = T.must(matched_call_signature(node))
+    ast_args = [node.object] + node.args
+    mir_args = ast_args.each_with_index.map do |argument, index|
+      lower_call_arg_from_facts(call_arg_facts(argument, signature, index))
+    end
+    receiver_type = node.object.full_type!(context: "protocol receiver lowering")
+    type_arg = MIR::Ident.new(generic_type_arg_zig(receiver_type))
+    all_args = [type_arg, MIR::Ident.new(runtime_binding_name)] + mir_args
+    fn_zig = "__clearProtocol_#{T.must(node.protocol_name)}_#{zig_safe_name(T.must(node.protocol_operation).to_s)}"
+    can_fail = signature.return_type.error_union?
+
+    finalize_call_result(
+      node,
+      fn_zig,
+      all_args,
+      can_fail,
+      call_owned_return?(node),
+      callable_contract_for_lowered_args(signature, ast_args, mir_args),
+      ast_args,
+      mir_args,
+    )
+  end
+  private :lower_user_protocol_method_call
 
   sig do
     params(

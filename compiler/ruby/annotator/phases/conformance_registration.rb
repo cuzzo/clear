@@ -18,6 +18,11 @@ module Annotator
       const :members, T::Hash[String, AST::FunctionDef]
     end
 
+    class ConformanceMatch < T::Struct
+      const :resolution, ConformanceResolution
+      const :substitutions, T::Hash[Symbol, Type]
+    end
+
     module ConformanceRegistration
       extend T::Sig
 
@@ -47,6 +52,7 @@ module Annotator
           local_owner = local_structs[owner_name]
           owner_params = conformance_owner_params(owner_name, local_owner)
           error!(declaration, :CONFORMANCE_UNKNOWN_OWNER, owner: owner_name) unless owner_params
+          infer_conformance_owner_application!(declaration, owner_name, owner_params)
           unless local_owner || local_protocols.include?(protocol_name)
             error!(declaration, :CONFORMANCE_ORPHAN, protocol: protocol_name, owner: owner_name)
           end
@@ -150,6 +156,46 @@ module Annotator
         validate_generic_bounds!(declaration.binders)
       end
       private :validate_conformance_arity!
+
+      sig do
+        params(
+          declaration: AST::ConformanceDef,
+          owner_name: String,
+          owner_params: T::Array[AST::GenericParamDecl],
+        ).void
+      end
+      def infer_conformance_owner_application!(declaration, owner_name, owner_params)
+        T.bind(self, ResolutionSession)
+        return if owner_params.empty? || declaration.owner_type.generic_instance?
+
+        binders = declaration.binders
+        if binders.empty?
+          names = declaration.protocol_type.generic_args.filter_map do |argument|
+            expression = argument.shape.expression
+            expression.name.to_s if expression.is_a?(NamedTypeExpression) && expression.arguments.empty? &&
+              !ResolutionSession::BUILTIN_TYPE_PARAMETER_NAMES.include?(expression.name)
+          end.uniq
+          if names.length != owner_params.length
+            error!(declaration, :CONFORMANCE_BINDERS_CANNOT_INFER,
+              owner: owner_name, expected: owner_params.length, got: names.length)
+          end
+          binders = names.map do |name|
+            AST::GenericParamDecl.new(token: declaration.token, name: name)
+          end
+          declaration.binders = binders
+        end
+        if binders.length != owner_params.length
+          error!(declaration, :CONFORMANCE_OWNER_ARITY, owner: owner_name,
+            expected: owner_params.length, got: binders.length)
+        end
+
+        declaration.owner_type = Type.new(NamedTypeExpression.new(
+          name: owner_name.to_sym,
+          arguments: binders.map { |binder| NamedTypeExpression.new(name: binder.name.to_sym) },
+          capabilities: declaration.owner_type.capabilities,
+        ))
+      end
+      private :infer_conformance_owner_application!
 
       sig do
         params(owner_name: String, local_owner: T.nilable(AST::StructDef))

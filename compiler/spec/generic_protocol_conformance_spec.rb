@@ -2,6 +2,7 @@
 require "rspec"
 require_relative "../ruby/annotator/annotator"
 require_relative "../ruby/ast/diagnostic_buckets"
+require_relative "../ruby/backends/transpiler"
 
 RSpec.describe "explicit generic protocol conformances" do
   class ImportedProtocolResolutionSession < Annotator::Phases::ResolutionSession
@@ -34,7 +35,7 @@ RSpec.describe "explicit generic protocol conformances" do
         METHOD get(self: Self, key: Key) RETURNS ?Value;
       }
       STRUCT Store<K, V> { last_key: ?K fallback: ?V }
-      IMPLEMENTATION<K, V> Lookup<K, V> FOR Store<K, V> {
+      IMPLEMENTATION Lookup<K, V> FOR Store {
         METHOD get(self, key: K) RETURNS ?V -> RETURN NIL; END
       }
       FN main() RETURNS Void -> PASS END
@@ -64,6 +65,122 @@ RSpec.describe "explicit generic protocol conformances" do
         FN main() RETURNS Void -> PASS END
       CLEAR
     }.not_to raise_error
+  end
+
+  it "resolves bounded METHOD calls and associated types through an explicit conformance" do
+    program = annotate(<<~CLEAR)
+      PROTOCOL Lookup<Key, Value> {
+        METHOD get(self: Self, key: Key) RETURNS ?Value;
+      }
+      STRUCT Store<K, V> { fallback: ?V }
+      IMPLEMENTATION Lookup<K, V> FOR Store {
+        METHOD get(self, key: K) RETURNS ?V -> RETURN NIL; END
+      }
+      FN read<S: Lookup>(store: S, key: S::Key) RETURNS ?S::Value ->
+        RETURN store.get(key);
+      END
+      FN main(store: Store<String, Int64>) RETURNS ?Int64 ->
+        RETURN read(store, "answer");
+      END
+    CLEAR
+
+    read = program.statements.grep(AST::FunctionDef).find { |fn| fn.name == "read" }
+    call = T.must(read).body.grep(AST::ReturnNode).first.value
+    expect(call).to be_a(AST::MethodCall)
+    expect(call.protocol_name).to eq("Lookup")
+    expect(call.protocol_operation).to eq(:get)
+    expect(call.matched_signature.return_type.raw.to_s).to eq("?S::Value")
+    expect(call.matched_signature.return_type.wrapped_type.projection_protocol).to eq(:Lookup)
+  end
+
+  it "checks user protocol bounds at concrete generic instantiations" do
+    expect_error(<<~CLEAR, /S requires Sized, but User does not conform/i)
+      PROTOCOL Sized { METHOD size(self: Self) RETURNS Int64; }
+      STRUCT User { id: Int64 }
+      FN measured<S: Sized>(value: S) RETURNS Int64 -> RETURN value.size(); END
+      FN main(user: User) RETURNS Int64 -> RETURN measured(user); END
+    CLEAR
+  end
+
+  it "lowers bounded calls through a zero-witness compile-time adapter" do
+    zig = ZigTranspiler.new.transpile(<<~CLEAR)
+      PROTOCOL Sized { METHOD size(self: Self) RETURNS Int64; }
+      STRUCT Box { value: Int64 }
+      IMPLEMENTATION Sized FOR Box {
+        METHOD size(self) RETURNS Int64 -> RETURN self.value; END
+      }
+      FN measured<S: Sized>(value: S) RETURNS Int64 -> RETURN value.size(); END
+      FN main() RETURNS Void ->
+        ASSERT measured(Box{ value: 7_i64 }) == 7_i64;
+      END
+    CLEAR
+
+    expect(zig).to include("fn __clearProtocol_Sized_size(comptime T: type")
+    expect(zig).to include("if (T == Box)")
+    expect(zig).to include("return __conformance_Sized_Box_size(rt, self)")
+    expect(zig).to include("__clearProtocol_Sized_size(S, rt, value)")
+    expect(zig).not_to include("WitnessTable")
+    expect(zig).not_to include("vtable")
+  end
+
+  it "rejects unknown and ambiguous methods on a constrained receiver" do
+    expect_error(<<~CLEAR, /Named has no METHOD named 'missing'.*name/m)
+      PROTOCOL Named { METHOD name(self: Self) RETURNS String; }
+      FN bad<T: Named>(value: T) RETURNS String -> RETURN value.missing(); END
+    CLEAR
+    expect_error(<<~CLEAR, /METHOD 'value' is declared by multiple bounds: Left, Right/i)
+      PROTOCOL Left { METHOD value(self: Self) RETURNS Int64; }
+      PROTOCOL Right { METHOD value(self: Self) RETURNS Int64; }
+      FN bad<T: Left & Right>(item: T) RETURNS Int64 -> RETURN item.value(); END
+    CLEAR
+  end
+
+  it "rejects ambiguous associated types from intersected protocol bounds" do
+    expect_error(<<~CLEAR, /T::Item.*multiple bounds.*Left, Right/i)
+      PROTOCOL Left<Item> { METHOD left(self: Self) RETURNS Item; }
+      PROTOCOL Right<Item> { METHOD right(self: Self) RETURNS Item; }
+      FN bad<T: Left & Right>(item: T) RETURNS T::Item -> RETURN item.left(); END
+    CLEAR
+  end
+
+  it "preserves protocol projections through every nested type-expression family" do
+    program = annotate(<<~CLEAR)
+      PROTOCOL Identity<Value> { METHOD identity(self: Self, value: Value) RETURNS Value; }
+      STRUCT Shapes<S: Identity> {
+        pair: Tuple<S::Value, Int64>
+        callback: FN(S::Value) -> S::Value
+        future: ~S::Value
+        stream: [~]S::Value
+      }
+      FN callback<S: Identity>(fn: FN(S::Value) -> S::Value) RETURNS Void -> PASS END
+    CLEAR
+
+    shape = program.statements.grep(AST::StructDef).find { |node| node.name == "Shapes" }
+    projections = T.must(shape).field_decls.values.flat_map do |field|
+      TypeExpressionTree.each_node(field.type.shape.expression).grep(TypeProjectionExpression)
+    end
+    expect(projections.map(&:protocol).uniq).to eq([:Identity])
+    fn = program.statements.grep(AST::FunctionDef).find { |node| node.name == "callback" }
+    fn_projection = T.must(fn).params.first.type.function_type.params.first.type
+    expect(fn_projection.projection_protocol).to eq(:Identity)
+  end
+
+  it "reports when a generic owner's binders cannot be inferred from its protocol side" do
+    expect_error(<<~CLEAR, /Cannot infer Holder's 1 generic binder.*found 0/i)
+      PROTOCOL Named { METHOD name(self: Self) RETURNS String; }
+      STRUCT Holder<T> { value: T }
+      IMPLEMENTATION Named FOR Holder {
+        METHOD name(self) RETURNS String -> RETURN "holder"; END
+      }
+    CLEAR
+  end
+
+  it "leaves future TypeExpression implementations intact during semantic transforms" do
+    custom = Class.new do
+      include TypeExpression
+      def capabilities = TypeCapabilities.new(ownership: :affine)
+    end.new
+    expect(TypeExpressionTree.transform(custom) { |node| node }).to equal(custom)
   end
 
   it "enforces the orphan rule for imported protocol and type facts" do
@@ -111,7 +228,7 @@ RSpec.describe "explicit generic protocol conformances" do
     expect_error(<<~CLEAR, /owner Pair expects 2 type argument\(s\), got 1/i)
       PROTOCOL Named { METHOD name(self: Self) RETURNS String; }
       STRUCT Pair<K, V> { key: K value: V }
-      IMPLEMENTATION<K> Named FOR Pair<K> { METHOD name(self) RETURNS String -> RETURN "x"; END }
+      IMPLEMENTATION<K> Named FOR Pair { METHOD name(self) RETURNS String -> RETURN "x"; END }
     CLEAR
   end
 
@@ -145,7 +262,7 @@ RSpec.describe "explicit generic protocol conformances" do
     cases.each do |message, member|
       expect_error(<<~CLEAR, /#{Regexp.escape(message)}/)
         #{prefix}
-        IMPLEMENTATION<K, V> Store<K, V> FOR Box<K, V> { #{member} }
+        IMPLEMENTATION Store<K, V> FOR Box { #{member} }
       CLEAR
     end
   end
@@ -169,28 +286,28 @@ RSpec.describe "explicit generic protocol conformances" do
     expect_error(<<~CLEAR, /Duplicate type parameter 'T' in generic conformance/i)
       PROTOCOL Pairing<K, V> { METHOD pair(self: Self, key: K) RETURNS V; }
       STRUCT Pair<T, U> { left: T right: U }
-      IMPLEMENTATION<T, T> Pairing<T, T> FOR Pair<T, T> {
+      IMPLEMENTATION<T, T> Pairing<T, T> FOR Pair {
         METHOD pair(self, key: T) RETURNS T -> RETURN key; END
       }
     CLEAR
     expect_error(<<~CLEAR, /shadows built-in type/i)
       PROTOCOL Named { METHOD name(self: Self) RETURNS String; }
       STRUCT Holder<T> { value: T }
-      IMPLEMENTATION<String> Named FOR Holder<String> {
+      IMPLEMENTATION<String> Named FOR Holder {
         METHOD name(self) RETURNS String -> RETURN "x"; END
       }
     CLEAR
     expect_error(<<~CLEAR, /Unknown generic protocol Missing/i)
       PROTOCOL Named { METHOD name(self: Self) RETURNS String; }
       STRUCT Holder<T> { value: T }
-      IMPLEMENTATION<T: Missing> Named FOR Holder<T> {
+      IMPLEMENTATION<T: Missing> Named FOR Holder {
         METHOD name(self) RETURNS String -> RETURN "x"; END
       }
     CLEAR
     expect_error(<<~CLEAR, /Member 'name'.*redeclares owner parameter 'T'/i)
       PROTOCOL Named { METHOD name(self: Self) RETURNS String; }
       STRUCT Holder<T> { value: T }
-      IMPLEMENTATION<T> Named FOR Holder<T> {
+      IMPLEMENTATION<T> Named FOR Holder {
         METHOD name<T>(self) RETURNS String -> RETURN "x"; END
       }
     CLEAR
@@ -198,7 +315,7 @@ RSpec.describe "explicit generic protocol conformances" do
       PROTOCOL Named { METHOD name(self: Self) RETURNS String; }
       STRUCT User { id: Int64 }
       STRUCT Holder<T> { value: T }
-      IMPLEMENTATION<User> Named FOR Holder<User> {
+      IMPLEMENTATION<User> Named FOR Holder {
         METHOD name(self) RETURNS String -> RETURN "x"; END
       }
     CLEAR

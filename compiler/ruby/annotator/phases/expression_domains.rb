@@ -83,6 +83,7 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         receiver = node.object.full_type!(context: "protocol method receiver")
+        return true if resolve_user_protocol_method_call!(node, receiver)
         return false unless map_requires_protocol_lowering?(receiver)
         require_generic_map_access_scope!(node.object, receiver)
 
@@ -123,6 +124,62 @@ module Annotator
         true
       end
       private :resolve_protocol_method_call!
+
+      sig { params(node: AST::MethodCall, receiver: Type).returns(T::Boolean) }
+      def resolve_user_protocol_method_call!(node, receiver)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        protocol_names = generic_parameter_protocol_names(receiver.resolved).reject { |name| name == "Map" }
+        return false if protocol_names.empty?
+
+        matches = protocol_names.filter_map do |name|
+          protocol = semantic_protocol(name)
+          requirement = protocol&.requirements&.find { |candidate| candidate.is_method && candidate.name == node.name }
+          [protocol, requirement] if protocol && requirement
+        end
+        if matches.length > 1
+          error!(node, :GENERIC_PROTOCOL_METHOD_AMBIGUOUS,
+            name: node.name, protocols: matches.map { |match| match.first.name }.join(", "))
+        end
+        if matches.empty?
+          available = protocol_names.flat_map do |name|
+            semantic_protocol(name)&.requirements&.select(&:is_method)&.map(&:name) || []
+          end.uniq.sort
+          error!(node, :GENERIC_PROTOCOL_METHOD_UNKNOWN,
+            name: node.name, protocols: protocol_names.join(" & "),
+            available: available.empty? ? "none" : available.join(", "))
+        end
+
+        protocol, requirement = T.must(matches.first)
+        substitutions = protocol.associated_types.each_with_object({Self: receiver}) do |associated, table|
+          table[associated.name.to_sym] = Type.new(TypeProjectionExpression.new(
+            owner: receiver.resolved,
+            member: associated.name.to_sym,
+            protocol: protocol.name.to_sym,
+          ))
+        end
+        signature = FunctionSignature.new(
+          params: requirement.params.map do |param|
+            AST::Param.new(
+              name: param.name,
+              type: apply_type_subst(param.type, substitutions),
+              required: true,
+              mutable: param.mutable,
+              takes: param.takes,
+            )
+          end,
+          return_type: apply_type_subst(requirement.return_type, substitutions),
+        )
+        verify_function_signature!(node, signature, [node.object] + node.args)
+        node.matched_signature = signature
+        node.protocol_name = protocol.name
+        node.protocol_operation = requirement.name.to_sym
+        stamp_resolved_call_result!(node, signature.return_type)
+        current_fn_ctx&.mark_runtime_used!
+        record_predicate_call_site!(node)
+        true
+      end
+      private :resolve_user_protocol_method_call!
 
       sig { params(node: AST::MethodCall, index: Integer, expected: Type).void }
       def verify_protocol_method_argument!(node, index, expected)

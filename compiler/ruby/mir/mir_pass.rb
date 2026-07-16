@@ -221,6 +221,7 @@ class MIRPass
   sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
   def finalized_runtime_input?(fn)
       fn.name.to_s == Compiler::Entrypoint::NAME ||
+      !fn.conformance_protocol.nil? ||
       fn.uses_rt == true ||
       function_error_context?(fn) ||
       fn.uses_alloc == true ||

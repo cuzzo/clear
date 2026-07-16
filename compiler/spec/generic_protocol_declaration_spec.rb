@@ -74,7 +74,7 @@ RSpec.describe "generic protocol declarations" do
       }
     CLEAR
     generic = <<~CLEAR
-      IMPLEMENTATION<K, V> Lookup<K, V> FOR Store<K, V> {
+      IMPLEMENTATION Lookup<K, V> FOR Store {
         METHOD get(self, key: K) RETURNS !?V -> RETURN NIL; END
       }
     CLEAR
@@ -84,9 +84,9 @@ RSpec.describe "generic protocol declarations" do
     expect(concrete_node).to be_a(AST::ConformanceDef)
     expect(concrete_node.protocol_type.resolved).to eq(:Named)
     expect(concrete_node.owner_type.resolved).to eq(:User)
-    expect(generic_node.binders.map(&:name)).to eq(%w[K V])
+    expect(generic_node.binders).to be_empty
     expect(generic_node.protocol_type.generic_args.map(&:resolved)).to eq(%i[K V])
-    expect(generic_node.owner_type.generic_args.map(&:resolved)).to eq(%i[K V])
+    expect(generic_node.owner_type.resolved).to eq(:Store)
     index = Annotator::Phases::DeclarationIndexer.index(AST::Program.new(nil, [concrete_node]))
     expect(index.conformance_declarations).to eq([concrete_node])
   end

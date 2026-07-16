@@ -1,0 +1,67 @@
+# User protocols lower through compile-time adapters. This exercises a
+# concrete owner, an inferred generic owner binder, an associated projection,
+# TAKES transport, and both definite and optional results without a runtime
+# witness table.
+PROTOCOL Sized {
+  METHOD size(self: Self) RETURNS Int64;
+  METHOD checkedSize(self: Self) RETURNS !Int64;
+}
+
+PROTOCOL Identity<Value> {
+  METHOD identity(self: Self, TAKES value: Value) RETURNS Value;
+  METHOD missing(self: Self) RETURNS ?Value;
+}
+
+STRUCT Box { value: Int64 }
+STRUCT Store<V> { marker: Int64 }
+STRUCT ProjectionBox<S: Identity> { latest: ?S::Value }
+
+IMPLEMENTATION Sized FOR Box {
+  METHOD size(self) RETURNS Int64 ->
+    RETURN self.value;
+  END
+
+
+  METHOD checkedSize(self) RETURNS !Int64 ->
+    RETURN self.value;
+  END
+}
+
+IMPLEMENTATION Identity<V> FOR Store {
+  METHOD identity(self, TAKES value: V) RETURNS V ->
+    RETURN value;
+  END
+
+  METHOD missing(self) RETURNS ?V ->
+    RETURN NIL;
+  END
+}
+
+FN measured<S: Sized>(value: S) RETURNS Int64 ->
+  RETURN value.size();
+END
+
+FN checked<S: Sized>(value: S) RETURNS !Int64 ->
+  RETURN value.checkedSize();
+END
+
+FN roundTrip<S: Identity>(store: S, TAKES value: S::Value) RETURNS S::Value ->
+  RETURN store.identity(value);
+END
+
+FN absent<S: Identity>(store: S) RETURNS ?S::Value ->
+  RETURN store.missing();
+END
+
+FN main() RETURNS !Void ->
+  box = Box{ value: 7_i64 };
+  ASSERT measured(box) == 7_i64;
+  ASSERT checked(box) == 7_i64;
+
+  store = Store<Int64>{ marker: 1_i64 };
+  ASSERT roundTrip(store, 42_i64) == 42_i64;
+  ASSERT absent(store) == NIL;
+
+  projected = ProjectionBox<Store<Int64>>{ latest: NIL };
+  ASSERT projected.latest == NIL;
+END

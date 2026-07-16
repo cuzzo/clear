@@ -19,12 +19,11 @@ RSpec.describe "generic associated-key map storage" do
           RETURN COPY self.entries[key];
         END
       }
-      FN get!<M: Map>(MUTABLE index: Index<M>, key: M::Key) RETURNS !?M::Value ->
-        WITH POLYMORPHIC index AS view { RETURN view.get(key); }
-        RETURN NIL;
+      FN get!<M: Map>(index: Index<M>, key: M::Key) RETURNS !?M::Value ->
+        RETURN index.get(key);
       END
       FN main() RETURNS !Void ->
-        MUTABLE words = Index<{String}String>{ entries: {} } @shared:locked;
+        words = Index<{String}String>{ entries: {} };
         ASSERT get!(words, "missing") OR_ELSE RAISE == NIL;
       END
     CLEAR
@@ -34,8 +33,6 @@ RSpec.describe "generic associated-key map storage" do
     zig = transpile(index_source)
 
     expect(zig).to include("entries: CheatLib.MapType(CheatLib.MapFacts(M).Key")
-    expect(zig).to include("fn run(view: *Index(M), __flow: *__PolyFlow")
-    expect(zig).to include(") !void {")
     expect(zig).to include("try __inherent_Index_get")
     expect(zig).to include("CheatLib.mapProtocolGet(&self.entries")
   end
@@ -44,10 +41,18 @@ RSpec.describe "generic associated-key map storage" do
     stderr = StringIO.new
     original = $stderr
     $stderr = stderr
-    transpile(index_source.sub(
-      'ASSERT get!(words, "missing") OR_ELSE RAISE == NIL;',
-      'words.put!("key", "value"); ASSERT get!(words, "key") OR_ELSE RAISE OR_ELSE "" == "value";',
-    ))
+    transpile(<<~CLEAR)
+      STRUCT Index<M: Map> { entries: {M::Key}M::Value }
+      IMPLEMENTATION Index<M> {
+        METHOD put!(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
+          self.entries[key] = COPY value;
+        END
+      }
+      FN main() RETURNS !Void ->
+        MUTABLE words = Index<{String}String>{ entries: {} } @shared:locked;
+        WITH EXCLUSIVE words AS view { view.put!("key", "value"); }
+      END
+    CLEAR
     expect(stderr.string).not_to include("never mutated via WITH EXCLUSIVE")
   ensure
     $stderr = original

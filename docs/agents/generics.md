@@ -595,7 +595,7 @@ STRUCT SmallMap<K: Hashable, V> {
   # fields
 }
 
-IMPLEMENTATION<K, V> Map<K, V> FOR SmallMap<K, V> {
+IMPLEMENTATION Map<K, V> FOR SmallMap {
   # checked Map requirement implementations
 }
 ```
@@ -605,7 +605,7 @@ incompatible requirement set at this declaration. A later adapter form may
 support an existing or external type:
 
 ```clear
-IMPLEMENTATION<K, V> Map<K, V> FOR ForeignMap<K, V> {
+IMPLEMENTATION Map<K, V> FOR ForeignMap {
   # explicit operation bindings or adapter methods
 }
 ```
@@ -674,7 +674,7 @@ class member scope, but it carries no inheritance or reference semantics. It
 also provides a natural pair with protocol conformance:
 
 ```clear
-IMPLEMENTATION<K, V> Map<K, V> FOR SmallMap<K, V> {
+IMPLEMENTATION Map<K, V> FOR SmallMap {
   # Map requirement implementations
 }
 ```

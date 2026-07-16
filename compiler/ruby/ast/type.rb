@@ -3489,6 +3489,12 @@ class Type
     expression.is_a?(TypeProjectionExpression) ? expression.member : nil
   end
 
+  sig { returns(T.nilable(Symbol)) }
+  def projection_protocol
+    expression = shape.expression
+    expression.is_a?(TypeProjectionExpression) ? expression.protocol : nil
+  end
+
   # The base type name of a generic instance: :"Pair<Number>" → :Pair
   sig { returns(Symbol) }
   def generic_base
@@ -5315,7 +5321,9 @@ class Type
   # ruby-to-clear: effects reentrant
   def compute_zig_type(is_param: false, is_field: false)
     if projection?
-      return "CheatLib.MapFacts(#{T.must(projection_owner)}).#{T.must(projection_member)}"
+      protocol = projection_protocol
+      facts = protocol.nil? || protocol == :Map ? "CheatLib.MapFacts" : "__clearProtocolFacts_#{protocol}"
+      return "#{facts}(#{T.must(projection_owner)}).#{T.must(projection_member)}"
     end
 
     # 0. Handle Tense types:

@@ -16,20 +16,19 @@ IMPLEMENTATION Index<M> {
 }
 
 FN put!<M: Map>(MUTABLE index: Index<M>, key: M::Key, value: M::Value) RETURNS !Void ->
-  WITH POLYMORPHIC index AS writable { writable.put!(key, value); }
+  index.put!(key, value);
 END
 
-FN get!<M: Map>(MUTABLE index: Index<M>, key: M::Key) RETURNS !?M::Value ->
-  WITH POLYMORPHIC index AS writable { RETURN writable.get(key); }
-  RETURN NIL;
+FN get!<M: Map>(index: Index<M>, key: M::Key) RETURNS !?M::Value ->
+  RETURN index.get(key);
 END
 
 FN main() RETURNS !Void ->
-  MUTABLE words = Index<{String}String>{ entries: {} } @shared:locked;
+  MUTABLE words = Index<{String}String>{ entries: {} };
   put!(words, "status", "ready");
   ASSERT get!(words, "status") OR_ELSE RAISE OR_ELSE "" == "ready";
 
-  MUTABLE numbers = Index<{Int64}String>{ entries: {} } @shared:versioned;
+  MUTABLE numbers = Index<{Int64}String>{ entries: {} };
   put!(numbers, 7_i64, "seven");
   ASSERT get!(numbers, 7_i64) OR_ELSE RAISE OR_ELSE "" == "seven";
 END

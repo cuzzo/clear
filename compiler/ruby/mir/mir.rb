@@ -957,6 +957,33 @@ module MIR
     include Stmt
   end
 
+  # One compile-time conformance branch in a generated static protocol
+  # adapter. `owner_type` is used for a concrete nominal; generic nominals use
+  # `owner_marker` plus `type_params` recovered from the generated type's
+  # compiler-only metadata.
+  class ProtocolConformanceCase < T::Struct
+    const :owner_type, T.nilable(String)
+    const :owner_marker, T.nilable(String)
+    const :type_params, T::Array[String], default: []
+    const :associated_types, T::Hash[String, String], default: {}
+    const :operations, T::Hash[String, String], default: {}
+  end
+
+  class ProtocolRequirementAdapter < T::Struct
+    const :name, String
+    const :argument_count, Integer
+    const :return_type, String
+  end
+
+  class ProtocolAdapterDef < T::Struct
+    include Stmt
+
+    const :protocol, String
+    const :associated_types, T::Array[String]
+    const :requirements, T::Array[ProtocolRequirementAdapter]
+    const :conformances, T::Array[ProtocolConformanceCase]
+  end
+
   # Struct field definition.
   # Zig: name: zig_type [= default]
   FieldDef = Struct.new(:name, :zig_type, :default) do

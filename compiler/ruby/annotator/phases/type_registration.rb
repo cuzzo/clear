@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "../protocol_projection_resolver"
 
 require_relative "../../ast/ast"
 require_relative "../../ast/schemas"
@@ -257,6 +258,9 @@ module Annotator
         validate_type_param_list!(node, node.type_params, "struct") if node.type_params.any?
         validate_generic_bounds!(node.generic_params)
         node.field_decls.each_value do |field|
+          resolve_declaration_projections!(node, field.type, node.generic_params)
+        end
+        node.field_decls.each_value do |field|
           error!(node, :COLLECTION_HINT_VALUE_ONLY) if field.type.preallocation_hint?
         end
         stamp_field_defaults!(node.field_decls)
@@ -283,6 +287,25 @@ module Annotator
         end
       end
       private :validate_generic_bounds!
+
+      sig do
+        params(
+          node: AST::Locatable,
+          type: Type,
+          parameters: T::Array[AST::GenericParamDecl],
+        ).void
+      end
+      def resolve_declaration_projections!(node, type, parameters)
+        T.bind(self, ResolutionSession)
+        result = Annotator::ProtocolProjectionResolver.new(protocols).resolve(
+          type.shape.expression,
+          parameters,
+        )
+        issue = result.issues.first
+        error!(node, issue.code, **issue.arguments) if issue
+        type.replace_shape!(type.shape.with_expression(result.expression))
+      end
+      private :resolve_declaration_projections!
 
       sig { params(node: AST::EnumDef).void }
       def register_enum_declaration(node)

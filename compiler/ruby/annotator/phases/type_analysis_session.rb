@@ -200,6 +200,21 @@ class Annotator::Phases::TypeAnalysisSession
     @resolution.program
   end
 
+  sig { params(name: String).returns(T.nilable(AST::ProtocolDef)) }
+  def semantic_protocol(name)
+    @resolution.protocols[name]
+  end
+
+  sig { returns(T::Hash[String, AST::ProtocolDef]) }
+  def semantic_protocols
+    @resolution.protocols
+  end
+
+  sig { returns(T::Array[Annotator::Phases::ConformanceResolution]) }
+  def semantic_conformance_resolutions
+    @resolution.conformance_resolutions
+  end
+
   sig { returns(T::Array[HeldLockTypeEntry]) }
   def semantic_held_lock_types
     current_held_lock_types
@@ -230,7 +245,8 @@ class Annotator::Phases::TypeAnalysisSession
     ctx = current_fn_ctx
     ctx ? ctx.type_params : []
   end
-  private :current_function_type_params
+  private :current_function_type_params, :semantic_protocol, :semantic_protocols,
+    :semantic_conformance_resolutions
 
   sig { returns(T::Array[AST::GenericParamDecl]) }
   def current_function_generic_params
