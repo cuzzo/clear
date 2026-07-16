@@ -88,7 +88,7 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
     key_type = p[:shape] == :associated_storage_string ? "String" : "Int64"
     key = p[:shape] == :associated_storage_string ? '"key"' : "7_i64"
     <<~CLEAR
-      STRUCT Index<M: Map> { entries: {M::Key}M::Value }
+      STRUCT Index<M: Map> { entries={}: {M::Key}M::Value }
       IMPLEMENTATION Index<M> {
         METHOD store!(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
           self.entries[key] = COPY value;
@@ -98,7 +98,7 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
         END
       }
       FN main() RETURNS !Void ->
-        MUTABLE index = Index<{#{key_type}}String>{ entries: {} };
+        MUTABLE index = Index<{#{key_type}}String>{};
         index.store!(#{key}, "value");
         ASSERT index.load(#{key}) OR_ELSE RAISE OR_ELSE "" == "value";
       END

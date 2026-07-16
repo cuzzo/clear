@@ -7,10 +7,10 @@ STRUCT LruNode<K> {
 }
 
 STRUCT Cache<M: Map> {
-  values: M,
-  recency: {M::Key}LruNode<M::Key>,
-  head: ?M::Key,
-  tail: ?M::Key,
+  values={}: M,
+  recency={}: {M::Key}LruNode<M::Key>,
+  head=NIL: ?M::Key,
+  tail=NIL: ?M::Key,
   capacity: Int64,
 }
 
@@ -71,7 +71,7 @@ IMPLEMENTATION Cache<M> {
     END
   END
 
-  METHOD put!(MUTABLE self, key: M::Key, value: M::Value) RETURNS Void ->
+  METHOD putView!(MUTABLE self, key: M::Key, value: M::Value) RETURNS Void ->
     existing = COPY self.values[key];
     IF existing EXISTS AS unused THEN
       self.values[key] = COPY value;
@@ -83,7 +83,7 @@ IMPLEMENTATION Cache<M> {
     self.promote!(key);
   END
 
-  METHOD get!(MUTABLE self, key: M::Key) RETURNS ?M::Value ->
+  METHOD getView!(MUTABLE self, key: M::Key) RETURNS ?M::Value ->
     existing = COPY self.values[key];
     IF existing EXISTS AS value THEN
       result = COPY value;
@@ -102,52 +102,52 @@ IMPLEMENTATION Cache<M> {
     END
   END
 
-  METHOD length(self) RETURNS Int64 -> RETURN self.values.count(); END
+  METHOD lengthView(self) RETURNS Int64 -> RETURN self.values.count(); END
+
+  METHOD put!(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
+    WITH POLYMORPHIC self AS state { state.putView!(key, value); }
+  END
+
+  METHOD get!(MUTABLE self, key: M::Key) RETURNS !?M::Value ->
+    WITH POLYMORPHIC self AS state { RETURN state.getView!(key); }
+    RETURN NIL;
+  END
+
+  METHOD length!(MUTABLE self) RETURNS !Int64 ->
+    WITH POLYMORPHIC self AS state { RETURN state.lengthView(); }
+    RETURN 0_i64;
+  END
 }
 
-FN put!<M: Map>(MUTABLE cache: Cache<M>, key: M::Key, value: M::Value) RETURNS !Void ->
-  WITH POLYMORPHIC cache AS state { state.put!(key, value); }
-END
-
-FN get!<M: Map>(MUTABLE cache: Cache<M>, key: M::Key) RETURNS !?M::Value ->
-  WITH POLYMORPHIC cache AS state { RETURN state.get!(key); }
-  RETURN NIL;
-END
-
-FN length!<M: Map>(MUTABLE cache: Cache<M>) RETURNS !Int64 ->
-  WITH POLYMORPHIC cache AS state { RETURN state.length(); }
-  RETURN 0_i64;
-END
-
 FN main() RETURNS Void ->
-  MUTABLE local = Cache<{String}Int64>{ values: {}, recency: {}, head: NIL, tail: NIL, capacity: 2_i64 };
-  put!(local, "a", 1_i64) OR_ELSE RAISE;
-  put!(local, "b", 2_i64) OR_ELSE RAISE;
-  ASSERT get!(local, "a") OR_ELSE RAISE OR_ELSE 0_i64 == 1_i64;
-  put!(local, "c", 3_i64) OR_ELSE RAISE;
-  ASSERT get!(local, "b") OR_ELSE RAISE == NIL, "least-recently-used key was evicted";
-  ASSERT get!(local, "a") OR_ELSE RAISE OR_ELSE 0_i64 == 1_i64;
-  ASSERT get!(local, "c") OR_ELSE RAISE OR_ELSE 0_i64 == 3_i64;
+  MUTABLE local = Cache<{String}Int64>{ capacity: 2_i64 };
+  local.put!("a", 1_i64) OR_ELSE RAISE;
+  local.put!("b", 2_i64) OR_ELSE RAISE;
+  ASSERT local.get!("a") OR_ELSE RAISE OR_ELSE 0_i64 == 1_i64;
+  local.put!("c", 3_i64) OR_ELSE RAISE;
+  ASSERT local.get!("b") OR_ELSE RAISE == NIL, "least-recently-used key was evicted";
+  ASSERT local.get!("a") OR_ELSE RAISE OR_ELSE 0_i64 == 1_i64;
+  ASSERT local.get!("c") OR_ELSE RAISE OR_ELSE 0_i64 == 3_i64;
 
-  MUTABLE locked = Cache<{Int64}Bool>{ values: {}, recency: {}, head: NIL, tail: NIL, capacity: 2_i64 } @shared:locked;
-  put!(locked, 1_i64, TRUE) OR_ELSE RAISE;
-  put!(locked, 2_i64, FALSE) OR_ELSE RAISE;
-  ASSERT get!(locked, 1_i64) OR_ELSE RAISE OR_ELSE FALSE;
-  put!(locked, 3_i64, TRUE) OR_ELSE RAISE;
-  ASSERT get!(locked, 2_i64) OR_ELSE RAISE == NIL, "locked cache evicts in O(1)";
-  first = BG { put!(locked, 4_i64, TRUE) OR_ELSE RAISE; RETURN; };
-  second = BG { put!(locked, 5_i64, TRUE) OR_ELSE RAISE; RETURN; };
+  MUTABLE locked = Cache<{Int64}Bool>{ capacity: 2_i64 } @shared:locked;
+  locked.put!(1_i64, TRUE) OR_ELSE RAISE;
+  locked.put!(2_i64, FALSE) OR_ELSE RAISE;
+  ASSERT locked.get!(1_i64) OR_ELSE RAISE OR_ELSE FALSE;
+  locked.put!(3_i64, TRUE) OR_ELSE RAISE;
+  ASSERT locked.get!(2_i64) OR_ELSE RAISE == NIL, "locked cache evicts in O(1)";
+  first = BG { locked.put!(4_i64, TRUE) OR_ELSE RAISE; RETURN; };
+  second = BG { locked.put!(5_i64, TRUE) OR_ELSE RAISE; RETURN; };
   NEXT first;
   NEXT second;
-  ASSERT length!(locked) OR_ELSE RAISE == 2_i64, "concurrent writes preserve capacity";
+  ASSERT locked.length!() OR_ELSE RAISE == 2_i64, "concurrent writes preserve capacity";
 
-  MUTABLE rw = Cache<{String}Int64>{ values: {}, recency: {}, head: NIL, tail: NIL, capacity: 1_i64 } @shared:writeLocked;
-  put!(rw, "rw", 4_i64) OR_ELSE RAISE;
-  ASSERT get!(rw, "rw") OR_ELSE RAISE OR_ELSE 0_i64 == 4_i64;
+  MUTABLE rw = Cache<{String}Int64>{ capacity: 1_i64 } @shared:writeLocked;
+  rw.put!("rw", 4_i64) OR_ELSE RAISE;
+  ASSERT rw.get!("rw") OR_ELSE RAISE OR_ELSE 0_i64 == 4_i64;
 
-  MUTABLE versioned = Cache<{String}Int64>{ values: {}, recency: {}, head: NIL, tail: NIL, capacity: 1_i64 } @shared:versioned;
-  put!(versioned, "mvcc", 5_i64) OR_ELSE RAISE;
-  ASSERT get!(versioned, "mvcc") OR_ELSE RAISE OR_ELSE 0_i64 == 5_i64;
+  MUTABLE versioned = Cache<{String}Int64>{ capacity: 1_i64 } @shared:versioned;
+  versioned.put!("mvcc", 5_i64) OR_ELSE RAISE;
+  ASSERT versioned.get!("mvcc") OR_ELSE RAISE OR_ELSE 0_i64 == 5_i64;
 
   print("generic-cache: exact O(1) LRU across 4 policies PASS");
 END

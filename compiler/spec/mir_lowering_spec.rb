@@ -1902,6 +1902,22 @@ RSpec.describe MIRLowering do
       expect(field_value.expr).to eq(MIR::Ident.new("items"))
       expect(field_value.safe).to eq(true)
     end
+
+    it "retains an Rc-backed identifier stored in a struct field" do
+      source = make_id("node", full_type: Type.new(:Node, ownership: :multiowned))
+      node = AST::StructLit.new(tok, "Wrapper", { "inner" => source }, nil, nil)
+      node.full_type = :Wrapper
+
+      low = lowering(struct_schemas: {
+        Wrapper: Schemas::StructSchema.new(fields: {
+          "inner" => Type.new(:Node, ownership: :multiowned),
+        }),
+      })
+      result = low.lower(node)
+
+      expect(emit(low.function_state.pending_stmts)).to include("rcRetain")
+      expect(emit(result)).to include(".inner = __tmp_")
+    end
   end
 
   describe "indirect aggregate field ownership" do

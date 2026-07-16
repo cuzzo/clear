@@ -485,7 +485,7 @@ module Annotator
               error!(node, :STRUCT_LITERAL_MISSING_FIELDS, name: node.name, fields: missing.join(', '))
             end
           end
-          stamp_type!(node, node.name.to_sym)
+          stamp_type!(node, literal_instance_type(node))
           return
         end
 

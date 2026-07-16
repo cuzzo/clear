@@ -2,7 +2,7 @@
 # representation only after M is specialized. The same implementation works
 # for owned String keys and inline numeric keys.
 STRUCT Index<M: Map> {
-  entries: {M::Key}M::Value,
+  entries={}: {M::Key}M::Value,
 }
 
 IMPLEMENTATION Index<M> {
@@ -15,20 +15,12 @@ IMPLEMENTATION Index<M> {
   END
 }
 
-FN put!<M: Map>(MUTABLE index: Index<M>, key: M::Key, value: M::Value) RETURNS !Void ->
-  index.put!(key, value);
-END
-
-FN get!<M: Map>(index: Index<M>, key: M::Key) RETURNS !?M::Value ->
-  RETURN index.get(key);
-END
-
 FN main() RETURNS !Void ->
-  MUTABLE words = Index<{String}String>{ entries: {} };
-  put!(words, "status", "ready");
-  ASSERT get!(words, "status") OR_ELSE RAISE OR_ELSE "" == "ready";
+  MUTABLE words = Index<{String}String>{};
+  words.put!("status", "ready");
+  ASSERT words.get("status") OR_ELSE RAISE OR_ELSE "" == "ready";
 
-  MUTABLE numbers = Index<{Int64}String>{ entries: {} };
-  put!(numbers, 7_i64, "seven");
-  ASSERT get!(numbers, 7_i64) OR_ELSE RAISE OR_ELSE "" == "seven";
+  MUTABLE numbers = Index<{Int64}String>{};
+  numbers.put!(7_i64, "seven");
+  ASSERT numbers.get(7_i64) OR_ELSE RAISE OR_ELSE "" == "seven";
 END

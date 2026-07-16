@@ -1596,6 +1596,38 @@ module MIRLoweringExpressions
       return replacement
     end
 
+    if t.projection?
+      owner = T.must(t.projection_owner)
+      concrete_input = subst[owner]
+      return raw_type unless concrete_input
+
+      concrete = Type.new(concrete_input)
+      projected = case t.projection_member
+      when :Key then concrete.key_type if concrete.map?
+      when :Value then concrete.value_type if concrete.map?
+      end
+      return projected if projected
+
+      return Type.new(TypeProjectionExpression.new(
+        owner: concrete.resolved,
+        member: T.must(t.projection_member),
+        protocol: t.projection_protocol,
+      ))
+    end
+
+    if t.map?
+      expression = T.cast(t.shape.expression, MapTypeExpression)
+      new_key = T.cast(substitute_mir_type(t.key_type, subst), Type::TypeInput)
+      new_value = T.cast(substitute_mir_type(t.value_type, subst), Type::TypeInput)
+      return Type.new(MapTypeExpression.new(
+        key: Type.new(new_key).shape.expression,
+        value: Type.new(new_value).shape.expression,
+        key_implicit: expression.key_implicit,
+        legacy_separator: expression.legacy_separator,
+        capabilities: expression.capabilities,
+      ))
+    end
+
     if t.generic_instance?
       new_args = t.generic_args.map { |arg| T.cast(substitute_mir_type(arg, subst), Type::TypeInput) }
       replacement = Type.generic_instance_of(t.generic_base, new_args)
@@ -1697,7 +1729,8 @@ module MIRLoweringExpressions
     # slices would otherwise be freed through the heap allocator at teardown.
     struct_alloc = coerced_destination&.node_reference? ? :heap : alloc_for_node(node)
 
-    fields = node.fields.map { |k, v|
+    literal_fields = struct_lit_fields_with_callsite_defaults(node)
+    fields = literal_fields.map { |k, v|
       ft = field_types[k.to_s]
       field_type_input = T.let(ft.is_a?(Schemas::InlineStructVariant) ? nil : ft, T.nilable(Type::TypeInput))
       borrowed_field = T.let(node.borrowed_field_names&.include?(k.to_s) == true, T::Boolean)
@@ -1710,7 +1743,7 @@ module MIRLoweringExpressions
         if borrowed_field
           aggregate_dynamic_slice_field_value(lower(field_node), expected_ft, true, field_sink_alloc, field_node)
         elsif rc_retain_needed?(field_node)
-          hoist_alloc(make_rc_retain(field_node), field_node, err_cleanup: true)
+          hoist_alloc(make_rc_retain(T.cast(field_node, AST::Identifier)), field_node, err_cleanup: true)
         elsif field_node.is_a?(AST::CopyNode) && expected_ft&.collection?
           hoist_alloc(MIR::DeepCopy.new(lower(field_node.value), expected_ft.zig_type, nil, :full_value, field_sink_alloc),
             field_node, err_cleanup: true)
@@ -1781,6 +1814,23 @@ module MIRLoweringExpressions
 
     wrap_indirect_field_hoists(hoisted, result)
   end
+
+  sig { params(node: AST::StructLit).returns(T::Hash[String, AST::Node]) }
+  def struct_lit_fields_with_callsite_defaults(node)
+    T.bind(self, MIRLowering) rescue nil
+    fields = T.let(node.fields.dup, T::Hash[String, AST::Node])
+    schema = mir_schema_lookup.call(node.name.to_sym)
+    return fields unless schema.is_a?(Schemas::StructSchema)
+
+    schema.fields.each do |name, field|
+      next if fields.key?(name)
+      next unless callsite_struct_field_default?(field)
+
+      fields[name] = T.must(field.default)
+    end
+    fields
+  end
+  private :struct_lit_fields_with_callsite_defaults
 
   sig { params(node: AST::UnionVariantLit).returns(MIR::Node) }
   def lower_union_variant_lit(node)

@@ -460,7 +460,12 @@ module MIRLoweringLiterals
   sig { params(node: AST::HashLit).returns(HashLiteralPlan) }
   def hash_literal_plan(node)
     T.bind(self, MIRLowering) rescue nil
-    ti = Type.new(node.coerced_type_info || node.full_type!)
+    expected_ti = Type.from_node(function_state.current_expected_type)
+    ti = if expected_ti&.map?
+      expected_ti
+    else
+      Type.new(node.coerced_type_info || node.full_type!)
+    end
     map_alloc = function_state.current_decl_alloc || alloc_for_node(node)
     HashLiteralPlan.new(
       type_info: ti,

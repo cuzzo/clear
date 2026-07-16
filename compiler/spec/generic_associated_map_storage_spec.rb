@@ -10,7 +10,7 @@ RSpec.describe "generic associated-key map storage" do
 
   let(:index_source) do
     <<~CLEAR
-      STRUCT Index<M: Map> { entries: {M::Key}M::Value }
+      STRUCT Index<M: Map> { entries={}: {M::Key}M::Value }
       IMPLEMENTATION Index<M> {
         METHOD put!(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
           self.entries[key] = COPY value;
@@ -19,12 +19,9 @@ RSpec.describe "generic associated-key map storage" do
           RETURN COPY self.entries[key];
         END
       }
-      FN get!<M: Map>(index: Index<M>, key: M::Key) RETURNS !?M::Value ->
-        RETURN index.get(key);
-      END
       FN main() RETURNS !Void ->
-        words = Index<{String}String>{ entries: {} };
-        ASSERT get!(words, "missing") OR_ELSE RAISE == NIL;
+        words = Index<{String}String>{};
+        ASSERT words.get("missing") OR_ELSE RAISE == NIL;
       END
     CLEAR
   end
@@ -35,6 +32,28 @@ RSpec.describe "generic associated-key map storage" do
     expect(zig).to include("entries: CheatLib.MapType(CheatLib.MapFacts(M).Key")
     expect(zig).to include("try __inherent_Index_get")
     expect(zig).to include("CheatLib.mapProtocolGet(&self.entries")
+    expect(zig).to include("const __tmp_1 = CheatLib.StringMap([]const u8){ .alloc = rt.heapAlloc() };")
+    expect(zig).to include("Index(CheatLib.StringMap([]const u8)){ .entries = __tmp_1 }")
+    expect(zig).not_to include("entries: CheatLib.MapType(CheatLib.MapFacts(M).Key, CheatLib.MapFacts(M).Value) =")
+  end
+
+  it "substitutes non-map protocol projections in concrete generic literals" do
+    zig = transpile(<<~CLEAR)
+      PROTOCOL Identity<Value> {
+        METHOD identity(self: Self, value: Value) RETURNS Value;
+      }
+      STRUCT Store<V> { marker: Int64 }
+      STRUCT ProjectionBox<S: Identity> { latest: ?S::Value }
+      IMPLEMENTATION Identity<V> FOR Store {
+        METHOD identity(self, value: V) RETURNS V -> RETURN value; END
+      }
+      FN main() RETURNS Void ->
+        projected = ProjectionBox<Store<Int64>>{ latest: NIL };
+        ASSERT projected.latest == NIL;
+      END
+    CLEAR
+
+    expect(zig).to include("ProjectionBox(Store(i64)){ .latest = @as(?i64, null) }")
   end
 
   it "does not misreport mutable generic calls as unused synchronization" do

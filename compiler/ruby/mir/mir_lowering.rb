@@ -3245,6 +3245,8 @@ class MIRLowering
 
   sig { params(field: AST::StructField).returns(T.nilable(MIR::Emittable)) }
   def lower_struct_field_default(field)
+    return nil if callsite_struct_field_default?(field)
+
     if field.type.optional? && field.type.node_reference? &&
        field.default.is_a?(AST::Literal) && field.default.value.nil?
       return MIR::StructInit.new(field.type.zig_type(is_field: true), [])
@@ -3262,9 +3264,21 @@ class MIRLowering
     nil
   end
 
+  # Allocator-backed collection literals cannot be Zig field defaults: their
+  # initialization needs the active CLEAR runtime allocator. They are lowered
+  # into each struct literal at its construction site instead.
+  sig { params(field: AST::StructField).returns(T::Boolean) }
+  def callsite_struct_field_default?(field)
+    field.default.is_a?(AST::HashLit) || field.default.is_a?(AST::ListLit)
+  end
+  private :callsite_struct_field_default?
+
   sig { params(node: AST::StructDef).returns(MIR::Node) }
   def lower_struct_def(node)
-    lowering_schemas.register_struct(node.name, Schemas::StructSchema.new(fields: node.field_decls))
+    lowering_schemas.register_struct(node.name, Schemas::StructSchema.new(
+      fields: node.field_decls,
+      type_params: node.type_params.map(&:to_sym),
+    ))
 
     if node.type_params.any?
       # Generic struct: fn Name(comptime T: type) type { return struct { ... }; }
