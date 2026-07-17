@@ -1217,6 +1217,11 @@ module MIRLoweringExpressions
     else
       target_node.symbol&.sync
     end
+    # GetField nodes do not carry a binding SymbolEntry, but their semantic
+    # type can introduce a capability boundary of its own (for example
+    # `holder.cell: Cell@alwaysMutable`). Preserve that field-local sync when
+    # selecting the representation access path.
+    target_sync ||= target_node.full_type!(context: "field target capability").sync
     path = field_access_path(ti, target_sync, is_rc_unwrapped, is_locked_unwrapped)
 
     target_type_sym = ti.resolved.to_s.to_sym

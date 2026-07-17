@@ -8,13 +8,13 @@ RSpec.describe "collection constructor capability integration" do
 
       FN main() RETURNS Void ->
         MUTABLE vals: []@sharded(2) Float64 = List[]:sharded(2);
-        vals.append(1.0);
-        vals.append(2.0);
+        &vals.append(1.0);
+        &vals.append(2.0);
         ASSERT vals.length() == 2_i64, "sharded list constructor";
 
         MUTABLE pool: [Pool(8)]@soa Item = Pool[]:soa;
-        pool.insert(Item{ value: 1.0, other: 10.0 });
-        pool.insert(Item{ value: 2.0, other: 20.0 });
+        &pool.insert(Item{ value: 1.0, other: 10.0 });
+        &pool.insert(Item{ value: 2.0, other: 20.0 });
         total = pool |> SUM _.value;
         ASSERT total == 3.0, "soa pool constructor";
         RETURN;

@@ -36,7 +36,7 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
     conc = last_concurrent_op(<<~CLEAR)
       FN main() RETURNS Void ->
           MUTABLE items: []Int64 = [];
-          items.append(1_i64);
+          &items.append(1_i64);
           MUTABLE counts: {Int64}@sharded(4) Int64 = {};
           items |> CONCURRENT EACH {
               counts[_] = (counts[_] OR_ELSE 0_i64) + 1_i64;
@@ -55,7 +55,7 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
       conc = last_concurrent_op(<<~CLEAR)
         FN main() RETURNS Void ->
             MUTABLE items: []Int64 = [];
-            items.append(1_i64);
+            &items.append(1_i64);
             MUTABLE a: {Int64}@sharded(4) Int64 = {};
             MUTABLE b: {Int64}@sharded(4) Int64 = {};
             items |> CONCURRENT EACH {
@@ -73,7 +73,7 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
     conc = last_concurrent_op(<<~CLEAR)
       FN main() RETURNS Void ->
           MUTABLE items: []Int64 = [];
-          items.append(1_i64);
+          &items.append(1_i64);
           MUTABLE counts: {Int64}@sharded(4) Int64 = {};
           items |> CONCURRENT EACH {
               count = counts.count();
@@ -90,7 +90,7 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
       conc = last_concurrent_op(<<~CLEAR)
         FN main() RETURNS Void ->
             MUTABLE items: []Int64 = [];
-            items.append(1_i64);
+            &items.append(1_i64);
             MUTABLE counts: {Int64}@sharded(4) Int64 = {};
             items |> CONCURRENT EACH {
                 counts[_] = (counts[_] OR_ELSE 0_i64) + 1_i64;

@@ -57,7 +57,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
             MUTABLE parts: []Int64 = [];
-            parts.append(i);
+            &parts.append(i);
             i = i + 1_i64;
           END
           RETURN;
@@ -72,7 +72,7 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           FOR i IN (0_i64 ..< 5) DO
             MUTABLE parts: []Int64 = [];
-            parts.append(i);
+            &parts.append(i);
           END
           RETURN;
         END
@@ -87,7 +87,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE xs: Int64[] = [1_i64, 2_i64];
           FOR x IN xs DO
             MUTABLE parts: []Int64 = [];
-            parts.append(x);
+            &parts.append(x);
           END
           RETURN;
         END
@@ -139,7 +139,7 @@ RSpec.describe LoopFrameAnalysis do
             MUTABLE j = 0_i64;
             WHILE j < 3 DO
               MUTABLE parts: []Int64 = [];
-              parts.append(j);
+              &parts.append(j);
               j = j + 1_i64;
             END
             i = i + 1_i64;
@@ -185,7 +185,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE all: []Float64 = [];
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
-            append(all, 1.0);
+            append(&all, 1.0);
             i = i + 1_i64;
           END
           RETURN;
@@ -202,7 +202,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE keys: []String = [];
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            keys.append(i.toString());
+            &keys.append(i.toString());
             i = i + 1_i64;
           END
           RETURN;
@@ -241,7 +241,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
             MUTABLE part: []Int64 = [];
-            part.append(i);
+            &part.append(i);
             resp = resp $+ i.toString();
             i = i + 1_i64;
           END
@@ -261,7 +261,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
             MUTABLE parts: []Int64 = [];
-            parts.append(i);
+            &parts.append(i);
             i = i + 1_i64;
           END
           RETURN;
@@ -278,7 +278,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
             MUTABLE parts: []Int64 = [];
-            parts.append(i);
+            &parts.append(i);
             resp = resp $+ i.toString();
             i = i + 1_i64;
           END
@@ -371,7 +371,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE outer: []Float64 = [];
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            append(outer, i.toString().length());
+            append(&outer, i.toString().length());
             i = i + 1_i64;
           END
           RETURN;
@@ -393,8 +393,8 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
             MUTABLE parts: []Int64 = [];
-            parts.append(i);
-            log.append("done");
+            &parts.append(i);
+            &log.append("done");
             i = i + 1_i64;
           END
           RETURN;
@@ -414,11 +414,11 @@ RSpec.describe LoopFrameAnalysis do
           WHILE i < 5 DO
             # frame-alloc in WHILE's direct body drives mark_per_iter=true
             MUTABLE buf: []Val = [];
-            buf.append(Val.Nil);
+            &buf.append(Val.Nil);
             FOR k IN (0_i64 ..< 4_i64) DO
               # Mutation buried inside a nested FOR; transitively in a
               # rewinding loop's body.
-              outer.append(Val.Nil);
+              &outer.append(Val.Nil);
             END
             i = i + 1_i64;
           END
@@ -438,9 +438,9 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
             MUTABLE buf: []Val = [];
-            buf.append(Val.Nil);
+            &buf.append(Val.Nil);
             PARTIAL MATCH i START
-              DEFAULT -> outer.append(Val.Nil);
+              DEFAULT -> &outer.append(Val.Nil);
             END
             i = i + 1_i64;
           END
@@ -508,7 +508,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
             MUTABLE parts: []Int64 = [];
-            parts.append(i);
+            &parts.append(i);
             i = i + 1_i64;
           END
           RETURN;
@@ -531,7 +531,7 @@ RSpec.describe LoopFrameAnalysis do
           WHILE i < program.length() DO
             ch = program.charAt(i);
             IF isCommand(ch) THEN
-              parts.append(ch);
+              &parts.append(ch);
             END
             i += 1;
           END
@@ -553,8 +553,8 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE i = 0;
           WHILE i < 1 DO
             MUTABLE inner: []Int64 = [];
-            inner.append(i);
-            outer.append(inner);
+            &inner.append(i);
+            &outer.append(inner);
             i += 1;
           END
           RETURN;
@@ -575,7 +575,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE i = 0;
           WHILE i < 1 DO
             inner: Int64[] = [i, i + 1];
-            outer.append(inner);
+            &outer.append(inner);
             i += 1;
           END
           RETURN;
@@ -596,7 +596,7 @@ RSpec.describe LoopFrameAnalysis do
           WHILE i < 1 DO
             MUTABLE m: {String}Int64 = {};
             m["x"] = i;
-            outer.append(m);
+            &outer.append(m);
             i += 1;
           END
           RETURN;
@@ -615,7 +615,7 @@ RSpec.describe LoopFrameAnalysis do
         FN main() RETURNS Void ->
           FOR i IN (0_i64 ..< 5) DO
             MUTABLE parts: []Int64 = [];
-            parts.append(i);
+            &parts.append(i);
           END
           RETURN;
         END
@@ -631,7 +631,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE xs: Int64[] = [1_i64, 2_i64, 3_i64];
           FOR x IN xs DO
             MUTABLE parts: []Int64 = [];
-            parts.append(x);
+            &parts.append(x);
           END
           RETURN;
         END
@@ -661,7 +661,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE all: []Float64 = [];
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
-            append(all, 1.0);
+            append(&all, 1.0);
             i = i + 1_i64;
           END
           RETURN;
@@ -677,7 +677,7 @@ RSpec.describe LoopFrameAnalysis do
           count: Int64 = 3_i64;
           MUTABLE futures: ~Void[]@list = [];
           FOR i IN (0_i64 ..< count) DO
-            futures.append(BG { sleep(1_i64); });
+            &futures.append(BG { sleep(1_i64); });
           END
           FOR j IN (0_i64 ..< count) DO
             IF futures[j] EXISTS AS future THEN NEXT future; END
@@ -701,7 +701,7 @@ RSpec.describe LoopFrameAnalysis do
             MUTABLE j = 0_i64;
             WHILE j < 3 DO
               MUTABLE parts: []Int64 = [];
-              parts.append(j);
+              &parts.append(j);
               j = j + 1_i64;
             END
             i = i + 1_i64;
@@ -731,7 +731,7 @@ RSpec.describe LoopFrameAnalysis do
             MUTABLE i = 0_i64;
             WHILE i < 5 DO
               MUTABLE parts: []Int64 = [];
-              parts.append(i);
+              &parts.append(i);
               resp = resp $+ i.toString() $+ ";" $+ prefix.length().toString();
               i = i + 1_i64;
             END
@@ -756,7 +756,7 @@ RSpec.describe LoopFrameAnalysis do
             MUTABLE j = 0_i64;
             WHILE j < 5 DO
               MUTABLE parts: []String = [];
-              parts.append(j.toString());
+              &parts.append(j.toString());
               resp = resp $+ j.toString() $+ ";" $+ prefix.length().toString();
               j = j + 1_i64;
             END
@@ -780,7 +780,7 @@ RSpec.describe LoopFrameAnalysis do
             MUTABLE j = 0_i64;
             WHILE j < 5 DO
               MUTABLE parts: []String = [];
-              parts.append(j.toString());
+              &parts.append(j.toString());
               resp = resp $+ j.toString() $+ ";" $+ prefix.length().toString();
               j = j + 1_i64;
             END
@@ -1030,7 +1030,7 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
             MUTABLE parts: []Int64 = [];
-            parts.append(i);
+            &parts.append(i);
             i = i + 1_i64;
           END
           RETURN;
@@ -1086,7 +1086,7 @@ RSpec.describe LoopFrameAnalysis do
       ast = run_mir(<<~CLEAR)
         FN scratch(n: Int64) RETURNS Int64 ->
           MUTABLE parts: []Int64 = [];
-          parts.append(n);
+          &parts.append(n);
           RETURN n;
         END
         FN main() RETURNS Void ->

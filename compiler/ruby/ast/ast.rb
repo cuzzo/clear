@@ -476,6 +476,7 @@ module AST
   sig { params(node: AST::Node).returns(T.nilable(AST::Identifier)) }
   def self.root_identifier(node)
     case node
+    when AST::MutableBorrow             then root_identifier(node.target)
     when AST::GetField, AST::GetIndex then root_identifier(node.target)
     when AST::Identifier              then node
     end
@@ -752,8 +753,10 @@ module AST
     when ListLit
       (expr.items || []).compact
     when Cast, MoveNode, CopyNode, CloneNode, ShareNode, LinkNode, ResolveNode,
+         MutableBorrow,
          FreezeNode, CapabilityWrap
-      expr.value ? [expr.value] : []
+      child = expr.is_a?(MutableBorrow) ? expr.target : expr.value
+      child ? [child] : []
     else
       []
     end
@@ -768,9 +771,10 @@ module AST
     case node
     when CopyNode, CloneNode, FreezeNode
       skip_copy ? [] : [node.value].compact
-    when MoveNode, ShareNode, CapabilityWrap, Cast, ReturnNode, Assignment, VarDecl, BindExpr,
+    when MoveNode, ShareNode, CapabilityWrap, Cast, MutableBorrow, ReturnNode, Assignment, VarDecl, BindExpr,
          DestructuringAssignment
-      [node.value].compact
+      child = node.is_a?(MutableBorrow) ? node.target : node.value
+      [child].compact
     when BinaryOp
       [node.left, node.right].compact
     when UnaryOp
@@ -2527,9 +2531,42 @@ module AST
     include Locatable
     include StatementVoidType
   end
+
+  # Shared syntax metadata for calls with explicit mutable arguments. The
+  # marker is consumed during annotation, so this keeps a source token rather
+  # than introducing first-class reference semantics into MIR.
+  module ExplicitMutableArguments
+    extend T::Sig
+
+    sig { params(index: Integer, token: Lexer::Token).void }
+    def mark_explicit_mutable_argument!(index, token)
+      explicit_mutable_argument_tokens[index] = token
+    end
+
+    sig { params(index: Integer).returns(T::Boolean) }
+    def explicit_mutable_argument?(index)
+      explicit_mutable_argument_tokens.key?(index)
+    end
+
+    sig { params(index: Integer).returns(T.nilable(Lexer::Token)) }
+    def explicit_mutable_argument_token(index)
+      explicit_mutable_argument_tokens[index]
+    end
+
+    sig { returns(T::Hash[Integer, Lexer::Token]) }
+    def explicit_mutable_argument_tokens
+      @explicit_mutable_argument_tokens = T.let(
+        @explicit_mutable_argument_tokens,
+        T.nilable(T::Hash[Integer, Lexer::Token])
+      )
+      @explicit_mutable_argument_tokens ||= {}
+    end
+  end
+
   FuncCall     = Struct.new(:token, :name, :args) do
     extend T::Sig
     include Locatable
+    include ExplicitMutableArguments
     # ruby-to-clear: field-type name=Any
     attr_accessor :module_alias
     attr_accessor :extern_call       # true when calling a native EXTERN FN (no rt, no try)
@@ -2587,6 +2624,7 @@ module AST
   MethodCall   = Struct.new(:token, :object, :name, :args) do
     extend T::Sig
     include Locatable
+    include ExplicitMutableArguments
     attr_accessor :pool_method    # :insert, :get, :remove — set by annotator for Pool dispatch
     attr_accessor :set_method     # :insert, :contains, :remove, :count — set by annotator for Set dispatch
     attr_accessor :map_method     # :delete, :contains, :count, :keys, :values — set by annotator for HashMap dispatch
@@ -2597,6 +2635,18 @@ module AST
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     attr_accessor :safe_nav_chain    # implicit continuation of an earlier ?. over non-optional members
     attr_accessor :error_union_type  # full !T requirement result before expression-level propagation unwraps it
+    sig { params(token: Lexer::Token).void }
+    def mark_explicit_mutable_receiver!(token)
+      @explicit_mutable_receiver_token = T.let(token, T.nilable(Lexer::Token))
+    end
+    sig { returns(T::Boolean) }
+    def explicit_mutable_receiver?
+      !explicit_mutable_receiver_token.nil?
+    end
+    sig { returns(T.nilable(Lexer::Token)) }
+    def explicit_mutable_receiver_token
+      @explicit_mutable_receiver_token = T.let(@explicit_mutable_receiver_token, T.nilable(Lexer::Token))
+    end
     sig { returns(T.nilable(Symbol)) }
     def protocol_operation
       @protocol_operation = T.let(@protocol_operation, T.nilable(Symbol))
@@ -2839,6 +2889,13 @@ module AST
     # ruby-to-clear: skip
     sig { returns(T.nilable(String)) }
     def name; target.respond_to?(:name) ? target.name : nil end
+  end
+  # Explicit call-site mutation marker. It never denotes a first-class
+  # reference: call annotation consumes it and records the marker on the
+  # enclosing call before type checking/lowering the target value.
+  MutableBorrow = Struct.new(:token, :target) do
+    extend T::Sig
+    include Locatable
   end
   OrElseRaise        = Struct.new(:token) { include Locatable }  # OR_ELSE RAISE - bubble up error (Zig's try)
   # OR_ELSE EXIT forms under the unified error system. Unspecified fields
@@ -3272,6 +3329,10 @@ module AST
   StaticCall        = Struct.new(:token, :type_name, :method_name, :args) do
     extend T::Sig
     include Locatable
+    include ExplicitMutableArguments
+
+    sig { returns(String) }
+    def name = "#{type_name.name}::#{method_name}"
 
     sig { returns(T.nilable(AST::FuncCall)) }
     def inherent_call
@@ -3282,6 +3343,8 @@ module AST
     def inherent_call=(value)
       @inherent_call = value
     end
+
+
   end
 
   class DoBranch < T::Struct

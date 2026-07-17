@@ -1191,10 +1191,10 @@ RSpec.describe "annotator branch gap burndown" do
       CHT
       <<~CHT,
         STRUCT Counter { value: Int64 }
-        FN bump!(MUTABLE c: Counter) RETURNS Void -> c.value = c.value + 1_i64; RETURN; END
+        FN bump(MUTABLE c: Counter) RETURNS Void -> c.value = c.value + 1_i64; RETURN; END
         FN main() RETURNS Void ->
           MUTABLE c = Counter{ value: 1_i64 };
-          bump!(c);
+          bump(&c);
           RETURN;
         END
       CHT
@@ -1225,10 +1225,10 @@ RSpec.describe "annotator branch gap burndown" do
         STRUCT Box { values: []Int64 }
         FN main() RETURNS Void ->
           MUTABLE xs: []Int64 = [];
-          xs.append(1_i64);
+          &xs.append(1_i64);
           b = Box{ values: xs };
           MUTABLE out: []Int64 = [];
-          out.append(b.values[0_i64]);
+          &out.append(b.values[0_i64]);
           RETURN;
         END
       CHT
@@ -1271,7 +1271,7 @@ RSpec.describe "annotator branch gap burndown" do
       <<~CHT,
         FN main() RETURNS Void ->
           xs: Int64[] = [1_i64, 2_i64];
-          WHILE xs.pop() EXISTS AS v DO
+          WHILE &xs.pop() EXISTS AS v DO
             s: String = COPY "owned";
             GIVE s;
           END
@@ -1284,8 +1284,8 @@ RSpec.describe "annotator branch gap burndown" do
       <<~CHT,
         FN hold(MUTABLE x: String) RETURNS *:String -> RETURN x; END
         FN main() RETURNS Void ->
-          MUTABLE s: String = COPY "abc";
-          out: String = hold(s);
+          s: String = COPY "abc";
+          out: String = hold(&s);
           RETURN;
         END
       CHT
@@ -2700,12 +2700,6 @@ RSpec.describe "annotator branch gap burndown" do
     borrowed_no_tok.full_type = Type.new(:String)
     ann.send(:emit_return_borrowed_no_copy_error!, borrowed_no_tok)
 
-    fn = AST::FunctionDef.new(token, "mutates", [], [], Type.new(:Void), nil, [], [], nil, :package)
-    fn.name_token = token(:VAR_ID, "mutates")
-    ann.send(:emit_style_mutable_param_needs_bang!, fn)
-    fn.name_token = nil
-    ann.send(:emit_style_mutable_param_needs_bang!, fn)
-
     scope = Scope.new
     decl_tok = token(:VAR_ID, "cell")
     decl_tok.line = 4
@@ -2719,9 +2713,9 @@ RSpec.describe "annotator branch gap burndown" do
     expect(ann.send(:build_atomic_escape_migration_fix, cell_sym, "cell")).not_to be_nil
 
     codes = direct_errors(ann).map { |e| e[1] }
-    expect(codes.count(:fixable)).to be >= 8
+    expect(codes.count(:fixable)).to be >= 6
     expect(codes).to include(:REGISTRY_MISMATCH_REJECTED, :TYPO_SUGGESTION_REJECTED, :MATCH_NON_EXHAUSTIVE,
-      :RETURN_BORROWED_NO_COPY_OR_LIFETIME, :STYLE_MUTABLE_PARAM_NEEDS_BANG)
+      :RETURN_BORROWED_NO_COPY_OR_LIFETIME)
   end
 
   it "covers error selector resolution branch matrix directly" do
@@ -4372,7 +4366,7 @@ RSpec.describe "annotator branch gap burndown" do
 
     expect(ann.send(:observable_capability_explanation, nil, :shared)).to include("heap-pointer lifetime")
     codes = direct_errors(ann).map { |e| e[1] }
-    expect(codes).to include(:MATCH_ENUM_CAPTURE, :MATCH_UNIT_CAPTURE, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, :GIVE_TO_BORROW_PARAM)
+    expect(codes).to include(:MATCH_ENUM_CAPTURE, :MATCH_UNIT_CAPTURE, :GIVE_TO_BORROW_PARAM)
   end
 
   it "uses the function registry in execution-boundary, capability, and tight-loop helpers" do

@@ -53,7 +53,7 @@ module DiagnosticRegistry
   DiagnosticEntry = T.type_alias { T::Hash[Symbol, DiagnosticEntryValue] }
   DiagnosticArgs = T.type_alias { T::Array[DiagnosticKwValue] }
   DiagnosticKwargs = T.type_alias { T::Hash[Symbol, DiagnosticKwValue] }
-  CATEGORIES = T.let(%i[type type_migration ownership capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
+  CATEGORIES = T.let(%i[type type_migration ownership mutability capability concurrency lifetime escape registry reentrance lint syntax mir test].freeze, T::Array[Symbol])
   SEVERITIES = T.let(%i[error warning hint info].freeze, T::Array[Symbol])
 
   sig { returns(T::Array[Symbol]) }
@@ -698,7 +698,7 @@ module DiagnosticRegistry
       severity: :error, category: :ownership,
       template: "Parameter '%{name}' is MUTABLE but has primitive type '%{type}'. Primitives are passed by value, so mutating them locally has no effect on the caller.",
       summary:  "Declaring a primitive-typed parameter `MUTABLE` is meaningless (pass-by-value).",
-      cause: "Reserved for a future warning: declaring a primitive-typed parameter `MUTABLE` is a footgun. CLEAR's `MUTABLE x: T` mutates the caller's binding through the parameter — but for primitives (Int64, Float64, Bool, etc.), the parameter is a copy and writes to it never reach the caller. The check would fire on `FN bump!(MUTABLE x: Int64) -> x = x + 1; END`, suggesting either dropping `MUTABLE` (if the local-only mutation is intentional) or returning the new value.",
+      cause: "Reserved for a future warning: declaring a primitive-typed parameter `MUTABLE` is a footgun. CLEAR's `MUTABLE x: T` mutates the caller's binding through the parameter — but for primitives (Int64, Float64, Bool, etc.), the parameter is a copy and writes to it never reach the caller. The check would fire on `FN bump(MUTABLE x: Int64) -> x = x + 1; END`, suggesting either dropping `MUTABLE` (if the local-only mutation is intentional) or returning the new value.",
       fix_hint: "While the check isn't wired, ask: did you mean to mutate the caller's variable? If so, return the new value and assign at the call site. If the local-only mutation is intentional, drop `MUTABLE` from the parameter declaration.",
       pending: true,
     },
@@ -707,10 +707,35 @@ module DiagnosticRegistry
       template: "Argument %{index} ('%{param}') is MUTABLE, but you passed immutable variable '%{actual}'.",
       summary:  "Callee's MUTABLE parameter requires a mutable binding at the call site.",
     },
-    IMMUTABLE_ARG_PASSED_AS_EXPRESSION: {
-      severity: :error, category: :ownership,
-      template: "Argument %{index} ('%{param}') is MUTABLE. You cannot pass a value/expression, you must pass a Mutable Variable.",
-      summary:  "Callee's MUTABLE parameter requires a binding, not a temporary expression.",
+    MUTABLE_ARGUMENT_REQUIRES_MARKER: {
+      severity: :error, category: :mutability,
+      template: "Argument %{index} ('%{param}') is MUTABLE. Pass '%{actual}' as '&%{actual}' so the mutation is explicit at this call site.",
+      summary: "A MUTABLE parameter requires an explicit `&` marker on the value it may mutate.",
+      fix_hint: "Insert `&` before the argument. If the local binding is immutable, also declare it MUTABLE.",
+    },
+    MUTABLE_MARKER_ON_IMMUTABLE_PARAM: {
+      severity: :error, category: :mutability,
+      template: "Argument %{index} ('%{param}') is not MUTABLE, so it must not be passed with '&'.",
+      summary: "The call site claims the callee mutates an argument whose parameter is not MUTABLE.",
+      fix_hint: "Remove `&`, or make the callee parameter MUTABLE if mutation is part of its contract.",
+    },
+    MUTABLE_MARKER_ON_ANONYMOUS_VALUE: {
+      severity: :error, category: :mutability,
+      template: "Argument %{index} ('%{param}') is an anonymous value. Pass it directly; '&' only marks mutation of existing storage.",
+      summary: "Anonymous temporaries do not need an explicit mutation marker because no caller binding can observe their mutation.",
+      fix_hint: "Remove `&` from the anonymous expression.",
+    },
+    MUTABLE_MARKER_REQUIRES_CALL: {
+      severity: :error, category: :mutability,
+      template: "'&' is only valid on an argument passed to a MUTABLE parameter or before a mutating method receiver.",
+      summary: "CLEAR's `&` is an explicit call-site mutation marker, not a first-class pointer/reference operator.",
+      fix_hint: "Use `&value` only inside a call, or `&value.method(...)` when the method mutates value.",
+    },
+    LEGACY_MUTATION_NAME_SUFFIX: {
+      severity: :error, category: :mutability,
+      template: "Identifier suffix '!' no longer marks mutation. Mutation is declared by MUTABLE and made explicit on affected values with '&'.",
+      summary: "CLEAR no longer encodes mutation in function or method names.",
+      fix_hint: "Remove the `!` suffix; the call-site checker will insert `&` on values passed to MUTABLE parameters.",
     },
     RETURN_MISMATCH: {
       severity: :error, category: :type,
@@ -1592,11 +1617,6 @@ module DiagnosticRegistry
       severity: :error, category: :registry,
       template: "REQUIRE is only supported when using the Importer. Pass importer: and source_dir: to SemanticAnnotator.new.",
       summary:  "REQUIRE statement reached annotation without an active importer (script-mode invocation).",
-    },
-    STYLE_MUTABLE_PARAM_NEEDS_BANG: {
-      severity: :error, category: :ownership,
-      template: "Style Error: Function '%{name}' has MUTABLE parameters. Its name must end in '!'",
-      summary:  "Functions that take MUTABLE params should end with `!` to surface the mutation at every call site.",
     },
     MUTABLE_UNUSED: {
       severity: :warning, category: :lint,
@@ -3508,7 +3528,9 @@ module DiagnosticRegistry
     ADD_ERROR_UNION_TO_RETURN: "Add `!` to the return type to declare the error union (Zig-style fallible signature).",
     ADD_NON_REENTRANT_REQUIRES: "Add %{requires} (rejects reentrant callbacks).",
     ADD_WITH_GUARD_ALIASES: "Add `AS <alias>` to each binding so the GUARD predicate can read the unwrapped value.",
-    APPEND_MUTABLE_PARAM_BANG: "Append `!` to '%{name}' (signals that it takes a MUTABLE parameter).",
+    INSERT_MUTABLE_ARGUMENT_MARKER: "Pass '%{name}' as '&%{name}' for MUTABLE parameter '%{param}'.",
+    REMOVE_MUTABLE_ARGUMENT_MARKER: "Remove `&` because parameter '%{param}' is not MUTABLE.",
+    REMOVE_MUTATION_NAME_SUFFIX: "Remove the retired `!` mutation suffix from this identifier.",
     CHANGE_BINDING_CAPABILITY_FOR_MOVE: "Change '%{name}' to `%{cap}` at its declaration (%{reason}).",
     CHANGE_DECL_CAPABILITY_GENERIC: "Change `%{old_sigil}` to `%{new_sigil}` on '%{name}' (line %{line}).",
     CHOOSE_RECURSIVE_LAYOUT: "%{description} on %{edge} using `%{capability}`.",

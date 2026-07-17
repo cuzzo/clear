@@ -149,13 +149,20 @@ module MethodAnalysis
     node.stdlib_allocates = defn_allocates
     node.mutates_receiver = defn.mutates_receiver?
 
-    narrow_receiver_collection!(node, obj_type, defn)
-
-    # Ownership: mark TAKES args as moved (same as function_analysis.rb line 305-310)
-    defn.intrinsic_argument_takes_indices.each do |arg_idx|
-      arg_node = T.must(node.args[arg_idx])
-      move_if_takes_ownership!(arg_node, action: :takes, consumer_param_type: nil)
+    # Collection methods use the same signature contract as functions and
+    # inherent/protocol methods. In particular, mutating receivers must be
+    # written `&value.method(...)`; the old bang-name convention never made
+    # this boundary explicit.
+    if defn.mutates_receiver? || defn.intrinsic_argument_takes_indices.any?
+      verify_function_signature!(node, collection_effect_signature(node, obj_type, defn),
+        [node.object] + node.args)
+      # Signature validation uses a concrete receiver/argument projection, but
+      # lowering and MIR runtime discovery need the full intrinsic contract
+      # (allocation template, failure behavior, and codegen pattern).
+      node.matched_signature = resolved_defn if zig && node.respond_to?(:matched_signature=)
     end
+
+    narrow_receiver_collection!(node, obj_type, defn)
 
     # Methods that allocate on the heap -- record so needs_rt is computed correctly.
     current_fn_ctx&.record_heap_use! if defn_allocates
@@ -173,6 +180,38 @@ module MethodAnalysis
 
     true
   end
+
+  sig do
+    params(
+      node: AST::MethodCall,
+      receiver_type: Type,
+      definition: FunctionSignature,
+    ).returns(FunctionSignature)
+  end
+  def collection_effect_signature(node, receiver_type, definition)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    takes = definition.intrinsic_argument_takes_indices.to_set
+    params = T.let([
+      AST::Param.new(
+        name: "receiver",
+        type: receiver_type,
+        required: true,
+        mutable: definition.mutates_receiver?,
+        takes: false,
+      )
+    ], T::Array[AST::Param])
+    node.args.each_with_index do |argument, index|
+      params << AST::Param.new(
+        name: "arg#{index + 1}",
+        type: argument.full_type!(context: "collection method argument"),
+        required: true,
+        mutable: false,
+        takes: takes.include?(index),
+      )
+    end
+    FunctionSignature.new(params: params, return_type: node.full_type!(context: "collection method result"))
+  end
+  private :collection_effect_signature
 
   sig { params(node: AST::MethodCall).void }
   def validate_indirect_collection_insertion!(node)

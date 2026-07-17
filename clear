@@ -644,7 +644,7 @@ when 'build'
       opt_level = 'Debug'
       extra_flags = []
       i += 1
-    when '--gradual'
+    when '--gradual', '--easy'
       # Gradual-typing mode (see docs/agents/gradual-typing.md).
       # Parser inserts implicit Auto for omitted parameter / return
       # type annotations; the inference pass resolves each Auto from
@@ -857,7 +857,7 @@ when 'run'
       use_c_allocator = true
     when '--no-cache'
       no_cache = true
-    when '--gradual'
+    when '--gradual', '--easy'
       ownership_mode = :easy
     when '--strict'
       ownership_mode = :strict
@@ -870,6 +870,10 @@ when 'run'
   error "Usage: clear run <file.clear> [--optimized|--safe] [-- args...]" unless source
 
   source = File.expand_path(source)
+  if ownership_mode == :easy
+    require_relative 'compiler/ruby/tools/clear_fix_support'
+    ClearFixSupport.run_args(['--loop', '--auto', source])
+  end
   output = File.join(File.dirname(source), File.basename(source, '.clear'))
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
   if find_project_build_zig(source)

@@ -12,7 +12,7 @@ RSpec.describe "generic associated-key map storage" do
     <<~CLEAR
       STRUCT Index<M: Map> { entries={}: {M::Key}M::Value }
       IMPLEMENTATION Index<M> {
-        METHOD put!(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
+        METHOD put(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
           self.entries[key] = COPY value;
         END
         METHOD get(self, key: M::Key) RETURNS !?M::Value ->
@@ -63,13 +63,13 @@ RSpec.describe "generic associated-key map storage" do
     transpile(<<~CLEAR)
       STRUCT Index<M: Map> { entries: {M::Key}M::Value }
       IMPLEMENTATION Index<M> {
-        METHOD put!(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
+        METHOD put(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
           self.entries[key] = COPY value;
         END
       }
       FN main() RETURNS !Void ->
         MUTABLE words = Index<{String}String>{ entries: {} } @shared:locked;
-        WITH EXCLUSIVE words AS view { view.put!("key", "value"); }
+        WITH EXCLUSIVE words AS view { &view.put("key", "value"); }
       END
     CLEAR
     expect(stderr.string).not_to include("never mutated via WITH EXCLUSIVE")

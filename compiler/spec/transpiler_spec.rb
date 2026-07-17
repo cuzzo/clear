@@ -39,9 +39,9 @@ RSpec.describe ZigTranspiler do
       zig = transpile(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE src: []String = [];
-          src.append(COPY "a");
-          src.append(COPY "b");
-          IF src.pop() EXISTS AS v THEN
+          &src.append(COPY "a");
+          &src.append(COPY "b");
+          IF &src.pop() EXISTS AS v THEN
             ASSERT v.length() >= 0_i64, "captured string";
           ELSE
             ASSERT FALSE, "expected a popped value";
@@ -60,8 +60,8 @@ RSpec.describe ZigTranspiler do
 
         FN main() RETURNS Void ->
           MUTABLE src: []Item = [];
-          src.append(Item{ name: COPY "a" });
-          WHILE src.pop() EXISTS AS v DO
+          &src.append(Item{ name: COPY "a" });
+          WHILE &src.pop() EXISTS AS v DO
             ASSERT v.name.length() >= 0_i64, "captured struct";
           END
           RETURN;
@@ -80,7 +80,7 @@ RSpec.describe ZigTranspiler do
           Num: Float64
         }
 
-        FN convert!(token: String) RETURNS !Val ->
+        FN convert(token: String) RETURNS !Val ->
           IF token == "nil" THEN RETURN Val.Nil; END
           IF charAt(token, 0) == "\\"" THEN RETURN Val{ Str: substr(token, 1, token.length() - 2) }; END
           n = toNumber(token) OR_ELSE (0.0 - 999999.0);
@@ -96,8 +96,8 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE stack: []Int64 = [];
-          stack.append(1_i64);
-          v = stack.pop() OR_ELSE 0_i64;
+          &stack.append(1_i64);
+          v = &stack.pop() OR_ELSE 0_i64;
           ASSERT v == 1_i64, "primitive pop fallback";
           RETURN;
         END
@@ -110,8 +110,8 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE src: []String = [];
-          src.append(COPY "a");
-          v = src.pop() OR_ELSE COPY "fallback";
+          &src.append(COPY "a");
+          v = &src.pop() OR_ELSE COPY "fallback";
           ASSERT v.length() > 0_i64, "owned pop fallback";
           RETURN;
         END
@@ -209,7 +209,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE vals: []Float64 = [];
-          append(vals, 1.0);
+          append(&vals, 1.0);
           RETURN;
         END
       CLEAR
@@ -222,7 +222,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE vals: []Float64 = [];
-          append(vals, 1.0);
+          append(&vals, 1.0);
           RETURN;
         END
       CLEAR
@@ -270,7 +270,7 @@ RSpec.describe ZigTranspiler do
           c26: zero
         };
         MUTABLE vals: []Float64 = [];
-        append(vals, big.c1.a);
+        append(&vals, big.c1.a);
         RETURN vals;
       END
       FN main() RETURNS Void ->
@@ -364,7 +364,7 @@ RSpec.describe ZigTranspiler do
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
             MUTABLE vals: []Float64 = [];
-            append(vals, 1.0);
+            append(&vals, 1.0);
             i = i + 1_i64;
           END
           RETURN;
@@ -381,7 +381,7 @@ RSpec.describe ZigTranspiler do
           MUTABLE items: Int64[] = [1_i64, 2_i64, 3_i64];
           FOR item IN items DO
             MUTABLE parts: []Int64 = [];
-            parts.append(item);
+            &parts.append(item);
           END
           RETURN;
         END
@@ -396,7 +396,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           FOR i IN (0_i64 ..< 10) DO
             MUTABLE parts: []Int64 = [];
-            parts.append(i);
+            &parts.append(i);
           END
           RETURN;
         END
@@ -416,7 +416,7 @@ RSpec.describe ZigTranspiler do
           MUTABLE all: []Float64 = [];
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
-            append(all, 1.0);
+            append(&all, 1.0);
             i = i + 1_i64;
           END
           RETURN;
@@ -527,8 +527,8 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN main() RETURNS Void ->
             MUTABLE keys: []String = [];
-            keys.append("a");
-            keys.append("b");
+            &keys.append("a");
+            &keys.append("b");
             MUTABLE counts: {String}@sharded(4) Int64 = {};
             (0_i64 ..< 2_i64) |> SHARD(keys[_] OR_ELSE panic("keys index invariant"), counts) |> CONCURRENT EACH {
                 cur = counts[_] OR_ELSE 0;
@@ -567,7 +567,7 @@ RSpec.describe ZigTranspiler do
           MUTABLE i = 0_i64;
           WHILE i < 10 DO
             MUTABLE vals: []Float64 = [];
-            append(vals, 1.0);
+            append(&vals, 1.0);
             i = i + 1_i64;
           END
           RETURN;
@@ -621,7 +621,7 @@ RSpec.describe ZigTranspiler do
           MUTABLE i = 0_i64;
           TIGHT WHILE i < 10 DO
             MUTABLE vals: []Float64 = [];
-            append(vals, 1.0);
+            append(&vals, 1.0);
             i = i + 1_i64;
           END
           RETURN;
@@ -695,7 +695,7 @@ RSpec.describe ZigTranspiler do
           MUTABLE i = 0_i64;
           MUTABLE vals: []Int64 = [];
           TIGHT WHILE i < 3 DO
-            vals.append(fib(i));
+            &vals.append(fib(i));
             i = i + 1_i64;
           END
           RETURN;
@@ -855,14 +855,14 @@ RSpec.describe ZigTranspiler do
   describe "HashMap param double-& fix" do
     it "does not double-wrap HashMap params with & in recursive calls" do
       src = <<~CLEAR
-        FN update!(key: String, MUTABLE env: {String}Int64, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT ->
+        FN update(key: String, MUTABLE env: {String}Int64, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT ->
             env[key] = depth;
-            IF depth > 0 THEN RETURN update!(key, env, depth - 1); END
+            IF depth > 0 THEN RETURN update(key, &env, depth - 1); END
             RETURN depth;
         END
         FN main() RETURNS Void ->
             MUTABLE env: {String}Int64 = {};
-            update!("k", env, 3);
+            update("k", &env, 3);
         END
       CLEAR
       zig = transpile(src)
@@ -898,7 +898,7 @@ RSpec.describe ZigTranspiler do
         UNION Wrapper { Items: Int64[] }
         FN main() RETURNS Void ->
             MUTABLE vals: []Int64 = List[];
-            vals.append(1_i64);
+            &vals.append(1_i64);
             w = Wrapper{ Items: vals };
         END
       CLEAR
@@ -914,8 +914,8 @@ RSpec.describe ZigTranspiler do
         STRUCT Pair { items: Int64[], count: Int64 }
         FN build() RETURNS !Pair ->
             MUTABLE vals: []Int64 = List[];
-            vals.append(1_i64);
-            vals.append(2_i64);
+            &vals.append(1_i64);
+            &vals.append(2_i64);
             RETURN Pair{ items: vals, count: 2 };
         END
         FN main() RETURNS Void ->
@@ -932,7 +932,7 @@ RSpec.describe ZigTranspiler do
         STRUCT Pair { items: Int64[], count: Int64 }
         FN build() RETURNS !Pair ->
             MUTABLE vals: []Int64 = List[];
-            vals.append(1_i64);
+            &vals.append(1_i64);
             RETURN Pair{ items: vals, count: 1 };
         END
         FN main() RETURNS Void ->
@@ -1008,8 +1008,8 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @boxed, id: Int64 } }
-        FN test!(MUTABLE pool: [Pool(10)]Env, MUTABLE map: {String}Value) RETURNS !Void ->
-            pool.insert(Env{ x: 1 });
+        FN test(MUTABLE pool: [Pool(10)]Env, MUTABLE map: {String}Value) RETURNS !Void ->
+            &pool.insert(Env{ x: 1 });
             val = Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
             map["key"] = val;
             RETURN;
@@ -1026,7 +1026,7 @@ RSpec.describe ZigTranspiler do
     it "moves owned map assignment values without deep-copying them" do
       src = <<~CLEAR
         UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @boxed, id: Int64 } }
-        FN test!(MUTABLE map: {String}Value) RETURNS !Void ->
+        FN test(MUTABLE map: {String}Value) RETURNS !Void ->
             val = Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
             map["key"] = val;
             RETURN;
@@ -1044,8 +1044,8 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @boxed, id: Int64 } }
-        FN test!(TAKES v: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
-            pool.insert(Env{ x: 1 });
+        FN test(TAKES v: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
+            &pool.insert(Env{ x: 1 });
             PARTIAL MATCH v START
                 Value.Lambda AS lam -> RETURN Value.Nil;,
                 DEFAULT -> RETURN Value.Nil;
@@ -1061,8 +1061,8 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @boxed, id: Int64 } }
-        FN test!(TAKES v: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
-            pool.insert(Env{ x: 1 });
+        FN test(TAKES v: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
+            &pool.insert(Env{ x: 1 });
             PARTIAL MATCH TAKES v START
                 Value.Lambda AS lam -> RETURN Value.Nil;,
                 DEFAULT -> RETURN Value.Nil;
@@ -1079,8 +1079,8 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @boxed, id: Int64 } }
-        FN test!(TAKES v: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
-            pool.insert(Env{ x: 1 });
+        FN test(TAKES v: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
+            &pool.insert(Env{ x: 1 });
             PARTIAL MATCH v START
                 Value.Num AS n -> RETURN Value{ Num: n };,
                 DEFAULT -> RETURN Value.Nil;
@@ -1094,7 +1094,7 @@ RSpec.describe ZigTranspiler do
     end
     it "heap-dupes string literal value in HashMap assignment" do
       src = <<~CLEAR
-        FN test!(MUTABLE map: {String}String) RETURNS !Void ->
+        FN test(MUTABLE map: {String}String) RETURNS !Void ->
             map["key"] = "hello";
             RETURN;
         END
@@ -1108,7 +1108,7 @@ RSpec.describe ZigTranspiler do
     it "heap-dupes string literal inside union value in HashMap assignment" do
       src = <<~CLEAR
         UNION Value { Nil, Str: String }
-        FN test!(MUTABLE map: {String}Value) RETURNS !Void ->
+        FN test(MUTABLE map: {String}Value) RETURNS !Void ->
             map["key"] = Value{ Str: "world" };
             RETURN;
         END
@@ -1120,7 +1120,7 @@ RSpec.describe ZigTranspiler do
     it "plain MATCH AS on non-Copy variant does not emit owned binding cleanup" do
       src = <<~CLEAR
         UNION Value { Num: Float64, List: Value[] }
-        FN test!() RETURNS !Void ->
+        FN test() RETURNS !Void ->
             result = Value{ Num: 1.0 };
             PARTIAL MATCH result START
                 Value.List AS items -> RETURN;,
@@ -1136,7 +1136,7 @@ RSpec.describe ZigTranspiler do
     it "MATCH TAKES emits cleanup on AS binding" do
       src = <<~CLEAR
         UNION Value { Num: Float64, List: Value[] }
-        FN test!() RETURNS !Void ->
+        FN test() RETURNS !Void ->
             result = Value{ Num: 1.0 };
             PARTIAL MATCH TAKES result START
                 Value.List AS items -> RETURN;,
@@ -1187,12 +1187,12 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         UNION Value { Nil, Str: String }
         STRUCT Pair { a: Value, b: Value }
-        FN consume!(TAKES items: Value[]) RETURNS Pair ->
+        FN consume(TAKES items: Value[]) RETURNS Pair ->
             RETURN Pair{ a: items[0], b: Value.Nil };
         END
         FN main() RETURNS Void ->
             MUTABLE list: []Value = List[];
-            p = consume!(list);
+            p = consume(list);
             RETURN;
         END
       CLEAR
@@ -1210,9 +1210,9 @@ RSpec.describe ZigTranspiler do
         }
         FN main() RETURNS Void ->
             MUTABLE pool: [Pool(10)]Env = [];
-            rootId: Id<Env> = pool.insert(Env{ vars: {} });
+            rootId: Id<Env> = &pool.insert(Env{ vars: {} });
             MUTABLE p: []Value = List[];
-            p.append(Value.Nil);
+            &p.append(Value.Nil);
             v = Value.Lambda{ params: p, body: Value.Nil, envId: rootId };
             RETURN;
         END
@@ -1259,7 +1259,7 @@ RSpec.describe ZigTranspiler do
         FN consume(items: Value[]) RETURNS Value -> RETURN Value.Nil; END
         FN main() RETURNS Void ->
             MUTABLE evaled: []Value = List[];
-            evaled.append(Value{ Str: COPY "hello" });
+            &evaled.append(Value{ Str: COPY "hello" });
             result = consume(evaled);
             RETURN;
         END
@@ -1312,13 +1312,13 @@ RSpec.describe ZigTranspiler do
     it "emits items_moved = true when TAKES slice is returned inside union" do
       src = <<~CLEAR
         UNION Value { Nil, List: Value[] }
-        FN consume!(TAKES items: Value[]) RETURNS Value ->
+        FN consume(TAKES items: Value[]) RETURNS Value ->
             IF items.length() == 0 THEN RETURN Value{ List: items }; END
             RETURN Value.Nil;
         END
         FN main() RETURNS Void ->
             MUTABLE list: []Value = List[];
-            result = consume!(list);
+            result = consume(list);
             RETURN;
         END
       CLEAR
@@ -1333,10 +1333,10 @@ RSpec.describe ZigTranspiler do
     it "generates rt parameter for function with TAKES slice" do
       src = <<~CLEAR
         UNION Value { Nil, Symbol: String }
-        FN process!(TAKES items: Value[]) RETURNS Float64 -> RETURN 42.0; END
+        FN process(TAKES items: Value[]) RETURNS Float64 -> RETURN 42.0; END
         FN main() RETURNS Void ->
             MUTABLE list: []Value = List[];
-            result = process!(list);
+            result = process(list);
             RETURN;
         END
       CLEAR
@@ -1349,7 +1349,7 @@ RSpec.describe ZigTranspiler do
     it "emits cleanup for heap string returned by TAKES function" do
       src = <<~CLEAR
         UNION Value { Nil, Symbol: String, List: Value[] }
-        FN consume!(TAKES v: Value) RETURNS !String ->
+        FN consume(TAKES v: Value) RETURNS !String ->
             PARTIAL MATCH TAKES v START
                 Value.Symbol AS s -> RETURN COPY s;,
                 DEFAULT -> RETURN "other";
@@ -1358,7 +1358,7 @@ RSpec.describe ZigTranspiler do
         END
         FN main() RETURNS Void ->
             sym = Value{ Symbol: COPY "hello" };
-            result = consume!(sym);
+            result = consume(sym);
             RETURN;
         END
       CLEAR
@@ -1373,7 +1373,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         STRUCT Env { vars: {String}Int64 }
 
-        FN has!(envId: Id<Env>, name: String, MUTABLE pool: [Pool(10)]Env) RETURNS Bool ->
+        FN has(envId: Id<Env>, name: String, MUTABLE pool: [Pool(10)]Env) RETURNS Bool ->
             RETURN pool[envId]?.vars.contains?(name) OR_ELSE FALSE;
         END
       CLEAR
@@ -1414,7 +1414,7 @@ RSpec.describe ZigTranspiler do
         UNION Value { Nil, List: Value[] }
         FN main() RETURNS Void ->
             MUTABLE items: []Value = List[];
-            items.append(Value.Nil);
+            &items.append(Value.Nil);
             v = Value{ List: items };
             RETURN;
         END
@@ -1430,7 +1430,7 @@ RSpec.describe ZigTranspiler do
         STRUCT Container { items: Value[] }
         FN main() RETURNS Void ->
             MUTABLE list: []Value = List[];
-            list.append(Value.Nil);
+            &list.append(Value.Nil);
             c = Container{ items: list };
             RETURN;
         END
@@ -1458,7 +1458,7 @@ RSpec.describe ZigTranspiler do
         UNION Value { Nil, Str: String, List: Value[] }
         FN main() RETURNS Void ->
             MUTABLE items: []Value = List[];
-            items.append(Value{ Str: COPY "hello" });
+            &items.append(Value{ Str: COPY "hello" });
             v = Value{ List: items };
             RETURN;
         END
@@ -1473,7 +1473,7 @@ RSpec.describe ZigTranspiler do
         UNION Wrapper { Nil, Items: Num[] }
         FN main() RETURNS Void ->
             MUTABLE items: []Num = List[];
-            items.append(Num{ Int: 42_i64 });
+            &items.append(Num{ Int: 42_i64 });
             w = Wrapper{ Items: items };
             RETURN;
         END
@@ -1494,16 +1494,16 @@ RSpec.describe ZigTranspiler do
           Tco { tcoAst: String @boxed, tcoEnv: Id<Env> }
         }
 
-        FN getEnvId!(v: Value, MUTABLE pool: [Pool(8)]Env) RETURNS !Id<Env> ->
+        FN getEnvId(v: Value, MUTABLE pool: [Pool(8)]Env) RETURNS !Id<Env> ->
           PARTIAL MATCH v START
             Value.Tco AS tco ->
               tcoEnv = COPY tco.tcoEnv;
               RETURN tcoEnv;,
             DEFAULT ->
-              dummy: Id<Env> = pool.insert(Env{ vars: [] });
+              dummy: Id<Env> = &pool.insert(Env{ vars: [] });
               RETURN dummy;
           END
-          dummy2: Id<Env> = pool.insert(Env{ vars: [] });
+          dummy2: Id<Env> = &pool.insert(Env{ vars: [] });
           RETURN dummy2;
         END
       CLEAR
@@ -1520,16 +1520,16 @@ RSpec.describe ZigTranspiler do
           Tco { tcoAst: String @boxed, tcoEnv: Id<Env> }
         }
 
-        FN eval!(TAKES ast: String, envId: Id<Env>, MUTABLE pool: [Pool(8)]Env) RETURNS String EFFECTS REENTRANT ->
+        FN eval(TAKES ast: String, envId: Id<Env>, MUTABLE pool: [Pool(8)]Env) RETURNS String EFFECTS REENTRANT ->
           RETURN ast;
         END
 
-        FN resolveTco!(v: Value, MUTABLE pool: [Pool(8)]Env) RETURNS !String EFFECTS REENTRANT ->
+        FN resolveTco(v: Value, MUTABLE pool: [Pool(8)]Env) RETURNS !String EFFECTS REENTRANT ->
           PARTIAL MATCH v START
             Value.Tco AS tco ->
               tcoAst = COPY tco.tcoAst;
               tcoEnv = COPY tco.tcoEnv;
-              RETURN eval!(GIVE tcoAst, tcoEnv, pool);,
+              RETURN eval(GIVE tcoAst, tcoEnv, &pool);,
             DEFAULT -> RETURN "";
           END
           RETURN "";
@@ -1616,9 +1616,9 @@ RSpec.describe ZigTranspiler do
   describe "BG string capture defer free" do
     it "captures an already-owned heap string as a fiber-owned duplicate" do
       src = <<~CLEAR
-        FN greet!(name: String) RETURNS String -> RETURN name; END
+        FN greet(name: String) RETURNS String -> RETURN name; END
         FN main() RETURNS Void ->
-            msg = greet!("hello");
+            msg = greet("hello");
             p: ~Void = BG { print(msg); };
             NEXT p;
             RETURN;
@@ -1657,12 +1657,12 @@ RSpec.describe ZigTranspiler do
 
     it "does NOT emit defer free for unpromoted string captures (BG inside MethodCall)" do
       src = <<~CLEAR
-        FN greet!(name: String) RETURNS String -> RETURN name; END
+        FN greet(name: String) RETURNS String -> RETURN name; END
         FN main() RETURNS Void ->
-            msg = greet!("hello");
+            msg = greet("hello");
             needle = "the";
             MUTABLE futures: ~Void[]@list = [];
-            futures.append(BG { print(msg); print(needle); });
+            &futures.append(BG { print(msg); print(needle); });
             IF futures[0] EXISTS AS future THEN NEXT future; END
             RETURN;
         END
@@ -1737,8 +1737,8 @@ RSpec.describe ZigTranspiler do
         FN work(n: Int64) RETURNS Int64 -> RETURN n; END
         FN main() RETURNS Void ->
             MUTABLE futures: ~Int64[]@list = [];
-            futures.append(BG { work(1); });
-            futures.append(BG { work(2); });
+            &futures.append(BG { work(1); });
+            &futures.append(BG { work(2); });
             results: []Int64 = NEXT futures;
             RETURN;
         END
@@ -1760,12 +1760,12 @@ RSpec.describe ZigTranspiler do
   describe "INV-1/INV-5: always-escaped collections are heap from start" do
     it "allocates always-escaped list on heap (no promoteList)" do
       src = <<~CLEAR
-        FN build!() RETURNS !Float64[] ->
+        FN build() RETURNS !Float64[] ->
             MUTABLE vals: []Float64 = List[];
-            append(vals, 1.0);
+            append(&vals, 1.0);
             RETURN vals;
         END
-        FN main() RETURNS Void -> x = build!(); RETURN; END
+        FN main() RETURNS Void -> x = build(); RETURN; END
       CLEAR
       zig = transpile(src)
       expect(zig).not_to include("promoteList")
@@ -1774,12 +1774,12 @@ RSpec.describe ZigTranspiler do
 
     it "uses heap allocator for always-escaped map" do
       src = <<~CLEAR
-        FN buildMap!() RETURNS !{String}Int64 ->
+        FN buildMap() RETURNS !{String}Int64 ->
             MUTABLE m: {String}Int64 = {};
             m["x"] = 1_i64;
             RETURN m;
         END
-        FN main() RETURNS Void -> x = buildMap!(); RETURN; END
+        FN main() RETURNS Void -> x = buildMap(); RETURN; END
       CLEAR
       zig = transpile(src)
       expect(zig).not_to include("promoteList")
@@ -1820,14 +1820,14 @@ RSpec.describe ZigTranspiler do
     it "hoists non-Copy union return from function call used as non-TAKES arg" do
       src = <<~CLEAR
         UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
-        FN makeVal!() RETURNS !Value ->
+        FN makeVal() RETURNS !Value ->
             RETURN Value.Lambda{ body: Value{ Num: 1.0 }, id: 1 };
         END
         FN useVal(v: Value) RETURNS String ->
             RETURN "ok";
         END
-        FN test!() RETURNS !String ->
-            RETURN useVal(makeVal!() OR_ELSE RAISE);
+        FN test() RETURNS !String ->
+            RETURN useVal(makeVal() OR_ELSE RAISE);
         END
       CLEAR
       zig = transpile(src)
@@ -1839,9 +1839,9 @@ RSpec.describe ZigTranspiler do
 
     it "does not hoist Copy types (Int64) used as non-TAKES args" do
       src = <<~CLEAR
-        FN makeNum!() RETURNS Int64 -> RETURN 42_i64; END
+        FN makeNum() RETURNS Int64 -> RETURN 42_i64; END
         FN useNum(n: Int64) RETURNS Void -> RETURN; END
-        FN test!() RETURNS Void -> useNum(makeNum!()); RETURN; END
+        FN test() RETURNS Void -> useNum(makeNum()); RETURN; END
       CLEAR
       zig = transpile(src)
       # Int64 is a Copy type -- no cleanup needed, no __tmp hoisting
@@ -1854,13 +1854,13 @@ RSpec.describe ZigTranspiler do
       # Use a named binding so makeStr!'s result is properly cleaned up
       # (inline `transform!(makeStr!())` would leak the temp string -- ERRDEFER_LEAK).
       src = <<~CLEAR
-        FN makeStr!() RETURNS !String -> RETURN COPY "hi"; END
-        FN transform!(s: String) RETURNS !String -> RETURN COPY s; END
-        FN caller!() RETURNS !String ->
-            s = makeStr!();
-            RETURN transform!(s);
+        FN makeStr() RETURNS !String -> RETURN COPY "hi"; END
+        FN transform(s: String) RETURNS !String -> RETURN COPY s; END
+        FN caller() RETURNS !String ->
+            s = makeStr();
+            RETURN transform(s);
         END
-        FN main() RETURNS Void -> result = caller!(); RETURN; END
+        FN main() RETURNS Void -> result = caller(); RETURN; END
       CLEAR
       zig = transpile(src)
       expect(zig).to match(/dupeValue\(\[\]const u8, .+, rt\.heapAlloc\(\)\)/)
@@ -1907,7 +1907,7 @@ RSpec.describe ZigTranspiler do
         END
         FN main() RETURNS Void ->
             MUTABLE data: []Float64 = [];
-            data.append(10.0);
+            &data.append(10.0);
             result = filterSum(data);
             RETURN;
         END
@@ -1925,7 +1925,7 @@ RSpec.describe ZigTranspiler do
         END
         FN main() RETURNS Void ->
             MUTABLE data: []Float64 = [];
-            data.append(1.0);
+            &data.append(1.0);
             result = sumAll(data);
             RETURN;
         END
@@ -2086,7 +2086,7 @@ RSpec.describe ZigTranspiler do
         STRUCT Point { x: Float64, y: Float64 }
         FN main() RETURNS Void ->
             MUTABLE soa: [10]@soa Point = [];
-            soa.append(Point{ x: 1.0, y: 2.0 });
+            &soa.append(Point{ x: 1.0, y: 2.0 });
             RETURN;
         END
       CLEAR
@@ -2104,7 +2104,7 @@ RSpec.describe ZigTranspiler do
         STRUCT Point { x: Float64, y: Float64 }
         FN main() RETURNS Void ->
             MUTABLE soa: [10]@soa Point = [];
-            soa.append(Point{ x: 1.0, y: 2.0 });
+            &soa.append(Point{ x: 1.0, y: 2.0 });
             RETURN;
         END
       CLEAR
@@ -2124,7 +2124,7 @@ RSpec.describe ZigTranspiler do
         STRUCT Point { x: Float64, y: Float64 }
         FN main() RETURNS Void ->
             MUTABLE soa: [100]@soa Point = [];
-            soa.append(Point{ x: 1.0, y: 2.0 });
+            &soa.append(Point{ x: 1.0, y: 2.0 });
             soa |> EACH { _.x = _.x + _.y; };
             RETURN;
         END
@@ -2149,8 +2149,8 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
             MUTABLE counts: {String}@sharded(32) Int64 = {};
             MUTABLE seeds: []Int64 = [];
-            seeds.append(1_i64);
-            seeds.append(2_i64);
+            &seeds.append(1_i64);
+            &seeds.append(2_i64);
             (0..<2) |> SHARD(makeKey(seeds[_] OR_ELSE panic("seeds index invariant")), counts) |> CONCURRENT EACH {
                 cur = counts[_] OR_ELSE 0;
                 counts[_] = cur + 1;

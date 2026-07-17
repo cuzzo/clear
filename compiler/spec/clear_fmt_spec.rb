@@ -202,14 +202,14 @@ RSpec.describe Formatter do
 
   it "keeps MUTABLE on bindings passed to bang helpers" do
     src = <<~CLEAR
-      FN appendOne!(MUTABLE xs: []Int64) RETURNS Void ->
-        xs.append(1_i64);
+      FN appendOne(MUTABLE xs: []Int64) RETURNS Void ->
+        &xs.append(1_i64);
         RETURN;
       END
 
       FN main() RETURNS Void ->
         MUTABLE xs: []Int64 = [];
-        appendOne!(xs);
+        appendOne(&xs);
         RETURN;
       END
     CLEAR
@@ -1045,7 +1045,7 @@ RSpec.describe Formatter do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE futures: ~Void[]@list = [];
-          futures.append(BG {
+          &futures.append(BG {
             FOR i IN (0 ..< 5) DO
               MUTABLE x = i;
               MUTABLE y = i;
@@ -1282,7 +1282,7 @@ RSpec.describe Formatter do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE futures: ~Int64[]@list = [];
-          futures.append(BG { @parallel ->
+          &futures.append(BG { @parallel ->
             MUTABLE total: Int64 = 0;
             WHILE total < 10 DO
               total += 1;
@@ -1554,7 +1554,7 @@ RSpec.describe Formatter do
       src = <<~CLEAR
         ENUM Op { A, B, C }
 
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
           op = Op.A;
           IF op == Op.A THEN PARTIAL MATCH op START Op.A -> PASS;, DEFAULT -> PASS; END
           ELSE_IF op == Op.B THEN PARTIAL MATCH op START Op.B -> PASS;, DEFAULT -> PASS; END
@@ -1584,7 +1584,7 @@ RSpec.describe Formatter do
         ENUM Op { Get, Put }
         ENUM SubOp { A, B }
 
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
           op = Op.Get;
           suboo = SubOp.A;
           MATCH op START
@@ -1678,7 +1678,7 @@ RSpec.describe Formatter do
     it "leaves a `REQUIRES x: LOCKED` clause alone" do
       src = <<~CLEAR
         STRUCT Counter { v: Int64 }
-        FN incr!(MUTABLE c: Counter) REQUIRES c: LOCKED -> RETURN; END
+        FN incr(MUTABLE c: Counter) REQUIRES c: LOCKED -> RETURN; END
       CLEAR
       out = Formatter.format(src)
       expect(out).to include("REQUIRES c: LOCKED")

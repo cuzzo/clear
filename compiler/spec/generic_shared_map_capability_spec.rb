@@ -47,7 +47,7 @@ RSpec.describe "capability-polymorphic generic Maps" do
 
     expect {
       annotate(<<~CLEAR)
-        FN valid!<M: SHARED Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+        FN valid<M: SHARED Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
           WITH POLYMORPHIC map AS values { values[key] = value; }
         END
       CLEAR
@@ -58,7 +58,7 @@ RSpec.describe "capability-polymorphic generic Maps" do
     zig = ZigTranspiler.new.transpile(<<~CLEAR)
       STRUCT Cache<M: SHARED Map> { values: M }
       IMPLEMENTATION Cache<M> {
-        METHOD put!(MUTABLE self, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+        METHOD put(MUTABLE self, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
           WITH POLYMORPHIC self.values AS values { values[key] = value; }
         END
       }

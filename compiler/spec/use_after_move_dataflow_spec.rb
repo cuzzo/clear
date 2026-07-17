@@ -158,7 +158,7 @@ RSpec.describe UseAfterMoveChecker do
         END
         FN main() RETURNS Void ->
           MUTABLE vals: []Int64 = List[];
-          vals.append(1_i64);
+          &vals.append(1_i64);
           n = consume(GIVE vals);
           RETURN;
         END
@@ -169,7 +169,7 @@ RSpec.describe UseAfterMoveChecker do
       expect_no_error(<<~CLEAR)
         FN makeList() RETURNS !Int64[] ->
           MUTABLE items: []Int64 = List[];
-          items.append(1_i64);
+          &items.append(1_i64);
           RETURN items;
         END
         FN main() RETURNS Void ->
@@ -198,7 +198,7 @@ RSpec.describe UseAfterMoveChecker do
         END
         FN main() RETURNS Void ->
           MUTABLE vals: []Int64 = List[];
-          vals.append(1_i64);
+          &vals.append(1_i64);
           n1 = readLen(vals);
           n2 = readLen(vals);
           RETURN;
@@ -210,9 +210,9 @@ RSpec.describe UseAfterMoveChecker do
       expect_no_error(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE vals: []Int64 = List[];
-          vals.append(1_i64);
+          &vals.append(1_i64);
           IF vals.length() > 0 THEN
-            vals.append(2_i64);
+            &vals.append(2_i64);
           END
           n = vals.length();
           RETURN;
@@ -226,7 +226,7 @@ RSpec.describe UseAfterMoveChecker do
           MUTABLE vals: []Int64 = List[];
           MUTABLE i = 0;
           WHILE i < 5 DO
-            vals.append(i);
+            &vals.append(i);
             i = i + 1;
           END
           n = vals.length();
@@ -775,11 +775,11 @@ RSpec.describe UseAfterMoveChecker do
     it "reports GIVE of a borrowed heap value inside the borrow scope" do
       errors = borrow_errors(<<~CLEAR)
         STRUCT User { id: Int64 }
-        FN consume!(TAKES u: User @boxed) RETURNS Void -> RETURN; END
+        FN consume(TAKES u: User @boxed) RETURNS Void -> RETURN; END
         FN main() RETURNS Void ->
           a: User @boxed = User{ id: 1 };
           WITH BORROWED a AS ref {
-            consume!(GIVE a);
+            consume(GIVE a);
           }
           RETURN;
         END
@@ -809,7 +809,7 @@ RSpec.describe UseAfterMoveChecker do
       df = analyze_state(<<~CLEAR, "makeList")
         FN makeList() RETURNS !Int64[] ->
           MUTABLE items: []Int64 = List[];
-          items.append(1_i64);
+          &items.append(1_i64);
           RETURN items;
         END
       CLEAR
@@ -822,7 +822,7 @@ RSpec.describe UseAfterMoveChecker do
         STRUCT Wrapper { data: Int64[] }
         FN wrap() RETURNS !Wrapper @boxed ->
           MUTABLE items: []Int64 = List[];
-          items.append(1_i64);
+          &items.append(1_i64);
           RETURN Wrapper{ data: items };
         END
       CLEAR
@@ -835,7 +835,7 @@ RSpec.describe UseAfterMoveChecker do
       df = analyze_state(<<~CLEAR, "makeList")
         FN makeList() RETURNS !Int64[] ->
           MUTABLE items: []Int64 = List[];
-          items.append(1_i64);
+          &items.append(1_i64);
           RETURN items;
         END
       CLEAR
@@ -853,7 +853,7 @@ RSpec.describe UseAfterMoveChecker do
         END
         FN main() RETURNS Void ->
           MUTABLE vals: []Int64 = List[];
-          vals.append(1_i64);
+          &vals.append(1_i64);
           n = consume(GIVE vals);
           RETURN;
         END

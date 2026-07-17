@@ -151,12 +151,12 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Box { value: Int64 }
-          FN borrow!(MUTABLE box: Box) RETURNS box:Box ->
+          FN borrow(MUTABLE box: Box) RETURNS box:Box ->
             RETURN box;
           END
           FN main() RETURNS Void ->
             MUTABLE b = Box{ value: 1 };
-            got = borrow!(b);
+            got = borrow(b);
             RETURN;
           END
         CLEAR
@@ -179,13 +179,13 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Box { value: Int64 }
-          FN pass!(MUTABLE scratch: Box, source: Box) RETURNS source:Box ->
+          FN pass(MUTABLE scratch: Box, source: Box) RETURNS source:Box ->
             RETURN source;
           END
           FN main() RETURNS Void ->
             MUTABLE a = Box{ value: 1 };
             b = Box{ value: 2 };
-            got = pass!(a, b);
+            got = pass(&a, b);
             RETURN;
           END
         CLEAR
@@ -196,13 +196,13 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Box { value: Int64 }
-          FN pass!(MUTABLE source: Box) RETURNS *:Box ->
+          FN pass(MUTABLE source: Box) RETURNS *:Box ->
             RETURN source;
           END
           FN main() RETURNS Void ->
             MUTABLE a = Box{ value: 1 };
             WITH RESTRICT a AS MUTABLE source {
-              got = pass!(source);
+              got = pass(&source);
             }
             RETURN;
           END

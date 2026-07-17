@@ -2601,7 +2601,7 @@ RSpec.describe SemanticAnnotator do
       expect {
         run(<<~CLEAR)
           STRUCT Counter { value: Float64 }
-          FN main!() RETURNS !Void ->
+          FN main() RETURNS !Void ->
             c = Counter{ value: 0 };
             WITH EXCLUSIVE c AS x { _ = x.value; }
             RETURN;
@@ -2613,7 +2613,7 @@ RSpec.describe SemanticAnnotator do
     it "compiles when the binding is @locked" do
       run(<<~CLEAR)
         STRUCT Counter { value: Float64 }
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
           c = Counter{ value: 0 } @locked;
           WITH EXCLUSIVE c AS x { _ = x.value; }
           RETURN;

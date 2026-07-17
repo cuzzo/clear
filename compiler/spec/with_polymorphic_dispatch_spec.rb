@@ -35,7 +35,7 @@ RSpec.describe "True-Sync-Polymorphism dispatch (#326)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Counter { value: Int64 }
-          FN bump!(c: Counter) RETURNS Void
+          FN bump(c: Counter) RETURNS Void
             REQUIRES c: LOCKED
           ->
             WITH EXCLUSIVE c AS x { x.value = x.value + 1; }
@@ -64,7 +64,7 @@ RSpec.describe "True-Sync-Polymorphism dispatch (#326)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Counter { value: Int64 }
-          FN bump!(c: Counter) RETURNS Void
+          FN bump(c: Counter) RETURNS Void
             REQUIRES c: LOCKED | VERSIONED
           ->
             WITH EXCLUSIVE c AS x { x.value = x.value + 1; }
@@ -78,7 +78,7 @@ RSpec.describe "True-Sync-Polymorphism dispatch (#326)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Counter { value: Int64 }
-          FN bump!(c: Counter) RETURNS Void
+          FN bump(c: Counter) RETURNS Void
             REQUIRES c: LOCKED
           ->
             WITH POLYMORPHIC EXCLUSIVE c AS x { x.value = x.value + 1; }
@@ -92,7 +92,7 @@ RSpec.describe "True-Sync-Polymorphism dispatch (#326)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Counter { value: Int64 }
-          FN bump!(c: Counter) RETURNS Void
+          FN bump(c: Counter) RETURNS Void
             REQUIRES c: VERSIONED
           ->
             WITH POLYMORPHIC EXCLUSIVE c AS x { x.value = x.value + 1; }
@@ -106,7 +106,7 @@ RSpec.describe "True-Sync-Polymorphism dispatch (#326)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Counter { value: Int64 }
-          FN bump!(c: Counter) RETURNS Void
+          FN bump(c: Counter) RETURNS Void
             REQUIRES c: ATOMIC
           ->
             WITH POLYMORPHIC EXCLUSIVE c AS x { x.value = x.value + 1; }

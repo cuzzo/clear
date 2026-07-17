@@ -28,7 +28,7 @@ RSpec.describe "Mixed-cap REQUIRES + RETURNS x:T (M2.7)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN spawn!(MUTABLE c: C) RETURNS c:~Void
+          FN spawn(MUTABLE c: C) RETURNS c:~Void
             REQUIRES c: ATOMIC | LOCKED
           ->
             bg = BG { x = c.v; print(x.toString()); };
@@ -42,7 +42,7 @@ RSpec.describe "Mixed-cap REQUIRES + RETURNS x:T (M2.7)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN spawn!(MUTABLE c: C) RETURNS c:~Void
+          FN spawn(MUTABLE c: C) RETURNS c:~Void
             REQUIRES c: ATOMIC | LOCKED
           ->
             bg = BG { x = c.v; print(x.toString()); };
@@ -58,7 +58,7 @@ RSpec.describe "Mixed-cap REQUIRES + RETURNS x:T (M2.7)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN spawn!(MUTABLE c: C) RETURNS c:~Void
+          FN spawn(MUTABLE c: C) RETURNS c:~Void
             REQUIRES c: ATOMIC | VERSIONED
           ->
             bg = BG { x = c.v; print(x.toString()); };
@@ -73,7 +73,7 @@ RSpec.describe "Mixed-cap REQUIRES + RETURNS x:T (M2.7)" do
     it "RETURNS x:T with REQUIRES x: ATOMIC alone compiles" do
       expect {
         annotate(<<~CLEAR)
-          FN spawn!(counter: Int64) RETURNS counter:~Void
+          FN spawn(counter: Int64) RETURNS counter:~Void
             REQUIRES counter: ATOMIC
           ->
             bg = BG { v = counter; print(v.toString()); };
@@ -87,7 +87,7 @@ RSpec.describe "Mixed-cap REQUIRES + RETURNS x:T (M2.7)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN spawn!(c: C) RETURNS c:~Void
+          FN spawn(c: C) RETURNS c:~Void
             REQUIRES c: LOCKED
           ->
             bg = BG { WITH EXCLUSIVE c AS inner { x = inner.v; print(x.toString()); } };
@@ -107,7 +107,7 @@ RSpec.describe "Mixed-cap REQUIRES + RETURNS x:T (M2.7)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN inspect!(MUTABLE c: C) RETURNS Int64
+          FN inspect(MUTABLE c: C) RETURNS Int64
             REQUIRES c: ATOMIC | LOCKED
           ->
             WITH c AS va MATCH
@@ -126,7 +126,7 @@ RSpec.describe "Mixed-cap REQUIRES + RETURNS x:T (M2.7)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN spawn!(MUTABLE a: C, b: Int64) RETURNS (a, b):~Void
+          FN spawn(MUTABLE a: C, b: Int64) RETURNS (a, b):~Void
             REQUIRES a: ATOMIC | LOCKED, b: ATOMIC
           ->
             bg = BG { x = a.v; y = b; print(x.toString()); print(y.toString()); };
@@ -139,7 +139,7 @@ RSpec.describe "Mixed-cap REQUIRES + RETURNS x:T (M2.7)" do
     it "compiles when each source is single-family" do
       expect {
         annotate(<<~CLEAR)
-          FN spawn!(a: Int64, b: Int64) RETURNS (a, b):~Void
+          FN spawn(a: Int64, b: Int64) RETURNS (a, b):~Void
             REQUIRES a: ATOMIC, b: ATOMIC
           ->
             bg = BG { x = a; y = b; print(x.toString()); print(y.toString()); };

@@ -438,7 +438,7 @@ RSpec.describe BorrowChecker do
         END
         FN main() RETURNS Void ->
           MUTABLE vals: []Int64 = List[];
-          vals.append(1_i64);
+          &vals.append(1_i64);
           WITH BORROWED vals AS ref {
             n = consume(GIVE vals);
           }

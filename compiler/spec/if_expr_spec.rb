@@ -116,7 +116,7 @@ RSpec.describe "IF/MATCH as expressions" do
     it "promotes IF expressions used in struct field assignments" do
       ast = annotate_if_expr_src(<<~CLEAR)
         STRUCT Settings { enabled: Bool }
-        FN configure!(MUTABLE settings: Settings, override: ?Bool) RETURNS Void ->
+        FN configure(MUTABLE settings: Settings, override: ?Bool) RETURNS Void ->
           settings.enabled = IF override == NIL THEN FALSE ELSE override? END;
           RETURN;
         END

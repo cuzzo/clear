@@ -439,7 +439,7 @@ RSpec.describe "type-system change contracts" do
     list_zig = transpile(<<~CLEAR)
       FN main() RETURNS Void ->
         MUTABLE futures: [List]~Void = List[];
-        futures.append(BG { sleep(1_i64); });
+        &futures.append(BG { sleep(1_i64); });
         RETURN;
       END
     CLEAR
@@ -560,11 +560,11 @@ RSpec.describe "type-system change contracts" do
   it "annotates canonical string-like and numeric map operations" do
     expect {
       annotate(<<~CLEAR)
-        by_symbol: {Symbol}Int64 = {};
-        by_symbol.put("answer", 42_i64);
+        MUTABLE by_symbol: {Symbol}Int64 = {};
+        &by_symbol.put("answer", 42_i64);
         symbol_value = by_symbol["answer"];
-        by_number: {Int64}String = {};
-        by_number.put(42_i64, "answer");
+          MUTABLE by_number: {Int64}String = {};
+          &by_number.put(42_i64, "answer");
         numeric_value = by_number[42_i64];
       CLEAR
     }.not_to raise_error

@@ -157,14 +157,14 @@ RSpec.describe LintFixRewriter do
     it "keeps MUTABLE on a binding referenced inside a BG block" do
       src = <<~CLEAR
         FN bar(MUTABLE xs: Int64[]) RETURNS Void ->
-          xs.append(1);
+          &xs.append(1);
           RETURN;
         END
 
         FN main() RETURNS Void ->
           MUTABLE arr: Int64[] = [1_i64, 2_i64];
           MUTABLE tasks: ~Void[]@list = [];
-          tasks.append(BG { bar(arr); });
+          &tasks.append(BG { bar(&arr); });
           RETURN;
         END
       CLEAR
@@ -186,14 +186,14 @@ RSpec.describe LintFixRewriter do
 
     it "keeps MUTABLE when the binding is passed to a bang helper" do
       src = <<~CLEAR
-        FN appendOne!(MUTABLE xs: []Int64) RETURNS Void ->
-          xs.append(1_i64);
+        FN appendOne(MUTABLE xs: []Int64) RETURNS Void ->
+          &xs.append(1_i64);
           RETURN;
         END
 
         FN main() RETURNS Void ->
           MUTABLE xs: []Int64 = [];
-          appendOne!(xs);
+          appendOne(&xs);
           RETURN;
         END
       CLEAR
@@ -268,7 +268,6 @@ RSpec.describe LintFixRewriter do
         expect(LintFixRewriter.send(:mutating_method_name?, name)).to eq(true)
       end
       expect(LintFixRewriter.send(:mutating_method_name?, "map")).to eq(false)
-      expect(LintFixRewriter.send(:mutating_method_name?, "push!")).to eq(false)
     end
 
     it "detects all type decorations that make annotation removal unsafe" do
@@ -350,9 +349,11 @@ RSpec.describe LintFixRewriter do
       expect(names).to eq(Set["a", "b"])
     end
 
-    it "collects mutation-sensitive names from bang functions and mutating methods" do
+    it "collects mutation-sensitive names from explicit arguments and mutating methods" do
+      explicit = AST::FuncCall.new(tok("appendOne"), "appendOne", [identifier("xs")])
+      explicit.mark_explicit_mutable_argument!(0, tok("&"))
       program = AST::Program.new(tok, [
-        AST::FuncCall.new(tok("appendOne!"), "appendOne!", [identifier("xs")]),
+        explicit,
         AST::MethodCall.new(tok("push"), identifier("ys"), "push", [int_lit]),
         AST::MethodCall.new(tok("map"), identifier("zs"), "map", []),
       ])

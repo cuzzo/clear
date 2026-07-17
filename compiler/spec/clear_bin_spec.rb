@@ -17,8 +17,8 @@ RSpec.describe "./clear build", :integration do
     [output, $?.success?]
   end
 
-  def clear_run(source_path)
-    cmd = "#{CLEAR_BIN} run #{source_path} 2>&1"
+  def clear_run(source_path, *args)
+    cmd = "#{CLEAR_BIN} run #{source_path} #{args.join(' ')} 2>&1"
     output = `#{cmd}`
     [output, $?.success?]
   end
@@ -46,6 +46,29 @@ RSpec.describe "./clear build", :integration do
       output, ok = clear_run(File.join(dir, "main.clear"))
       expect(ok).to be true
       expect(output).to include("hello")
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+
+    it "autofixes explicit mutation before running in EASY mode" do
+      dir = Dir.mktmpdir
+      source_path = File.join(dir, "main.clear")
+      File.write(source_path, <<~CLEAR)
+        FN increment(MUTABLE value: Int64) RETURNS Void ->
+          value = value + 1_i64;
+        END
+        FN main() RETURNS Void ->
+          value = 1_i64;
+          increment(value);
+          ASSERT value == 2_i64;
+        END
+      CLEAR
+
+      output, ok = clear_run(source_path, "--easy")
+      rewritten = File.read(source_path)
+      expect(ok).to eq(true), "Expected EASY autofix+run to succeed, got: #{output}"
+      expect(rewritten).to include("MUTABLE value = 1_i64;")
+      expect(rewritten).to include("increment(&value);")
     ensure
       FileUtils.rm_rf(dir)
     end

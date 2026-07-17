@@ -25,6 +25,7 @@ module ClearFixSupport
   class Options < T::Struct
     const :dry_run, T::Boolean
     const :take_first, T::Boolean
+    const :auto_only, T::Boolean
     const :only_set, T.nilable(T::Set[Symbol])
     const :loop_until_clean, T::Boolean
     const :loop_max, Integer
@@ -57,12 +58,16 @@ module ClearFixSupport
     end
   end
 
-  CLEAR_HEREDOC_MARKERS = T.let(%w[CLEAR FLUX CHT].freeze, T::Array[String])
+  # SRC is used by the compiler's integration-style specs for CLEAR input.
+  # Keep this list deliberately closed so Ruby/Zig/XML fixture heredocs are
+  # never handed to the CLEAR parser or rewritten accidentally.
+  CLEAR_HEREDOC_MARKERS = T.let(%w[CLEAR FLUX CHT SRC].freeze, T::Array[String])
 
   sig { params(args: T::Array[String]).returns(Options) }
   def self.parse_args(args)
     dry_run = T.let(false, T::Boolean)
     take_first = T.let(false, T::Boolean)
+    auto_only = T.let(false, T::Boolean)
     only_set = T.let(nil, T.nilable(T::Set[Symbol]))
     loop_until_clean = T.let(false, T::Boolean)
     loop_max = T.let(20, Integer)
@@ -74,6 +79,8 @@ module ClearFixSupport
         dry_run = true
       when "--yes"
         take_first = true
+      when "--auto"
+        auto_only = true
       when "--loop"
         loop_until_clean = true
         take_first = true
@@ -90,12 +97,13 @@ module ClearFixSupport
       end
     end
 
-    raise UsageError, "Usage: clear fix [--dry-run|--yes|--loop[=N]|--only=cat1,cat2] <file.clear|file.rb>..." if paths.empty?
+    raise UsageError, "Usage: clear fix [--dry-run|--yes|--auto|--loop[=N]|--only=cat1,cat2] <file.clear|file.rb|file.md>..." if paths.empty?
     raise UsageError, "--loop and --dry-run are mutually exclusive" if loop_until_clean && dry_run
 
     Options.new(
       dry_run: dry_run,
       take_first: take_first,
+      auto_only: auto_only,
       only_set: only_set,
       loop_until_clean: loop_until_clean,
       loop_max: loop_max,
@@ -141,6 +149,12 @@ module ClearFixSupport
       SyntaxTypoScanner.scan!(source)
       PredicateRewriter.lint!(source)
       MultiStatementLinter.lint!(source)
+      # REQUIRE warmup temporarily disables (and therefore clears) the global
+      # collector. Preserve source-only findings so lexical migrations still
+      # work in imported programs and, crucially, can repair syntax that the
+      # post-migration lexer no longer accepts.
+      source_findings = FixCollector.drain
+      source_findings.each { |finding| FixCollector.push(finding) }
       begin
         tokens = Lexer.new(source).tokenize
         ast = ClearParser.new(tokens, source).parse
@@ -158,11 +172,12 @@ module ClearFixSupport
           begin
             SemanticAnnotator.new(importer: importer, source_dir: source_dir,
               source_code: source).annotate!(ast)
-          rescue CompilerError, ParserError, ModuleImportError
+          rescue CompilerError, ParserError, ModuleImportError, RuntimeError
             # A root diagnostic is expected during this non-collecting warmup.
           ensure
             FixCollector.enable!
             FixCollector.enable_type_migrations!
+            source_findings.each { |finding| FixCollector.push(finding) }
           end
           tokens = Lexer.new(source).tokenize
           ast = ClearParser.new(tokens, source).parse
@@ -171,7 +186,7 @@ module ClearFixSupport
         annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir,
           source_code: source)
         annotator.annotate!(ast)
-      rescue CompilerError, ParserError, ModuleImportError, Lexer::Error
+      rescue CompilerError, ParserError, ModuleImportError, Lexer::Error, RuntimeError
       end
       FixCollector.drain
     rescue Lexer::Error
@@ -245,6 +260,11 @@ module ClearFixSupport
     while i < lines.length
       line = T.must(lines[i])
       match = line.match(/<<(~|-)?(#{marker_pattern})\b/)
+      # Documentation often shows `<<~CLEAR` inside a Ruby comment. Treating
+      # that as a live opener makes the next real heredoc terminator swallow
+      # arbitrary Ruby host code and lets source migrations rewrite methods
+      # such as `annotate!`. Only executable-looking opener lines qualify.
+      match = nil if match && line[0...match.begin(0)].lstrip.start_with?('#')
       unless match
         i += 1
         next
@@ -283,6 +303,36 @@ module ClearFixSupport
       i = end_idx + 1
     end
 
+    out
+  end
+
+  # Markdown documentation is executable language surface too. Extract only
+  # explicitly labelled CLEAR fences; unlabelled and other-language blocks
+  # are intentionally left untouched.
+  sig { params(source: String).returns(T::Array[Heredoc]) }
+  def self.extract_clear_markdown_fences(source)
+    out = T.let([], T::Array[Heredoc])
+    lines = source.lines
+    index = T.let(0, Integer)
+    while index < lines.length
+      opening = T.must(lines[index]).match(/\A([ \t]*)```(?:clear|flux|cht)\s*\z/i)
+      unless opening
+        index += 1
+        next
+      end
+
+      indent = T.must(opening[1]).length
+      body_start = index + 1
+      closing = body_start
+      closing += 1 while closing < lines.length && !T.must(lines[closing]).match?(/\A[ \t]*```\s*\z/)
+      break if closing >= lines.length
+
+      body = (lines[body_start...closing] || []).map do |line|
+        line.length >= indent ? line[indent..] : line
+      end.join
+      out << Heredoc.new(content: body, start_line: body_start + 1, indent: indent)
+      index = closing + 1
+    end
     out
   end
 
@@ -387,7 +437,12 @@ module ClearFixSupport
           next
         end
 
-        fix = chosen_fix(finding, take_first: options.take_first)
+        fix = if options.auto_only
+          finding.fixes.find { |candidate| candidate.confidence == :auto }
+        else
+          chosen_fix(finding, take_first: options.take_first)
+        end
+        next if !fix && options.auto_only
         unless fix
           describe_finding(finding, out: out)
           fix = prompt_choice(finding, err: err, input: input)
@@ -415,15 +470,19 @@ module ClearFixSupport
   sig { params(path: String, source: String, out: OutputStream, only_set: T.nilable(T::Set[Symbol])).returns(T::Array[FixableFinding]) }
   def self.findings_for_path(path, source, out:, only_set:)
     migrations_only = only_set == Set[:type_migration]
-    unless path.end_with?(".rb")
+    unless path.end_with?(".rb", ".md", ".markdown")
       return collect_type_migrations(source) if migrations_only
 
       return collect_findings(source, source_dir: File.dirname(File.expand_path(path)))
     end
 
-    heredocs = extract_clear_heredocs(source)
+    heredocs = if path.end_with?(".rb")
+      extract_clear_heredocs(source)
+    else
+      extract_clear_markdown_fences(source)
+    end
     if heredocs.empty?
-      out.puts("#{path}: no CLEAR heredocs found")
+      out.puts("#{path}: no CLEAR code blocks found")
       return []
     end
 

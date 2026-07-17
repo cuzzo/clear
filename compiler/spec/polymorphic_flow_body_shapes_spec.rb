@@ -14,7 +14,7 @@ RSpec.describe "polymorphic-flow body shape emission" do
   it "emits an IF/ELSE inside the flow body, threading return_kind into both arms" do
     zig = transpile(<<~CLEAR)
       STRUCT Counter { value: Int64 }
-      FN bumpOrZero!(MUTABLE c: Counter) RETURNS !Int64 ->
+      FN bumpOrZero(MUTABLE c: Counter) RETURNS !Int64 ->
         WITH POLYMORPHIC c AS x {
           IF x.value > 0 THEN
             n = x.value + 1;
@@ -38,7 +38,7 @@ RSpec.describe "polymorphic-flow body shape emission" do
   it "emits an IF without ELSE inside the flow body" do
     zig = transpile(<<~CLEAR)
       STRUCT Counter { value: Int64 }
-      FN earlyExit!(MUTABLE c: Counter) RETURNS !Int64 ->
+      FN earlyExit(MUTABLE c: Counter) RETURNS !Int64 ->
         WITH POLYMORPHIC c AS x {
           IF x.value > 0 THEN
             RETURN 7;
@@ -58,7 +58,7 @@ RSpec.describe "polymorphic-flow body shape emission" do
   it "emits a nested ScopeBlock (e.g. WITH RESTRICT) inside the flow body" do
     zig = transpile(<<~CLEAR)
       STRUCT Counter { value: Int64 }
-      FN bumpRestricted!(MUTABLE c: Counter) RETURNS !Int64 ->
+      FN bumpRestricted(MUTABLE c: Counter) RETURNS !Int64 ->
         WITH POLYMORPHIC c AS x {
           MUTABLE local = x.value;
           WITH RESTRICT local {

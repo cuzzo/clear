@@ -156,6 +156,7 @@ class Lexer
       when @s.scan(/->/) then add(:ARROW, '->', start_col)
       when @s.scan(/\|>/) then add(:SMOOTH, '|>', start_col)
       when @s.scan(/OR_ELSE\b/) then add(:OR_ELSE, 'OR_ELSE', start_col)
+      when @s.scan(/!!/) then add(:CHAR, '!!', start_col)
       when @s.scan(/==/) then add(:CHAR, '==', start_col)
       when @s.scan(/>=/) then add(:CHAR, '>=', start_col)
       when @s.scan(/<=/) then add(:CHAR, '<=', start_col)
@@ -189,7 +190,7 @@ class Lexer
       when @s.scan(/%/)
         add(:PERCENT, '%', start_col)
 
-      when @s.scan(/[a-zA-Z_@$]\w*(!(?!=)|\?(?=\())?/)
+      when @s.scan(/[a-zA-Z_@$]\w*(\?(?=\())?/)
         word = @s.matched
         if KEYWORDS.include?(word)
           add(:KEYWORD, word, start_col)

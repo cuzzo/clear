@@ -13,7 +13,7 @@ RSpec.describe "@node capability" do
     FN main() RETURNS Void ->
       MUTABLE root: Node@node = Node{ id: 1 };
       root.left = Node{ id: 2 };
-      root.children.append(Node{ id: 3 });
+      &root.children.append(Node{ id: 3 });
       ASSERT root.left?.id == 2;
       ASSERT root.children[0]?.id == 3;
     END
@@ -67,7 +67,7 @@ RSpec.describe "@node capability" do
       FN main() RETURNS Void ->
         MUTABLE nodes: []Node@node = [];
         TIGHT FOR i IN (0_i64 ..< 8_i64) DO
-          nodes.append(Node{ id: i });
+          &nodes.append(Node{ id: i });
         END
       END
     CLEAR

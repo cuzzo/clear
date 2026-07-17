@@ -69,7 +69,7 @@ RSpec.describe "ClearParser WITH MATCH records" do
   it "synthesizes policy clauses through typed VERSIONED arms" do
     program = annotate(<<~CLEAR)
       STRUCT Cfg { port: Int64 }
-      FN bump!(MUTABLE cell: Cfg) RETURNS !Void
+      FN bump(MUTABLE cell: Cfg) RETURNS !Void
         REQUIRES cell: VERSIONED | ATOMIC
       ->
         WITH SNAPSHOT cell AS MUTABLE value MATCH
@@ -88,7 +88,7 @@ RSpec.describe "ClearParser WITH MATCH records" do
   it "rejects conflict clauses on typed ATOMIC arms" do
     source = <<~CLEAR
       STRUCT Cfg { port: Int64 }
-      FN bump!(MUTABLE cell: Cfg) RETURNS !Void
+      FN bump(MUTABLE cell: Cfg) RETURNS !Void
         REQUIRES cell: VERSIONED | ATOMIC
       ->
         WITH SNAPSHOT cell AS MUTABLE value MATCH
@@ -105,7 +105,7 @@ RSpec.describe "ClearParser WITH MATCH records" do
   it "rejects multi-cell snapshots when a typed arm admits ATOMIC" do
     source = <<~CLEAR
       STRUCT Cfg { port: Int64 }
-      FN update!(MUTABLE left: Cfg, MUTABLE right: Cfg) RETURNS !Void
+      FN update(MUTABLE left: Cfg, MUTABLE right: Cfg) RETURNS !Void
         REQUIRES left, right: VERSIONED | ATOMIC
       ->
         WITH SNAPSHOT left AS MUTABLE a, SNAPSHOT right AS MUTABLE b MATCH
@@ -122,7 +122,7 @@ RSpec.describe "ClearParser WITH MATCH records" do
   it "lowers typed arm fields into MIR dispatch records" do
     program = annotate(<<~CLEAR)
       STRUCT Counter { value: Int64 }
-      FN read!(MUTABLE cell: Counter) RETURNS Int64
+      FN read(MUTABLE cell: Counter) RETURNS Int64
         REQUIRES cell: VERSIONED | LOCKED
       ->
         MUTABLE result: Int64 = 0;

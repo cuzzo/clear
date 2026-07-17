@@ -15,6 +15,7 @@ module Annotator
       def visit_FuncCall(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
+        normalize_explicit_mutable_arguments!(node)
         node.args.each { |arg| annotate_call_argument!(node, arg) }
 
         if node.name == "native_call"
@@ -79,6 +80,7 @@ module Annotator
       def visit_MethodCall(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
+        normalize_explicit_mutable_arguments!(node)
         visit(node.object)
         node.args.each { |arg| visit(arg) }
 
@@ -124,6 +126,24 @@ module Annotator
           name: node.name, type: Type.surface_name(node.object.full_type!(context: "method receiver")))
       end
 
+      sig { params(node: T.any(AST::FuncCall, AST::MethodCall, AST::StaticCall)).void }
+      def normalize_explicit_mutable_arguments!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        node.args.each_with_index do |argument, index|
+          next unless argument.is_a?(AST::MutableBorrow)
+
+          node.mark_explicit_mutable_argument!(index, argument.token)
+          node.args[index] = argument.target
+        end
+      end
+      private :normalize_explicit_mutable_arguments!
+
+      sig { params(node: AST::MutableBorrow).void }
+      def visit_MutableBorrow(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        error!(node, :MUTABLE_MARKER_REQUIRES_CALL)
+      end
+
       sig { params(node: AST::MethodCall).returns(T::Boolean) }
       def resolve_protocol_method_call!(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
@@ -149,6 +169,7 @@ module Annotator
 
         key_type = protocol_map_associated_type(receiver, :Key)
         value_type = protocol_map_associated_type(receiver, :Value)
+        verify_generic_map_receiver_mutability!(node, receiver, operation)
         verify_protocol_method_argument!(node, 0, key_type) if expected_arity.positive?
         verify_protocol_method_argument!(node, 1, value_type) if operation == :put
 
@@ -170,6 +191,30 @@ module Annotator
         true
       end
       private :resolve_protocol_method_call!
+
+      sig { params(node: AST::MethodCall, receiver: Type, operation: Symbol).void }
+      def verify_generic_map_receiver_mutability!(node, receiver, operation)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        mutates = %i[put delete].include?(operation)
+        return unless mutates
+
+        params = T.let([
+          AST::Param.new(name: "receiver", type: receiver, required: true, mutable: true, takes: false)
+        ], T::Array[AST::Param])
+        node.args.each_with_index do |argument, index|
+          params << AST::Param.new(
+            name: "arg#{index + 1}",
+            type: argument.full_type!(context: "generic map method argument"),
+            required: true,
+            mutable: false,
+            takes: false,
+          )
+        end
+        verify_function_signature!(node,
+          FunctionSignature.new(params: params, return_type: Type.new(:Void)),
+          [node.object] + node.args)
+      end
+      private :verify_generic_map_receiver_mutability!
 
       sig { params(node: AST::MethodCall, receiver: Type).returns(T::Boolean) }
       def resolve_user_protocol_method_call!(node, receiver)
@@ -331,6 +376,7 @@ module Annotator
       def visit_StaticCall(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
+        normalize_explicit_mutable_arguments!(node)
         node.args.each { |arg| visit(arg) }
 
         # `File` in `File::open(...)` is a TYPE reference, not a runtime
@@ -415,6 +461,9 @@ module Annotator
           ImplementationRegistration.function_name(owner.to_s, node.method_name),
           node.args,
         )
+        node.explicit_mutable_argument_tokens.each do |index, token|
+          call.mark_explicit_mutable_argument!(index, token)
+        end
         resolve_call(call, node.args)
         AST.copy_pipeline_rewrite_metadata!(call, node, include_call_metadata: true)
         node.inherent_call = call

@@ -59,13 +59,13 @@ RSpec.describe "EASY automatic indirection" do
   it "moves a TAKES parameter into an inline list without a deep COPY" do
     source = <<~CLEAR
       STRUCT Foo { name: String }
-      FN add!(TAKES f: Foo, MUTABLE items: []Foo) RETURNS Void ->
-        items.append(f);
+      FN add(TAKES f: Foo, MUTABLE items: []Foo) RETURNS Void ->
+        &items.append(f);
       END
       FN main() RETURNS Void ->
         MUTABLE items: []Foo = [];
         f = Foo{ name: COPY "owned" };
-        add!(f, items);
+        add(f, &items);
         ASSERT items.length() == 1;
       END
     CLEAR
@@ -82,7 +82,7 @@ RSpec.describe "EASY automatic indirection" do
       STRUCT Foo { value: Int64 }
       FN main() RETURNS Void ->
         MUTABLE items: []@boxed Foo = [];
-        items.append(Foo{ value: 1 });
+        &items.append(Foo{ value: 1 });
       END
     CLEAR
 

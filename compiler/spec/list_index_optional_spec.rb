@@ -9,7 +9,7 @@ RSpec.describe "optional @list indexing" do
     STRUCT Item { name: Int64 }
     FN main() RETURNS Void ->
       MUTABLE items: []Item = [];
-      items.append(Item{ name: 7 });
+      &items.append(Item{ name: 7 });
       value = items[0].name;
       ASSERT value == 7;
     END
@@ -22,7 +22,7 @@ RSpec.describe "optional @list indexing" do
     STRUCT Item { profile: Profile }
     FN main() RETURNS Void ->
       MUTABLE items: []Item = [];
-      items.append(Item{ profile: Profile{ name: 7 } });
+      &items.append(Item{ profile: Profile{ name: 7 } });
       value = items[0]?.profile.name;
       ASSERT value == 7;
     END
@@ -89,7 +89,7 @@ RSpec.describe "optional @list indexing" do
       STRUCT Item { name: Int64 }
       FN main() RETURNS Void ->
         MUTABLE items: []Item = [];
-        items.append(Item{ name: 1_i64 });
+        &items.append(Item{ name: 1_i64 });
         items[0]?.name = 7_i64;
         items[9]?.name = 99_i64;
         ASSERT (items[0]?.name OR_ELSE 0_i64) == 7_i64;
@@ -122,7 +122,7 @@ RSpec.describe "optional @list indexing" do
       STRUCT Item { name: String }
       FN main() RETURNS Void ->
         MUTABLE items: []Item = [];
-        items.append(Item{ name: COPY "abc" });
+        &items.append(Item{ name: COPY "abc" });
         size = items[0]?.name.length() OR_ELSE 0_i64;
         ASSERT size == 3_i64;
       END

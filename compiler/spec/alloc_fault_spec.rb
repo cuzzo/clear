@@ -35,7 +35,7 @@ RSpec.describe "alloc_fault (allocation FAULT axis)" do
     ast = annotate(<<~CLEAR)
       FN build() RETURNS []Int64 ->
         MUTABLE xs: []Int64 = [];
-        xs.append(7_i64);
+        &xs.append(7_i64);
         RETURN xs;
       END
     CLEAR
@@ -56,7 +56,7 @@ RSpec.describe "alloc_fault (allocation FAULT axis)" do
     ast = annotate(<<~CLEAR)
       FN build() RETURNS []Int64 ->
         MUTABLE xs: []Int64 = [];
-        xs.append(7_i64);
+        &xs.append(7_i64);
         RETURN xs;
       END
       FN viaBare() RETURNS Int64 ->
@@ -71,7 +71,7 @@ RSpec.describe "alloc_fault (allocation FAULT axis)" do
     ast = annotate(<<~CLEAR)
       FN build() RETURNS []Int64 ->
         MUTABLE xs: []Int64 = [];
-        xs.append(7_i64);
+        &xs.append(7_i64);
         RETURN xs;
       END
       FN viaAbsorbed(flag: Bool) RETURNS Int64 ->

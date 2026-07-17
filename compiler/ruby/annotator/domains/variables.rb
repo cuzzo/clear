@@ -812,7 +812,9 @@ module Annotator
       # doesn't bottom out at one. Used to attribute receiver mutation back to
       # the declared binding.
 
-      sig { params(node: T.any(AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Identifier)).returns(T.nilable(String)) }
+      AccessPathNode = T.type_alias { T.any(AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Identifier) }
+
+      sig { params(node: AccessPathNode).returns(T.nilable(String)) }
       def chain_root_name(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
@@ -821,6 +823,20 @@ module Annotator
           curr = curr.target
         end
         curr.is_a?(AST::Identifier) ? curr.name : nil
+      end
+
+      sig { params(node: AccessPathNode).returns(T::Boolean) }
+      def interior_mutable_access_path?(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        curr = T.let(node, AccessPathNode)
+        loop do
+          type = curr.full_type!(context: "interior-mutable assignment path")
+          return true if SymbolEntry.always_mutable_sync?(type.sync)
+          break unless curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex) || curr.is_a?(AST::OptionalUnwrap)
+          curr = curr.target
+        end
+        false
       end
 
       # ==========================================
@@ -1020,8 +1036,14 @@ module Annotator
           # Chained target (e.g. `y.items.field = ...` or `obj.f.g = ...`).
           # Attribute mutation to the chain root so post-annotation passes
           # see it without re-walking the AST.
-          root = chain_root_name(field_node.target)
-          mark_var_mutated(root) if root
+          target = T.cast(field_node.target, AccessPathNode)
+          root = chain_root_name(target)
+          if root
+            if current_scope.is_immutable?(root) && !interior_mutable_access_path?(target)
+              emit_immutable_field_assignment_error!(assignment_node, current_scope, root, field_node.field)
+            end
+            mark_var_mutated(root)
+          end
         end
 
         # 4. Type Check
@@ -1079,6 +1101,7 @@ module Annotator
       # INVALIDATION LOGIC (The "Dependencies" feature)
       # ==========================================
       private :assignment_value_type
+      private :interior_mutable_access_path?
       private :finalize_decl_node!
       private :accumulate_stack_bytes
       private :atomic_bind_operation

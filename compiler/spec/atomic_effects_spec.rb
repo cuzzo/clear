@@ -115,9 +115,9 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
 
   describe "polymorphic REQUIRES + WITH MATCH ?-form" do
     it "stamps CONTENTION concretely + BLOCKING_MAYBE for LOCKED | ATOMIC" do
-      effs = effects_of(<<~CLEAR, "incr!")
+      effs = effects_of(<<~CLEAR, "incr")
         STRUCT Counter { value: Int64 }
-        FN incr!(MUTABLE c: Counter) RETURNS Void REQUIRES c: ATOMIC | LOCKED ->
+        FN incr(MUTABLE c: Counter) RETURNS Void REQUIRES c: ATOMIC | LOCKED ->
             WITH c AS va MATCH
               WHEN ATOMIC   -> { x = 0; }
               WHEN LOCKED -> { va.value = va.value + 1; }
@@ -136,9 +136,9 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
     end
 
     it "stamps CONTENTION concrete (no MAYBE) for LOCKED | VERSIONED" do
-      effs = effects_of(<<~CLEAR, "incr!")
+      effs = effects_of(<<~CLEAR, "incr")
         STRUCT Counter { value: Int64 }
-        FN incr!(MUTABLE c: Counter) RETURNS Void REQUIRES c: VERSIONED | LOCKED ->
+        FN incr(MUTABLE c: Counter) RETURNS Void REQUIRES c: VERSIONED | LOCKED ->
             WITH c AS va MATCH
               WHEN VERSIONED -> { x = va.value; }
               WHEN LOCKED  -> { x = va.value; }
@@ -160,7 +160,7 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
     it "upgrades BLOCKING_MAYBE -> BLOCKING when caller passes a concrete @locked binding" do
       effs = effects_of(<<~CLEAR, "caller")
         STRUCT Counter { value: Int64 }
-        FN bump!(MUTABLE c: Counter) RETURNS Void REQUIRES c: ATOMIC | LOCKED ->
+        FN bump(MUTABLE c: Counter) RETURNS Void REQUIRES c: ATOMIC | LOCKED ->
             WITH c AS va MATCH
               WHEN ATOMIC   -> { x = 0; }
               WHEN LOCKED -> { va.value = va.value + 1; }
@@ -170,7 +170,7 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
 
         FN caller() RETURNS !Void ->
             MUTABLE c = Counter{ value: 0 } @locked;
-            bump!(c);
+            bump(&c);
             RETURN;
         END
 
@@ -183,9 +183,9 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
     end
 
     it "keeps BLOCKING_MAYBE when caller is itself polymorphic (passes its own polymorphic param)" do
-      effs = effects_of(<<~CLEAR, "wrapper!")
+      effs = effects_of(<<~CLEAR, "wrapper")
         STRUCT Counter { value: Int64 }
-        FN bump!(MUTABLE c: Counter) RETURNS Void REQUIRES c: ATOMIC | LOCKED ->
+        FN bump(MUTABLE c: Counter) RETURNS Void REQUIRES c: ATOMIC | LOCKED ->
             WITH c AS va MATCH
               WHEN ATOMIC   -> { x = 0; }
               WHEN LOCKED -> { va.value = va.value + 1; }
@@ -193,8 +193,8 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
             RETURN;
         END
 
-        FN wrapper!(MUTABLE c: Counter) RETURNS Void REQUIRES c: ATOMIC | LOCKED ->
-            bump!(c);
+        FN wrapper(MUTABLE c: Counter) RETURNS Void REQUIRES c: ATOMIC | LOCKED ->
+            bump(&c);
             RETURN;
         END
 
@@ -261,7 +261,7 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
     it "projects BLOCKING_MAYBE to :\"blocking?\" in EffectSet" do
       ast = run(<<~CLEAR)
         STRUCT Counter { value: Int64 }
-        FN incr!(MUTABLE c: Counter) RETURNS Void REQUIRES c: ATOMIC | LOCKED ->
+        FN incr(MUTABLE c: Counter) RETURNS Void REQUIRES c: ATOMIC | LOCKED ->
             WITH c AS va MATCH
               WHEN ATOMIC   -> { x = 0; }
               WHEN LOCKED -> { va.value = va.value + 1; }
@@ -271,7 +271,7 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
 
         FN main() RETURNS Void -> RETURN; END
       CLEAR
-      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "incr!" }
+      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "incr" }
       es = fn.effect_set
       expect(es).not_to be_nil
       expect(es.include?(:contention)).to eq(true)

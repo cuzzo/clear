@@ -56,38 +56,6 @@ RSpec.describe "Tier 1 fixable findings" do
     end
   end
 
-  describe "STYLE_MUTABLE_PARAM_NEEDS_BANG" do
-    let(:src) {
-      <<~CLEAR
-        FN inc(MUTABLE x: Int64) -> x += 1; END
-        FN main() RETURNS Void -> END
-      CLEAR
-    }
-
-    it "captures a fixable finding with a single :auto fix" do
-      annotate(src)
-      findings = FixCollector.drain.select { |f| f.message.include?("MUTABLE parameters") }
-      expect(findings.size).to eq(1)
-      expect(findings.first.fixes.first.confidence).to eq(:auto)
-    end
-
-    it "produces an edit that appends `!` immediately after the function name" do
-      annotate(src)
-      edit = FixCollector.drain.first.fixes.first.edits.first
-      expect(edit.replacement).to eq("!")
-      expect(edit.span.line).to eq(1)
-      expect(edit.span.length).to eq(0)
-      # `FN inc` — name 'inc' starts at column 4, ends after column 6.
-      # The bang insertion goes at column 7 (1-indexed, 0-length insert).
-      expect(edit.span.col).to eq(7)
-    end
-
-    it "applying the fix produces compilable CLEAR" do
-      fixed = src.sub("FN inc(", "FN inc!(")
-      expect { annotate(fixed) }.not_to raise_error
-    end
-  end
-
   describe "CAN_SMASH_NOT_SUPPORTED" do
     # `@canSmash` lives inside the BG body's prefix block, between `{`
     # and the body's `->`. Consume the future with NEXT so the

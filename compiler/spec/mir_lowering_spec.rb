@@ -611,7 +611,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers identifier with bang suffix" do
-      node = make_id("push!")
+      node = make_id("push")
       result = lowering.lower(node)
       expect(emit(result)).to eq("push")
     end
@@ -2399,7 +2399,7 @@ RSpec.describe MIRLowering do
 
         FN main() RETURNS Void ->
           MUTABLE pool: [Pool(4)]Env = [];
-          id: Id<Env> = pool.insert(Env{ vars: {} });
+          id: Id<Env> = &pool.insert(Env{ vars: {} });
           IF pool[id] EXISTS AS env THEN
             env.vars["a"] = 1_i64;
           END
@@ -3631,7 +3631,7 @@ RSpec.describe MIRLowering do
 
         FN run() RETURNS !Void ->
           MUTABLE outer: []String = [];
-          outer.append(inner() OR_ELSE PASS);
+          &outer.append(inner() OR_ELSE PASS);
           RETURN;
         END
       CLEAR

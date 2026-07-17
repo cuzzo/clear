@@ -111,22 +111,22 @@ RSpec.describe Formatter, "stdlib METHOD UFCS rewrite" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE xs: Int64[] = [];
-          push(xs, 5);
+          push(&xs, 5);
           RETURN;
         END
       CLEAR
-      expect(fmt(src)).to include("xs.push(5)")
+      expect(fmt(src)).to include("&xs.push(5)")
     end
 
     it "rewrites pop(xs) to xs.pop()" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE xs: Int64[] = [1];
-          v = pop(xs);
+          v = pop(&xs);
           RETURN;
         END
       CLEAR
-      expect(fmt(src)).to include("xs.pop()")
+      expect(fmt(src)).to include("&xs.pop()")
     end
   end
 

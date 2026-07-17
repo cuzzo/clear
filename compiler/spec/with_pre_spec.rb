@@ -124,7 +124,7 @@ RSpec.describe "PRE clauses on function signatures" do
     it "parses PRE clauses on a function that also has REQUIRES" do
       ast = parse(<<~CLEAR)
         STRUCT Counter { value: Int64 }
-        FN bump!(MUTABLE c: Counter) RETURNS !Void
+        FN bump(MUTABLE c: Counter) RETURNS !Void
           REQUIRES c: LOCKED
           PRE: TRUE
         ->
@@ -302,7 +302,7 @@ RSpec.describe "PRE clauses on function signatures" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Counter { value: Int64 }
-          FN bumpIfNonNeg!(MUTABLE c: Counter) RETURNS !Int64
+          FN bumpIfNonNeg(MUTABLE c: Counter) RETURNS !Int64
             PRE: c.value >= 0
           ->
             c.value = c.value + 1;

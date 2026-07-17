@@ -181,11 +181,11 @@ class Formatter::FormatLexer
       when @s.peek(1) == '"'
         raw = consume_string
         push(:STRING, raw, sl, sc)
-      when m = @s.scan(/->|\|>|==|!=|>=|<=|&&|\|\||\*\*|\$\+|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
+      when m = @s.scan(/->|\|>|!!|==|!=|>=|<=|&&|\|\||\*\*|\$\+|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
         push(:OP, m, sl, sc)
       when m = @s.scan(/[=+\-*\/<>&|!.,;(){}\[\]:?~%]/)
         push(:SYM, m, sl, sc)
-      when m = @s.scan(/[a-zA-Z_@$]\w*[!?]?/)
+      when m = @s.scan(/[a-zA-Z_@$]\w*\??/)
         if ::Lexer::KEYWORDS.include?(m)
           push(:KEYWORD, m, sl, sc)
         elsif m =~ /\A[A-Z]/
@@ -3033,6 +3033,10 @@ class Formatter::Emitter
     return false if a.type == :OP  && a.raw == '::'
     return false if b.type == :OP  && b.raw == '::'
 
+    # Error propagation is postfix and may be followed by another postfix:
+    # `load()!!` and `load()!!.field`.
+    return false if b.type == :OP && b.raw == '!!'
+
     # Optional unwrap is postfix: `value?`, `call()?`, `items[0]?`.
     if b.type == :SYM && b.raw == '?'
       return false if [:VAR_ID, :TYPE_ID, :NUM, :STRING].include?(a.type)
@@ -3129,8 +3133,10 @@ class Formatter::Emitter
       end
     end
 
-    # Unary `-` at expression start: attach (e.g., `-1`).
-    if a.type == :SYM && a.raw == '-' && unary_context?(line, b_idx - 1)
+    # Unary `-` and mutable-borrow `&` attach at expression start
+    # (`-1`, `&value`, and `&value.method()`). Binary operators retain
+    # their ordinary surrounding spaces.
+    if a.type == :SYM && %w[- &].include?(a.raw) && unary_context?(line, b_idx - 1)
       return false
     end
 

@@ -11,6 +11,7 @@ module FunctionAnalysis
   RoutineNode = T.type_alias { T.any(AST::FunctionDef, AST::LambdaLit) }
   RoutineBody = T.type_alias { T.any(AST::RawBody, AST::Node) }
   CallNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall) }
+  SignatureCallNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall, AST::StaticCall) }
   CallArgList = T.type_alias { T::Array[AST::Locatable] }
   DeclaredReturn = T.type_alias { T.nilable(Type::TypeInput) }
   LifetimeSourceList = T.type_alias { T::Array[FunctionSignature::LifetimeSource] }
@@ -18,7 +19,7 @@ module FunctionAnalysis
   class CallSignatureSite < T::Struct
     extend T::Sig
 
-    const :node, CallNode
+    const :node, SignatureCallNode
     const :name, String
     prop :args, T::Array[AST::Locatable]
 
@@ -35,6 +36,26 @@ module FunctionAnalysis
     sig { params(index: Integer, arg: AST::Locatable).void }
     def replace_arg!(index, arg)
       args[index] = arg
+    end
+
+    sig { params(index: Integer).returns(T::Boolean) }
+    def explicit_mutable_argument?(index)
+      method_node = T.cast(node, T.nilable(AST::MethodCall)) if node.is_a?(AST::MethodCall)
+      if method_node && !args.empty? && args.first.equal?(method_node.object)
+        return method_node.explicit_mutable_receiver? if index == 0
+        return method_node.explicit_mutable_argument?(index - 1)
+      end
+      node.explicit_mutable_argument?(index)
+    end
+
+    sig { params(index: Integer).returns(T.nilable(Lexer::Token)) }
+    def explicit_mutable_argument_token(index)
+      method_node = T.cast(node, T.nilable(AST::MethodCall)) if node.is_a?(AST::MethodCall)
+      if method_node && !args.empty? && args.first.equal?(method_node.object)
+        return method_node.explicit_mutable_receiver_token if index == 0
+        return method_node.explicit_mutable_argument_token(index - 1)
+      end
+      node.explicit_mutable_argument_token(index)
     end
   end
 
@@ -80,6 +101,8 @@ module FunctionAnalysis
     const :actual_type, Type
     const :actual, T.nilable(Symbol)
     const :path, T::Array[Symbol]
+    const :explicit_mutable, T::Boolean, default: false
+    const :mutable_marker_token, T.nilable(Lexer::Token), default: nil
   end
 
   class EncounteredCallArgument < T::Struct
@@ -264,10 +287,6 @@ module FunctionAnalysis
     )
     push_function_context!(fn_ctx)
     begin
-      has_mutable_param = node.params.any? { |p| p.mutable }
-      if has_mutable_param && !node.name.end_with?("!")
-        emit_style_mutable_param_needs_bang!(node)
-      end
       verify_lifetime!(node)
 
       validate_type_param_list!(node, node.type_params, "function") if fn_type_params.any?
@@ -564,7 +583,7 @@ module FunctionAnalysis
   # values in this allocator (per "one collection = one allocator").
   # Returns nil when the call has no container context (plain function call,
   # or receiver storage not yet determined).
-  sig { params(node: CallNode).returns(T.nilable(Symbol)) }
+  sig { params(node: SignatureCallNode).returns(T.nilable(Symbol)) }
   def receiver_container_alloc(node)
     return nil unless node.is_a?(AST::MethodCall)
     obj = node.object
@@ -576,7 +595,7 @@ module FunctionAnalysis
     nil
   end
 
-  sig { params(node: CallNode, signature: FunctionSignature, args: T.nilable(CallArgList)).returns(NilClass) }
+  sig { params(node: SignatureCallNode, signature: FunctionSignature, args: T.nilable(CallArgList)).returns(NilClass) }
   def verify_function_signature!(node, signature, args = nil)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     args ||= node.args
@@ -606,10 +625,12 @@ module FunctionAnalysis
     nil
   end
 
-  sig { params(node: CallNode, args: T.nilable(CallArgList)).returns(CallSignatureSite) }
+  sig { params(node: SignatureCallNode, args: T.nilable(CallArgList)).returns(CallSignatureSite) }
   def call_signature_site(node, args = nil)
     args ||= node.args
-    source_name = if node.is_a?(AST::MethodCall) && node.source_method_name
+    source_name = if node.is_a?(AST::StaticCall)
+      "#{node.type_name.name}::#{node.method_name}"
+    elsif node.is_a?(AST::MethodCall) && node.source_method_name
       T.must(node.source_method_name)
     else
       node.name.to_s
@@ -693,26 +714,72 @@ module FunctionAnalysis
       actual_type: arg_type,
       actual: actual,
       path: get_path_to_root(arg_node),
+      explicit_mutable: site.explicit_mutable_argument?(index),
+      mutable_marker_token: site.explicit_mutable_argument_token(index),
     )
   end
 
   sig { params(facts: CallArgumentFacts).void }
   def verify_mutable_argument!(facts)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
-    return unless param_mutable?(facts.param)
-
-    arg_node = facts.arg_node
-    unless arg_node.is_a?(AST::Identifier)
-      error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION,
-        index: facts.index + 1, param: facts.param.name)
+    unless param_mutable?(facts.param)
+      emit_unexpected_mutable_argument_error!(facts) if facts.explicit_mutable
       return
     end
 
-    if current_scope.is_immutable?(arg_node.name)
-      emit_immutable_arg_error!(arg_node, current_scope, facts.index + 1, facts.param.name)
+    arg_node = facts.arg_node
+    root = AST.root_identifier(arg_node)
+    if root.nil?
+      if facts.explicit_mutable
+        error!(arg_node, :MUTABLE_MARKER_ON_ANONYMOUS_VALUE,
+          index: facts.index + 1, param: facts.param.name)
+      end
+      # A temporary has no caller-visible binding to upgrade or alias. The
+      # lowering phase materializes an addressable temporary when the ABI
+      # needs one.
+      return
     end
 
-    mark_var_mutated_via_call(arg_node.name)
+    interior_mutable = SymbolEntry.always_mutable_sync?(arg_node.full_type!(context: "mutable argument").sync)
+    # Interior-mutable storage owns its addressability contract. The marker is
+    # unnecessary, but accepting it keeps explicit generic call sites valid:
+    # `update(&holder.cell)` must not require the immutable `holder` itself to
+    # become mutable when `cell` is @alwaysMutable.
+    if interior_mutable
+      mark_var_mutated_via_call(root.name)
+      return
+    end
+
+    missing_marker = !facts.explicit_mutable
+    if missing_marker
+      if language_mode == :easy
+        emit_missing_mutable_marker_error!(facts, current_scope) if FixCollector.enabled?
+        promote_mutable_call_argument!(root)
+      else
+        emit_missing_mutable_marker_error!(facts, current_scope)
+      end
+    end
+
+    if current_scope.is_immutable?(root.name) && !missing_marker
+      if language_mode == :easy
+        promote_mutable_call_argument!(root)
+        emit_immutable_arg_error!(root, current_scope, facts.index + 1, facts.param.name) if FixCollector.enabled? && facts.explicit_mutable
+      else
+        emit_immutable_arg_error!(root, current_scope, facts.index + 1, facts.param.name)
+      end
+    end
+
+    mark_var_mutated_via_call(root.name)
+  end
+
+  sig { params(arg_node: AST::Identifier).void }
+  def promote_mutable_call_argument!(arg_node)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    entry = current_scope.resolve_entry(arg_node.name)
+    return unless entry
+
+    entry.mutable = true
+    entry.reg.mutable = true if entry.reg.respond_to?(:mutable=)
   end
 
   sig { params(facts: CallArgumentFacts).void }
@@ -1028,7 +1095,7 @@ module FunctionAnalysis
     type.atomic? && type.primitive?
   end
 
-  sig { params(node: CallNode, atomic_args: CallArgList).void }
+  sig { params(node: SignatureCallNode, atomic_args: CallArgList).void }
   def warn_multi_atomic_bare_value_call!(node, atomic_args)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     unique_args = atomic_args.compact

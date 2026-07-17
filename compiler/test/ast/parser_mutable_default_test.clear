@@ -33,8 +33,8 @@ TEST ClearParserMutableFixedArrayDefaults DO
     END
     TEST THAT "coerces fixed-array defaults through their target type" DO
       MUTABLE lit = DefaultArrayLit{ token: NIL, type_info: Type.array_of(:Int64, 2), storage: :stack };
-      ASSERT lit.coerce!(Type.array_of(:Int64, 2)) == [symbol("Int64[2]"), NIL], "expected lit.coerce!(Type.array_of(:Int64, 2)) to eq([:\"Int64[2]\", nil])";
-      MUTABLE coerced, error = lit.coerce!(Type.array_of(:String, 2));
+      ASSERT lit.coerce(Type.array_of(:Int64, 2)) == [symbol("Int64[2]"), NIL], "expected lit.coerce!(Type.array_of(:Int64, 2)) to eq([:\"Int64[2]\", nil])";
+      MUTABLE coerced, error = lit.coerce(Type.array_of(:String, 2));
       ASSERT coerced.nil?(), "expected coerced to be_nil";
       ASSERT error.contains?("Cannot initialize array of size 2 with 2 elements"), "expected error to include(\"Cannot initialize array of size 2 with 2 elements\")";
     END

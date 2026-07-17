@@ -8,7 +8,7 @@ RSpec.describe "AsyncResultShape" do
       FN main() RETURNS Void ->
         xs: ~Int64[]@list = BG {
           MUTABLE out: []Int64 = [];
-          out.append(1_i64);
+          &out.append(1_i64);
           out;
         };
         ys: []Int64 = NEXT xs;

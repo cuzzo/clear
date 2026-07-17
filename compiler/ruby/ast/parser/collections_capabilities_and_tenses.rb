@@ -114,6 +114,8 @@ class ClearParser
       result.sync = :locked
     when "@writeLocked", "writeLocked"
       result.sync = :write_locked
+    when "@alwaysMutable", "alwaysMutable"
+      result.sync = :always_mutable
     when "@link"
       result.ownership = :link
     when "@boxed", "boxed", "@indirect", "indirect"

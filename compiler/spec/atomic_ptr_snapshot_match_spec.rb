@@ -21,7 +21,7 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
   describe "single-cell SNAPSHOT MATCH" do
     it "parses VERSIONED + ATOMIC arms with per-arm ON MvccConflict on the VERSIONED arm" do
       src = <<~CLEAR
-        FN bumpPort!(MUTABLE c: Cfg) RETURNS Void ->
+        FN bumpPort(MUTABLE c: Cfg) RETURNS Void ->
           WITH SNAPSHOT c AS MUTABLE x MATCH
             WHEN VERSIONED -> { x.port = x.port + 1; } ON MvccConflict RAISE
             WHEN ATOMIC    -> { x.port = x.port + 1; }
@@ -40,7 +40,7 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
 
     it "VERSIONED arm preserves the ON MvccConflict clause" do
       src = <<~CLEAR
-        FN f!(MUTABLE c: Cfg) RETURNS Void ->
+        FN f(MUTABLE c: Cfg) RETURNS Void ->
           WITH SNAPSHOT c AS MUTABLE x MATCH
             WHEN VERSIONED -> { _ = x.port; } ON MvccConflict RAISE
             WHEN ATOMIC    -> { _ = x.port; }
@@ -56,7 +56,7 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
 
     it "ATOMIC arm has NO ON MvccConflict clause" do
       src = <<~CLEAR
-        FN f!(MUTABLE c: Cfg) RETURNS Void ->
+        FN f(MUTABLE c: Cfg) RETURNS Void ->
           WITH SNAPSHOT c AS MUTABLE x MATCH
             WHEN VERSIONED -> { _ = x.port; } ON MvccConflict RAISE
             WHEN ATOMIC    -> { _ = x.port; }
@@ -72,7 +72,7 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
 
     it "snapshot_mode is :transaction when alias is MUTABLE (regardless of MATCH)" do
       src = <<~CLEAR
-        FN f!(MUTABLE c: Cfg) RETURNS Void ->
+        FN f(MUTABLE c: Cfg) RETURNS Void ->
           WITH SNAPSHOT c AS MUTABLE x MATCH
             WHEN VERSIONED -> { _ = x.port; } ON MvccConflict RAISE
             WHEN ATOMIC    -> { _ = x.port; }
@@ -137,7 +137,7 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
   describe "non-MATCH path is unaffected" do
     it "parses single-cell SNAPSHOT (no MATCH) with ON MvccConflict trailing the body" do
       src = <<~CLEAR
-        FN f!(MUTABLE c: Cfg) RETURNS Void ->
+        FN f(MUTABLE c: Cfg) RETURNS Void ->
           WITH SNAPSHOT c AS MUTABLE x { _ = x.port; } ON MvccConflict RAISE
           RETURN;
         END

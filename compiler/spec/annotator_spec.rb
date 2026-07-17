@@ -375,32 +375,17 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "Mutable Parameter Naming" do
-      context "missing suffix" do
-        let(:code) {
-          <<~FLUX
-            FN update(MUTABLE x: Float64) ->
-              x = x + 1;
-              RETURN x;
-            END
-          FLUX
-        }
-        it "raises error if function takes MUTABLE param but name doesn't end in !" do
-          expect { ast }.to raise_error(/Style Error/i)
-        end
-      end
+      let(:code) {
+        <<~FLUX
+          FN update(MUTABLE x: Float64) ->
+            x = x + 1;
+            RETURN x;
+          END
+        FLUX
+      }
 
-      context "matching suffix" do
-        let(:code) {
-          <<~FLUX
-            FN update!(MUTABLE x: Float64) ->
-              x = x + 1;
-              RETURN x;
-            END
-          FLUX
-        }
-        it "allows MUTABLE param if name ends in !" do
-          expect { ast }.not_to raise_error
-        end
+      it "does not encode mutation in the function name" do
+        expect { ast }.not_to raise_error
       end
     end
   end
@@ -876,7 +861,7 @@ RSpec.describe SemanticAnnotator do
     context "Mutability Safety" do
       let(:mutable_func) {
         <<~FLUX
-          FN modify!(MUTABLE x: Float64) ->
+          FN modify(MUTABLE x: Float64) ->
             x = x + 1;
           END
         FLUX
@@ -885,21 +870,20 @@ RSpec.describe SemanticAnnotator do
       it "errors when passing an immutable variable to a MUTABLE parameter" do
         code = mutable_func + <<~FLUX
           im = 10; # Implicitly immutable
-          modify!(im);
+          modify(&im);
         FLUX
         expect { run(code) }.to raise_error(/but you passed immutable variable/i)
       end
 
-      # TODO: Probably not a good idea.
-      it "errors when passing a literal/expression to a MUTABLE parameter" do
-        code = mutable_func + "modify!(10);"
-        expect { run(code) }.to raise_error(/You cannot pass a value\/expression/i)
+      it "accepts an anonymous value without an address marker" do
+        code = mutable_func + "modify(10);"
+        expect { run(code) }.not_to raise_error
       end
 
       it "accepts a mutable variable passed to a MUTABLE parameter" do
         code = mutable_func + <<~FLUX
           MUTABLE m = 10;
-          modify!(m);
+          modify(&m);
         FLUX
         expect { run(code) }.not_to raise_error
       end
@@ -911,7 +895,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT User { id: Float64 }
 
           # This doesn't actually work, but it's just for testing aliasing...
-          FN swap!(MUTABLE u1: User, MUTABLE u2: User) ->
+          FN swap(MUTABLE u1: User, MUTABLE u2: User) ->
             u1 = u2;
             u2 = User{ id: 20 };
           END
@@ -921,7 +905,7 @@ RSpec.describe SemanticAnnotator do
       it "errors" do
         code = mutable_func + <<~FLUX
           MUTABLE u = User{ id: 1 };
-          swap!(u, u);
+          swap(&u, &u);
         FLUX
         expect { run(code) }.to raise_error(/Aliasing Error/i)
       end
@@ -930,7 +914,7 @@ RSpec.describe SemanticAnnotator do
         code = mutable_func + <<~FLUX
           MUTABLE u1 = User{id: 1};
           MUTABLE u2 = User{id: 2};
-          swap!(u1, u2);
+          swap(&u1, &u2);
         FLUX
         expect { run(code) }.not_to raise_error
       end
@@ -951,8 +935,8 @@ RSpec.describe SemanticAnnotator do
         code = <<~FLUX
           STRUCT Node { keys: []Int64, vals: []String }
           STRUCT DB { nodes: []Node }
-          FN addKey!(MUTABLE db: DB, idx: Int64, key: Int64) RETURNS !Void ->
-              IF db.nodes[idx] EXISTS AS node THEN node.keys.append(key); END
+          FN addKey(MUTABLE db: DB, idx: Int64, key: Int64) RETURNS !Void ->
+              IF db.nodes[idx] EXISTS AS node THEN &node.keys.append(key); END
           END
         FLUX
         expect { run(code) }.not_to raise_error
@@ -961,8 +945,8 @@ RSpec.describe SemanticAnnotator do
       it "flags needs_mut_ref on GetIndex for mutating intrinsic" do
         code = <<~FLUX
           STRUCT Node { keys: []Int64 }
-          FN addKey!(MUTABLE nodes: []Node, idx: Int64, key: Int64) RETURNS !Void ->
-              IF nodes[idx] EXISTS AS node THEN node.keys.append(key); END
+          FN addKey(MUTABLE nodes: []Node, idx: Int64, key: Int64) RETURNS !Void ->
+              IF nodes[idx] EXISTS AS node THEN &node.keys.append(key); END
           END
         FLUX
         ast = run(code)
@@ -975,7 +959,7 @@ RSpec.describe SemanticAnnotator do
       it "flags needs_mut_ref on GetIndex for field assignment" do
         code = <<~FLUX
           STRUCT Node { keys: []Int64 }
-          FN setKeys!(MUTABLE nodes: []Node, idx: Int64) RETURNS Void ->
+          FN setKeys(MUTABLE nodes: []Node, idx: Int64) RETURNS Void ->
               IF nodes[idx] EXISTS AS node THEN node.keys = [1, 2, 3]; END
           END
         FLUX
@@ -991,7 +975,7 @@ RSpec.describe SemanticAnnotator do
           FN test() RETURNS !Void ->
             STRUCT Node { vals: []String }
             MUTABLE nodes: []Node = [];
-            nodes.append(Node{ vals: [] });
+            &nodes.append(Node{ vals: [] });
             MUTABLE nv: []String = [];
             IF nodes[0] EXISTS AS node THEN node.vals = nv; END
           END
@@ -1004,7 +988,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~FLUX
           STRUCT Node { keys: []Int64 }
           MUTABLE keys: []Int64 = [];
-          keys.append(1);
+          &keys.append(1);
           Node{ keys: keys };
         FLUX
         ast = run(code)
@@ -1774,7 +1758,7 @@ RSpec.describe SemanticAnnotator do
             MUTABLE i = 0_i64;
             WHILE i < 10 DO
               MUTABLE vals: Float64[]@list = [];
-              append(vals, 1.0);
+              append(&vals, 1.0);
               i = i + 1_i64;
             END
             RETURN;
@@ -1796,7 +1780,7 @@ RSpec.describe SemanticAnnotator do
             MUTABLE all: Float64[]@list = [];
             MUTABLE i = 0_i64;
             WHILE i < 10 DO
-              append(all, 1.0);
+              append(&all, 1.0);
               i = i + 1_i64;
             END
             RETURN;
@@ -1817,7 +1801,7 @@ RSpec.describe SemanticAnnotator do
             MUTABLE keys: String[]@list = List[];
             MUTABLE i = 0_i64;
             WHILE i < 10 DO
-              keys.append(toString(i));
+              &keys.append(toString(i));
               i = i + 1_i64;
             END
             RETURN;
@@ -1837,7 +1821,7 @@ RSpec.describe SemanticAnnotator do
             MUTABLE keys: String[]@list = List[];
             MUTABLE i = 0_i64;
             WHILE i < 10 DO
-              keys.append("b:" $+ toString(i));
+              &keys.append("b:" $+ toString(i));
               i = i + 1_i64;
             END
             RETURN;
@@ -1879,7 +1863,7 @@ RSpec.describe SemanticAnnotator do
           FN foo() RETURNS !Void ->
             FOR i IN (0_i64 ..< 5) DO
               MUTABLE parts: Int64[]@list = [];
-              parts.append(i);
+              &parts.append(i);
             END
             RETURN;
           END
@@ -1895,7 +1879,7 @@ RSpec.describe SemanticAnnotator do
           FN foo() RETURNS !Void ->
             MUTABLE all: String[]@list = [];
             FOR i IN (0_i64 ..< 5) DO
-              all.append(i.toString());
+              &all.append(i.toString());
             END
             RETURN;
           END
@@ -1914,7 +1898,7 @@ RSpec.describe SemanticAnnotator do
             MUTABLE items: Int64[] = [1_i64, 2_i64];
             FOR item IN items DO
               MUTABLE parts: Int64[]@list = [];
-              parts.append(item);
+              &parts.append(item);
             END
             RETURN;
           END
@@ -1931,7 +1915,7 @@ RSpec.describe SemanticAnnotator do
             MUTABLE items: Int64[] = [1_i64, 2_i64];
             MUTABLE all: String[]@list = [];
             FOR item IN items DO
-              all.append(item.toString());
+              &all.append(item.toString());
             END
             RETURN;
           END
@@ -1948,7 +1932,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN buildList() RETURNS !Float64[]@list ->
             MUTABLE vals: Float64[]@list = [];
-            append(vals, 1.0);
+            append(&vals, 1.0);
             RETURN vals;
           END
         CLEAR
@@ -1965,7 +1949,7 @@ RSpec.describe SemanticAnnotator do
           UNION Value { Nil, List: Value[] }
           FN makeList() RETURNS !Value ->
               MUTABLE items: Value[]@list = List[];
-              items.append(Value.Nil);
+              &items.append(Value.Nil);
               RETURN Value{ List: items };
           END
           FN main() RETURNS Void -> v = makeList(); RETURN; END
@@ -1985,8 +1969,8 @@ RSpec.describe SemanticAnnotator do
           STRUCT Node { value: Int64 }
           FN main() RETURNS Void ->
               MUTABLE pool: Node[100]@pool = [];
-              id1: Id<Node> = pool.insert(Node{ value: 1 });
-              id2: Id<Node> = pool.insert(Node{ value: 2 });
+              id1: Id<Node> = &pool.insert(Node{ value: 1 });
+              id2: Id<Node> = &pool.insert(Node{ value: 2 });
               copy_of_id = id1;
               RETURN;
           END
@@ -2421,7 +2405,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           MUTABLE list = [1, 2];
           # append returns Void, usually used as statement
-          list.append(3);
+          &list.append(3);
         FLUX
       }
       it "resolves append to Void" do
@@ -3989,7 +3973,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
             MUTABLE m: {String}Int64 = {};
-            m.delete("x");
+            &m.delete("x");
             RETURN;
           END
         CLEAR
@@ -4002,7 +3986,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_map(<<~CLEAR)
           FN f() RETURNS !Void ->
             MUTABLE m: {String}Int64 = {};
-            m.delete("x");
+            &m.delete("x");
             RETURN;
           END
         CLEAR
@@ -4473,7 +4457,7 @@ RSpec.describe SemanticAnnotator do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
         FN f() RETURNS !Void ->
           MUTABLE nums: []Int64 = [];
-          nums.append(1_i64);
+          &nums.append(1_i64);
           MUTABLE sum: Int64 = 0;
           FOR n IN nums DO
             sum += n;
@@ -4746,8 +4730,8 @@ RSpec.describe SemanticAnnotator do
   describe "WHILE bind footgun: stateless condition on immutable receiver" do
     it "supports clearing a mutable list" do
       src = <<~CLEAR
-        FN clear_items!(MUTABLE items: []Int64) RETURNS Void ->
-          items.clear();
+        FN clear_items(MUTABLE items: []Int64) RETURNS Void ->
+          &items.clear();
         END
       CLEAR
 
@@ -4783,8 +4767,8 @@ RSpec.describe SemanticAnnotator do
       src = <<~CHT
         FN test() RETURNS !Void ->
           MUTABLE items: []Int64 = [];
-          items.append(1_i64);
-          WHILE items.pop() EXISTS AS v DO
+          &items.append(1_i64);
+          WHILE &items.pop() EXISTS AS v DO
             _ = v;
           END
           RETURN;

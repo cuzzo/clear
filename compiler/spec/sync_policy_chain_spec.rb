@@ -58,7 +58,7 @@ RSpec.describe "SYNC POLICY chain (#328)" do
     it "stamps the policy handler on the empty VERSIONED arm" do
       ast = annotate(<<~CLEAR)
         STRUCT Cfg { port: Int64 }
-        FN bumpPort!(MUTABLE c: Cfg) RETURNS !Void
+        FN bumpPort(MUTABLE c: Cfg) RETURNS !Void
           REQUIRES c: VERSIONED | ATOMIC
         ->
           WITH SNAPSHOT c AS MUTABLE x MATCH
@@ -69,12 +69,12 @@ RSpec.describe "SYNC POLICY chain (#328)" do
         END
         FN main() RETURNS Void ->
           MUTABLE cfg = Cfg{ port: 80 } @boxed:atomic;
-          bumpPort!(cfg);
+          bumpPort(&cfg);
           RETURN;
         END
       CLEAR
 
-      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "bumpPort!" }
+      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "bumpPort" }
       with_node = fn.body.find { |s| s.is_a?(AST::WithBlock) }
       versioned_arm = with_node.arms.find { |a| a.family == :VERSIONED }
       atomic_arm    = with_node.arms.find { |a| a.family == :ATOMIC }

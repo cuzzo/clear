@@ -66,7 +66,7 @@ RSpec.describe "Effect / REQUIRES / reentrant typo auto-fixes" do
   describe "UNKNOWN_REQUIRES_FAMILY — `LOKKED` typo" do
     let(:src) {
       <<~CLEAR
-        FN incr!(MUTABLE c: Counter) REQUIRES c: LOKKED -> END
+        FN incr(MUTABLE c: Counter) REQUIRES c: LOKKED -> END
         FN main() RETURNS Void -> END
       CLEAR
     }

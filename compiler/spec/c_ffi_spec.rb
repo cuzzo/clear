@@ -36,7 +36,7 @@ RSpec.describe "C ABI integration" do
 
       FN main() RETURNS Void ->
         MUTABLE out: ?Handle = NIL;
-        ASSERT acquire("item", out, 4) == 0;
+        ASSERT acquire("item", &out, 4) == 0;
         handle = out?;
       END
     CLEAR

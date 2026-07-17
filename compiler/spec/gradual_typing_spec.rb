@@ -1146,8 +1146,8 @@ RSpec.describe "Gradual typing — full pipeline integration (M1.7)" do
   it "restamps shape-inferred Auto locals and their empty initializer" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
-        xs: Auto = [];
-        xs.append(1);
+        MUTABLE xs: Auto = [];
+        &xs.append(1);
         RETURN;
       END
     CLEAR
@@ -1591,8 +1591,8 @@ RSpec.describe "Gradual typing — forward-flow `[]` / `{}` inference (M2.2)" do
     it "records `xs.append(e)` arg as :list_element evidence" do
       ast = parse(<<~CLEAR)
         FN main() RETURNS !Void ->
-          xs: Auto = [];
-          xs.append(5_i64);
+          MUTABLE xs: Auto = [];
+          &xs.append(5_i64);
           RETURN;
         END
       CLEAR
@@ -1619,8 +1619,8 @@ RSpec.describe "Gradual typing — forward-flow `[]` / `{}` inference (M2.2)" do
     it "records `m.put(k, v)` args as :map_key + :map_value evidence" do
       ast = parse(<<~CLEAR)
         FN main() RETURNS !Void ->
-          m: Auto = {};
-          m.put("hi", 5_i64);
+          MUTABLE m: Auto = {};
+          &m.put("hi", 5_i64);
           RETURN;
         END
       CLEAR
@@ -1635,8 +1635,8 @@ RSpec.describe "Gradual typing — forward-flow `[]` / `{}` inference (M2.2)" do
     it "records `m.insert(k, v)` args as :map_key + :map_value evidence" do
       ast = parse(<<~CLEAR)
         FN main() RETURNS !Void ->
-          m: Auto = {};
-          m.insert("hi", 5_i64);
+          MUTABLE m: Auto = {};
+          &m.insert("hi", 5_i64);
           RETURN;
         END
       CLEAR
@@ -1688,8 +1688,8 @@ RSpec.describe "Gradual typing — forward-flow `[]` / `{}` inference (M2.2)" do
           RETURN;
         END
         FN bar() RETURNS Void ->
-          ys: Int64[] = [1_i64, 2_i64];
-          ys.append(3_i64);
+          MUTABLE ys: Int64[] = [1_i64, 2_i64];
+          &ys.append(3_i64);
           RETURN;
         END
       CLEAR
@@ -1704,8 +1704,8 @@ RSpec.describe "Gradual typing — forward-flow `[]` / `{}` inference (M2.2)" do
     it "resolves `xs: Auto = []` + `xs.append(5_i64)` as Int64[]" do
       ast = annotate(<<~CLEAR)
         FN main() RETURNS !Void ->
-          xs: Auto = [];
-          xs.append(5_i64);
+          MUTABLE xs: Auto = [];
+          &xs.append(5_i64);
           RETURN;
         END
       CLEAR
@@ -1770,9 +1770,9 @@ RSpec.describe "Gradual typing — forward-flow `[]` / `{}` inference (M2.2)" do
     it "widens Byte[N] string literals to String for :list_element evidence too" do
       ast = annotate(<<~CLEAR)
         FN main() RETURNS !Void ->
-          xs: Auto = [];
-          xs.append("hi");
-          xs.append("hello");
+          MUTABLE xs: Auto = [];
+          &xs.append("hi");
+          &xs.append("hello");
           RETURN;
         END
       CLEAR
@@ -1785,9 +1785,9 @@ RSpec.describe "Gradual typing — forward-flow `[]` / `{}` inference (M2.2)" do
     it "emits ambiguity when appends disagree on element type" do
       annotate(<<~CLEAR)
         FN main() RETURNS !Void ->
-          xs: Auto = [];
-          xs.append(5_i64);
-          xs.append("hello");
+          MUTABLE xs: Auto = [];
+          &xs.append(5_i64);
+          &xs.append("hello");
           RETURN;
         END
       CLEAR
@@ -1924,8 +1924,8 @@ RSpec.describe "Gradual typing — forward-flow `[]` / `{}` inference (M2.2)" do
     it "does not emit per-sub-slot resolved findings for shape slots" do
       annotate(<<~CLEAR)
         FN main() RETURNS !Void ->
-          xs: Auto = [];
-          xs.append(5_i64);
+          MUTABLE xs: Auto = [];
+          &xs.append(5_i64);
           RETURN;
         END
       CLEAR

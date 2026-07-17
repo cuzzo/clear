@@ -28,7 +28,7 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @boxed:atomic (M3.9)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN both!() RETURNS !Void ->
+          FN both() RETURNS !Void ->
             a = C{ v: 0 } @versioned;
             b = C{ v: 0 } @versioned;
             WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
@@ -45,7 +45,7 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @boxed:atomic (M3.9)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN both!() RETURNS Void ->
+          FN both() RETURNS Void ->
             a = C{ v: 0 } @versioned;
             b = C{ v: 0 } @boxed:atomic;
             WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
@@ -83,7 +83,7 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @boxed:atomic (M3.9)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN both!() RETURNS Void ->
+          FN both() RETURNS Void ->
             a = C{ v: 0 } @boxed:atomic;
             b = C{ v: 0 } @boxed:atomic;
             WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
@@ -102,7 +102,7 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @boxed:atomic (M3.9)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN one!() RETURNS !Void ->
+          FN one() RETURNS !Void ->
             a = C{ v: 0 } @boxed:atomic;
             WITH SNAPSHOT a AS MUTABLE va { va.v = va.v + 1; }
             RETURN;
@@ -115,7 +115,7 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @boxed:atomic (M3.9)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN one!() RETURNS !Void ->
+          FN one() RETURNS !Void ->
             a = C{ v: 0 } @versioned;
             WITH SNAPSHOT a AS MUTABLE va { va.v = va.v + 1; } ON MvccConflict RAISE
             RETURN;

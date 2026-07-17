@@ -57,12 +57,12 @@ RSpec.describe "the intrinsic generic Map protocol" do
 
   it "type-checks generic indexing and the stable Map method surface" do
     program = annotate(<<~CLEAR)
-      FN exercise!<M: Map>(MUTABLE map: M, key: M::Key, TAKES first: M::Value, TAKES second: M::Value) RETURNS !Int64 ->
+      FN exercise<M: Map>(MUTABLE map: M, key: M::Key, TAKES first: M::Value, TAKES second: M::Value) RETURNS !Int64 ->
         before = map[key];
         map[key] = first;
-        map.put(key, second);
+        &map.put(key, second);
         ASSERT map.contains?(key);
-        map.delete(key);
+        &map.delete(key);
         ASSERT map.empty?() OR map.any?();
         RETURN map.length();
       END
@@ -80,8 +80,8 @@ RSpec.describe "the intrinsic generic Map protocol" do
   it "requires owned generic values and preserves explicit COPY through MIR" do
     expect {
       annotate(<<~CLEAR)
-        FN invalid!<M: Map>(MUTABLE map: M, key: M::Key, value: M::Value) RETURNS !Void ->
-          map.put(key, value);
+        FN invalid<M: Map>(MUTABLE map: M, key: M::Key, value: M::Value) RETURNS !Void ->
+          &map.put(key, value);
         END
       CLEAR
     }.to raise_error(CompilerError, /Cannot pass borrowed access to TAKES parameter/)
@@ -101,7 +101,7 @@ RSpec.describe "the intrinsic generic Map protocol" do
     }.to raise_error(CompilerError, /Cannot pass container index access to TAKES parameter/)
 
     zig = ZigTranspiler.new.transpile(<<~CLEAR)
-      FN copied!<M: Map>(MUTABLE map: M, key: M::Key, value: M::Value) RETURNS !Void ->
+      FN copied<M: Map>(MUTABLE map: M, key: M::Key, value: M::Value) RETURNS !Void ->
         map[key] = COPY value;
       END
     CLEAR
@@ -112,17 +112,17 @@ RSpec.describe "the intrinsic generic Map protocol" do
 
   it "specializes concrete calls and emits static adapters with caller allocator provenance" do
     zig = ZigTranspiler.new.transpile(<<~CLEAR)
-      FN write!<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+      FN write<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
         map[key] = value;
       END
 
-      FN forward!<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
-        write!(map, key, value);
+      FN forward<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+        write(&map, key, value);
       END
 
       FN main() RETURNS !Void ->
         MUTABLE words: {String}Int64 = {};
-        write!(words, "answer", 42_i64);
+        write(&words, "answer", 42_i64);
       END
     CLEAR
 
@@ -185,8 +185,8 @@ RSpec.describe "the intrinsic generic Map protocol" do
 
     expect {
       annotate(<<~CLEAR)
-        FN bad<M: Map>(map: M, key: M::Key) RETURNS Void ->
-          map.put(key, "not-a-generic-value");
+        FN bad<M: Map>(MUTABLE map: M, key: M::Key) RETURNS Void ->
+          &map.put(key, "not-a-generic-value");
         END
       CLEAR
     }.to raise_error(CompilerError, /Map.put argument 2 expects M::Value, but got Byte\[19\]/)
@@ -194,11 +194,11 @@ RSpec.describe "the intrinsic generic Map protocol" do
 
   it "keeps concrete map assignment and protocol runtime classification distinct" do
     program = annotate(<<~CLEAR)
-      FN concrete!() RETURNS !Void ->
+      FN concrete() RETURNS !Void ->
         MUTABLE map: {String}Int64 = {};
         map["x"] = 1_i64;
       END
-      FN generic!<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+      FN generic<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
         map[key] = value;
       END
     CLEAR

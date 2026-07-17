@@ -26,7 +26,7 @@ RSpec.describe "Immutable param auto-fix" do
   describe "ASSIGN_INDEX_IMMUTABLE_LIST on a HashMap parameter" do
     let(:src) {
       <<~CLEAR
-        FN parseValue!(json: String, penv: {String}Int64) RETURNS Void ->
+        FN parseValue(json: String, penv: {String}Int64) RETURNS Void ->
           penv["__jp"] = 0;
         END
         FN main() RETURNS Void -> END
@@ -46,10 +46,10 @@ RSpec.describe "Immutable param auto-fix" do
       edit = finding.fixes.first.edits.first
       expect(edit.replacement).to eq("MUTABLE ")
       expect(edit.span.line).to eq(1)
-      # `FN parseValue!(json: String, penv: HashMap<Int64>) ...`
-      # The 'penv' identifier starts at column 30 (1-indexed); insert
+      # `FN parseValue(json: String, penv: HashMap<Int64>) ...`
+      # The 'penv' identifier starts at column 29 (1-indexed); insert
       # before it.
-      expect(edit.span.col).to eq(30)
+      expect(edit.span.col).to eq(29)
       expect(edit.span.length).to eq(0)
     end
 

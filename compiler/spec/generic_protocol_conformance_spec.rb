@@ -152,13 +152,13 @@ RSpec.describe "explicit generic protocol conformances" do
         IMPLEMENTATION Sized FOR Box {
           METHOD size(self) RETURNS Int64 -> RETURN self.value; END
         }
-        FN measured!<T: SHARED Sized>(MUTABLE value: T) RETURNS !Int64 ->
+        FN measured<T: SHARED Sized>(MUTABLE value: T) RETURNS !Int64 ->
           WITH POLYMORPHIC value AS view { RETURN view.size(); }
           RETURN 0_i64;
         END
         FN main() RETURNS Void ->
           MUTABLE box = Box{ value: 7_i64 } @shared:locked;
-          ASSERT measured!(box) OR_ELSE RAISE == 7_i64;
+          ASSERT measured(&box) OR_ELSE RAISE == 7_i64;
         END
       CLEAR
     }.not_to raise_error
@@ -355,16 +355,16 @@ RSpec.describe "explicit generic protocol conformances" do
   it "checks member kind, arity, ownership, mutability, and return type" do
     prefix = <<~CLEAR
       PROTOCOL Store<Key, Value> {
-        METHOD put!(MUTABLE self: Self, TAKES key: Key, value: Value) RETURNS !Void;
+        METHOD put(MUTABLE self: Self, TAKES key: Key, value: Value) RETURNS !Void;
       }
       STRUCT Box<K, V> { marker: Int64 }
     CLEAR
     cases = {
-      "expected METHOD, found FN" => "FN put!(MUTABLE self: Box<K, V>, TAKES key: K, value: V) RETURNS !Void -> RETURN; END",
-      "expected 3 parameter(s), found 2" => "METHOD put!(MUTABLE self, TAKES key: K) RETURNS !Void -> RETURN; END",
-      "parameter 1 is incompatible" => "METHOD put!(self, TAKES key: K, value: V) RETURNS !Void -> RETURN; END",
-      "parameter 2 is incompatible" => "METHOD put!(MUTABLE self, key: K, value: V) RETURNS !Void -> RETURN; END",
-      "expected RETURNS !Void, found Void" => "METHOD put!(MUTABLE self, TAKES key: K, value: V) RETURNS Void -> RETURN; END",
+      "expected METHOD, found FN" => "FN put(MUTABLE self: Box<K, V>, TAKES key: K, value: V) RETURNS !Void -> RETURN; END",
+      "expected 3 parameter(s), found 2" => "METHOD put(MUTABLE self, TAKES key: K) RETURNS !Void -> RETURN; END",
+      "parameter 1 is incompatible" => "METHOD put(self, TAKES key: K, value: V) RETURNS !Void -> RETURN; END",
+      "parameter 2 is incompatible" => "METHOD put(MUTABLE self, key: K, value: V) RETURNS !Void -> RETURN; END",
+      "expected RETURNS !Void, found Void" => "METHOD put(MUTABLE self, TAKES key: K, value: V) RETURNS Void -> RETURN; END",
     }
 
     cases.each do |message, member|

@@ -1244,14 +1244,16 @@ module Annotator
 
         pre_loop_states = ownership_graph.fork_lightweight
 
-        # Footgun guard: a MethodCall on an immutable receiver cannot advance the
-        # loop condition and will loop forever.  RESOLVE is a ResolveNode (not a
-        # MethodCall) and is safe; mutable receivers may mutate state each iteration.
+        # A read-only method on immutable state cannot advance a bind-loop
+        # condition: `WHILE text.indexOf(",") EXISTS AS ...` would observe the
+        # same value forever. Mutating methods are already governed by the
+        # universal MUTABLE/& call contract before reaching this guard.
         cond = node.condition
         if cond.is_a?(AST::MethodCall)
           recv = cond.object
           if recv.is_a?(AST::Identifier) && current_scope.is_immutable?(recv.name)
-            error!(node, :WHILE_AS_IMMUTABLE_RECEIVER, method: cond.name, recv: recv.name, recv2: recv.name)
+            error!(node, :WHILE_AS_IMMUTABLE_RECEIVER,
+              method: cond.name, recv: recv.name, recv2: recv.name)
           end
         end
 

@@ -749,6 +749,68 @@ module FixableHelper
       raise_in_collector: true)
   end
 
+  # A MUTABLE parameter is an explicit effect at the call site. Insert `&`
+  # before the argument and, when necessary, upgrade its local declaration in
+  # the same atomic fix so `clear run --easy` can safely rewrite both sites.
+  sig { params(facts: FunctionAnalysis::CallArgumentFacts, scope: Scope).void }
+  def emit_missing_mutable_marker_error!(facts, scope)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    arg = facts.arg_node
+    root = AST.root_identifier(arg)
+    return unless root
+
+    edits = T.let([
+      Edit.new(
+        span: Span.new(file: nil, line: root.token.line, col: root.token.column, length: 0),
+        replacement: '&'
+      )
+    ], T::Array[Edit])
+    mutable_fix = build_declare_mutable_fix(root.name, scope)
+    edits.concat(mutable_fix.edits) if scope.is_immutable?(root.name) && mutable_fix
+    fix = Fix.new(
+      description: fix_description(:INSERT_MUTABLE_ARGUMENT_MARKER,
+        name: root.name, param: facts.param.name),
+      confidence: :auto,
+      edits: edits
+    )
+    fixable!(root,
+      code: :MUTABLE_ARGUMENT_REQUIRES_MARKER,
+      index: facts.index + 1,
+      param: facts.param.name,
+      actual: root.name,
+      category: :mutability,
+      level: :error,
+      fixes: [fix])
+  end
+
+  # `&` may only satisfy a MUTABLE parameter. Silently accepting it on an
+  # immutable parameter would make the source claim an effect the callee does
+  # not have and would hide signature drift.
+  sig { params(facts: FunctionAnalysis::CallArgumentFacts).void }
+  def emit_unexpected_mutable_argument_error!(facts)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    token = facts.mutable_marker_token
+    return error!(facts.arg_node, :MUTABLE_MARKER_ON_IMMUTABLE_PARAM,
+      index: facts.index + 1, param: facts.param.name) unless token
+
+    fix = Fix.new(
+      description: fix_description(:REMOVE_MUTABLE_ARGUMENT_MARKER,
+        param: facts.param.name),
+      confidence: :auto,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: token.line, col: token.column, length: 1),
+        replacement: ''
+      )]
+    )
+    fixable!(token,
+      code: :MUTABLE_MARKER_ON_IMMUTABLE_PARAM,
+      index: facts.index + 1,
+      param: facts.param.name,
+      category: :mutability,
+      level: :error,
+      fixes: [fix])
+  end
+
   # `x[i] = ...` or `m["k"] = ...` where x/m is an immutable binding.
   # Same fix shape: insert MUTABLE at the binding's declaration. The
   # error code is named `_LIST` for historical reasons but the same
@@ -1334,36 +1396,6 @@ module FixableHelper
       code: :WITH_RESTRICT_NEEDS_MUTABLE,
       name: name,
       category: :capability,
-      level: :error,
-      fixes: [fix])
-  end
-
-  # Style lint: a function with at least one MUTABLE param should end
-  # in `!`. :auto fix appends `!` immediately after the function name.
-  # Falls back to plain error! when the name token isn't available
-  # (e.g. synthesized fns).
-  sig { params(fn_node: AST::FunctionDef).void }
-  def emit_style_mutable_param_needs_bang!(fn_node)
-    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    name = fn_node.name
-    name_tok = fn_node.name_token
-    fix = nil
-    if name_tok
-      end_col = name_tok.column + name.length
-      fix = Fix.new(
-        description: fix_description(:APPEND_MUTABLE_PARAM_BANG, name: name),
-        confidence: :auto,
-        edits: [Edit.new(
-          span: Span.new(file: nil, line: name_tok.line, col: end_col, length: 0),
-          replacement: '!'
-        )]
-      )
-    end
-    return error!(fn_node, :STYLE_MUTABLE_PARAM_NEEDS_BANG, name: name) unless fix
-    fixable!(fn_node,
-      code: :STYLE_MUTABLE_PARAM_NEEDS_BANG,
-      name: name,
-      category: :lint,
       level: :error,
       fixes: [fix])
   end

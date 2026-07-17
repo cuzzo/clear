@@ -34,7 +34,7 @@ RSpec.describe "Polymorphic VERSIONED|ATOMIC mutate without MATCH (M3.11)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
-          FN bumpPort!(MUTABLE c: Cfg) RETURNS !Void
+          FN bumpPort(MUTABLE c: Cfg) RETURNS !Void
             REQUIRES c: VERSIONED | ATOMIC
           ->
             WITH SNAPSHOT c AS MUTABLE x { x.port = x.port + 1; }
@@ -50,7 +50,7 @@ RSpec.describe "Polymorphic VERSIONED|ATOMIC mutate without MATCH (M3.11)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
-          FN bumpPort!(MUTABLE c: Cfg) RETURNS !Void
+          FN bumpPort(MUTABLE c: Cfg) RETURNS !Void
             REQUIRES c: VERSIONED | ATOMIC
           ->
             WITH SNAPSHOT c AS MUTABLE x MATCH
@@ -87,7 +87,7 @@ RSpec.describe "Polymorphic VERSIONED|ATOMIC mutate without MATCH (M3.11)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
-          FN bumpV!(MUTABLE c: Cfg) RETURNS !Void
+          FN bumpV(MUTABLE c: Cfg) RETURNS !Void
             REQUIRES c: VERSIONED
           ->
             WITH SNAPSHOT c AS MUTABLE x { x.port = x.port + 1; } ON MvccConflict RAISE
@@ -101,7 +101,7 @@ RSpec.describe "Polymorphic VERSIONED|ATOMIC mutate without MATCH (M3.11)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
-          FN bumpA!(MUTABLE c: Cfg) RETURNS !Void
+          FN bumpA(MUTABLE c: Cfg) RETURNS !Void
             REQUIRES c: ATOMIC
           ->
             WITH SNAPSHOT c AS MUTABLE x { x.port = x.port + 1; }

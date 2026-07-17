@@ -1135,6 +1135,13 @@ module MIRLoweringFunctions
       return MIR::ItemsAccess.new(arg, true)
     end
 
+    # @alwaysMutable is already stable interior-mutable storage. Its wrapper
+    # owns the addressability contract, so source does not spell `&`; pass the
+    # wrapped payload pointer to a MUTABLE parameter directly.
+    if callee_param&.mutable && SymbolEntry.always_mutable_sync?(ti.sync)
+      return MIR::AddressOf.new(MIR::FieldGet.new(arg, "data"))
+    end
+
     if with_alias_pointer_shaped?(a) && callee_param && !callee_param.mutable &&
         !callee_param_type.needs_pointer_passing?
       return MIR::Deref.new(arg)
@@ -1142,7 +1149,21 @@ module MIRLoweringFunctions
 
     return arg unless wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)
     return arg if arg_already_pointer_shaped?(a)
+    if callee_param&.mutable && AST.root_identifier(a).nil?
+      arg = materialize_mutable_call_temporary(arg, a)
+    end
     MIR::AddressOf.new(arg)
+  end
+
+  sig { params(arg: MIR::Node, ast_arg: AST::Node).returns(MIR::Node) }
+  def materialize_mutable_call_temporary(arg, ast_arg)
+    T.bind(self, MIRLowering) rescue nil
+    hoisted = hoist_alloc(arg, ast_arg, mutable: true)
+    return hoisted unless hoisted.equal?(arg)
+
+    name = "__mutable_arg_#{lowering_counters.next_tmp_id}"
+    function_state.pending_stmts << MIR::Let.new(name, arg, true, nil, nil)
+    MIR::Ident.new(name)
   end
 
   sig { params(callee_param: T.nilable(AST::Param), moved_arg: T::Boolean, ti: Type, callee_param_type: Type).returns(T::Boolean) }
@@ -1435,7 +1456,6 @@ module MIRLoweringFunctions
                           callee_param.type.respond_to?(:list_collection?) &&
                           callee_param.type.list_collection?
     wants_ptr_mut_value = mutable_callee &&
-                          a.is_a?(AST::Identifier) &&
                           !wants_ptr_mut_list &&
                           !callee_param_type.needs_pointer_passing?
     wants_ptr_intrinsic = ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
@@ -1483,7 +1503,7 @@ module MIRLoweringFunctions
     end
 
     # Standard call
-    callee_sig = fn_sig_for(node.name, bang_alias: true)
+    callee_sig = fn_sig_for(node.name)
     callee_sig ||= matched_call_signature(node)
     args_mir = node.args.each_with_index.map do |a, idx|
       lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx))
@@ -1723,7 +1743,7 @@ module MIRLoweringFunctions
   sig { params(node: T.any(AST::FunctionDef, CallNode)).returns(T::Boolean) }
   def call_owned_return?(node)
     T.bind(self, MIRLowering) rescue nil
-    sig = fn_sig_for(node.name, bang_alias: true) if node.respond_to?(:name)
+    sig = fn_sig_for(node.name) if node.respond_to?(:name)
     sig ||= FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     if sig && sig.respond_to?(:return_lifetime) && !sig.return_lifetime.empty?
       return false unless sig.heap_carry_return == true || sig.heap_return_alloc?

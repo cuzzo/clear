@@ -377,7 +377,7 @@ RSpec.describe SemanticAnnotator do
     context "default parameter (implicit borrow)" do
       let(:code) {
         preamble + <<~CLEAR
-          FN test!(v: Value, MUTABLE map: {String}Value) RETURNS Void ->
+          FN test(v: Value, MUTABLE map: {String}Value) RETURNS Void ->
               map["key"] = v;
               RETURN;
           END
@@ -392,7 +392,7 @@ RSpec.describe SemanticAnnotator do
     context "MUTABLE parameter (still a borrow, not owned)" do
       let(:code) {
         preamble + <<~CLEAR
-          FN test!(MUTABLE v: Value, MUTABLE map: {String}Value) RETURNS Void ->
+          FN test(MUTABLE v: Value, MUTABLE map: {String}Value) RETURNS Void ->
               map["key"] = v;
               RETURN;
           END
@@ -407,7 +407,7 @@ RSpec.describe SemanticAnnotator do
     context "TAKES parameter (owned)" do
       let(:code) {
         preamble + <<~CLEAR
-          FN test!(TAKES v: Value, MUTABLE map: {String}Value) RETURNS !Void ->
+          FN test(TAKES v: Value, MUTABLE map: {String}Value) RETURNS !Void ->
               map["key"] = v;
               RETURN;
           END
@@ -422,7 +422,7 @@ RSpec.describe SemanticAnnotator do
     context "TAKES MUTABLE parameter (owned + mutable)" do
       let(:code) {
         preamble + <<~CLEAR
-          FN test!(TAKES MUTABLE v: Value, MUTABLE map: {String}Value) RETURNS !Void ->
+          FN test(TAKES MUTABLE v: Value, MUTABLE map: {String}Value) RETURNS !Void ->
               map["key"] = v;
               RETURN;
           END
@@ -484,7 +484,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
-          FN test!(MUTABLE map: {String}Value) RETURNS !Void ->
+          FN test(MUTABLE map: {String}Value) RETURNS !Void ->
               v = Value.Nil;
               map["key"] = v;
               RETURN;
@@ -503,7 +503,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
-          FN test!(v: Value, MUTABLE map: {String}Value) RETURNS Void ->
+          FN test(v: Value, MUTABLE map: {String}Value) RETURNS Void ->
               map["key"] = v;
               RETURN;
           END
@@ -519,7 +519,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
-          FN test!(TAKES v: Value, MUTABLE map: {String}Value) RETURNS !Void ->
+          FN test(TAKES v: Value, MUTABLE map: {String}Value) RETURNS !Void ->
               map["key"] = v;
               RETURN;
           END
@@ -607,8 +607,8 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
-          FN test!(MUTABLE list: []Value) RETURNS !Void ->
-              list.append(Value.Nil);
+          FN test(MUTABLE list: []Value) RETURNS !Void ->
+              &list.append(Value.Nil);
               f = list[0];
               RETURN;
           END
@@ -626,8 +626,8 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
-          FN test!(MUTABLE list: []Value, MUTABLE map: {String}Value) RETURNS Void ->
-              list.append(Value.Nil);
+          FN test(MUTABLE list: []Value, MUTABLE map: {String}Value) RETURNS Void ->
+              &list.append(Value.Nil);
               IF list[0] EXISTS AS value THEN map["key"] = value; END
               RETURN;
           END
@@ -643,12 +643,12 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Str: String, List: Value[] }
-          FN consume!(TAKES v: Value) RETURNS Void ->
+          FN consume(TAKES v: Value) RETURNS Void ->
               RETURN;
           END
-          FN test!(MUTABLE list: []Value) RETURNS Void ->
-              list.append(Value.Nil);
-              IF list[0] EXISTS AS value THEN consume!(value); END
+          FN test(MUTABLE list: []Value) RETURNS Void ->
+              &list.append(Value.Nil);
+              IF list[0] EXISTS AS value THEN consume(value); END
               RETURN;
           END
         CLEAR
@@ -662,13 +662,13 @@ RSpec.describe SemanticAnnotator do
     context "passing Copy list element to TAKES parameter is OK" do
       let(:code) {
         <<~CLEAR
-          FN consume!(TAKES n: Int64) RETURNS Void ->
+          FN consume(TAKES n: Int64) RETURNS Void ->
               RETURN;
           END
-          FN test!() RETURNS !Void ->
+          FN test() RETURNS !Void ->
               MUTABLE list: []Int64 = List[];
-              list.append(1_i64);
-              consume!(list[0] OR_ELSE 0_i64);
+              &list.append(1_i64);
+              consume(list[0] OR_ELSE 0_i64);
               RETURN;
           END
         CLEAR
@@ -688,7 +688,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Str: String }
-          FN test!(MUTABLE map: {String}Value) RETURNS Void ->
+          FN test(MUTABLE map: {String}Value) RETURNS Void ->
               data: String[] = ["alpha", "beta"];
               map["key"] = Value{ Str: data[0] };
               RETURN;
@@ -710,7 +710,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Str: String }
-          FN test!(s: String, MUTABLE map: {String}Value) RETURNS Void ->
+          FN test(s: String, MUTABLE map: {String}Value) RETURNS Void ->
               map["key"] = Value{ Str: s };
               RETURN;
           END
@@ -726,7 +726,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Str: String }
-          FN test!(s: String, MUTABLE map: {String}Value) RETURNS !Void ->
+          FN test(s: String, MUTABLE map: {String}Value) RETURNS !Void ->
               map["key"] = Value{ Str: COPY s };
               RETURN;
           END
@@ -747,7 +747,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Str: String }
-          FN test!(MUTABLE map: {String}Value) RETURNS Void ->
+          FN test(MUTABLE map: {String}Value) RETURNS Void ->
               s = substr("hello", 0_i64, 3_i64);
               map["key"] = Value{ Str: s };
               RETURN;
@@ -767,7 +767,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Str: String }
-          FN test!(MUTABLE map: {String}Value) RETURNS !String ->
+          FN test(MUTABLE map: {String}Value) RETURNS !String ->
               val = map["t0"] OR_ELSE Value.Nil;
               PARTIAL MATCH val START
                   Value.Str AS s -> RETURN s;,
@@ -779,7 +779,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "marks the binding as container_borrow" do
-        fn = ast[1].find { |n| n.is_a?(AST::FunctionDef) && n.name == "test!" }
+        fn = ast[1].find { |n| n.is_a?(AST::FunctionDef) && n.name == "test" }
         bind = fn.body.find { |s| s.is_a?(AST::BindExpr) && s.name == "val" }
         expect(bind.container_borrow).to eq(true)
       end
@@ -812,12 +812,12 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Str: String }
-          FN consume!(TAKES v: Value) RETURNS Void ->
+          FN consume(TAKES v: Value) RETURNS Void ->
               RETURN;
           END
           FN caller() RETURNS !Void ->
               x = Value{ Str: COPY "hello" };
-              consume!(x);
+              consume(x);
               RETURN;
           END
         CLEAR
@@ -825,7 +825,7 @@ RSpec.describe SemanticAnnotator do
 
       it "marks the argument as was_moved at the call site" do
         fn = ast[1].find { |n| n.is_a?(AST::FunctionDef) && n.name == "caller" }
-        call = fn.body.find { |s| s.is_a?(AST::FuncCall) && s.name == "consume!" }
+        call = fn.body.find { |s| s.is_a?(AST::FuncCall) && s.name == "consume" }
         expect(call.args[0].was_moved).to eq(true)
       end
     end

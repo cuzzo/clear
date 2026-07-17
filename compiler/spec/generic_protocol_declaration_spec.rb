@@ -11,7 +11,7 @@ RSpec.describe "generic protocol declarations" do
     source = <<~CLEAR
       PROTOCOL Lookup<Key, Value> {
         METHOD get(self: Self, key: Key) RETURNS !?Value;
-        METHOD put!(MUTABLE self: Self, key: Key, value: Value) RETURNS !Void;
+        METHOD put(MUTABLE self: Self, key: Key, value: Value) RETURNS !Void;
       }
       STRUCT Box<S: Lookup> { storage: S }
       FN main() RETURNS Void -> PASS END
@@ -21,7 +21,7 @@ RSpec.describe "generic protocol declarations" do
     protocol = program.statements.first
     expect(protocol).to be_a(AST::ProtocolDef)
     expect(protocol.associated_types.map(&:name)).to eq(%w[Key Value])
-    expect(protocol.requirements.map(&:name)).to eq(%w[get put!])
+    expect(protocol.requirements.map(&:name)).to eq(%w[get put])
     expect(protocol.requirements.last.params.first.mutable).to be(true)
     expect { transpile(source) }.not_to raise_error
   end

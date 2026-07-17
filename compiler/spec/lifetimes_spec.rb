@@ -262,7 +262,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Bar { index: Float64 }
           STRUCT Foo { b: Bar }
 
-          FN changeBar!(MUTABLE f: Foo) ->
+          FN changeBar(MUTABLE f: Foo) ->
             f.b = Bar{index: 10};
           END
 
@@ -274,7 +274,7 @@ RSpec.describe SemanticAnnotator do
           MUTABLE foo = Foo{ b: Bar{ index: 1 }};
           WITH RESTRICT foo {
             MUTABLE y = identity(foo);
-            changeBar!(foo);
+            changeBar(foo);
           }
         FLUX
       }

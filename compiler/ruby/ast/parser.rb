@@ -380,6 +380,7 @@ class ClearParser
     rule(:DOUBLE_COLON, '::', action: :parse_static_call_suffix),
     rule(:CHAR, '.', action: :parse_dot_suffix),
     rule(:CHAR, '(', action: :parse_func_call_suffix),
+    rule(:CHAR, '!!', action: :parse_raise_suffix),
     rule(:CHAR, '?', action: :parse_optional_unwrap_suffix),
     rule(:KEYWORD, 'EXISTS', action: :parse_exists_suffix),
     rule(:KEYWORD, 'IS_OK', action: :parse_is_ok_suffix),
@@ -427,9 +428,9 @@ class ClearParser
     '@alwaysMutable'  => sigil_attrs(dim: :sync, val: :always_mutable),
   }.freeze, SigilTable)
 
-  ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @node @locked @writeLocked @link @boxed @indirect].freeze
-  ELEMENT_SYNC_TOKENS = %w[@locked @writeLocked locked writeLocked].freeze
-  CAPABILITY_TOKENS = %w[@multiowned @shared @node @split @locked @writeLocked @local @versioned @atomic @boxed @indirect @link @raw @symbol @c @size @list @pool @set @soa @sharded @observable].freeze
+  ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @node @locked @writeLocked @alwaysMutable @link @boxed @indirect].freeze
+  ELEMENT_SYNC_TOKENS = %w[@locked @writeLocked @alwaysMutable locked writeLocked alwaysMutable].freeze
+  CAPABILITY_TOKENS = %w[@multiowned @shared @node @split @locked @writeLocked @alwaysMutable @local @versioned @atomic @boxed @indirect @link @raw @symbol @c @size @list @pool @set @soa @sharded @observable].freeze
   CAPABILITY_OWNERSHIP_VALUES = T.let({
     "@multiowned" => :multiowned,
     "@shared" => :shared,
@@ -440,6 +441,7 @@ class ClearParser
   CAPABILITY_SYNC_VALUES = T.let({
     "@locked" => :locked,
     "@writeLocked" => :write_locked,
+    "@alwaysMutable" => :always_mutable,
     "@local" => :local,
     "@versioned" => :versioned,
     "@atomic" => :atomic,

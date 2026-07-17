@@ -59,7 +59,7 @@ RSpec.describe Annotator::Phases::TypeAnalysisPhase do
       FN main() RETURNS Void ->
         MUTABLE items: Int64[] = [];
         WITH RESTRICT items {
-          items.append(1_i64);
+          &items.append(1_i64);
         }
       END
     CLEAR
@@ -67,7 +67,7 @@ RSpec.describe Annotator::Phases::TypeAnalysisPhase do
 
     expect {
       SemanticAnnotator.new(source_code: source).annotate!(ast)
-    }.to raise_error(CompilerError, /Cannot assign to 'items' because it is currently borrowed/)
+    }.to raise_error(CompilerError, /Cannot pass 'items' as mutable argument because it is currently RESTRICTed/)
   end
 
   it "routes every rare AST family directly to its phase-owned visitor" do

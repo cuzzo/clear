@@ -159,6 +159,7 @@ class ClearParser
     when :parse_static_call_suffix then parse_static_call_suffix(lhs)
     when :parse_dot_suffix then parse_dot_suffix(lhs)
     when :parse_func_call_suffix then parse_func_call_suffix(lhs)
+    when :parse_raise_suffix then parse_raise_suffix(lhs)
     when :parse_optional_unwrap_suffix then parse_optional_unwrap_suffix(lhs)
     when :parse_exists_suffix then parse_exists_suffix(lhs)
     when :parse_is_ok_suffix then parse_is_ok_suffix(lhs)
@@ -284,6 +285,12 @@ class ClearParser
   def parse_func_call_suffix(lhs)
     start_token, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
     AST::FuncCall.new(start_token, lhs, args)
+  end
+
+  sig { params(lhs: AST::Node).returns(AST::BinaryOp) }
+  def parse_raise_suffix(lhs)
+    bang_token = consume(:CHAR, '!!')
+    AST::BinaryOp.new(bang_token, lhs, :OR_ELSE, AST::OrElseRaise.new(bang_token))
   end
 
   sig { params(lhs: AST::Node).returns(AST::OptionalUnwrap) }
@@ -585,6 +592,15 @@ class ClearParser
   sig { returns(AST::Node) }
   def parse_unary
     v = current.value
+    if current.type == :CHAR && v == '&'
+      marker = consume(:CHAR, '&')
+      target = parse_unary
+      if target.is_a?(AST::MethodCall)
+        target.mark_explicit_mutable_receiver!(marker)
+        return target
+      end
+      return AST::MutableBorrow.new(marker, target)
+    end
     if current.type == :CHAR && AST::UNARY_OPS.include?(v)
       op_token = consume(:CHAR)
       # Recursively parse the thing being negated (handles --5)
@@ -646,7 +662,7 @@ class ClearParser
     rule = PRIMARY_RULE_INDEX[ClearParser.token_rule_key(current)]
     rule ||= PRIMARY_RULE_INDEX[ClearParser.rule_key(current.type, nil)]
     return dispatch_primary_rule(rule) if rule
-    return parse_unary() if current.type == :CHAR && AST::UNARY_OPS.include?(current.value)
+    return parse_unary() if current.type == :CHAR && (AST::UNARY_OPS.include?(current.value) || current.value == '&')
     lit = parse_lit(:stack)
     return parse_suffixes(lit) if !lit.nil?
     error!(current, :UNEXPECTED_TOKEN_LINE, value: current.value, type: current.type, line: current.line)

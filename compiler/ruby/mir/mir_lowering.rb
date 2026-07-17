@@ -402,11 +402,10 @@ class MIRLowering
     current_function_context&.zig_name
   end
 
-  sig { params(name: T.any(String, Symbol), bang_alias: T::Boolean).returns(T.nilable(FunctionSignature)) }
-  def fn_sig_for(name, bang_alias: false)
+  sig { params(name: T.any(String, Symbol)).returns(T.nilable(FunctionSignature)) }
+  def fn_sig_for(name)
     sigs = fn_sigs
     sig = sigs.dig(name) || sigs.dig(name.to_sym) || sigs.dig(name.to_s)
-    sig ||= sigs.dig("#{name}!") if bang_alias
     FunctionSignature.unwrap(sig)
   end
 
