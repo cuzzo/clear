@@ -74,7 +74,7 @@ FOR bi IN (0_i64 ..< bgArgc) DO
 END
 bgCaps: Value[] = bgCapsList;       -- slice borrow from @list
 append(futures, BG {
-    vmFiberRun!(ops, consts, bgEntry, bgCaps);   -- escapes
+    vmFiberRun(ops, consts, bgEntry, bgCaps);   -- escapes
 });
 ```
 
@@ -806,15 +806,15 @@ where `sourceLines: Int64[]@list` is a parameter). Blocks R3 Step 3.
 
 ```clear
 FN consume(xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
-FN worker!(sl: Int64[]@list, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT:MAX_DEPTH(8) ->
+FN worker(sl: Int64[]@list, depth: Int64) RETURNS !Int64 EFFECTS REENTRANT:MAX_DEPTH(8) ->
     IF depth <= 0_i64 THEN RETURN consume(sl); END
-    f: ~Int64 = BG { @service -> worker!(COPY sl, depth - 1_i64) OR_ELSE RAISE; };
+    f: ~Int64 = BG { @service -> worker(COPY sl, depth - 1_i64) OR_ELSE RAISE; };
     RETURN NEXT f;
 END
 FN main() RETURNS !Void ->
     MUTABLE xs: Int64[]@list = List[];
-    xs.append(1_i64); xs.append(2_i64); xs.append(3_i64);
-    n: Int64 = worker!(GIVE xs, 2_i64) OR_ELSE RAISE;
+    &xs.append(1_i64); &xs.append(2_i64); &xs.append(3_i64);
+    n: Int64 = worker(GIVE xs, 2_i64) OR_ELSE RAISE;
     ASSERT n == 3_i64, "reentrant BG COPY @list param";
 END
 ```

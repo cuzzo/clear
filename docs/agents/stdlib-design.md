@@ -308,8 +308,9 @@ Decision gates:
   both.
 - Generic constraints without traits/interfaces. If CLEAR avoids traits, the
   stdlib needs a practical generic story for collection element operations.
-- Mutation convention for `map!`-style operations. Prefer explicit mutation
-  names and reject aliasing hazards.
+- Mutation uses ordinary operation names plus `MUTABLE` parameters and
+  call-site `&` on existing storage. Reject aliasing hazards independently of
+  naming.
 
 ### Strings, Bytes, Regex, And Scanner
 

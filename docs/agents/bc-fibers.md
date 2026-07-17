@@ -41,7 +41,7 @@ completes.
         bgCaps.append(COPY stack[sp - bgArgc + bi]);
     END
     sp -= bgArgc;
-    pv = exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);
+    pv = exec(ops, consts, curEnv, pool, bgEntry, bgCaps);
     IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
     sp += 1;
 ```
@@ -57,7 +57,7 @@ completes.
     END
     sp -= bgArgc;
     bgPromise = BG {
-        exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);
+        exec(ops, consts, curEnv, pool, bgEntry, bgCaps);
     };
     -- Encode the promise as a Value the dispatch loop can stash and AWAIT
     pv = Value.Future{ inner: bgPromise };

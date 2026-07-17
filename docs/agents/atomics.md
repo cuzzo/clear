@@ -228,7 +228,7 @@ With atomic added:
 
 ```clear
 -- ILLUSTRATIVE
-FN incr!(MUTABLE c: Int64) ->
+FN incr(MUTABLE c: Int64) ->
     c += 1;
 END
 
@@ -253,7 +253,7 @@ the existing pattern. WITH MATCH adds an `ATOMIC` arm:
 
 ```clear
 -- ILLUSTRATIVE
-FN bump!(MUTABLE c: Int64) REQUIRES c: ATOMIC | LOCKABLE ->
+FN bump(MUTABLE c: Int64) REQUIRES c: ATOMIC | LOCKABLE ->
     WITH c AS x MATCH
         WHEN ATOMIC   -> { x += 1; }    -- fetch_add
         WHEN LOCKABLE -> { x += 1; }    -- mutex acquire + plain += + release

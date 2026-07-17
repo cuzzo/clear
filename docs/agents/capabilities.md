@@ -142,6 +142,22 @@ cfg.retries = 5;
 y = cfg.retries;
 ```
 
+Interior-mutability also crosses call boundaries without upgrading the outer
+binding:
+
+```clear
+STRUCT Holder { cfg: Config@alwaysMutable }
+FN retheme(MUTABLE cfg: Config) RETURNS Void -> cfg.theme = "light"; END
+
+holder = Holder{ cfg: Config{ theme: "dark", retries: 3 } @alwaysMutable };
+retheme(holder.cfg);  # no `&holder.cfg` and no `MUTABLE holder`
+```
+
+Ordinary storage remains explicit: `retheme(&holder.cfg)` would require a
+mutable root unless `cfg` itself carries `@alwaysMutable`. Anonymous values,
+such as `retheme(makeConfig())`, require no marker because there is no
+caller-visible binding to alias.
+
 For scoped access (multiple mutations without repeated borrow/release):
 
 ```clear
@@ -149,7 +165,7 @@ For scoped access (multiple mutations without repeated borrow/release):
 WITH cfg AS c {
     c.theme = "light";
     c.retries = 10;
-    update!(c);
+    update(c);
 }
 ```
 

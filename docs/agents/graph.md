@@ -17,7 +17,7 @@ STRUCT Node {
 FN main() RETURNS Void ->
   MUTABLE root: Node@node = Node{ id: 1 };
   root.left = Node{ id: 2 };
-  root.children.append(Node{ id: 3 });
+  &root.children.append(Node{ id: 3 });
 
   ASSERT root.left?.id == 2;
   ASSERT root.children[0]?.id == 3;

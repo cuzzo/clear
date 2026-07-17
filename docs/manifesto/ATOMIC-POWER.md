@@ -30,7 +30,7 @@ For simple numeric types like counters, CLEAR uses the **`shared:atomic`** capab
 
 ```CLEAR
 counter = SHARE:atomic(0);      -- Create an atomic integer
-counter.increment!();           -- Thread-safe mutation
+counter.increment();           -- Thread-safe mutation
 ```
 
 ## 3. How CLEAR Handles Them: "The Magic Count"

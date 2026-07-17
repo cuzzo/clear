@@ -35,16 +35,16 @@ This design didn't emerge from theory. It emerged from a real, concrete failure 
 The bytecode VM (`examples/minivm/_bc_runner.clear`) stores environments in a pool, shared across the interpreter and any fibers it spawns:
 
 ```clear
-FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>,
+FN exec(ops: Int64[], consts: Value[], envId: Id<Env>,
          MUTABLE pool: Env[50000]@pool, ...) RETURNS Value EFFECTS REENTRANT ->
     -- ... interpreter loop ...
     -- BG_SPAWN handler: run the fiber's bytecode in a separate fiber
-    bgResult = exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);    -- (Phase 1: synchronous)
+    bgResult = exec(ops, consts, curEnv, pool, bgEntry, bgCaps);    -- (Phase 1: synchronous)
 END
 
 FN main() ->
     MUTABLE pool: Env[50000]@pool = [];
-    bcResult = exec!(bcOps, bcConsts, rootId, pool, 0_i64, mainCaps);
+    bcResult = exec(bcOps, bcConsts, rootId, pool, 0_i64, mainCaps);
 END
 ```
 
@@ -56,7 +56,7 @@ The minimal change:
 
 ```clear
 bgPromise: ~Value = BG {
-    exec!(COPY ops, COPY consts, curEnv, pool, bgEntry, GIVE bgCaps);
+    exec(COPY ops, COPY consts, curEnv, pool, bgEntry, GIVE bgCaps);
 };
 bgResult = NEXT bgPromise;
 ```
@@ -77,7 +77,7 @@ Add the capability:
 ```clear
 FN main() ->
     pool: Env[50000]@pool = [] @shared:locked;     -- now Arc-wrapped + locked
-    exec!(...)
+    exec(...)
 END
 ```
 
@@ -112,14 +112,14 @@ The VM exposes the problem in its purest form because:
 After implementing the binding-metadata model:
 
 ```clear
-FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>,
+FN exec(ops: Int64[], consts: Value[], envId: Id<Env>,
          pool: Env[50000]@pool, ...) RETURNS Value
     ! yield                                              -- effect projected (BG / NEXT)
 ->
     -- ... interpreter loop ...
     bgPromise: ~Value = BG {
-        exec!(COPY ops, COPY consts, curEnv, pool, bgEntry, GIVE bgCaps);
-        -- pool's binding metadata flows from main → exec! → fiber.
+        exec(COPY ops, COPY consts, curEnv, pool, bgEntry, GIVE bgCaps);
+        -- pool's binding metadata flows from main → exec → fiber.
         -- Fiber captures via RcClone (Arc retain on the @shared:locked wrapper).
     };
     bgResult = NEXT bgPromise;
@@ -127,7 +127,7 @@ END
 
 FN main() ->
     pool: Env[50000]@pool @shared:locked = [];     -- one line changed
-    bcResult = exec!(bcOps, bcConsts, rootId, pool, 0_i64, mainCaps);
+    bcResult = exec(bcOps, bcConsts, rootId, pool, 0_i64, mainCaps);
 END
 ```
 

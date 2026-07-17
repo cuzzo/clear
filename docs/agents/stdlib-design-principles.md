@@ -258,8 +258,10 @@ lands:
     interface for maps, sets, JSON object generation, and diagnostics.
 12. **Generic and iterator model.** Decide how collection functions specialize
     without importing a class/trait/interface model that CLEAR does not want.
-13. **Mutation convention.** Decide how mutating collection/string operations
-    are named and how aliasing/capability hazards are rejected.
+13. **Mutation contract.** Mutating collection/string operations declare
+    `MUTABLE` parameters; existing storage is explicit at the call site with
+    `&`, while anonymous and `@alwaysMutable` values remain ergonomic. Define
+    the remaining aliasing/capability rejection rules around that contract.
 14. **Docs stability labels.** Decide the public status vocabulary for planned,
     prototype, self-host required, intrinsic today, and stable APIs so docs do
     not imply premature compatibility.

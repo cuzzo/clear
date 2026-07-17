@@ -36,8 +36,8 @@ Dynamic-size, heap-allocated. Backed by `std.ArrayListUnmanaged(T)`.
 
 ```clear
 MUTABLE users = List[];
-users.append("Alice");
-users.append("Bob");
+&users.append("Alice");
+&users.append("Bob");
 n = users.length();       # 2
 name = users[0];           # "Alice"
 ```
@@ -52,7 +52,7 @@ name = users[0];           # "Alice"
 
 ```clear
 MUTABLE items = List[];
-items.append(42.0);  # type inferred as []Float64
+&items.append(42.0);  # type inferred as []Float64
 ```
 
 ## Pools — `[Pool(N)]T`
@@ -63,8 +63,8 @@ Handle-based, pre-allocated with fixed capacity. Backed by `Pool(T)` with **gene
 STRUCT Enemy { hp: Int64, name: String }
 
 MUTABLE enemies: [Pool(1000)]Enemy = [];
-id1: Id<Enemy> = enemies.insert(Enemy{ hp: 100, name: "Goblin" });
-id2: Id<Enemy> = enemies.insert(Enemy{ hp: 200, name: "Dragon" });
+id1: Id<Enemy> = &enemies.insert(Enemy{ hp: 100, name: "Goblin" });
+id2: Id<Enemy> = &enemies.insert(Enemy{ hp: 200, name: "Dragon" });
 
 # Access via handle — returns ?T (optional). Must use OR_ELSE to unwrap:
 goblin = enemies.get(id1) OR_ELSE Enemy{ hp: 0, name: "none" };
@@ -73,7 +73,7 @@ goblin = enemies.get(id1) OR_ELSE Enemy{ hp: 0, name: "none" };
 dragon = enemies[id2] OR_ELSE Enemy{ hp: 0, name: "none" };
 
 # Remove: slot is freed, generation increments
-enemies.remove(id1);
+&enemies.remove(id1);
 
 # Stale handle returns null — OR_ELSE provides a safe fallback:
 gone = enemies.get(id1) OR_ELSE Enemy{ hp: 0, name: "removed" };
@@ -150,7 +150,7 @@ MUTABLE scores: {String}Int64 = {};
 scores["alice"] = 100_i64;
 scores["bob"] = 200_i64;
 val = scores["alice"];                    # 100
-scores.delete("bob");
+&scores.delete("bob");
 scores.contains?("alice");                 # TRUE
 scores.count();                           # 1
 ```
@@ -272,12 +272,12 @@ n = 1000000;
 MUTABLE map: {String}@sharded(8) String = {};
 
 # Functions: no @sharded needed in parameter types
-FN doWork!(MUTABLE map: {String}String, key: String) RETURNS !Void ->
+FN doWork(MUTABLE map: {String}String, key: String) RETURNS !Void ->
     map[key] = "value";
 END
 
 # BG blocks: auto-pinned when they capture a @sharded map
-BG { doWork!(map, "hello"); }
+BG { doWork(&map, "hello"); }
 # [Note] BG block auto-pinned — captures shared/locked resource.
 ```
 

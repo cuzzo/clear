@@ -21,7 +21,7 @@ CLEAR is a **Fortress Language**. It handles the "Safety Gap" at the public boun
 In CLEAR, any Public Union *must* be able to behave as a Product (a struct with fields) by projecting a **View**.
 
 ```CLEAR
--- CLEAR allows this!
+-- CLEAR allows this
 -- If the user is NOT SignedIn, .email returns a suitable default (empty string)
 -- or handles the Nil case implicitly if defined in the Fortress boundary.
 PRINT(getUser().email);
@@ -34,7 +34,7 @@ In CLEAR, you match only what you care about.
 ```CLEAR
 CASE getUser() OF
   SignedInUser AS u => doSignedInUserThing(u);
-  -- No need to match Guest or Banned if you don't care!
+  -- No need to match Guest or Banned if you don't care
   -- They flow through to the default or are ignored.
 END
 ```

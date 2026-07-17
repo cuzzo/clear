@@ -19,10 +19,10 @@ In CLEAR, we separate **Types** from **Capabilities**:
 -- CLEAR's Solution: Unwrapping at the call site
 WITH sharedPlayer AS player {
   -- 'player' is now the raw Type (User), unwrapped from its 'shared' capability
-  damage!(player);               -- OKAY
-  heal!(player);                 -- OKAY
+  damage(player);               -- OKAY
+  heal(player);                 -- OKAY
   
-  -- heal!(sharedPlayer);       -- COMPILER ERROR! 
+  -- heal(sharedPlayer);       -- COMPILER ERROR
   -- Functions take User, not shared:locked User.
 }
 ```

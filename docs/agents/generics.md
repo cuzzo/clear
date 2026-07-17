@@ -64,7 +64,7 @@ STRUCT Cache<M: SHARED Map> {
   values: M,
 }
 
-FN put!<M: SHARED Map>(
+FN put<M: SHARED Map>(
   MUTABLE cache: Cache<M>,
   key: M::Key,
   value: M::Value,
@@ -441,8 +441,8 @@ table. It is the only protocol form that enables a heterogeneous list.
 ```clear
 PROTOCOL Map<Key, Value> {
   FN get(self: Self, key: Key) RETURNS !?Value;
-  FN put!(MUTABLE self: Self, key: Key, value: Value) RETURNS !Void;
-  FN delete!(MUTABLE self: Self, key: Key) RETURNS !Bool;
+  FN put(MUTABLE self: Self, key: Key, value: Value) RETURNS !Void;
+  FN delete(MUTABLE self: Self, key: Key) RETURNS !Bool;
   FN length(self: Self) RETURNS Int64;
 }
 ```
@@ -658,7 +658,7 @@ Coherence rules:
 Today a function such as this is type-unambiguous:
 
 ```clear
-FN put!<M: SHARED Map>(MUTABLE cache: Cache<M>, key: M::Key, value: M::Value)
+FN put<M: SHARED Map>(MUTABLE cache: Cache<M>, key: M::Key, value: M::Value)
   RETURNS !Void ->
   # ...
 END
@@ -679,7 +679,7 @@ STRUCT Cache<M: SHARED Map> {
 }
 
 IMPLEMENTATION Cache<M> {
-  METHOD put!(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
+  METHOD put(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
     WITH POLYMORPHIC self.values AS values {
       values[key] = value;
     }
@@ -724,8 +724,8 @@ bindings, constraints, visibility namespace, and dot-call eligibility:
 ```clear
 IMPLEMENTATION Cache<M> {
   METHOD get(self, key: M::Key) RETURNS ?M::Value -> ... END
-  METHOD put!(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void -> ... END
-  METHOD drain!(TAKES self) RETURNS []M::Value -> ... END
+  METHOD put(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void -> ... END
+  METHOD drain(TAKES self) RETURNS []M::Value -> ... END
 
   FN new(map: M, capacity: Int64) RETURNS Cache<M> -> ... END
 }
@@ -735,9 +735,9 @@ Conceptually these lower to ordinary functions whose receiver is first:
 
 ```clear
 FN Cache.get<M>(self: Cache<M>, key: M::Key) RETURNS ?M::Value -> ... END
-FN Cache.put!<M>(MUTABLE self: Cache<M>, key: M::Key, value: M::Value)
+FN Cache.put<M>(MUTABLE self: Cache<M>, key: M::Key, value: M::Value)
   RETURNS !Void -> ... END
-FN Cache.drain!<M>(TAKES self: Cache<M>) RETURNS []M::Value -> ... END
+FN Cache.drain<M>(TAKES self: Cache<M>) RETURNS []M::Value -> ... END
 ```
 
 The source must still spell `self`, `MUTABLE self`, or `TAKES self`. Only its
@@ -1057,7 +1057,7 @@ Existing `SHARED T` remains the way a function accepts a caller-selected
 shared synchronization family. Protocol constraints compose with it:
 
 ```clear
-FN update!<M: SHARED Map>(MUTABLE map: M, key: M::Key, value: M::Value)
+FN update<M: SHARED Map>(MUTABLE map: M, key: M::Key, value: M::Value)
   RETURNS !Void
   REQUIRES map: LOCKED | VERSIONED
 ->
@@ -1087,7 +1087,7 @@ Synchronizing only the value map cannot make eviction or promotion atomic. A
 concurrent exact LRU therefore needs an outer gate over the complete LRU state:
 
 ```clear
-FN get!<M: Map>(MUTABLE cache: SHARED LruCache<M>, key: M::Key)
+FN get<M: Map>(MUTABLE cache: SHARED LruCache<M>, key: M::Key)
   RETURNS !?M::Value
 ->
   WITH POLYMORPHIC cache AS state {
@@ -1223,7 +1223,7 @@ Report one grouped error:
 
 ```text
 SmallMap<K, V> declares Map<K, V> but does not satisfy 2 requirements:
-  - delete!(MUTABLE Self, K) RETURNS !Bool: missing
+  - delete(MUTABLE Self, K) RETURNS !Bool: missing
   - get(Self, K) RETURNS !?V: found RETURNS ?V (missing fallible effect)
 ```
 
