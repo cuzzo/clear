@@ -11,16 +11,16 @@
 # shape dispatch, mirroring the existing optional-unwrap pattern in
 # getAt / firstOpt / lastOpt / sliceContains / len.
 
-FN setFirst!(MUTABLE xs: []Int64, value: Int64) RETURNS !Void ->
+FN setFirst(MUTABLE xs: []Int64, value: Int64) RETURNS !Void ->
     xs[0_i64] = value;
     RETURN;
 END
 
-FN main!() RETURNS !Void ->
+FN main() RETURNS !Void ->
     MUTABLE xs: []Int64 = List[];
-    xs.append(10_i64);
-    xs.append(20_i64);
-    setFirst!(xs, 99_i64) OR_ELSE RAISE;
+    &xs.append(10_i64);
+    &xs.append(20_i64);
+    setFirst(&xs, 99_i64) OR_ELSE RAISE;
     ASSERT xs.length() == 2_i64, "len preserved";
     ASSERT xs[0_i64] == 99_i64, "first updated";
     ASSERT xs[1_i64] == 20_i64, "second untouched";

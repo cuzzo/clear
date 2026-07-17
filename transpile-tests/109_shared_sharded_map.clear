@@ -31,7 +31,7 @@ FN main() RETURNS Void ->
     ASSERT n == 3, "count should be 3";
 
     # Delete.
-    map.delete("bob");
+    &map.delete("bob");
     ASSERT map.count() == 2, "count should be 2 after delete";
     ASSERT map.contains?("bob") == FALSE, "bob should be removed";
 

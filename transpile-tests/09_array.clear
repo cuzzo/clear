@@ -1,7 +1,7 @@
 FN main() RETURNS Void ->
   MUTABLE list : Int64[] = [];
-  list.append(10);
-  list.append(20);
+  &list.append(10);
+  &list.append(20);
 
   # Verify append works
   ASSERT list.length() == 2, "Array length should be 2";

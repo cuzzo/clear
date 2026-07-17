@@ -65,8 +65,8 @@ FuzzGenerator.register(:pipeline_gap_matrix, cells: PIPELINE_GAP_CELLS) do |p|
 
       FN main() RETURNS Void ->
         MUTABLE buckets: Bucket[8]@pool = [];
-        _ = buckets.insert(Bucket{ values: [1_i64, 2_i64] });
-        _ = buckets.insert(Bucket{ values: [3_i64, 4_i64] });
+        _ = &buckets.insert(Bucket{ values: [1_i64, 2_i64] });
+        _ = &buckets.insert(Bucket{ values: [3_i64, 4_i64] });
         total = buckets |> UNNEST _.values |> SUM toFloat(_);
         ASSERT total == 10.0, "unnest plain sum";
         RETURN;

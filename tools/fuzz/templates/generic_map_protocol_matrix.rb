@@ -29,51 +29,51 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
   case p[:shape]
   when :string_index
     <<~CLEAR
-      FN store!<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+      FN store<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
         map[key] = value;
       END
       FN main() RETURNS !Void ->
         MUTABLE values: {String}Int64 = {};
-        store!(values, "x", 7_i64);
+        store(&values, "x", 7_i64);
         ASSERT values["x"] OR_ELSE 0_i64 == 7_i64;
       END
     CLEAR
   when :numeric_methods
     <<~CLEAR
-      FN exercise!<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
-        map.put(key, value);
+      FN exercise<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+        &map.put(key, value);
         ASSERT map.contains?(key);
         ASSERT map.count() == 1_i64;
-        map.delete(key);
+        &map.delete(key);
         ASSERT map.empty?();
       END
       FN main() RETURNS !Void ->
         MUTABLE values: {Int64}Int64 = {};
-        exercise!(values, 4_i64, 9_i64);
+        exercise(&values, 4_i64, 9_i64);
       END
     CLEAR
   when :generic_forwarding
     <<~CLEAR
-      FN inner!<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+      FN inner<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
         map[key] = value;
       END
-      FN outer!<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
-        inner!(map, key, value);
+      FN outer<M: Map>(MUTABLE map: M, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+        inner(&map, key, value);
       END
       FN main() RETURNS !Void ->
         MUTABLE values: {String}Int64 = {};
-        outer!(values, "x", 3_i64);
+        outer(&values, "x", 3_i64);
         ASSERT values["x"] OR_ELSE 0_i64 == 3_i64;
       END
     CLEAR
   when :cleanup_value_copy
     <<~CLEAR
-      FN copyStore!<M: Map>(MUTABLE map: M, key: M::Key, value: M::Value) RETURNS !Void ->
-        map.put(key, COPY value);
+      FN copyStore<M: Map>(MUTABLE map: M, key: M::Key, value: M::Value) RETURNS !Void ->
+        &map.put(key, COPY value);
       END
       FN main() RETURNS !Void ->
         MUTABLE values: {String}String = {};
-        copyStore!(values, "state", "ready");
+        copyStore(&values, "state", "ready");
         ASSERT values["state"] OR_ELSE "" == "ready";
       END
     CLEAR
@@ -90,7 +90,7 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
     <<~CLEAR
       STRUCT Index<M: Map> { entries={}: {M::Key}M::Value }
       IMPLEMENTATION Index<M> {
-        METHOD store!(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
+        METHOD store(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
           self.entries[key] = COPY value;
         END
         METHOD load(self, key: M::Key) RETURNS !?M::Value ->
@@ -99,7 +99,7 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
       }
       FN main() RETURNS !Void ->
         MUTABLE index = Index<{#{key_type}}String>{};
-        index.store!(#{key}, "value");
+        &index.store(#{key}, "value");
         ASSERT index.load(#{key}) OR_ELSE RAISE OR_ELSE "" == "value";
       END
     CLEAR
@@ -133,7 +133,7 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
     <<~CLEAR
       PUB PROTOCOL Lookup<Key, Value> {
         METHOD get(self: Self, key: Key) RETURNS !?Value;
-        FN clear!(MUTABLE self: Self) RETURNS !Void;
+        FN clear(MUTABLE self: Self) RETURNS !Void;
       }
       STRUCT Holder<S: Lookup> { storage: S }
       FN main() RETURNS Void -> PASS END
@@ -177,13 +177,13 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
       IMPLEMENTATION Sized FOR Box {
         METHOD size(self) RETURNS Int64 -> RETURN self.value; END
       }
-      FN measured!<S: SHARED Sized>(MUTABLE value: S) RETURNS !Int64 ->
+      FN measured<S: SHARED Sized>(MUTABLE value: S) RETURNS !Int64 ->
         WITH POLYMORPHIC value AS view { RETURN view.size(); }
         RETURN 0_i64;
       END
       FN main() RETURNS !Void ->
         MUTABLE value = Box{ value: 8_i64 } @shared:locked;
-        ASSERT measured!(value) == 8_i64;
+        ASSERT measured(&value) == 8_i64;
       END
     CLEAR
   when :duplicate_user_protocol_requirement
@@ -221,7 +221,7 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
   when :borrowed_value
     {
       source: <<~CLEAR,
-        FN invalid!<M: Map>(MUTABLE map: M, key: M::Key, value: M::Value) RETURNS !Void ->
+        FN invalid<M: Map>(MUTABLE map: M, key: M::Key, value: M::Value) RETURNS !Void ->
           map[key] = value;
         END
       CLEAR

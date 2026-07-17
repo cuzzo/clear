@@ -31,11 +31,11 @@ STRUCT SearchResult {
 
 # Search a batch of files concurrently. Returns heap-promoted count list.
 # Isolating the promise list here prevents per-iteration frame rewind in main.
-FN search_batch!(files: String[], start: Int64, end: Int64, data_dir: String, needle: String) RETURNS !Int64[] ->
+FN search_batch(files: String[], start: Int64, end: Int64, data_dir: String, needle: String) RETURNS !Int64[] ->
   MUTABLE futures: ~Int64[]@list = [];
   FOR i IN (start ..< end) DO
     filepath = "${data_dir}/${files[i]}";
-    futures.append(
+    &futures.append(
       BG {
         content = readFile(filepath);
         content.countOccurrences(needle);
@@ -67,9 +67,9 @@ FN main() RETURNS Void ->
       batch_end = n;
     END
 
-    counts = search_batch!(files, batch_start, batch_end, data_dir, needle);
+    counts = search_batch(files, batch_start, batch_end, data_dir, needle);
     FOR k IN (0 ..< counts.length()) DO
-      results.append(SearchResult{ file_idx: batch_start + k, count: counts[k] });
+      &results.append(SearchResult{ file_idx: batch_start + k, count: counts[k] });
     END
 
     batch_start = batch_end;

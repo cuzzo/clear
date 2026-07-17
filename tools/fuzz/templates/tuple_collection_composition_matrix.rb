@@ -41,7 +41,7 @@ FuzzGenerator.register(
   when :list_of_tuple
     <<~CLEAR
       MUTABLE values: [List]Tuple<Int64, Bool> = List[];
-      values.append(Tuple{3_i64, TRUE});
+      &values.append(Tuple{3_i64, TRUE});
       IF values[0_i64] EXISTS AS item THEN
           ASSERT item._0 == 3_i64, "List of Tuple";
           ASSERT item._1, "List Tuple field";
@@ -52,7 +52,7 @@ FuzzGenerator.register(
   when :pool_of_tuple
     <<~CLEAR
       MUTABLE values: [Pool(4)]Tuple<Int64, Bool> = Pool[];
-      id = values.insert(Tuple{4_i64, TRUE});
+      id = &values.insert(Tuple{4_i64, TRUE});
       IF values[id] EXISTS AS item THEN
           ASSERT item._0 == 4_i64, "Pool of Tuple";
       ELSE
@@ -63,7 +63,7 @@ FuzzGenerator.register(
     <<~CLEAR
       MUTABLE values: [Set]Tuple<Int64, Bool> = Set[];
       item = Tuple{5_i64, TRUE};
-      values.insert(COPY item);
+      &values.insert(COPY item);
       ASSERT values.contains?(item), "Set of Tuple";
     CLEAR
   when :map_of_tuple
@@ -91,14 +91,14 @@ FuzzGenerator.register(
   when :tuple_of_pool
     <<~CLEAR
       MUTABLE items: [Pool(4)]Int64 = Pool[];
-      id = items.insert(12_i64);
+      id = &items.insert(12_i64);
       MUTABLE value: Tuple<[Pool(4)]Int64, Bool> = Tuple{GIVE items, TRUE};
       ASSERT value._0.length() == 1_i64, "Tuple of Pool";
     CLEAR
   when :tuple_of_set
     <<~CLEAR
       MUTABLE items: [Set]Int64 = Set[];
-      items.insert(13_i64);
+      &items.insert(13_i64);
       value: Tuple<[Set]Int64, Bool> = Tuple{GIVE items, TRUE};
       ASSERT value._0.contains?(13_i64), "Tuple of Set";
     CLEAR

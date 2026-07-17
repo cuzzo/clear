@@ -45,7 +45,7 @@ ESCAPE_PATTERNS = [
   :bg_capture,             # BG { use(alias) } returned — must reject (Gap 1)
   :do_capture,             # DO { BG { use(alias) }, ... } returned — must reject
   :bg_stream_capture,      # BG STREAM { use(alias) } returned — must reject
-  :takes_consume,          # foo!(GIVE alias) — must reject (alias isn't owned)
+  :takes_consume,          # consume(GIVE alias) — must reject (alias isn't owned)
   :store_field,            # outer.field = alias — must reject
   :list_append,            # append(some_list, alias) — must reject
 ]
@@ -256,14 +256,14 @@ FuzzGenerator.register(:access_gate, cells: ACCESS_GATE_CELLS) do |p|
     <<~CHT
       STRUCT Counter { value: #{field_type} }
 
-      FN consume!(TAKES x: Counter) RETURNS !Int64 ->
+      FN consume(TAKES x: Counter) RETURNS !Int64 ->
           RETURN #{p[:payload] == :int ? 'x.value' : 'x.value.length()'};
       END
 
       FN main() RETURNS Void ->
           #{decl}
           #{head} {
-              v: Int64 = consume!(GIVE ref);
+              v: Int64 = consume(GIVE ref);
           }
           RETURN;
       END

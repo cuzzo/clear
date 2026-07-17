@@ -6,9 +6,9 @@ STRUCT Item { val: Int64 }
 FN main() RETURNS Void ->
     # @list: insert and push are aliases for append
     MUTABLE nums: []Int64 = [];
-    nums.insert(5);
-    nums.push(10);
-    nums.insert(15);
+    &nums.insert(5);
+    &nums.push(10);
+    &nums.insert(15);
     ASSERT nums.length() == 3, "list length after insert/push";
     ASSERT nums[0] == 5,  "list[0]";
     ASSERT nums[1] == 10, "list[1]";
@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
 
     # @list: pop returns ?T
     MUTABLE popped: Int64 = -1;
-    IF nums.pop() EXISTS AS last THEN
+    IF &nums.pop() EXISTS AS last THEN
         popped = last;
     END
     ASSERT popped == 15, "popped last element";
@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
     # pop on empty list returns nil
     MUTABLE empty: []Int64 = [];
     MUTABLE popped_nil: Bool = FALSE;
-    IF empty.pop() EXISTS AS _ THEN
+    IF &empty.pop() EXISTS AS _ THEN
         popped_nil = TRUE;
     ELSE
         popped_nil = FALSE;
@@ -34,16 +34,16 @@ FN main() RETURNS Void ->
 
     # @set: insert and length
     MUTABLE s: [Set]Int64 = [];
-    s.insert(1);
-    s.insert(2);
-    s.insert(3);
+    &s.insert(1);
+    &s.insert(2);
+    &s.insert(3);
     ASSERT s.length() == 3, "set length";
     ASSERT s.contains?(2) == TRUE, "set contains 2";
 
     # @pool: insert returns Id, length counts live slots
     MUTABLE pool: [Pool(100)]Item = [];
-    id1 = pool.insert(Item{ val: 42 });
-    id2 = pool.insert(Item{ val: 99 });
+    id1 = &pool.insert(Item{ val: 42 });
+    id2 = &pool.insert(Item{ val: 99 });
     ASSERT pool.length() == 2, "pool length";
     IF pool[id1] EXISTS AS item THEN
         ASSERT item.val == 42, "pool get id1";

@@ -22,7 +22,7 @@ END
 FN buildLargePayload(id: Int64) RETURNS !String ->
     # Simulate generateJson or readFile: build a ~6KB string.
     MUTABLE parts: []String = [];
-    FOR i IN (1_i64 ..= 200) -> parts.append(id.toString() $+ ":" $+ i.toString());
+    FOR i IN (1_i64 ..= 200) -> &parts.append(id.toString() $+ ":" $+ i.toString());
     RETURN join(parts, ",");
 END
 

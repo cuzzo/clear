@@ -1,0 +1,29 @@
+# Explicit mutable call-site integration.
+#
+# Existing storage is visibly borrowed with &, anonymous storage is
+# materialized by the compiler, and @alwaysMutable storage needs no marker.
+
+STRUCT Counter { value: Int64 }
+
+FN increment(MUTABLE counter: Counter) RETURNS Void ->
+    counter.value = counter.value + 1_i64;
+END
+
+FN makeCounter(value: Int64) RETURNS Counter ->
+    RETURN Counter{ value: value };
+END
+
+FN main() RETURNS Void ->
+    MUTABLE local = Counter{ value: 1_i64 };
+    increment(&local);
+    ASSERT local.value == 2_i64, "explicit mutable argument";
+
+    # Anonymous values have no persistent binding to mark MUTABLE or borrow.
+    increment(makeCounter(10_i64));
+
+    sharedCell = Counter{ value: 20_i64 } @alwaysMutable;
+    increment(sharedCell);
+    ASSERT sharedCell.value == 21_i64, "interior mutable argument";
+
+    RETURN;
+END

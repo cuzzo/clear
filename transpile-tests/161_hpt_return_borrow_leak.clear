@@ -16,26 +16,26 @@ FN getStr(v: Val) RETURNS !String ->
     RETURN COPY "nil";
 END
 
-FN makeLambda!() RETURNS !Val ->
+FN makeLambda() RETURNS !Val ->
     MUTABLE params: []Val = List[];
-    params.append(Val{ Str: "x" });
+    &params.append(Val{ Str: "x" });
     RETURN Val.Lambda{ params: COPY params, body: Val{ Str: "body" }, envId: 0 };
 END
 
-FN extractStr!(v: Val) RETURNS !String ->
+FN extractStr(v: Val) RETURNS !String ->
     RETURN getStr(v);
 END
 
-# Named binding ensures makeLambda!()'s cleanup is a regular defer, not errdefer.
+# Named binding ensures makeLambda()'s cleanup is a regular defer, not errdefer.
 # getStr copies the extracted string, so it survives when v is freed.
-FN safeReturn!() RETURNS !String ->
-    v = makeLambda!();
-    RETURN extractStr!(v);
+FN safeReturn() RETURNS !String ->
+    v = makeLambda();
+    RETURN extractStr(v);
 END
 
 FN main() RETURNS Void ->
-    s = safeReturn!();
-    s2 = safeReturn!();
-    s3 = safeReturn!();
+    s = safeReturn();
+    s2 = safeReturn();
+    s3 = safeReturn();
     print("PASS");
 END

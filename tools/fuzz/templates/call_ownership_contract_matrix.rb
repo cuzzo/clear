@@ -115,13 +115,13 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
   helper_list = <<~CHT
     FN mkList() RETURNS !Int64[]@list ->
       MUTABLE xs: Int64[]@list = [];
-      xs.append(1_i64);
+      &xs.append(1_i64);
       RETURN xs;
     END
 
     FN mkStringList() RETURNS !String[]@list ->
       MUTABLE xs: String[]@list = List[];
-      xs.append(COPY "a");
+      &xs.append(COPY "a");
       RETURN xs;
     END
   CHT

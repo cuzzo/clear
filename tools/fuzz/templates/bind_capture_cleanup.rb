@@ -179,7 +179,7 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
              <<~CHT
                FN bindCaptureList(n: Int64) RETURNS Int64[]@list ->
                    MUTABLE xs: Int64[]@list = [];
-                   xs.append(n);
+                   &xs.append(n);
                    RETURN xs;
                END
 

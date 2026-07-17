@@ -21,17 +21,17 @@ FN sumAll(items: Int64[]) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    items: []Int64 = [];
-    items.append(1_i64);
-    items.append(2_i64);
-    items.append(3_i64);
+    MUTABLE items: []Int64 = [];
+    &items.append(1_i64);
+    &items.append(2_i64);
+    &items.append(3_i64);
 
     pr: ~Int64 = BG {
         sumAll(COPY items);
     };
 
-    items.append(100_i64);
-    items.append(200_i64);
+    &items.append(100_i64);
+    &items.append(200_i64);
 
     fiber_sum = NEXT pr;
     outer_sum = sumAll(items);

@@ -5,13 +5,13 @@
 REQUIRE "types.clear";
 REQUIRE "parser.clear";
 
-FN readFileOr!(path: String, fallback: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !String ->
+FN readFileOr(path: String, fallback: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !String ->
     content = readFile(path) OR_ELSE RAISE;
     RETURN content;
 END
 
-FN readFileSafe!(path: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !String ->
-    content = readFileOr!(path, "", pool) OR_ELSE "";
+FN readFileSafe(path: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !String ->
+    content = readFileOr(path, "", &pool) OR_ELSE "";
     RETURN content;
 END
 
@@ -21,7 +21,7 @@ END
 # When returning 4, the parsed inspect AST is stored in env at "__dbg_inspect".
 # The caller should eval it, format with prStr, and re-call with the result string.
 
-FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Int64
+FN debugPause(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Int64
   REQUIRES pool: LOCKED
   EFFECTS REENTRANT
 ->
@@ -30,7 +30,7 @@ FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE po
         writeFile("/tmp/_debug_resp.txt", inspectResult);
     ELSE
         # Build call stack string
-        stackStr = envGet!(envId, "__dbg_stack", pool);
+        stackStr = envGet(envId, "__dbg_stack", &pool);
         stackDisplay = getStr(stackStr);
 
         # Write break info
@@ -41,13 +41,13 @@ FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE po
         writeFile("/tmp/_debug_break.txt", breakInfo);
     END
 
-    stackStr2 = envGet!(envId, "__dbg_stack", pool);
+    stackStr2 = envGet(envId, "__dbg_stack", &pool);
     stackDisplay2 = getStr(stackStr2);
 
     MUTABLE debugAction: Int64 = 0;
     MUTABLE debugActive = TRUE;
     WHILE debugActive DO
-        MUTABLE cmdRaw = readFileSafe!("/tmp/_debug_cmd.txt", pool) OR_ELSE RAISE;
+        MUTABLE cmdRaw = readFileSafe("/tmp/_debug_cmd.txt", &pool) OR_ELSE RAISE;
         IF cmdRaw.length() > 0 THEN
             writeFile("/tmp/_debug_cmd.txt", "");
             IF cmdRaw == ":c" OR cmdRaw == ":continue" THEN
@@ -62,15 +62,15 @@ FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE po
                 # Parse the inspect expression, store AST in env, return 4
                 inspectExpr = substr(cmdRaw, 3, cmdRaw.length() - 3);
                 MUTABLE inspPenv: {String}Value = {};
-                tokenizeToEnv!(inspPenv, inspectExpr) OR_ELSE RAISE;
+                tokenizeToEnv(&inspPenv, inspectExpr) OR_ELSE RAISE;
                 inspPenv["__rp"] = Value{ Number: 0.0 };
-                inspAst = readFormEnv!(inspPenv) OR_ELSE RAISE;
+                inspAst = readFormEnv(&inspPenv) OR_ELSE RAISE;
                 WITH POLYMORPHIC EXCLUSIVE pool AS p {
                     IF p[envId] EXISTS AS dbgInspEnv THEN dbgInspEnv.vars["__dbg_inspect"] = COPY inspAst; END
                 }
                 debugAction = 4; debugActive = FALSE;
             ELSE_IF cmdRaw == ":l" OR cmdRaw == ":locals" THEN
-                localsStr = envGet!(envId, "__dbg_locals", pool);
+                localsStr = envGet(envId, "__dbg_locals", &pool);
                 MUTABLE localDump = "";
                 IF getStr(localsStr).length() > 0 THEN
                     localDump = getStr(localsStr);
@@ -92,3 +92,4 @@ FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE po
     writeFile("/tmp/_debug_break.txt", "");
     RETURN debugAction;
 END
+&

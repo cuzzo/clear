@@ -9,9 +9,9 @@
 
 FN main() RETURNS Void ->
     MUTABLE items: []String = [];
-    items.append("a");
-    items.append("b");
-    items.append("c");
+    &items.append("a");
+    &items.append("b");
+    &items.append("c");
     MUTABLE i = 0_i64;
     WHILE i < 2 DO
         # frame_str triggers mark_per_iter so the loop frame is rewound each iteration.
@@ -19,7 +19,7 @@ FN main() RETURNS Void ->
         # Rebuild items as all but the last element.
         MUTABLE next: []String = [];
         FOR j IN (0_i64 ..< items.length() - 1) DO
-            next.append(COPY (items[j] OR_ELSE ""));
+            &next.append(COPY (items[j] OR_ELSE ""));
         END
         # Without the fix: next is frame-backed; frame rewind frees it between iterations.
         # With the fix: next is heap-backed; survives the frame rewind as the new items.

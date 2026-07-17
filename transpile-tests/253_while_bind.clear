@@ -5,12 +5,12 @@ STRUCT Node { val: Int64 }
 # Test 1: WHILE list.pop() AS item -- drain a list
 FN test_pop_drain() RETURNS !Void ->
     MUTABLE items: []Int64 = [];
-    items.append(1_i64);
-    items.append(2_i64);
-    items.append(3_i64);
+    &items.append(1_i64);
+    &items.append(2_i64);
+    &items.append(3_i64);
 
     MUTABLE sum = 0_i64;
-    WHILE items.pop() EXISTS AS v DO
+    WHILE &items.pop() EXISTS AS v DO
         sum = sum + v;
     END
     ASSERT sum == 6_i64, "pop drain: sum should be 6";
@@ -26,9 +26,9 @@ FN test_resolve_traversal() RETURNS !Void ->
 
     # Build a chain: link -> n1 -> n2 -> n3 (via LINK reassignment each iter)
     MUTABLE links: []Node@link = [];
-    links.append(LINK n1);
-    links.append(LINK n2);
-    links.append(LINK n3);
+    &links.append(LINK n1);
+    &links.append(LINK n2);
+    &links.append(LINK n3);
 
     MUTABLE sum = 0_i64;
     MUTABLE i: Int64 = 0;

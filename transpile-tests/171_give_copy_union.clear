@@ -4,7 +4,7 @@
 
 UNION SimpleValue { Nil, Number: Float64 }
 
-FN consume!(TAKES v: SimpleValue) RETURNS Float64 ->
+FN consume(TAKES v: SimpleValue) RETURNS Float64 ->
     PARTIAL MATCH TAKES v START
         SimpleValue.Number AS n -> RETURN n;,
         DEFAULT -> RETURN 0.0;
@@ -14,11 +14,11 @@ END
 
 FN main() RETURNS Void ->
     MUTABLE v = SimpleValue{ Number: 42.0 };
-    result = consume!(GIVE v);
+    result = consume(GIVE v);
     ASSERT result == 42.0, "GIVE copy union passes value";
 
     MUTABLE v2 = SimpleValue.Nil;
-    result2 = consume!(GIVE v2);
+    result2 = consume(GIVE v2);
     ASSERT result2 == 0.0, "GIVE copy union Nil returns 0";
 
     print("171: give copy union PASSED");

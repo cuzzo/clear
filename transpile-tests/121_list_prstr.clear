@@ -28,19 +28,19 @@ FN applyNative(name: String, evaled: Value[]) RETURNS !Value ->
     IF name == "list" THEN
         MUTABLE litems: []Value = List[];
         FOR li IN (0_i64 ..< evaled.length()) DO
-            litems.append(COPY evaled[li]);
+            &litems.append(COPY evaled[li]);
         END
         RETURN Value{ List: litems };
     END
     RETURN Value.Nil;
 END
 
-FN evalList!(TAKES items: Value[]) RETURNS !Value ->
+FN evalList(TAKES items: Value[]) RETURNS !Value ->
     MUTABLE evaled: []Value = List[];
     FOR ei IN (0_i64 ..< items.length()) DO
-        evaled.append(COPY items[ei]);
+        &evaled.append(COPY items[ei]);
     END
-    f = evaled.remove(0_i64);
+    f = &evaled.remove(0_i64);
     PARTIAL MATCH f START
         Value.NativeFn AS s -> RETURN applyNative(s, evaled);,
         DEFAULT -> RETURN Value.Nil;
@@ -51,12 +51,12 @@ END
 FN main() RETURNS Void ->
     # Build (list 1 2 3) as [NativeFn("list"), Number(1), Number(2), Number(3)]
     MUTABLE ast: []Value = List[];
-    ast.append(Value{ NativeFn: "list" });
-    ast.append(Value{ Number: 1.0 });
-    ast.append(Value{ Number: 2.0 });
-    ast.append(Value{ Number: 3.0 });
+    &ast.append(Value{ NativeFn: "list" });
+    &ast.append(Value{ Number: 1.0 });
+    &ast.append(Value{ Number: 2.0 });
+    &ast.append(Value{ Number: 3.0 });
 
-    result = evalList!(ast);
+    result = evalList(ast);
     s = prStr(result);
     print(s);
     ASSERT s == "(1 2 3)", "list 1 2 3";

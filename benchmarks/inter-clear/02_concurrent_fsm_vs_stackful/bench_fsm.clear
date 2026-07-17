@@ -19,7 +19,7 @@ FN main() RETURNS Void ->
   MUTABLE total: Int64 = 0_i64;
 
   FOR i IN (0 ..< count) DO
-    futures.append(BG { bench_work(i); });
+    &futures.append(BG { bench_work(i); });
   END
 
   FOR j IN (0 ..< count) DO

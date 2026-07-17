@@ -11,9 +11,9 @@ FN main() RETURNS Void ->
 
     # List iteration
     MUTABLE nums: []Int64 = [];
-    nums.append(1_i64);
-    nums.append(2_i64);
-    nums.append(3_i64);
+    &nums.append(1_i64);
+    &nums.append(2_i64);
+    &nums.append(3_i64);
     MUTABLE list_sum: Int64 = 0;
     FOR n IN nums DO
         list_sum += n;

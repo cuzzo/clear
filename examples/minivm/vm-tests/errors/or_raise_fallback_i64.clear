@@ -1,7 +1,7 @@
-FN fail!() RETURNS !Int64 ->
+FN fail() RETURNS !Int64 ->
     RAISE "bad";
 END
 
 FN main() RETURNS Int64 ->
-    RETURN fail!() OR_ELSE 42_i64;
+    RETURN fail() OR_ELSE 42_i64;
 END

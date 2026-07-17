@@ -43,8 +43,8 @@ def lbm_helpers(shape)
   <<~CHT
     FN mkList() RETURNS !Int64[]@list ->
         MUTABLE xs: Int64[]@list = [];
-        xs.append(1_i64);
-        xs.append(2_i64);
+        &xs.append(1_i64);
+        &xs.append(2_i64);
         RETURN xs;
     END
   CHT

@@ -84,7 +84,7 @@ FN main() RETURNS Void ->
   # SOA layout via T[N]@soa (fixed-size SOA array)
   MUTABLE soa: [100000]@soa Particle = [];
   TIGHT FOR i IN (0 ..< n) DO
-    soa
+    &soa
       .append(
         Particle{
           x: i.toFloat(),

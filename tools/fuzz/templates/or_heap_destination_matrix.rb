@@ -36,8 +36,8 @@ def ohd_shape_helpers(shape)
   list_helper = <<~CHT
     FN mkStringList() RETURNS String[]@list ->
         MUTABLE xs: String[]@list = List[];
-        xs.append(COPY "a");
-        xs.append(COPY "b");
+        &xs.append(COPY "a");
+        &xs.append(COPY "b");
         RETURN xs;
     END
   CHT
@@ -146,8 +146,8 @@ FuzzGenerator.register(:or_heap_destination_matrix, cells: OR_HEAP_DESTINATION_C
   fallback_helper = p[:shape] == :list_owned ? <<~CHT : ""
     FN fallbackList() RETURNS Int64[]@list ->
         MUTABLE xs: Int64[]@list = [];
-        xs.append(7_i64);
-        xs.append(8_i64);
+        &xs.append(7_i64);
+        &xs.append(8_i64);
         RETURN xs;
     END
   CHT

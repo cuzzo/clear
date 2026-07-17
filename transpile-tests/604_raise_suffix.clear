@@ -1,0 +1,16 @@
+STRUCT Result { value: Int64 }
+
+FN load(value: Int64) RETURNS !Result ->
+  RETURN Result{ value: value };
+END
+
+FN forwarded(value: Int64) RETURNS !Int64 ->
+  RETURN load(value)!!.value;
+END
+
+FN main() RETURNS Void ->
+  direct = load(7)!!.value;
+  nested = forwarded(9)!!;
+  ASSERT direct == 7, "!!. unwraps a fallible value before field access";
+  ASSERT nested == 9, "!! propagates errors like OR_ELSE RAISE";
+END

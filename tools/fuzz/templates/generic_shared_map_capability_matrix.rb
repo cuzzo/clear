@@ -25,14 +25,14 @@ FuzzGenerator.register(:generic_shared_map_capability_matrix, cells: GENERIC_SHA
     <<~CLEAR
       STRUCT Cache<M: SHARED Map> { values: M }
       IMPLEMENTATION Cache<M> {
-        METHOD put!(MUTABLE self, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+        METHOD put(MUTABLE self, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
           WITH POLYMORPHIC self.values AS values { values[key] = value; }
         END
       }
       FN main() RETURNS !Void ->
         storage: {String}#{capability} Int64 = {};
         MUTABLE cache = Cache<{String}#{capability} Int64>{ values: storage };
-        cache.put!("key", 9_i64);
+        cache.put("key", 9_i64);
       END
     CLEAR
   else

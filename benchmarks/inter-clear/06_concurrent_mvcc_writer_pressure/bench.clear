@@ -33,7 +33,7 @@ FN main() RETURNS Void ->
 
     MUTABLE rw_readers: ~Int64[]@list = [];
     FOR r IN (0_i64 ..< n_readers) DO
-        rw_readers.append(BG { @parallel ->
+        &rw_readers.append(BG { @parallel ->
             MUTABLE s: Int64 = 0_i64;
             MUTABLE i: Int64 = 0_i64;
             WHILE i < reads_per DO
@@ -46,7 +46,7 @@ FN main() RETURNS Void ->
 
     MUTABLE rw_writers: ~Void[]@list = [];
     FOR w IN (0_i64 ..< n_writers) DO
-        rw_writers.append(BG { @parallel ->
+        &rw_writers.append(BG { @parallel ->
             MUTABLE i: Int64 = 0_i64;
             WHILE i < writes_per DO
                 WITH EXCLUSIVE c_rw AS inner { inner.value = inner.value + 1_i64; }
@@ -67,7 +67,7 @@ FN main() RETURNS Void ->
 
     MUTABLE v_readers: ~Int64[]@list = [];
     FOR r IN (0_i64 ..< n_readers) DO
-        v_readers.append(BG { @parallel ->
+        &v_readers.append(BG { @parallel ->
             MUTABLE s: Int64 = 0_i64;
             MUTABLE i: Int64 = 0_i64;
             WHILE i < reads_per DO
@@ -80,7 +80,7 @@ FN main() RETURNS Void ->
 
     MUTABLE v_writers: ~Void[]@list = [];
     FOR w IN (0_i64 ..< n_writers) DO
-        v_writers.append(BG { @parallel ->
+        &v_writers.append(BG { @parallel ->
             MUTABLE i: Int64 = 0_i64;
             WHILE i < writes_per DO
                 WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON MvccConflict RAISE

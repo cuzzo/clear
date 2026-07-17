@@ -18,9 +18,9 @@ FN main() RETURNS Void ->
 
     # Also exercise via @list slice -- both shapes should call cleanly.
     MUTABLE list: []Int64 = List[];
-    list.append(10_i64);
-    list.append(20_i64);
-    list.append(30_i64);
+    &list.append(10_i64);
+    &list.append(20_i64);
+    &list.append(30_i64);
     listTotal = sumFirstThree(list);
     ASSERT listTotal == 60_i64, "@list passed to slice-typed param (control)";
 

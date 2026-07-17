@@ -31,7 +31,7 @@ FN main() RETURNS Void ->
 
     MUTABLE rw_readers: ~Int64[]@list = [];
     FOR r IN (0_i64 ..< n_readers) DO
-        rw_readers.append(BG { @parallel ->
+        &rw_readers.append(BG { @parallel ->
             MUTABLE s: Int64 = 0_i64;
             MUTABLE i: Int64 = 0_i64;
             WHILE i < reads_per DO
@@ -53,7 +53,7 @@ FN main() RETURNS Void ->
 
     MUTABLE v_readers: ~Int64[]@list = [];
     FOR r IN (0_i64 ..< n_readers) DO
-        v_readers.append(BG { @parallel ->
+        &v_readers.append(BG { @parallel ->
             MUTABLE s: Int64 = 0_i64;
             MUTABLE i: Int64 = 0_i64;
             WHILE i < reads_per DO

@@ -7,7 +7,7 @@ UNION Val {
     Pair { car: String, cdr: String }
 }
 
-FN extractStr!(v: Val) RETURNS !Val ->
+FN extractStr(v: Val) RETURNS !Val ->
     PARTIAL MATCH v START
         Val.Str AS s -> RETURN Val{ Str: COPY s };,
         DEFAULT -> RETURN Val.Nil;
@@ -17,7 +17,7 @@ END
 
 FN main() RETURNS Void ->
     input = Val{ Str: "hello" };
-    result = extractStr!(input);
+    result = extractStr(input);
     PARTIAL MATCH result START
         Val.Str AS s -> ASSERT s == "hello", "copy in union return";,
         DEFAULT -> ASSERT FALSE, "should be Str";

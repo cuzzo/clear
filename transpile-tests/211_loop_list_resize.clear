@@ -5,7 +5,7 @@
 FN main() RETURNS Void ->
     MUTABLE items: []String = [];
     FOR i IN (1_i64 ..= 200) DO
-        items.append("entry-" $+ i.toString());
+        &items.append("entry-" $+ i.toString());
     END
     ASSERT items.length() == 200, "all 200 items stored";
     ASSERT items[0] == "entry-1", "first item";

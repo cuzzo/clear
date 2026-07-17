@@ -18,15 +18,15 @@
 
 # Iterative Lomuto quicksort over a plain slice.
 # The `!` suffix marks a function with MUTABLE parameters (CLEAR convention).
-FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS !Void ->
+FN qsort(MUTABLE arr: Float64[], n: Int64) RETURNS !Void ->
   # Pre-allocate stacks: log2(1M) < 20; 48 entries is safe.
   # Using @list so both stacks live in the frame arena; trivially freed on exit.
   MUTABLE lo_stk: []Int64 = [];
   MUTABLE hi_stk: []Int64 = [];
   # Fill loop uses append → cannot be TIGHT (append calls rt.frameAlloc).
   TIGHT FOR fill_i IN (0 ..< 48) DO
-    lo_stk.append(0);
-    hi_stk.append(0);
+    &lo_stk.append(0);
+    &hi_stk.append(0);
   END
   lo_stk[0] = 0;
   hi_stk[0] = n - 1;
@@ -74,7 +74,7 @@ END
 
 # Bottom-up iterative mergesort.
 # arr and tmp are both plain slices (Float64[]); no allocation inside this function.
-FN msort!(MUTABLE arr: Float64[], MUTABLE tmp: Float64[], n: Int64) RETURNS !Void ->
+FN msort(MUTABLE arr: Float64[], MUTABLE tmp: Float64[], n: Int64) RETURNS !Void ->
   MUTABLE width = 1;
   # TIGHT: all loops here are pure compare/copy, no allocation.
   TIGHT WHILE width < n DO
@@ -125,13 +125,13 @@ FN main() RETURNS !Void ->
   MUTABLE seed_i = 0;
   TIGHT WHILE seed_i < n DO
     v = seed_i * 2_654_435_761 MOD n + 0.0;
-    arr.append(v);
+    &arr.append(v);
     seed_i += 1;
   END
 
   # Quicksort
   t0 = timestampMs();
-  qsort!(arr, n);
+  qsort(&arr, n);
   qsortMs = timestampMs() - t0;
   ASSERT (arr[0] OR_ELSE 0.0) <= (arr[1] OR_ELSE 0.0), "qsort: not sorted at start";
   ASSERT (arr[n - 2] OR_ELSE 0.0) <= (arr[n - 1] OR_ELSE 0.0), "qsort: not sorted at end";
@@ -146,9 +146,9 @@ FN main() RETURNS !Void ->
 
   # Mergesort (needs a temp buffer of the same size)
   MUTABLE tmp_arr: []Float64 = [];
-  TIGHT FOR ti IN (0 ..< n) -> tmp_arr.append(0.0);
+  TIGHT FOR ti IN (0 ..< n) -> &tmp_arr.append(0.0);
   t1 = timestampMs();
-  msort!(arr, tmp_arr, n);
+  msort(&arr, &tmp_arr, n);
   msortMs = timestampMs() - t1;
   ASSERT (arr[0] OR_ELSE 0.0) <= (arr[1] OR_ELSE 0.0), "msort: not sorted at start";
   ASSERT (arr[n - 2] OR_ELSE 0.0) <= (arr[n - 1] OR_ELSE 0.0), "msort: not sorted at end";

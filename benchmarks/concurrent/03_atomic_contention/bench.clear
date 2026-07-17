@@ -22,7 +22,7 @@ FN main() RETURNS Void ->
   t0 = timestampMs();
   MUTABLE futures: ~Void[]@list = [];
   FOR i IN (0 ..< 1024) DO
-    futures.append(
+    &futures.append(
       BG {
         FOR j IN (0 ..< 10_000) -> c.value += 1;
       }

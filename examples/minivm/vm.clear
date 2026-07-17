@@ -204,7 +204,7 @@ STRUCT RegisterStringListHandle {
 # to `register_debugger.clear` -- which is also REQUIREd from the top
 # of this file and would otherwise see neither.
 
-FN loadRegisterOps!(path: String) RETURNS !Int64[] ->
+FN loadRegisterOps(path: String) RETURNS !Int64[] ->
     raw = readFile(path) OR_ELSE RAISE;
     parts = split(raw, ",");
     MUTABLE ops: []Int64 = List[];
@@ -227,7 +227,7 @@ END
 # instruction; operand-position entries hold 0. The runner consults this
 # on error to format "<file>:<line>" instead of just "ip=<N>". Always
 # present (emitted by bc_run.rb) -- see register_bc_emitter.rb.
-FN loadRegisterSourceLines!(path: String) RETURNS ![]Int64 ->
+FN loadRegisterSourceLines(path: String) RETURNS ![]Int64 ->
     bytes: String@raw = readFile(path) OR_ELSE RAISE;
     MUTABLE lines: []Int64 = List[];
     MUTABLE cursor: Int64 = 0_i64;
@@ -249,7 +249,7 @@ END
 # in `:l` and visualization). `<endSourceLine>` is the last line
 # where the binding is live (`-1` means "until function return").
 # `<typeName>` may be empty when the emitter didn't resolve a type.
-FN loadRegisterVarNames!(path: String) RETURNS ![]RegisterVarName ->
+FN loadRegisterVarNames(path: String) RETURNS ![]RegisterVarName ->
     raw = readFile(path) OR_ELSE "";
     MUTABLE entries: []RegisterVarName = List[];
     parts = split(raw, "\n");
@@ -320,7 +320,7 @@ END
 # empty list -- the runner then runs without trap rewrites. bc_run.rb
 # writes this file when invoked with `--pause-on=file:line`; see the
 # `--debug` path there.
-FN loadRegisterBreakpoints!(path: String) RETURNS ![]Int64 ->
+FN loadRegisterBreakpoints(path: String) RETURNS ![]Int64 ->
     raw = readFile(path) OR_ELSE "";
     MUTABLE bps: []Int64 = List[];
     parts = split(raw, "\n");
@@ -338,7 +338,7 @@ END
 # CLEAR source path. Today there is one entry (the main file); a
 # future multi-file (module-imported) attribution will append more
 # entries and stamp non-zero file_ids on MIR statements.
-FN loadRegisterSourcePaths!(path: String) RETURNS ![]String ->
+FN loadRegisterSourcePaths(path: String) RETURNS ![]String ->
     raw: String@raw = readFile(path) OR_ELSE RAISE;
     MUTABLE paths: []String = List[];
     parts = split(raw, "\n");
@@ -423,7 +423,7 @@ FN readPackedU32(bytes: String, cursor: Int64) RETURNS Int64 ->
     RETURN byteAt(bytes, cursor) + byteAt(bytes, cursor + 1) * 256_i64 + byteAt(bytes, cursor + 2) * 65536_i64 + byteAt(bytes, cursor + 3) * 16777216_i64;
 END
 
-FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
+FN loadPackedRegisterProgram(path: String) RETURNS !PackedRegisterProgram ->
     bytes: String@raw = readFile(path) OR_ELSE RAISE;
     MUTABLE ops: []Int64 = List[];
     MUTABLE opcodes: []RegisterOp = List[];
@@ -784,7 +784,7 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
     RETURN 0_i64;
 END
 
-FN decodeRegisterOpcodes!(ops: Int64[]) RETURNS !RegisterOp[] ->
+FN decodeRegisterOpcodes(ops: Int64[]) RETURNS !RegisterOp[] ->
     MUTABLE decoded: []RegisterOp = List[];
     MUTABLE ip: Int64 = 0;
     TIGHT WHILE ip < ops.length() DO
@@ -799,7 +799,7 @@ FN decodeRegisterOpcodes!(ops: Int64[]) RETURNS !RegisterOp[] ->
     RETURN decoded;
 END
 
-FN parseRegisterConstLine!(line: String) RETURNS !RegisterValue ->
+FN parseRegisterConstLine(line: String) RETURNS !RegisterValue ->
     IF startsWith?(line, "I:") THEN
         numStr = substr(line, 2, line.length() - 2);
         intVal = toInt(numStr) OR_ELSE 0_i64;
@@ -822,7 +822,7 @@ FN parseRegisterConstLine!(line: String) RETURNS !RegisterValue ->
     RETURN RegisterValue.Nil;
 END
 
-FN loadRegisterConsts!(path: String) RETURNS !RegisterValue[] ->
+FN loadRegisterConsts(path: String) RETURNS !RegisterValue[] ->
     raw = readFile(path) OR_ELSE RAISE;
     MUTABLE consts: []RegisterValue = List[];
     MUTABLE pos: Int64 = 0;
@@ -834,7 +834,7 @@ FN loadRegisterConsts!(path: String) RETURNS !RegisterValue[] ->
         END
         line = substr(raw, pos, lineEnd - pos);
         IF line.length() > 0 THEN
-            consts.append(parseRegisterConstLine!(line) OR_ELSE RAISE);
+            consts.append(parseRegisterConstLine(line) OR_ELSE RAISE);
         END
         pos = lineEnd + 1;
     END
@@ -881,7 +881,7 @@ FN stringResult(v: String) RETURNS !RegisterValue ->
     RETURN RegisterValue{ Str: COPY v };
 END
 
-FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: []Int64, sourceColumns: []Int64, sourcePaths: []String, breakpointIps: []Int64, varNames: []RegisterVarName, entryIp: Int64, TAKES initCaps: RegisterValue[], MUTABLE sharedCells: []RegisterValue) RETURNS !RegisterValue REQUIRES sharedCells: LOCKED EFFECTS REENTRANT:MAX_DEPTH(1024) ->
+FN runRegisterBytecode(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: []Int64, sourceColumns: []Int64, sourcePaths: []String, breakpointIps: []Int64, varNames: []RegisterVarName, entryIp: Int64, TAKES initCaps: RegisterValue[], MUTABLE sharedCells: []RegisterValue) RETURNS !RegisterValue REQUIRES sharedCells: LOCKED EFFECTS REENTRANT:MAX_DEPTH(1024) ->
     # Debugger breakpoints are checked per-instruction by consulting a
     # parallel flag array `isBreakpoint`. Zero overhead on the success
     # path: when `breakpointIps` is empty we bypass the build and the
@@ -1031,7 +1031,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                 line = sourceLineFor(sourceLines, ip);
                 col  = sourceLineFor(sourceColumns, ip);
                 path = sourcePathFor(sourcePaths, 0_i64);
-                action = registerDebugPause!(
+                action = registerDebugPause(
                     path, line, col, ip,
                     varNames, iregs, fregs, sregs,
                     iBase, fBase, frameIBases, frameFBases, frameRetIps,
@@ -1583,7 +1583,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                         12 -> sregs[dst] = replace(sregs[argReg0], sregs[argReg1], sregs[argReg2]);,
                         13 -> sregs[dst] = downcase(sregs[argReg0]);,
                         14 -> sregs[dst] = upcase(sregs[argReg0]);,
-                        15 -> sregs[dst] = readLine!() OR_ELSE RAISE;,
+                        15 -> sregs[dst] = readLine() OR_ELSE RAISE;,
                         16 -> iregs[iBase + dst] = framePeakBytes();,
                         17 -> iregs[iBase + dst] = codepointCount(sregs[argReg0]);,
                         18 -> sregs[dst] = readFile(sregs[argReg0]) OR_ELSE RAISE;,
@@ -2534,7 +2534,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     END
                     pendingCaps = List[];
                     bgFut: ~RegisterValue = BG { @service ->
-                        runRegisterBytecode!(COPY ops, COPY opcodes, COPY consts, COPY sourceLines, COPY sourceColumns, COPY sourcePaths, COPY breakpointIps, COPY varNames, bgEntry, GIVE bgCaps, sharedCells) OR_ELSE RAISE;
+                        runRegisterBytecode(COPY ops, COPY opcodes, COPY consts, COPY sourceLines, COPY sourceColumns, COPY sourcePaths, COPY breakpointIps, COPY varNames, bgEntry, GIVE bgCaps, sharedCells) OR_ELSE RAISE;
                     };
                     bgNewFid = futureTable.length();
                     futureTable.append(GIVE bgFut);

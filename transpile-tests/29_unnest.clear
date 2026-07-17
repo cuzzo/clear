@@ -19,9 +19,9 @@ FN main() RETURNS Void ->
   item3 = makeItem(3, tags3);
 
   MUTABLE items: Item[] = [];
-  items.append(item1);
-  items.append(item2);
-  items.append(item3);
+  &items.append(item1);
+  &items.append(item2);
+  &items.append(item3);
 
   # Test UNNEST: flatten all tags from all items
   all_tags = items |> UNNEST _.tags;

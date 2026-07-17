@@ -6,16 +6,16 @@ STRUCT Node { keys: []Int64, vals: []String }
 
 FN main() RETURNS Void ->
     MUTABLE nodes: []Node = [];
-    nodes.append(Node{ keys: [], vals: [] });
+    &nodes.append(Node{ keys: [], vals: [] });
     IF nodes[0] EXISTS AS node THEN
-        node.keys.append(1);
-        node.vals.append("one");
+        &node.keys.append(1);
+        &node.vals.append("one");
     END
 
     # Replace vals (String[]@list) through indexed access
     MUTABLE nv: []String = [];
-    nv.append("ten");
-    nv.append("twenty");
+    &nv.append("ten");
+    &nv.append("twenty");
     IF nodes[0] EXISTS AS node THEN node.vals = nv; END
 
     ASSERT nodes[0]?.vals.length() == 2, "replaced vals has 2 entries";
@@ -24,8 +24,8 @@ FN main() RETURNS Void ->
 
     # Replace keys (Int64[]@list) through indexed access
     MUTABLE nk: []Int64 = [];
-    nk.append(10);
-    nk.append(20);
+    &nk.append(10);
+    &nk.append(20);
     IF nodes[0] EXISTS AS node THEN node.keys = nk; END
 
     ASSERT nodes[0]?.keys.length() == 2, "replaced keys has 2 entries";

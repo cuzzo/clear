@@ -2,11 +2,11 @@
 
 REQUIRE "types.clear";
 
-FN run!(MUTABLE pool: [Pool(200000)]Env) RETURNS Int64 ->
+FN run(MUTABLE pool: [Pool(200000)]Env) RETURNS Int64 ->
     MUTABLE total: Int64 = 0;
     MUTABLE iter: Int64 = 0;
     WHILE iter < 100000 DO
-        id: Id<Env> = pool.insert(Env{ vars: {} });
+        id: Id<Env> = &pool.insert(Env{ vars: {} });
         IF pool[id] EXISTS AS env THEN
             env.vars["k1"] = Value{ Int64Val: iter };
             env.vars["k2"] = Value{ Int64Val: iter * 2 };
@@ -26,7 +26,7 @@ END
 FN main() RETURNS Void ->
     MUTABLE pool: [Pool(200000)]Env = [];
     startMs = timestampMs();
-    total = run!(pool);
+    total = run(&pool);
     endMs = timestampMs();
     elapsed = endMs - startMs;
     print("VM pool ops (nosync) total=" $+ total.toString() $+ " in " $+ elapsed.toString() $+ "ms");

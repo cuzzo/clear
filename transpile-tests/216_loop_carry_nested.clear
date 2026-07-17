@@ -14,7 +14,7 @@
 # block-index state corrupts the GPA free list and crashes on subsequent
 # trimExcess -> pop calls.
 
-FN processLines!(n: Int64) RETURNS !Void ->
+FN processLines(n: Int64) RETURNS !Void ->
     MUTABLE outer: Int64 = 0;
     WHILE outer < 10 DO
         # Outer frame-local: forces mark_per_iter on the outer loop.
@@ -27,7 +27,7 @@ FN processLines!(n: Int64) RETURNS !Void ->
         MUTABLE i: Int64 = 0;
         WHILE i < n DO
             MUTABLE parts: []String = [];
-            parts.append(i.toString());
+            &parts.append(i.toString());
             # Use prefix as length (no move, just read)
             resp = resp $+ i.toString() $+ ";" $+ prefix.length().toString();
             i += 1;
@@ -44,7 +44,7 @@ FN main() RETURNS !Void ->
     # occurs inside this loop.
     MUTABLE k: Int64 = 0;
     WHILE k < 200 DO
-        processLines!(20) OR_ELSE EXIT;
+        processLines(20) OR_ELSE EXIT;
         k += 1;
     END
     print("PASS");

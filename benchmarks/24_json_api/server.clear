@@ -26,7 +26,7 @@ END
 FN generateJson(id: Int64) RETURNS String ->
     sz = sizeForId(id);
     MUTABLE parts: []String = [];
-    FOR i IN (1_i64 ..= sz) -> parts.append(i.toString());
+    FOR i IN (1_i64 ..= sz) -> &parts.append(i.toString());
     RETURN "{\"id\":${id.toString()},\"data\":[${join(parts, ",")}]}";
 END
 
@@ -39,7 +39,7 @@ FN parseJsonArraySum(content: String) RETURNS !Int64 ->
     RETURN sum;
 END
 
-FN handleClient!(client: TCPClient) RETURNS !Void ->
+FN handleClient(client: TCPClient) RETURNS !Void ->
     MUTABLE running: Bool = TRUE;
     WHILE running DO
         data = tcpRead(client);
@@ -98,8 +98,8 @@ FN main() RETURNS Void ->
     MUTABLE tasks: ~Void[]@list = [];
     WHILE TRUE DO
         client = accept(server);
-        tasks.append(BG {
-            handleClient!(client);
+        &tasks.append(BG {
+            handleClient(client);
         });
     END
 END

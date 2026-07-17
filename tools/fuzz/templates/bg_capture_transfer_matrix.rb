@@ -53,9 +53,9 @@ def bct_shape_helpers(shape)
   list_helper = <<~CHT
     FN mkStringList() RETURNS String[]@list ->
         MUTABLE xs: String[]@list = List[];
-        xs.append(COPY "a");
-        xs.append(COPY "b");
-        xs.append(COPY "c");
+        &xs.append(COPY "a");
+        &xs.append(COPY "b");
+        &xs.append(COPY "c");
         RETURN xs;
     END
   CHT

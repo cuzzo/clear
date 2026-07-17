@@ -5,10 +5,10 @@ FN double(n: Int64) RETURNS Int64 -> RETURN n * 2; END
 
 FN main() RETURNS Void ->
     MUTABLE futures: ~Int64[]@list = [];
-    futures.append(BG { double(1); });
-    futures.append(BG { double(2); });
-    futures.append(BG { double(3); });
-    futures.append(BG { double(4); });
+    &futures.append(BG { double(1); });
+    &futures.append(BG { double(2); });
+    &futures.append(BG { double(3); });
+    &futures.append(BG { double(4); });
 
     # Await all: NEXT on the list returns Int64[]@list
     results: []Int64 = NEXT futures;

@@ -28,7 +28,7 @@ FN makeResultSet(count: Int64) RETURNS !ResultSet@multiowned ->
   MUTABLE ks: []Int64 = [];
   MUTABLE i = 0;
   WHILE i < count DO
-    ks.append((i + 1) * 10);
+    &ks.append((i + 1) * 10);
     i += 1;
   END
   RETURN ResultSet{ keys: ks, count: count } @multiowned;
@@ -68,21 +68,21 @@ FN main() RETURNS !Void ->
   # Build B-tree: root(30) -> left(10,20), right(40)
   MUTABLE lk0: []Int64 = [];
   MUTABLE lv0: []String = [];
-  lk0.append(10);
-  lk0.append(20);
-  lv0.append("10");
-  lv0.append("20");
-  nodes.append(Node{ keys: lk0, vals: lv0, numChildren: 0, isLeaf: TRUE });
+  &lk0.append(10);
+  &lk0.append(20);
+  &lv0.append("10");
+  &lv0.append("20");
+  &nodes.append(Node{ keys: lk0, vals: lv0, numChildren: 0, isLeaf: TRUE });
   MUTABLE rk0: []Int64 = [];
   MUTABLE rv0: []String = [];
-  rk0.append(40);
-  rv0.append("40");
-  nodes.append(Node{ keys: rk0, vals: rv0, numChildren: 0, isLeaf: TRUE });
+  &rk0.append(40);
+  &rv0.append("40");
+  &nodes.append(Node{ keys: rk0, vals: rv0, numChildren: 0, isLeaf: TRUE });
   MUTABLE rootK: []Int64 = [];
   MUTABLE rootV: []String = [];
-  rootK.append(30);
-  rootV.append("30");
-  nodes.append(Node{ keys: rootK, vals: rootV, numChildren: 2, isLeaf: FALSE });
+  &rootK.append(30);
+  &rootV.append("30");
+  &nodes.append(Node{ keys: rootK, vals: rootV, numChildren: 2, isLeaf: FALSE });
   children[childKey(2, 0)] = 0;
   children[childKey(2, 1)] = 1;
   root = 2;
@@ -114,9 +114,9 @@ FN main() RETURNS !Void ->
 
   # Collect all keys for pipeline queries
   MUTABLE allKeys: []Int64 = [];
-  allKeys.append(10);
-  allKeys.append(20);
-  allKeys.append(40);
+  &allKeys.append(10);
+  &allKeys.append(20);
+  &allKeys.append(40);
 
   # Lambda filter
   evenCount = scanWithFilter(allKeys, %(k: Int64) -> k MOD 2 == 0);
@@ -146,7 +146,7 @@ FN main() RETURNS !Void ->
   MUTABLE futures: ~Void[]@list = [];
   MUTABLE fi = 0;
   WHILE fi < 4 DO
-    futures.append(
+    &futures.append(
       BG {
         WITH EXCLUSIVE stats AS s {s.insertCount = s.insertCount + 10;}
       }

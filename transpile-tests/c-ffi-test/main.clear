@@ -115,17 +115,17 @@ FN main() RETURNS Void ->
   ASSERT sumFixed([1, 2, 4, 8]) == 15;
 
   MUTABLE handle_out: ?FixtureHandle = NIL;
-  ASSERT openHandle("alpha", handle_out) == 0;
+  ASSERT openHandle("alpha", &handle_out) == 0;
   handle = handle_out?;
   ASSERT stringsEqual(handleName(handle), "alpha") == 1;
   ASSERT findName(handle, 42) EXISTS;
   ASSERT(findName(handle, 0)).nil?();
 
   MUTABLE rejected: ?FixtureHandle = NIL;
-  ASSERT openHandle("reject", rejected) == 7;
+  ASSERT openHandle("reject", &rejected) == 7;
   ASSERT rejected.nil?();
   MUTABLE detail: TargetInt = 0;
-  ASSERT fail(9, detail) == 9;
+  ASSERT fail(9, &detail) == 9;
   ASSERT detail == 90;
   ASSERT applyCallback(21, doubleForC) == 42;
   values_pointer = values(handle)?;

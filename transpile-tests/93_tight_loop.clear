@@ -9,7 +9,7 @@
 # must be minimised.
 
 # Iterative power: tight inner loop, no alloc, no yield
-FN ipow!(base: Float64, MUTABLE exp: Int64) RETURNS Float64 ->
+FN ipow(base: Float64, MUTABLE exp: Int64) RETURNS Float64 ->
   MUTABLE result = 1.0;
   TIGHT WHILE exp > 0 DO
     result = result * base;
@@ -42,14 +42,14 @@ END
 FN main() RETURNS Void ->
   # TIGHT power: 2^10 = 1024
   MUTABLE exp10 = 10_i64;
-  ASSERT ipow!(2.0, exp10) == 1024.0;
+  ASSERT ipow(2.0, &exp10) == 1024.0;
 
   # TIGHT sum-of-squares over a small array
   MUTABLE data: []Float64 = [];
-  append(data, 1.0);
-  append(data, 2.0);
-  append(data, 3.0);
-  append(data, 4.0);
+  append(&data, 1.0);
+  append(&data, 2.0);
+  append(&data, 3.0);
+  append(&data, 4.0);
   # 1 + 4 + 9 + 16 = 30
   ASSERT sumSq(data, 4) == 30.0;
 

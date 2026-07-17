@@ -60,7 +60,7 @@ FN main() RETURNS Void ->
 
   # Build data array
   MUTABLE data: []Int64 = [];
-  TIGHT FOR i IN (0 ..< n) -> data.append(i %* 7 %+ 13);
+  TIGHT FOR i IN (0 ..< n) -> &data.append(i %* 7 %+ 13);
 
   # Warm up
   x = benchRawLoop(data, n, 1);

@@ -26,9 +26,9 @@ FN containsCell?(cells: []Cell, cell: Cell) RETURNS Bool ->
   RETURN FALSE;
 END
 
-FN appendUniqueCell!(MUTABLE cells: []Cell, cell: Cell) RETURNS !Void ->
+FN appendUniqueCell(MUTABLE cells: []Cell, cell: Cell) RETURNS !Void ->
   IF containsCell?(cells, cell) == FALSE THEN
-    cells.append(cell);
+    &cells.append(cell);
   END
   RETURN;
 END
@@ -40,7 +40,7 @@ FN cellNeighbors(cell: Cell) RETURNS ![]Cell ->
     MUTABLE dy = -1;
     WHILE dy <= 1 DO
       IF dx != 0 OR dy != 0 THEN
-        neighbors.append(Cell{ x: cell.x + dx, y: cell.y + dy });
+        &neighbors.append(Cell{ x: cell.x + dx, y: cell.y + dy });
       END
       dy += 1;
     END
@@ -99,10 +99,10 @@ FN candidateCells(liveCells: []Cell) RETURNS ![]Cell ->
     MUTABLE n = 0;
     WHILE n < neighbors.length() DO
       neighbor = neighbors[n] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
-      appendUniqueCell!(candidates, neighbor);
+      appendUniqueCell(&candidates, neighbor);
       n += 1;
     END
-    appendUniqueCell!(candidates, cell);
+    appendUniqueCell(&candidates, cell);
     i += 1;
   END
   RETURN candidates;
@@ -117,7 +117,7 @@ FN advance(liveCells: []Cell) RETURNS ![]Cell ->
     cell = candidates[i] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
     state = states[cellKey(cell)] OR_ELSE CellState{ life: FALSE, neighbors: 0 };
     IF evolve(state) THEN
-      next.append(cell);
+      &next.append(cell);
     END
     i += 1;
   END

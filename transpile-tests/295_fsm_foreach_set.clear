@@ -10,9 +10,9 @@ FN main() RETURNS Void ->
     # @set: keyIterator yields ?*T, so the descriptor sets deref:
     # true and the bind reads __nxt.*.
     MUTABLE s: [Set]Int64 = [];
-    s.insert(100_i64);
-    s.insert(200_i64);
-    s.insert(300_i64);
+    &s.insert(100_i64);
+    &s.insert(200_i64);
+    &s.insert(300_i64);
 
     MUTABLE sum = 0_i64;
     FOR v IN s DO

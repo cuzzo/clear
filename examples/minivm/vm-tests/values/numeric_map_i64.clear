@@ -9,7 +9,7 @@ FN main() RETURNS Int64 ->
     IF m.contains?(1_i64) == FALSE THEN
         RETURN 0_i64;
     END
-    m.delete(1_i64);
+    &m.delete(1_i64);
     IF m.contains?(1_i64) THEN
         RETURN 0_i64;
     END

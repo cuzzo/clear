@@ -25,8 +25,8 @@ FN main() RETURNS Void ->
     # Simulate lambda param binding: store list elements into a HashMap
     MUTABLE env: {String}Value = {};
     MUTABLE args: []Value = List[];
-    args.append(Value{ Str: "hello" });
-    args.append(Value{ Str: "world" });
+    &args.append(Value{ Str: "hello" });
+    &args.append(Value{ Str: "world" });
 
     # Store elements from args into the map (no COPY, no GIVE)
     IF (args[0] EXISTS AS a) AND (args[1] EXISTS AS b) THEN

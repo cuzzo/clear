@@ -57,13 +57,30 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
       END
     CHT
   when :always_mutable
-    # Interior mutability: immutable binding, mutable data, direct.
+    # Interior mutability: immutable roots may mutate/call through the
+    # capability-bearing layer without acquiring ordinary mutability.
     <<~CHT
       STRUCT Counter { value: Int64 }
+      STRUCT Holder { counter: Counter@alwaysMutable }
+
+      FN increment(MUTABLE counter: Counter) RETURNS Void ->
+          counter.value = counter.value + 1_i64;
+      END
+
+      FN updateHolder(holder: Holder) RETURNS Void ->
+          holder.counter.value = holder.counter.value + 1_i64;
+          increment(holder.counter);
+      END
+
       FN main() RETURNS Void ->
           c = Counter{ value: 1_i64 } @alwaysMutable;
           c.value = 2_i64;
-          ASSERT c.value == 2_i64, "alwaysMutable interior mutate";
+          increment(c);
+          ASSERT c.value == 3_i64, "alwaysMutable interior mutate";
+
+          holder = Holder{ counter: Counter{ value: 3_i64 } @alwaysMutable };
+          updateHolder(holder);
+          ASSERT holder.counter.value == 5_i64, "nested alwaysMutable mutate";
           RETURN;
       END
     CHT

@@ -2,7 +2,7 @@
 # OR_ELSE PASS must be cleaned with the heap allocator in the receiving binding.
 FN inner() RETURNS ![]Int64 ->
     MUTABLE v: []Int64 = [];
-    v.append(1_i64);
+    &v.append(1_i64);
     RETURN v;
 END
 

@@ -4,15 +4,15 @@
 FN test_string_set() RETURNS !Void ->
     MUTABLE s: [Set]String = Set[];
 
-    s.insert("hello");
-    s.insert("world");
-    s.insert("hello");
+    &s.insert("hello");
+    &s.insert("world");
+    &s.insert("hello");
 
     ASSERT s.length() == 2_i64, "set should have 2 unique items";
     ASSERT s.contains?("hello"), "set should contain hello";
     ASSERT s.contains?("world"), "set should contain world";
 
-    s.remove("hello");
+    &s.remove("hello");
     ASSERT s.length() == 1_i64, "set should have 1 item after remove";
     ASSERT s.contains?("hello") == FALSE, "hello should be removed";
     ASSERT s.contains?("world"), "world should still be present";
@@ -24,16 +24,16 @@ END
 FN test_numeric_set() RETURNS !Void ->
     MUTABLE ids: [Set]Int64 = Set[];
 
-    ids.insert(10_i64);
-    ids.insert(20_i64);
-    ids.insert(30_i64);
-    ids.insert(10_i64);
+    &ids.insert(10_i64);
+    &ids.insert(20_i64);
+    &ids.insert(30_i64);
+    &ids.insert(10_i64);
 
     ASSERT ids.length() == 3_i64, "numeric set should have 3 unique items";
     ASSERT ids.contains?(20_i64), "set should contain 20";
     ASSERT ids.contains?(99_i64) == FALSE, "set should not contain 99";
 
-    ids.remove(20_i64);
+    &ids.remove(20_i64);
     ASSERT ids.length() == 2_i64, "set should have 2 items after remove";
 
     RETURN;
@@ -46,7 +46,7 @@ FN test_empty_set() RETURNS !Void ->
     ASSERT s.length() == 0_i64, "empty set should have count 0";
     ASSERT s.contains?("anything") == FALSE, "empty set contains nothing";
 
-    s.remove("nonexistent");
+    &s.remove("nonexistent");
     ASSERT s.length() == 0_i64, "remove from empty set is a no-op";
 
     RETURN;
@@ -57,7 +57,7 @@ FN test_set_in_loop() RETURNS !Void ->
     MUTABLE s: [Set]Int64 = Set[];
 
     FOR i IN (0_i64 ..< 100_i64) DO
-        s.insert(i MOD 10_i64);
+        &s.insert(i MOD 10_i64);
     END
 
     ASSERT s.length() == 10_i64, "set should have 10 unique values (0-9)";

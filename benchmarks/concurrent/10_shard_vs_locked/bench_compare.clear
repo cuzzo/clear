@@ -23,7 +23,7 @@ FN main() RETURNS Void ->
   MUTABLE wi = 0;
   WHILE wi < workers DO
     start = wi * chunk;
-    set_futures
+    &set_futures
       .append(BG {FOR i IN (start ..< start + chunk) -> locked_map["key:" $+ i.toString()] = "value";});
     wi += 1;
   END
@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
   wi = 0;
   WHILE wi < workers DO
     start = wi * chunk;
-    get_futures
+    &get_futures
       .append(BG {FOR i IN (start ..< start + chunk) -> MUTABLE got = locked_map["key:" $+ i.toString()] OR_ELSE "";});
     wi += 1;
   END
@@ -50,7 +50,7 @@ FN main() RETURNS Void ->
   MUTABLE mix_chunk = (n / 5) / workers;
   WHILE wi < workers DO
     start = wi * mix_chunk;
-    mix_set_futures
+    &mix_set_futures
       .append(BG {FOR i IN (start ..< start + mix_chunk) -> locked_map["key:" $+ i.toString()] = "updated";});
     wi += 1;
   END
@@ -63,7 +63,7 @@ FN main() RETURNS Void ->
   MUTABLE mix_get_chunk = ((n / 5) * 4) / workers;
   WHILE wi < workers DO
     start = wi * mix_get_chunk;
-    mix_get_futures
+    &mix_get_futures
       .append(BG {FOR i IN (start ..< start + mix_get_chunk) -> MUTABLE got = locked_map["key:" $+ i.toString()] OR_ELSE "";});
     wi += 1;
   END

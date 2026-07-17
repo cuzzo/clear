@@ -106,7 +106,7 @@ def escape_via_return_shape_cell(shape)
     <<~CHT
       FN inner() RETURNS !Int64[]@list ->
           MUTABLE xs: Int64[]@list = [];
-          xs.append(9_i64);
+          &xs.append(9_i64);
           RETURN xs;
       END
 
@@ -124,10 +124,10 @@ def escape_via_return_shape_cell(shape)
     <<~CHT
       FN make(flag: Bool) RETURNS !Int64[]@list ->
           MUTABLE a: Int64[]@list = [];
-          a.append(1_i64);
+          &a.append(1_i64);
           MUTABLE b: Int64[]@list = [];
-          b.append(2_i64);
-          b.append(3_i64);
+          &b.append(2_i64);
+          &b.append(3_i64);
           IF flag THEN RETURN a; END
           RETURN b;
       END
@@ -146,7 +146,7 @@ def escape_via_return_shape_cell(shape)
 
       FN make() RETURNS !Int64[]@list ->
           MUTABLE xs: Int64[]@list = [];
-          xs.append(3_i64);
+          &xs.append(3_i64);
           hld = Holder{ items: xs };
           RETURN COPY hld.items;
       END
@@ -161,9 +161,9 @@ def escape_via_return_shape_cell(shape)
     <<~CHT
       FN make() RETURNS !Int64[]@list ->
           MUTABLE inner: Int64[]@list = [];
-          inner.append(2_i64);
+          &inner.append(2_i64);
           MUTABLE outer: Int64[][]@list = [];
-          outer.append(inner);
+          &outer.append(inner);
           MUTABLE missing: Int64[]@list = [];
           RETURN COPY (outer[0_i64] OR_ELSE missing);
       END

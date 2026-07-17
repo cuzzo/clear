@@ -12,7 +12,7 @@ FN generateReadings(n: Int64, seed: Int64) RETURNS ![]Float64 ->
     modVal = state MOD 1000;
     MUTABLE raw = modVal.toFloat();
     IF raw < 0.0 -> raw = 0.0 - raw;
-    readings.append(raw);
+    &readings.append(raw);
   END
   RETURN readings;
 END

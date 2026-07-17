@@ -22,7 +22,7 @@ FN heavyCompute(seed: Int64, n: Int64) RETURNS Int64 ->
   RETURN x MOD 1_000_000_000;
 END
 
-FN handleClient!(client: TCPClient) RETURNS !Void ->
+FN handleClient(client: TCPClient) RETURNS !Void ->
   MUTABLE running = TRUE;
   WHILE running DO
     data: String@raw = client.tcpRead();
@@ -84,10 +84,10 @@ FN main() RETURNS Void ->
   MUTABLE tasks: ~Void[]@list = [];
   WHILE TRUE DO
     client = server.accept();
-    tasks.append(
+    &tasks.append(
       BG {
         n = pin.count();
-        handleClient!(client);
+        handleClient(client);
       }
     );
   END

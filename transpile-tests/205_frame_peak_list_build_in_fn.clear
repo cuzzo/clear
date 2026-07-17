@@ -4,7 +4,7 @@
 
 FN buildCsv(n: Int64) RETURNS !String ->
     MUTABLE parts: []String = [];
-    FOR i IN (1_i64 ..= n) -> parts.append(i.toString());
+    FOR i IN (1_i64 ..= n) -> &parts.append(i.toString());
     RETURN join(parts, ",");
 END
 

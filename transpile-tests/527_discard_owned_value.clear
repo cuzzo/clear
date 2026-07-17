@@ -2,7 +2,7 @@
 # and still be cleaned up (no leak), not emit literal Zig `_`.
 FN mkList() RETURNS ![]Int64 ->
     MUTABLE xs: []Int64 = List[];
-    xs.append(7_i64);
+    &xs.append(7_i64);
     RETURN GIVE xs;
 END
 
@@ -10,7 +10,7 @@ STRUCT Bag { items: []Int64 }
 
 FN mkBag() RETURNS !Bag ->
     MUTABLE ys: []Int64 = List[];
-    ys.append(9_i64);
+    &ys.append(9_i64);
     RETURN Bag{ items: GIVE ys };
 END
 

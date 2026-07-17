@@ -8,7 +8,7 @@
 
 STRUCT Counter { value: Int64 }
 
-FN bumpValue!(MUTABLE c: Counter) RETURNS !Void
+FN bumpValue(MUTABLE c: Counter) RETURNS !Void
     REQUIRES c: VERSIONED | ATOMIC
 ->
     WITH SNAPSHOT c AS MUTABLE x MATCH
@@ -20,9 +20,9 @@ END
 
 FN main() RETURNS Void ->
     MUTABLE cfg = Counter{ value: 0 } @boxed:atomic;
-    bumpValue!(cfg);
-    bumpValue!(cfg);
-    bumpValue!(cfg);
+    bumpValue(&cfg);
+    bumpValue(&cfg);
+    bumpValue(&cfg);
     WITH SNAPSHOT cfg AS c {
         ASSERT c.value == 3, "expected 3 after 3 bumps";
     }

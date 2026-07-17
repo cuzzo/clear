@@ -43,7 +43,7 @@ FN isDelimiter?(c: String) RETURNS Bool ->
     RETURN c == " " OR c == "," OR c == "\n" OR c == "\t" OR c == "(" OR c == ")" OR c == "[" OR c == "]" OR c == "\"" OR c == ";";
 END
 
-FN tokenizeToEnv!(MUTABLE penv: {String}Value, str: String) RETURNS !Void ->
+FN tokenizeToEnv(MUTABLE penv: {String}Value, str: String) RETURNS !Void ->
     MUTABLE count: Int64 = 0;
     MUTABLE i: Int64 = 0;
     len = str.length();
@@ -82,17 +82,17 @@ FN tokenizeToEnv!(MUTABLE penv: {String}Value, str: String) RETURNS !Void ->
     RETURN;
 END
 
-FN getTokenStr!(MUTABLE penv: {String}Value, idx: Int64) RETURNS !String ->
+FN getTokenStr(MUTABLE penv: {String}Value, idx: Int64) RETURNS !String ->
     val = penv["__t" $+ idx.toString()] OR_ELSE Value.Nil;
     RETURN getStr(val);
 END
 
-FN readFormEnv!(MUTABLE penv: {String}Value) RETURNS !Value EFFECTS REENTRANT ->
+FN readFormEnv(MUTABLE penv: {String}Value) RETURNS !Value EFFECTS REENTRANT ->
     posVal = penv["__rp"] OR_ELSE Value{ Number: 0.0 };
     tcVal = penv["__tc"] OR_ELSE Value{ Number: 0.0 };
     pos = toInt(getNum(posVal));
     tc = toInt(getNum(tcVal));
-    tok = getTokenStr!(penv, pos) OR_ELSE RAISE;
+    tok = getTokenStr(&penv, pos) OR_ELSE RAISE;
 
     IF pos >= tc THEN
         RETURN Value.Nil;
@@ -100,14 +100,14 @@ FN readFormEnv!(MUTABLE penv: {String}Value) RETURNS !Value EFFECTS REENTRANT ->
 
     IF tok == "(" OR tok == "[" THEN
         penv["__rp"] = Value{ Number: toFloat(pos + 1) };
-        RETURN readListEnv!(penv) OR_ELSE RAISE;
+        RETURN readListEnv(&penv) OR_ELSE RAISE;
     END
 
     penv["__rp"] = Value{ Number: toFloat(pos + 1) };
     RETURN readAtom(tok) OR_ELSE RAISE;
 END
 
-FN readListEnv!(MUTABLE penv: {String}Value) RETURNS !Value EFFECTS REENTRANT ->
+FN readListEnv(MUTABLE penv: {String}Value) RETURNS !Value EFFECTS REENTRANT ->
     MUTABLE items: []Value = List[];
     MUTABLE listDone = FALSE;
     WHILE listDone == FALSE DO
@@ -117,13 +117,13 @@ FN readListEnv!(MUTABLE penv: {String}Value) RETURNS !Value EFFECTS REENTRANT ->
         tc2 = toInt(getNum(tcVal2));
         IF curPos >= tc2 THEN listDone = TRUE;
         ELSE
-            curTok = getTokenStr!(penv, curPos) OR_ELSE RAISE;
+            curTok = getTokenStr(&penv, curPos) OR_ELSE RAISE;
             IF curTok == ")" OR curTok == "]" THEN
                 penv["__rp"] = Value{ Number: toFloat(curPos + 1) };
                 listDone = TRUE;
             ELSE
-                item = readFormEnv!(penv) OR_ELSE RAISE;
-                items.append(item);
+                item = readFormEnv(&penv) OR_ELSE RAISE;
+                &items.append(item);
             END
         END
     END

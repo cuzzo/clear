@@ -33,10 +33,10 @@ FN main() RETURNS Void ->
   # ── RC version: n_docs scattered Doc allocations ─────────────────────────
   # 5 heap allocs per Doc (ctrl, data, title, body, tag) → 50 000 allocs total.
   # Working set ≈ n_docs × 80 B ≈ 800 KB, exceeds L1/L2 → LLC misses.
-  docs: []Doc@multiowned = List[];
+  MUTABLE docs: []Doc@multiowned = List[];
   MUTABLE k = 0;
   WHILE k < n_docs DO
-    docs.append(buildDoc(k));
+    &docs.append(buildDoc(k));
     k += 1;
   END
 

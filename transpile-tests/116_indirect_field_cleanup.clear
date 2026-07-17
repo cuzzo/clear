@@ -7,15 +7,15 @@
 STRUCT Env { x: Int64 }
 UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @boxed, id: Int64 } }
 
-FN captureLambda!(TAKES bodyVal: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
-    pool.insert(Env{ x: 1 });
+FN captureLambda(TAKES bodyVal: Value, MUTABLE pool: [Pool(10)]Env) RETURNS !Value ->
+    &pool.insert(Env{ x: 1 });
     RETURN Value.Lambda{ body: bodyVal, id: 1 };
 END
 
 FN main() RETURNS Void ->
     MUTABLE pool: [Pool(10)]Env = [];
     body = Value{ Num: 42.0 };
-    lambda = captureLambda!(body, pool);
+    lambda = captureLambda(body, &pool);
     # lambda goes out of scope. cleanup(Value) must free *Value body.
     RETURN;
 END

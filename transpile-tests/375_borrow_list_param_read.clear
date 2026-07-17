@@ -19,15 +19,15 @@ END
 
 FN main() RETURNS Void ->
     MUTABLE xs: []Int64 = List[];
-    xs.append(10_i64);
-    xs.append(20_i64);
-    xs.append(30_i64);
+    &xs.append(10_i64);
+    &xs.append(20_i64);
+    &xs.append(30_i64);
 
     ASSERT measureLen(xs) == 3_i64, "borrow length";
     ASSERT sumAll(xs)     == 60_i64, "borrow iter sum";
     ASSERT firstTwo(xs)   == 30_i64, "borrow indexed access";
 
     # The borrow must not have consumed `xs`; the caller can keep using it.
-    xs.append(40_i64);
+    &xs.append(40_i64);
     ASSERT xs.length() == 4_i64, "caller still owns list after borrow calls";
 END

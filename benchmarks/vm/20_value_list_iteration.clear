@@ -7,11 +7,11 @@ FN main() RETURNS Void ->
     FOR i IN (0_i64 ..< 100000_i64) DO
         m3 = i MOD 3_i64;
         IF m3 == 0_i64 THEN
-            items.append(Val{ Str: COPY ("tag_" $+ i.toString()) });
+            &items.append(Val{ Str: COPY ("tag_" $+ i.toString()) });
         ELSE_IF m3 == 1_i64 THEN
-            items.append(Val{ Num: toFloat(i) });
+            &items.append(Val{ Num: toFloat(i) });
         ELSE
-            items.append(Val.Nil);
+            &items.append(Val.Nil);
         END
     END
 

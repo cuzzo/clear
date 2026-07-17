@@ -135,17 +135,17 @@ FuzzGenerator.register(:owned_sink_destination_matrix, cells: OWNED_SINK_DESTINA
   list_helper = %i[list_owned string_list_owned union_owned nested_owned].include?(p[:shape]) ? <<~CHT : ""
     FN mkList() RETURNS Int64[]@list ->
         MUTABLE xs: Int64[]@list = [];
-        xs.append(1_i64);
-        xs.append(2_i64);
-        xs.append(3_i64);
+        &xs.append(1_i64);
+        &xs.append(2_i64);
+        &xs.append(3_i64);
         RETURN xs;
     END
 
     FN mkStringList() RETURNS String[]@list ->
         MUTABLE xs: String[]@list = List[];
-        xs.append(COPY "a");
-        xs.append(COPY "b");
-        xs.append(COPY "c");
+        &xs.append(COPY "a");
+        &xs.append(COPY "b");
+        &xs.append(COPY "c");
         RETURN xs;
     END
   CHT

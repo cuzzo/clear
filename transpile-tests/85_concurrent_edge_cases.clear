@@ -27,9 +27,9 @@ FN main() RETURNS Void ->
 
     # Edge case 4: CONCURRENT EACH on @list
     MUTABLE list_items: []Item = [];
-    append(list_items, Item{value: 1.0});
-    append(list_items, Item{value: 2.0});
-    append(list_items, Item{value: 3.0});
+    append(&list_items, Item{value: 1.0});
+    append(&list_items, Item{value: 2.0});
+    append(&list_items, Item{value: 3.0});
     list_items |> CONCURRENT(workers: 2) EACH { _.value = _.value * 2.0; };
     list_total = list_items |> SUM _.value;
     ASSERT list_total == 12.0, "CONCURRENT EACH on @list should double values";

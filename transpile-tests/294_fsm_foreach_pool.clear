@@ -8,9 +8,9 @@ STRUCT Entity { health: Int64 }
 FN main() RETURNS Void ->
   p1: ~Int64 = BG {
     MUTABLE pool: [Pool(8)]Entity = [];
-    pool.insert(Entity{ health: 10 });
-    pool.insert(Entity{ health: 20 });
-    pool.insert(Entity{ health: 30 });
+    &pool.insert(Entity{ health: 10 });
+    &pool.insert(Entity{ health: 20 });
+    &pool.insert(Entity{ health: 30 });
 
     MUTABLE total = 0_i64;
     FOR e IN pool DO

@@ -9,9 +9,9 @@ STRUCT MapHolder { data: {String}Int64, label: String }
 # Return struct containing @list via StructLit (direct escape)
 FN buildListDirect() RETURNS !ListHolder ->
     MUTABLE vals: []Int64 = List[];
-    vals.append(10_i64);
-    vals.append(20_i64);
-    vals.append(30_i64);
+    &vals.append(10_i64);
+    &vals.append(20_i64);
+    &vals.append(30_i64);
     RETURN ListHolder{ items: vals, label: "direct" };
 END
 

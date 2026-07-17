@@ -7,21 +7,21 @@
 # This is the recursive / forwarded-mutable-list case. 374 covered
 # the direct case (caller has the live list); this covers the chain.
 
-FN pushOne!(MUTABLE xs: []Int64, value: Int64) RETURNS !Void ->
-    xs.append(value);
+FN pushOne(MUTABLE xs: []Int64, value: Int64) RETURNS !Void ->
+    &xs.append(value);
     RETURN;
 END
 
-FN pushBoth!(MUTABLE xs: []Int64, a: Int64, b: Int64) RETURNS !Void ->
-    pushOne!(xs, a);
-    pushOne!(xs, b);
+FN pushBoth(MUTABLE xs: []Int64, a: Int64, b: Int64) RETURNS !Void ->
+    pushOne(&xs, a);
+    pushOne(&xs, b);
     RETURN;
 END
 
-FN main!() RETURNS !Void ->
+FN main() RETURNS !Void ->
     MUTABLE xs: []Int64 = List[];
-    pushBoth!(xs, 1_i64, 2_i64);
-    pushBoth!(xs, 3_i64, 4_i64);
+    pushBoth(&xs, 1_i64, 2_i64);
+    pushBoth(&xs, 3_i64, 4_i64);
     ASSERT xs.length() == 4_i64, "list length after forwarded appends";
     ASSERT xs[0_i64] == 1_i64, "first";
     ASSERT xs[1_i64] == 2_i64, "second";

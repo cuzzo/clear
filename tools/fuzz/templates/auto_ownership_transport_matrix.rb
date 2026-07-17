@@ -69,23 +69,23 @@ FuzzGenerator.register(:auto_ownership_transport_matrix, cells: AUTO_OWNERSHIP_T
   when :stdlib_mutation
     <<~CLEAR
       FN main() RETURNS Void ->
-        MUTABLE x: Int64[]@list = [1]; y = x; x.append(2); ASSERT y[0] == 1;
+        MUTABLE x: Int64[]@list = [1]; y = x; &x.append(2); ASSERT y[0] == 1;
       END
     CLEAR
   when :user_method_mutation
     <<~CLEAR
       STRUCT U { n: Int64, label: String }
-      FN setN!(MUTABLE u: U, n: Int64) RETURNS Void -> u.n = n; END
+      FN setN(MUTABLE u: U, n: Int64) RETURNS Void -> u.n = n; END
       FN main() RETURNS Void ->
-        MUTABLE x = U{ n: 1, label: "a" }; y = x; x.setN!(2); ASSERT y.n == 1;
+        MUTABLE x = U{ n: 1, label: "a" }; y = x; x.setN(2); ASSERT y.n == 1;
       END
     CLEAR
   when :user_function_mutation
     <<~CLEAR
       STRUCT U { n: Int64, label: String }
-      FN setN!(MUTABLE u: U, n: Int64) RETURNS Void -> u.n = n; END
+      FN setN(MUTABLE u: U, n: Int64) RETURNS Void -> u.n = n; END
       FN main() RETURNS Void ->
-        MUTABLE x = U{ n: 1, label: "a" }; y = x; setN!(x, 2); ASSERT y.n == 1;
+        MUTABLE x = U{ n: 1, label: "a" }; y = x; setN(&x, 2); ASSERT y.n == 1;
       END
     CLEAR
   when :nested_place_mutation
@@ -93,7 +93,7 @@ FuzzGenerator.register(:auto_ownership_transport_matrix, cells: AUTO_OWNERSHIP_T
       STRUCT Holder { values: Int64[]@list, label: String }
       FN main() RETURNS Void ->
         MUTABLE x = Holder{ values: [1], label: "a" }; y = x;
-        x.values.append(2); ASSERT y.values.length() == 1;
+        &x.values.append(2); ASSERT y.values.length() == 1;
       END
     CLEAR
   when :exclusive_branches
@@ -127,10 +127,10 @@ FuzzGenerator.register(:auto_ownership_transport_matrix, cells: AUTO_OWNERSHIP_T
     end
     <<~CLEAR
       STRUCT U { n: Int64, label: String }
-      FN setN!(MUTABLE u: U, n: Int64) RETURNS Void -> u.n = n; END
+      FN setN(MUTABLE u: U, n: Int64) RETURNS Void -> u.n = n; END
       FN main() RETURNS !Void ->
         MUTABLE x = U{ n: 1, label: "a" }#{suffix}; y = x;
-        pending: ~Void = BG { setN!(x, 2); };
+        pending: ~Void = BG { setN(x, 2); };
         ASSERT y.n == 1; NEXT pending; RETURN;
       END
     CLEAR
@@ -147,11 +147,11 @@ FuzzGenerator.register(:auto_ownership_transport_matrix, cells: AUTO_OWNERSHIP_T
   when :boundary_nested_alias_mutation
     <<~CLEAR
       STRUCT U { n: Int64, label: String }
-      FN setN!(MUTABLE u: U, n: Int64) RETURNS Void -> u.n = n; END
+      FN setN(MUTABLE u: U, n: Int64) RETURNS Void -> u.n = n; END
       FN main() RETURNS !Void ->
         pending: ~Void = BG {
           MUTABLE x = U{ n: 1, label: "nested" }; y = x;
-          setN!(x, 2); ASSERT y.n == 1;
+          setN(&x, 2); ASSERT y.n == 1;
         };
         NEXT pending; RETURN;
       END
@@ -159,10 +159,10 @@ FuzzGenerator.register(:auto_ownership_transport_matrix, cells: AUTO_OWNERSHIP_T
   when :lambda_capture_mutation
     <<~CLEAR
       STRUCT U { n: Int64, label: String }
-      FN setN!(MUTABLE u: U) RETURNS Void -> u.n = 2_i64; END
+      FN setN(MUTABLE u: U) RETURNS Void -> u.n = 2_i64; END
       FN main() RETURNS Void ->
         MUTABLE x = U{ n: 1, label: "outer" }; y = x;
-        callback: FN() -> Void = %() USE(MUTABLE x) -> setN!(x);
+        callback: FN() -> Void = %() USE(MUTABLE x) -> setN(&x);
         callback(); ASSERT y.n == 1;
       END
     CLEAR

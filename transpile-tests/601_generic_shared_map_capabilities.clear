@@ -1,11 +1,11 @@
 STRUCT Cache<M: SHARED Map> { values: M }
 
 IMPLEMENTATION Cache<M> {
-  METHOD put!(MUTABLE self, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
+  METHOD put(MUTABLE self, key: M::Key, TAKES value: M::Value) RETURNS !Void ->
     WITH POLYMORPHIC self.values AS values { values[key] = value; }
   END
 
-  METHOD get!(self, key: M::Key) RETURNS !?M::Value ->
+  METHOD get(self, key: M::Key) RETURNS !?M::Value ->
     WITH POLYMORPHIC self.values AS values { RETURN COPY values[key]; }
     RETURN NIL;
   END
@@ -14,21 +14,21 @@ IMPLEMENTATION Cache<M> {
 FN main() RETURNS !Void ->
   lockedMap: {String}@shared:locked Int64 = {};
   MUTABLE locked = Cache<{String}@shared:locked Int64>{ values: lockedMap };
-  locked.put!("answer", 42_i64);
-  ASSERT locked.get!("answer") OR_ELSE RAISE OR_ELSE 0_i64 == 42_i64;
+  &locked.put("answer", 42_i64);
+  ASSERT locked.get("answer") OR_ELSE RAISE OR_ELSE 0_i64 == 42_i64;
 
   rwMap: {String}@shared:writeLocked Int64 = {};
   MUTABLE rw = Cache<{String}@shared:writeLocked Int64>{ values: rwMap };
-  rw.put!("answer", 43_i64);
-  ASSERT rw.get!("answer") OR_ELSE RAISE OR_ELSE 0_i64 == 43_i64;
+  &rw.put("answer", 43_i64);
+  ASSERT rw.get("answer") OR_ELSE RAISE OR_ELSE 0_i64 == 43_i64;
 
   versionedMap: {String}@shared:versioned Int64 = {};
   MUTABLE versioned = Cache<{String}@shared:versioned Int64>{ values: versionedMap };
-  versioned.put!("answer", 44_i64);
-  ASSERT versioned.get!("answer") OR_ELSE RAISE OR_ELSE 0_i64 == 44_i64;
+  &versioned.put("answer", 44_i64);
+  ASSERT versioned.get("answer") OR_ELSE RAISE OR_ELSE 0_i64 == 44_i64;
 
   shardedMap: {String}@shared:sharded(4):writeLocked Int64 = {};
   MUTABLE sharded = Cache<{String}@shared:sharded(4):writeLocked Int64>{ values: shardedMap };
-  sharded.put!("answer", 45_i64);
-  ASSERT sharded.get!("answer") OR_ELSE RAISE OR_ELSE 0_i64 == 45_i64;
+  &sharded.put("answer", 45_i64);
+  ASSERT sharded.get("answer") OR_ELSE RAISE OR_ELSE 0_i64 == 45_i64;
 END

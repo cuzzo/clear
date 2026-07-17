@@ -19,8 +19,8 @@ FN main() RETURNS Void ->
 
     # COPY into function argument
     MUTABLE list: []Value = List[];
-    list.append(COPY v);
-    list.append(COPY n);
+    &list.append(COPY v);
+    &list.append(COPY n);
     ASSERT list.length() == 2, "list has 2";
 
     # COPY from container index into binding

@@ -13,8 +13,8 @@ END
 FN bounds(cells: []Cell) RETURNS ![]Cell ->
   MUTABLE result: []Cell = [];
   IF cells.empty?() THEN
-    result.append(Cell{ x: 0, y: 0 });
-    result.append(Cell{ x: 0, y: 0 });
+    &result.append(Cell{ x: 0, y: 0 });
+    &result.append(Cell{ x: 0, y: 0 });
     RETURN result;
   END
 
@@ -28,19 +28,19 @@ FN bounds(cells: []Cell) RETURNS ![]Cell ->
     IF cells[i] EXISTS AS cell THEN
       IF cell.x < minX -> minX = cell.x;
       IF cell.x > maxX -> maxX = cell.x;
-      IF cell.y < minY -> minY = cell.y;
+    &  IF cell.y < minY -> minY = cell.y;
       IF cell.y > maxY -> maxY = cell.y;
     END
     i += 1;
   END
 
-  result.append(Cell{ x: minX, y: minY });
-  result.append(Cell{ x: maxX, y: maxY });
+  &result.append(Cell{ x: minX, y: minY });
+  &result.append(Cell{ x: maxX, y: maxY });
   RETURN result;
 END
 
 FN graph(cells: []Cell) RETURNS ![]String ->
-  live = liveCellMap(cells);
+  live =& liveCellMap(cells);
   b = bounds(cells);
   min = b[0] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
   max = b[1] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
@@ -59,7 +59,7 @@ FN graph(cells: []Cell) RETURNS ![]String ->
       END
       y += 1;
     END
-    rows.append(row);
+    &rows.append(row);
     x += 1;
   END
 

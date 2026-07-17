@@ -3,7 +3,7 @@
 
 REQUIRE "types.clear";
 
-FN run!(MUTABLE pool: [Pool(200000)]Env) RETURNS Int64
+FN run(MUTABLE pool: [Pool(200000)]Env) RETURNS Int64
   REQUIRES pool: LOCKED
 ->
     MUTABLE total: Int64 = 0;
@@ -11,7 +11,7 @@ FN run!(MUTABLE pool: [Pool(200000)]Env) RETURNS Int64
     WHILE iter < 100000 DO
         MUTABLE eid: ?Id<Env> = NIL;
         WITH POLYMORPHIC EXCLUSIVE pool AS p {
-            id: Id<Env> = p.insert(Env{ vars: {} });
+            id: Id<Env> = &p.insert(Env{ vars: {} });
             IF p[id] EXISTS AS env THEN
                 env.vars["k1"] = Value{ Int64Val: iter };
                 env.vars["k2"] = Value{ Int64Val: iter * 2 };
@@ -37,7 +37,7 @@ END
 FN main() RETURNS Void ->
     MUTABLE pool: [Pool(200000)]@shared:locked Env = [];
     startMs = timestampMs();
-    total = run!(pool);
+    total = run(&pool);
     endMs = timestampMs();
     elapsed = endMs - startMs;
     print("VM pool ops total=" $+ total.toString() $+ " in " $+ elapsed.toString() $+ "ms");

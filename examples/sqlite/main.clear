@@ -23,7 +23,7 @@ EXTERN FN sqlite3_errmsg(database: Database) RETURNS String@c FROM "sqlite3" ABI
 
 FN main() RETURNS Void ->
   MUTABLE database_out: ?Database = NIL;
-  ASSERT sqlite3_open(":memory:", database_out) == 0, "open in-memory database";
+  ASSERT sqlite3_open(":memory:", &database_out) == 0, "open in-memory database";
   database = database_out?;
 
   MUTABLE schema_out: ?Statement = NIL;
@@ -31,7 +31,7 @@ FN main() RETURNS Void ->
     database,
     "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT NOT NULL, score INTEGER NOT NULL)",
     -1,
-    schema_out,
+    &schema_out,
     NIL
   ) == 0, "prepare schema";
   schema = schema_out?;
@@ -42,7 +42,7 @@ FN main() RETURNS Void ->
     database,
     "INSERT INTO users VALUES(1, 'Ada', 95), (2, 'Grace', 88)",
     -1,
-    insert_out,
+    &insert_out,
     NIL
   ) == 0, "prepare insert";
   insert = insert_out?;
@@ -53,7 +53,7 @@ FN main() RETURNS Void ->
     database,
     "SELECT name, score FROM users WHERE score >= 90 ORDER BY score DESC",
     -1,
-    query_out,
+    &query_out,
     NIL
   ) == 0, "prepare query";
   query = query_out?;
@@ -67,7 +67,7 @@ FN main() RETURNS Void ->
     database,
     "INSERT INTO users VALUES(1, 'Duplicate', 0)",
     -1,
-    bad_out,
+    &bad_out,
     NIL
   ) == 0, "prepare constraint error";
   bad = bad_out?;

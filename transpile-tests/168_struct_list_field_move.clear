@@ -7,12 +7,12 @@ STRUCT Node { keys: []Int64 }
 FN main() RETURNS Void ->
     # Build a list and move it into a struct
     MUTABLE keys: []Int64 = [];
-    keys.append(10);
-    keys.append(20);
-    keys.append(30);
+    &keys.append(10);
+    &keys.append(20);
+    &keys.append(30);
 
     MUTABLE nodes: []Node = [];
-    nodes.append(Node{ keys: keys });
+    &nodes.append(Node{ keys: keys });
 
     ASSERT nodes[0]?.keys.length() == 3, "node has 3 keys";
     ASSERT nodes[0]?.keys[0] == 10, "key 0 is 10";
@@ -21,9 +21,9 @@ FN main() RETURNS Void ->
 
     # Build a second node with fresh keys
     MUTABLE keys2: []Int64 = [];
-    keys2.append(40);
-    keys2.append(50);
-    nodes.append(Node{ keys: keys2 });
+    &keys2.append(40);
+    &keys2.append(50);
+    &nodes.append(Node{ keys: keys2 });
 
     ASSERT nodes[1]?.keys.length() == 2, "node 1 has 2 keys";
     ASSERT nodes[1]?.keys[0] == 40, "node 1 key 0 is 40";

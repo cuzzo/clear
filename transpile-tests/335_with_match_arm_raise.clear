@@ -19,7 +19,7 @@ STRUCT Counter { value: Int64 }
 
 # Returns Bool so `OR_ELSE FALSE` can absorb the error in expression
 # position. Always raises (the IF guard always succeeds for value > 0).
-FN raise_in_arm!(MUTABLE c: Counter) RETURNS !Bool
+FN raise_in_arm(MUTABLE c: Counter) RETURNS !Bool
   REQUIRES c: VERSIONED | LOCKED
 ->
     WITH c AS va MATCH
@@ -36,7 +36,7 @@ END
 FN main() RETURNS Void ->
     # VERSIONED arm raises mid-body; cell stays at value=42.
     MUTABLE c1 = Counter{ value: 42 } @versioned;
-    ok1 = raise_in_arm!(c1) OR_ELSE FALSE;
+    ok1 = raise_in_arm(&c1) OR_ELSE FALSE;
     ASSERT ok1 == FALSE, "raise propagated";
     WITH SNAPSHOT c1 AS view {
         ASSERT view.value == 42, "VERSIONED: cell readable post-Guard-release";
@@ -45,7 +45,7 @@ FN main() RETURNS Void ->
     # LOCKED arm: lock acquired, body raises, defer release fires,
     # mutex freed; subsequent WITH EXCLUSIVE acquires without deadlock.
     MUTABLE c2 = Counter{ value: 7 } @locked;
-    ok2 = raise_in_arm!(c2) OR_ELSE FALSE;
+    ok2 = raise_in_arm(&c2) OR_ELSE FALSE;
     ASSERT ok2 == FALSE, "raise propagated";
     WITH EXCLUSIVE c2 AS inner {
         ASSERT inner.value == 7, "LOCKED: lock released, cell readable";

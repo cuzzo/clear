@@ -6,7 +6,7 @@ STRUCT Index<M: Map> {
 }
 
 IMPLEMENTATION Index<M> {
-  METHOD put!(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
+  METHOD put(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
     self.entries[key] = COPY value;
   END
 
@@ -17,10 +17,10 @@ IMPLEMENTATION Index<M> {
 
 FN main() RETURNS !Void ->
   MUTABLE words = Index<{String}String>{};
-  words.put!("status", "ready");
+  &words.put("status", "ready");
   ASSERT words.get("status") OR_ELSE RAISE OR_ELSE "" == "ready";
 
   MUTABLE numbers = Index<{Int64}String>{};
-  numbers.put!(7_i64, "seven");
+  &numbers.put(7_i64, "seven");
   ASSERT numbers.get(7_i64) OR_ELSE RAISE OR_ELSE "" == "seven";
 END

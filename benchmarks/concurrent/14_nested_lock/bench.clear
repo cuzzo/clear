@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
 
   MUTABLE accts: []Account@shared:locked = [];
   FOR i IN (0 ..< numAccounts) DO
-    accts.append(Account{ balance: 1000 } @shared:locked);
+    &accts.append(Account{ balance: 1000 } @shared:locked);
   END
   bank = Bank{ accounts: accts } @shared:writeLocked;
 
@@ -34,7 +34,7 @@ FN main() RETURNS Void ->
   MUTABLE futures: ~Void[]@list = [];
   MUTABLE w = 0;
   WHILE w < nWorkers DO
-    futures
+    &futures
       .append(
         BG {
           @parallel ->
@@ -88,10 +88,10 @@ FN main() RETURNS Void ->
   # already joined so no symmetric caller exists, but the lint can't
   # prove that. The snapshot pattern sidesteps the warning while
   # preserving the read-then-per-element-lock semantics.)
-  acct_refs: []Account@shared:locked = [];
+  MUTABLE acct_refs: []Account@shared:locked = [];
   WITH bank AS bk {
     FOR i IN (0 ..< numAccounts) DO
-      IF bk.accounts[i] EXISTS AS account THEN acct_refs.append(CLONE account); END
+      IF bk.accounts[i] EXISTS AS account THEN &acct_refs.append(CLONE account); END
     END
   }
   MUTABLE total = 0;

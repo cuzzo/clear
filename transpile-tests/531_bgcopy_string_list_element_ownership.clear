@@ -5,7 +5,7 @@ FN consume(xs: []String) RETURNS Int64 -> RETURN xs.length(); END
 
 FN runit() RETURNS !Int64 ->
     MUTABLE c0: []String = List[];
-    c0.append("a");
+    &c0.append("a");
     f: ~Int64 = BG { consume(COPY c0); };
     RETURN NEXT f;
 END

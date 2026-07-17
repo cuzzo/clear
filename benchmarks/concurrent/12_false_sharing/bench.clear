@@ -24,7 +24,7 @@ FN main() RETURNS !Void ->
   # Each worker gets its own @shared:locked counter (separate heap alloc)
   MUTABLE counters: []Counter@shared:locked = [];
   FOR i IN (0 ..< workers) DO
-    counters.append(Counter{ value: 0 } @shared:locked);
+    &counters.append(Counter{ value: 0 } @shared:locked);
   END
 
   t0 = timestampMs();
@@ -34,7 +34,7 @@ FN main() RETURNS !Void ->
   WHILE wi < workers DO
     IF counters[wi] EXISTS AS ref0 THEN
       ref = CLONE ref0;
-      futures
+      &futures
         .append(
           BG {
             @standard:@parallel -> FOR j IN (0 ..< increments) DO

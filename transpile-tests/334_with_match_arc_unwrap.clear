@@ -21,7 +21,7 @@ STRUCT Counter { value: Int64 }
 
 # Polymorphic helper: same body works for VERSIONED and LOCKED
 # callers via the L7.2/L7.3/L7.4 comptime if-else dispatch.
-FN read_poly!(MUTABLE c: Counter) RETURNS Int64
+FN read_poly(MUTABLE c: Counter) RETURNS Int64
   REQUIRES c: VERSIONED | LOCKED
 ->
     MUTABLE result: Int64 = 0;
@@ -33,7 +33,7 @@ FN read_poly!(MUTABLE c: Counter) RETURNS Int64
 END
 
 # Single-family VERSIONED helper. Pre-B2 this didn't compile.
-FN read_v!(MUTABLE c: Counter) RETURNS Int64
+FN read_v(MUTABLE c: Counter) RETURNS Int64
   REQUIRES c: VERSIONED
 ->
     MUTABLE result: Int64 = 0;
@@ -46,20 +46,20 @@ END
 FN main() RETURNS Void ->
     # All four shapes through the polymorphic helper.
     MUTABLE c1 = Counter{ value: 11 } @versioned;
-    ASSERT read_poly!(c1) == 11, "bare @versioned";
+    ASSERT read_poly(&c1) == 11, "bare @versioned";
 
     MUTABLE c2 = Counter{ value: 22 } @shared:versioned;
-    ASSERT read_poly!(c2) == 22, "@shared:versioned (B1 cleanup path)";
+    ASSERT read_poly(&c2) == 22, "@shared:versioned (B1 cleanup path)";
 
     MUTABLE c3 = Counter{ value: 33 } @locked;
-    ASSERT read_poly!(c3) == 33, "bare @locked";
+    ASSERT read_poly(&c3) == 33, "bare @locked";
 
     MUTABLE c4 = Counter{ value: 44 } @shared:locked;
-    ASSERT read_poly!(c4) == 44, "@shared:locked";
+    ASSERT read_poly(&c4) == 44, "@shared:locked";
 
     # Single-family helper.
     MUTABLE c5 = Counter{ value: 55 } @versioned;
-    ASSERT read_v!(c5) == 55, "single-family VERSIONED (B2 path)";
+    ASSERT read_v(&c5) == 55, "single-family VERSIONED (B2 path)";
 
     RETURN;
 END

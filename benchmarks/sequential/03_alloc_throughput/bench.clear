@@ -15,7 +15,7 @@ FN benchRegular(n: Int64) RETURNS !Float64 ->
   MUTABLE total = 0.0;
   FOR outer IN (0 ..< n) DO
     MUTABLE vals: []Float64 = [];
-    FOR inner IN (0 ..< n) -> vals.append(inner + 0.0);
+    FOR inner IN (0 ..< n) -> &vals.append(inner + 0.0);
     MUTABLE s = 0.0;
     FOR inner IN (0 ..< vals.length()) -> s += (vals[inner] OR_ELSE 0.0);
     total = total + s;
@@ -29,7 +29,7 @@ FN benchTight(n: Int64) RETURNS !Float64 ->
     MUTABLE vals: []Float64 = [];
     MUTABLE inner = 0;
     TIGHT WHILE inner < n DO
-      vals.append(inner + 0.0);
+      &vals.append(inner + 0.0);
       inner += 1;
     END
     MUTABLE s = 0.0;

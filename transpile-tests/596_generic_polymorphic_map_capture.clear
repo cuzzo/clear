@@ -3,15 +3,15 @@
 
 STRUCT Cache<T> { values: {String}T }
 
-FN put!<T>(MUTABLE cache: Cache<T>, key: String, value: T) RETURNS !Void ->
+FN put<T>(MUTABLE cache: Cache<T>, key: String, value: T) RETURNS !Void ->
   WITH POLYMORPHIC cache AS writable { writable.values[key] = value; }
 END
 
 FN main() RETURNS Void ->
   MUTABLE locked = Cache<Int64>{ values: {} } @shared:locked;
   MUTABLE versioned = Cache<Int64>{ values: {} } @shared:versioned;
-  put!(locked, "locked", 10_i64) OR_ELSE RAISE;
-  put!(versioned, "versioned", 20_i64) OR_ELSE RAISE;
+  put(&locked, "locked", 10_i64) OR_ELSE RAISE;
+  put(&versioned, "versioned", 20_i64) OR_ELSE RAISE;
   WITH locked AS view { ASSERT view.values["locked"] == 10_i64; }
   WITH SNAPSHOT versioned AS view { ASSERT view.values["versioned"] == 20_i64; }
   print("OK");

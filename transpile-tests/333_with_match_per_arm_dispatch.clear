@@ -15,7 +15,7 @@ STRUCT Counter { value: Int64 }
 # Read the cell's `value` via whichever sync primitive is in play.
 # The body is identical across arms (`result = va.value;`); the
 # difference lives in the per-arm prelude that obtains the Guard.
-FN read_value!(MUTABLE c: Counter) RETURNS Int64
+FN read_value(MUTABLE c: Counter) RETURNS Int64
   REQUIRES c: VERSIONED | LOCKED
 ->
     MUTABLE result: Int64 = 0;
@@ -30,18 +30,18 @@ FN main() RETURNS Void ->
     # VERSIONED arm: c1 is *Versioned(Counter); WithMatchInner peels
     # the pointer, sees `Inner` decl, selects the VERSIONED arm.
     MUTABLE c1 = Counter{ value: 42 } @versioned;
-    v1 = read_value!(c1);
+    v1 = read_value(&c1);
     ASSERT v1 == 42, "VERSIONED arm read";
 
     # LOCKED arm: c2 is *Locked(Counter); WithMatchInner peels
     # the pointer, sees `mutex` field, selects the LOCKED arm.
     MUTABLE c2 = Counter{ value: 7 } @locked;
-    v2 = read_value!(c2);
+    v2 = read_value(&c2);
     ASSERT v2 == 7, "LOCKED arm read";
 
     # Calling read_value! twice on the same versioned cell exercises
     # the EBR-pinned Guard release between calls.
-    v1b = read_value!(c1);
+    v1b = read_value(&c1);
     ASSERT v1b == 42, "VERSIONED arm read (second call, same cell)";
 
     RETURN;

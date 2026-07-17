@@ -16,7 +16,7 @@
 
 STRUCT Counter { value: Int64 }
 
-FN bump_counter!(MUTABLE c: Counter) RETURNS Void
+FN bump_counter(MUTABLE c: Counter) RETURNS Void
     REQUIRES c: ATOMIC | LOCKED
 ->
     WITH c AS va MATCH
@@ -28,9 +28,9 @@ END
 
 FN main() RETURNS Void ->
     MUTABLE c_locked = Counter{ value: 0 } @locked;
-    bump_counter!(c_locked);
-    bump_counter!(c_locked);
-    bump_counter!(c_locked);
+    bump_counter(&c_locked);
+    bump_counter(&c_locked);
+    bump_counter(&c_locked);
     WITH EXCLUSIVE c_locked AS guard1 {
         ASSERT guard1.value == 3, "LOCKED arm: expected 3 after 3 bumps";
     }

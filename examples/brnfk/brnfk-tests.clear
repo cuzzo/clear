@@ -27,8 +27,8 @@ FN main() RETURNS Void ->
   ASSERT decByte(0) == 255, "- wraps 0 to 255";
   ASSERT byteToString(65) == "A", "byteToString renders printable ASCII";
   MUTABLE renderBytes: []Int64 = [];
-  renderBytes.append(65);
-  renderBytes.append(10);
+  &renderBytes.append(65);
+  &renderBytes.append(10);
   rendered = bytesToString(renderBytes) OR_ELSE RAISE;
   ASSERT rendered == "A\n", "bytesToString renders printable bytes";
   ASSERT stringToByte("A") == 65, "stringToByte reads printable ASCII";
@@ -46,9 +46,9 @@ FN main() RETURNS Void ->
   ASSERT rawA[0] == 65, "runBytes returns byte value";
   ASSERT run(",.", "Z") == "Z", "echoes one byte";
   MUTABLE nonPrintableInput: []Int64 = [];
-  nonPrintableInput.append(0);
-  nonPrintableInput.append(255);
-  nonPrintableInput.append(10);
+  &nonPrintableInput.append(0);
+  &nonPrintableInput.append(255);
+  &nonPrintableInput.append(10);
   echoed = runByteInputWithLimits(",>,>,<<.>.>.", nonPrintableInput, 8, 1000) OR_ELSE RAISE;
   ASSERT echoed.length() == 3, "byte input echo returns all bytes";
   ASSERT echoed[0] == 0, "byte input supports NUL";

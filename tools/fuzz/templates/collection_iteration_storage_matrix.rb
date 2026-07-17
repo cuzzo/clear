@@ -163,10 +163,10 @@ FuzzGenerator.register(:collection_iteration_storage_matrix, cells: COLLECTION_I
     <<~CHT
       FN main() RETURNS Void ->
         MUTABLE items: Int64[]@list = [];
-        items.append(1_i64);
-        items.append(2_i64);
+        &items.append(1_i64);
+        &items.append(2_i64);
         MUTABLE total = 0_i64;
-        WHILE items.pop() EXISTS AS v DO
+        WHILE &items.pop() EXISTS AS v DO
           IF v == 1_i64 THEN CONTINUE; END
           total = total + v;
         END
@@ -179,8 +179,8 @@ FuzzGenerator.register(:collection_iteration_storage_matrix, cells: COLLECTION_I
     <<~CHT
       FN main() RETURNS Void ->
         MUTABLE items: String[]@list = [];
-        items.append(COPY "a");
-        WHILE items.pop() EXISTS AS v DO
+        &items.append(COPY "a");
+        WHILE &items.pop() EXISTS AS v DO
           GIVE v;
           GIVE v;
         END

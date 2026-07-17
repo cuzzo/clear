@@ -29,9 +29,9 @@ FuzzGenerator.register(:mutable_collection_param, cells: MUTABLE_PARAM_CELLS) do
   mutation = case p[:collection]
              when :list
                push_value = (p[:elem] == :int) ? "99_i64" : '"hello"'
-               "xs.append(#{push_value});"
+               "&xs.append(#{push_value});"
              when :set
-               p[:elem] == :int ? "xs.insert(xs.length());" : "xs.insert(xs.length().toString());"
+               p[:elem] == :int ? "&xs.insert(xs.length());" : "&xs.insert(xs.length().toString());"
              when :map
                push_value = (p[:elem] == :int) ? "99_i64" : '"hello"'
                "xs[\"k\" $+ xs.count().toString()] = #{push_value};"
@@ -39,7 +39,7 @@ FuzzGenerator.register(:mutable_collection_param, cells: MUTABLE_PARAM_CELLS) do
 
   # `xs.append` is fallible (OOM) so callee must declare !Void.
   callee = <<~CHT.chomp
-    FN add!(MUTABLE xs: #{type_decl}) RETURNS !Void ->
+    FN add(MUTABLE xs: #{type_decl}) RETURNS !Void ->
         #{mutation}
         RETURN;
     END
@@ -47,9 +47,9 @@ FuzzGenerator.register(:mutable_collection_param, cells: MUTABLE_PARAM_CELLS) do
 
   call_block = case p[:context]
   when :none
-    (1..p[:calls]).map { "    add!(lst);" }.join("\n")
+    (1..p[:calls]).map { "    add(&lst);" }.join("\n")
   when :outer_loop
-    "    FOR i IN (1_i64 ..= #{p[:calls]}_i64) DO\n        add!(lst);\n    END"
+    "    FOR i IN (1_i64 ..= #{p[:calls]}_i64) DO\n        add(&lst);\n    END"
   end
 
   expected_len = p[:calls]

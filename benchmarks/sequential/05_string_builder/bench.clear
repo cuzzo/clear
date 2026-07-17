@@ -43,7 +43,7 @@ FN main() RETURNS Void ->
         # rewinding the frame arena each iteration.
         MUTABLE parts: []String = List[];
 
-        FOR i IN (0_i64 ..< 1000) -> parts.append("hello");
+        FOR i IN (0_i64 ..< 1000) -> &parts.append("hello");
 
         result = join(parts, "");
         total = total + result.length();

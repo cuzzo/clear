@@ -8,14 +8,14 @@ UNION Value {
     Error { errMsg: String, errKind: String },
 }
 
-FN handleCatch!(msg: String, kind: String) RETURNS !Value ->
+FN handleCatch(msg: String, kind: String) RETURNS !Value ->
     RETURN Value.Wrapped{ inner: "caught:" $+ msg $+ ":" $+ kind };
 END
 
-FN tryEval!(TAKES input: Value) RETURNS !Value ->
+FN tryEval(TAKES input: Value) RETURNS !Value ->
     PARTIAL MATCH input START
         Value.Error AS e ->
-            RETURN handleCatch!(e.errMsg, e.errKind);,
+            RETURN handleCatch(e.errMsg, e.errKind);,
         DEFAULT -> RETURN input;
     END
     RETURN Value.Nil;
@@ -33,12 +33,12 @@ END
 
 FN main() RETURNS Void ->
     err = Value.Error{ errMsg: "x", errKind: "E" };
-    result = tryEval!(COPY err);
+    result = tryEval(COPY err);
     str = prStr(result);
     ASSERT str == "caught:x:E", "indirect string promoted through pointer";
 
     ok = Value{ Str: "hello" };
-    result2 = tryEval!(COPY ok);
+    result2 = tryEval(COPY ok);
     str2 = prStr(result2);
     ASSERT str2 == "hello", "non-error passthrough";
 

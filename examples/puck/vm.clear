@@ -200,12 +200,12 @@ FN loadProgram(path: String) RETURNS !Program ->
       ELSE
         argInt = parseInt(tail);
       END
-      allOps.append(ByteCode{ op: opcode, arg: argInt, kind: kind });
+      &allOps.append(ByteCode{ op: opcode, arg: argInt, kind: kind });
       pos += 1;
       i += 1;
     END
 
-    procs.append(Procedure{ params: params, opStart: opStart, opCount: codesLen });
+    &procs.append(Procedure{ params: params, opStart: opStart, opCount: codesLen });
     p += 1;
   END
 
@@ -245,29 +245,29 @@ FN doCompare(kind: Int64, a: Int64, b: Int64) RETURNS Int64 ->
   RETURN 0;
 END
 
-FN handleSyscall!(
+FN handleSyscall(
     MUTABLE stack: []Int64,
     id: Int64,
     startMs: Int64
 ) RETURNS !Void ->
   IF id == 1 THEN
-    v = stack.pop() OR_ELSE 0_i64;
+    v = &stack.pop() OR_ELSE 0_i64;
     print("OUTPUT: " $+ v.toString());
     RETURN;
   END
   IF id == 6 THEN
     now = timestampMs();
-    stack.append(now - startMs);
+    &stack.append(now - startMs);
     RETURN;
   END
   IF id == 9 THEN
-    v = stack.pop() OR_ELSE 0_i64;
+    v = &stack.pop() OR_ELSE 0_i64;
     RAISE "halt(" $+ v.toString() $+ ")";
   END
   RAISE "vm.clear: SYSCALL " $+ id.toString() $+ " not implemented";
 END
 
-FN runProc!(
+FN runProc(
     program: Program,
     procIdx: Int64,
     MUTABLE memory: []Int64,
@@ -283,46 +283,46 @@ FN runProc!(
     ip += 1;
 
     IF c.op == opPush() THEN
-      stack.append(c.arg);
+      &stack.append(c.arg);
     ELSE_IF c.op == opLoad() THEN
-      WHILE memory.length() <= c.arg DO memory.append(0_i64); END
-      stack.append(memory[c.arg] OR_ELSE 0_i64);
+      WHILE memory.length() <= c.arg DO &memory.append(0_i64); END
+      &stack.append(memory[c.arg] OR_ELSE 0_i64);
     ELSE_IF c.op == opStore() THEN
-      v = stack.pop() OR_ELSE 0_i64;
-      WHILE memory.length() <= c.arg DO memory.append(0_i64); END
+      v = &stack.pop() OR_ELSE 0_i64;
+      WHILE memory.length() <= c.arg DO &memory.append(0_i64); END
       memory[c.arg] = v;
     ELSE_IF c.op == opMath() THEN
-      b = stack.pop() OR_ELSE 0_i64;
-      a = stack.pop() OR_ELSE 0_i64;
-      stack.append(doMath(c.kind, a, b));
+      b = &stack.pop() OR_ELSE 0_i64;
+      a = &stack.pop() OR_ELSE 0_i64;
+      &stack.append(doMath(c.kind, a, b));
     ELSE_IF c.op == opCompare() THEN
-      b = stack.pop() OR_ELSE 0_i64;
-      a = stack.pop() OR_ELSE 0_i64;
-      stack.append(doCompare(c.kind, a, b));
+      b = &stack.pop() OR_ELSE 0_i64;
+      a = &stack.pop() OR_ELSE 0_i64;
+      &stack.append(doCompare(c.kind, a, b));
     ELSE_IF c.op == opJump() THEN
       ip = c.arg;
     ELSE_IF c.op == opJumpIfFalse() THEN
-      v = stack.pop() OR_ELSE 0_i64;
+      v = &stack.pop() OR_ELSE 0_i64;
       IF v == 0 THEN ip = c.arg; END
     ELSE_IF c.op == opCall() THEN
       callee = program.procs[c.arg] OR_ELSE Procedure{ params: 0_i64, opStart: 0_i64, opCount: 0_i64 };
       MUTABLE calleeMem: []Int64 = [];
       MUTABLE m = 0;
       WHILE m < callee.params DO
-        calleeMem.append(0_i64);
+        &calleeMem.append(0_i64);
         m += 1;
       END
       MUTABLE j: Int64 = callee.params - 1;
       WHILE j >= 0 DO
-        calleeMem[j] = stack.pop() OR_ELSE 0_i64;
+        calleeMem[j] = &stack.pop() OR_ELSE 0_i64;
         j -= 1;
       END
-      res = runProc!(program, c.arg, calleeMem, startMs) OR_ELSE RAISE;
-      stack.append(res);
+      res = runProc(program, c.arg, &calleeMem, startMs) OR_ELSE RAISE;
+      &stack.append(res);
     ELSE_IF c.op == opReturn() THEN
-      RETURN stack.pop() OR_ELSE 0_i64;
+      RETURN &stack.pop() OR_ELSE 0_i64;
     ELSE_IF c.op == opSyscall() THEN
-      handleSyscall!(stack, c.arg, startMs) OR_ELSE RAISE;
+      handleSyscall(&stack, c.arg, startMs) OR_ELSE RAISE;
     ELSE
       RAISE "vm: op " $+ c.op.toString() $+ " not supported by vm.clear (use v10 or v11)";
     END
@@ -344,10 +344,10 @@ FN main() RETURNS !Void ->
   # Keep the integration example hermetic: exercise the VM with a tiny
   # PUSH/RETURN program instead of depending on the process working directory.
   MUTABLE procs: []Procedure = [];
-  procs.append(Procedure{ params: 0_i64, opStart: 0_i64, opCount: 2_i64 });
+  &procs.append(Procedure{ params: 0_i64, opStart: 0_i64, opCount: 2_i64 });
   MUTABLE allOps: []ByteCode = [];
-  allOps.append(ByteCode{ op: opPush(), arg: 42_i64, kind: kNone() });
-  allOps.append(ByteCode{ op: opReturn(), arg: 0_i64, kind: kNone() });
+  &allOps.append(ByteCode{ op: opPush(), arg: 42_i64, kind: kNone() });
+  &allOps.append(ByteCode{ op: opReturn(), arg: 0_i64, kind: kNone() });
   program = Program{ procs: procs, allOps: allOps };
   startMs = timestampMs();
 
@@ -356,9 +356,9 @@ FN main() RETURNS !Void ->
   MUTABLE mainMem: []Int64 = [];
   MUTABLE i = 0;
   WHILE i < mainProc.params DO
-    mainMem.append(0_i64);
+    &mainMem.append(0_i64);
     i += 1;
   END
-  runProc!(program, 0, mainMem, startMs) OR_ELSE RAISE;
+  runProc(program, 0, &mainMem, startMs) OR_ELSE RAISE;
   RETURN;
 END

@@ -16,14 +16,14 @@ FN getStr(v: Val) RETURNS String ->
 END
 
 # Case 1: frame-allocated string promoted to heap via PromotionPlan
-FN makeFromFrame!(a: String, b: String) RETURNS !Val ->
+FN makeFromFrame(a: String, b: String) RETURNS !Val ->
     RETURN Val{ Str: a $+ b };
 END
 
 # Case 2: heap-allocated via COPY
-FN makeFromHeap!() RETURNS !Val ->
+FN makeFromHeap() RETURNS !Val ->
     MUTABLE params: []Val = List[];
-    params.append(Val{ Str: "x" });
+    &params.append(Val{ Str: "x" });
     RETURN Val.Lambda{ params: COPY params, body: Val{ Str: "body" }, envId: 0 };
 END
 
@@ -38,11 +38,11 @@ END
 
 FN main() RETURNS Void ->
     # Case 1: frame-promoted return as temp
-    s1 = wrap(makeFromFrame!("hel", "lo"));
+    s1 = wrap(makeFromFrame("hel", "lo"));
     ASSERT s1 == "hello", "frame promoted temp";
 
     # Case 2: heap return as temp
-    s2 = wrap(makeFromHeap!());
+    s2 = wrap(makeFromHeap());
     ASSERT s2 == "nil", "heap temp";  # Lambda has no Str, getStr returns "nil"
 
     # Case 3: pure return as temp (no leak expected)

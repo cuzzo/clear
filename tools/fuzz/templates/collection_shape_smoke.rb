@@ -43,9 +43,9 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE vals: Int64[]@list = [];
-          vals.append(1_i64);
-          vals.append(2_i64);
-          vals.append(3_i64);
+          &vals.append(1_i64);
+          &vals.append(2_i64);
+          &vals.append(3_i64);
           ASSERT vals.length() == 3_i64, "list length";
           ASSERT vals[2_i64] == 3_i64, "list index";
           RETURN;
@@ -56,8 +56,8 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE vals: String[]@list = List[];
-          vals.append(COPY "alpha");
-          vals.append(COPY "beta");
+          &vals.append(COPY "alpha");
+          &vals.append(COPY "beta");
           ASSERT vals.length() == 2_i64, "string list length";
           ASSERT vals[1_i64] == "beta", "string list index";
           RETURN;
@@ -70,14 +70,14 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
 
       FN main() RETURNS Void ->
           MUTABLE pool: Item[8]@pool = [];
-          id = pool.insert(Item{ value: 42_i64 });
+          id = &pool.insert(Item{ value: 42_i64 });
           ASSERT pool.length() == 1_i64, "pool length";
           IF pool[id] EXISTS AS item THEN
               ASSERT item.value == 42_i64, "pool readback";
           ELSE
               ASSERT FALSE, "pool handle should be live";
           END
-          pool.remove(id);
+          &pool.remove(id);
           ASSERT pool[id] == NIL, "pool stale handle";
           RETURN;
       END
@@ -87,9 +87,9 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE vals: Int64[]@set = [];
-          vals.insert(7_i64);
-          vals.insert(9_i64);
-          vals.insert(7_i64);
+          &vals.insert(7_i64);
+          &vals.insert(9_i64);
+          &vals.insert(7_i64);
           ASSERT vals.length() == 2_i64, "set unique length";
           ASSERT vals.contains?(9_i64), "set contains value";
           RETURN;
@@ -112,9 +112,9 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE vals: Float64[]@list:sharded(2) = [];
-          vals.append(1.0);
-          vals.append(2.0);
-          vals.append(3.0);
+          &vals.append(1.0);
+          &vals.append(2.0);
+          &vals.append(3.0);
           total = vals |> SUM _;
           ASSERT total == 6.0, "sharded list sum";
           RETURN;
@@ -127,11 +127,11 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
 
       FN main() RETURNS Void ->
           MUTABLE pool: Item[8]@pool:sharded(2) = [];
-          id1 = pool.insert(Item{ value: 10_i64 });
-          id2 = pool.insert(Item{ value: 20_i64 });
+          id1 = &pool.insert(Item{ value: 10_i64 });
+          id2 = &pool.insert(Item{ value: 20_i64 });
           ASSERT pool.length() == 2_i64, "sharded pool length";
           ASSERT pool.get(id1) != NIL, "sharded pool get id1";
-          pool.remove(id2);
+          &pool.remove(id2);
           ASSERT pool.get(id2) == NIL, "sharded pool stale handle";
           RETURN;
       END
@@ -141,9 +141,9 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE vals: Int64[]@set:sharded(2) = [];
-          vals.insert(1_i64);
-          vals.insert(2_i64);
-          vals.insert(1_i64);
+          &vals.insert(1_i64);
+          &vals.insert(2_i64);
+          &vals.insert(1_i64);
           ASSERT vals.length() == 2_i64, "sharded set unique length";
           ASSERT vals.contains?(2_i64), "sharded set contains value";
           RETURN;
@@ -168,9 +168,9 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
 
       FN main() RETURNS Void ->
           MUTABLE vals: Item[]@list:soa = [];
-          vals.append(Item{ value: 1.0, other: 10.0 });
-          vals.append(Item{ value: 2.0, other: 20.0 });
-          vals.append(Item{ value: 3.0, other: 30.0 });
+          &vals.append(Item{ value: 1.0, other: 10.0 });
+          &vals.append(Item{ value: 2.0, other: 20.0 });
+          &vals.append(Item{ value: 3.0, other: 30.0 });
           total = vals |> SUM _.value;
           ASSERT total == 6.0, "soa list field sum";
           RETURN;
@@ -183,9 +183,9 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
 
       FN main() RETURNS Void ->
           MUTABLE vals: Item[8]@pool:soa = [];
-          vals.insert(Item{ value: 1.0, other: 10.0 });
-          vals.insert(Item{ value: 2.0, other: 20.0 });
-          vals.insert(Item{ value: 3.0, other: 30.0 });
+          &vals.insert(Item{ value: 1.0, other: 10.0 });
+          &vals.insert(Item{ value: 2.0, other: 20.0 });
+          &vals.insert(Item{ value: 3.0, other: 30.0 });
           total = vals |> SUM _.value;
           ASSERT total == 6.0, "soa pool field sum";
           RETURN;
@@ -198,13 +198,13 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
 
       FN main() RETURNS Void ->
           MUTABLE vals: Float64[]@list:sharded(2) = List[]:sharded(2);
-          vals.append(1.0);
-          vals.append(2.0);
+          &vals.append(1.0);
+          &vals.append(2.0);
           ASSERT vals.length() == 2_i64, "sharded list constructor";
 
           MUTABLE pool: Item[8]@pool:soa = Pool[]:soa;
-          pool.insert(Item{ value: 1.0, other: 10.0 });
-          pool.insert(Item{ value: 2.0, other: 20.0 });
+          &pool.insert(Item{ value: 1.0, other: 10.0 });
+          &pool.insert(Item{ value: 2.0, other: 20.0 });
           total = pool |> SUM _.value;
           ASSERT total == 3.0, "soa pool constructor";
           RETURN;
@@ -216,9 +216,9 @@ FuzzGenerator.register(:collection_shape_smoke, cells: COLLECTION_SHAPE_SMOKE_CE
       FN main() RETURNS Void ->
           MUTABLE outer: Int64[][]@list = [];
           MUTABLE inner: Int64[]@list = [];
-          inner.append(5_i64);
-          inner.append(6_i64);
-          outer.append(inner);
+          &inner.append(5_i64);
+          &inner.append(6_i64);
+          &outer.append(inner);
           ASSERT outer.length() == 1_i64, "nested outer length";
           IF outer[0_i64] EXISTS AS inner_read THEN
               ASSERT inner_read[1_i64] == 6_i64, "nested readback";
