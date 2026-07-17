@@ -33,14 +33,17 @@ String:
   find: linear_scan
   starts_with: linear_scan
   substr: linear_materialize
-# Direct `std::algorithm` calls deliberately remain absent. The C++ adapter
-# currently projects them as a callable expression rather than a resolved
-# receiver/message pair; mapping that parser artifact here would make the
-# language registry depend on syntax details. Add these after the adapter
-# resolves direct calls to their native identities.
 Namespace:
   std: declaration
 Intrinsic:
+  # These free functions are modeled only after a SCIP symbol proves `std`
+  # ownership. Their standard semantics do not execute user callbacks.
+  std.move: constant
+  std.forward: constant
+  std.addressof: constant
+  std.get: constant
+  std.as_const: constant
+  std.launder: constant
   assert: declaration
   malloc: declaration
   calloc: declaration

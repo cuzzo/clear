@@ -4,12 +4,15 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, type_before_parameter_name,
-    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
-    NormalizedNilGuardFact, NormalizedSemanticEffect, NormalizedStateRead,
+    configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
+    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
+    eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
+    scip_global_parts, type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
+    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
+    NormalizedStateRead,
 };
-use super::CallSite;
 use super::StateDeclaration;
+use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata};
 use crate::ast::Child;
 use crate::ast::{Node, Span};
 use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
@@ -30,6 +33,66 @@ const PHP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
 
 pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     nominal::parse(source, &PHP_NOMINAL_TYPE_SYNTAX)
+}
+
+fn scip_php_parts(symbol: &str) -> Option<(&str, &str)> {
+    let (package, _version, descriptor) = scip_global_parts(symbol, "scip-php", "composer")?;
+    Some((package, descriptor))
+}
+
+pub(crate) fn external_symbol_call_complexity(
+    symbol: &str,
+    message: &str,
+) -> Option<ExternalCallComplexity> {
+    let (package, descriptor) = scip_php_parts(symbol)?;
+    if package != "php" || configured_semantic_symbol_parametric_cost("php", descriptor).is_some() {
+        return None;
+    }
+    let owner = scip_descriptor_owner(descriptor);
+    let complexity = configured_semantic_symbol_call_complexity("php", descriptor)
+        .or_else(|| configured_intrinsic_call_complexity("php", None, message))
+        .or_else(|| {
+            owner.as_deref().and_then(|owner| {
+                PhpNormalizedBehavior.call_complexity(&parse_declared_type(owner), message)
+            })
+        })?;
+    Some(ExternalCallComplexity {
+        time: complexity.time,
+        space: complexity.space,
+        provenance: "php_scip_symbol_registry",
+        bound_quality: "upper_bound_exact_target",
+        candidates: Vec::new(),
+        assumption: None,
+    })
+}
+
+pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
+    let Some((package, descriptor)) = scip_php_parts(symbol) else {
+        return ExternalSymbolMetadata {
+            scope: "dynamic",
+            missing_cost_kind: "callback_or_function_value_origin_unknown".to_string(),
+            parametric_cost: None,
+        };
+    };
+    if package == "php" {
+        ExternalSymbolMetadata {
+            scope: "stdlib",
+            missing_cost_kind: configured_semantic_symbol_kind("php", descriptor)
+                .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
+            parametric_cost: configured_semantic_symbol_parametric_cost("php", descriptor),
+        }
+    } else {
+        ExternalSymbolMetadata {
+            scope: "dependency",
+            missing_cost_kind: "dependency_cost_model_missing".to_string(),
+            parametric_cost: None,
+        }
+    }
+}
+
+pub(crate) fn external_symbol_owner(symbol: &str) -> Option<String> {
+    let (_package, descriptor) = scip_php_parts(symbol)?;
+    scip_descriptor_owner(descriptor)
 }
 
 const PHP_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
@@ -103,6 +166,22 @@ const PHP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct PhpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
+    fn external_symbol_call_complexity(
+        &self,
+        symbol: &str,
+        message: &str,
+    ) -> Option<ExternalCallComplexity> {
+        external_symbol_call_complexity(symbol, message)
+    }
+
+    fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
+        external_symbol_metadata(symbol)
+    }
+
+    fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
+        external_symbol_owner(symbol)
+    }
+
     fn parameter_type_from_signature(&self, parameter: &str) -> Option<String> {
         type_before_parameter_name(parameter)
     }
@@ -489,6 +568,21 @@ fn is_simple_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scip_php_symbols_use_proven_runtime_identity() {
+        let strlen = "scip-php composer php 8.5.4 strlen().";
+        let dependency =
+            "scip-php composer ramsey/collection 2.1.1 Ramsey/Collection/Collection#count().";
+
+        assert_eq!(external_symbol_metadata(strlen).scope, "stdlib");
+        assert_eq!(
+            external_symbol_call_complexity(strlen, "strlen").map(|cost| cost.time),
+            Some("O(1)")
+        );
+        assert_eq!(external_symbol_metadata(dependency).scope, "dependency");
+        assert!(external_symbol_call_complexity(dependency, "count").is_none());
+    }
 
     fn node(kind: &str, text: &str) -> Node {
         Node {

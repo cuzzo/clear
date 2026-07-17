@@ -34,12 +34,35 @@ struct Index {
 
 #[derive(Debug, Deserialize)]
 struct Metadata {
-    #[serde(default)]
-    text_document_encoding: u32,
+    #[serde(default, alias = "textDocumentEncoding")]
+    text_document_encoding: TextDocumentEncoding,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(untagged)]
+enum TextDocumentEncoding {
+    #[default]
+    Unspecified,
+    Number(u32),
+    Name(String),
+}
+
+impl TextDocumentEncoding {
+    fn is_utf8(&self) -> bool {
+        match self {
+            Self::Unspecified | Self::Number(0 | 1) => true,
+            Self::Name(name) => matches!(
+                name.to_ascii_lowercase().as_str(),
+                "utf-8" | "utf8" | "utf_8"
+            ),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct Document {
+    #[serde(alias = "relativePath")]
     relative_path: String,
     #[serde(default)]
     occurrences: Vec<Occurrence>,
@@ -57,7 +80,7 @@ struct SymbolInformation {
 #[derive(Debug, Deserialize)]
 struct Relationship {
     symbol: String,
-    #[serde(default)]
+    #[serde(default, alias = "isImplementation")]
     is_implementation: bool,
 }
 
@@ -72,7 +95,7 @@ struct Occurrence {
     typed_range: Option<TypedRange>,
     #[serde(default)]
     symbol: String,
-    #[serde(default)]
+    #[serde(default, alias = "symbolRoles")]
     symbol_roles: u32,
 }
 
@@ -91,16 +114,23 @@ enum TypedRange {
 
 #[derive(Clone, Debug, Deserialize)]
 struct SingleLineRange {
+    #[serde(default)]
     line: usize,
+    #[serde(default)]
     start_character: usize,
+    #[serde(default)]
     end_character: usize,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 struct MultiLineRange {
+    #[serde(default)]
     start_line: usize,
+    #[serde(default)]
     start_character: usize,
+    #[serde(default)]
     end_line: usize,
+    #[serde(default)]
     end_character: usize,
 }
 
@@ -182,7 +212,7 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
     if index
         .metadata
         .as_ref()
-        .is_some_and(|metadata| !matches!(metadata.text_document_encoding, 0 | 1))
+        .is_some_and(|metadata| !metadata.text_document_encoding.is_utf8())
     {
         anyhow::bail!(
             "SCIP index uses non-UTF-8 text_document_encoding; column conversion is required"
@@ -244,10 +274,6 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
                     .all(|pair| equivalent_external_cost(&pair[0], &pair[1]))))
         .then(|| candidate_costs.into_iter().next())
         .flatten();
-        if selected_symbols.len() > 1 && target_ids.is_empty() && converged_cost.is_none() {
-            stats.unmatched_calls += 1;
-            continue;
-        }
 
         stats.matched_occurrences += 1;
         call.semantic_symbol = Some(occurrence.symbol.clone());
@@ -267,6 +293,27 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
             call.resolution_missing_proof = None;
             call.empty_domain_cause = None;
             stats.exact_project_targets += 1;
+        } else if !target_ids.is_empty() {
+            // A compiler index may legitimately map one source selector to
+            // multiple overloads, or one symbol to multiple in-project
+            // definitions (for example macro/configuration surfaces). Those
+            // are closed project candidates, never evidence of a dependency.
+            call.target = None;
+            call.kind = "unresolved_call".to_string();
+            call.external_symbol_scope = Some("project".to_string());
+            call.complexity_missing_kind = None;
+            call.known_time_complexity = None;
+            call.known_space_complexity = None;
+            call.complexity_provenance = None;
+            call.complexity_bound_quality = None;
+            call.complexity_candidates.clear();
+            call.complexity_assumptions.clear();
+            call.candidate_targets = target_ids.into_iter().map(str::to_string).collect();
+            call.candidate_reason = Some("scip_project_candidate_set".to_string());
+            call.unresolved_reason =
+                Some("scip_closed_project_candidate_set_requires_summary".to_string());
+            call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+            call.empty_domain_cause = None;
         } else {
             // SCIP proved an external/excluded symbol. A prior heuristic
             // project target must not outrank compiler identity.
@@ -277,6 +324,12 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
             call.complexity_missing_kind = Some(metadata.missing_cost_kind);
             let parametric_cost = metadata.parametric_cost;
             stats.external_symbols += 1;
+            if selected_symbols.len() > 1 {
+                call.complexity_candidates = selected_symbols
+                    .iter()
+                    .map(|symbol| (*symbol).to_string())
+                    .collect();
+            }
             if let Some(complexity) = converged_cost.or_else(|| {
                 syntax::external_symbol_call_complexity(language, &occurrence.symbol, &call.message)
             }) {
@@ -835,6 +888,28 @@ fn occurrence_is_outer_selector(
     while open < call_end && bytes.get(open).is_some_and(u8::is_ascii_whitespace) {
         open += 1;
     }
+    if bytes.get(open) == Some(&b'<') {
+        let mut template_depth = 0usize;
+        let mut close = None;
+        for (offset, byte) in bytes[open..call_end].iter().copied().enumerate() {
+            if byte == b'<' {
+                template_depth += 1;
+            } else if byte == b'>' {
+                template_depth = template_depth.saturating_sub(1);
+                if template_depth == 0 {
+                    close = Some(open + offset + 1);
+                    break;
+                }
+            }
+        }
+        let Some(template_end) = close else {
+            return false;
+        };
+        open = template_end;
+        while open < call_end && bytes.get(open).is_some_and(u8::is_ascii_whitespace) {
+            open += 1;
+        }
+    }
     if bytes.get(open) != Some(&b'(') {
         return false;
     }
@@ -924,17 +999,7 @@ fn semantic_symbol(symbol: &str) -> bool {
 }
 
 fn bare_message(message: &str) -> &str {
-    message
-        .rsplit("::")
-        .next()
-        .unwrap_or(message)
-        .rsplit('.')
-        .next()
-        .unwrap_or(message)
-        .split('<')
-        .next()
-        .unwrap_or(message)
-        .trim()
+    crate::syntax::normalized_behavior::balanced_selector_name(message)
 }
 
 fn occurrence_text(source: &str, span: [usize; 4]) -> &str {
@@ -1132,6 +1197,17 @@ mod tests {
             ("c", "demo.c", "cxx . demo v1$ callee(abc)."),
             ("cpp", "demo.cpp", "cxx . demo v1$ Demo#callee(abc)."),
             ("csharp", "Demo.cs", "scip-dotnet nuget . . Demo/Callee()."),
+            (
+                "kotlin",
+                "Demo.kt",
+                "scip-java maven example/demo 1.0.0 demo/callee().",
+            ),
+            (
+                "php",
+                "Demo.php",
+                "scip-php composer example/demo 1.0.0 callee().",
+            ),
+            ("swift", "Demo.swift", "swift Demo callee()."),
             (
                 "typescript",
                 "demo.ts",
@@ -1488,6 +1564,189 @@ mod tests {
         assert_eq!(
             output.calls[0].candidate_reason.as_deref(),
             Some("scip_implementation_set")
+        );
+    }
+
+    #[test]
+    fn balanced_template_selector_ignores_qualified_template_arguments() {
+        assert_eq!(bare_message("plog::detail::operator<<"), "operator");
+        assert_eq!(bare_message("Wrapper<T>::target<U>"), "target");
+        assert!(occurrence_is_outer_selector(
+            "target<Wrapper::Data>()",
+            [0, 0, 0, 23],
+            [0, 0, 0, 6]
+        ));
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.cpp");
+        fs::write(
+            &path,
+            "void target() {}\nvoid caller() { detail::target<Wrapper::Data>(); }\n",
+        )
+        .unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "cxx . . . detail/target().";
+        let index = json!({"documents": [{
+            "relative_path": "demo.cpp",
+            "occurrences": [
+                canonical_occurrence([0, 5, 11], symbol, 1),
+                canonical_occurrence([1, 24, 30], symbol, 8)
+            ]
+        }]});
+        let mut target = method("target", &path, "target", [1, 1, 1, 17]);
+        target.language = "cpp".into();
+        let mut caller = method("caller", &path, "caller", [2, 1, 2, 58]);
+        caller.language = "cpp".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![target, caller];
+        output.calls.push(call(
+            "caller",
+            &path,
+            "detail::target<Wrapper::Data>",
+            [2, 17, 2, 48],
+        ));
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].target.as_deref(), Some("target"));
+        assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(symbol));
+    }
+
+    #[test]
+    fn multiple_scip_symbols_are_preserved_as_project_candidates() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.cpp");
+        fs::write(
+            &path,
+            "void pick(int) {}\nvoid pick(long) {}\nvoid caller() { pick(1); }\n",
+        )
+        .unwrap();
+        let path = path.to_string_lossy().to_string();
+        let first = "cxx . . . pick(first).";
+        let second = "cxx . . . pick(second).";
+        let index = json!({"documents": [{
+            "relative_path": "demo.cpp",
+            "occurrences": [
+                canonical_occurrence([0, 5, 9], first, 1),
+                canonical_occurrence([1, 5, 9], second, 1),
+                canonical_occurrence([2, 16, 20], first, 8),
+                canonical_occurrence([2, 16, 20], second, 8)
+            ]
+        }]});
+        let mut first_method = method("pick-int", &path, "pick", [1, 1, 1, 19]);
+        first_method.language = "cpp".into();
+        let mut second_method = method("pick-long", &path, "pick", [2, 1, 2, 20]);
+        second_method.language = "cpp".into();
+        let mut caller = method("caller", &path, "caller", [3, 1, 3, 28]);
+        caller.language = "cpp".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![first_method, second_method, caller];
+        output
+            .calls
+            .push(call("caller", &path, "pick", [3, 16, 3, 23]));
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].target, None);
+        assert_eq!(output.calls[0].kind, "unresolved_call");
+        assert_eq!(
+            output.calls[0].candidate_targets,
+            ["pick-int", "pick-long"],
+            "call={:?}",
+            output.calls[0]
+        );
+        assert_eq!(
+            output.calls[0].candidate_reason.as_deref(),
+            Some("scip_project_candidate_set")
+        );
+        assert_ne!(
+            output.calls[0].external_symbol_scope.as_deref(),
+            Some("dependency")
+        );
+    }
+
+    #[test]
+    fn duplicate_project_definitions_are_candidates_not_dependencies() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.cpp");
+        fs::write(
+            &path,
+            "void reset() {}\nvoid reset() {}\nvoid caller() { reset(); }\n",
+        )
+        .unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "cxx . . . reset().";
+        let index = json!({"documents": [{
+            "relative_path": "demo.cpp",
+            "occurrences": [
+                canonical_occurrence([0, 5, 10], symbol, 1),
+                canonical_occurrence([1, 5, 10], symbol, 1),
+                canonical_occurrence([2, 16, 21], symbol, 8)
+            ]
+        }]});
+        let mut first = method("reset-a", &path, "reset", [1, 1, 1, 17]);
+        first.language = "cpp".into();
+        let mut second = method("reset-b", &path, "reset", [2, 1, 2, 17]);
+        second.language = "cpp".into();
+        let mut caller = method("caller", &path, "caller", [3, 1, 3, 27]);
+        caller.language = "cpp".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![first, second, caller];
+        output
+            .calls
+            .push(call("caller", &path, "reset", [3, 16, 3, 23]));
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].target, None);
+        assert_eq!(output.calls[0].candidate_targets, ["reset-a", "reset-b"]);
+        assert_eq!(
+            output.calls[0].candidate_reason.as_deref(),
+            Some("scip_project_candidate_set")
+        );
+        assert_eq!(
+            output.calls[0].external_symbol_scope.as_deref(),
+            Some("project")
+        );
+    }
+
+    #[test]
+    fn converges_scip_proven_std_overloads_without_discarding_identities() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.cpp");
+        fs::write(&path, "void caller() { std::move(value); }\n").unwrap();
+        let path = path.to_string_lossy().to_string();
+        let first = "cxx . . $ std/move(7316eb2979bdd03c).";
+        let second = "cxx . . $ std/move(e35c19a1ba7baa26).";
+        let index = json!({"documents": [{
+            "relative_path": "demo.cpp",
+            "occurrences": [
+                canonical_occurrence([0, 21, 25], first, 8),
+                canonical_occurrence([0, 21, 25], second, 8)
+            ]
+        }]});
+        let mut caller = method("caller", &path, "caller", [1, 1, 1, 36]);
+        caller.language = "cpp".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller];
+        output
+            .calls
+            .push(call("caller", &path, "std::move<T>", [1, 17, 1, 32]));
+
+        let stats = apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(stats.matched_occurrences, 1);
+        assert_eq!(stats.modeled_external_symbols, 1);
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(1)")
+        );
+        assert_eq!(
+            output.calls[0].known_space_complexity.as_deref(),
+            Some("O(1)")
+        );
+        assert_eq!(
+            output.calls[0].complexity_candidates,
+            [first.to_string(), second.to_string()]
         );
     }
 
@@ -2166,5 +2425,82 @@ mod tests {
         });
         let error = apply_json(&mut output, &index.to_string()).unwrap_err();
         assert!(error.to_string().contains("non-UTF-8"));
+    }
+
+    #[test]
+    fn accepts_protobuf_json_camel_case_fields_and_utf8_name() {
+        let mut output = ProfileOutput::default();
+        let index = json!({
+            "metadata": {"textDocumentEncoding": "UTF-8"},
+            "documents": [{
+                "relativePath": "Demo.swift",
+                "occurrences": [],
+                "symbols": [{
+                    "symbol": "swift Demo Child#",
+                    "relationships": [{
+                        "symbol": "swift Demo Parent#",
+                        "isImplementation": true
+                    }]
+                }]
+            }]
+        });
+        assert!(apply_json(&mut output, &index.to_string()).is_ok());
+    }
+
+    #[test]
+    fn imports_the_available_swift_indexstore_json_shape() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("Sources/Demo.swift");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let declaration = "func callee() {}";
+        let caller = "func caller() { callee() }";
+        fs::write(&path, format!("{declaration}\n{caller}\n")).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let declaration_column = declaration.find("callee").unwrap();
+        let call_column = caller.find("callee").unwrap();
+        let symbol = "swift Demo callee().";
+        let index = json!({
+            "metadata": {"textDocumentEncoding": "UTF-8"},
+            "documents": [{
+                "relativePath": "Sources/Demo.swift",
+                "language": "swift",
+                "symbols": [{"symbol": symbol}],
+                "occurrences": [
+                    {"range": [0, declaration_column, declaration_column + 6], "symbol": symbol, "symbolRoles": 1},
+                    {"range": [1, call_column, call_column + 6], "symbol": symbol, "symbolRoles": 8}
+                ]
+            }]
+        });
+        let mut callee = method("callee", &path, "callee", [1, 0, 1, declaration.len()]);
+        let mut caller_method = method("caller", &path, "caller", [2, 0, 2, caller.len()]);
+        callee.language = "swift".into();
+        caller_method.language = "swift".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![callee, caller_method];
+        output.calls = vec![call(
+            "caller",
+            &path,
+            "callee",
+            [2, call_column, 2, call_column + 8],
+        )];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].target.as_deref(), Some("callee"));
+        assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(symbol));
+    }
+
+    #[test]
+    fn accepts_typed_ranges_with_omitted_zero_coordinates() {
+        // Protobuf JSON omits scalar fields whose value is zero. SCIP 0.9
+        // therefore emits first-line ranges without a `line` member and
+        // ranges starting at column zero without `start_character`.
+        let occurrence: Occurrence = serde_json::from_value(json!({
+            "TypedRange": {"SingleLineRange": {"end_character": 4}},
+            "symbol": "swift Demo main()."
+        }))
+        .unwrap();
+
+        assert_eq!(occurrence.span(), Some([0, 0, 0, 4]));
     }
 }

@@ -4,12 +4,13 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    configured_collection_operation, configured_intrinsic_call_complexity,
-    configured_semantic_symbol_call_complexity, configured_semantic_symbol_kind,
-    configured_semantic_symbol_parametric_cost, eliminable_guard_from_call,
-    nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
-    type_before_parameter_name, NormalizedCallProjection, NormalizedLanguageBehavior,
-    NormalizedNilGuardFact, NormalizedSemanticEffect, NormalizedStateRead,
+    balanced_selector_name, configured_collection_operation, configured_intrinsic_call_complexity,
+    configured_non_call_construct, configured_semantic_symbol_call_complexity,
+    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
+    eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
+    scip_global_parts, type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
+    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
+    NormalizedStateRead,
 };
 use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata};
 use crate::ast::{Node, Span};
@@ -66,11 +67,12 @@ pub(crate) fn external_symbol_call_complexity(
         return None;
     }
     let owner = scip_descriptor_owner(descriptor);
+    let message = balanced_selector_name(message);
     let complexity = configured_semantic_symbol_call_complexity("cpp", descriptor)
         .or_else(|| {
-            owner.as_deref().and_then(|owner| {
-                configured_intrinsic_call_complexity("cpp", Some(owner), message)
-            })
+            owner
+                .as_deref()
+                .and_then(|owner| configured_intrinsic_call_complexity("cpp", Some(owner), message))
         })
         .or_else(|| {
             owner.as_deref().and_then(|owner| {
@@ -104,7 +106,11 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
         }
     } else {
         ExternalSymbolMetadata {
-            scope: if package == "." { "external" } else { "dependency" },
+            scope: if package == "." {
+                "external"
+            } else {
+                "dependency"
+            },
             missing_cost_kind: "dependency_cost_model_missing".to_string(),
             parametric_cost: None,
         }
@@ -251,6 +257,14 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
 
     fn parameter_type_from_signature(&self, parameter: &str) -> Option<String> {
         type_before_parameter_name(parameter)
+    }
+
+    fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
+        cpp_member_selector_is_invoked(&node.text, &parts.message) == Some(false)
+    }
+
+    fn suppress_call_site(&self, _node: &Node, call: &NormalizedCallProjection) -> bool {
+        configured_non_call_construct("cpp", &call.message)
     }
 
     fn collection_operation(
@@ -455,6 +469,53 @@ fn simple_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn cpp_member_selector_is_invoked(source: &str, message: &str) -> Option<bool> {
+    let selector = balanced_selector_name(message);
+    if selector.is_empty() || selector == "operator" {
+        return None;
+    }
+    let explicit_offset = ["->", ".", "::"]
+        .into_iter()
+        .filter_map(|separator| {
+            source
+                .rfind(&format!("{separator}{selector}"))
+                .map(|offset| offset + separator.len() + selector.len())
+        })
+        .max();
+    let offset = explicit_offset.or_else(|| {
+        source.match_indices(selector).filter_map(|(offset, _)| {
+            let before = source[..offset].chars().next_back();
+            let end = offset + selector.len();
+            let after = source[end..].chars().next();
+            let identifier = |character: char| character == '_' || character.is_alphanumeric();
+            (!before.is_some_and(identifier) && !after.is_some_and(identifier)).then_some(end)
+        }).last()
+    })?;
+    let suffix = source[offset..].trim_start();
+    if !suffix.starts_with('<') {
+        return Some(suffix.starts_with('('));
+    }
+
+    let mut depth = 0usize;
+    for (index, character) in suffix.char_indices() {
+        match character {
+            '<' => depth += 1,
+            '>' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(
+                        suffix[index + character.len_utf8()..]
+                            .trim_start()
+                            .starts_with('('),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn last_visibility_marker(source: &str) -> Option<&'static str> {

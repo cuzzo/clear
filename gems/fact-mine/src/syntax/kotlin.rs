@@ -4,12 +4,14 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, type_after_parameter_colon,
-    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
-    NormalizedNilGuardFact, NormalizedSemanticEffect,
+    configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
+    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
+    eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
+    scip_global_parts, type_after_parameter_colon, NormalizedCallParts, NormalizedCallProjection,
+    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
 };
-use super::CallSite;
 use super::StateDeclaration;
+use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata};
 use crate::ast::Child;
 use crate::ast::{Node, Span};
 use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
@@ -30,6 +32,84 @@ const KOTLIN_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
 
 pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     nominal::parse(source, &KOTLIN_NOMINAL_TYPE_SYNTAX)
+}
+
+fn scip_kotlin_parts(symbol: &str) -> Option<(&str, &str)> {
+    let (package, _version, descriptor) = scip_global_parts(symbol, "scip-java", "maven")?;
+    Some((package, descriptor))
+}
+
+fn kotlin_runtime_descriptor(descriptor: &str) -> bool {
+    descriptor == "kotlin" || descriptor.starts_with("kotlin/")
+}
+
+pub(crate) fn external_symbol_call_complexity(
+    symbol: &str,
+    message: &str,
+) -> Option<ExternalCallComplexity> {
+    // Kotlin/JVM source can call JDK declarations directly. Reuse Java's
+    // reviewed semantic contracts after scip-java has proved JDK ownership.
+    if symbol.starts_with("scip-java maven jdk ") {
+        return super::java::external_symbol_call_complexity(symbol, message);
+    }
+    let (_package, descriptor) = scip_kotlin_parts(symbol)?;
+    if !kotlin_runtime_descriptor(descriptor)
+        || configured_semantic_symbol_parametric_cost("kotlin", descriptor).is_some()
+    {
+        return None;
+    }
+    let owner = scip_descriptor_owner(descriptor);
+    let complexity = configured_semantic_symbol_call_complexity("kotlin", descriptor)
+        .or_else(|| {
+            owner.as_deref().and_then(|owner| {
+                KotlinNormalizedBehavior.call_complexity(&parse_declared_type(owner), message)
+            })
+        })
+        .or_else(|| configured_intrinsic_call_complexity("kotlin", None, message))?;
+    Some(ExternalCallComplexity {
+        time: complexity.time,
+        space: complexity.space,
+        provenance: "kotlin_scip_symbol_registry",
+        bound_quality: "upper_bound_exact_target",
+        candidates: Vec::new(),
+        assumption: None,
+    })
+}
+
+pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
+    if symbol.starts_with("scip-java maven jdk ") {
+        return super::java::external_symbol_metadata(symbol);
+    }
+    let Some((_package, descriptor)) = scip_kotlin_parts(symbol) else {
+        return ExternalSymbolMetadata {
+            scope: "dynamic",
+            missing_cost_kind: "callback_or_function_value_origin_unknown".to_string(),
+            parametric_cost: None,
+        };
+    };
+    if kotlin_runtime_descriptor(descriptor) {
+        ExternalSymbolMetadata {
+            scope: "stdlib",
+            missing_cost_kind: configured_semantic_symbol_kind("kotlin", descriptor)
+                .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
+            parametric_cost: configured_semantic_symbol_parametric_cost("kotlin", descriptor),
+        }
+    } else {
+        ExternalSymbolMetadata {
+            scope: "dependency",
+            missing_cost_kind: "dependency_cost_model_missing".to_string(),
+            parametric_cost: None,
+        }
+    }
+}
+
+pub(crate) fn external_symbol_owner(symbol: &str) -> Option<String> {
+    if symbol.starts_with("scip-java maven jdk ") {
+        let descriptor = symbol.split_whitespace().last()?;
+        return scip_descriptor_owner(descriptor);
+    }
+    let (_package, descriptor) = scip_kotlin_parts(symbol)?;
+    scip_descriptor_owner(descriptor)
 }
 
 const KOTLIN_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
@@ -110,6 +190,22 @@ const KOTLIN_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct KotlinNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
+    fn external_symbol_call_complexity(
+        &self,
+        symbol: &str,
+        message: &str,
+    ) -> Option<ExternalCallComplexity> {
+        external_symbol_call_complexity(symbol, message)
+    }
+
+    fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
+        external_symbol_metadata(symbol)
+    }
+
+    fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
+        external_symbol_owner(symbol)
+    }
+
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
         super::normalized_behavior::type_after_local_colon(source, name)
     }
@@ -370,6 +466,26 @@ fn is_keyword(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scip_kotlin_symbols_use_proven_runtime_identity() {
+        let array_get = "scip-java maven . . kotlin/Array#get().";
+        let jdk_length = "scip-java maven jdk 21 java/lang/String#length().";
+        let dependency = "scip-java maven com.squareup.okio/okio 3.10.0 okio/Buffer#readByte().";
+
+        assert_eq!(external_symbol_metadata(array_get).scope, "stdlib");
+        assert_eq!(external_symbol_owner(array_get).as_deref(), Some("Array"));
+        assert_eq!(
+            external_symbol_call_complexity(array_get, "get").map(|cost| cost.time),
+            Some("O(1)")
+        );
+        assert_eq!(
+            external_symbol_call_complexity(jdk_length, "length").map(|cost| cost.time),
+            Some("O(1)")
+        );
+        assert_eq!(external_symbol_metadata(dependency).scope, "dependency");
+        assert!(external_symbol_call_complexity(dependency, "readByte").is_none());
+    }
 
     fn node(kind: &str, text: &str) -> Node {
         Node {

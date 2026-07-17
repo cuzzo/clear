@@ -4,13 +4,15 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, type_after_parameter_colon,
-    CardinalityCallSemantics, NormalizedCallParts, NormalizedCallProjection,
-    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
-    NormalizedStateWrite,
+    configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
+    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
+    eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
+    type_after_parameter_colon, CardinalityCallSemantics, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    NormalizedSemanticEffect, NormalizedStateWrite,
 };
-use super::CallSite;
 use super::StateDeclaration;
+use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata};
 use crate::ast::Child;
 use crate::ast::{Node, Span};
 use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
@@ -31,6 +33,75 @@ const SWIFT_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
 
 pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     nominal::parse(source, &SWIFT_NOMINAL_TYPE_SYNTAX)
+}
+
+/// The available Swift IndexStore converter predates a registered SCIP symbol
+/// scheme and emits `swift <module> <descriptor>`. Keep that producer grammar
+/// here; the shared importer remains language-neutral.
+fn scip_swift_parts(symbol: &str) -> Option<(&str, &str)> {
+    let rest = symbol.strip_prefix("swift ")?;
+    rest.split_once(' ')
+}
+
+fn swift_stdlib_module(module: &str) -> bool {
+    matches!(module, "Swift" | "Foundation" | "_Concurrency")
+}
+
+pub(crate) fn external_symbol_call_complexity(
+    symbol: &str,
+    message: &str,
+) -> Option<ExternalCallComplexity> {
+    let (module, descriptor) = scip_swift_parts(symbol)?;
+    if !swift_stdlib_module(module)
+        || configured_semantic_symbol_parametric_cost("swift", descriptor).is_some()
+    {
+        return None;
+    }
+    let owner = scip_descriptor_owner(descriptor);
+    let complexity = configured_semantic_symbol_call_complexity("swift", descriptor)
+        .or_else(|| {
+            owner.as_deref().and_then(|owner| {
+                SwiftNormalizedBehavior.call_complexity(&parse_declared_type(owner), message)
+            })
+        })
+        .or_else(|| configured_intrinsic_call_complexity("swift", None, message))?;
+    Some(ExternalCallComplexity {
+        time: complexity.time,
+        space: complexity.space,
+        provenance: "swift_scip_symbol_registry",
+        bound_quality: "upper_bound_exact_target",
+        candidates: Vec::new(),
+        assumption: None,
+    })
+}
+
+pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
+    let Some((module, descriptor)) = scip_swift_parts(symbol) else {
+        return ExternalSymbolMetadata {
+            scope: "dynamic",
+            missing_cost_kind: "callback_or_function_value_origin_unknown".to_string(),
+            parametric_cost: None,
+        };
+    };
+    if swift_stdlib_module(module) {
+        ExternalSymbolMetadata {
+            scope: "stdlib",
+            missing_cost_kind: configured_semantic_symbol_kind("swift", descriptor)
+                .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
+            parametric_cost: configured_semantic_symbol_parametric_cost("swift", descriptor),
+        }
+    } else {
+        ExternalSymbolMetadata {
+            scope: "dependency",
+            missing_cost_kind: "dependency_cost_model_missing".to_string(),
+            parametric_cost: None,
+        }
+    }
+}
+
+pub(crate) fn external_symbol_owner(symbol: &str) -> Option<String> {
+    let (_module, descriptor) = scip_swift_parts(symbol)?;
+    scip_descriptor_owner(descriptor)
 }
 
 const SWIFT_CONTEXT_PAIRS: &[(&str, &[&str])] = &[("Date", &["now"]), ("UUID", &["init"])];
@@ -110,6 +181,22 @@ const SWIFT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct SwiftNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
+    fn external_symbol_call_complexity(
+        &self,
+        symbol: &str,
+        message: &str,
+    ) -> Option<ExternalCallComplexity> {
+        external_symbol_call_complexity(symbol, message)
+    }
+
+    fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
+        external_symbol_metadata(symbol)
+    }
+
+    fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
+        external_symbol_owner(symbol)
+    }
+
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
         super::normalized_behavior::type_after_local_colon(source, name)
     }
@@ -440,6 +527,21 @@ fn is_keyword(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scip_swift_symbols_use_proven_module_identity() {
+        let append = "swift Swift Array#append().";
+        let dependency = "swift Tagged Tagged#rawValue().";
+
+        assert_eq!(external_symbol_metadata(append).scope, "stdlib");
+        assert_eq!(external_symbol_owner(append).as_deref(), Some("Array"));
+        assert_eq!(
+            external_symbol_call_complexity(append, "append").map(|cost| cost.time),
+            Some("O(1)")
+        );
+        assert_eq!(external_symbol_metadata(dependency).scope, "dependency");
+        assert!(external_symbol_call_complexity(dependency, "rawValue").is_none());
+    }
 
     fn node(kind: &str, text: &str) -> Node {
         Node {

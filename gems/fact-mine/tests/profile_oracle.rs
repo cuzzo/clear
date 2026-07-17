@@ -181,6 +181,48 @@ fn source_facing_fields_preserve_native_declared_type_spelling() -> Result<()> {
 }
 
 #[test]
+fn cpp_field_projections_and_named_casts_are_not_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Data { int value; };
+struct Holder { Data data; int read() { return data.value; } };
+int helper(int value) { return value; }
+int analyze(Data* data, int input) {
+    int projected = data->value;
+    long widened = static_cast<long>(input);
+    return helper(static_cast<int>(projected + widened));
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    assert!(
+        document
+            .state_reads
+            .iter()
+            .any(|read| read.receiver == "data" && read.field == "value"),
+        "field projection should remain a state read: {:?}",
+        document.state_reads
+    );
+    let output = profile::extract(&document, Profile::Espalier);
+    let messages = output
+        .calls
+        .iter()
+        .map(|call| call.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(messages.contains(&"helper"), "calls={messages:?}");
+    assert!(!messages.contains(&"value"), "calls={messages:?}");
+    assert!(!messages.contains(&"data"), "calls={messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|message| !message.starts_with("static_cast<")),
+        "calls={messages:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn go_short_declaration_does_not_reuse_outer_non_nil_proof() -> Result<()> {
     let document = syntax::parse_file(fixture("go_shadowing.go"), Language::Go)?;
     assert!(document.redundant_nil_guards.is_empty());

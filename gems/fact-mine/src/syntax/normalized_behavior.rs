@@ -361,6 +361,68 @@ pub(crate) fn configured_non_call_construct(language: &str, message: &str) -> bo
             .is_some_and(|constructs| constructs.keys().any(|prefix| message.starts_with(prefix)))
 }
 
+/// Return the final selector while ignoring qualifiers nested in balanced
+/// generic/template arguments. This is source-language neutral: adapters and
+/// compiler-index importers both need `A<T>::f<U, B::C>` to mean `f` without
+/// mistaking `B::C` for the selected member.
+pub(crate) fn balanced_selector_name(message: &str) -> &str {
+    let message = message.trim();
+    let bytes = message.as_bytes();
+    let mut depth = 0usize;
+    let mut selector_start = 0usize;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'<' => depth += 1,
+            b'>' => depth = depth.saturating_sub(1),
+            b':' | b'-' if depth == 0 && index + 1 < bytes.len() => {
+                let pair = &bytes[index..index + 2];
+                if pair == b"::" || pair == b"->" {
+                    selector_start = index + 2;
+                    index += 1;
+                }
+            }
+            b'.' if depth == 0 => selector_start = index + 1,
+            _ => {}
+        }
+        index += 1;
+    }
+
+    let selector = message[selector_start..].trim();
+    if selector
+        .strip_prefix("operator")
+        .and_then(|suffix| suffix.chars().next())
+        .is_some_and(|character| character != '_' && !character.is_ascii_alphanumeric())
+    {
+        // clang indexes the identifier token of symbolic C++ operator names;
+        // the punctuation is syntax adjacent to, but outside, its occurrence.
+        return &selector[.."operator".len()];
+    }
+    let Some(template_start) = selector.find('<') else {
+        return selector;
+    };
+    let mut template_depth = 0usize;
+    let mut template_end = None;
+    for (offset, character) in selector[template_start..].char_indices() {
+        match character {
+            '<' => template_depth += 1,
+            '>' => {
+                template_depth = template_depth.saturating_sub(1);
+                if template_depth == 0 {
+                    template_end = Some(template_start + offset + character.len_utf8());
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    if template_end.is_some_and(|end| selector[end..].trim().is_empty()) {
+        selector[..template_start].trim()
+    } else {
+        selector
+    }
+}
+
 pub(crate) fn configured_dynamic_global_binding(language: &str) -> bool {
     stdlib_operations(language)
         .and_then(|operations| operations.get("DynamicGlobalBinding"))
@@ -524,9 +586,9 @@ pub(crate) fn configured_parametric_call_cost(
         .unwrap_or(&name);
     let operations = stdlib_operations(language)?;
     let contracts = operations.get("ParametricCall")?;
-    let result = [name.as_str(), unqualified].into_iter().find_map(|owner| {
-        contracts.get(&format!("{owner}.{message}")).cloned()
-    });
+    let result = [name.as_str(), unqualified]
+        .into_iter()
+        .find_map(|owner| contracts.get(&format!("{owner}.{message}")).cloned());
     result
 }
 
@@ -819,18 +881,16 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 
     fn parametric_call_cost(&self, receiver_type: &TypeExpr, message: &str) -> Option<String> {
-        self.stdlib_language().and_then(|language| {
-            configured_parametric_call_cost(language, receiver_type, message)
-        })
+        self.stdlib_language()
+            .and_then(|language| configured_parametric_call_cost(language, receiver_type, message))
     }
 
     /// Classify a language-owned declared function/callable type. The shared
     /// profile follows field projections; adapters only recognize native type
     /// grammar or reviewed named callable aliases.
     fn declared_callable_cost(&self, declared_type: &str) -> Option<String> {
-        self.stdlib_language().and_then(|language| {
-            configured_callable_type_cost(language, declared_type)
-        })
+        self.stdlib_language()
+            .and_then(|language| configured_callable_type_cost(language, declared_type))
     }
 
     /// Return a cost only when the adapter recognizes a language/runtime

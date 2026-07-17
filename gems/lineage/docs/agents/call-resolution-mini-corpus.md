@@ -649,6 +649,70 @@ targets plus three downstream call-result targets. It is worth keeping, but its
 TypeScript dispatch remain measurement-only until access/template/structural
 semantics have exact language oracles.
 
+### Kotlin, PHP, and Swift SCIP follow-up
+
+The shared importer now accepts both legacy compact ranges and SCIP 0.9 typed
+ranges, including protobuf JSON's omitted zero-valued coordinates. This was
+required for current `scip-java`: decoding its Kotlin index with the old 0.6.1
+CLI silently removed every occurrence range and made a valid index appear to
+have zero coverage. Language adapters only classify their producer's symbol
+grammar and standard-library identity; operation costs remain in reviewed YAML.
+
+The fixed production corpora are:
+
+| Language | Repository | Commit |
+| --- | --- | --- |
+| Kotlin | `JakeWharton/picnic` | `5105608d4dc21665c8c7f20950ebc2ae43a1e7b4` |
+| Kotlin | `Kotlin/kotlinx-benchmark` | `a685e02804bbae9f71a3dc48db7f890aaa02e70c` |
+| PHP | `nikic/FastRoute` | `1c961398bef1ff6ecd8b273bef651d7afe90312b` |
+| PHP | `ramsey/uuid` | `da5b521600a707d2dd097598464bd3090de850f5` |
+| Swift | `apple/swift-argument-parser` | `8d220407756534854cd2d9e1244955befa9577eb` |
+| Swift | `pointfreeco/swift-tagged` | `6a8517578035408b6c14ccba00ee990a1435515c` |
+
+Kotlin used `scip-java` 0.13.1 and SCIP CLI 0.9.0. PHP used
+`davidrjenni/scip-php` at `71a5b117ec4c5dd2af302e363410e604e5df309e`.
+The Kotlin producer is compiler-version coupled: these revisions deliberately
+use Kotlin 2.2.0, and `kotlinx-benchmark` required excluding Gradle's older
+`buildSrc` compiler from plugin injection. The PHP indexer must run with its
+own Composer dependency graph; loading a target repository's development
+dependencies into the same process can replace its `nikic/php-parser` classes.
+
+| Corpus | Eligible calls | Baseline accounted | SCIP accounted | Compiler identity | Exact project target |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Kotlin / Picnic | 74 | 13 (17.57%) | 65 (87.84%) | 72 (97.30%) | 30 (40.54%) |
+| Kotlin / kotlinx-benchmark | 283 | 25 (8.83%) | 194 (68.55%) | 267 (94.35%) | 83 (29.33%) |
+| Kotlin combined | 357 | 38 (10.64%) | 259 (72.55%) | 339 (94.96%) | 113 (31.65%) |
+| PHP / FastRoute | 177 | 43 (24.29%) | 96 (54.24%) | 149 (84.18%) | 45 (25.42%) |
+| PHP / UUID | 972 | 299 (30.76%) | 532 (54.73%) | 709 (72.94%) | 237 (24.38%) |
+| PHP combined | 1,149 | 342 (29.77%) | 628 (54.66%) | 858 (74.67%) | 282 (24.54%) |
+
+The resulting complete symbolic Espalier bounds also improve; no known function
+became unknown in any measured corpus. Parametric callback bounds retain `C`
+and `S` rather than pretending callback bodies are constant.
+
+| Corpus | Functions | Baseline known Big-O | SCIP known Big-O | Net gain |
+| --- | ---: | ---: | ---: | ---: |
+| Kotlin / Picnic | 106 | 84 (79.25%) | 103 (97.17%) | +19 / +17.92 points |
+| Kotlin / kotlinx-benchmark | 132 | 75 (56.82%) | 91 (68.94%) | +16 / +12.12 points |
+| Kotlin combined | 238 | 159 (66.81%) | 194 (81.51%) | +35 / +14.71 points |
+| PHP / FastRoute | 94 | 37 (39.36%) | 47 (50.00%) | +10 / +10.64 points |
+| PHP / UUID | 395 | 128 (32.41%) | 174 (44.05%) | +46 / +11.65 points |
+| PHP combined | 489 | 165 (33.74%) | 221 (45.19%) | +56 / +11.45 points |
+
+Swift is not yet an end-to-end SCIP result. The official SCIP indexer list has
+no Swift producer. The only located community IndexStore converter,
+`Fostonger/SwiftSCIPIndex` at `88c222d17c3649083eb226b4459643d59dfb3d40`,
+requires Xcode DerivedData on macOS, writes custom JSON or SQLite rather than a
+binary SCIP protobuf, and does not consistently include containing-type or
+overload identity in method symbols. FactMine accepts and tests that JSON shape,
+but treating it as compiler-quality identity would be unsound. Baseline-only
+measurements are 109/966 (11.28%) accounted calls and 33/284 (11.62%) known
+Big-O for `swift-argument-parser`, and 1/18 (5.56%) accounted calls and 4/17
+(23.53%) known Big-O for `swift-tagged`. A trustworthy Swift result requires a
+producer from SourceKit-LSP/IndexStoreDB that preserves USRs, owners, overloads,
+and standard SCIP serialization; it does not require more language logic in
+the shared importer.
+
 ## By Language
 
 These are weighted by eligible call sites, not averages of repository rates.
