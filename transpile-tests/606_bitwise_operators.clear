@@ -1,0 +1,12 @@
+FN main() RETURNS Void ->
+  shift = 2;
+  ASSERT(10 XOR 3) == 9, "XOR";
+  ASSERT(10 BIT_AND 3) == 2, "BIT_AND";
+  ASSERT(10 BIT_OR 3) == 11, "BIT_OR";
+  ASSERT(1 << shift) == 4, "runtime left shift";
+  ASSERT(8 >> shift) == 2, "runtime right shift";
+  ASSERT(1 << 2 + 1) == 8, "arithmetic binds before shift";
+  ASSERT(1 BIT_OR 6 XOR 3 BIT_AND 7) == 5,
+  "BIT_AND binds before XOR, which binds before BIT_OR";
+  ASSERT 1 BIT_OR 2 == 3, "bitwise operators bind before comparisons";
+END

@@ -1023,6 +1023,30 @@ END
 | `[~]T` | Finite stream | `s: [~]Int64 = BG STREAM { YIELD 1; }` |
 | `Tuple<A, B>` | Positional product | `p = Tuple{"ok", 1_i64}; p._0` |
 
+## Bitwise and Shift Operators
+
+CLEAR spells binary bitwise operations as words so they cannot be confused with
+mutable borrows (`&value`) or pipelines (`|>`). Shifts retain the conventional
+symbols:
+
+| Operator | Meaning | Example |
+|---|---|---|
+| `XOR` | Bitwise exclusive OR | `flags XOR mask` |
+| `BIT_AND` | Bitwise AND | `flags BIT_AND mask` |
+| `BIT_OR` | Bitwise OR | `flags BIT_OR mask` |
+| `<<` | Shift left | `value << amount` |
+| `>>` | Shift right | `value >> amount` |
+
+All five operators require integer operands. From tightest to loosest, their
+precedence is shifts, `BIT_AND`, `XOR`, then `BIT_OR`. Arithmetic binds more
+tightly than shifts; comparisons and boolean `AND`/`OR` bind more loosely.
+
+```ruby clear
+read = permissions BIT_AND 0b100_i64 != 0_i64;
+packed = (kind << 8_i64) BIT_OR payload;
+toggled = flags XOR 0b0011_i64;
+```
+
 ## Integer Overflow Operators
 
 CLEAR uses fixed-width integers (Int64, Int32, etc.) that can overflow. Three tiers of arithmetic operators control what happens on overflow:

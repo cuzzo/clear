@@ -52,6 +52,34 @@ RSpec.describe Type, "binary operator type checking" do
     expect_compile_expr("TRUE OR FALSE")
   end
 
+  it "accepts integer bitwise and shift operators" do
+    expect_compile_expr("5_i64 XOR 3_i64", returns: "Int64")
+    expect_compile_expr("5_i64 BIT_AND 3_i64", returns: "Int64")
+    expect_compile_expr("5_i64 BIT_OR 2_i64", returns: "Int64")
+    expect_compile_expr("1_i64 << 3_i64", returns: "Int64")
+    expect_compile_expr("8_i64 >> 2_i64", returns: "Int64")
+  end
+
+  it "rejects non-integer bitwise and shift operands" do
+    expect_reject_expr("1.0 XOR 2.0", returns: "Float64")
+    expect_reject_expr("TRUE BIT_AND FALSE")
+    expect_reject_expr("1_i64 << 2.0", returns: "Int64")
+  end
+
+  it "uses arithmetic, shift, bitwise, comparison, AND, then OR precedence" do
+    ast = annotate(<<~CLEAR)
+      FN main() RETURNS Bool ->
+        RETURN TRUE OR FALSE AND 1_i64 BIT_OR 6_i64 XOR 3_i64 BIT_AND 7_i64 << 1_i64 + 1_i64 == 7_i64;
+      END
+    CLEAR
+    fn = T.cast(ast.statements.first, AST::FunctionDef)
+    returned = T.cast(fn.body.first, AST::ReturnNode)
+    root = T.cast(returned.value, AST::BinaryOp)
+
+    expect(root.op).to eq(:OR)
+    expect(T.cast(root.right, AST::BinaryOp).op).to eq(:AND)
+  end
+
   it "rejects nonnumeric arithmetic operands" do
     expect_reject_expr('"a" - "b"', returns: "String")
     expect_reject_expr('TRUE * "b"', returns: "Float64")
@@ -103,6 +131,7 @@ RSpec.describe Type, "binary operator type checking" do
     expect(Type.binary_op(:OR, Type.new(:Bool), auto).type.resolved).to eq(:Bool)
     expect(Type.binary_op(:ADD, auto, Type.new(:Int64)).type.auto?).to be(true)
     expect(Type.binary_op(:MUL, Type.new(:Int64), auto).type.auto?).to be(true)
+    expect(Type.binary_op(:XOR, Type.new(:Int64), auto).type.auto?).to be(true)
     expect(Type.binary_op(:UNKNOWN, Type.new(:Int64), Type.new(:Int64)).error).to eq("Unknown operator: UNKNOWN")
 
     expect(Type.binary_op(:AND, Type.new(:Bool), Type.new(:Bool)).type.resolved).to eq(:Bool)
@@ -139,5 +168,9 @@ RSpec.describe Type, "binary operator type checking" do
     expect(Type.binary_op(:MUL, Type.new(:Any), Type.new(:Any)).type.resolved).to eq(:Any)
     expect(Type.binary_op(:SUB, Type.new(:String), Type.new(:String)).error).to include("numeric")
     expect(Type.binary_op(:ADD, Type.new(:Bool), Type.new(:Counter)).error).to eq("Cannot add types: Bool and Counter")
+    expect(Type.binary_op(:BIT_OR, Type.new(:Int8), Type.new(:Int64)).type.resolved).to eq(:Int64)
+    expect(Type.binary_op(:SHL, Type.new(:Int8), Type.new(:Int64)).type.resolved).to eq(:Int8)
+    expect(Type.binary_op(:BIT_AND, Type.new(:Any), Type.new(:Int64)).type.resolved).to eq(:Any)
+    expect(Type.binary_op(:SHR, Type.new(:String), Type.new(:Int64)).error).to include("requires integer operands")
   end
 end

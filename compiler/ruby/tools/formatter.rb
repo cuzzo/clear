@@ -74,7 +74,7 @@ class Formatter
   ].to_set.freeze
 
   EXPR_START_OPS = %w[
-    == != <= >= && || ** += -= *= /= :: -> |>
+    == != <= >= << >> && || ** += -= *= /= :: -> |>
     .. ..< ..<= ..= %* %+ %- !* !+ !-
   ].to_set.freeze
 
@@ -181,7 +181,7 @@ class Formatter::FormatLexer
       when @s.peek(1) == '"'
         raw = consume_string
         push(:STRING, raw, sl, sc)
-      when m = @s.scan(/->|\|>|!!|==|!=|>=|<=|&&|\|\||\*\*|\$\+|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
+      when m = @s.scan(/->|\|>|!!|==|!=|>=|<=|>>|<<|&&|\|\||\*\*|\$\+|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
         push(:OP, m, sl, sc)
       when m = @s.scan(/[=+\-*\/<>&|!.,;(){}\[\]:?~%]/)
         push(:SYM, m, sl, sc)
@@ -2871,7 +2871,10 @@ class Formatter::Emitter
     i = start_idx
     while i < line.length
       t = line[i]
-      if t.type == :SYM
+      if t.type == :OP && t.raw == '>>'
+        depth -= 2
+        return i if depth <= 0
+      elsif t.type == :SYM
         case t.raw
         when '<' then depth += 1
         when '>'
@@ -3080,7 +3083,7 @@ class Formatter::Emitter
         return false
       end
       # `Bar>` — no space before the generic close.
-      if b_is_generic && b.raw == '>'
+      if b_is_generic && (b.raw == '>' || b.raw == '>>')
         return false
       end
     end

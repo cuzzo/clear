@@ -685,6 +685,17 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("(x > 10.0)")
     end
 
+    it "lowers bitwise operators directly and casts runtime shift counts" do
+      left = make_id("bits", full_type: :Int64)
+      right = make_id("amount", full_type: :Int64)
+
+      expect(emit(lowering.lower(make_binop(left, :BIT_AND, right)))).to eq("(bits & amount)")
+      expect(emit(lowering.lower(make_binop(left, :BIT_OR, right)))).to eq("(bits | amount)")
+      expect(emit(lowering.lower(make_binop(left, :XOR, right)))).to eq("(bits ^ amount)")
+      expect(emit(lowering.lower(make_binop(left, :SHL, right)))).to eq("(bits << @intCast(amount))")
+      expect(emit(lowering.lower(make_binop(left, :SHR, right)))).to eq("(bits >> @intCast(amount))")
+    end
+
     it "lowers left-optional equality to a nil-safe payload comparison" do
       left = make_id("maybe", full_type: :"?Int64")
       right = make_lit(:INT64, 1, full_type: :Int64)

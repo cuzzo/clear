@@ -1263,6 +1263,8 @@ class Type
   EQUALITY_OPS = [:EQ, :NEQ].freeze
   ORDERING_OPS = [:LT, :GT, :LTE, :GTE].freeze
   LOGICAL_OPS = [:AND, :OR].freeze
+  BITWISE_OPS = [:XOR, :BIT_AND, :BIT_OR].freeze
+  SHIFT_OPS = [:SHL, :SHR].freeze
   BOOL_RESULT_OPS = T.let((EQUALITY_OPS + ORDERING_OPS).freeze, T::Array[Symbol])
   NUMBER_RESULT_OPS = [:SUB, :MUL, :DIV, :POW, :MOD, :WRAP_SUB, :WRAP_MUL, :CHECK_SUB, :CHECK_MUL]
 
@@ -1299,6 +1301,16 @@ class Type
       op == :CHECK_MUL
   end
 
+  sig { params(op: Symbol).returns(T::Boolean) }
+  def self.bitwise_op?(op)
+    BITWISE_OPS.include?(op)
+  end
+
+  sig { params(op: Symbol).returns(T::Boolean) }
+  def self.shift_op?(op)
+    SHIFT_OPS.include?(op)
+  end
+
   # Resolves the result type of a binary operation given two operand types.
   # Returns a BinaryOpResult with type, optional coercions, and storage.
   sig { params(op: Symbol, left_type: Type, right_type: Type).returns(BinaryOpResult) }
@@ -1329,6 +1341,7 @@ class Type
     return resolve_logical_op(op, left_type, right_type) if logical_op?(op)
     return resolve_equality_op(op, left_type, right_type) if equality_op?(op)
     return resolve_ordering_op(op, left_type, right_type) if ordering_op?(op)
+    return resolve_integer_op(op, left_type, right_type, preserve_left: shift_op?(op)) if bitwise_op?(op) || shift_op?(op)
     return resolve_numeric_op(left_type, right_type) if number_result_op?(op) || op == :WRAP_ADD || op == :CHECK_ADD
     return resolve_concat_op(t_left, t_right, left_type, right_type) if op == :CONCAT
     return resolve_add_op(t_left, t_right, left_type, right_type) if op == :ADD
@@ -1381,6 +1394,23 @@ class Type
   def self.resolve_ordering_op(op, left_type, right_type)
     return BinaryOpResult.new(type: Type.new(:Bool)) if ordered_compatible?(left_type, right_type)
     BinaryOpResult.new(error: "Operator #{op} requires ordered operands, got #{left_type.resolved} and #{right_type.resolved}")
+  end
+
+  sig { params(op: Symbol, left_type: Type, right_type: Type, preserve_left: T::Boolean).returns(BinaryOpResult) }
+  def self.resolve_integer_op(op, left_type, right_type, preserve_left:)
+    if left_type.any? || right_type.any?
+      return BinaryOpResult.new(type: Type.new(:Any))
+    end
+
+    unless left_type.integer? && right_type.integer?
+      return BinaryOpResult.new(
+        error: "Operator #{op} requires integer operands, got #{left_type.resolved} and #{right_type.resolved}"
+      )
+    end
+
+    return BinaryOpResult.new(type: copy_type(left_type)) if preserve_left
+
+    resolve_numeric_op(left_type, right_type)
   end
 
   sig { params(left_type: Type, right_type: Type).returns(T::Boolean) }

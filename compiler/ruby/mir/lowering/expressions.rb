@@ -635,7 +635,12 @@ module MIRLoweringExpressions
   sig { params(plan: BinaryOperationPlan).returns(MIR::BinOp) }
   def emit_standard_binary_plan(plan)
     facts = plan.facts
-    MIR::BinOp.new(T.must(plan.op_str), facts.left, facts.right)
+    right = if facts.op == :SHL || facts.op == :SHR
+      MIR::Cast.new(facts.right, nil, :intCast)
+    else
+      facts.right
+    end
+    MIR::BinOp.new(T.must(plan.op_str), facts.left, right)
   end
 
   sig { params(facts: BinaryOperandFacts).returns(MIR::Node) }

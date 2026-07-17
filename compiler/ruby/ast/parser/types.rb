@@ -156,13 +156,13 @@ class ClearParser
       generic_base = base.to_sym
       consume(:CHAR, '<')
       type_args = []
-      until match?(:CHAR, '>')
+      until generic_close?
         argument = parse_type_annotation(migration_root: false)
         type_args << type_annotation_source(argument)
         generic_argument_expressions << argument.shape.expression
         match!(:CHAR, ',')
       end
-      consume(:CHAR, '>')
+      consume_generic_close
       base = "#{base}<#{type_args.join(',')}>"
     end
 
@@ -385,11 +385,11 @@ class ClearParser
     arguments = T.let([], T::Array[TypeExpression])
     if match?(:CHAR, '<')
       consume(:CHAR, '<')
-      until match?(:CHAR, '>')
+      until generic_close?
         arguments << parse_inline_type_expression
         break unless match!(:CHAR, ',')
       end
-      consume(:CHAR, '>')
+      consume_generic_close
     end
     expression = if name == "Tuple"
       TupleTypeExpression.new(items: arguments)

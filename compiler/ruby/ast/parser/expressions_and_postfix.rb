@@ -365,13 +365,17 @@ class ClearParser
     start_token = current
     lhs = parse_unary
 
-    while (op_token = current) && (op_prec = get_precedence(op_token)) && op_prec > precedence
+    while (raw_op_token = current)
+      op_prec = binary_operator_precedence(raw_op_token)
+      break unless op_prec && op_prec > precedence
+      op_token = canonical_binary_operator_token(raw_op_token)
+
       # GUARD CLAUSE: AS is used as a keyword in CAST, and only binds if followed by an alias ($...)
       if op_token.text! == 'AS' && (peek.type == :TYPE_ID || peek.text![0] != '$')
         break
       end
 
-      consume(op_token.type)
+      consume(raw_op_token.type)
       lhs = parse_binary_op(lhs, op_token, op_prec)
     end
 
@@ -379,22 +383,68 @@ class ClearParser
   end
 
   sig { params(token: Lexer::Token).returns(T.nilable(Integer)) }
+  def binary_operator_precedence(token)
+    if token.type == :LEGACY_LOGICAL
+      return token.text! == '&&' ? 5 : 4
+    end
+
+    get_precedence(token)
+  end
+
+  sig { params(token: Lexer::Token).returns(T.nilable(Integer)) }
   def get_precedence(token)
-    return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :LEGACY_LOGICAL || token.type == :SMOOTH || token.type == :OR_ELSE || token.type == :RANGE_EXCL || token.type == :RANGE_INCL
+    return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :SMOOTH || token.type == :OR_ELSE || token.type == :RANGE_EXCL || token.type == :RANGE_INCL
 
     # Precedence levels (higher = tighter binding)
     case token.text!
     when '|>'             then 1
     when 'OR_ELSE', 'AS' then 2
     when '..<', '..<=', '..=' then 3
-    when 'OR', '||'       then 4
-    when 'AND', '&&'      then 5
+    when 'OR'             then 4
+    when 'AND'            then 5
     when 'IS_A', '==', '!=', '<', '>', '<=', '>=' then 6
-    when '+', '$+', '-', '%+', '%-', '!+', '!-' then 7
-    when '*', '/', 'MOD', '%*', '!*'     then 8
-    when '**'             then 9
+    when 'BIT_OR'          then 7
+    when 'XOR'             then 8
+    when 'BIT_AND'         then 9
+    when '<<', '>>'        then 10
+    when '+', '$+', '-', '%+', '%-', '!+', '!-' then 11
+    when '*', '/', 'MOD', '%*', '!*'     then 12
+    when '**'             then 13
     else nil
     end
+  end
+
+  sig { params(token: Lexer::Token).returns(Lexer::Token) }
+  def canonical_binary_operator_token(token)
+    return token unless token.type == :LEGACY_LOGICAL
+
+    legacy = token.text!
+    replacement = legacy == '&&' ? 'AND' : 'OR'
+    fix = Fix.new(
+      description: fix_description(
+        :REPLACE_OPERATOR_TYPO,
+        match: legacy,
+        replace: replacement,
+        label: "Boolean operator (use `#{replacement}`, not `#{legacy}`)",
+      ),
+      confidence: :auto,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: token.line, col: token.column, length: 2),
+        replacement: replacement
+      )]
+    )
+    fixable!(token,
+      code: :OPERATOR_TYPO_SUGGESTION,
+      match: legacy,
+      replace: replacement,
+      category: :syntax,
+      level: :error,
+      fixes: [fix])
+
+    canonical = T.let(token.dup, Lexer::Token)
+    canonical.type = :KEYWORD
+    canonical.value = replacement
+    canonical
   end
 
   sig { params(lhs: AST::Node, op_token: Lexer::Token, op_prec: Integer).returns(AST::Node) }
@@ -422,33 +472,6 @@ class ClearParser
     when 'AND'
       and_rhs = parse_expression(next_prec)
       return AST::BinaryOp.new(op_token, lhs, :AND, and_rhs)
-
-    when '&&', '||'
-      replacement = op_val == '&&' ? 'AND' : 'OR'
-      fix = Fix.new(
-        description: fix_description(
-          :REPLACE_OPERATOR_TYPO,
-          match: op_val,
-          replace: replacement,
-          label: "Boolean operator (use `#{replacement}`, not `#{op_val}`)",
-        ),
-        confidence: :auto,
-        edits: [Edit.new(
-          span: Span.new(file: nil, line: op_token.line, col: op_token.column, length: 2),
-          replacement: replacement
-        )]
-      )
-      fixable!(op_token,
-        code: :OPERATOR_TYPO_SUGGESTION,
-        match: op_val,
-        replace: replacement,
-        category: :syntax,
-        level: :error,
-        fixes: [fix])
-      # In fix-collection mode only, preserve the logical parse shape so the
-      # frontend can collect and apply every migration edit in one pass.
-      rhs = parse_expression(next_prec)
-      return AST::BinaryOp.new(op_token, lhs, op_val == '&&' ? :AND : :OR, rhs)
 
     when 'IS_A'
       is_a_rhs = parse_is_a_rhs
@@ -704,8 +727,8 @@ class ClearParser
       return false unless token
       if token.type == :CHAR && token.value == '<'
         depth += 1
-      elsif token.type == :CHAR && token.value == '>'
-        depth -= 1
+      elsif token.type == :CHAR && (token.value == '>' || token.value == '>>')
+        depth -= token.value == '>>' ? 2 : 1
         if depth == 0
           following = peek_at(offset + 1)
           return !following.nil? && following.type == :CHAR && following.value == end_char
@@ -786,11 +809,11 @@ class ClearParser
         # Generic struct literal: Pair<Number>{ first: 1.0, second: 2.0 }
         consume(:CHAR, '<')
         type_args = []
-        until match?(:CHAR, '>')
+        until generic_close?
           type_args << parse_type_annotation
           match!(:CHAR, ',')
         end
-        consume(:CHAR, '>')
+        consume_generic_close
         return parse_struct_literal(type_token, name, storage, type_args)
       elsif match?(:CHAR, '{') && !match_destructure_brace?
         # Struct literal: User{ id: 1 }

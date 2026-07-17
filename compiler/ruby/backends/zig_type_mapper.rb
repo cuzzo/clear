@@ -26,6 +26,11 @@ module ZigTypeMapper
 
     # Bitwise
     :BITWISE_NOT => "~",
+    :XOR => "^",
+    :BIT_AND => "&",
+    :BIT_OR => "|",
+    :SHL => "<<",
+    :SHR => ">>",
 
     # Special AST nodes you might map to operators
     #:OR_ELSE   => "orelse"

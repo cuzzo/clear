@@ -2521,7 +2521,20 @@ module AST
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
-    attr_accessor :tight
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      @tight = T.let(false, T::Boolean)
+    end
+
+    sig { returns(T::Boolean) }
+    def tight = @tight
+
+    sig { params(value: T::Boolean).void }
+    def tight=(value)
+      @tight = value
+    end
   end
   BreakNode    = Struct.new(:token) do
     include Locatable
@@ -3791,15 +3804,19 @@ module AST
   end
 
   PRECEDENCE_MAP = T.let({
-    8 => precedence_info(ops: ['**'], assoc: :right),
-    7 => precedence_info(ops: ['*', '/', 'MOD'], assoc: :left),
-    6 => precedence_info(ops: ['+', '$+', '-'], assoc: :left),
-    5 => precedence_info(ops: ['==', '!=', '<', '>', '<=', '>='], assoc: :left),
-    4 => precedence_info(ops: ['AND'], assoc: :left),
-    3 => precedence_info(ops: ['OR'], assoc: :left),
-    # LEVEL 1: Both Pipe and fallback live here.
-    # They bind loosely and strictly left-to-right.
-    1 => precedence_info(ops: ['OR_ELSE', '|>', 'AS'], assoc: :left)
+    13 => precedence_info(ops: ['**'], assoc: :right),
+    12 => precedence_info(ops: ['*', '/', 'MOD'], assoc: :left),
+    11 => precedence_info(ops: ['+', '$+', '-'], assoc: :left),
+    10 => precedence_info(ops: ['<<', '>>'], assoc: :left),
+    9 => precedence_info(ops: ['BIT_AND'], assoc: :left),
+    8 => precedence_info(ops: ['XOR'], assoc: :left),
+    7 => precedence_info(ops: ['BIT_OR'], assoc: :left),
+    6 => precedence_info(ops: ['IS_A', '==', '!=', '<', '>', '<=', '>='], assoc: :left),
+    5 => precedence_info(ops: ['AND'], assoc: :left),
+    4 => precedence_info(ops: ['OR'], assoc: :left),
+    3 => precedence_info(ops: ['..<', '..<=', '..='], assoc: :left),
+    2 => precedence_info(ops: ['OR_ELSE', 'AS'], assoc: :left),
+    1 => precedence_info(ops: ['|>'], assoc: :left)
   }, T::Hash[Integer, PrecedenceInfo])
   MAX_PRECEDENCE = T.let(T.must(PRECEDENCE_MAP.keys.max), Integer)
 
@@ -3816,6 +3833,11 @@ module AST
     :LTE => :<=,
     :GTE => :>=,
     :BITWISE_NOT => :~,
+    :XOR => :^,
+    :BIT_AND => :&,
+    :BIT_OR => :|,
+    :SHL => :<<,
+    :SHR => :>>,
   }, T::Hash[Symbol, Symbol])
 
   # Canonical definitions are in Type class. These aliases maintain backward compat.
@@ -3842,6 +3864,11 @@ module AST
     'MOD' => :MOD,
     'OR_ELSE' => :OR_ELSE,
     '~' => :BITWISE_NOT,
+    'XOR' => :XOR,
+    'BIT_AND' => :BIT_AND,
+    'BIT_OR' => :BIT_OR,
+    '<<' => :SHL,
+    '>>' => :SHR,
     'AS' => :BIND_VAR,
     '%+' => :WRAP_ADD,
     '%-' => :WRAP_SUB,

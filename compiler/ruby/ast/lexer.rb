@@ -89,7 +89,7 @@ class Lexer
       CAST AS
       STRUCT ENUM UNION PROTOCOL IMPLEMENTATION TRUE FALSE NIL Auto
       ASSERT RAISE CATCH EXIT DIE PASS PRUNE
-      MOD AND OR OR_ELSE
+      MOD AND OR OR_ELSE XOR BIT_AND BIT_OR
       REQUIRE
       SELECT WHERE INDEX REDUCE ORDER_BY LIMIT SKIP UNNEST DISTINCT EACH TAP FIND ANY ALL COUNT SUM AVERAGE MIN MAX CONCURRENT SHARD TAKE_WHILE WINDOW JOIN RECOVER COLLECT
       GIVE TAKES COPY MOVE CLONE SHARE LINK RESOLVE FREEZE
@@ -158,6 +158,8 @@ class Lexer
       when @s.scan(/OR_ELSE\b/) then add(:OR_ELSE, 'OR_ELSE', start_col)
       when @s.scan(/!!/) then add(:CHAR, '!!', start_col)
       when @s.scan(/==/) then add(:CHAR, '==', start_col)
+      when @s.scan(/>>/) then add(:CHAR, '>>', start_col)
+      when @s.scan(/<</) then add(:CHAR, '<<', start_col)
       when @s.scan(/>=/) then add(:CHAR, '>=', start_col)
       when @s.scan(/<=/) then add(:CHAR, '<=', start_col)
       when @s.scan(/!=/) then add(:CHAR, '!=', start_col)
