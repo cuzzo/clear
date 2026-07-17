@@ -1,0 +1,30 @@
+# Generic owner parameters are inherited by METHOD, while method-local
+# parameters remain independent. Equal method names on different owners do
+# not conflict, and dot calls lower to the correct owner-qualified function.
+
+STRUCT Box<T> { value: T }
+STRUCT Label { value: String }
+
+IMPLEMENTATION Box<T> {
+  METHOD get(self) RETURNS T -> RETURN self.value; END
+  METHOD replace<N>(self, value: N) RETURNS Box<N> ->
+    RETURN Box<N>{ value: value };
+  END
+}
+
+IMPLEMENTATION Label {
+  METHOD get(self) RETURNS String -> RETURN self.value; END
+}
+
+FN main() RETURNS Void ->
+  number = Box<Int64>{ value: 41_i64 };
+  changed = number.replace(TRUE);
+  label = Label{ value: "owner" };
+  ASSERT number.get() == 41_i64;
+  ASSERT changed.get() == TRUE;
+  ASSERT label.get() == "owner";
+  print("OK");
+END
+
+# expect:
+# OK

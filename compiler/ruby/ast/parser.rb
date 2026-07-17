@@ -276,6 +276,8 @@ class ClearParser
     rule(:KEYWORD, 'IF', action: :parse_if_statement),
     rule(:KEYWORD, 'COMPTIME', action: :parse_comptime_statement),
     rule(:KEYWORD, 'STRUCT', action: :parse_struct_def),
+    rule(:KEYWORD, 'PROTOCOL', action: :parse_protocol_def),
+    rule(:KEYWORD, 'IMPLEMENTATION', action: :parse_implementation_def),
     rule(:KEYWORD, 'ENUM', action: :parse_enum_def),
     rule(:KEYWORD, 'UNION', action: :parse_union_def),
     rule(:KEYWORD, 'WHILE', action: :parse_while_loop),
@@ -378,6 +380,7 @@ class ClearParser
     rule(:DOUBLE_COLON, '::', action: :parse_static_call_suffix),
     rule(:CHAR, '.', action: :parse_dot_suffix),
     rule(:CHAR, '(', action: :parse_func_call_suffix),
+    rule(:CHAR, '!!', action: :parse_raise_suffix),
     rule(:CHAR, '?', action: :parse_optional_unwrap_suffix),
     rule(:KEYWORD, 'EXISTS', action: :parse_exists_suffix),
     rule(:KEYWORD, 'IS_OK', action: :parse_is_ok_suffix),
@@ -425,9 +428,9 @@ class ClearParser
     '@alwaysMutable'  => sigil_attrs(dim: :sync, val: :always_mutable),
   }.freeze, SigilTable)
 
-  ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @node @locked @writeLocked @link @boxed @indirect].freeze
-  ELEMENT_SYNC_TOKENS = %w[@locked @writeLocked locked writeLocked].freeze
-  CAPABILITY_TOKENS = %w[@multiowned @shared @node @split @locked @writeLocked @local @versioned @atomic @boxed @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
+  ELEMENT_CAPABILITY_TOKENS = %w[@shared @multiowned @node @locked @writeLocked @alwaysMutable @link @boxed @indirect].freeze
+  ELEMENT_SYNC_TOKENS = %w[@locked @writeLocked @alwaysMutable locked writeLocked alwaysMutable].freeze
+  CAPABILITY_TOKENS = %w[@multiowned @shared @node @split @locked @writeLocked @alwaysMutable @local @versioned @atomic @boxed @indirect @link @raw @symbol @c @size @list @pool @set @soa @sharded @observable].freeze
   CAPABILITY_OWNERSHIP_VALUES = T.let({
     "@multiowned" => :multiowned,
     "@shared" => :shared,
@@ -438,11 +441,14 @@ class ClearParser
   CAPABILITY_SYNC_VALUES = T.let({
     "@locked" => :locked,
     "@writeLocked" => :write_locked,
+    "@alwaysMutable" => :always_mutable,
     "@local" => :local,
     "@versioned" => :versioned,
     "@atomic" => :atomic,
     "@raw" => :raw,
     "@symbol" => :symbol,
+    "@c" => :c,
+    "@size" => :size,
   }.freeze, T::Hash[String, Symbol])
   CAPABILITY_COLLECTION_VALUES = T.let({
     "@list" => :list,
@@ -504,7 +510,7 @@ class ClearParser
   private :parse_comma_seq
   private :parse_error_selector
   private :parse_error_selectors
-  private :parse_generic_type_param_names
+  private :parse_generic_type_params
   private :parse_generic_type_param_symbols
   private :parse_lock_action
   private :parse_lock_error_clause

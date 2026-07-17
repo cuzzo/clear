@@ -34,7 +34,7 @@ FN main() RETURNS Void ->
   MUTABLE seed = 42;
   FOR i IN (0 ..< n) DO
     seed = lcg(seed);
-    seeds.append(seed);
+    &seeds.append(seed);
   END
 
   # Phase 1: Build histogram via SHARD with integer keys — zero string allocation.

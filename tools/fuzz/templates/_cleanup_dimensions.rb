@@ -39,7 +39,7 @@ module CleanupDims
   # Emit a "use" statement that exercises the allocated value.
   def self.use_stmt(kind, varname: "v", idx_expr: "1_i64")
     case kind
-    when :heap_list           then "#{varname}.append(#{idx_expr});"
+    when :heap_list           then "&#{varname}.append(#{idx_expr});"
     when :heap_string         then "#{varname} = #{varname} $+ #{idx_expr}.toString();"
     when :frame_string_concat then "_ = #{varname}.length();"
     when :frame_list          then "_ = #{varname}[0_i64];"
@@ -68,6 +68,6 @@ module CleanupDims
   end
 
   def self.outer_append(kind, outer_var, value_var)
-    "#{outer_var}.append(#{value_var});"
+    "&#{outer_var}.append(#{value_var});"
   end
 end

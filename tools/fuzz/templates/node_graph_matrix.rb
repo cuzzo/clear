@@ -19,14 +19,14 @@ FuzzGenerator.register(:node_graph_matrix, cells: NODE_GRAPH_CELLS) do |p|
       MUTABLE root: Node@node = Node{ id: 1, name: COPY "root" };
           MUTABLE i = 0_i64;
           WHILE i < 5000_i64 DO
-              root.children.append(Node{ id: i + 2_i64, name: i.toString() });
+              &root.children.append(Node{ id: i + 2_i64, name: i.toString() });
               i += 1_i64;
           END
           ASSERT root.children.length() == 5000_i64;
           ASSERT root.children[4999]?.id == 5001_i64;
     CLEAR
   when :existing_handle
-    "MUTABLE root: Node@node = Node{ id: 1, name: COPY \"root\" }; root.children.append(Node{ id: 2, name: COPY \"child\" }); IF root.children[0] EXISTS AS child THEN root.left = child; END ASSERT root.left?.id == 2;"
+    "MUTABLE root: Node@node = Node{ id: 1, name: COPY \"root\" }; &root.children.append(Node{ id: 2, name: COPY \"child\" }); IF root.children[0] EXISTS AS child THEN root.left = child; END ASSERT root.left?.id == 2;"
   when :nested_scope
     "MUTABLE root: Node@node = Node{ id: 1, name: COPY \"outer\" }; IF TRUE THEN root.left = Node{ id: 2, name: COPY \"inner\" }; END ASSERT root.left?.name == \"inner\";"
   end

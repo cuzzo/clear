@@ -8,8 +8,8 @@ FN expectedSquares() RETURNS !String ->
   MUTABLE lines: []String = [];
   MUTABLE i = 0;
   WHILE i <= 100 DO
-    lines.append((i * i).toString());
-    lines.append("\n");
+    &lines.append((i * i).toString());
+    &lines.append("\n");
     i += 1;
   END
   RETURN lines.join("");

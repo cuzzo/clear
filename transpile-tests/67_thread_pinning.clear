@@ -25,9 +25,9 @@ FN main() RETURNS Void ->
     # 2. @pool pipeline operators
     # -------------------------
     MUTABLE pool: [Pool(100)]Item = [];
-    id1: Id<Item> = pool.insert(Item{ value: 10.0 });
-    id2: Id<Item> = pool.insert(Item{ value: 20.0 });
-    id3: Id<Item> = pool.insert(Item{ value: 30.0 });
+    id1: Id<Item> = &pool.insert(Item{ value: 10.0 });
+    id2: Id<Item> = &pool.insert(Item{ value: 20.0 });
+    id3: Id<Item> = &pool.insert(Item{ value: 30.0 });
 
     # SUM of a pool field
     total = pool |> SUM _.value;
@@ -55,7 +55,7 @@ FN main() RETURNS Void ->
     ASSERT mx == 30.0, "pool MAX should be 30";
 
     # After removing one slot, SUM reflects only live items
-    pool.remove(id1);
+    &pool.remove(id1);
     total2 = pool |> SUM _.value;
     ASSERT total2 == 50.0, "pool SUM after remove should be 50";
 
@@ -63,10 +63,10 @@ FN main() RETURNS Void ->
     # 3. @list:sharded pipeline operators
     # -------------------------
     MUTABLE slist: []@sharded(2) Float64 = [];
-    append(slist, 1.0);
-    append(slist, 2.0);
-    append(slist, 3.0);
-    append(slist, 4.0);
+    append(&slist, 1.0);
+    append(&slist, 2.0);
+    append(&slist, 3.0);
+    append(&slist, 4.0);
 
     sl_sum = slist |> SUM _;
     ASSERT sl_sum == 10.0, "sharded list SUM should be 10";
@@ -84,8 +84,8 @@ FN main() RETURNS Void ->
     # 4. @list:sharded EACH (parallel)
     # -------------------------
     MUTABLE slist2: []@sharded(2) Item = [];
-    append(slist2, Item{ value: 5.0 });
-    append(slist2, Item{ value: 6.0 });
+    append(&slist2, Item{ value: 5.0 });
+    append(&slist2, Item{ value: 6.0 });
     # EACH runs N parallel fibers, one per shard (side-effect mutation)
     slist2 |> EACH { _.value = 0.0; };
 

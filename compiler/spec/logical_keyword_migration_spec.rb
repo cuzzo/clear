@@ -36,13 +36,22 @@ RSpec.describe "AND/OR logical keyword migration" do
 
     FixCollector.enable!
     begin
-      parse(source)
+      ast = parse(source)
       edits = FixCollector.drain.flat_map { |finding| finding.fixes.fetch(0).edits }
-      expect(edits.map(&:replacement)).to include("AND", "OR")
+      expect(edits.map(&:replacement)).to eq(["AND", "OR"])
       expect(edits.map { |edit| edit.span.length }).to all(eq(2))
+      expr = ast.statements.first.body.first.value
+      expect(expr.op).to eq(:OR)
+      expect(expr.left.op).to eq(:AND)
     ensure
       FixCollector.disable!
     end
+  end
+
+  it "rejects || specifically instead of accepting it as an OR grammar rule" do
+    source = "FN main() RETURNS Bool -> RETURN TRUE || FALSE; END"
+
+    expect { parse(source) }.to raise_error(ParserError, /did you mean `OR`/)
   end
 
   it "short-circuits both operators" do

@@ -7,7 +7,7 @@ UNION Value {
     Str: String
 }
 
-FN storeCopy!(name: String, val: Value, MUTABLE map: {String}Value) RETURNS !Void ->
+FN storeCopy(name: String, val: Value, MUTABLE map: {String}Value) RETURNS !Void ->
     map[name] = COPY val;
     RETURN;
 END
@@ -16,7 +16,7 @@ FN main() RETURNS !Void ->
     MUTABLE map: {String}Value = {};
     payload = "owned-" $+ "payload";
 
-    storeCopy!("out", Value{ Str: COPY payload }, map) OR_ELSE RAISE;
+    storeCopy("out", Value{ Str: COPY payload }, &map) OR_ELSE RAISE;
     got = map["out"] OR_ELSE Value.Nil;
 
     PARTIAL MATCH got START

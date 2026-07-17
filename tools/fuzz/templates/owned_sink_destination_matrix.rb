@@ -60,9 +60,9 @@ def osd_build_value(shape, name = "v")
   when :struct_owned
     "#{name}: Box = Box{ label: COPY \"abc\" };"
   when :list_owned
-    "MUTABLE #{name}: Int64[]@list = [];\n    #{name}.append(1_i64);\n    #{name}.append(2_i64);\n    #{name}.append(3_i64);"
+    "MUTABLE #{name}: Int64[]@list = [];\n    &#{name}.append(1_i64);\n    &#{name}.append(2_i64);\n    &#{name}.append(3_i64);"
   when :string_list_owned
-    "MUTABLE #{name}: String[]@list = List[];\n    #{name}.append(COPY \"a\");\n    #{name}.append(COPY \"b\");\n    #{name}.append(COPY \"c\");"
+    "MUTABLE #{name}: String[]@list = List[];\n    &#{name}.append(COPY \"a\");\n    &#{name}.append(COPY \"b\");\n    &#{name}.append(COPY \"c\");"
   when :union_owned
     "#{name}: Val = Val{ Items: mkStringList() };"
   when :nested_owned
@@ -97,8 +97,8 @@ def osd_source_setup(source, shape)
     init = case shape
            when :string then 'MUTABLE v: String = COPY "seed";'
            when :struct_owned then 'MUTABLE v: Box = Box{ label: COPY "seed" };'
-           when :list_owned then "MUTABLE v: Int64[]@list = [];\n    v.append(0_i64);"
-           when :string_list_owned then "MUTABLE v: String[]@list = List[];\n    v.append(COPY \"seed\");"
+           when :list_owned then "MUTABLE v: Int64[]@list = [];\n    &v.append(0_i64);"
+           when :string_list_owned then "MUTABLE v: String[]@list = List[];\n    &v.append(COPY \"seed\");"
            when :union_owned then "MUTABLE v: Val = Val{ Text: COPY \"seed\" };"
            when :nested_owned then "MUTABLE v: Nest = Nest{ items: mkStringList() };"
            end
@@ -114,7 +114,7 @@ def osd_source_setup(source, shape)
   when :field_borrow
     ["src: SrcHolder = SrcHolder{ value: #{osd_return_expr(shape)} };", "src.value"]
   when :index_borrow
-    ["MUTABLE srcs: #{osd_type(shape)}[]@list = [];\n    srcs.append(#{osd_return_expr(shape)});", "srcs[0_i64]"]
+    ["MUTABLE srcs: #{osd_type(shape)}[]@list = [];\n    &srcs.append(#{osd_return_expr(shape)});", "srcs[0_i64]"]
   end
 end
 
@@ -135,17 +135,17 @@ FuzzGenerator.register(:owned_sink_destination_matrix, cells: OWNED_SINK_DESTINA
   list_helper = %i[list_owned string_list_owned union_owned nested_owned].include?(p[:shape]) ? <<~CHT : ""
     FN mkList() RETURNS Int64[]@list ->
         MUTABLE xs: Int64[]@list = [];
-        xs.append(1_i64);
-        xs.append(2_i64);
-        xs.append(3_i64);
+        &xs.append(1_i64);
+        &xs.append(2_i64);
+        &xs.append(3_i64);
         RETURN xs;
     END
 
     FN mkStringList() RETURNS String[]@list ->
         MUTABLE xs: String[]@list = List[];
-        xs.append(COPY "a");
-        xs.append(COPY "b");
-        xs.append(COPY "c");
+        &xs.append(COPY "a");
+        &xs.append(COPY "b");
+        &xs.append(COPY "c");
         RETURN xs;
     END
   CHT
@@ -213,7 +213,7 @@ FuzzGenerator.register(:owned_sink_destination_matrix, cells: OWNED_SINK_DESTINA
       FN main() RETURNS Void ->
           #{setup}
           MUTABLE out: #{ty}[]@list = [];
-          out.append(#{expr});
+          &out.append(#{expr});
           ASSERT out.length() == 1_i64, "owned sink list";
           RETURN;
       END

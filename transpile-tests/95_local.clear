@@ -14,7 +14,7 @@ FN main() RETURNS Void ->
     MUTABLE futures: ~Void[]@list = [];
     MUTABLE i: Int64 = 0;
     WHILE i < 4 DO
-        append(futures, BG {
+        append(&futures, BG {
             c.value = c.value + 1;
         });
         i = i + 1;

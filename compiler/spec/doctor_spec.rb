@@ -323,7 +323,7 @@ RSpec.describe Doctor do
         STRUCT Counter { value: Int64 }
         STRUCT Cfg { host: String, port: Int64 }
 
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
           c = Counter{ value: 0 } @shared:locked;
           WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
 
@@ -353,7 +353,7 @@ RSpec.describe Doctor do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "source.clear"), <<~CLEAR)
         STRUCT Cfg { host: String, port: Int64 }
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
           MUTABLE cfg = Cfg{ host: "a", port: 1 } @shared:writeLocked;
           WITH EXCLUSIVE cfg AS view { view = Cfg{ host: "b", port: 2 }; }
           RETURN;
@@ -372,7 +372,7 @@ RSpec.describe Doctor do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "source.clear"), <<~CLEAR)
         STRUCT Cfg { host: String, port: Int64 }
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
           cfg = Cfg{ host: "a", port: 1 } @shared:locked;
           WITH EXCLUSIVE cfg AS view { _ = view.host; }
           RETURN;
@@ -389,7 +389,7 @@ RSpec.describe Doctor do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "source.clear"), <<~CLEAR)
         STRUCT Cfg { host: String, port: Int64 }
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
           MUTABLE cfg = Cfg{ host: "a", port: 1 } @shared:versioned;
           WITH SNAPSHOT cfg AS MUTABLE view { view = Cfg{ host: "b", port: 2 }; } ON MvccConflict RAISE
           RETURN;

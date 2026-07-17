@@ -1,0 +1,17 @@
+EXTERN FROM HEADER "fixture.h"
+  LINK "clear_c_fixture"
+  ABI C;
+
+FN importedDouble(value: TargetInt) RETURNS TargetInt ->
+  RETURN value * 2;
+END
+
+FN main() RETURNS Void ->
+  ASSERT clear_fixture_echo_int(-17) == -17;
+  ASSERT clear_fixture_echo_size(31) == 31;
+  record = clear_fixture_make_record(10, 3.5);
+  ASSERT record.id == 10;
+  ASSERT record.samples[2] == 7;
+  ASSERT clear_fixture_apply(21, importedDouble) == 42;
+  print("C header import PASS");
+END

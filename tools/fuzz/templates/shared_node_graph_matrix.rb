@@ -32,7 +32,7 @@ FuzzGenerator.register(:shared_node_graph_matrix, cells: SHARED_NODE_GRAPH_CELLS
       MUTABLE root: Node@shared:node = Node{ id: 1, name: COPY "root" };
       MUTABLE i = 0_i64;
       WHILE i < 5000_i64 DO
-        root.children.append(Node{ id: i + 2_i64, name: i.toString() });
+        &root.children.append(Node{ id: i + 2_i64, name: i.toString() });
         i += 1_i64;
       END
       ASSERT root.children.length() == 5000_i64;

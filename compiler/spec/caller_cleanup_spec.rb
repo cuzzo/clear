@@ -23,7 +23,7 @@ RSpec.describe CleanupClassifier do
       transpile(<<~CLEAR)
         FN makeList() RETURNS !Int64[] ->
             MUTABLE items: []Int64 = List[];
-            items.append(1_i64);
+            &items.append(1_i64);
             RETURN items;
         END
         FN main() RETURNS Void ->
@@ -78,7 +78,7 @@ RSpec.describe CleanupClassifier do
       transpile(<<~CLEAR)
         FN makeList() RETURNS !Int64[] ->
             MUTABLE items: []Int64 = List[];
-            items.append(1_i64);
+            &items.append(1_i64);
             RETURN items;
         END
         FN main() RETURNS Void ->

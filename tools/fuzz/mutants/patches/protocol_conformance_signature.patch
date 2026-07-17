@@ -1,0 +1,11 @@
+diff --git a/compiler/ruby/annotator/phases/conformance_validation.rb b/compiler/ruby/annotator/phases/conformance_validation.rb
+--- a/compiler/ruby/annotator/phases/conformance_validation.rb
++++ b/compiler/ruby/annotator/phases/conformance_validation.rb
+@@ -49,6 +49,7 @@ module Annotator
+       def conformance_requirement_mismatch(requirement, member, resolution)
+         T.bind(self, TypeAnalysisSession)
+ 
++        return nil # MUTANT: accept every concrete protocol member signature.
+         if requirement.is_method != member.is_method
+           expected_kind = requirement.is_method ? "METHOD" : "FN"
+           actual_kind = member.is_method ? "METHOD" : "FN"

@@ -36,8 +36,8 @@ def ccm_helpers(shape)
     helpers << <<~CHT
       FN makeList() RETURNS !Int64[]@list ->
           MUTABLE xs: Int64[]@list = [];
-          xs.append(1_i64);
-          xs.append(2_i64);
+          &xs.append(1_i64);
+          &xs.append(2_i64);
           RETURN xs;
       END
     CHT
@@ -45,7 +45,7 @@ def ccm_helpers(shape)
     helpers << <<~CHT
       FN makeBox() RETURNS !Box ->
           MUTABLE xs: Inner[]@list = [];
-          xs.append(Inner{ label: COPY "abc" });
+          &xs.append(Inner{ label: COPY "abc" });
           RETURN Box{ items: xs };
       END
     CHT

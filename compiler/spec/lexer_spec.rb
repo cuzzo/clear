@@ -511,23 +511,33 @@ RSpec.describe Lexer do
     end
   end
 
-  describe "! mutation suffix" do
-    it "includes ! in identifier" do
+  describe "retired ! mutation suffix" do
+    it "keeps ! separate from an identifier so the migration scanner can diagnose it" do
       tokens = Lexer.new("mutate!(x)").tokenize
       expect(tokens[0].type).to eq(:VAR_ID)
-      expect(tokens[0].value).to eq("mutate!")
+      expect(tokens[0].value).to eq("mutate")
+      expect(tokens[1].type).to eq(:CHAR)
+      expect(tokens[1].value).to eq("!")
     end
 
-    it "includes ! without parens (pipeline)" do
+    it "keeps a pipeline's ! separate too" do
       tokens = Lexer.new("x |> mutate!").tokenize
       expect(tokens[2].type).to eq(:VAR_ID)
-      expect(tokens[2].value).to eq("mutate!")
+      expect(tokens[2].value).to eq("mutate")
+      expect(tokens[3].value).to eq("!")
     end
 
     it "does NOT include != (not-equal operator)" do
       tokens = Lexer.new("x != y").tokenize
       expect(tokens[0].value).to eq("x")
       expect(tokens[1].value).to eq("!=")
+    end
+
+
+    it "tokenizes !! as one postfix error-propagation operator" do
+      tokens = Lexer.new("risky()!!.value").tokenize
+      expect(tokens.map(&:value)).to include("!!")
+      expect(tokens.find { |token| token.value == "!!" }.type).to eq(:CHAR)
     end
   end
   end

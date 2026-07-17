@@ -114,6 +114,8 @@ class ClearParser
       result.sync = :locked
     when "@writeLocked", "writeLocked"
       result.sync = :write_locked
+    when "@alwaysMutable", "alwaysMutable"
+      result.sync = :always_mutable
     when "@link"
       result.ownership = :link
     when "@boxed", "boxed", "@indirect", "indirect"
@@ -204,7 +206,7 @@ class ClearParser
 
     # VIEW forms are routed before the generic capability-list parser so they
     # don't participate in the comma-separated capability grammar.
-    if match?(:KEYWORD, 'VIEW') || match?(:KEYWORD, 'MATERIALIZED')
+    if match?(:KEYWORD, 'VIEW') || match?(:KEYWORD, 'MATERIALIZED') || match?(:KEYWORD, 'UNSAFE')
       return parse_view_block(with_token)
     end
 
@@ -397,15 +399,22 @@ class ClearParser
   #
   #   WITH VIEW <var> AS <alias> { <body> } [END]
   #   WITH MATERIALIZED VIEW <var> AS <alias> { <body> } [END]
+  #   WITH UNSAFE VIEW <var> LENGTH <count> AS <alias> { <body> } [END]
   #
-  # Builds an AST::WithBlock with view_kind = :view / :materialized_view
-  # and a single capability entry { capability: :VIEW | :MATERIALIZED_VIEW,
+  # Builds an AST::WithBlock with view_kind = :view / :materialized_view /
+  # :unsafe_view and a single capability entry,
   # var_node:, alias: }. The optional END after `}` is consumed if present.
   sig { params(with_token: Lexer::Token).returns(AST::WithBlock) }
   def parse_view_block(with_token)
     view_kind = nil
     view_token = nil
-    if match?(:KEYWORD, 'MATERIALIZED')
+    view_length = nil
+    if match?(:KEYWORD, 'UNSAFE')
+      view_token = consume(:KEYWORD, 'UNSAFE')
+      consume(:KEYWORD, 'VIEW')
+      view_kind = :unsafe_view
+      capability = :UNSAFE_VIEW
+    elsif match?(:KEYWORD, 'MATERIALIZED')
       mat_tok = consume(:KEYWORD, 'MATERIALIZED')
       view_token = consume(:KEYWORD, 'VIEW')
       view_kind = :materialized_view
@@ -418,7 +427,12 @@ class ClearParser
     end
 
     var_node = parse_var_id
-    consume(:KEYWORD, 'AS')
+    if view_kind == :unsafe_view
+      consume(:KEYWORD, 'LENGTH')
+      # Stop before AS (precedence 2), which introduces the lexical alias.
+      view_length = parse_expression(2)
+    end
+    as_token = consume(:KEYWORD, 'AS')
     alias_name = consume(:VAR_ID).text!
 
     # Optional ARROW for the WITH ... AS s -> ... shape used in docs.
@@ -438,6 +452,8 @@ class ClearParser
       alias: alias_name,
       alias_mutable: false,
       view_token: view_token,
+      view_length: view_length,
+      as_token: as_token,
     )], body)
     node.view_kind = view_kind
     node

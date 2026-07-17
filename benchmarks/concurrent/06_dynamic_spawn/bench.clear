@@ -17,7 +17,7 @@ END
 FN main() RETURNS Void ->
   t0 = timestampMs();
   MUTABLE futures: ~Int64[]@list = [];
-  FOR i IN (0 ..< 100_000) -> futures.append(BG {doWork(i);});
+  FOR i IN (0 ..< 100_000) -> &futures.append(BG {doWork(i);});
 
   MUTABLE total = 0;
   FOR j IN (0 ..< 100_000) DO

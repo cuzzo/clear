@@ -132,12 +132,12 @@ RSpec.describe IntrinsicRegistry do
     expect(spec.capability_constrained?).to be(true)
   end
 
-  it "keeps validation params separate from receiver mutation metadata" do
+  it "preserves receiver mutation in the call-validation contract" do
     fs = IntrinsicRegistry.send(:convert_entry, "append", STD_LIB["append"], REGISTRIES)
     validation = fs.intrinsic_call_validation_signature
 
     expect(fs.params.first.mutable).to be(true)
-    expect(validation.params.first.mutable).to be(false)
+    expect(validation.params.first.mutable).to be(true)
     expect(validation.params[1].takes).to be(true)
   end
 

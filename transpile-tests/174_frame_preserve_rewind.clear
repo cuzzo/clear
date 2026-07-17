@@ -10,7 +10,7 @@ END
 # Pattern 2: Loop builds intermediates, returns final string
 FN buildCsv(n: Int64) RETURNS !String ->
     MUTABLE parts: []String = [];
-    FOR i IN (1_i64 ..= n) -> parts.append(i.toString());
+    FOR i IN (1_i64 ..= n) -> &parts.append(i.toString());
     RETURN join(parts, ",");
 END
 
@@ -31,7 +31,7 @@ END
 FN formatItem(id: Int64) RETURNS !String ->
     sz = ((id * 7 + 13) MOD 97) + 3;
     MUTABLE parts: []String = [];
-    FOR i IN (1_i64 ..= sz) -> parts.append(i.toString());
+    FOR i IN (1_i64 ..= sz) -> &parts.append(i.toString());
     RETURN "{" $+ join(parts, ",") $+ "}";
 END
 

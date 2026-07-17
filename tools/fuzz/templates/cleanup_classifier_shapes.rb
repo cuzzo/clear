@@ -74,9 +74,9 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
 
       FN main() RETURNS Void ->
           MUTABLE xs: Int64[]@list = [];
-          xs.append(1_i64);
-          xs.append(2_i64);
-          xs.append(3_i64);
+          &xs.append(1_i64);
+          &xs.append(2_i64);
+          &xs.append(3_i64);
           v = Val{ List: xs };
           PARTIAL MATCH v START
               Val.List AS lst -> ASSERT lst.length() == 3_i64, "union list variant";,
@@ -143,8 +143,8 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
 
       FN main() RETURNS Void ->
           MUTABLE b = Bag{ items: [] };
-          b.items.append(1_i64);
-          b.items.append(2_i64);
+          &b.items.append(1_i64);
+          &b.items.append(2_i64);
           ASSERT b.items.length() == 2_i64, "struct list field";
           RETURN;
       END

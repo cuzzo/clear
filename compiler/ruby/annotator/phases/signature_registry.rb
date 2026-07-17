@@ -18,10 +18,19 @@ module Annotator
           visibility: node.visibility,
           fn_type_params: node.type_params.map(&:to_sym),
           type_params: node.type_params.map(&:to_sym),
+          generic_bounds: generic_bounds(node.generic_params),
           reentrant: node.declared_plain_reentrant?,
           requires: node.requires
         )
       end
+
+      sig { params(params: T::Array[AST::GenericParamDecl]).returns(FunctionSignature::GenericBounds) }
+      def self.generic_bounds(params)
+        params.each_with_object({}) do |param, bounds|
+          bounds[param.name.to_sym] = param.bounds.map(&:type)
+        end
+      end
+      private_class_method :generic_bounds
 
       sig { params(node: AST::ExternFnDecl).returns(FunctionSignature) }
       def self.extern_function_signature(node)
@@ -32,6 +41,7 @@ module Annotator
           extern: true,
           module_alias: node.from_module,
           extern_effects: extern_effects(node),
+          extern_source: node.extern_source,
           fn_type_params: fn_type_params(node),
           type_params: fn_type_params(node),
           owner_type: node.owner_type,

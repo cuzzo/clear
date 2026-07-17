@@ -54,7 +54,7 @@ RSpec.describe "register MIR ownership contracts" do
       compile_register(<<~CLEAR)
         STRUCT Counter { value: Int64 }
 
-        FN valueOf!(MUTABLE counter: Counter) RETURNS !Int64 ->
+        FN valueOf(MUTABLE counter: Counter) RETURNS !Int64 ->
           WITH POLYMORPHIC counter AS inner {
             value = inner.value;
             RETURN value;
@@ -63,7 +63,7 @@ RSpec.describe "register MIR ownership contracts" do
 
         FN main() RETURNS !Void ->
           MUTABLE counter = Counter{ value: 7_i64 };
-          value = valueOf!(counter) OR_ELSE RAISE;
+          value = valueOf(&counter) OR_ELSE RAISE;
           ASSERT value == 7_i64, "value";
           RETURN;
         END

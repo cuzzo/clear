@@ -139,13 +139,13 @@ RSpec.describe "AtomicMigrationSuggester (M1.9/M1.10 static eligibility)" do
     it "does not flag bindings that escape via fn-arg" do
       cs = candidates(<<~CLEAR)
         STRUCT C { v: Int64 }
-        FN sink!(MUTABLE c: C) RETURNS Void REQUIRES c: LOCKED ->
+        FN sink(MUTABLE c: C) RETURNS Void REQUIRES c: LOCKED ->
           WITH EXCLUSIVE c AS a { a.v = a.v + 1; }
           RETURN;
         END
         FN main() RETURNS Void ->
-          c = C{ v: 0 } @shared:locked;
-          sink!(c);
+          MUTABLE c = C{ v: 0 } @shared:locked;
+          sink(&c);
           RETURN;
         END
       CLEAR

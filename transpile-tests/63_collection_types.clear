@@ -7,9 +7,9 @@ STRUCT Point { x: Float64, y: Float64 }
 FN main() RETURNS Void ->
     # @list with UFCS append
     MUTABLE pts: []Point = [];
-    pts.append(Point{ x: 1.0, y: 2.0 });
-    pts.append(Point{ x: 3.0, y: 4.0 });
-    pts.append(Point{ x: 5.0, y: 6.0 });
+    &pts.append(Point{ x: 1.0, y: 2.0 });
+    &pts.append(Point{ x: 3.0, y: 4.0 });
+    &pts.append(Point{ x: 5.0, y: 6.0 });
     ASSERT pts.length() == 3, "@list should hold 3 points";
 
     # Pipeline operators on @list work the same as on plain arrays
@@ -35,8 +35,8 @@ FN main() RETURNS Void ->
     MUTABLE pool: [Pool(100)]Point = [];
 
     # insert returns an Id<Point> (u64 handle)
-    id_a: Id<Point> = pool.insert(Point{ x: 10.0, y: 20.0 });
-    id_b: Id<Point> = pool.insert(Point{ x: 30.0, y: 40.0 });
+    id_a: Id<Point> = &pool.insert(Point{ x: 10.0, y: 20.0 });
+    id_b: Id<Point> = &pool.insert(Point{ x: 30.0, y: 40.0 });
 
     # pool.length() tracks live slots
     ASSERT pool.length() == 2, "pool should have 2 live items";
@@ -46,7 +46,7 @@ FN main() RETURNS Void ->
     ASSERT p_a != NIL, "get should find a";
 
     # remove invalidates the handle
-    pool.remove(id_a);
+    &pool.remove(id_a);
     ASSERT pool.get(id_a) == NIL, "get after remove should return NIL";
     ASSERT pool.length() == 1, "pool should have 1 live item after remove";
 

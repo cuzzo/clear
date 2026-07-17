@@ -108,10 +108,11 @@ class MIRLoweringCapabilityState < T::Struct
   prop :rc_unwrap_map, T.nilable(MIRLoweringCapabilities::RcUnwrapMap), default: nil
   prop :with_alias_alloc_map, T.nilable(MIRLoweringCapabilities::AliasAllocMap), default: nil
   prop :with_alias_owner_map, T.nilable(MIRLoweringCapabilities::AliasOwnerMap), default: nil
-  # IF ... EXISTS AS aliases over collection lookups are physically *T in
-  # Zig (getAt returns ?*T), unlike ordinary optional captures which are T.
-  # Carry that representation fact through the lexical lowering context so
-  # consumers such as MATCH do not have to reconstruct it from ownership.
+  prop :polymorphic_alias_type_map, T.nilable(MIRLoweringCapabilities::PolymorphicAliasTypeMap), default: nil
+  # IF ... EXISTS AS aliases can be borrowed values or physical *T captures.
+  # Keep semantic borrowing separate from runtime representation: list/map/set
+  # reads usually capture T, pools and mutable struct-list reads capture *T.
+  prop :if_bind_aliases, T::Set[String], factory: -> { Set.new }
   prop :if_bind_pointer_aliases, T::Set[String], factory: -> { Set.new }
   prop :atomic_emit_raw, T::Boolean, default: false
 end

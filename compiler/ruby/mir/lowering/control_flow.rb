@@ -244,7 +244,9 @@ module MIRLoweringControlFlow
   def collection_param_receiver?(target)
     T.bind(self, MIRLowering) rescue nil
 
-    target.is_a?(AST::Identifier) && current_function_collection_param?(target.name)
+    target.is_a?(AST::Identifier) &&
+      (current_function_collection_param?(target.name) ||
+       capability_state.with_alias_owner_map&.key?(target.name.to_s) == true)
   end
 
   sig do
@@ -256,9 +258,11 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     prev_alias_alloc = capability_state.with_alias_alloc_map
     prev_alias_owner = capability_state.with_alias_owner_map
+    prev_if_bind_aliases = T.let(capability_state.if_bind_aliases, T::Set[String])
     prev_pointer_aliases = T.let(capability_state.if_bind_pointer_aliases, T::Set[String])
     alias_alloc_map = T.let((prev_alias_alloc || {}).dup, IfBindAliasAllocMap)
     alias_owner_map = T.let((prev_alias_owner || {}).dup, IfBindAliasOwnerMap)
+    if_bind_aliases = T.let(prev_if_bind_aliases.dup, T::Set[String])
     pointer_aliases = T.let(prev_pointer_aliases.dup, T::Set[String])
 
     node.bindings.each do |binding|
@@ -268,21 +272,36 @@ module MIRLoweringControlFlow
       alias_name = binding.name.to_s
       alias_owner_map[alias_name] = owner
       alias_alloc_map[alias_name] = placement_for_node(binding.expr)
-      # Collection get operations expose a borrowed optional pointer. Compact
-      # @node handles are values, so they must retain their value shape.
-      binding_type = Type.from_node!(binding.expr, context: "IF binding pointer shape")
-      pointer_aliases.add(alias_name) if AST.container_borrow?(binding.expr) && !binding_type.node_reference?
+      if_bind_aliases.add(alias_name)
+      # Only remember aliases whose runtime capture is actually a pointer.
+      # Most indexed container reads (lists, maps, sets and fixed arrays)
+      # return borrowed values. Pools return pointers, while mutable struct
+      # list bindings explicitly lower through getAtPtrOpt.
+      pointer_aliases.add(alias_name) if if_bind_pointer_alias?(binding.expr)
     end
 
     capability_state.with_alias_alloc_map = alias_alloc_map
     capability_state.with_alias_owner_map = alias_owner_map
+    capability_state.if_bind_aliases = if_bind_aliases
     capability_state.if_bind_pointer_aliases = pointer_aliases
     blk.call
   ensure
     T.bind(self, MIRLowering) rescue nil
     capability_state.with_alias_alloc_map = prev_alias_alloc
     capability_state.with_alias_owner_map = prev_alias_owner
+    capability_state.if_bind_aliases = T.must(prev_if_bind_aliases)
     capability_state.if_bind_pointer_aliases = T.must(prev_pointer_aliases)
+  end
+
+  sig { params(expr: AST::Node).returns(T::Boolean) }
+  def if_bind_pointer_alias?(expr)
+    T.bind(self, MIRLowering) rescue nil
+    if expr.is_a?(AST::GetIndex)
+      receiver = Type.from_node!(expr.target, context: "IF binding runtime shape")
+      return receiver.pool? || mutable_struct_list_bind?(expr)
+    end
+
+    expr.is_a?(AST::MethodCall) && expr.pool_method == :get
   end
 
   sig { params(expr: AST::Node).returns(Type) }
@@ -1502,5 +1521,6 @@ module MIRLoweringControlFlow
   private :union_tag_condition
   private :value_if_chain_match_case
   private :with_if_bind_alias_maps
+  private :if_bind_pointer_alias?
 
 end

@@ -54,6 +54,8 @@ class MIREmitter
     @if_bind_counter = T.let(nil, T.nilable(Integer))
     @discard_counter = T.let(0, Integer)
     @symbol_literals = T.let({}, T::Hash[String, String])
+    @ident_overrides = T.let({}, T::Hash[String, String])
+    @uses_c_callback = T.let(false, T::Boolean)
   end
 
   # Emit Zig code from a structural MIR node. Returns a String.
@@ -72,6 +74,8 @@ class MIREmitter
     when MIR::UnionTypeDef then emit_union_def(node)
     when MIR::Import      then emit_import(node)
     when MIR::TypeAlias   then emit_type_alias(node)
+    when MIR::CExternFnDecl then emit_c_extern_fn_decl(node)
+    when MIR::CExternStructDef then emit_c_extern_struct_def(node)
     when MIR::ModuleNamespace then emit_module_namespace(node)
     when MIR::TestDef     then emit_test_def(node)
 
@@ -116,6 +120,7 @@ class MIREmitter
     when MIR::Comment          then "// #{node.text}"
     when MIR::Suppress         then "_ = &#{node.name};"
     when MIR::PubConst         then "pub const #{node.name} = #{node.value};"
+    when MIR::ProtocolAdapterDef then emit_protocol_adapter_def(node)
 
     # --- Memory operations ---
     when MIR::HeapCreate       then emit_heap_create(node)
@@ -170,7 +175,7 @@ class MIREmitter
     when MIR::DefaultValue     then emit_default_value(node)
     when MIR::EnumTag          then ".#{node.variant}"
     when MIR::EnumOrdinal      then "@intFromEnum(#{emit(node.value)})"
-    when MIR::Ident            then node.name
+    when MIR::Ident            then @ident_overrides.fetch(node.name.to_s, node.name.to_s)
     when MIR::DestructureTarget then emit_destructure_target(node)
     when MIR::TupleLiteral     then emit_tuple_literal(node)
     when MIR::CapabilityUnwrap then emit_capability_unwrap(node)
@@ -203,7 +208,9 @@ class MIREmitter
     when MIR::ConstCast        then "@constCast(#{emit(node.expr)})"
     when MIR::DefaultStreamCapacity then emit_default_stream_capacity(node)
     when MIR::NextPromiseList  then emit_next_promise_list(node)
-    when MIR::OptionalUnwrap   then "#{emit(node.expr)}.?"
+    when MIR::OptionalUnwrap, MIR::ForeignOwnedUnwrap then "#{emit(node.expr)}.?"
+    when MIR::CFunctionAdapter then emit_c_function_adapter(node)
+    when MIR::ForeignSliceView then "#{emit(node.pointer)}[0..@intCast(#{emit(node.count)})]"
     when MIR::AllocatorRef     then emit_allocator_ref(node)
     when MIR::Undef            then node.zig_type ? "@as(#{node.zig_type}, undefined)" : "undefined"
     when MIR::TypeSentinel     then emit_type_sentinel(node)
@@ -220,10 +227,19 @@ class MIREmitter
     when MIR::InlineBc         then emit_inline_bc_as_zig(node)
     when MIR::ShardedMapPut    then emit_sharded_map_put(node)
     when MIR::ShardedMapGet    then emit_sharded_map_get(node)
+    when MIR::ProtocolCall     then emit_protocol_call(node)
 
     else
       raise "MIREmitter: unknown node type #{node.class}"
     end
+  end
+
+  # Render a sequence in statement position. Wrapper renderers use this
+  # boundary instead of calling `emit` item-by-item so expression-shaped MIR
+  # statements receive their required terminators consistently.
+  sig { params(stmts: T::Array[MIR::Node]).returns(String) }
+  def emit_statements(stmts)
+    emit_body(stmts)
   end
 
   sig { params(node: MIR::BgBlock).returns(String) }
@@ -489,6 +505,99 @@ class MIREmitter
     sharded_map_substitute_common(pattern, node)
   end
 
+  sig { params(node: MIR::ProtocolCall).returns(String) }
+  def emit_protocol_call(node)
+    unless node.protocol == :Map
+      raise "unsupported protocol call #{node.protocol}.#{node.operation}"
+    end
+
+    receiver = emit(node.receiver)
+    arguments = node.args.map { |argument| emit(argument) }
+    case node.operation
+    when :get
+      "CheatLib.mapProtocolGet(#{receiver}, #{arguments.fetch(0)})"
+    when :put
+      "try CheatLib.mapProtocolPut(#{receiver}, #{arguments.fetch(2)}, #{arguments.fetch(3)}, #{arguments.fetch(0)}, #{arguments.fetch(1)})"
+    when :delete
+      "CheatLib.mapProtocolDelete(#{receiver}, #{arguments.fetch(1)}, #{arguments.fetch(0)})"
+    when :contains
+      "CheatLib.mapProtocolContains(#{receiver}, #{arguments.fetch(0)})"
+    when :count
+      "CheatLib.mapProtocolCount(#{receiver})"
+    when :empty
+      "(CheatLib.mapProtocolCount(#{receiver}) == 0)"
+    when :any
+      "(CheatLib.mapProtocolCount(#{receiver}) > 0)"
+    else
+      raise "unsupported Map protocol operation #{node.operation}"
+    end
+  end
+
+  sig { params(node: MIR::ProtocolAdapterDef).returns(String) }
+  def emit_protocol_adapter_def(node)
+    facts_name = "__clearProtocolFacts_#{node.protocol}"
+    facts_cases = node.conformances.map do |conformance|
+      protocol_conformance_branch(conformance) do |bindings|
+        fields = node.associated_types.map do |name|
+          value = conformance.associated_types.fetch(name)
+          "pub const #{name} = #{value};"
+        end.join(" ")
+        "#{bindings}return struct { #{fields} };"
+      end
+    end
+    facts_body = (facts_cases + ["@compileError(\"No #{node.protocol} conformance for \" ++ @typeName(T));"]).join("\n    ")
+    facts = "fn #{facts_name}(comptime T: type) type {\n    #{facts_body}\n}"
+
+    operations = node.requirements.map do |requirement|
+      params = (1...requirement.argument_count).map { |index| "arg#{index}: anytype" }
+      all_params = ["comptime T: type", "rt: *Runtime", "self: anytype"] + params
+      branches = node.conformances.filter_map do |conformance|
+        target = conformance.operations[requirement.name]
+        next unless target
+
+        protocol_conformance_branch(conformance) do |bindings|
+          type_args = conformance.type_params
+          call_args = type_args + ["rt", "self"] + (1...requirement.argument_count).map { |index| "arg#{index}" }
+          "#{bindings}return #{target}(#{call_args.join(', ')});"
+        end
+      end
+      suppressions = if branches.empty?
+        (["rt", "self"] + (1...requirement.argument_count).map { |index| "arg#{index}" })
+          .map { |name| "_ = #{name};" }
+      else
+        []
+      end
+      body = (suppressions + branches + ["@compileError(\"No #{node.protocol}.#{requirement.name} conformance for \" ++ @typeName(T));"]).join("\n    ")
+      "fn __clearProtocol_#{node.protocol}_#{protocol_zig_name(requirement.name)}(#{all_params.join(', ')}) #{requirement.return_type} {\n    #{body}\n}"
+    end
+    ([facts] + operations).join("\n\n")
+  end
+
+  sig do
+    params(
+      conformance: MIR::ProtocolConformanceCase,
+      block: T.proc.params(bindings: String).returns(String),
+    ).returns(String)
+  end
+  def protocol_conformance_branch(conformance, &block)
+    if conformance.owner_type
+      return "if (T == #{conformance.owner_type}) { #{block.call("")} }"
+    end
+
+    marker = T.must(conformance.owner_marker)
+    bindings = conformance.type_params.each_with_index.map do |name, index|
+      "const #{name} = T.__clear_type_args[#{index}]; "
+    end.join
+    "if (comptime @typeInfo(T) == .@\"struct\" and @hasDecl(T, \"#{marker}\")) { #{block.call(bindings)} }"
+  end
+  private :protocol_conformance_branch
+
+  sig { params(name: String).returns(String) }
+  def protocol_zig_name(name)
+    name.end_with?("!", "?") ? T.must(name[0...-1]) : name
+  end
+  private :protocol_zig_name
+
   # Pick the Zig template the lowering committed to. template_kind is
   # set on the node by mir_lowering after inspecting shard_context and
   # the receiver type.
@@ -585,7 +694,7 @@ class MIREmitter
     fields << "self_val: @TypeOf(#{receiver_code})" if receiver_code
     fields << "alloc: std.mem.Allocator" if node.alloc_kind
     node.runtime_args.each_with_index do |arg, index|
-      field_type = arg.field_type&.zig_type(is_param: true)
+      field_type = arg.field_zig_type || arg.field_type&.zig_type(is_param: true)
       fields << "a#{index}: #{field_type || "@TypeOf(#{args_tuple_name}[#{index}])"}"
     end
     fields << "err: ?anyerror = null" if can_fail
@@ -611,6 +720,11 @@ class MIREmitter
     f_binding = f_needed ? "const f: *@This() = @ptrCast(@alignCast(ptr));" : "_ = ptr;"
     label = "blk_ext#{node.id}"
     code = returns_void ? "{ " : "#{label}: { "
+    if node.runtime_args.any? { |arg| arg.expr.is_a?(MIR::CFunctionAdapter) }
+      code += "const __previous_c_callback_rt = __clear_c_callback_rt; " \
+        "__clear_c_callback_rt = #{@rt_name}; " \
+        "defer __clear_c_callback_rt = __previous_c_callback_rt; "
+    end
     code += "const #{args_tuple_name} = #{arg_tuple}; " if runtime_arg_codes.any?
     field_decls = fields.empty? ? "" : "#{fields.join(', ')}, "
     code += "const #{prefix}#{node.id} = struct { #{field_decls}fn run(ptr: ?*anyopaque) callconv(.c) void { #{f_binding} #{call_stmt} } }; "
@@ -619,6 +733,25 @@ class MIREmitter
     code += "if (#{frame_name}.err) |e| return e; " if can_fail
     code += "break :#{label} #{frame_name}.ret; " unless returns_void
     code + "}"
+  end
+
+  sig { params(node: MIR::CFunctionAdapter).returns(String) }
+  def emit_c_function_adapter(node)
+    @uses_c_callback = true
+    params = node.signature.params.each_with_index.map do |param, index|
+      "a#{index}: #{param.type.zig_type(is_param: true)}"
+    end
+    args = node.signature.params.each_index.map { |index| "a#{index}" }
+    clear_function = T.must(emit(node.clear_function)).delete_prefix("&")
+    clear_call = "#{clear_function}(__clear_c_callback_rt orelse " \
+      "@panic(\"C callback escaped its synchronous CLEAR call\")#{args.empty? ? "" : ", #{args.join(', ')}"})"
+    return_type = node.signature.return_type
+    body = if return_type.void?
+      "#{clear_call} catch @panic(\"CLEAR error crossed a C callback\");"
+    else
+      "return #{clear_call} catch @panic(\"CLEAR error crossed a C callback\");"
+    end
+    "&struct { fn run(#{params.join(', ')}) callconv(.c) #{return_type.zig_type} { #{body} } }.run"
   end
 
   sig { params(node: MIR::ExternTrampoline, comptime_codes: T::Array[String], runtime_arg_count: Integer).returns(String) }
@@ -1015,15 +1148,24 @@ class MIREmitter
   # comptime-dispatches to the right family-specific path.
   sig { params(node: MIR::PolymorphicMutate).returns(String) }
   def emit_polymorphic_mutate(node)
-    body_zig = emit_body(node.body || [])
+    captures = polymorphic_read_captures(node.body || [], [node.alias_name])
+    captures.unshift(node.rt.to_s) unless captures.include?(node.rt.to_s)
+    overrides = polymorphic_capture_overrides(captures)
+    body_zig = with_ident_overrides(overrides) do
+      with_runtime_name(T.must(overrides[node.rt.to_s])) { emit_body(node.body || []) }
+    end
     cell_zig = T.must(emit(node.cell))
+    capture_param = captures.empty? ? "" : ", __captures: anytype"
+    capture_suppress = captures.empty? ? "" : "_ = &__captures;"
+    capture_args = captures.empty? ? ".{}" : ".{.{#{captures.join(', ')}}}"
     <<~ZIG.rstrip
       try CheatLib.polymorphicMutate(#{cell_zig}, #{node.rt}, struct {
-          fn run(#{node.alias_name}: *#{node.bare_type.zig_type}) void {
+          fn run(#{node.alias_name}: *#{node.bare_type.zig_type}#{capture_param}) !void {
               _ = &#{node.alias_name};
+              #{capture_suppress}
               #{body_zig}
           }
-      }.run, .{});
+      }.run, #{capture_args});
     ZIG
   end
 
@@ -1032,15 +1174,32 @@ class MIREmitter
     old_flow_alias = @flow_alias_name
     @flow_alias_name = node.alias_name
     cell_zig = T.must(emit(node.cell))
-    body_zig = emit_body_flow(node.body || [], :ret_commit)
+    captures = polymorphic_read_captures(
+      (node.body || []) + (node.guard_fail_body || []),
+      [node.alias_name, "__flow"]
+    )
+    captures.unshift(node.rt.to_s) unless captures.include?(node.rt.to_s)
+    overrides = polymorphic_capture_overrides(captures)
+    body_zig = with_ident_overrides(overrides) do
+      with_runtime_name(T.must(overrides[node.rt.to_s])) do
+        emit_body_flow(node.body || [], :ret_commit)
+      end
+    end
+    capture_param = captures.empty? ? "" : ", __captures: anytype"
+    capture_suppress = captures.empty? ? "" : "_ = &__captures;"
+    capture_args = captures.empty? ? ".{&__poly_flow}" : ".{&__poly_flow, .{#{captures.join(', ')}}}"
     guard_block = ""
     if node.guard_cond
-      fail_zig = emit_body_flow(node.guard_fail_body || [], :ret_no_commit)
+      fail_zig = with_ident_overrides(overrides) do
+        with_runtime_name(T.must(overrides[node.rt.to_s])) do
+          emit_body_flow(node.guard_fail_body || [], :ret_no_commit)
+        end
+      end
       unless flow_body_terminates?(node.guard_fail_body || [])
         fail_zig += "\n__flow.* = .{ .kind = .skip_no_commit };\nreturn;"
       end
       guard_block = <<~ZIG
-        if (!(#{emit(node.guard_cond)})) {
+        if (!(#{with_ident_overrides(overrides) { with_runtime_name(T.must(overrides[node.rt.to_s])) { emit(node.guard_cond) } }})) {
             #{indent_block(fail_zig, 12)}
         }
       ZIG
@@ -1053,13 +1212,14 @@ class MIREmitter
       };
       var __poly_flow = __PolyFlow{ .kind = .cont_commit };
       try CheatLib.polymorphicMutateFlow(#{cell_zig}, #{node.rt}, struct {
-          fn run(#{node.alias_name}: *#{node.bare_type.zig_type}, __flow: *__PolyFlow) void {
+          fn run(#{node.alias_name}: *#{node.bare_type.zig_type}, __flow: *__PolyFlow#{capture_param}) !void {
               _ = &#{node.alias_name};
+              #{capture_suppress}
               #{guard_block}
               #{body_zig}
               #{flow_body_terminates?(node.body || []) ? "" : "__flow.* = .{ .kind = .cont_commit };"}
           }
-      }.run, .{&__poly_flow});
+      }.run, #{capture_args});
       switch (__poly_flow.kind) {
           .ret_commit, .ret_no_commit => return __poly_flow.ret,
           .raise_no_commit => return error.CheatError,
@@ -1068,6 +1228,51 @@ class MIREmitter
     ZIG
     @flow_alias_name = old_flow_alias
     result
+  end
+
+  sig { params(body: T::Array[MIR::Node], excluded: T::Array[String]).returns(T::Array[String]) }
+  def polymorphic_read_captures(body, excluded)
+    declared = T.let(Set.new(excluded), T::Set[String])
+    used = T.let([], T::Array[String])
+    MIR.each_node(body) do |part|
+      declared << part.name.to_s if part.is_a?(MIR::Let)
+      if part.is_a?(MIR::Ident)
+        name = part.name.to_s
+        used << name unless used.include?(name)
+      end
+    end
+    used.reject { |name| declared.include?(name) }
+  end
+
+  sig { params(captures: T::Array[String]).returns(T::Hash[String, String]) }
+  def polymorphic_capture_overrides(captures)
+    captures.each_with_index.to_h { |name, index| [name, "__captures[#{index}]"] }
+  end
+
+  sig do
+    type_parameters(:U)
+      .params(overrides: T::Hash[String, String], blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def with_ident_overrides(overrides, &blk)
+    previous = T.let(@ident_overrides, T::Hash[String, String])
+    @ident_overrides = previous.merge(overrides)
+    blk.call
+  ensure
+    @ident_overrides = T.must(previous)
+  end
+
+  sig do
+    type_parameters(:U)
+      .params(runtime_name: String, blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def with_runtime_name(runtime_name, &blk)
+    previous = T.let(@rt_name, String)
+    @rt_name = runtime_name
+    blk.call
+  ensure
+    @rt_name = T.must(previous)
   end
 
   sig { params(stmts: T::Array[MIR::Node], return_kind: Symbol).returns(String) }
@@ -1587,11 +1792,12 @@ class MIREmitter
 
   sig { returns(String) }
   def symbol_pool_declarations
-    return "" if @symbol_literals.empty?
-
-    lines = [
-      "// Static String@symbol literal pool.",
-    ]
+    lines = T.let([], T::Array[String])
+    if @uses_c_callback
+      lines << "// Runtime bridge for synchronous C callbacks."
+      lines << "threadlocal var __clear_c_callback_rt: ?*Runtime = null;"
+    end
+    lines << "// Static String@symbol literal pool." unless @symbol_literals.empty?
     @symbol_literals.each do |value, name|
       lines << "const #{name}: []const u8 = #{zig_byte_string_literal(value)};"
     end
@@ -1660,6 +1866,24 @@ class MIREmitter
   sig { params(node: MIR::TypeAlias).returns(String) }
   def emit_type_alias(node)
     "const #{node.name} = #{node.target};"
+  end
+
+  sig { params(node: MIR::CExternFnDecl).returns(String) }
+  def emit_c_extern_fn_decl(node)
+    params = node.params.map { |param| "#{param.name}: #{param.zig_type}" }.join(", ")
+    library = node.library == "c" ? "c" : node.library
+    callconv = case node.callconv
+    when :system then ".c"
+    when :winapi then ".winapi"
+    else ".c"
+    end
+    "extern \"#{library}\" fn #{node.name}(#{params}) callconv(#{callconv}) #{node.return_type};"
+  end
+
+  sig { params(node: MIR::CExternStructDef).returns(String) }
+  def emit_c_extern_struct_def(node)
+    fields = node.fields.map { |field| "#{field.name}: #{field.zig_type}" }.join(", ")
+    "const #{node.name} = extern struct { #{fields} };"
   end
 
   sig { params(node: MIR::ModuleNamespace).returns(String) }
@@ -3045,6 +3269,8 @@ class MIREmitter
     when Schemas::ResourceCloseCallKind::Function
       args = [target] + runtime_args
       "#{action.name}(#{args.join(", ")})"
+    when Schemas::ResourceCloseCallKind::CFunction
+      "_ = #{action.name}(#{target})"
     else
       raise "unknown resource close call kind: #{action.call_kind.inspect}"
     end

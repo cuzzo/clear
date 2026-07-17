@@ -27,7 +27,7 @@ RSpec.describe "TAKES auto-move" do
         END
         FN main() RETURNS Void ->
             MUTABLE vals: []Int64 = List[];
-            vals.append(1_i64);
+            &vals.append(1_i64);
             n = consume(vals);
             RETURN;
         END
@@ -100,7 +100,7 @@ RSpec.describe "TAKES auto-move" do
       UNION Value { Num: Float64, List: Int64[] }
       FN makeValue() RETURNS !Value ->
           MUTABLE items: []Int64 = List[];
-          items.append(1_i64);
+          &items.append(1_i64);
           RETURN Value{ List: items };
       END
       FN consume(TAKES v: Value) RETURNS Float64 ->

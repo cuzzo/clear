@@ -35,7 +35,7 @@ def apx_setup(access)
   when :map_index
     'm: HashMap<String> = {"a": COPY "abc"};'
   when :set_index
-    'MUTABLE s: String[]@set = Set[]; s.insert("abc");'
+    'MUTABLE s: String[]@set = Set[]; &s.insert("abc");'
   when :nested_field
     'w: Wrap = Wrap{ box: Box{ label: COPY "abc" } };'
   end

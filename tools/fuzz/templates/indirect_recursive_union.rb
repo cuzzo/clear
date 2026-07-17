@@ -116,12 +116,12 @@ FuzzGenerator.register(:indirect_recursive_union, cells: INDIRECT_RU_CELLS) do |
     <<~CHT
       #{union_decl}
 
-      FN make!() RETURNS !U ->
+      FN make() RETURNS !U ->
           RETURN #{indirect_ru_ctor(p[:payload])};
       END
 
       FN main() RETURNS Void ->
-          subject = make!() OR_ELSE RAISE;
+          subject = make() OR_ELSE RAISE;
           #{match_block}
           RETURN;
       END

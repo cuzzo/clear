@@ -30,7 +30,7 @@
 
 FN buildData(n: Int64) RETURNS ![]Float64 ->
   MUTABLE data: []Float64 = [];
-  data.reserve(n);
+  &data.reserve(n);
   # TODO: replace with Float64[n]@list once T[expr]@list supports runtime capacity
 
   MUTABLE state = 42;
@@ -38,7 +38,7 @@ FN buildData(n: Int64) RETURNS ![]Float64 ->
     state = (state %* 6_364_136_223_846_793_005 %+ (i %+ 1_442_695_040_888_963_407));
     MUTABLE val = (state MOD 1000).toFloat();
     IF val < 0.0 -> val = 0.0 - val;
-    data.append(val);
+    &data.append(val);
   END
   RETURN data;
 END

@@ -46,7 +46,7 @@ FuzzGenerator.register(:loop_local_cleanup_alloc, cells: LLCA_CELLS) do |p|
   when :direct_list
     [
       "",
-      "MUTABLE holder: #{elem_zig}[]@list = List[];\n            holder.append(#{elem_val});\n            IF holder.length() < 0_i64 THEN RAISE \"unreached\"; END",
+      "MUTABLE holder: #{elem_zig}[]@list = List[];\n            &holder.append(#{elem_val});\n            IF holder.length() < 0_i64 THEN RAISE \"unreached\"; END",
     ]
   when :struct_with_list
     carrier_init = "Holder{ items: [#{elem_val}], tag: COPY \"t\" }"

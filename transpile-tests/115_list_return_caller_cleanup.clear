@@ -10,15 +10,15 @@ END
 
 FN makeInner() RETURNS !Value ->
     MUTABLE inner: []Value = List[];
-    inner.append(makeNum(1.0));
-    inner.append(makeNum(2.0));
+    &inner.append(makeNum(1.0));
+    &inner.append(makeNum(2.0));
     RETURN Value{ List: inner };
 END
 
 FN makeOuter() RETURNS !Value ->
     MUTABLE items: []Value = List[];
-    items.append(makeInner());
-    items.append(makeInner());
+    &items.append(makeInner());
+    &items.append(makeInner());
     RETURN Value{ List: items };
 END
 

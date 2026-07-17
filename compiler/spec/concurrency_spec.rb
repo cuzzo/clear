@@ -1253,7 +1253,7 @@ RSpec.describe SemanticAnnotator do
       CLEAR
       out = transpile_fn(src)
       expect(out).to include("CheatLib.concurrentListSelect")
-      expect(out).to include("return mayFail(__item)")
+      expect(out).to include("return try mayFail(__item)")
     end
 
     # -------------------------------------------------------------------------
@@ -1798,7 +1798,7 @@ RSpec.describe SemanticAnnotator do
         FN f() RETURNS !Void ->
           p: ~Int64 = BG {
             MUTABLE pool: [Pool(8)]Entity = [];
-            pool.insert(Entity{ health: 10_i64 });
+            &pool.insert(Entity{ health: 10_i64 });
             sleep(1_i64);
             1_i64;
           };
@@ -1978,7 +1978,7 @@ RSpec.describe SemanticAnnotator do
           MUTABLE tasks: ~Void[]@list = [];
           WHILE TRUE DO
             client = accept(server);
-            tasks.append(BG { tcpWrite(client, "hi"); });
+            &tasks.append(BG { tcpWrite(client, "hi"); });
           END
           RETURN;
         END

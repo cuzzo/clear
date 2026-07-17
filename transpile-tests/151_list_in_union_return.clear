@@ -14,20 +14,20 @@ UNION Val {
     Pair: Pair
 }
 
-FN makeStr!(prefix: String, suffix: String) RETURNS !String ->
+FN makeStr(prefix: String, suffix: String) RETURNS !String ->
     RETURN prefix $+ suffix;
 END
 
-FN buildList!() RETURNS !Val ->
+FN buildList() RETURNS !Val ->
     MUTABLE items: []Val = List[];
     # Use dynamically built strings (frame-arena allocated, not rodata)
-    items.append(Val{ Str: makeStr!("hel", "lo") });
-    items.append(Val{ Str: makeStr!("wor", "ld") });
+    &items.append(Val{ Str: makeStr("hel", "lo") });
+    &items.append(Val{ Str: makeStr("wor", "ld") });
     RETURN Val{ List: items };
 END
 
 FN main() RETURNS Void ->
-    result = buildList!();
+    result = buildList();
     PARTIAL MATCH result START
         Val.List AS elems ->
             PARTIAL MATCH elems[0] START

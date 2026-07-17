@@ -25,10 +25,18 @@ class ClearParser
     consume(:CHAR, ')')
     consume(:ARROW, '->')
     return_type = parse_type_annotation(migration_root: false)
+    abi = T.let(:clear, Symbol)
+    if match!(:KEYWORD, 'CALLCONV')
+      abi_token = current
+      consume(abi_token.type)
+      abi = abi_token.text!.downcase.to_sym
+      error!(abi_token, :PARSER_EXPECTED, expected: "C", got: abi_token.value,
+        type: abi_token.type, line: abi_token.line) unless abi == :c
+    end
     if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
       error!(current, :PARSER_EXPECTED, expected: "supported function type annotation", got: current.value, type: current.type, line: current.line)
     end
-    Type.function_type_from_parts(param_types, T.unsafe(return_type), false, nil)
+    Type.function_type_from_parts(param_types, T.unsafe(return_type), false, nil, abi)
   end
 
   sig { params(migration_root: T::Boolean).returns(Type) }
@@ -134,6 +142,12 @@ class ClearParser
     end
     inner = ""
 
+    if match?(:DOUBLE_COLON)
+      consume(:DOUBLE_COLON)
+      member = consume(:TYPE_ID).text!
+      return Type.new("#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}::#{member}")
+    end
+
     # Generic type arguments: Pair<Number> or Map<String, Number>.
     # Type arguments are full type annotations, so Cache<Box @shared:locked>
     # preserves the synchronization family as part of T.
@@ -142,13 +156,13 @@ class ClearParser
       generic_base = base.to_sym
       consume(:CHAR, '<')
       type_args = []
-      until match?(:CHAR, '>')
+      until generic_close?
         argument = parse_type_annotation(migration_root: false)
         type_args << type_annotation_source(argument)
         generic_argument_expressions << argument.shape.expression
         match!(:CHAR, ',')
       end
-      consume(:CHAR, '>')
+      consume_generic_close
       base = "#{base}<#{type_args.join(',')}>"
     end
 
@@ -362,14 +376,20 @@ class ClearParser
     end
 
     name = consume(:TYPE_ID).text!
+    if match?(:DOUBLE_COLON)
+      consume(:DOUBLE_COLON)
+      member = consume(:TYPE_ID).text!
+      expression = TypeProjectionExpression.new(owner: name.to_sym, member: member.to_sym)
+      return TypeExpressionTree.with_root_capabilities(expression, parse_inline_capabilities)
+    end
     arguments = T.let([], T::Array[TypeExpression])
     if match?(:CHAR, '<')
       consume(:CHAR, '<')
-      until match?(:CHAR, '>')
+      until generic_close?
         arguments << parse_inline_type_expression
         break unless match!(:CHAR, ',')
       end
-      consume(:CHAR, '>')
+      consume_generic_close
     end
     expression = if name == "Tuple"
       TupleTypeExpression.new(items: arguments)

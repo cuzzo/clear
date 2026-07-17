@@ -534,6 +534,7 @@ module Annotator
               current_scope.declare(b.name, nil, unwrapped, mutable_list_alias, false, nil, :stack)
               entry = current_scope.local_entry!(b.name)
               b.symbol = entry
+              entry.mark_owned_optional_capture! if AST.capture_expr_owns_result?(b.expr)
               # Propagate non_escaping when the source is borrow-derived from a
               # non_escaping binding (a WITH alias or another transitive borrow
               # of one). IF-AS on `p[i]` / `p.field` where `p` is the alias
@@ -703,12 +704,12 @@ module Annotator
         end
       end
 
-      sig { params(node: AST::StructLit, schema: T.any(Schemas::StructSchema, Schemas::UnionSchema)).returns(T::Hash[Symbol, Symbol]) }
+      sig { params(node: AST::StructLit, schema: T.any(Schemas::StructSchema, Schemas::UnionSchema)).returns(GenericAnalysis::GenericSubstitution) }
       def literal_type_substitution!(node, schema)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         type_params = schema.type_params
-        subst = {}
+        subst = T.let({}, GenericAnalysis::GenericSubstitution)
         if node.type_args&.any?
           if type_params.empty?
             error!(node, :GENERIC_NOT_GENERIC, type: node.name)
@@ -716,7 +717,7 @@ module Annotator
           if node.type_args.length != type_params.length
             error!(node, :GENERIC_WRONG_ARG_COUNT, type: node.name, expected: type_params.length, got: node.type_args.length)
           end
-          type_params.zip(node.type_args).each { |param, arg| subst[param] = arg.to_sym }
+          type_params.zip(node.type_args).each { |param, arg| subst[param] = Type.new(arg) }
         elsif type_params.any?
           params_hint = type_params.map(&:to_s).join(', ')
           error!(node, :GENERIC_MISSING_TYPE_ARGS, type: node.name, type2: node.name, hint: params_hint)
@@ -724,14 +725,17 @@ module Annotator
         subst
       end
 
-      sig { params(node: AST::StructLit).returns(Symbol) }
+      sig { params(node: AST::StructLit).returns(Type) }
       def literal_instance_type(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         if node.type_args&.any?
-          :"#{node.name}<#{node.type_args.join(',')}>"
+          Type.new(NamedTypeExpression.new(
+            name: node.name.to_sym,
+            arguments: node.type_args.map { |argument| Type.new(argument).shape.expression },
+          ))
         else
-          node.name.to_sym
+          Type.new(node.name.to_sym)
         end
       end
 
@@ -1240,14 +1244,16 @@ module Annotator
 
         pre_loop_states = ownership_graph.fork_lightweight
 
-        # Footgun guard: a MethodCall on an immutable receiver cannot advance the
-        # loop condition and will loop forever.  RESOLVE is a ResolveNode (not a
-        # MethodCall) and is safe; mutable receivers may mutate state each iteration.
+        # A read-only method on immutable state cannot advance a bind-loop
+        # condition: `WHILE text.indexOf(",") EXISTS AS ...` would observe the
+        # same value forever. Mutating methods are already governed by the
+        # universal MUTABLE/& call contract before reaching this guard.
         cond = node.condition
         if cond.is_a?(AST::MethodCall)
           recv = cond.object
           if recv.is_a?(AST::Identifier) && current_scope.is_immutable?(recv.name)
-            error!(node, :WHILE_AS_IMMUTABLE_RECEIVER, method: cond.name, recv: recv.name, recv2: recv.name)
+            error!(node, :WHILE_AS_IMMUTABLE_RECEIVER,
+              method: cond.name, recv: recv.name, recv2: recv.name)
           end
         end
 

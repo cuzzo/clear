@@ -85,20 +85,20 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
       "s", :heap, nil,
     ],
     list_int: [
-      "FN make() RETURNS !Int64[]@list -> MUTABLE lst: Int64[]@list = []; lst.append(1_i64); RETURN lst; END",
+      "FN make() RETURNS !Int64[]@list -> MUTABLE lst: Int64[]@list = []; &lst.append(1_i64); RETURN lst; END",
       "lst", :heap, :heap,
     ],
     list_string: [
-      "FN make() RETURNS !String[]@list -> MUTABLE lst: String[]@list = []; lst.append(\"a\"); RETURN lst; END",
+      "FN make() RETURNS !String[]@list -> MUTABLE lst: String[]@list = []; &lst.append(\"a\"); RETURN lst; END",
       "lst", :heap, :heap,
     ],
     set_int: [
-      "FN make() RETURNS !Int64[]@set -> MUTABLE s: Int64[]@set = Set[]; s.insert(1_i64); RETURN s; END",
+      "FN make() RETURNS !Int64[]@set -> MUTABLE s: Int64[]@set = Set[]; &s.insert(1_i64); RETURN s; END",
       "s", :heap, :heap,
     ],
     pool: [
       "STRUCT P { x: Int64 }\n" \
-      "FN make() RETURNS !P[100]@pool -> MUTABLE p: P[100]@pool = []; pid = p.insert(P{ x: 1_i64 }); RETURN p; END",
+      "FN make() RETURNS !P[100]@pool -> MUTABLE p: P[100]@pool = []; pid = &p.insert(P{ x: 1_i64 }); RETURN p; END",
       "p", :heap, :heap,
     ],
     map_str: [
@@ -115,7 +115,7 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
       # ownership shape marks the binding heap so the nested list buffer
       # uses the same allocator its returned cleanup will use.
       "STRUCT C { items: Int64[]@list }\n" \
-      "FN make() RETURNS !C -> MUTABLE c = C{ items: [] }; c.items.append(1_i64); RETURN c; END",
+      "FN make() RETURNS !C -> MUTABLE c = C{ items: [] }; &c.items.append(1_i64); RETURN c; END",
       "c", :heap, :heap,
     ],
     union_pure: [
@@ -125,7 +125,7 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
     ],
     union_with_heap: [
       "UNION W { Empty, Has: Int64[]@list }\n" \
-      "FN make() RETURNS !W -> MUTABLE lst: Int64[]@list = []; lst.append(1_i64); RETURN W{ Has: lst }; END",
+      "FN make() RETURNS !W -> MUTABLE lst: Int64[]@list = []; &lst.append(1_i64); RETURN W{ Has: lst }; END",
       "lst", :heap, :heap,
     ],
     indirect_int: [
@@ -170,7 +170,7 @@ RSpec.describe "Escape promotion matrix (Phase 1a)" do
   # current escape-hatch declaration so divergence is visible.
   describe "capability declarative axis (default-deny)" do
     it "SYNC_DOES_NOT_BIND_CAPTURE lists exactly the data-access modes" do
-      expect(SemanticAnnotator::SYNC_DOES_NOT_BIND_CAPTURE).to eq(Set[:raw, :symbol])
+      expect(SemanticAnnotator::SYNC_DOES_NOT_BIND_CAPTURE).to eq(Set[:raw, :symbol, :c, :size])
     end
 
     it "STORAGE_OUTLIVES_DECLARING_SCOPE lists exactly :shared and :heap" do

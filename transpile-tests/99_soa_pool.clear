@@ -14,15 +14,15 @@ FN main() RETURNS Void ->
 
     # Same data in a SOA pool.
     MUTABLE pool: [Pool(100)]@soa Entity = [];
-    pool.insert(Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 });
-    pool.insert(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
-    pool.insert(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });
+    &pool.insert(Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 });
+    &pool.insert(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
+    &pool.insert(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });
 
     # Same data in a fixed SOA array (T[N]@soa).
     MUTABLE fixed: [100]@soa Entity = [];
-    fixed.append(Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 });
-    fixed.append(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
-    fixed.append(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });
+    &fixed.append(Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 });
+    &fixed.append(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
+    &fixed.append(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });
 
     # SUM
     arr_sum = entities |> SUM _.health;
@@ -104,7 +104,7 @@ FN main() RETURNS Void ->
     ASSERT each_vx == 21.0, "EACH set vx=7, sum should be 21";
 
     # EACH: alive-check -- remove one entity, EACH should skip dead slot
-    pool.remove(pool.insert(Entity{ x: 0, y: 0, vx: 0, vy: 0, health: 0 }));
+    &pool.remove(&pool.insert(Entity{ x: 0, y: 0, vx: 0, vy: 0, health: 0 }));
     pool |> EACH { _.vy = 10.0; };
     each_vy = pool |> SUM _.vy;
     ASSERT each_vy == 30.0, "EACH should skip dead slots, sum vy should be 30";

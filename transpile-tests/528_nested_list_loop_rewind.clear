@@ -7,12 +7,12 @@ FN run(n: Int64) RETURNS !Int64 ->
     MUTABLE i: Int64 = 0_i64;
     WHILE i < n DO
         MUTABLE scratch: []Int64 = List[];
-        scratch.append(i);
-        scratch.append(i + 1_i64);
-        handles.append(Handle{ values: [] });
+        &scratch.append(i);
+        &scratch.append(i + 1_i64);
+        &handles.append(Handle{ values: [] });
         IF handles[i] EXISTS AS handle THEN
-            handle.values.append(scratch[0] OR_ELSE 0_i64);
-            handle.values.append(scratch[1] OR_ELSE 0_i64);
+            &handle.values.append(scratch[0] OR_ELSE 0_i64);
+            &handle.values.append(scratch[1] OR_ELSE 0_i64);
         END
         i = i + 1_i64;
     END

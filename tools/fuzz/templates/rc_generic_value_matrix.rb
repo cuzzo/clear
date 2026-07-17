@@ -58,9 +58,9 @@ FuzzGenerator.register(:rc_generic_value_matrix, cells: RC_GENERIC_VALUE_CELLS) 
   when :list_optional_copy
     <<~CLEAR
       MUTABLE source: ?RefItem#{cap}[]@list = [];
-          source.append(RefItem{ value: 7_i64 } #{cap});
+          &source.append(RefItem{ value: 7_i64 } #{cap});
           copied = COPY source;
-          source.clear();
+          &source.clear();
           ASSERT copied[0_i64]?.value == 7_i64;
     CLEAR
   when :map_optional_values
@@ -68,7 +68,7 @@ FuzzGenerator.register(:rc_generic_value_matrix, cells: RC_GENERIC_VALUE_CELLS) 
       MUTABLE source: HashMap<?RefItem#{cap}> = {};
           source["item"] = RefItem{ value: 7_i64 } #{cap};
           values = source.values();
-          source.delete("item");
+          &source.delete("item");
           ASSERT values[0]?.value == 7;
     CLEAR
   end

@@ -130,6 +130,8 @@ seeds = [
   "value = 1_i64;",
   "IF value EXISTS AS item AND item > 0_i64 THEN PASS; END",
   "FN main(x: {Symbol}[List]?Tuple<Int64, String>) RETURNS Void -> PASS; END",
+  "STRUCT Cache<M: SHARED Map, K: Hashable & Equality> { values: M }",
+  "IMPLEMENTATION Cache<M> { METHOD get<N>(self: Cache<M>, key: N) RETURNS ?N -> RETURN NIL; END }",
   'message = "before ${call("nested")}";',
 ]
 harness = HostileFrontend.new(timeout: options[:timeout], memory_mb: options[:memory_mb])

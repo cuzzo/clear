@@ -44,7 +44,7 @@ RSpec.describe "polymorphic-flow ON GuardFail action variants" do
     # The raise-action emits a setError into the runtime context with
     # the static "WITH GUARD predicate failed" message and flips the
     # flow kind to raise_no_commit.
-    expect(zig).to include("ErrorName.GuardFail")
+    expect(zig).to include("__captures[1].GuardFail")
     expect(zig).to include("WITH GUARD predicate failed")
     expect(zig).to include(".kind = .raise_no_commit")
     expect(zig).not_to include(".kind = .ret_no_commit, .ret = {}")
@@ -64,7 +64,7 @@ RSpec.describe "polymorphic-flow ON GuardFail action variants" do
     # EXIT with an explicit message lowers the message expression
     # and threads it into setError; the message string must appear
     # in the emitted Zig.
-    expect(zig).to include("ErrorName.GuardFail")
+    expect(zig).to include("__captures[1].GuardFail")
     expect(zig).to include("custom guard fail")
     expect(zig).to include(".kind = .raise_no_commit")
     expect(zig).not_to include(".kind = .ret_no_commit, .ret = {}")

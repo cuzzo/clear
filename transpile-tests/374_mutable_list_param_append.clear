@@ -9,16 +9,16 @@
 # `@list` (or any `@list`) parameter must lower to a pointer to the
 # underlying ArrayListUnmanaged so methods like `.append` resolve.
 
-FN pushTwice!(MUTABLE xs: []Int64, value: Int64) RETURNS !Void ->
-    xs.append(value);
-    xs.append(value + 1_i64);
+FN pushTwice(MUTABLE xs: []Int64, value: Int64) RETURNS !Void ->
+    &xs.append(value);
+    &xs.append(value + 1_i64);
     RETURN;
 END
 
-FN main!() RETURNS !Void ->
+FN main() RETURNS !Void ->
     MUTABLE xs: []Int64 = List[];
-    pushTwice!(xs, 10_i64);
-    pushTwice!(xs, 20_i64);
+    pushTwice(&xs, 10_i64);
+    pushTwice(&xs, 20_i64);
     ASSERT xs.length() == 4_i64, "list length after appends";
     ASSERT xs[0_i64] == 10_i64, "first appended";
     ASSERT xs[1_i64] == 11_i64, "second appended";

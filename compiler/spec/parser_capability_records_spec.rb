@@ -58,6 +58,7 @@ RSpec.describe "ClearParser capability records" do
       "Counter@multiowned[]" => [:multiowned, nil, nil],
       "Counter@link[]" => [:link, nil, nil],
       "Counter@writeLocked[]" => [nil, :write_locked, nil],
+      "Counter@alwaysMutable[]" => [nil, :always_mutable, nil],
       "Counter@boxed[]" => [nil, nil, :indirect],
     }
 

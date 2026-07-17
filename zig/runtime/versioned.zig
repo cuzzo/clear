@@ -324,7 +324,8 @@ pub fn Versioned(comptime T: type) type {
                 errdefer if (initialized and !published) destroyOwnedVersion(allocator, new_ptr) else allocator.destroy(new_ptr);
                 new_ptr.* = try rt_profile.CheatLib.dupeValue(T, old_ptr.*, allocator);
                 initialized = true;
-                @call(.auto, func, .{new_ptr} ++ args);
+                const callback_result = @call(.auto, func, .{new_ptr} ++ args);
+                if (comptime @typeInfo(@TypeOf(callback_result)) == .error_union) try callback_result;
 
                 // 3. CAS: .release on success publishes our writes to
                 // *new_ptr; .acquire on failure synchronizes the
@@ -381,7 +382,8 @@ pub fn Versioned(comptime T: type) type {
                 errdefer if (initialized and !published) destroyOwnedVersion(allocator, new_ptr) else allocator.destroy(new_ptr);
                 new_ptr.* = try rt_profile.CheatLib.dupeValue(T, old_ptr.*, allocator);
                 initialized = true;
-                @call(.auto, func, .{new_ptr} ++ args);
+                const result = @call(.auto, func, .{new_ptr} ++ args);
+                if (comptime @typeInfo(@TypeOf(result)) == .error_union) try result;
 
                 const flow_ptr = args[0];
                 switch (flow_ptr.kind) {

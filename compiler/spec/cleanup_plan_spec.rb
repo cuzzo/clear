@@ -410,9 +410,9 @@ RSpec.describe CleanupClassifier do
   describe "container borrow" do
     context "HashMap get with OR_ELSE default" do
       let(:plan) do
-        cleanup_for(<<~CLEAR, "test!")
+        cleanup_for(<<~CLEAR, "test")
           UNION Value { Nil, Str: String }
-          FN test!(MUTABLE map: {String}Value) RETURNS !String ->
+          FN test(MUTABLE map: {String}Value) RETURNS !String ->
               val = map["t0"] OR_ELSE Value.Nil;
               PARTIAL MATCH val START
                   Value.Str AS s -> RETURN s;,
@@ -488,9 +488,9 @@ RSpec.describe CleanupClassifier do
   describe "TAKES parameters" do
     context "TAKES union parameter" do
       let(:plan) do
-        cleanup_for(<<~CLEAR, "consume!")
+        cleanup_for(<<~CLEAR, "consume")
           UNION Value { Nil, Str: String }
-          FN consume!(TAKES v: Value) RETURNS Void ->
+          FN consume(TAKES v: Value) RETURNS Void ->
               RETURN;
           END
         CLEAR
@@ -522,8 +522,8 @@ RSpec.describe CleanupClassifier do
 
     context "TAKES string parameter" do
       let(:plan) do
-        cleanup_for(<<~CLEAR, "consume!")
-          FN consume!(TAKES s: String) RETURNS Void ->
+        cleanup_for(<<~CLEAR, "consume")
+          FN consume(TAKES s: String) RETURNS Void ->
               RETURN;
           END
         CLEAR
@@ -542,9 +542,9 @@ RSpec.describe CleanupClassifier do
 
     context "TAKES slice parameter" do
       let(:plan) do
-        cleanup_for(<<~CLEAR, "process!")
+        cleanup_for(<<~CLEAR, "process")
           UNION Value { Nil, Num: Float64 }
-          FN process!(TAKES items: Value[]) RETURNS Void ->
+          FN process(TAKES items: Value[]) RETURNS Void ->
               RETURN;
           END
         CLEAR
@@ -567,9 +567,9 @@ RSpec.describe CleanupClassifier do
   describe "MATCH AS binding (borrow)" do
     context "plain MATCH AS borrows non-Copy variants" do
       let(:plan) do
-        cleanup_for(<<~CLEAR, "eval!")
+        cleanup_for(<<~CLEAR, "eval")
           UNION Value { Nil, Num: Float64, List: Value[] }
-          FN eval!(TAKES ast: Value) RETURNS Value ->
+          FN eval(TAKES ast: Value) RETURNS Value ->
               PARTIAL MATCH ast START
                   Value.List AS items -> RETURN Value.Nil;,
                   DEFAULT -> RETURN Value.Nil;
@@ -968,9 +968,9 @@ RSpec.describe CleanupClassifier do
   describe "MATCH TAKES binding (move)" do
     context "MATCH TAKES with slice payload" do
       let(:plan) do
-        cleanup_for(<<~CLEAR, "eval!")
+        cleanup_for(<<~CLEAR, "eval")
           UNION Value { Nil, Num: Float64, List: Value[] }
-          FN eval!(TAKES ast: Value) RETURNS Value ->
+          FN eval(TAKES ast: Value) RETURNS Value ->
               PARTIAL MATCH TAKES ast START
                   Value.List AS items -> RETURN Value.Nil;,
                   DEFAULT -> RETURN Value.Nil;
@@ -999,9 +999,9 @@ RSpec.describe CleanupClassifier do
 
     context "Copy payload (Float64)" do
       let(:plan) do
-        cleanup_for(<<~CLEAR, "test!")
+        cleanup_for(<<~CLEAR, "test")
           UNION Value { Nil, Num: Float64 }
-          FN test!(TAKES v: Value) RETURNS Void ->
+          FN test(TAKES v: Value) RETURNS Void ->
               PARTIAL MATCH v START
                   Value.Num AS n -> RETURN;,
                   DEFAULT -> RETURN;
@@ -1026,7 +1026,7 @@ RSpec.describe CleanupClassifier do
         cleanup_for(<<~CLEAR, "main")
           FN main() RETURNS Void ->
               MUTABLE vals: []Int64 = List[];
-              vals.append(1_i64);
+              &vals.append(1_i64);
               RETURN;
           END
         CLEAR
@@ -1068,7 +1068,7 @@ RSpec.describe CleanupClassifier do
         cleanup_for(<<~CLEAR, "main")
           FN makeList() RETURNS !Int64[] ->
               MUTABLE items: []Int64 = List[];
-              items.append(1_i64);
+              &items.append(1_i64);
               RETURN items;
           END
           FN main() RETURNS Void ->
@@ -1091,7 +1091,7 @@ RSpec.describe CleanupClassifier do
         cleanup_for(<<~CLEAR, "main")
           FN makeList() RETURNS !Int64[] ->
               MUTABLE items: []Int64 = List[];
-              items.append(1_i64);
+              &items.append(1_i64);
               RETURN items;
           END
           FN wrapper() RETURNS !Int64[] ->
@@ -1116,7 +1116,7 @@ RSpec.describe CleanupClassifier do
           UNION Value { Num: Float64, Items: Int64[] }
           FN makeValue() RETURNS !Value ->
               MUTABLE items: []Int64 = List[];
-              items.append(1_i64);
+              &items.append(1_i64);
               RETURN Value{ Items: items };
           END
           FN main() RETURNS Void ->

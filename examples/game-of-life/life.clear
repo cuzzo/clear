@@ -16,7 +16,7 @@ FN readGrid(path: String) RETURNS ![]Cell ->
   WHILE i < lines.length() DO
     line = lines[i].trim();
     IF line.any?() THEN
-      cells.append(parseCell(line));
+      &cells.append(parseCell(line));
     END
     i += 1;
   END
@@ -35,11 +35,11 @@ END
 
 FN defaultGlider() RETURNS ![]Cell ->
   MUTABLE cells: []Cell = [];
-  cells.append(Cell{ x: 1, y: 0 });
-  cells.append(Cell{ x: 2, y: 1 });
-  cells.append(Cell{ x: 0, y: 2 });
-  cells.append(Cell{ x: 1, y: 2 });
-  cells.append(Cell{ x: 2, y: 2 });
+  &cells.append(Cell{ x: 1, y: 0 });
+  &cells.append(Cell{ x: 2, y: 1 });
+  &cells.append(Cell{ x: 0, y: 2 });
+  &cells.append(Cell{ x: 1, y: 2 });
+  &cells.append(Cell{ x: 2, y: 2 });
   RETURN cells;
 END
 

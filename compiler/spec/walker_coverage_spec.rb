@@ -20,8 +20,11 @@ RSpec.describe "AST walker coverage" do
   # Nodes visited through a non-visit phase route, or via a parent's visit_
   # rather than directly. Adding a new entry here is intentional: it documents
   # that the node is handled without a dedicated visit_ method.
+  # Top-level declarations are consumed by DeclarationIndexer; their member
+  # FunctionDefs are inserted into body_statements before body traversal.
   INDIRECT_DISPATCH = %w[
-    Program StructDef ExternStructDecl EnumDef UnionDef ExternFnDecl
+    Program StructDef ExternStructDecl EnumDef UnionDef ProtocolDef
+    ImplementationDef ConformanceDef ExternFnDecl
 
     Require RequireNode StringConcat StructPattern ThrowNode CatchBlock
 

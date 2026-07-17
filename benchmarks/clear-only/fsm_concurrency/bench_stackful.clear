@@ -19,7 +19,7 @@ FN main() RETURNS Void ->
 
   MUTABLE futures: ~Void[]@list = [];
   FOR i IN (0 ..< count) DO
-    futures.append(BG { @standard -> napFor(50); });
+    &futures.append(BG { @standard -> napFor(50); });
   END
 
   FOR j IN (0 ..< count) DO

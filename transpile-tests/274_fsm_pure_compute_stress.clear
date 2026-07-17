@@ -18,7 +18,7 @@ FN main() RETURNS Void ->
   MUTABLE futures: ~Int64[]@list = [];
   MUTABLE i = 1_i64;
   WHILE i <= 64 DO
-    futures.append(BG { compute(i); });
+    &futures.append(BG { compute(i); });
     i += 1;
   END
 

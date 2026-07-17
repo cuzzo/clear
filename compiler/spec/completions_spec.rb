@@ -41,6 +41,10 @@ RSpec.describe Completions do
       expect(script).to include("compgen -f -X '!*.clear'")
     end
 
+    it 'allows both C headers and CLEAR output paths for c-ffi' do
+      expect(script).to match(/c-ffi\)\s*\n\s+COMPREPLY=\( \$\(compgen -f --/)
+    end
+
     it 'completes only directories for `doctor`' do
       expect(script).to match(/doctor\)\s*\n\s+# Prefer \*\.profile\/ directories/)
       expect(script).to include('compgen -d -- "$cur"')
@@ -65,6 +69,10 @@ RSpec.describe Completions do
       expect(script).to match(/doctor\)\s*\n\s+_files -\/ -g '\*\.profile'/)
     end
 
+    it 'uses general path completion for c-ffi headers and output' do
+      expect(script).to match(/c-ffi\)\s*\n\s+_files/)
+    end
+
     it 'uses _describe for first-position subcommand completion' do
       expect(script).to include('_describe \'subcommand\' subcmds')
     end
@@ -83,6 +91,7 @@ RSpec.describe Completions do
     it 'gates file completion on subcommand context' do
       expect(script).to include("__fish_seen_subcommand_from build run fmt format fix profile explain test benchmark")
       expect(script).to include("__fish_seen_subcommand_from doctor")
+      expect(script).to include("__fish_seen_subcommand_from c-ffi")
     end
 
     it 'escapes single quotes in descriptions' do

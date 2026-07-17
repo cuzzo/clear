@@ -77,6 +77,14 @@ class SymbolEntry
     prop :is_param, T::Boolean, default: false
     prop :link_source, T.nilable(Symbol), default: nil
     prop :async_result_shape, T.nilable(AsyncResultShape), default: nil
+    # A mutable C ABI out parameter initialized this binding with an owned
+    # resource handle. Unwrapping the optional transfers that ownership to the
+    # resulting resource binding; ordinary optional unwraps remain borrows.
+    prop :foreign_out_owner, T::Boolean, default: false
+    # Successful payload of an owning optional/fallible expression. Zig's
+    # value capture does not provide a writable source slot, so moving this
+    # payload would leave the enclosing optional cleanup owning the same data.
+    prop :owned_optional_capture, T::Boolean, default: false
   end
 
   attr_accessor :reg, :mutable, :rebindable,
@@ -126,6 +134,8 @@ class SymbolEntry
   lifecycle_attr :takes
   lifecycle_attr :is_param
   lifecycle_attr :link_source
+  lifecycle_attr :foreign_out_owner
+  lifecycle_attr :owned_optional_capture
 
   flow_attr :non_escaping
   flow_attr :borrowed_alias
@@ -436,6 +446,11 @@ class SymbolEntry
   sig { void }
   def mark_borrowed_alias!
     @flow.borrowed_alias = true
+  end
+
+  sig { void }
+  def mark_owned_optional_capture!
+    @lifecycle.owned_optional_capture = true
   end
 
   sig { params(original: SymbolEntry).void }

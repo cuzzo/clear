@@ -72,6 +72,11 @@ module MethodRewriter
         fns << node.name
       end
       walk_collect_user_decls(node.body, methods, fns) if node.body
+    when AST::ExternFnDecl
+      # Native functions shadow same-named stdlib METHOD entries exactly like
+      # CLEAR FN declarations. Rewriting `values(handle)` to
+      # `handle.values()` changes which ABI function the program calls.
+      fns << node.name
     when Array
       node.each { |n| walk_collect_user_decls(n, methods, fns) }
     else
@@ -202,13 +207,20 @@ module MethodRewriter
     first = args_text[spans[0][0]...spans[0][1]].strip
     return nil if first.empty?
 
+    # Prefix-form mutation marks the first argument (`push(&xs, v)`). In
+    # UFCS form the marker belongs before the receiver expression
+    # (`&xs.push(v)`), not inside a parenthesized receiver (`(&xs).push(v)`).
+    first_arg_node = call.args[0]
+    mutable_receiver = first_arg_node.is_a?(AST::MutableBorrow)
+    first = first.sub(/\A&\s*/, '') if mutable_receiver
+
     # Wrap the first arg in parens if its top-level AST node would
     # bind looser than `.method()`. Without this, expressions like
     # `toFloat(state MOD 1000)` would be rewritten to
     # `state MOD 1000.toFloat()`, which Zig parses as
     # `state MOD (1000.toFloat())` — a real semantics change.
     # See spec/method_rewriter_spec.rb for the regression case.
-    first_arg_node = call.args[0]
+    first_arg_node = first_arg_node.target if mutable_receiver
     first = "(#{first})" if needs_parens?(first_arg_node, first)
 
     rest_text = if spans.size > 1
@@ -227,6 +239,7 @@ module MethodRewriter
     else
       "#{first}.#{call.name}(#{rest_text})"
     end
+    rewritten = "&#{rewritten}" if mutable_receiver
 
     { start: start_off, len: close_off - start_off + 1, replacement: rewritten }
   end

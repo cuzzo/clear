@@ -13,7 +13,7 @@ module CapabilityPlan
   CapabilityVarNode = T.type_alias { AST::Locatable }
 
   LOCK_CAPABILITIES = T.let(Set[:EXCLUSIVE, :write_locked_read].freeze, T::Set[Symbol])
-  VIEW_CAPABILITIES = T.let(Set[:VIEW, :MATERIALIZED_VIEW].freeze, T::Set[Symbol])
+  VIEW_CAPABILITIES = T.let(Set[:VIEW, :MATERIALIZED_VIEW, :UNSAFE_VIEW].freeze, T::Set[Symbol])
 
   class CapabilityRequest < T::Struct
     extend T::Sig
@@ -25,6 +25,7 @@ module CapabilityPlan
     const :alias_explicit, T::Boolean
     const :alias_mutable, T::Boolean
     const :guard_expr, T.nilable(AST::Locatable)
+    const :view_length, T.nilable(AST::Locatable)
 
     sig { params(source: AST::Capability).returns(CapabilityRequest) }
     def self.from_ast(source)
@@ -37,6 +38,7 @@ module CapabilityPlan
         alias_explicit: !alias_name.nil?,
         alias_mutable: source[:alias_mutable] == true,
         guard_expr: T.cast(source[:guard_expr], T.nilable(AST::Locatable)),
+        view_length: T.cast(source[:view_length], T.nilable(AST::Locatable)),
       )
     end
 
@@ -109,6 +111,7 @@ module CapabilityPlan
     const :alias_explicit, T::Boolean
     const :alias_mutable, T::Boolean
     const :guard_expr, T.nilable(AST::Locatable)
+    const :view_length, T.nilable(AST::Locatable)
     const :resolved_type, Type
     const :old_scope, T.nilable(Scope)
     const :source_entry, T.nilable(SymbolEntry)
@@ -337,6 +340,7 @@ module CapabilityPlan
       alias_explicit: request.alias_explicit,
       alias_mutable: request.alias_mutable,
       guard_expr: request.guard_expr,
+      view_length: request.view_length,
       resolved_type: Type.new(target.resolved_type),
       old_scope: target.old_scope,
       source_entry: target.source_entry,

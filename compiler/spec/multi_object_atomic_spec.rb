@@ -30,7 +30,7 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN both!() RETURNS Void ->
+          FN both() RETURNS Void ->
             a = C{ v: 0 } @versioned;
             b = C{ v: 0 } @boxed:atomic;
             WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
@@ -64,7 +64,7 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN tx!(MUTABLE x: C, MUTABLE y: C) RETURNS Void
+          FN tx(MUTABLE x: C, MUTABLE y: C) RETURNS Void
             REQUIRES x, y: ATOMIC
           ->
             WITH EXCLUSIVE x AS xa, EXCLUSIVE y AS ya { xa.v = ya.v + 1; }
@@ -78,7 +78,7 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN tx!(MUTABLE x: C, MUTABLE y: C) RETURNS Void
+          FN tx(MUTABLE x: C, MUTABLE y: C) RETURNS Void
             REQUIRES x, y: SNAPSHOTTED
           ->
             WITH POLYMORPHIC EXCLUSIVE x AS xa, EXCLUSIVE y AS ya {
@@ -94,7 +94,7 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN tx!(MUTABLE x: C, MUTABLE y: C) RETURNS Void
+          FN tx(MUTABLE x: C, MUTABLE y: C) RETURNS Void
             REQUIRES x, y: LOCKED | ATOMIC
           ->
             WITH POLYMORPHIC EXCLUSIVE x AS xa, EXCLUSIVE y AS ya {
@@ -114,7 +114,7 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN tx!(MUTABLE x: C, MUTABLE y: C) RETURNS Void
+          FN tx(MUTABLE x: C, MUTABLE y: C) RETURNS Void
             REQUIRES x, y: LOCKED | VERSIONED
           ->
             WITH POLYMORPHIC EXCLUSIVE x AS xa, EXCLUSIVE y AS ya {
@@ -130,7 +130,7 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN tx!(MUTABLE x: C, MUTABLE y: C) RETURNS !Void
+          FN tx(MUTABLE x: C, MUTABLE y: C) RETURNS !Void
             REQUIRES x, y: VERSIONED
           ->
             WITH SNAPSHOT x AS MUTABLE xa, SNAPSHOT y AS MUTABLE ya {
@@ -146,7 +146,7 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN tx!(MUTABLE x: C, MUTABLE y: C) RETURNS Void
+          FN tx(MUTABLE x: C, MUTABLE y: C) RETURNS Void
             REQUIRES x, y: LOCKED
           ->
             WITH POLYMORPHIC EXCLUSIVE x AS xa, EXCLUSIVE y AS ya {
@@ -166,7 +166,7 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN one!() RETURNS !Void ->
+          FN one() RETURNS !Void ->
             a = C{ v: 0 } @boxed:atomic;
             WITH SNAPSHOT a AS MUTABLE va { va.v = va.v + 1; }
             RETURN;

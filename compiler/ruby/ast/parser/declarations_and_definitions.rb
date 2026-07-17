@@ -158,6 +158,8 @@ class ClearParser
       parse_function_def(visibility, is_method: true)
     elsif match?(:KEYWORD, 'STRUCT')
       parse_struct_def(visibility)
+    elsif match?(:KEYWORD, 'PROTOCOL')
+      parse_protocol_def(visibility)
     elsif match?(:KEYWORD, 'ENUM')
       parse_enum_def(visibility)
     elsif match?(:KEYWORD, 'UNION')
@@ -224,11 +226,17 @@ class ClearParser
     #                Do NOT use for filesystem I/O or deep-stack functions.
     effects = parse_extern_effects
 
+    native_name = T.let(name, String)
+    if match!(:KEYWORD, 'AS')
+      native_name = consume(:STRING).text!
+    end
+
     consume(:KEYWORD, 'FROM')
     from_module = consume(:STRING).text!
+    source = parse_extern_source(from_module, native_name)
     match!(:CHAR, ';')
     AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects.to_h,
-                          owner_type, owner_type_params, fn_type_params)
+                          owner_type, owner_type_params, fn_type_params, source)
   end
 
   sig { returns(ParsedExternEffects) }
@@ -299,18 +307,163 @@ class ClearParser
     if match!(:KEYWORD, 'FROM')
       from_module = consume(:STRING).text!
     end
+    source = parse_extern_source(from_module || "", as_type || name)
     match!(:CHAR, ';')
     AST::ExternStructDecl.new(extern_tok, name, fields, from_module,
-                              type_params, close_method, as_type)
+                              type_params, close_method, as_type, source)
+  end
+
+  sig { params(dependency: String, native_name: String).returns(Schemas::ExternSource) }
+  def parse_extern_source(dependency, native_name)
+    abi = T.let(:zig, Symbol)
+    callconv = T.let(:c, Symbol)
+    header = T.let(nil, T.nilable(String))
+
+    if match!(:KEYWORD, 'ABI')
+      abi_token = current
+      consume(abi_token.type)
+      abi = abi_token.text!.downcase.to_sym
+      error!(abi_token, :PARSER_EXPECTED, expected: "C or ZIG", got: abi_token.value,
+        type: abi_token.type, line: abi_token.line) unless %i[c zig].include?(abi)
+    end
+    if match!(:KEYWORD, 'CALLCONV')
+      callconv_token = current
+      consume(callconv_token.type)
+      callconv = callconv_token.text!.downcase.to_sym
+      error!(callconv_token, :PARSER_EXPECTED, expected: "C, SYSTEM, or WINAPI",
+        got: callconv_token.value, type: callconv_token.type,
+        line: callconv_token.line) unless %i[c system winapi].include?(callconv)
+    end
+    if match!(:KEYWORD, 'HEADER')
+      header = consume(:STRING).text!
+    end
+
+    Schemas::ExternSource.new(
+      dependency: dependency,
+      abi: abi,
+      symbol: native_name,
+      callconv: callconv,
+      header: header
+    )
   end
 
   sig { params(visibility: Symbol).returns(AST::StructDef) }
   def parse_struct_def(visibility = :package)
     tok = consume(:KEYWORD, 'STRUCT')
     name = consume(:TYPE_ID).text!
-    type_params = parse_generic_type_param_names
+    generic_params = parse_generic_type_params
     fields = parse_struct_body
-    AST::StructDef.new(tok, name, fields, visibility, type_params)
+    node = AST::StructDef.new(tok, name, fields, visibility, generic_params.map(&:name))
+    node.generic_params = generic_params
+    node
+  end
+
+  sig { params(visibility: Symbol).returns(AST::ProtocolDef) }
+  def parse_protocol_def(visibility = :package)
+    token = consume(:KEYWORD, 'PROTOCOL')
+    name_token = consume(:TYPE_ID)
+    associated_types = parse_generic_type_params
+    consume(:CHAR, '{')
+    requirements = T.let([], T::Array[AST::ProtocolRequirement])
+    until match?(:CHAR, '}')
+      requirements << parse_protocol_requirement
+    end
+    consume(:CHAR, '}')
+    AST::ProtocolDef.new(
+      token, name_token.text!, name_token, associated_types, requirements, visibility,
+    )
+  end
+
+  sig { returns(AST::ProtocolRequirement) }
+  def parse_protocol_requirement
+    token = if match?(:KEYWORD, 'METHOD')
+      consume(:KEYWORD, 'METHOD')
+    else
+      consume(:KEYWORD, 'FN')
+    end
+    method = token.text! == 'METHOD'
+    name_token = consume(:VAR_ID)
+    name = name_token.text!
+    params = parse_argument_list
+    return_type = if match!(:KEYWORD, 'RETURNS')
+      parse_type_annotation
+    else
+      Type.new(:Void)
+    end
+    effects = parse_effects_decl
+    consume(:CHAR, ';')
+    AST::ProtocolRequirement.new(
+      token: token,
+      name: name,
+      params: params,
+      return_type: return_type,
+      is_method: method,
+      effects_decl: effects.kind,
+      max_depth_n: effects.max_depth,
+      tight_reentrance: effects.tight,
+    )
+  end
+
+  sig { returns(T.any(AST::ImplementationDef, AST::ConformanceDef)) }
+  def parse_implementation_def
+    conformance = conformance_implementation_header?
+    token = consume(:KEYWORD, 'IMPLEMENTATION')
+    return parse_conformance_def(token) if conformance
+
+    owner_token = consume(:TYPE_ID)
+    binders = parse_generic_type_params
+    members = parse_implementation_members
+    AST::ImplementationDef.new(token, owner_token.text!, owner_token, binders, members)
+  end
+
+  sig { returns(T::Boolean) }
+  def conformance_implementation_header?
+    index = @pos
+    while index < @tokens.length
+      token = T.must(@tokens[index])
+      return true if token.type == :KEYWORD && token.value == 'FOR'
+      return false if token.type == :CHAR && token.value == '{'
+      index += 1
+    end
+    false
+  end
+
+  sig { params(token: Lexer::Token).returns(AST::ConformanceDef) }
+  def parse_conformance_def(token)
+    binders = match?(:CHAR, '<') ? parse_generic_type_params : []
+    protocol_type = parse_type_annotation
+    consume(:KEYWORD, 'FOR')
+    owner_type = parse_type_annotation
+    AST::ConformanceDef.new(token, binders, protocol_type, owner_type, parse_implementation_members)
+  end
+
+  sig { returns(T::Array[AST::FunctionDef]) }
+  def parse_implementation_members
+    consume(:CHAR, '{')
+    members = T.let([], T::Array[AST::FunctionDef])
+    until match?(:CHAR, '}')
+      member_start = current
+      visibility = T.let(:package, Symbol)
+      if match!(:KEYWORD, 'PUB')
+        visibility = :pub
+      elsif match!(:KEYWORD, 'PRIVATE')
+        visibility = :private
+      end
+
+      member = if match?(:KEYWORD, 'METHOD')
+        parse_function_def(visibility, is_method: true)
+      elsif match?(:KEYWORD, 'FN')
+        parse_function_def(visibility)
+      else
+        error!(current, :PARSER_EXPECTED,
+          expected: "FN, METHOD, or } in IMPLEMENTATION",
+          got: current.value, type: current.type, line: current.line)
+      end
+      stamp_source_range!(member, member_start, previous)
+      members << member
+    end
+    consume(:CHAR, '}')
+    members
   end
 
   sig { params(visibility: Symbol).returns(AST::EnumDef) }
@@ -333,7 +486,7 @@ class ClearParser
     name = consume(:TYPE_ID).text!
 
     # Parse optional generic type parameters: UNION Option<T> { ... }
-    type_params = parse_generic_type_param_names
+    generic_params = parse_generic_type_params
 
     consume(:CHAR, '{')
     variants = {}
@@ -408,7 +561,9 @@ class ClearParser
     consume(:CHAR, '}')
     methods = T.let(nil, T.nilable(T::Array[AST::UnionMethodRequirement]))
     methods = method_reqs unless method_reqs.empty?
-    AST::UnionDef.new(tok, name, variants, visibility, type_params, methods)
+    node = AST::UnionDef.new(tok, name, variants, visibility, generic_params.map(&:name), methods)
+    node.generic_params = generic_params
+    node
   end
 
   # Slice the source text spanning [start_tok, end_tok). Used to capture
@@ -451,7 +606,8 @@ class ClearParser
     end
 
     # Parse optional generic type parameters: FN name<T, U>(...)
-    type_params = parse_generic_type_param_names
+    generic_params = parse_generic_type_params
+    type_params = generic_params.map(&:name)
 
     params = parse_argument_list()
 
@@ -659,13 +815,15 @@ class ClearParser
     stored_requires_clauses = requires_clauses.empty? ? nil : requires_clauses
     stored_pre_clauses = pre_clauses.empty? ? nil : pre_clauses
     stored_post_clauses = post_clauses.empty? ? nil : post_clauses
-    AST::FunctionDef.new(
+    node = AST::FunctionDef.new(
       fn_token, name, params, captures, return_type, return_lifetime, body,
       catch_clauses, default_body, visibility, nil, nil, explicit_return, type_params,
       effects_decl == :reentrant_tail_call, requires_clause, arrow_token, name_tok,
       effects_decl, effects_span, max_depth_n, tight_reentrance, stored_requires_clauses,
       return_type_token, stored_pre_clauses, stored_post_clauses, is_method
     )
+    node.generic_params = generic_params
+    node
   end
 
   # Parse the REQUIRES clause body (the keyword has already been consumed):
@@ -941,12 +1099,26 @@ class ClearParser
     [start_token, items]
   end
 
-  sig { returns(T::Array[String]) }
-  def parse_generic_type_param_names
+  sig { returns(T::Array[AST::GenericParamDecl]) }
+  def parse_generic_type_params
     return [] unless match?(:CHAR, '<')
 
-    _, names = parse_comma_seq(:CHAR, '<', '>') { consume(:TYPE_ID).text! }
-    names
+    _, params = parse_comma_seq(:CHAR, '<', '>') do
+      name_token = consume(:TYPE_ID)
+      bounds = T.let([], T::Array[AST::GenericBoundDecl])
+      if match!(:CHAR, ':')
+        loop do
+          bound_token = current
+          bounds << AST::GenericBoundDecl.new(
+            token: bound_token,
+            type: parse_type_annotation(migration_root: false),
+          )
+          break unless match!(:CHAR, '&')
+        end
+      end
+      AST::GenericParamDecl.new(token: name_token, name: name_token.text!, bounds: bounds)
+    end
+    params
   end
 
   sig { returns(T::Boolean) }

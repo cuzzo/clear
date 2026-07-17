@@ -170,14 +170,14 @@ RSpec.describe "WITH GUARD clauses" do
     expect {
       annotate(<<~CLEAR)
         STRUCT Counter { value: Int64 }
-        FN bump!(MUTABLE c: Counter) RETURNS Void ->
+        FN bump(MUTABLE c: Counter) RETURNS Void ->
           c.value = c.value + 1;
           RETURN;
         END
         FN main() RETURNS Void ->
           c = Counter{ value: 1 } @shared:locked;
           WITH EXCLUSIVE c AS MUTABLE y GUARD y.value > 0 {
-            bump!(y);
+            bump(&y);
           }
           RETURN;
         END
@@ -551,7 +551,7 @@ RSpec.describe "WITH GUARD clauses" do
   it "keeps mutation-only universal polymorphic WITH on the non-flow helper" do
     zig = transpile(<<~CLEAR)
       STRUCT Counter { value: Int64 }
-      FN bump!(MUTABLE c: Counter) RETURNS !Void ->
+      FN bump(MUTABLE c: Counter) RETURNS !Void ->
         WITH POLYMORPHIC c AS y {
           y.value = y.value + 1;
         }

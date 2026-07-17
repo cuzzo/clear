@@ -1,0 +1,153 @@
+# Exact O(1) generic LRU cache with bind-time synchronization.
+
+STRUCT LruNode<K> {
+  key: K,
+  previous: ?K,
+  next: ?K,
+}
+
+STRUCT Cache<M: Map> {
+  values={}: M,
+  recency={}: {M::Key}LruNode<M::Key>,
+  head=NIL: ?M::Key,
+  tail=NIL: ?M::Key,
+  capacity: Int64,
+}
+
+IMPLEMENTATION Cache<M> {
+  METHOD detach(MUTABLE self, key: M::Key) RETURNS Void ->
+    maybeNode = COPY self.recency[key];
+    IF maybeNode EXISTS AS node THEN
+      IF node.previous EXISTS AS previousKey THEN
+        maybePrevious = COPY self.recency[previousKey];
+        IF maybePrevious EXISTS AS previousNode THEN
+          MUTABLE previous = COPY previousNode;
+          previous.next = COPY node.next;
+          self.recency[previousKey] = previous;
+        END
+      ELSE
+        self.head = COPY node.next;
+      END
+      IF node.next EXISTS AS nextKey THEN
+        maybeNext = COPY self.recency[nextKey];
+        IF maybeNext EXISTS AS nextNode THEN
+          MUTABLE next = COPY nextNode;
+          next.previous = COPY node.previous;
+          self.recency[nextKey] = next;
+        END
+      ELSE
+        self.tail = COPY node.previous;
+      END
+    END
+  END
+
+  METHOD promote(MUTABLE self, key: M::Key) RETURNS Void ->
+    &self.detach(key);
+    oldHead = COPY self.head;
+    self.recency[key] = LruNode<M::Key>{
+      key: COPY key,
+      previous: NIL,
+      next: oldHead,
+    };
+    IF oldHead EXISTS AS oldHeadKey THEN
+      maybeHead = COPY self.recency[oldHeadKey];
+      IF maybeHead EXISTS AS ownedHead THEN
+        MUTABLE headNode = COPY ownedHead;
+        headNode.previous = COPY key;
+        self.recency[oldHeadKey] = headNode;
+      END
+    ELSE
+      self.tail = COPY key;
+    END
+    self.head = COPY key;
+  END
+
+  METHOD evictTail(MUTABLE self) RETURNS Void ->
+    oldTail = COPY self.tail;
+    IF oldTail EXISTS AS tailKey THEN
+      &self.detach(tailKey);
+      &self.values.delete(tailKey);
+      &self.recency.delete(tailKey);
+    END
+  END
+
+  METHOD putView(MUTABLE self, key: M::Key, value: M::Value) RETURNS Void ->
+    existing = COPY self.values[key];
+    IF existing EXISTS AS unused THEN
+      self.values[key] = COPY value;
+      &self.promote(key);
+      RETURN;
+    END
+    IF self.values.count() >= self.capacity THEN &self.evictTail(); END
+    self.values[key] = COPY value;
+    &self.promote(key);
+  END
+
+  METHOD getView(MUTABLE self, key: M::Key) RETURNS ?M::Value ->
+    existing = COPY self.values[key];
+    IF existing EXISTS AS value THEN
+      result = COPY value;
+      &self.promote(key);
+      RETURN result;
+    END
+    RETURN NIL;
+  END
+
+  METHOD delete(MUTABLE self, key: M::Key) RETURNS Void ->
+    existing = COPY self.values[key];
+    IF existing EXISTS AS unused THEN
+      &self.detach(key);
+      &self.values.delete(key);
+      &self.recency.delete(key);
+    END
+  END
+
+  METHOD lengthView(self) RETURNS Int64 -> RETURN self.values.count(); END
+
+  METHOD put(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
+    WITH POLYMORPHIC self AS state { &state.putView(key, value); }
+  END
+
+  METHOD get(MUTABLE self, key: M::Key) RETURNS !?M::Value ->
+    WITH POLYMORPHIC self AS state { RETURN &state.getView(key); }
+    RETURN NIL;
+  END
+
+  METHOD length(MUTABLE self) RETURNS !Int64 ->
+    WITH POLYMORPHIC self AS state { RETURN state.lengthView(); }
+    RETURN 0_i64;
+  END
+}
+
+FN main() RETURNS Void ->
+  MUTABLE local = Cache<{String}Int64>{ capacity: 2_i64 };
+  &local.put("a", 1_i64)!!;
+  &local.put("b", 2_i64)!!;
+  ASSERT &local.get("a")!! OR_ELSE 0_i64 == 1_i64;
+  &local.put("c", 3_i64)!!;
+  ASSERT &local.get("b")!! == NIL, "least-recently-used key was evicted";
+  ASSERT &local.get("a")!! OR_ELSE 0_i64 == 1_i64;
+  ASSERT &local.get("c")!! OR_ELSE 0_i64 == 3_i64;
+
+  MUTABLE locked = Cache<{Int64}Bool>{ capacity: 2_i64 } @shared:locked;
+  &locked.put(1_i64, TRUE)!!;
+  &locked.put(2_i64, FALSE)!!;
+  ASSERT &locked.get(1_i64)!! OR_ELSE FALSE;
+  &locked.put(3_i64, TRUE)!!;
+  ASSERT &locked.get(2_i64)!! == NIL, "locked cache evicts in O(1)";
+  first = BG { &locked.put(4_i64, TRUE)!!; };
+  second = BG { &locked.put(5_i64, TRUE)!!; };
+  NEXT first;
+  NEXT second;
+  ASSERT &locked.length()!! == 2_i64, "concurrent writes preserve capacity";
+
+  MUTABLE rw = Cache<{String}Int64>{ capacity: 1_i64 } @shared:writeLocked;
+  &rw.put("rw", 4_i64)!!;
+  ASSERT &rw.get("rw")!! OR_ELSE 0_i64 == 4_i64;
+
+  MUTABLE versioned = Cache<{String}Int64>{ capacity: 1_i64 } @shared:versioned;
+  &versioned.put("mvcc", 5_i64)!!;
+  ASSERT &versioned.get("mvcc")!! OR_ELSE 0_i64 == 5_i64;
+
+  print("generic-cache: exact O(1) LRU across 4 policies PASS");
+END

@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
   t0 = timestampMs();
   # Build work items
   MUTABLE items: Work[] = [];
-  FOR i IN (0 ..< 10_000) -> items.append(Work{ seed: i });
+  FOR i IN (0 ..< 10_000) -> &items.append(Work{ seed: i });
 
   # Fan-out: scale workers with core count, distributed across schedulers
   results = items |> CONCURRENT(parallel: TRUE) SELECT doWork(_.seed);

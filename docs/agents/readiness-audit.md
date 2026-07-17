@@ -355,7 +355,7 @@ STRUCT Node {
 
 MUTABLE root: Node@node = Node{ id: 1 };
 root.left = Node{ id: 2 };
-root.children.append(Node{ id: 3 });
+&root.children.append(Node{ id: 3 });
 ```
 
 Expected-type coercion hides insertion, handles stay four bytes, lookup checks

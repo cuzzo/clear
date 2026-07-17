@@ -957,6 +957,33 @@ module MIR
     include Stmt
   end
 
+  # One compile-time conformance branch in a generated static protocol
+  # adapter. `owner_type` is used for a concrete nominal; generic nominals use
+  # `owner_marker` plus `type_params` recovered from the generated type's
+  # compiler-only metadata.
+  class ProtocolConformanceCase < T::Struct
+    const :owner_type, T.nilable(String)
+    const :owner_marker, T.nilable(String)
+    const :type_params, T::Array[String], default: []
+    const :associated_types, T::Hash[String, String], default: {}
+    const :operations, T::Hash[String, String], default: {}
+  end
+
+  class ProtocolRequirementAdapter < T::Struct
+    const :name, String
+    const :argument_count, Integer
+    const :return_type, String
+  end
+
+  class ProtocolAdapterDef < T::Struct
+    include Stmt
+
+    const :protocol, String
+    const :associated_types, T::Array[String]
+    const :requirements, T::Array[ProtocolRequirementAdapter]
+    const :conformances, T::Array[ProtocolConformanceCase]
+  end
+
   # Struct field definition.
   # Zig: name: zig_type [= default]
   FieldDef = Struct.new(:name, :zig_type, :default) do
@@ -1011,6 +1038,19 @@ module MIR
   # Type alias.
   # Zig: const Name = target;
   TypeAlias = Struct.new(:name, :target) do
+    include NamedEmittable
+    include Stmt
+  end
+
+  # Linker-visible C ABI declarations. These remain structural so MIR checks
+  # can validate every parameter and result before the Zig backend renders
+  # them.
+  CExternFnDecl = Struct.new(:name, :params, :return_type, :library, :callconv) do
+    include NamedEmittable
+    include Stmt
+  end
+
+  CExternStructDef = Struct.new(:name, :fields) do
     include NamedEmittable
     include Stmt
   end
@@ -3859,6 +3899,15 @@ module MIR
     def child_exprs = compact_child_exprs([object, index])
   end
 
+  # A statically witnessed protocol operation. The protocol and operation are
+  # semantic identifiers; static calls carry no runtime witness table.
+  ProtocolCall = Struct.new(:protocol, :operation, :receiver, :args) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([receiver] + args)
+  end
+
   # Binary operation.
   # Zig: left op right
   # op is the Zig operator string: "+", "-", "==", "and", "or", etc.
@@ -4490,6 +4539,27 @@ module MIR
     end
   end
 
+  # Optional resource handle produced by a mutable C ABI out parameter. This
+  # has the same representation as OptionalUnwrap, but unlike an ordinary
+  # optional projection it creates the ownership consumed by CLOSE cleanup.
+  ForeignOwnedUnwrap = Struct.new(:expr) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
+  end
+
+  # Scoped borrowed slice constructed from a programmer-asserted foreign
+  # pointer/count pair. The resulting slice never owns or frees the C allocation.
+  ForeignSliceView = Struct.new(:pointer, :count) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([pointer, count])
+  end
+
   # Range literal.
   # Zig: CheatLib.IntRange{ .start = s, .end = e } or CheatLib.Range{ .start = s, .end = e }
   RangeLit = Struct.new(:start, :end_val, :elem_type) do
@@ -4779,6 +4849,20 @@ module MIR
   class ExternTrampolineArg < T::Struct
     const :expr, Emittable
     const :field_type, T.nilable(Type), default: nil
+    const :field_zig_type, T.nilable(String), default: nil
+  end
+
+  # Synchronous adapter from a normal CLEAR function value
+  # (*Runtime + error channel) to a C callback pointer.
+  class CFunctionAdapter < T::Struct
+    extend T::Sig
+    include Expr
+
+    const :clear_function, Emittable
+    const :signature, Type::FunctionType
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([clear_function])
   end
 
   class ExternTrampoline < T::Struct

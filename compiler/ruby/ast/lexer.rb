@@ -87,18 +87,18 @@ class Lexer
       IF THEN ELSE ELSE_IF END COMPTIME IS_A EXISTS IS_OK IS_READY
       WHILE DO FOR IN BG NEXT BREAK CONTINUE
       CAST AS
-      STRUCT ENUM UNION TRUE FALSE NIL Auto
+      STRUCT ENUM UNION PROTOCOL IMPLEMENTATION TRUE FALSE NIL Auto
       ASSERT RAISE CATCH EXIT DIE PASS PRUNE
-      MOD AND OR OR_ELSE
+      MOD AND OR OR_ELSE XOR BIT_AND BIT_OR
       REQUIRE
       SELECT WHERE INDEX REDUCE ORDER_BY LIMIT SKIP UNNEST DISTINCT EACH TAP FIND ANY ALL COUNT SUM AVERAGE MIN MAX CONCURRENT SHARD TAKE_WHILE WINDOW JOIN RECOVER COLLECT
       GIVE TAKES COPY MOVE CLONE SHARE LINK RESOLVE FREEZE
-      WITH EXCLUSIVE RESTRICT BORROWED ON RETRY POSSIBLE_DEADLOCK POSSIBLE_LOCK_CYCLE VIEW MATERIALIZED SNAPSHOT GUARD PRE DEBUG_POST
+      WITH EXCLUSIVE RESTRICT BORROWED ON RETRY POSSIBLE_DEADLOCK POSSIBLE_LOCK_CYCLE VIEW MATERIALIZED UNSAFE LENGTH SNAPSHOT GUARD PRE DEBUG_POST
       POLYMORPHIC SHARED SYNC POLICY
       REQUIRES
       MATCH PARTIAL START DEFAULT WHEN
       PUB PRIVATE
-      EXTERN FROM EFFECTS CLOSE REQUIRES
+      EXTERN FROM EFFECTS CLOSE REQUIRES ABI CALLCONV HEADER LINK
       STREAM YIELD YIELDS
       TIGHT
       TEST THAT STUB BENCHMARK SMASH PROFILE ASSERT_RAISES CAPTURES SEQUENCE
@@ -156,7 +156,10 @@ class Lexer
       when @s.scan(/->/) then add(:ARROW, '->', start_col)
       when @s.scan(/\|>/) then add(:SMOOTH, '|>', start_col)
       when @s.scan(/OR_ELSE\b/) then add(:OR_ELSE, 'OR_ELSE', start_col)
+      when @s.scan(/!!/) then add(:CHAR, '!!', start_col)
       when @s.scan(/==/) then add(:CHAR, '==', start_col)
+      when @s.scan(/>>/) then add(:CHAR, '>>', start_col)
+      when @s.scan(/<</) then add(:CHAR, '<<', start_col)
       when @s.scan(/>=/) then add(:CHAR, '>=', start_col)
       when @s.scan(/<=/) then add(:CHAR, '<=', start_col)
       when @s.scan(/!=/) then add(:CHAR, '!=', start_col)
@@ -189,7 +192,7 @@ class Lexer
       when @s.scan(/%/)
         add(:PERCENT, '%', start_col)
 
-      when @s.scan(/[a-zA-Z_@$]\w*(!(?!=)|\?(?=\())?/)
+      when @s.scan(/[a-zA-Z_@$]\w*(\?(?=\())?/)
         word = @s.matched
         if KEYWORDS.include?(word)
           add(:KEYWORD, word, start_col)

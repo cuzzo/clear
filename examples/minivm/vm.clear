@@ -204,7 +204,7 @@ STRUCT RegisterStringListHandle {
 # to `register_debugger.clear` -- which is also REQUIREd from the top
 # of this file and would otherwise see neither.
 
-FN loadRegisterOps!(path: String) RETURNS !Int64[] ->
+FN loadRegisterOps(path: String) RETURNS !Int64[] ->
     raw = readFile(path) OR_ELSE RAISE;
     parts = split(raw, ",");
     MUTABLE ops: []Int64 = List[];
@@ -212,7 +212,7 @@ FN loadRegisterOps!(path: String) RETURNS !Int64[] ->
         part = trim(parts[pi]);
         IF part.length() > 0 THEN
             n = toInt(part) OR_ELSE 0_i64;
-            ops.append(n);
+            &ops.append(n);
         END
     END
     RETURN ops;
@@ -227,13 +227,13 @@ END
 # instruction; operand-position entries hold 0. The runner consults this
 # on error to format "<file>:<line>" instead of just "ip=<N>". Always
 # present (emitted by bc_run.rb) -- see register_bc_emitter.rb.
-FN loadRegisterSourceLines!(path: String) RETURNS ![]Int64 ->
+FN loadRegisterSourceLines(path: String) RETURNS ![]Int64 ->
     bytes: String@raw = readFile(path) OR_ELSE RAISE;
     MUTABLE lines: []Int64 = List[];
     MUTABLE cursor: Int64 = 0_i64;
     TIGHT WHILE cursor + 4_i64 <= bytes.length() DO
         word = readPackedU32(bytes, cursor);
-        lines.append(word);
+        &lines.append(word);
         cursor += 4_i64;
     END
     RETURN lines;
@@ -249,7 +249,7 @@ END
 # in `:l` and visualization). `<endSourceLine>` is the last line
 # where the binding is live (`-1` means "until function return").
 # `<typeName>` may be empty when the emitter didn't resolve a type.
-FN loadRegisterVarNames!(path: String) RETURNS ![]RegisterVarName ->
+FN loadRegisterVarNames(path: String) RETURNS ![]RegisterVarName ->
     raw = readFile(path) OR_ELSE "";
     MUTABLE entries: []RegisterVarName = List[];
     parts = split(raw, "\n");
@@ -265,7 +265,7 @@ FN loadRegisterVarNames!(path: String) RETURNS ![]RegisterVarName ->
                 endSrc = toInt(fields[3]) OR_ELSE -1_i64;
                 physIdx = toInt(fields[5]) OR_ELSE -1_i64;
                 IF funcIp >= 0_i64 AND srcLine >= 0_i64 AND physIdx >= 0_i64 THEN
-                    entries.append(RegisterVarName{
+                    &entries.append(RegisterVarName{
                         funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: srcCol,
                         endSourceLine: endSrc,
                         kind: COPY fields[4], physIdx: physIdx,
@@ -278,7 +278,7 @@ FN loadRegisterVarNames!(path: String) RETURNS ![]RegisterVarName ->
                 endSrc = toInt(fields[2]) OR_ELSE -1_i64;
                 physIdx = toInt(fields[4]) OR_ELSE -1_i64;
                 IF funcIp >= 0_i64 AND srcLine >= 0_i64 AND physIdx >= 0_i64 THEN
-                    entries.append(RegisterVarName{
+                    &entries.append(RegisterVarName{
                         funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: 0_i64,
                         endSourceLine: endSrc,
                         kind: COPY fields[3], physIdx: physIdx,
@@ -290,7 +290,7 @@ FN loadRegisterVarNames!(path: String) RETURNS ![]RegisterVarName ->
                 srcLine = toInt(fields[1]) OR_ELSE -1_i64;
                 physIdx = toInt(fields[3]) OR_ELSE -1_i64;
                 IF funcIp >= 0_i64 AND srcLine >= 0_i64 AND physIdx >= 0_i64 THEN
-                    entries.append(RegisterVarName{
+                    &entries.append(RegisterVarName{
                         funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: 0_i64,
                         endSourceLine: -1_i64,
                         kind: COPY fields[2], physIdx: physIdx,
@@ -302,7 +302,7 @@ FN loadRegisterVarNames!(path: String) RETURNS ![]RegisterVarName ->
                 srcLine = toInt(fields[1]) OR_ELSE -1_i64;
                 physIdx = toInt(fields[3]) OR_ELSE -1_i64;
                 IF funcIp >= 0_i64 AND srcLine >= 0_i64 AND physIdx >= 0_i64 THEN
-                    entries.append(RegisterVarName{
+                    &entries.append(RegisterVarName{
                         funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: 0_i64,
                         endSourceLine: -1_i64,
                         kind: COPY fields[2], physIdx: physIdx,
@@ -320,7 +320,7 @@ END
 # empty list -- the runner then runs without trap rewrites. bc_run.rb
 # writes this file when invoked with `--pause-on=file:line`; see the
 # `--debug` path there.
-FN loadRegisterBreakpoints!(path: String) RETURNS ![]Int64 ->
+FN loadRegisterBreakpoints(path: String) RETURNS ![]Int64 ->
     raw = readFile(path) OR_ELSE "";
     MUTABLE bps: []Int64 = List[];
     parts = split(raw, "\n");
@@ -328,7 +328,7 @@ FN loadRegisterBreakpoints!(path: String) RETURNS ![]Int64 ->
         entry = trim(parts[pi]);
         IF entry.length() > 0 THEN
             n = toInt(entry) OR_ELSE -1_i64;
-            IF n >= 0_i64 THEN bps.append(n); END
+            IF n >= 0_i64 THEN &bps.append(n); END
         END
     END
     RETURN bps;
@@ -338,13 +338,13 @@ END
 # CLEAR source path. Today there is one entry (the main file); a
 # future multi-file (module-imported) attribution will append more
 # entries and stamp non-zero file_ids on MIR statements.
-FN loadRegisterSourcePaths!(path: String) RETURNS ![]String ->
+FN loadRegisterSourcePaths(path: String) RETURNS ![]String ->
     raw: String@raw = readFile(path) OR_ELSE RAISE;
     MUTABLE paths: []String = List[];
     parts = split(raw, "\n");
     FOR pi IN (0_i64 ..< parts.length()) DO
         entry = parts[pi];
-        IF entry.length() > 0 THEN paths.append(COPY entry); END
+        IF entry.length() > 0 THEN &paths.append(COPY entry); END
     END
     RETURN paths;
 END
@@ -423,7 +423,7 @@ FN readPackedU32(bytes: String, cursor: Int64) RETURNS Int64 ->
     RETURN byteAt(bytes, cursor) + byteAt(bytes, cursor + 1) * 256_i64 + byteAt(bytes, cursor + 2) * 65536_i64 + byteAt(bytes, cursor + 3) * 16777216_i64;
 END
 
-FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
+FN loadPackedRegisterProgram(path: String) RETURNS !PackedRegisterProgram ->
     bytes: String@raw = readFile(path) OR_ELSE RAISE;
     MUTABLE ops: []Int64 = List[];
     MUTABLE opcodes: []RegisterOp = List[];
@@ -437,185 +437,185 @@ FN loadPackedRegisterProgram!(path: String) RETURNS !PackedRegisterProgram ->
     TIGHT WHILE cursor < bytes.length() DO
         opcodeRaw = readPackedU8(bytes, cursor);
         cursor += 1;
-        ops.append(opcodeRaw);
-        opcodes.append(CAST(opcodeRaw AS RegisterOp));
+        &ops.append(opcodeRaw);
+        &opcodes.append(CAST(opcodeRaw AS RegisterOp));
         op: RegisterOp = CAST(opcodeRaw AS RegisterOp);
         MATCH op START
-            RegisterOp.IConst -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.IRet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IConst -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IRet -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
             RegisterOp.Halt -> PASS;,
-            RegisterOp.IMov -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.IAdd -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.ISub -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.IMul -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.IDiv -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.ILt -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.IGt -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.IEq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.INeq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.ILte -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.IGte -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.Jmp -> ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.Jf -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FConst -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FRet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FMov -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FAdd -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FSub -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FMul -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FDiv -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FLt -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FGt -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FEq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FNeq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FLte -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FGte -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.IMod -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IMov -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IAdd -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ISub -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IMul -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IDiv -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ILt -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IGt -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IEq -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.INeq -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ILte -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IGte -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.Jmp -> &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.Jf -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FConst -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FRet -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FMov -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FAdd -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FSub -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FMul -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FDiv -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FLt -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FGt -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FEq -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FNeq -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FLte -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FGte -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IMod -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
             RegisterOp.ICall ->
-                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
-                ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);
+                &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);
+                &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);
                 argc = readPackedU8(bytes, cursor);
-                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
-                ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);
-                ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);
-                FOR packedArg IN (0_i64 ..< argc) DO ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); END,
+                &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);
+                &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);
+                &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);
+                FOR packedArg IN (0_i64 ..< argc) DO &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); END,
             RegisterOp.FCall ->
-                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
-                ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);
+                &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);
+                &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);
                 argc = readPackedU8(bytes, cursor);
-                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
-                ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);
-                ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);
-                FOR packedArg IN (0_i64 ..< argc) DO ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); END,
+                &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);
+                &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);
+                &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);
+                FOR packedArg IN (0_i64 ..< argc) DO &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); END,
             RegisterOp.NCall ->
-                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
-                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
-                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
+                &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);
+                &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);
+                &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);
                 argc = readPackedU8(bytes, cursor);
-                ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);
-                FOR packedArg IN (0_i64 ..< argc) DO ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); END,
-            RegisterOp.IPrint -> ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+                &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);
+                FOR packedArg IN (0_i64 ..< argc) DO &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); END,
+            RegisterOp.IPrint -> &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
             RegisterOp.Reserved34 -> PASS;,
             RegisterOp.Reserved35 -> PASS;,
             RegisterOp.Reserved36 -> PASS;,
-            RegisterOp.IPrint2 -> ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.SConst -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.SRet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.SMov -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.SConcat -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LAppendI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.MNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.MPutI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.MGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LFNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LFAppend -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LFGet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.SEq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LSSet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LSetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LFSet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LFLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.MLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.MContains -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.MDelete -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.NMPutI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.NMGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.NMContains -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.NMDelete -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.NMNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.NMLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.JILtF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.JIGtF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.JIEqF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.JINeqF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.JILteF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.JIGteF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.JFLtF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.JFGtF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.JFEqF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.JFNeqF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.JFLteF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.JFGteF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IPrint2 -> &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SConst -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SRet -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SMov -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SConcat -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LNew -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LAppendI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LGetI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LLen -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MNew -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MPutI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MGetI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LFNew -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LFAppend -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LFGet -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SEq -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSSet -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSetI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LFSet -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LFLen -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MLen -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MContains -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MDelete -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMPutI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMGetI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMContains -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMDelete -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMNew -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMLen -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JILtF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JIGtF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JIEqF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JINeqF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JILteF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JIGteF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JFLtF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JFGtF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JFEqF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JFNeqF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JFLteF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.JFGteF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand);,
             RegisterOp.Trap -> PASS;,
-            RegisterOp.SPrint -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LSNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LSAppend -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LSGet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LSLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LSJoin -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMPutNil -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMPutI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMPutF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMPutS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMGetTag -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMGetF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMGetS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.MPutIR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.MGetIR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.MContainsR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMPutNilR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMPutIR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMPutFR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMPutSR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMGetTagR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMGetIR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMGetFR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.VMGetSR -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LVNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LVAppNil -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LVAppI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LVAppF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LVAppS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LVLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LVGetTag -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LVGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LVGetF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LVGetS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LSSplit -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.MKeys -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.MValues -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.NMKeys -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.NMValues -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.IHNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.IHAppend -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.IHGet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.IHLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.SHNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.SHAppend -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.SHGet -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.SHLen -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.NMFNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.NMPutF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.NMGetF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.ERaise -> ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SPrint -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSNew -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSAppend -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSGet -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSLen -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSJoin -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMNew -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutNil -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutS -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetTag -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetS -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MPutIR -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MGetIR -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MContainsR -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutNilR -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutIR -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutFR -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMPutSR -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetTagR -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetIR -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetFR -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.VMGetSR -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVNew -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVAppNil -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVAppI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVAppF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVAppS -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVLen -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVGetTag -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVGetI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVGetF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LVGetS -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LSSplit -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MKeys -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.MValues -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMKeys -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMValues -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IHNew -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IHAppend -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IHGet -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.IHLen -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SHNew -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SHAppend -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SHGet -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SHLen -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMFNew -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMPutF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.NMGetF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ERaise -> &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
             RegisterOp.EGuard -> PASS;,
             RegisterOp.EClr -> PASS;,
-            RegisterOp.EMatchK -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.EFlag -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.EMatchN -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.EMatchM -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.ERewrite -> ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.BgSpawn -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU32(bytes, cursor)); cursor += 4; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FNextI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FNextF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.FNextS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.CapGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.CapGetF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.CapGetS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU16(bytes, cursor)); cursor += 2; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.EMatchK -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.EFlag -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.EMatchN -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.EMatchM -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.ERewrite -> &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.BgSpawn -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU32(bytes, cursor)); cursor += 4; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FNextI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FNextF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.FNextS -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapGetI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapGetF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapGetS -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU16(bytes, cursor)); cursor += 2; &opcodes.append(RegisterOp.Operand);,
             RegisterOp.CapNew -> PASS;,
-            RegisterOp.CapPushI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.CapPushF -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.CapPushS -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.SCellNew -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.SCellGetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.SCellSetI -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LockAcq -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand); ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
-            RegisterOp.LockRel -> ops.append(readPackedU8(bytes, cursor)); cursor += 1; opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapPushI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapPushF -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.CapPushS -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SCellNew -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SCellGetI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.SCellSetI -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LockAcq -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand); &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
+            RegisterOp.LockRel -> &ops.append(readPackedU8(bytes, cursor)); cursor += 1; &opcodes.append(RegisterOp.Operand);,
             RegisterOp.Operand -> PASS;
         END
     END
@@ -784,22 +784,22 @@ FN registerOpArity(ops: Int64[], ip: Int64, op: RegisterOp) RETURNS Int64 ->
     RETURN 0_i64;
 END
 
-FN decodeRegisterOpcodes!(ops: Int64[]) RETURNS !RegisterOp[] ->
+FN decodeRegisterOpcodes(ops: Int64[]) RETURNS !RegisterOp[] ->
     MUTABLE decoded: []RegisterOp = List[];
     MUTABLE ip: Int64 = 0;
     TIGHT WHILE ip < ops.length() DO
         op: RegisterOp = CAST(ops[ip] AS RegisterOp);
         arity = registerOpArity(ops, ip, op);
-        decoded.append(op);
+        &decoded.append(op);
         FOR ai IN (0_i64 ..< arity) DO
-            decoded.append(RegisterOp.Operand);
+            &decoded.append(RegisterOp.Operand);
         END
         ip += 1 + arity;
     END
     RETURN decoded;
 END
 
-FN parseRegisterConstLine!(line: String) RETURNS !RegisterValue ->
+FN parseRegisterConstLine(line: String) RETURNS !RegisterValue ->
     IF startsWith?(line, "I:") THEN
         numStr = substr(line, 2, line.length() - 2);
         intVal = toInt(numStr) OR_ELSE 0_i64;
@@ -822,7 +822,7 @@ FN parseRegisterConstLine!(line: String) RETURNS !RegisterValue ->
     RETURN RegisterValue.Nil;
 END
 
-FN loadRegisterConsts!(path: String) RETURNS !RegisterValue[] ->
+FN loadRegisterConsts(path: String) RETURNS !RegisterValue[] ->
     raw = readFile(path) OR_ELSE RAISE;
     MUTABLE consts: []RegisterValue = List[];
     MUTABLE pos: Int64 = 0;
@@ -834,7 +834,7 @@ FN loadRegisterConsts!(path: String) RETURNS !RegisterValue[] ->
         END
         line = substr(raw, pos, lineEnd - pos);
         IF line.length() > 0 THEN
-            consts.append(parseRegisterConstLine!(line) OR_ELSE RAISE);
+            &consts.append(parseRegisterConstLine(line) OR_ELSE RAISE);
         END
         pos = lineEnd + 1;
     END
@@ -881,7 +881,7 @@ FN stringResult(v: String) RETURNS !RegisterValue ->
     RETURN RegisterValue{ Str: COPY v };
 END
 
-FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: []Int64, sourceColumns: []Int64, sourcePaths: []String, breakpointIps: []Int64, varNames: []RegisterVarName, entryIp: Int64, TAKES initCaps: RegisterValue[], MUTABLE sharedCells: []RegisterValue) RETURNS !RegisterValue REQUIRES sharedCells: LOCKED EFFECTS REENTRANT:MAX_DEPTH(1024) ->
+FN runRegisterBytecode(ops: Int64[], opcodes: RegisterOp[], consts: RegisterValue[], sourceLines: []Int64, sourceColumns: []Int64, sourcePaths: []String, breakpointIps: []Int64, varNames: []RegisterVarName, entryIp: Int64, TAKES initCaps: RegisterValue[], MUTABLE sharedCells: []RegisterValue) RETURNS !RegisterValue REQUIRES sharedCells: LOCKED EFFECTS REENTRANT:MAX_DEPTH(1024) ->
     # Debugger breakpoints are checked per-instruction by consulting a
     # parallel flag array `isBreakpoint`. Zero overhead on the success
     # path: when `breakpointIps` is empty we bypass the build and the
@@ -891,14 +891,14 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     MUTABLE breakpointEntries: []BreakpointEntry = List[];
     IF debuggerActive THEN
         FOR oi IN (0_i64 ..< opcodes.length()) DO
-            isBreakpoint.append(0_i64);
+            &isBreakpoint.append(0_i64);
         END
         FOR bi IN (0_i64 ..< breakpointIps.length()) DO
             bpIp = breakpointIps[bi] OR_ELSE -1_i64;
             IF bpIp >= 0_i64 AND bpIp < opcodes.length() THEN
                 isBreakpoint[bpIp] = 1_i64;
                 bpLine = sourceLineFor(sourceLines, bpIp);
-                breakpointEntries.append(BreakpointEntry{
+                &breakpointEntries.append(BreakpointEntry{
                     id: bi + 1_i64,
                     sourceLine: bpLine,
                     ip: bpIp,
@@ -1000,7 +1000,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
     MUTABLE traceAllocId: Int64 = 0_i64;
 
     FOR ci IN (0_i64 ..< initCaps.length()) DO
-        captureSlots.append(COPY initCaps[ci]);
+        &captureSlots.append(COPY initCaps[ci]);
     END
     MUTABLE ip: Int64 = entryIp;
     TIGHT WHILE ip < ops.length() DO
@@ -1031,11 +1031,11 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                 line = sourceLineFor(sourceLines, ip);
                 col  = sourceLineFor(sourceColumns, ip);
                 path = sourcePathFor(sourcePaths, 0_i64);
-                action = registerDebugPause!(
+                action = registerDebugPause(
                     path, line, col, ip,
-                    varNames, iregs, fregs, sregs,
+                    varNames, &iregs, &fregs, &sregs,
                     iBase, fBase, frameIBases, frameFBases, frameRetIps,
-                    sourceLines, sourceColumns, isBreakpoint, breakpointEntries,
+                    sourceLines, sourceColumns, &isBreakpoint, &breakpointEntries,
                     traceEvents, traceStrings, step
                 ) OR_ELSE 0_i64;
                 # Clear the current breakpoint so we don't re-trap here.
@@ -1093,7 +1093,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     oldVal = iregs[slot];
                     iregs[slot] = getRegisterConstInt(consts, constIdx);
                     IF recordingActive == 1_i64 THEN
-                        traceEvents.append(TraceEvent{
+                        &traceEvents.append(TraceEvent{
                             step: step, kind: 1_i64, slot: slot,
                             iBefore: oldVal, iAfter: iregs[slot],
                             fBefore: 0.0, fAfter: 0.0, ip: instructionIp
@@ -1111,12 +1111,12 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                         fBase = frameFBases[last] OR_ELSE 0_i64;
                         iTop = frameITops[last] OR_ELSE 0_i64;
                         fTop = frameFTops[last] OR_ELSE 0_i64;
-                        frameRetIps.pop();
-                        frameRetDsts.pop();
-                        frameIBases.pop();
-                        frameFBases.pop();
-                        frameITops.pop();
-                        frameFTops.pop();
+                        &frameRetIps.pop();
+                        &frameRetDsts.pop();
+                        &frameIBases.pop();
+                        &frameFBases.pop();
+                        &frameITops.pop();
+                        &frameFTops.pop();
                         iregs[iBase + retDst] = retVal;
                     ELSE
                     RETURN intResult(iregs[iBase + src]);
@@ -1149,12 +1149,12 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                             fBase = frameFBases[last] OR_ELSE 0_i64;
                             iTop = frameITops[last] OR_ELSE 0_i64;
                             fTop = frameFTops[last] OR_ELSE 0_i64;
-                            frameRetIps.pop();
-                            frameRetDsts.pop();
-                            frameIBases.pop();
-                            frameFBases.pop();
-                            frameITops.pop();
-                            frameFTops.pop();
+                            &frameRetIps.pop();
+                            &frameRetDsts.pop();
+                            &frameIBases.pop();
+                            &frameFBases.pop();
+                            &frameITops.pop();
+                            &frameFTops.pop();
                         ELSE
                             RETURN RegisterValue.Nil;
                         END
@@ -1178,14 +1178,14 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     ELSE
                         iregs[slot] = 0_i64;
                     END
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.EFlag ->
                 # EFLAG dst -- dst = errored ? 1 : 0
                     dst = ops[ip]; ip += 1;
                     slot = iBase + dst;
                     oldVal = iregs[slot];
                     iregs[slot] = errored;
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.EMatchN ->
                 # EMATCHN dst nameConst -> dst = (errored and
                 # errName == name) ? 1 : 0
@@ -1198,7 +1198,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     ELSE
                         iregs[slot] = 0_i64;
                     END
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.EMatchM ->
                 # EMATCHM dst msgConst -> dst = (errored and
                 # errMsg == msg) ? 1 : 0
@@ -1211,7 +1211,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     ELSE
                         iregs[slot] = 0_i64;
                     END
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.ERewrite ->
                 # EREWRITE kindC nameC msgC lineC maskC -- OR_ELSE EXIT
                 # partial override of the active error. Unset mask
@@ -1233,7 +1233,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     slot = iBase + dst;
                     oldVal = iregs[slot];
                     iregs[slot] = iregs[iBase + src];
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.IAdd ->
                 # IADD dst left right
                     dst = ops[ip]; ip += 1;
@@ -1242,7 +1242,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     slot = iBase + dst;
                     oldVal = iregs[slot];
                     iregs[slot] = iregs[iBase + left] + iregs[iBase + right];
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.ISub ->
                 # ISUB dst left right
                     dst = ops[ip]; ip += 1;
@@ -1251,7 +1251,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     slot = iBase + dst;
                     oldVal = iregs[slot];
                     iregs[slot] = iregs[iBase + left] - iregs[iBase + right];
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.IMul ->
                 # IMUL dst left right
                     dst = ops[ip]; ip += 1;
@@ -1260,7 +1260,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     slot = iBase + dst;
                     oldVal = iregs[slot];
                     iregs[slot] = iregs[iBase + left] * iregs[iBase + right];
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.IDiv ->
                 # IDIV dst left right
                     dst = ops[ip]; ip += 1;
@@ -1269,7 +1269,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     slot = iBase + dst;
                     oldVal = iregs[slot];
                     iregs[slot] = iregs[iBase + left] / iregs[iBase + right];
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.ILt ->
                 # ILT dst left right
                     dst = ops[ip]; ip += 1;
@@ -1357,7 +1357,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     fslot = fBase + dst;
                     fOldVal = fregs[fslot];
                     fregs[fslot] = getRegisterConstFloat(consts, constIdx);
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
             RegisterOp.FRet ->
                 # FRET src
                     src = ops[ip]; ip += 1;
@@ -1370,12 +1370,12 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                         fBase = frameFBases[last] OR_ELSE 0_i64;
                         iTop = frameITops[last] OR_ELSE 0_i64;
                         fTop = frameFTops[last] OR_ELSE 0_i64;
-                        frameRetIps.pop();
-                        frameRetDsts.pop();
-                        frameIBases.pop();
-                        frameFBases.pop();
-                        frameITops.pop();
-                        frameFTops.pop();
+                        &frameRetIps.pop();
+                        &frameRetDsts.pop();
+                        &frameIBases.pop();
+                        &frameFBases.pop();
+                        &frameITops.pop();
+                        &frameFTops.pop();
                         fregs[fBase + retDst] = retVal;
                     ELSE
                     RETURN floatResult(fregs[fBase + src]);
@@ -1387,7 +1387,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     fslot = fBase + dst;
                     fOldVal = fregs[fslot];
                     fregs[fslot] = fregs[fBase + src];
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
             RegisterOp.FAdd ->
                 # FADD dst left right
                     dst = ops[ip]; ip += 1;
@@ -1396,7 +1396,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     fslot = fBase + dst;
                     fOldVal = fregs[fslot];
                     fregs[fslot] = fregs[fBase + left] + fregs[fBase + right];
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
             RegisterOp.FSub ->
                 # FSUB dst left right
                     dst = ops[ip]; ip += 1;
@@ -1405,7 +1405,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     fslot = fBase + dst;
                     fOldVal = fregs[fslot];
                     fregs[fslot] = fregs[fBase + left] - fregs[fBase + right];
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
             RegisterOp.FMul ->
                 # FMUL dst left right
                     dst = ops[ip]; ip += 1;
@@ -1414,7 +1414,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     fslot = fBase + dst;
                     fOldVal = fregs[fslot];
                     fregs[fslot] = fregs[fBase + left] * fregs[fBase + right];
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
             RegisterOp.FDiv ->
                 # FDIV dst left right
                     dst = ops[ip]; ip += 1;
@@ -1423,7 +1423,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     fslot = fBase + dst;
                     fOldVal = fregs[fslot];
                     fregs[fslot] = fregs[fBase + left] / fregs[fBase + right];
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 2_i64, slot: fslot, iBefore: 0_i64, iAfter: 0_i64, fBefore: fOldVal, fAfter: fregs[fslot], ip: instructionIp }); END,
             RegisterOp.FLt ->
                 # FLT dst left right
                     dst = ops[ip]; ip += 1;
@@ -1468,7 +1468,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     slot = iBase + dst;
                     oldVal = iregs[slot];
                     iregs[slot] = iregs[iBase + left] MOD iregs[iBase + right];
-                    IF recordingActive == 1_i64 THEN traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN &traceEvents.append(TraceEvent{ step: step, kind: 1_i64, slot: slot, iBefore: oldVal, iAfter: iregs[slot], fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.ICall ->
                 # ICALL dst target argc iframe fframe arg...
                     dst = ops[ip]; ip += 1;
@@ -1495,12 +1495,12 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                             iArg += 1;
                         END
                     END
-                    frameIBases.append(iBase);
-                    frameFBases.append(fBase);
-                    frameITops.append(iTop);
-                    frameFTops.append(fTop);
-                    frameRetIps.append(ip);
-                    frameRetDsts.append(dst);
+                    &frameIBases.append(iBase);
+                    &frameFBases.append(fBase);
+                    &frameITops.append(iTop);
+                    &frameFTops.append(fTop);
+                    &frameRetIps.append(ip);
+                    &frameRetDsts.append(dst);
                     iBase = nextIBase;
                     fBase = nextFBase;
                     iTop = nextITop;
@@ -1532,12 +1532,12 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                             iArg += 1;
                         END
                     END
-                    frameIBases.append(iBase);
-                    frameFBases.append(fBase);
-                    frameITops.append(iTop);
-                    frameFTops.append(fTop);
-                    frameRetIps.append(ip);
-                    frameRetDsts.append(dst);
+                    &frameIBases.append(iBase);
+                    &frameFBases.append(fBase);
+                    &frameITops.append(iTop);
+                    &frameFTops.append(fTop);
+                    &frameRetIps.append(ip);
+                    &frameRetDsts.append(dst);
                     iBase = nextIBase;
                     fBase = nextFBase;
                     iTop = nextITop;
@@ -1583,7 +1583,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                         12 -> sregs[dst] = replace(sregs[argReg0], sregs[argReg1], sregs[argReg2]);,
                         13 -> sregs[dst] = downcase(sregs[argReg0]);,
                         14 -> sregs[dst] = upcase(sregs[argReg0]);,
-                        15 -> sregs[dst] = readLine!() OR_ELSE RAISE;,
+                        15 -> sregs[dst] = readLine() OR_ELSE RAISE;,
                         16 -> iregs[iBase + dst] = framePeakBytes();,
                         17 -> iregs[iBase + dst] = codepointCount(sregs[argReg0]);,
                         18 -> sregs[dst] = readFile(sregs[argReg0]) OR_ELSE RAISE;,
@@ -1613,7 +1613,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     constIdx = ops[ip]; ip += 1;
                     sOldVal = COPY sregs[dst];
                     sregs[dst] = getRegisterConstString(consts, constIdx) OR_ELSE RAISE;
-                    IF recordingActive == 1_i64 THEN sBeforeIdx = traceStrings.length(); traceStrings.append(COPY sOldVal); sAfterIdx = traceStrings.length(); traceStrings.append(COPY sregs[dst]); traceEvents.append(TraceEvent{ step: step, kind: 3_i64, slot: dst, iBefore: sBeforeIdx, iAfter: sAfterIdx, fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN sBeforeIdx = traceStrings.length(); &traceStrings.append(COPY sOldVal); sAfterIdx = traceStrings.length(); &traceStrings.append(COPY sregs[dst]); &traceEvents.append(TraceEvent{ step: step, kind: 3_i64, slot: dst, iBefore: sBeforeIdx, iAfter: sAfterIdx, fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.SRet ->
                 # SRET src
                     src = ops[ip]; ip += 1;
@@ -1624,7 +1624,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     src = ops[ip]; ip += 1;
                     sOldVal = COPY sregs[dst];
                     sregs[dst] = COPY sregs[src];
-                    IF recordingActive == 1_i64 THEN sBeforeIdx = traceStrings.length(); traceStrings.append(COPY sOldVal); sAfterIdx = traceStrings.length(); traceStrings.append(COPY sregs[dst]); traceEvents.append(TraceEvent{ step: step, kind: 3_i64, slot: dst, iBefore: sBeforeIdx, iAfter: sAfterIdx, fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN sBeforeIdx = traceStrings.length(); &traceStrings.append(COPY sOldVal); sAfterIdx = traceStrings.length(); &traceStrings.append(COPY sregs[dst]); &traceEvents.append(TraceEvent{ step: step, kind: 3_i64, slot: dst, iBefore: sBeforeIdx, iAfter: sAfterIdx, fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.SPrint ->
                 # SPRINT src -- print sregs[src] followed by newline.
                 # Dedicated string-print op so `print(strVar)` doesn't
@@ -1639,7 +1639,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     right = ops[ip]; ip += 1;
                     sOldVal = COPY sregs[dst];
                     sregs[dst] = sregs[left] $+ sregs[right];
-                    IF recordingActive == 1_i64 THEN sBeforeIdx = traceStrings.length(); traceStrings.append(COPY sOldVal); sAfterIdx = traceStrings.length(); traceStrings.append(COPY sregs[dst]); traceEvents.append(TraceEvent{ step: step, kind: 3_i64, slot: dst, iBefore: sBeforeIdx, iAfter: sAfterIdx, fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
+                    IF recordingActive == 1_i64 THEN sBeforeIdx = traceStrings.length(); &traceStrings.append(COPY sOldVal); sAfterIdx = traceStrings.length(); &traceStrings.append(COPY sregs[dst]); &traceEvents.append(TraceEvent{ step: step, kind: 3_i64, slot: dst, iBefore: sBeforeIdx, iAfter: sAfterIdx, fBefore: 0.0, fAfter: 0.0, ip: instructionIp }); END,
             RegisterOp.LNew ->
                 # LNEW dst -- allocate Int64 list. Container kind tag = 1.
                     dst = ops[ip]; ip += 1;
@@ -1649,16 +1649,16 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     ELSE_IF dst == 3 THEN list3 = List[]; END
                     IF recordingActive == 1_i64 THEN
                         traceAllocId = traceAllocId + 1_i64;
-                        traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 1_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
+                        &traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 1_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
                     END,
             RegisterOp.LAppendI ->
                 # LAPPENDI list src
                     listReg = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN list0.append(iregs[iBase + src]);
-                    ELSE_IF listReg == 1 THEN list1.append(iregs[iBase + src]);
-                    ELSE_IF listReg == 2 THEN list2.append(iregs[iBase + src]);
-                    ELSE_IF listReg == 3 THEN list3.append(iregs[iBase + src]); END,
+                    IF listReg == 0 THEN &list0.append(iregs[iBase + src]);
+                    ELSE_IF listReg == 1 THEN &list1.append(iregs[iBase + src]);
+                    ELSE_IF listReg == 2 THEN &list2.append(iregs[iBase + src]);
+                    ELSE_IF listReg == 3 THEN &list3.append(iregs[iBase + src]); END,
             RegisterOp.LGetI ->
                 # LGETI dst list idx
                     dst = ops[ip]; ip += 1;
@@ -1685,7 +1685,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     ELSE_IF dst == 3 THEN map3 = {}; END
                     IF recordingActive == 1_i64 THEN
                         traceAllocId = traceAllocId + 1_i64;
-                        traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 3_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
+                        &traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 3_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
                     END,
             RegisterOp.MPutI ->
                 # MPUTI map key_const src
@@ -1717,16 +1717,16 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     ELSE_IF dst == 3 THEN flist3 = List[]; END
                     IF recordingActive == 1_i64 THEN
                         traceAllocId = traceAllocId + 1_i64;
-                        traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 2_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
+                        &traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 2_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
                     END,
             RegisterOp.LFAppend ->
                 # LFAPPEND list src
                     listReg = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN flist0.append(fregs[fBase + src]);
-                    ELSE_IF listReg == 1 THEN flist1.append(fregs[fBase + src]);
-                    ELSE_IF listReg == 2 THEN flist2.append(fregs[fBase + src]);
-                    ELSE_IF listReg == 3 THEN flist3.append(fregs[fBase + src]); END,
+                    IF listReg == 0 THEN &flist0.append(fregs[fBase + src]);
+                    ELSE_IF listReg == 1 THEN &flist1.append(fregs[fBase + src]);
+                    ELSE_IF listReg == 2 THEN &flist2.append(fregs[fBase + src]);
+                    ELSE_IF listReg == 3 THEN &flist3.append(fregs[fBase + src]); END,
             RegisterOp.LFGet ->
                 # LFGET dst list idx
                     dst = ops[ip]; ip += 1;
@@ -1800,10 +1800,10 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     mapReg = ops[ip]; ip += 1;
                     keyIdx = ops[ip]; ip += 1;
                     mapKey = getRegisterConstString(consts, keyIdx) OR_ELSE RAISE;
-                    IF mapReg == 0 THEN map0.delete(mapKey);
-                    ELSE_IF mapReg == 1 THEN map1.delete(mapKey);
-                    ELSE_IF mapReg == 2 THEN map2.delete(mapKey);
-                    ELSE_IF mapReg == 3 THEN map3.delete(mapKey); END,
+                    IF mapReg == 0 THEN &map0.delete(mapKey);
+                    ELSE_IF mapReg == 1 THEN &map1.delete(mapKey);
+                    ELSE_IF mapReg == 2 THEN &map2.delete(mapKey);
+                    ELSE_IF mapReg == 3 THEN &map3.delete(mapKey); END,
             RegisterOp.NMPutI ->
                 # NMPUTI map key_reg src
                     mapReg = ops[ip]; ip += 1;
@@ -1836,10 +1836,10 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                 # NMDELETE map key_reg
                     mapReg = ops[ip]; ip += 1;
                     keyReg = ops[ip]; ip += 1;
-                    IF mapReg == 0 THEN nmap0.delete(iregs[iBase + keyReg]);
-                    ELSE_IF mapReg == 1 THEN nmap1.delete(iregs[iBase + keyReg]);
-                    ELSE_IF mapReg == 2 THEN nmap2.delete(iregs[iBase + keyReg]);
-                    ELSE_IF mapReg == 3 THEN nmap3.delete(iregs[iBase + keyReg]); END,
+                    IF mapReg == 0 THEN &nmap0.delete(iregs[iBase + keyReg]);
+                    ELSE_IF mapReg == 1 THEN &nmap1.delete(iregs[iBase + keyReg]);
+                    ELSE_IF mapReg == 2 THEN &nmap2.delete(iregs[iBase + keyReg]);
+                    ELSE_IF mapReg == 3 THEN &nmap3.delete(iregs[iBase + keyReg]); END,
             RegisterOp.NMNew ->
                 # NMNEW dst -- allocate Int64-keyed map. Container kind tag = 4.
                     dst = ops[ip]; ip += 1;
@@ -1849,7 +1849,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     ELSE_IF dst == 3 THEN nmap3 = {}; END
                     IF recordingActive == 1_i64 THEN
                         traceAllocId = traceAllocId + 1_i64;
-                        traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 4_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
+                        &traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 4_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
                     END,
             RegisterOp.NMLen ->
                 # NMLEN dst map
@@ -1868,7 +1868,7 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     ELSE_IF dst == 3 THEN nfmap3 = {}; END
                     IF recordingActive == 1_i64 THEN
                         traceAllocId = traceAllocId + 1_i64;
-                        traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 4_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
+                        &traceEvents.append(TraceEvent{ step: step, kind: 4_i64, slot: 4_i64, iBefore: traceAllocId, iAfter: 0_i64, fBefore: 0.0, fAfter: 0.0, ip: instructionIp });
                     END,
             RegisterOp.NMPutF ->
                 # NMPUTF map key_reg src
@@ -1953,10 +1953,10 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                 # LSAPPEND list src
                     listReg = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN slist0.append(COPY sregs[src]);
-                    ELSE_IF listReg == 1 THEN slist1.append(COPY sregs[src]);
-                    ELSE_IF listReg == 2 THEN slist2.append(COPY sregs[src]);
-                    ELSE_IF listReg == 3 THEN slist3.append(COPY sregs[src]); END,
+                    IF listReg == 0 THEN &slist0.append(COPY sregs[src]);
+                    ELSE_IF listReg == 1 THEN &slist1.append(COPY sregs[src]);
+                    ELSE_IF listReg == 2 THEN &slist2.append(COPY sregs[src]);
+                    ELSE_IF listReg == 3 THEN &slist3.append(COPY sregs[src]); END,
             RegisterOp.LSGet ->
                 # LSGET dst list idx
                     dst = ops[ip]; ip += 1;
@@ -2266,26 +2266,26 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
             RegisterOp.LVAppNil ->
                 # LVAPPNIL list
                     listReg = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN vlist0.append(RegisterValue.Nil);
-                    ELSE_IF listReg == 1 THEN vlist1.append(RegisterValue.Nil);
-                    ELSE_IF listReg == 2 THEN vlist2.append(RegisterValue.Nil);
-                    ELSE_IF listReg == 3 THEN vlist3.append(RegisterValue.Nil); END,
+                    IF listReg == 0 THEN &vlist0.append(RegisterValue.Nil);
+                    ELSE_IF listReg == 1 THEN &vlist1.append(RegisterValue.Nil);
+                    ELSE_IF listReg == 2 THEN &vlist2.append(RegisterValue.Nil);
+                    ELSE_IF listReg == 3 THEN &vlist3.append(RegisterValue.Nil); END,
             RegisterOp.LVAppI ->
                 # LVAPPI list src
                     listReg = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN vlist0.append(RegisterValue{ Int64Val: iregs[iBase + src] });
-                    ELSE_IF listReg == 1 THEN vlist1.append(RegisterValue{ Int64Val: iregs[iBase + src] });
-                    ELSE_IF listReg == 2 THEN vlist2.append(RegisterValue{ Int64Val: iregs[iBase + src] });
-                    ELSE_IF listReg == 3 THEN vlist3.append(RegisterValue{ Int64Val: iregs[iBase + src] }); END,
+                    IF listReg == 0 THEN &vlist0.append(RegisterValue{ Int64Val: iregs[iBase + src] });
+                    ELSE_IF listReg == 1 THEN &vlist1.append(RegisterValue{ Int64Val: iregs[iBase + src] });
+                    ELSE_IF listReg == 2 THEN &vlist2.append(RegisterValue{ Int64Val: iregs[iBase + src] });
+                    ELSE_IF listReg == 3 THEN &vlist3.append(RegisterValue{ Int64Val: iregs[iBase + src] }); END,
             RegisterOp.LVAppF ->
                 # LVAPPF list src
                     listReg = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN vlist0.append(RegisterValue{ Number: fregs[fBase + src] });
-                    ELSE_IF listReg == 1 THEN vlist1.append(RegisterValue{ Number: fregs[fBase + src] });
-                    ELSE_IF listReg == 2 THEN vlist2.append(RegisterValue{ Number: fregs[fBase + src] });
-                    ELSE_IF listReg == 3 THEN vlist3.append(RegisterValue{ Number: fregs[fBase + src] }); END,
+                    IF listReg == 0 THEN &vlist0.append(RegisterValue{ Number: fregs[fBase + src] });
+                    ELSE_IF listReg == 1 THEN &vlist1.append(RegisterValue{ Number: fregs[fBase + src] });
+                    ELSE_IF listReg == 2 THEN &vlist2.append(RegisterValue{ Number: fregs[fBase + src] });
+                    ELSE_IF listReg == 3 THEN &vlist3.append(RegisterValue{ Number: fregs[fBase + src] }); END,
             RegisterOp.LVAppS ->
                 # LVAPPS list src -- COPYs the source string into the
                 # list element's heap storage; @list cleanup runs the
@@ -2293,10 +2293,10 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                 # compiled CLEAR's UserUnion[]@list cleanup does.
                     listReg = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
-                    IF listReg == 0 THEN vlist0.append(RegisterValue{ Str: COPY sregs[src] });
-                    ELSE_IF listReg == 1 THEN vlist1.append(RegisterValue{ Str: COPY sregs[src] });
-                    ELSE_IF listReg == 2 THEN vlist2.append(RegisterValue{ Str: COPY sregs[src] });
-                    ELSE_IF listReg == 3 THEN vlist3.append(RegisterValue{ Str: COPY sregs[src] }); END,
+                    IF listReg == 0 THEN &vlist0.append(RegisterValue{ Str: COPY sregs[src] });
+                    ELSE_IF listReg == 1 THEN &vlist1.append(RegisterValue{ Str: COPY sregs[src] });
+                    ELSE_IF listReg == 2 THEN &vlist2.append(RegisterValue{ Str: COPY sregs[src] });
+                    ELSE_IF listReg == 3 THEN &vlist3.append(RegisterValue{ Str: COPY sregs[src] }); END,
             RegisterOp.LVLen ->
                 # LVLEN dst list
                     dst = ops[ip]; ip += 1;
@@ -2479,13 +2479,13 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
             RegisterOp.IHNew ->
                     dst = ops[ip]; ip += 1;
                     newHandle = intListHandles.length();
-                    intListHandles.append(RegisterIntListHandle{ values: [] });
+                    &intListHandles.append(RegisterIntListHandle{ values: [] });
                     iregs[iBase + dst] = newHandle;,
             RegisterOp.IHAppend ->
                     handleReg = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
                     IF intListHandles[iregs[iBase + handleReg]] EXISTS AS handle THEN
-                        handle.values.append(iregs[iBase + src]);
+                        &handle.values.append(iregs[iBase + src]);
                     END,
             RegisterOp.IHGet ->
                     dst = ops[ip]; ip += 1;
@@ -2503,13 +2503,13 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
             RegisterOp.SHNew ->
                     dst = ops[ip]; ip += 1;
                     newHandle = stringListHandles.length();
-                    stringListHandles.append(RegisterStringListHandle{ values: [] });
+                    &stringListHandles.append(RegisterStringListHandle{ values: [] });
                     iregs[iBase + dst] = newHandle;,
             RegisterOp.SHAppend ->
                     handleReg = ops[ip]; ip += 1;
                     src = ops[ip]; ip += 1;
                     IF stringListHandles[iregs[iBase + handleReg]] EXISTS AS handle THEN
-                        handle.values.append(COPY sregs[src]);
+                        &handle.values.append(COPY sregs[src]);
                     END,
             RegisterOp.SHGet ->
                     dst = ops[ip]; ip += 1;
@@ -2530,14 +2530,14 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     ip += 1;
                     MUTABLE bgCaps: []RegisterValue = List[];
                     FOR bci IN (0_i64 ..< pendingCaps.length()) DO
-                        bgCaps.append(COPY (pendingCaps[bci] OR_ELSE RegisterValue.Nil));
+                        &bgCaps.append(COPY (pendingCaps[bci] OR_ELSE RegisterValue.Nil));
                     END
                     pendingCaps = List[];
                     bgFut: ~RegisterValue = BG { @service ->
-                        runRegisterBytecode!(COPY ops, COPY opcodes, COPY consts, COPY sourceLines, COPY sourceColumns, COPY sourcePaths, COPY breakpointIps, COPY varNames, bgEntry, GIVE bgCaps, sharedCells) OR_ELSE RAISE;
+                        runRegisterBytecode(COPY ops, COPY opcodes, COPY consts, COPY sourceLines, COPY sourceColumns, COPY sourcePaths, COPY breakpointIps, COPY varNames, bgEntry, GIVE bgCaps, &sharedCells) OR_ELSE RAISE;
                     };
                     bgNewFid = futureTable.length();
-                    futureTable.append(GIVE bgFut);
+                    &futureTable.append(GIVE bgFut);
                     iregs[iBase + bgDst] = bgNewFid;,
             RegisterOp.FNextI ->
                     fniDst = ops[ip]; ip += 1;
@@ -2631,19 +2631,19 @@ FN runRegisterBytecode!(ops: Int64[], opcodes: RegisterOp[], consts: RegisterVal
                     pendingCaps = List[];,
             RegisterOp.CapPushI ->
                     cpiR = ops[ip]; ip += 1;
-                    pendingCaps.append(RegisterValue{ Int64Val: iregs[iBase + cpiR] });,
+                    &pendingCaps.append(RegisterValue{ Int64Val: iregs[iBase + cpiR] });,
             RegisterOp.CapPushF ->
                     cpfR = ops[ip]; ip += 1;
-                    pendingCaps.append(RegisterValue{ Number: fregs[fBase + cpfR] });,
+                    &pendingCaps.append(RegisterValue{ Number: fregs[fBase + cpfR] });,
             RegisterOp.CapPushS ->
                     cpsR = ops[ip]; ip += 1;
-                    pendingCaps.append(RegisterValue{ Str: COPY sregs[cpsR] });,
+                    &pendingCaps.append(RegisterValue{ Str: COPY sregs[cpsR] });,
             RegisterOp.SCellNew ->
                     scnDst = ops[ip]; ip += 1;
                     WITH POLYMORPHIC EXCLUSIVE sharedCells AS sc {
                         iregs[iBase + scnDst] = sc.length();
-                        sc.append(RegisterValue{ Int64Val: 0_i64 });
-                        sc.append(RegisterValue{ Int64Val: 0_i64 });
+                        &sc.append(RegisterValue{ Int64Val: 0_i64 });
+                        &sc.append(RegisterValue{ Int64Val: 0_i64 });
                     },
             RegisterOp.SCellGetI ->
                     scgDst = ops[ip]; ip += 1;

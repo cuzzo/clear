@@ -15,7 +15,7 @@ STRUCT Env {
     vars: {String}Value
 }
 
-FN forceTco!(f: Value) RETURNS !Value ->
+FN forceTco(f: Value) RETURNS !Value ->
     PARTIAL MATCH f START
         Value.Lambda AS lam -> RETURN Value.Tco{ ast: lam.body };,
         DEFAULT -> RETURN Value.Nil;
@@ -23,8 +23,8 @@ FN forceTco!(f: Value) RETURNS !Value ->
     RETURN Value.Nil;
 END
 
-FN unwrapTco!(f: Value) RETURNS !Value ->
-    result = forceTco!(f) OR_ELSE RAISE;
+FN unwrapTco(f: Value) RETURNS !Value ->
+    result = forceTco(f) OR_ELSE RAISE;
     PARTIAL MATCH result START
         Value.Tco AS tco ->
             ast = COPY tco.ast;
@@ -37,13 +37,13 @@ END
 FN main() RETURNS Void ->
     bodyText = "lambda-" $+ "body";
     MUTABLE params: []Value = [];
-    params.append(Value{ Symbol: COPY "x" });
+    &params.append(Value{ Symbol: COPY "x" });
     MUTABLE bodyItems: []Value = [];
-    bodyItems.append(Value{ Symbol: COPY "identity" });
-    bodyItems.append(Value{ Str: COPY bodyText });
+    &bodyItems.append(Value{ Symbol: COPY "identity" });
+    &bodyItems.append(Value{ Str: COPY bodyText });
 
     MUTABLE pool: [Pool(8)]Env = [];
-    envId: Id<Env> = pool.insert(Env{ vars: {} });
+    envId: Id<Env> = &pool.insert(Env{ vars: {} });
     IF pool[envId] EXISTS AS env THEN
         env.vars["f"] = Value.Lambda{ params: COPY params, body: Value{ List: bodyItems } };
     END
@@ -52,7 +52,7 @@ FN main() RETURNS Void ->
         lambda = env2.vars["f"] OR_ELSE Value.Nil;
     END
 
-    ast = unwrapTco!(lambda) OR_ELSE RAISE;
+    ast = unwrapTco(lambda) OR_ELSE RAISE;
     PARTIAL MATCH ast START
         Value.List AS items ->
             ASSERT items.length() == 2, "lambda body should survive TCO unwrap";,

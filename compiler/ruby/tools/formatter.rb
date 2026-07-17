@@ -42,6 +42,7 @@ require "sorbet-runtime"
 
 require_relative '../ast/lexer'
 require_relative '../ast/parser'
+require_relative '../ffi/c_header_importer'
 require_relative 'method_rewriter'
 require_relative 'predicate_rewriter'
 require_relative 'lint_fix_rewriter'
@@ -73,7 +74,7 @@ class Formatter
   ].to_set.freeze
 
   EXPR_START_OPS = %w[
-    == != <= >= && || ** += -= *= /= :: -> |>
+    == != <= >= << >> && || ** += -= *= /= :: -> |>
     .. ..< ..<= ..= %* %+ %- !* !+ !-
   ].to_set.freeze
 
@@ -110,13 +111,20 @@ class Formatter
     # `: Type` annotations. Runs first so subsequent rewriters see
     # the cleanest source. Falls back to the original on annotation
     # failure (fmt must format files with errors).
-    rewritten = LintFixRewriter.rewrite(@source)
-    # Predicate canonicalization runs before METHOD-UFCS rewriting:
-    # `x == NIL` -> `x.nil?()` may produce a new prefix call site
-    # that MethodRewriter then converts to UFCS form. Doing them in
-    # the reverse order would miss the second pass.
-    rewritten = PredicateRewriter.rewrite(rewritten)
-    rewritten = MethodRewriter.rewrite(rewritten)
+    # Header imports are expanded by CompilerFrontend before the parser. The
+    # AST-based convenience rewriters deliberately do not run over that
+    # pre-parser directive; token formatting remains lossless and complete.
+    # Generated `.ffi.clear` declarations take the ordinary AST path.
+    rewritten = @source
+    unless @source.match?(CHeaderImporter::DIRECTIVE)
+      rewritten = LintFixRewriter.rewrite(rewritten)
+      # Predicate canonicalization runs before METHOD-UFCS rewriting:
+      # `x == NIL` -> `x.nil?()` may produce a new prefix call site
+      # that MethodRewriter then converts to UFCS form. Doing them in
+      # the reverse order would miss the second pass.
+      rewritten = PredicateRewriter.rewrite(rewritten)
+      rewritten = MethodRewriter.rewrite(rewritten)
+    end
     tokens = FormatLexer.new(rewritten).tokenize
     Emitter.new(tokens).emit
   end
@@ -125,8 +133,14 @@ class Formatter
 
   sig { returns(T.nilable(AST::Program)) }
   def validate_parse!
-    ts = ::Lexer.new(@source).tokenize
-    ::ClearParser.new(ts, @source).parse
+    # The compiler expands this directive before lexing. Replace only the
+    # recognized form with an equivalent declaration for syntax validation;
+    # the lossless formatter still receives and emits the original text.
+    validation_source = @source.gsub(CHeaderImporter::DIRECTIVE) do
+      'EXTERN STRUCT CHeaderImportPlaceholder {} FROM "c_header_import" ABI C;'
+    end
+    ts = ::Lexer.new(validation_source).tokenize
+    ::ClearParser.new(ts, validation_source).parse
   rescue => e
     raise Error, "parse error: #{e.message}"
   end
@@ -167,11 +181,11 @@ class Formatter::FormatLexer
       when @s.peek(1) == '"'
         raw = consume_string
         push(:STRING, raw, sl, sc)
-      when m = @s.scan(/->|\|>|==|!=|>=|<=|&&|\|\||\*\*|\$\+|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
+      when m = @s.scan(/->|\|>|!!|==|!=|>=|<=|>>|<<|&&|\|\||\*\*|\$\+|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
         push(:OP, m, sl, sc)
       when m = @s.scan(/[=+\-*\/<>&|!.,;(){}\[\]:?~%]/)
         push(:SYM, m, sl, sc)
-      when m = @s.scan(/[a-zA-Z_@$]\w*[!?]?/)
+      when m = @s.scan(/[a-zA-Z_@$]\w*\??/)
         if ::Lexer::KEYWORDS.include?(m)
           push(:KEYWORD, m, sl, sc)
         elsif m =~ /\A[A-Z]/
@@ -323,6 +337,7 @@ class Formatter::Emitter
     toks = collapse_newlines(toks)
     toks = canonicalize_numerics(toks)
     toks = expand_match_blocks(toks)
+    toks = expand_extern_declarations(toks)
     toks = expand_fn_blocks(toks)
     toks = expand_then_do_blocks(toks)
     toks = expand_with_blocks(toks)
@@ -767,6 +782,152 @@ class Formatter::Emitter
     end
   end
 
+  # Canonicalize the two C-FFI declaration surfaces before the generic FN
+  # and record passes see them. In particular, callback types contain an
+  # anonymous `FN(...) -> T`; keeping the complete EXTERN statement together
+  # prevents that arrow from being mistaken for a function body.
+  sig { params(toks: Array).returns(Array) }
+  def expand_extern_declarations(toks)
+    out = []
+    i = 0
+    while i < toks.length
+      token = toks[i]
+      unless token.type == :KEYWORD && token.raw == 'EXTERN'
+        out << token
+        i += 1
+        next
+      end
+
+      # Parse validation guarantees every EXTERN declaration terminates.
+      finish = T.must(extern_declaration_end(toks, i))
+
+      if header_import_declaration?(toks, i, finish)
+        emit_header_import_declaration(out, toks, i, finish)
+      elsif should_wrap_extern_declaration?(toks, i, finish)
+        emit_wrapped_extern_declaration(out, toks, i, finish)
+      else
+        (i..finish).each { |j| out << toks[j] }
+      end
+      i = finish + 1
+    end
+    out
+  end
+
+  sig { params(toks: Array, start: Integer).returns(T.nilable(Integer)) }
+  def extern_declaration_end(toks, start)
+    depth = 0
+    j = start + 1
+    while j < toks.length
+      token = toks[j]
+      if token.type == :SYM
+        case token.raw
+        when '(', '[', '{' then depth += 1
+        when ')', ']', '}' then depth -= 1
+        when ';' then return j if depth.zero?
+        end
+      end
+      j += 1
+    end
+    nil
+  end
+
+  sig { params(toks: Array, start: Integer, finish: Integer).returns(T::Boolean) }
+  def header_import_declaration?(toks, start, finish)
+    code = toks[start..finish].reject { |token| [:NL, :COMMENT].include?(token.type) }
+    code[1]&.raw == 'FROM' && code[2]&.raw == 'HEADER'
+  end
+
+  sig { params(out: Array, toks: Array, start: Integer, finish: Integer).void }
+  def emit_header_import_declaration(out, toks, start, finish)
+    # CHeaderImporter::DIRECTIVE recognizes LINK and ABI as one unit.
+    link = T.must(keyword_index(toks, start, finish, 'LINK'))
+    abi = T.must(keyword_index(toks, start, finish, 'ABI'))
+
+    copy_without_nls(out, toks, start, link)
+    insert_nl(out)
+    out << phantom(:INDENT_OPEN)
+    copy_without_nls(out, toks, link, abi)
+    insert_nl(out)
+    copy_without_nls(out, toks, abi, finish + 1)
+    out << phantom(:INDENT_CLOSE)
+  end
+
+  EXTERN_SUFFIX_KEYWORDS = %w[AS FROM ABI CALLCONV HEADER].freeze
+
+  sig { params(toks: Array, start: Integer, finish: Integer).returns(T::Boolean) }
+  def should_wrap_extern_declaration?(toks, start, finish)
+    return true if extern_has_top_level_newline?(toks, start, finish)
+    inline = toks[start..finish].reject { |token| token.type == :NL }
+    format_line_body(inline).length > 120
+  end
+
+  sig { params(toks: Array, start: Integer, finish: Integer).returns(T::Boolean) }
+  def extern_has_top_level_newline?(toks, start, finish)
+    depth = 0
+    (start..finish).each do |j|
+      token = toks[j]
+      return true if token.type == :NL && depth.zero?
+      next unless token.type == :SYM
+      case token.raw
+      when '(', '[', '{' then depth += 1
+      when ')', ']', '}' then depth -= 1
+      end
+    end
+    false
+  end
+
+  sig { params(out: Array, toks: Array, start: Integer, finish: Integer).void }
+  def emit_wrapped_extern_declaration(out, toks, start, finish)
+    suffixes = top_level_extern_suffixes(toks, start, finish)
+    first_suffix = suffixes.first
+    unless first_suffix
+      copy_without_nls(out, toks, start, finish + 1)
+      return
+    end
+
+    copy_without_nls(out, toks, start, first_suffix)
+    insert_nl(out)
+    out << phantom(:INDENT_OPEN)
+    suffixes.each_with_index do |clause_start, index|
+      clause_finish = suffixes[index + 1] || finish + 1
+      copy_without_nls(out, toks, clause_start, clause_finish)
+      insert_nl(out) unless clause_finish > finish
+    end
+    out << phantom(:INDENT_CLOSE)
+  end
+
+  sig { params(toks: Array, start: Integer, finish: Integer).returns(T::Array[Integer]) }
+  def top_level_extern_suffixes(toks, start, finish)
+    depth = 0
+    indices = []
+    (start..finish).each do |j|
+      token = toks[j]
+      if token.type == :SYM
+        case token.raw
+        when '(', '[', '{' then depth += 1
+        when ')', ']', '}' then depth -= 1
+        end
+      elsif depth.zero? && token.type == :KEYWORD && EXTERN_SUFFIX_KEYWORDS.include?(token.raw)
+        indices << j
+      end
+    end
+    indices
+  end
+
+  sig { params(toks: Array, start: Integer, finish: Integer, keyword: String).returns(T.nilable(Integer)) }
+  def keyword_index(toks, start, finish, keyword)
+    (start..finish).find do |j|
+      toks[j].type == :KEYWORD && toks[j].raw == keyword
+    end
+  end
+
+  sig { params(out: Array, toks: Array, start: Integer, finish: Integer).void }
+  def copy_without_nls(out, toks, start, finish)
+    (start...finish).each do |j|
+      out << toks[j] unless toks[j].type == :NL
+    end
+  end
+
   # For each top-level `FN ... -> ... END` (or any nested FN), ensure that
   # the body is multi-line: a newline follows `->` and precedes `END`, and
   # statements in between are split on `;` boundaries.
@@ -776,7 +937,7 @@ class Formatter::Emitter
     i = 0
     while i < toks.length
       t = toks[i]
-      if t.type == :KEYWORD && t.raw == 'FN'
+      if t.type == :KEYWORD && t.raw == 'FN' && named_function?(toks, i)
         i = emit_fn_block(out, toks, i)
       else
         out << t
@@ -784,6 +945,16 @@ class Formatter::Emitter
       end
     end
     out
+  end
+
+  # Function types use `FN(...) -> T` and have no name or END-delimited body.
+  # Treating their arrow as a function-definition opener corrupts every
+  # subsequent declaration in an FFI file containing a callback.
+  sig { params(toks: Array, fn_idx: Integer).returns(T::Boolean) }
+  def named_function?(toks, fn_idx)
+    j = fn_idx + 1
+    j += 1 while j < toks.length && [:NL, :COMMENT].include?(toks[j].type)
+    j < toks.length && [:VAR_ID, :TYPE_ID].include?(toks[j].type)
   end
 
   # Emits a FN block starting at index `start` (token = 'FN') into `out`.
@@ -2419,6 +2590,13 @@ class Formatter::Emitter
     end
     return j if j >= toks.length
 
+    # Empty EXTERN structs describe opaque C handles and read best as `{}`.
+    next_code = skip_nls(toks, j)
+    if next_code < toks.length && toks[next_code].type == :SYM && toks[next_code].raw == '}'
+      out << toks[next_code]
+      return next_code + 1
+    end
+
     # Canonicalize: exactly one NL after `{`, one NL after each top-level
     # `,`, one NL before `}`. Internal NLs/comments (e.g., default-method
     # FN declarations with leading comments in UNION bodies) are preserved.
@@ -2693,7 +2871,10 @@ class Formatter::Emitter
     i = start_idx
     while i < line.length
       t = line[i]
-      if t.type == :SYM
+      if t.type == :OP && t.raw == '>>'
+        depth -= 2
+        return i if depth <= 0
+      elsif t.type == :SYM
         case t.raw
         when '<' then depth += 1
         when '>'
@@ -2855,10 +3036,21 @@ class Formatter::Emitter
     return false if a.type == :OP  && a.raw == '::'
     return false if b.type == :OP  && b.raw == '::'
 
+    # Error propagation is postfix and may be followed by another postfix:
+    # `load()!!` and `load()!!.field`.
+    return false if b.type == :OP && b.raw == '!!'
+
+    # Optional unwrap is postfix: `value?`, `call()?`, `items[0]?`.
+    if b.type == :SYM && b.raw == '?'
+      return false if [:VAR_ID, :TYPE_ID, :NUM, :STRING].include?(a.type)
+      return false if a.type == :SYM && [')', ']', '}'].include?(a.raw)
+    end
+
     # Call / index attach.
     if b.type == :SYM && b.raw == '('
       return false if [:VAR_ID, :TYPE_ID].include?(a.type)
       return false if a.type == :SYM && [')', ']'].include?(a.raw)
+      return false if a.type == :KEYWORD && a.raw == 'FN'
       return false if a.type == :KEYWORD && Formatter::ATTACH_PAREN_AFTER.include?(a.raw)
     end
     if b.type == :SYM && b.raw == '['
@@ -2891,7 +3083,7 @@ class Formatter::Emitter
         return false
       end
       # `Bar>` — no space before the generic close.
-      if b_is_generic && b.raw == '>'
+      if b_is_generic && (b.raw == '>' || b.raw == '>>')
         return false
       end
     end
@@ -2935,14 +3127,19 @@ class Formatter::Emitter
       if b.type == :SYM && %w[! ? % ~].include?(b.raw)
         return false
       end
+      if b.type == :SYM && ['[', '{'].include?(b.raw)
+        return false
+      end
       # Unary use at expression start: attach.
       if unary_context?(line, b_idx - 1)
         return false
       end
     end
 
-    # Unary `-` at expression start: attach (e.g., `-1`).
-    if a.type == :SYM && a.raw == '-' && unary_context?(line, b_idx - 1)
+    # Unary `-` and mutable-borrow `&` attach at expression start
+    # (`-1`, `&value`, and `&value.method()`). Binary operators retain
+    # their ordinary surrounding spaces.
+    if a.type == :SYM && %w[- &].include?(a.raw) && unary_context?(line, b_idx - 1)
       return false
     end
 

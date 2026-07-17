@@ -17,6 +17,33 @@ MUTABLE counter = 0;          # OKAY: Explicit mutability
 counter = 1;                  # OKAY: can reassign mutable binding
 ```
 
+Mutation is also explicit where it crosses a call boundary. A `MUTABLE`
+parameter takes `&value`, and a mutating method uses `&value.method()`:
+
+```ruby clear
+FN increment(MUTABLE value: Int64) RETURNS Void ->
+  value += 1;
+END
+
+MUTABLE count = 0;
+increment(&count);
+
+MUTABLE values: []Int64 = [];
+&values.append(1_i64);
+```
+
+`&` applies to an existing storage path, not to an anonymous temporary, so
+`consume(makeValue())` is valid without `&`. A path such as `&box.value`
+requires its root binding (`box`) to be `MUTABLE`. The exception is
+`@alwaysMutable`: that capability owns its interior-mutability contract, so
+an `@alwaysMutable` binding or field may satisfy a `MUTABLE` parameter without
+`&` and without making its containing binding mutable.
+
+> **NOTE — EASY mode:** DEFAULT and STRICT report a fixable error when either
+> `MUTABLE` or `&` is missing. Running `clear run --easy` automatically applies
+> that fix to the source—adding the mutable declaration and explicit call-site
+> address where needed—before building and running the corrected program.
+
 ## 2. Primitive Types
 
 CLEAR provides a comprehensive set of primitives for precise control over memory.
@@ -141,7 +168,7 @@ fails in EASY, DEFAULT, and STRICT. Choose the semantics explicitly:
 
 ```ruby clear illustrative
 y = x;
-x.update!();
+&x.update();
 print(y);          # COMPILER ERROR: ambiguous alias + mutation
 
 y = COPY x;       # independent snapshot
@@ -163,12 +190,12 @@ Function parameters are **implicit borrows** by default. Only `TAKES` transfers 
 
 ```ruby clear
 # Owned: can store into collections
-FN store!(TAKES v: Value, MUTABLE map: {String}Value) RETURNS Void ->
+FN store(TAKES v: Value, MUTABLE map: {String}Value) RETURNS Void ->
     map["item"] = v;                # OKAY: v is owned via TAKES
     RETURN;
 END
 
-FN bad!(v: Value, MUTABLE map: {String}Value) RETURNS Void ->
+FN bad(v: Value, MUTABLE map: {String}Value) RETURNS Void ->
     map["item"] = v;                # COMPILER ERROR: Cannot move borrowed value 'v'
     RETURN;
 END
@@ -385,7 +412,7 @@ FN sum(v: Value) RETURNS Float64 ->
 END
 
 # Owned source: MATCH AS moves the payload
-FN take!(TAKES v: Value) RETURNS []Value ->
+FN take(TAKES v: Value) RETURNS []Value ->
     MATCH v START
         Value.List AS items ->       # items is []Value (owned, v consumed)
             RETURN items;            # OKAY: returning owned data
@@ -430,6 +457,8 @@ result = data |> process |> validate |> format;
 # 3. Error Handling: OR_ELSE fallback or propagation
 val = parseInt("abc") OR_ELSE 0;                   # OKAY: Fallback value
 content = readFile("config.json") OR_ELSE RAISE;   # OKAY: Explicit propagation
+same = readFile("config.json")!!;                  # Equivalent postfix shorthand
+title = loadConfig("config.json")!!.title;         # Raise, then continue navigation
 
 # 4. Function-level CATCH
 FN main() RETURNS Void ->
@@ -984,7 +1013,8 @@ END
 | Sigil | Meaning | Example |
 |---|---|---|
 | `@` | Capability / pipeline binding | `value @shared`, `\|> process AS @p` |
-| `!` | Mutation suffix | `FN increment!(...)` |
+| `&` | Explicit mutable call-site path | `increment(&value)`, `&items.append(x)` |
+| `!!` | Raise on a fallible result | `load()!!`, `load()!!.field` |
 | `\|>` | Smooth operator (pipeline) | `items \|> WHERE _ > 5` |
 | `_` | Pipeline element placeholder | `\|> SELECT _.name` |
 | `!T` | Error union type | `RETURNS !Float64` |
@@ -992,6 +1022,30 @@ END
 | `~T` | Promise / stream type | `p: ~Int64 = BG { 42; }` |
 | `[~]T` | Finite stream | `s: [~]Int64 = BG STREAM { YIELD 1; }` |
 | `Tuple<A, B>` | Positional product | `p = Tuple{"ok", 1_i64}; p._0` |
+
+## Bitwise and Shift Operators
+
+CLEAR spells binary bitwise operations as words so they cannot be confused with
+mutable borrows (`&value`) or pipelines (`|>`). Shifts retain the conventional
+symbols:
+
+| Operator | Meaning | Example |
+|---|---|---|
+| `XOR` | Bitwise exclusive OR | `flags XOR mask` |
+| `BIT_AND` | Bitwise AND | `flags BIT_AND mask` |
+| `BIT_OR` | Bitwise OR | `flags BIT_OR mask` |
+| `<<` | Shift left | `value << amount` |
+| `>>` | Shift right | `value >> amount` |
+
+All five operators require integer operands. From tightest to loosest, their
+precedence is shifts, `BIT_AND`, `XOR`, then `BIT_OR`. Arithmetic binds more
+tightly than shifts; comparisons and boolean `AND`/`OR` bind more loosely.
+
+```ruby clear
+read = permissions BIT_AND 0b100_i64 != 0_i64;
+packed = (kind << 8_i64) BIT_OR payload;
+toggled = flags XOR 0b0011_i64;
+```
 
 ## Integer Overflow Operators
 

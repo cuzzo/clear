@@ -8,15 +8,15 @@ UNION Val {
     List: Val[]
 }
 
-FN consume!(TAKES items: Val[]) RETURNS !Val ->
+FN consume(TAKES items: Val[]) RETURNS !Val ->
     IF items.length() == 0 THEN RETURN Val.Nil; END
     RETURN COPY items[0];
 END
 
-FN eval!(TAKES ast: Val) RETURNS !Val EFFECTS REENTRANT ->
+FN eval(TAKES ast: Val) RETURNS !Val EFFECTS REENTRANT ->
     PARTIAL MATCH TAKES ast START
         Val.List AS items ->
-            RETURN consume!(GIVE items);,
+            RETURN consume(GIVE items);,
         DEFAULT -> RETURN Val.Nil;
     END
     RETURN Val.Nil;
@@ -24,9 +24,9 @@ END
 
 FN main() RETURNS Void ->
     MUTABLE list: []Val = List[];
-    list.append(Val{ Str: "hello" });
+    &list.append(Val{ Str: "hello" });
     ast = Val{ List: list };
-    result = eval!(COPY ast);
+    result = eval(COPY ast);
     PARTIAL MATCH result START
         Val.Str AS s -> ASSERT s == "hello", "give in func arg";,
         DEFAULT -> ASSERT FALSE, "should be Str";

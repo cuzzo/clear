@@ -68,7 +68,7 @@ RSpec.describe "predicate-impurity rejection" do
           STRUCT Box { items: Int64[] }
           FN main() RETURNS Void ->
             b = Box{ items: [1, 2] } @shared:locked;
-            WITH EXCLUSIVE b AS y GUARD y.items.pop() > 0 {
+            WITH EXCLUSIVE b AS y GUARD &y.items.pop() > 0 {
               v = y.items;
             }
             RETURN;

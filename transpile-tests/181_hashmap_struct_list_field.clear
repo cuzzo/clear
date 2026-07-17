@@ -8,9 +8,9 @@ STRUCT Item {
     tags: []String,
 }
 
-FN addItem!(MUTABLE items: {String}Item, key: String, name: String, tag: String) RETURNS !Void ->
+FN addItem(MUTABLE items: {String}Item, key: String, name: String, tag: String) RETURNS !Void ->
     MUTABLE tags: []String = [];
-    tags.append(COPY tag);
+    &tags.append(COPY tag);
     items[key] = Item{ name: COPY name, tags: tags };
     RETURN;
 END
@@ -19,10 +19,10 @@ FN main() RETURNS Void ->
     MUTABLE items: {String}Item = {};
 
     # Store a struct with a populated list field
-    addItem!(items, "x", "first", "a");
+    addItem(&items, "x", "first", "a");
 
     # Replace it - triggers cleanup of old value's frame-allocated list
-    addItem!(items, "x", "second", "b");
+    addItem(&items, "x", "second", "b");
 
     # Verify replacement worked
     item = items["x"] OR_ELSE Item{ name: "", tags: [] };

@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
         seed = seed %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
         IF seed < 0 -> seed = 0 - seed;
         bucket = seed MOD 10000;
-        keys.append("b:" $+ bucket.toString());
+        &keys.append("b:" $+ bucket.toString());
     END
 
     peak = framePeakBytes();

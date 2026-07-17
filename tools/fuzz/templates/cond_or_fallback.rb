@@ -70,8 +70,8 @@ def cof_extra_fn(fb, t)
   <<~CHT.chomp
     FN cofFallback() RETURNS Int64[]@list ->
         MUTABLE xs: Int64[]@list = [];
-        xs.append(1_i64);
-        xs.append(2_i64);
+        &xs.append(1_i64);
+        &xs.append(2_i64);
         RETURN xs;
     END
   CHT

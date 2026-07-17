@@ -8,7 +8,7 @@ UNION Val {
     Num: Float64
 }
 
-FN convert!(token: String) RETURNS !Val ->
+FN convert(token: String) RETURNS !Val ->
     # Path 1: frame string in union (needs promotion)
     IF token == "nil" THEN RETURN Val.Nil; END
     IF charAt(token, 0) == "\"" THEN RETURN Val{ Str: substr(token, 1, token.length() - 2) }; END
@@ -20,10 +20,10 @@ FN convert!(token: String) RETURNS !Val ->
 END
 
 FN main() RETURNS Void ->
-    v1 = convert!("nil");
-    v2 = convert!("\"hello\"");
-    v3 = convert!("42");
-    v4 = convert!("symbol");
+    v1 = convert("nil");
+    v2 = convert("\"hello\"");
+    v3 = convert("42");
+    v4 = convert("symbol");
     PARTIAL MATCH v2 START
         Val.Str AS s -> ASSERT s == "hello", "substr path";,
         DEFAULT -> ASSERT FALSE, "should be Str";

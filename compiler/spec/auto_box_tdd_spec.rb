@@ -44,7 +44,7 @@ RSpec.describe "automatic box transport — TDD contract" do
         STRUCT Foo { name: String }
         FN main() RETURNS Void ->
           MUTABLE items: []@boxed Foo = [];
-          items.append(Foo{ name: COPY "inline" });
+          &items.append(Foo{ name: COPY "inline" });
         END
       CLEAR
       zig = transpile(source)
@@ -58,13 +58,13 @@ RSpec.describe "automatic box transport — TDD contract" do
     it "allocates a box and moves an inline TAKES payload into a boxed-element list" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
-        FN add!(TAKES f: Foo, MUTABLE items: []Foo@boxed) RETURNS Void ->
-          items.append(f);
+        FN add(TAKES f: Foo, MUTABLE items: []Foo@boxed) RETURNS Void ->
+          &items.append(f);
         END
         FN main() RETURNS Void ->
           MUTABLE items: []Foo@boxed = [];
           f = Foo{ name: COPY "inline" };
-          add!(f, items);
+          add(f, items);
           ASSERT items.length() == 1;
         END
       CLEAR
@@ -131,13 +131,13 @@ RSpec.describe "automatic box transport — TDD contract" do
     it "specializes a generic TAKES append to the boxed element representation" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
-        FN add!<T>(TAKES value: T, MUTABLE items: []T@boxed) RETURNS Void ->
-          items.append(value);
+        FN add<T>(TAKES value: T, MUTABLE items: []T@boxed) RETURNS Void ->
+          &items.append(value);
         END
         FN main() RETURNS Void ->
           MUTABLE items: []Foo@boxed = [];
           value = Foo{ name: COPY "generic" };
-          add!(value, items);
+          add(value, items);
           ASSERT items.length() == 1;
         END
       CLEAR
@@ -150,13 +150,13 @@ RSpec.describe "automatic box transport — TDD contract" do
     it "moves a boxed payload into an inline list and releases only the empty box shell" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
-        FN add!(TAKES f: Foo@boxed, MUTABLE items: []Foo) RETURNS Void ->
-          items.append(f);
+        FN add(TAKES f: Foo@boxed, MUTABLE items: []Foo) RETURNS Void ->
+          &items.append(f);
         END
         FN main() RETURNS Void ->
           MUTABLE items: []Foo = [];
           f = Foo{ name: COPY "boxed" } @boxed;
-          add!(f, items);
+          add(f, &items);
           ASSERT items.length() == 1;
           ASSERT items[0]?.name == "boxed";
         END
@@ -175,7 +175,7 @@ RSpec.describe "automatic box transport — TDD contract" do
         FN main() RETURNS Void ->
           MUTABLE items: []Foo@boxed = [];
           f = Foo{ name: COPY "default" };
-          items.append(f);
+          &items.append(f);
         END
       CLEAR
 
@@ -189,7 +189,7 @@ RSpec.describe "automatic box transport — TDD contract" do
         FN main() RETURNS Void ->
           MUTABLE items: []Foo@boxed = [];
           f = Foo{ name: COPY "strict" };
-          items.append(f);
+          &items.append(f);
         END
       CLEAR
 
@@ -232,7 +232,7 @@ RSpec.describe "automatic box transport — TDD contract" do
         FN main() RETURNS Void ->
           MUTABLE items: []Foo@boxed = [];
           f = Foo{ name: COPY "still-live" };
-          items.append(f);
+          &items.append(f);
           ASSERT f.name == "still-live";
         END
       CLEAR
@@ -244,13 +244,13 @@ RSpec.describe "automatic box transport — TDD contract" do
     it "rejects a boxed-element list where a concrete inline-element list is required" do
       source = <<~CLEAR
         STRUCT Foo { name: String }
-        FN add!(TAKES f: Foo, MUTABLE items: []Foo) RETURNS Void ->
-          items.append(f);
+        FN add(TAKES f: Foo, MUTABLE items: []Foo) RETURNS Void ->
+          &items.append(f);
         END
         FN main() RETURNS Void ->
           MUTABLE items: []Foo@boxed = [];
           f = Foo{ name: COPY "mismatch" };
-          add!(f, items);
+          add(f, &items);
         END
       CLEAR
 
@@ -328,7 +328,7 @@ RSpec.describe "automatic box transport — TDD contract" do
           MUTABLE items: []Foo@boxed = [];
           MUTABLE value = Foo{ name: COPY "before" };
           alias = value;
-          items.append(value);
+          &items.append(value);
           value.name = COPY "after";
           ASSERT alias.name == "before";
         END
@@ -358,7 +358,7 @@ RSpec.describe "automatic box transport — TDD contract" do
         FN main() RETURNS Void ->
           MUTABLE items: []Foo@boxed = [];
           value = Foo{ name: COPY "fix" };
-          items.append(value);
+          &items.append(value);
         END
       CLEAR
 

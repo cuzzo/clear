@@ -1,4 +1,4 @@
--- Test: RETURN f(g!()) where the return type is a raw slice T[].
+-- Test: RETURN f(g()) where the return type is a raw slice T[].
 --
 -- This is structurally deeper than 255/256: those were single-classifier
 -- bugs (BinaryOp falling through to raw `==`; stdlib templates substituting
@@ -25,7 +25,7 @@
 --   4. `is_pointer = heap? || (frame? && struct?)` adds a `*` prefix to
 --      heap-provenance arrays, producing `*[]T` in zig_type -- never the
 --      desired form.
---   5. `build_drop_entry!` and `hoist_cleanup_entry` for slice-shaped
+--   5. `build_drop_entry` and `hoist_cleanup_entry` for slice-shaped
 --      types call `ti.zig_type` without `is_param: true`, so they get
 --      the ArrayList form back from (1) and emit
 --      `CheatLib.cleanup(std.ArrayListUnmanaged(T), ...)` against a
@@ -53,7 +53,7 @@
 
 UNION Value { Nil, Str: String }
 
-FN makeItems!() RETURNS Value[] ->
+FN makeItems() RETURNS Value[] ->
     MUTABLE list: Value[]@list = List[];
     list.append(Value{ Str: COPY "hello" });
     list.append(Value{ Str: COPY "world" });
@@ -64,10 +64,10 @@ END
 -- buffer, the copy is dangling.
 FN passThrough(items: Value[]) RETURNS Value[] -> RETURN items; END
 
-FN wrapAndReturn!() RETURNS Value[] -> RETURN passThrough(makeItems!()); END
+FN wrapAndReturn() RETURNS Value[] -> RETURN passThrough(makeItems()); END
 
 FN main() RETURNS Void ->
-    result = wrapAndReturn!();
+    result = wrapAndReturn();
     ASSERT result.length() == 2, "two items survive HPT cleanup";
     MATCH result[0] START
         Value.Str AS s -> ASSERT s == "hello", "first item string survives";,

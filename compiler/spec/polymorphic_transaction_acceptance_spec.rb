@@ -14,7 +14,7 @@ require_relative "../ruby/ast/ast" unless defined?(MIR::ReassignPlan)
 #
 #   STRUCT Counter { value: Int64 }
 #
-#   FN tick!(MUTABLE c: Counter) RETURNS Int64 ->
+#   FN tick(MUTABLE c: Counter) RETURNS Int64 ->
 #     MUTABLE r: Int64 = 0_i64;
 #     WITH POLYMORPHIC c AS x { x.value = x.value + 1; r = x.value; }
 #     RETURN r;
@@ -43,7 +43,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
   def fn_with_requires(suffix:, requires_clause:, with_form:)
     <<~CLEAR
       STRUCT Counter#{suffix} { value: Int64 }
-      FN tick_#{suffix}!(MUTABLE c: Counter#{suffix}) RETURNS !Int64
+      FN tick_#{suffix}(MUTABLE c: Counter#{suffix}) RETURNS !Int64
         #{requires_clause}
       ->
         MUTABLE r: Int64 = 0_i64;
@@ -64,7 +64,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterLocked{ value: 0 } @shared:locked;
-          _ = tick_Locked!(c);
+          _ = tick_Locked(&c);
           RETURN;
         END
       CLEAR
@@ -92,7 +92,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterWriteLocked{ value: 0 } @shared:writeLocked;
-          _ = tick_WriteLocked!(c);
+          _ = tick_WriteLocked(&c);
           RETURN;
         END
       CLEAR
@@ -116,7 +116,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterVersioned{ value: 0 } @shared:versioned;
-          _ = tick_Versioned!(c);
+          _ = tick_Versioned(&c);
           RETURN;
         END
       CLEAR
@@ -144,7 +144,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterAtomic{ value: 0 } @boxed:atomic;
-          _ = tick_Atomic!(c);
+          _ = tick_Atomic(&c);
           RETURN;
         END
       CLEAR
@@ -181,7 +181,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c1 = CounterSnapshotted{ value: 0 } @versioned;
-          _ = tick_Snapshotted!(c1);
+          _ = tick_Snapshotted(&c1);
           RETURN;
         END
       CLEAR
@@ -209,7 +209,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterLocal{ value: 0 } @local;
-          _ = tick_Local!(c);
+          _ = tick_Local(&c);
           RETURN;
         END
       CLEAR
@@ -232,7 +232,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterMulti{ value: 0 } @multiowned;
-          _ = tick_Multi!(c);
+          _ = tick_Multi(&c);
           RETURN;
         END
       CLEAR
@@ -252,7 +252,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterReadMulti{ value: 0 } @multiowned;
-          _ = tick_ReadMulti!(c);
+          _ = tick_ReadMulti(&c);
           RETURN;
         END
       CLEAR
@@ -270,7 +270,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterPlain{ value: 0 };
-          _ = tick_Plain!(c);
+          _ = tick_Plain(&c);
           RETURN;
         END
       CLEAR
@@ -284,14 +284,14 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
   # ── 6. THE HEADLINE: one fn body, every sync strategy ─────────
 
   describe "ACCEPTANCE: ONE polymorphic transaction fn for ALL sync strategies" do
-    # The endpoint: a single tick! that admits every sync (LOCKED,
+    # The endpoint: a single tick that admits every sync (LOCKED,
     # SNAPSHOTTED, ATOMIC, plus non-sync local / multiowned / plain),
     # comptime-dispatches per family, and the lowering is honest --
     # the lock-only branch never runs an atomic op, the atomic-only
     # branch never runs a lock acquire, the local branch is pure
     # field access. When this passes (no `pending`), the milestone
     # is complete.
-    it "compiles a single tick! body that is called from 6+ sync strategies " \
+    it "compiles a single tick body that is called from 6+ sync strategies " \
        "(real end-to-end verification in transpile-tests/350_polymorphic_unified_tick.clear)" do
       # This spec verifies the codegen path -- the generated Zig contains the
       # comptime-dispatch helper call. The behavioral verification (build +
@@ -304,7 +304,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       src = <<~CLEAR
         STRUCT Counter { value: Int64 }
 
-        FN tick!(MUTABLE c: Counter) RETURNS !Void ->
+        FN tick(MUTABLE c: Counter) RETURNS !Void ->
           WITH POLYMORPHIC c AS x { x.value = x.value + 1; }
           RETURN;
         END
@@ -317,12 +317,12 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
           MUTABLE versioned_c = Counter{ value: 0 } @shared:versioned;
           MUTABLE atomic_c    = Counter{ value: 0 } @boxed:atomic;
 
-          tick!(local_c)     OR_ELSE EXIT;
-          tick!(multi_c)     OR_ELSE EXIT;
-          tick!(locked_c)    OR_ELSE EXIT;
-          tick!(wlocked_c)   OR_ELSE EXIT;
-          tick!(versioned_c) OR_ELSE EXIT;
-          tick!(atomic_c)    OR_ELSE EXIT;
+          tick(&local_c)     OR_ELSE EXIT;
+          tick(&multi_c)     OR_ELSE EXIT;
+          tick(&locked_c)    OR_ELSE EXIT;
+          tick(&wlocked_c)   OR_ELSE EXIT;
+          tick(&versioned_c) OR_ELSE EXIT;
+          tick(&atomic_c)    OR_ELSE EXIT;
 
           RETURN;
         END
@@ -331,8 +331,10 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       # Codegen contract: one shared body, one helper call -- the
       # comptime dispatch lives inside CheatLib.polymorphicMutate.
       expect(zig).to include("CheatLib.polymorphicMutate(")
-      # The body becomes a no-capture closure with the matching signature.
-      expect(zig).to match(/fn run\(x: \*Counter\) void/)
+      # The body becomes a callback with an explicit capture tuple. Keeping the
+      # runtime in that tuple lets generic bodies allocate without reaching
+      # through Zig's forbidden nested-function lexical scope.
+      expect(zig).to match(/fn run\(x: \*Counter, __captures: anytype\) !void/)
       # No per-family duplication: only ONE tick fn in the output.
       expect(zig.scan(/^fn tick\b/m).length).to eq(1)
     end
@@ -346,7 +348,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       # cell is a locked cell.
       src = <<~CLEAR
         STRUCT C { v: Int64 }
-        FN bump!(MUTABLE c: C) RETURNS Void
+        FN bump(MUTABLE c: C) RETURNS Void
           REQUIRES c: LOCKED
         ->
           WITH POLYMORPHIC EXCLUSIVE c AS x { x.v = x.v + 1; }
@@ -354,7 +356,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
         END
         FN main() RETURNS Void ->
           MUTABLE c = C{ v: 0 } @versioned;
-          bump!(c);
+          bump(&c);
           RETURN;
         END
       CLEAR
@@ -364,7 +366,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
     it "REQUIRES c: VERSIONED + caller passes @shared:locked → call-site error" do
       src = <<~CLEAR
         STRUCT C { v: Int64 }
-        FN bump!(MUTABLE c: C) RETURNS !Void
+        FN bump(MUTABLE c: C) RETURNS !Void
           REQUIRES c: VERSIONED
         ->
           WITH SNAPSHOT c AS MUTABLE x { x.v = x.v + 1; } ON MvccConflict RAISE
@@ -372,7 +374,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
         END
         FN main() RETURNS Void ->
           MUTABLE c = C{ v: 0 } @shared:locked;
-          bump!(c);
+          bump(&c);
           RETURN;
         END
       CLEAR

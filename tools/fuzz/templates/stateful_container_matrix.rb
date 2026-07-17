@@ -18,10 +18,10 @@ SCM_CELLS.concat([
 FuzzGenerator.register(:stateful_container_matrix, cells: SCM_CELLS) do |p|
   cap = p[:capability] == :shared ? "@shared" : "@multiowned"
   if p[:key_kind] == :list
-    mutation = p[:operation] == :borrow_then_clear ? "items.clear();" : "items[0] = Managed{ text: COPY \"new\" } #{cap};"
+    mutation = p[:operation] == :borrow_then_clear ? "&items.clear();" : "items[0] = Managed{ text: COPY \"new\" } #{cap};"
     body = <<~CLEAR.chomp
       MUTABLE items: Managed#{cap}[]@list = [];
-          items.append(Managed{ text: COPY "old" } #{cap});
+          &items.append(Managed{ text: COPY "old" } #{cap});
           IF items[0] EXISTS AS borrowed THEN
               #{mutation}
               ASSERT borrowed.text == "old";
@@ -35,11 +35,11 @@ FuzzGenerator.register(:stateful_container_matrix, cells: SCM_CELLS) do |p|
     when :overwrite
       "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"old\" } #{cap}; items[#{key}] = Managed{ text: COPY \"new\" } #{cap}; ASSERT items[#{key}]?.text == \"new\";"
     when :delete_reinsert
-      "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"first\" } #{cap}; items.delete(#{key}); items[#{key}] = Managed{ text: COPY \"second\" } #{cap}; ASSERT items[#{key}]?.text == \"second\";"
+      "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"first\" } #{cap}; &items.delete(#{key}); items[#{key}] = Managed{ text: COPY \"second\" } #{cap}; ASSERT items[#{key}]?.text == \"second\";"
     when :copy_values
-      "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"copy\" } #{cap}; copied = COPY items; values = items.values(); items.delete(#{key}); ASSERT copied[#{key}]?.text == \"copy\"; ASSERT values[0]?.text == \"copy\";"
+      "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"copy\" } #{cap}; copied = COPY items; values = items.values(); &items.delete(#{key}); ASSERT copied[#{key}]?.text == \"copy\"; ASSERT values[0]?.text == \"copy\";"
     when :borrow_then_delete
-      "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"old\" } #{cap}; IF items[#{key}] EXISTS AS borrowed THEN items.delete(#{key}); ASSERT borrowed.text == \"old\"; END"
+      "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"old\" } #{cap}; IF items[#{key}] EXISTS AS borrowed THEN &items.delete(#{key}); ASSERT borrowed.text == \"old\"; END"
     when :borrow_then_overwrite
       "MUTABLE items: #{map_type} = {}; items[#{key}] = Managed{ text: COPY \"old\" } #{cap}; IF items[#{key}] EXISTS AS borrowed THEN items[#{key}] = Managed{ text: COPY \"new\" } #{cap}; ASSERT borrowed.text == \"old\"; END"
     end

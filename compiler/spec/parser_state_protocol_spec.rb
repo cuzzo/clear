@@ -30,6 +30,15 @@ RSpec.describe "ClearParser state-free grammar decisions" do
     expect(parser.instance_variable_get(:@pos)).to eq(0)
   end
 
+  it "keeps adjacent nested generic closers distinct from right shift expressions" do
+    nested = parser_for("Tuple<Tuple<Int64, String>, Bool>").send(:parse_type_annotation)
+    shift = parser_for("value >> amount").send(:parse_expression)
+
+    expect(nested.resolved).to eq(:"Tuple<Tuple<Int64,String>,Bool>")
+    expect(shift).to be_a(AST::BinaryOp)
+    expect(shift.op).to eq(:SHR)
+  end
+
   it "returns capability and reentrance REQUIRES products together" do
     source = <<~CLEAR
       FN apply(f: FN() -> Void, cell: Int64) RETURNS Void

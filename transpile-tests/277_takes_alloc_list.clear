@@ -4,7 +4,7 @@
 # Architectural cause: escape_analysis lacks a "GIVE-to-TAKES" condition;
 # the source declaration is not promoted to heap.
 
-FN sum!(TAKES xs: []Int64) RETURNS Int64 ->
+FN sum(TAKES xs: []Int64) RETURNS Int64 ->
     MUTABLE total: Int64 = 0_i64;
     FOR x IN xs DO total = total + x; END
     RETURN total;
@@ -13,7 +13,7 @@ END
 FN main() RETURNS Void ->
     # Frame-allocated source: this is the only thing the test exercises.
     MUTABLE lst: []Int64 = List[];
-    lst.append(10_i64); lst.append(20_i64); lst.append(30_i64);
-    n: Int64 = sum!(GIVE lst);
+    &lst.append(10_i64); &lst.append(20_i64); &lst.append(30_i64);
+    n: Int64 = sum(GIVE lst);
     ASSERT n == 60_i64, "GIVE frame @list to TAKES @list param";
 END

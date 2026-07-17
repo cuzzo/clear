@@ -27,7 +27,7 @@ The same function body can work across multiple storage strategies:
 ```ruby clear illustrative
 STRUCT Counter { value: Int64 }
 
-FN tick!(MUTABLE c: SHARED Counter) RETURNS !Void ->
+FN tick(MUTABLE c: SHARED Counter) RETURNS !Void ->
   WITH POLYMORPHIC c AS x {
     x.value = x.value + 1;
   }
@@ -35,7 +35,7 @@ FN tick!(MUTABLE c: SHARED Counter) RETURNS !Void ->
 END
 ```
 
-The binding passed to `tick!` chooses the implementation:
+The binding passed to `tick` chooses the implementation:
 
 ```ruby clear illustrative
 MUTABLE local_c     = Counter{ value: 0 } @local;
@@ -44,11 +44,11 @@ MUTABLE wlocked_c   = Counter{ value: 0 } @shared:writeLocked;
 MUTABLE versioned_c = Counter{ value: 0 } @shared:versioned;
 MUTABLE atomic_c    = Counter{ value: 0 } @boxed:atomic;
 
-tick!(local_c)     OR DIE;
-tick!(locked_c)    OR DIE;
-tick!(wlocked_c)   OR DIE;
-tick!(versioned_c) OR DIE;
-tick!(atomic_c)    OR DIE;
+tick(&local_c)     OR_ELSE RAISE;
+tick(&locked_c)    OR_ELSE RAISE;
+tick(&wlocked_c)   OR_ELSE RAISE;
+tick(&versioned_c) OR_ELSE RAISE;
+tick(&atomic_c)    OR_ELSE RAISE;
 ```
 
 The compiler lowers each call to the strategy that matches the actual binding:
@@ -102,7 +102,7 @@ For public contracts, a function can constrain which synchronization families
 it accepts with `REQUIRES`.
 
 ```ruby clear illustrative
-FN bump!(MUTABLE c: Counter)
+FN bump(MUTABLE c: Counter)
   RETURNS !Void
   REQUIRES c: SNAPSHOTTED
 ->
@@ -137,7 +137,7 @@ Use `WITH POLYMORPHIC` when the body must work for more than one possible
 storage strategy.
 
 ```ruby clear illustrative
-FN addFee!(MUTABLE acct: SHARED Account)
+FN addFee(MUTABLE acct: SHARED Account)
   RETURNS !Void
   REQUIRES acct: LOCKED
 ->
@@ -163,7 +163,7 @@ function can dispatch across strategies, the `WITH` block says so.
 Snapshot-style strategies use `WITH SNAPSHOT`.
 
 ```ruby clear illustrative
-FN updateConfig!(MUTABLE cfg: Config@shared:versioned) RETURNS !Void ->
+FN updateConfig(MUTABLE cfg: Config@shared:versioned) RETURNS !Void ->
   WITH SNAPSHOT cfg AS MUTABLE c {
     c.port = c.port + 1;
   }
@@ -176,7 +176,7 @@ The above accepts only MVCC.
 But `SNAPSHOTTED` polymorphic syncronization can accept both MVCC and atomic-pointer cells:
 
 ```ruby clear illustrative
-FN updateConfig!(MUTABLE cfg: SHARED Config)
+FN updateConfig(MUTABLE cfg: SHARED Config)
   RETURNS !Void
   REQUIRES cfg: SNAPSHOTTED
 ->
@@ -191,8 +191,8 @@ END
 MUTABLE mvcc_cfg   = Config{ port: 8080 } @versioned;
 MUTABLE atomic_cfg = Config{ port: 8080 } @boxed:atomic;
 
-updateConfig!(mvcc_cfg) OR_ELSE RAISE;    # may surface MvccConflict
-updateConfig!(atomic_cfg) OR_ELSE RAISE;  # may surface AtomicConflict
+updateConfig(&mvcc_cfg) OR_ELSE RAISE;    # may surface MvccConflict
+updateConfig(&atomic_cfg) OR_ELSE RAISE;  # may surface AtomicConflict
 ```
 
 The body must be safe to retry. Fallible work inside a retryable body is
@@ -216,7 +216,7 @@ The compiler projects the error set at each call site:
 Example:
 
 ```ruby clear illustrative
-FN tick!(MUTABLE c: Counter)
+FN tick(MUTABLE c: Counter)
   RETURNS !Void
   REQUIRES c: SNAPSHOTTED
 ->
@@ -229,8 +229,8 @@ END
 MUTABLE mvcc_c = Counter{ value: 0 } @versioned;
 MUTABLE atomic_c = Counter{ value: 0 } @boxed:atomic;
 
-tick!(mvcc_c);    # caller sees MvccConflict
-tick!(atomic_c);  # caller sees AtomicConflict
+tick(&mvcc_c);    # caller sees MvccConflict
+tick(&atomic_c);  # caller sees AtomicConflict
 ```
 
 Forwarding preserves the same narrowing. If a wrapper function accepts only
@@ -307,7 +307,7 @@ Multiple locked or versioned cells can be synchronized together when the
 family supports that consistency model:
 
 ```ruby clear illustrative
-FN transfer!(MUTABLE a: SHARED Account, MUTABLE b: SHARED Account, amount: Float64)
+FN transfer(MUTABLE a: SHARED Account, MUTABLE b: SHARED Account, amount: Float64)
   RETURNS !Void
   REQUIRES a, b: LOCKED | VERSIONED
 ->

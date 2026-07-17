@@ -1720,7 +1720,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
-            append(futures, BG { 42; });
+            append(&futures, BG { 42; });
             RETURN;
           END
         CLEAR
@@ -1731,7 +1731,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
-            append(futures, BG { 42; });
+            append(&futures, BG { 42; });
             IF futures[0] EXISTS AS future THEN
               v: Int64 = NEXT future;
             END
@@ -1745,7 +1745,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
-            append(futures, BG { 42; });
+            append(&futures, BG { 42; });
             v: Int64 = NEXT futures[0];
             RETURN;
           END
@@ -1795,7 +1795,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
-            append(futures, BG { 7; });
+            append(&futures, BG { 7; });
             RETURN;
           END
         CLEAR
@@ -1810,7 +1810,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
-            append(futures, BG { 7; });
+            append(&futures, BG { 7; });
             IF futures[0] EXISTS AS future THEN
               v: Int64 = NEXT future;
             END
@@ -1825,7 +1825,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
-            append(futures, BG { 7; });
+            append(&futures, BG { 7; });
             values: Int64[] = NEXT futures;
             RETURN;
           END

@@ -107,7 +107,7 @@ module FuzzCoverageModel
       high_risk: true
     ),
     capability_wrap_matrix: profile(
-      failure_proves: 'Capability wrapper construction admits valid wrappers and rejects invalid combinations.'
+      failure_proves: 'Capability wrapper construction admits valid wrappers, observable values require scoped WITH VIEW access, and invalid combinations or direct observable access are rejected.'
     ),
     cast_lowering_matrix: profile(
       failure_proves: 'Annotation-driven casts/coercions lower without losing cleanup obligations.'
@@ -136,6 +136,9 @@ module FuzzCoverageModel
       failure_proves: 'Every registered collection/container shape remains syntactically admitted or intentionally rejected.',
       matrix_strategy: :smoke
     ),
+    c_ffi_type_matrix: profile(
+      failure_proves: 'Target-resolved C integer aliases remain ordinary numeric collection elements, while foreign pointers require a non-escaping WITH UNSAFE VIEW boundary with an integer length.'
+    ),
     tuple_collection_composition_matrix: profile(
       failure_proves: 'Tuple composes recursively with collections, capability-bearing layers, and optional/fallible/future tenses without changing which node each tense gates.'
     ),
@@ -163,6 +166,17 @@ module FuzzCoverageModel
     error_cleanup: profile(
       failure_proves: 'Error paths clean or transfer owned values under OR_ELSE PASS, RAISE, and DEFAULT.',
       high_risk: true
+    ),
+    generic_map_protocol_matrix: profile(
+      failure_proves: 'Map bounds, associated Key/Value projections, static operation dispatch, user protocol declarations/conformances, capability wrappers, and allocator forwarding survive concrete/generic representations while invalid constraints fail before Zig.',
+      high_risk: true
+    ),
+    generic_shared_map_capability_matrix: profile(
+      failure_proves: 'SHARED Map bounds retain caller-selected synchronization and require a typed WITH POLYMORPHIC access boundary.',
+      high_risk: true
+    ),
+    inherent_method_matrix: profile(
+      failure_proves: 'Owner-scoped METHOD lookup, owner and method generic binders, static owner functions, and free-function dot-call rejection remain coherent.'
     ),
     escape_mechanism_matrix: profile(
       failure_proves: 'Escape-analysis entry points heap-place owned values for returns, stores, captures, and consuming calls.',

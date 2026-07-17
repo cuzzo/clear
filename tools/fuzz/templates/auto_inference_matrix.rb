@@ -89,8 +89,8 @@ FuzzGenerator.register(:auto_inference_matrix, cells: AUTO_INFERENCE_CELLS) do |
     <<~CHT
       FN main() RETURNS Void ->
         MUTABLE xs: Auto = [];
-        xs.append(1_i64);
-        xs.append(2_i64);
+        &xs.append(1_i64);
+        &xs.append(2_i64);
         ASSERT xs.length() == 2_i64, "auto list shape";
         RETURN;
       END

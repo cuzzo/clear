@@ -108,6 +108,22 @@ A type may contain at most three separate capability sites. A joined chain
 such as `@shared:locked` counts as one site. This keeps access obligations
 locally understandable while still allowing nested collection designs.
 
+### Boundary representation capabilities
+
+`@c` and `@size` use capability syntax because they constrain how a value may
+be bound and accessed, but they are not synchronization mechanisms:
+
+| Spelling | Meaning |
+|---|---|
+| `String@c` | Borrowed, NUL-terminated C string; not a CLEAR slice header |
+| `[]@c T` | Unbounded borrowed C data pointer; open a scoped `WITH UNSAFE VIEW` before indexing |
+| `TargetUInt@size` | Target `size_t` width, still a member of `UInt`/`Number` |
+| `TargetInt@size` | Target signed pointer-difference width, still `Int`/`Number` |
+
+These capabilities add no lock and never imply ownership of foreign memory.
+For example, `WITH UNSAFE VIEW pointer LENGTH count AS values { ... }` binds
+an ordinary bounded borrowed `[]T`; cleanup remains the C owner's responsibility.
+
 ## Interior Mutability (@alwaysMutable)
 
 `@alwaysMutable` is CLEAR's equivalent of Rust's `RefCell<T>`. It allows field mutation through const bindings - the binding itself doesn't change, but the data it points to can be modified.
@@ -126,6 +142,22 @@ cfg.retries = 5;
 y = cfg.retries;
 ```
 
+Interior-mutability also crosses call boundaries without upgrading the outer
+binding:
+
+```clear
+STRUCT Holder { cfg: Config@alwaysMutable }
+FN retheme(MUTABLE cfg: Config) RETURNS Void -> cfg.theme = "light"; END
+
+holder = Holder{ cfg: Config{ theme: "dark", retries: 3 } @alwaysMutable };
+retheme(holder.cfg);  # no `&holder.cfg` and no `MUTABLE holder`
+```
+
+Ordinary storage remains explicit: `retheme(&holder.cfg)` would require a
+mutable root unless `cfg` itself carries `@alwaysMutable`. Anonymous values,
+such as `retheme(makeConfig())`, require no marker because there is no
+caller-visible binding to alias.
+
 For scoped access (multiple mutations without repeated borrow/release):
 
 ```clear
@@ -133,7 +165,7 @@ For scoped access (multiple mutations without repeated borrow/release):
 WITH cfg AS c {
     c.theme = "light";
     c.retries = 10;
-    update!(c);
+    update(c);
 }
 ```
 

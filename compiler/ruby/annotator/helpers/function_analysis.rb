@@ -36,6 +36,26 @@ module FunctionAnalysis
     def replace_arg!(index, arg)
       args[index] = arg
     end
+
+    sig { params(index: Integer).returns(T::Boolean) }
+    def explicit_mutable_argument?(index)
+      method_node = T.cast(node, T.nilable(AST::MethodCall)) if node.is_a?(AST::MethodCall)
+      if method_node && !args.empty? && args.first.equal?(method_node.object)
+        return method_node.explicit_mutable_receiver? if index == 0
+        return method_node.explicit_mutable_argument?(index - 1)
+      end
+      node.explicit_mutable_argument?(index)
+    end
+
+    sig { params(index: Integer).returns(T.nilable(Lexer::Token)) }
+    def explicit_mutable_argument_token(index)
+      method_node = T.cast(node, T.nilable(AST::MethodCall)) if node.is_a?(AST::MethodCall)
+      if method_node && !args.empty? && args.first.equal?(method_node.object)
+        return method_node.explicit_mutable_receiver_token if index == 0
+        return method_node.explicit_mutable_argument_token(index - 1)
+      end
+      node.explicit_mutable_argument_token(index)
+    end
   end
 
   class CallArityPlan < T::Struct
@@ -80,6 +100,8 @@ module FunctionAnalysis
     const :actual_type, Type
     const :actual, T.nilable(Symbol)
     const :path, T::Array[Symbol]
+    const :explicit_mutable, T::Boolean, default: false
+    const :mutable_marker_token, T.nilable(Lexer::Token), default: nil
   end
 
   class EncounteredCallArgument < T::Struct
@@ -259,14 +281,11 @@ module FunctionAnalysis
     fn_type_params = node.type_params.map(&:to_sym)
     fn_ctx = FunctionContext.new(
       name: node.name, return_type: node.annotation_return_type,
-      lifetime: lifetime_paths, type_params: fn_type_params
+      lifetime: lifetime_paths, type_params: fn_type_params,
+      generic_params: node.generic_params,
     )
     push_function_context!(fn_ctx)
     begin
-      has_mutable_param = node.params.any? { |p| p.mutable }
-      if has_mutable_param && !node.name.end_with?("!")
-        emit_style_mutable_param_needs_bang!(node)
-      end
       verify_lifetime!(node)
 
       validate_type_param_list!(node, node.type_params, "function") if fn_type_params.any?
@@ -283,6 +302,9 @@ module FunctionAnalysis
         return_type: node.annotation_return_type, return_lifetime: lifetime_paths,
         visibility: node.visibility,
         type_params: fn_type_params,
+        generic_bounds: node.generic_params.each_with_object({}) do |param, bounds|
+          bounds[param.name.to_sym] = param.bounds.map(&:type)
+        end,
         reentrant: node.declared_plain_reentrant?,
         requires: node.requires
       )
@@ -431,6 +453,7 @@ module FunctionAnalysis
       if node.respond_to?(:extern_call=) && signature.extern
         T.unsafe(node).extern_call = true
         T.unsafe(node).extern_effects = signature.extern_effects
+        T.unsafe(node).extern_source = signature.extern_source if node.respond_to?(:extern_source=)
         record_effect(EffectTracker::EXTERN)
         # EXTERN FN with EFFECTS :alloc needs rt for allocator injection.
         alloc_kind = signature.extern_effects&.dig(:alloc)
@@ -450,6 +473,7 @@ module FunctionAnalysis
             error!(arg, :SOA_TO_EXTERN_FN)
           end
         end
+        mark_owned_c_out_parameters!(signature, args)
         # Comptime params: extract type args from arguments in comptime positions.
         # The argument is a TYPE_ID Identifier (e.g., MyDoc) — set it as a generic_type_arg.
         comptime_type_args = []
@@ -481,29 +505,13 @@ module FunctionAnalysis
         substituted = substitute_type_params(signature, subst)
         verify_function_signature!(node, substituted, args)
         T.unsafe(node).matched_signature = substituted if node.respond_to?(:matched_signature=)
-        stamp_type!(node, substituted.return_type)
+        stamp_resolved_call_result!(node, substituted.return_type)
       else
         verify_function_signature!(node, signature, args)
         T.unsafe(node).matched_signature = signature if node.respond_to?(:matched_signature=)
         # Copy the return type so per-call-site mutations (provenance, cleanup_alloc)
         # don't corrupt the function signature's shared Type object.
-        stamp_type!(node, Type.new(signature.return_type))
-        # Auto-propagate (CLEAR's error-handling default): the call's
-        # *expression-level* type is the SUCCESS branch -- a binding
-        # `h = call()` sees `T`, not `!T`. The error union flows
-        # implicitly through the enclosing fn's `!T` return signature
-        # (the codegen's try-wrap performs the unwrap). Per
-        # docs/agents/error-handling.md: "the compiler handles error
-        # propagation for you by default."
-        # The original `!T` is stashed on `error_union_type` so
-        # OR_ELSE handlers (which read the LHS's union to pick
-        # `catch`/`orelse`) can still see the un-stripped form.
-        call_type = node.full_type!(context: "function call result")
-        if call_type.respond_to?(:error_union?) &&
-           call_type.error_union?
-          T.unsafe(node).error_union_type = call_type if node.respond_to?(:error_union_type=)
-          stamp_type!(node, call_type.success_type)
-        end
+        stamp_resolved_call_result!(node, signature.return_type)
       end
 
 
@@ -529,6 +537,44 @@ module FunctionAnalysis
 
     nil
   end
+
+  # Auto-propagation gives a call expression the success branch T while
+  # retaining its declared !T for OR_ELSE and lowering. All resolved call
+  # families use this boundary so generic and protocol dispatch cannot expose
+  # a different expression type from ordinary calls.
+  sig { params(node: CallNode, return_type: Type).void }
+  def stamp_resolved_call_result!(node, return_type)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    resolved = Type.new(return_type)
+    stamp_type!(node, resolved)
+    return unless resolved.error_union?
+
+    T.unsafe(node).error_union_type = resolved if node.respond_to?(:error_union_type=)
+    T.unsafe(node).can_fail = true if node.respond_to?(:can_fail=)
+    stamp_type!(node, resolved.success_type)
+  end
+
+  sig { params(signature: FunctionSignature, args: CallArgList).void }
+  def mark_owned_c_out_parameters!(signature, args)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    return unless signature.extern_source&.abi == :c
+
+    signature.params.zip(args).each do |param, arg|
+      next unless param&.mutable
+      next unless arg.is_a?(AST::Identifier)
+
+      param_type = Type.new(param.type)
+      payload = param_type.optional? ? param_type.wrapped_type : nil
+      next unless payload
+      schema = lookup_type_schema(payload.resolved)
+      next unless schema.is_a?(Schemas::ResourceSchema)
+
+      symbol = arg.symbol
+      symbol.foreign_out_owner = true if symbol
+    end
+  end
+
+  private :mark_owned_c_out_parameters!
 
   # Single point: what allocator does the receiver/container of this call use?
   # For MethodCall on a list/struct/etc, the receiver's binding storage tells
@@ -581,9 +627,14 @@ module FunctionAnalysis
   sig { params(node: CallNode, args: T.nilable(CallArgList)).returns(CallSignatureSite) }
   def call_signature_site(node, args = nil)
     args ||= node.args
+    source_name = if node.is_a?(AST::MethodCall) && node.source_method_name
+      T.must(node.source_method_name)
+    else
+      node.name.to_s
+    end
     CallSignatureSite.new(
       node: node,
-      name: node.name.to_s,
+      name: source_name,
       args: args,
     )
   end
@@ -660,26 +711,71 @@ module FunctionAnalysis
       actual_type: arg_type,
       actual: actual,
       path: get_path_to_root(arg_node),
+      explicit_mutable: site.explicit_mutable_argument?(index),
+      mutable_marker_token: site.explicit_mutable_argument_token(index),
     )
   end
 
   sig { params(facts: CallArgumentFacts).void }
   def verify_mutable_argument!(facts)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
-    return unless param_mutable?(facts.param)
-
-    arg_node = facts.arg_node
-    unless arg_node.is_a?(AST::Identifier)
-      error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION,
-        index: facts.index + 1, param: facts.param.name)
+    unless param_mutable?(facts.param)
+      emit_unexpected_mutable_argument_error!(facts) if facts.explicit_mutable
       return
     end
 
-    if current_scope.is_immutable?(arg_node.name)
-      emit_immutable_arg_error!(arg_node, current_scope, facts.index + 1, facts.param.name)
+    arg_node = facts.arg_node
+    root = AST.root_identifier(arg_node)
+    if root.nil?
+      if facts.explicit_mutable
+        error!(arg_node, :MUTABLE_MARKER_ON_ANONYMOUS_VALUE,
+          index: facts.index + 1, param: facts.param.name)
+      end
+      # A temporary has no caller-visible binding to upgrade or alias. The
+      # lowering phase materializes an addressable temporary when the ABI
+      # needs one.
+      return
     end
 
-    mark_var_mutated_via_call(arg_node.name)
+    interior_mutable = SymbolEntry.always_mutable_sync?(arg_node.full_type!(context: "mutable argument").sync)
+    # Interior-mutable storage owns its addressability contract. The marker is
+    # unnecessary, but accepting it keeps explicit generic call sites valid:
+    # `update(&holder.cell)` must not require the immutable `holder` itself to
+    # become mutable when `cell` is @alwaysMutable.
+    if interior_mutable
+      mark_var_mutated_via_call(root.name)
+      return
+    end
+
+    missing_marker = !facts.explicit_mutable
+    if missing_marker
+      if language_mode == :easy
+        emit_missing_mutable_marker_error!(facts, current_scope) if FixCollector.enabled?
+        promote_mutable_call_argument!(root)
+      else
+        emit_missing_mutable_marker_error!(facts, current_scope)
+      end
+    end
+
+    if current_scope.is_immutable?(root.name) && !missing_marker
+      if language_mode == :easy
+        promote_mutable_call_argument!(root)
+      else
+        emit_immutable_arg_error!(root, current_scope, facts.index + 1, facts.param.name)
+      end
+    end
+
+    mark_var_mutated_via_call(root.name)
+  end
+
+  sig { params(arg_node: AST::Identifier).void }
+  def promote_mutable_call_argument!(arg_node)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    entry = current_scope.resolve_entry(arg_node.name)
+    return unless entry
+
+    entry.mutable = true
+    entry.reg.mutable = true if entry.reg.respond_to?(:mutable=)
   end
 
   sig { params(facts: CallArgumentFacts).void }

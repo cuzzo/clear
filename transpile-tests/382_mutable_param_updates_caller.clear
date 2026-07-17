@@ -1,19 +1,19 @@
 STRUCT Box { value: Int64 }
 
-FN bump!(MUTABLE x: Int64) RETURNS Void ->
+FN bump(MUTABLE x: Int64) RETURNS Void ->
   x = x + 1;
 END
 
-FN set_box!(MUTABLE b: Box) RETURNS Void ->
+FN set_box(MUTABLE b: Box) RETURNS Void ->
   b.value = 7;
 END
 
 FN main() RETURNS Void ->
   MUTABLE n = 5;
-  bump!(n);
+  bump(&n);
   ASSERT n == 6, "MUTABLE primitive param updates caller binding";
 
   MUTABLE box = Box{ value: 1 };
-  set_box!(box);
+  set_box(&box);
   ASSERT box.value == 7, "MUTABLE struct param updates caller binding";
 END

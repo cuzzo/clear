@@ -2,6 +2,18 @@
 # Allows field mutation through const bindings.
 
 STRUCT Config { theme: String, retries: Int64 }
+STRUCT Service { config: Config@alwaysMutable }
+
+FN incrementRetries(MUTABLE cfg: Config) RETURNS Void ->
+    cfg.retries = cfg.retries + 1_i64;
+END
+
+FN updateService(service: Service) RETURNS Void ->
+    # The ordinary Service parameter remains immutable. Its capability-bearing
+    # field is independently mutable, both directly and at a call boundary.
+    service.config.retries = service.config.retries + 1_i64;
+    incrementRetries(service.config);
+END
 
 FN main() RETURNS Void ->
     # @alwaysMutable: const binding, mutable data
@@ -14,12 +26,19 @@ FN main() RETURNS Void ->
     # Write through const binding (interior mutability)
     cfg.theme = "light";
     cfg.retries = 5;
+    incrementRetries(cfg);
     ASSERT cfg.theme == "light", "mutated theme";
-    ASSERT cfg.retries == 5, "mutated retries";
+    ASSERT cfg.retries == 6, "mutated retries";
 
     # Copy a value out
     r = cfg.retries;
-    ASSERT r == 5, "copied value";
+    ASSERT r == 6, "copied value";
+
+    service = Service{
+        config: Config{ theme: "nested", retries: 10_i64 } @alwaysMutable,
+    };
+    updateService(service);
+    ASSERT service.config.retries == 12_i64, "nested interior mutation";
 
     RETURN;
 END

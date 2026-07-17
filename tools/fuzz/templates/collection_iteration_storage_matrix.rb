@@ -24,12 +24,12 @@ FuzzGenerator.register(:collection_iteration_storage_matrix, cells: COLLECTION_I
     value = "v"
     sum_assert = "6_i64"
   when :list
-    decl = "MUTABLE items: Int64[]@list = []; items.append(1_i64); items.append(2_i64); items.append(3_i64);"
+    decl = "MUTABLE items: Int64[]@list = []; &items.append(1_i64); &items.append(2_i64); &items.append(3_i64);"
     iter = "items"
     value = "v"
     sum_assert = "6_i64"
   when :set
-    decl = "MUTABLE items: Int64[]@set = []; items.insert(1_i64); items.insert(2_i64); items.insert(3_i64);"
+    decl = "MUTABLE items: Int64[]@set = []; &items.insert(1_i64); &items.insert(2_i64); &items.insert(3_i64);"
     iter = "items"
     value = "v"
     sum_assert = "6_i64"
@@ -39,17 +39,17 @@ FuzzGenerator.register(:collection_iteration_storage_matrix, cells: COLLECTION_I
     value = "(items[v] OR_ELSE 0_i64)"
     sum_assert = "6_i64"
   when :pool
-    decl = "MUTABLE items: Item[8]@pool = []; items.insert(Item{ value: 1_i64 }); items.insert(Item{ value: 2_i64 }); items.insert(Item{ value: 3_i64 });"
+    decl = "MUTABLE items: Item[8]@pool = []; &items.insert(Item{ value: 1_i64 }); &items.insert(Item{ value: 2_i64 }); &items.insert(Item{ value: 3_i64 });"
     iter = "items"
     value = "v.value"
     sum_assert = "6_i64"
   when :nested_list
-    decl = "MUTABLE items: Box[]@list = []; MUTABLE a: Int64[]@list = []; a.append(1_i64); a.append(2_i64); items.append(Box{ values: a }); MUTABLE b: Int64[]@list = []; b.append(3_i64); items.append(Box{ values: b });"
+    decl = "MUTABLE items: Box[]@list = []; MUTABLE a: Int64[]@list = []; &a.append(1_i64); &a.append(2_i64); &items.append(Box{ values: a }); MUTABLE b: Int64[]@list = []; &b.append(3_i64); &items.append(Box{ values: b });"
     iter = "items"
     value = "v.values.length()"
     sum_assert = "3_i64"
   when :soa_list
-    decl = "MUTABLE items: Item[]@list:soa = []; items.append(Item{ value: 1_i64 }); items.append(Item{ value: 2_i64 }); items.append(Item{ value: 3_i64 });"
+    decl = "MUTABLE items: Item[]@list:soa = []; &items.append(Item{ value: 1_i64 }); &items.append(Item{ value: 2_i64 }); &items.append(Item{ value: 3_i64 });"
     iter = "items"
     value = "v.value"
     sum_assert = "6_i64"
@@ -122,7 +122,7 @@ FuzzGenerator.register(:collection_iteration_storage_matrix, cells: COLLECTION_I
           #{decl}
           MUTABLE outer: Int64[]@list = [];
           FOR v IN #{iter} DO
-            outer.append(v.values.length());
+            &outer.append(v.values.length());
           END
           ASSERT outer.length() >= 1_i64, "collection store outer";
           RETURN;
@@ -134,7 +134,7 @@ FuzzGenerator.register(:collection_iteration_storage_matrix, cells: COLLECTION_I
           #{decl}
           MUTABLE outer: Int64[]@list = [];
           FOR v IN #{iter} DO
-            outer.append(#{value});
+            &outer.append(#{value});
           END
           ASSERT outer.length() >= 1_i64, "collection store outer";
           RETURN;
@@ -163,10 +163,10 @@ FuzzGenerator.register(:collection_iteration_storage_matrix, cells: COLLECTION_I
     <<~CHT
       FN main() RETURNS Void ->
         MUTABLE items: Int64[]@list = [];
-        items.append(1_i64);
-        items.append(2_i64);
+        &items.append(1_i64);
+        &items.append(2_i64);
         MUTABLE total = 0_i64;
-        WHILE items.pop() EXISTS AS v DO
+        WHILE &items.pop() EXISTS AS v DO
           IF v == 1_i64 THEN CONTINUE; END
           total = total + v;
         END
@@ -179,8 +179,8 @@ FuzzGenerator.register(:collection_iteration_storage_matrix, cells: COLLECTION_I
     <<~CHT
       FN main() RETURNS Void ->
         MUTABLE items: String[]@list = [];
-        items.append(COPY "a");
-        WHILE items.pop() EXISTS AS v DO
+        &items.append(COPY "a");
+        WHILE &items.pop() EXISTS AS v DO
           GIVE v;
           GIVE v;
         END

@@ -526,9 +526,9 @@ RSpec.describe SemanticAnnotator do
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
               MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
-              id = sp.insert(Score{ value: 1.0 });
+              id = &sp.insert(Score{ value: 1.0 });
               result = sp.get(id);
-              sp.remove(id);
+              &sp.remove(id);
               n = sp.length();
               RETURN;
             END
@@ -541,9 +541,9 @@ RSpec.describe SemanticAnnotator do
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
             MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
-            id = sp.insert(Score{ value: 1.0 });
+            id = &sp.insert(Score{ value: 1.0 });
             result = sp.get(id);
-            sp.remove(id);
+            &sp.remove(id);
             n = sp.length();
             RETURN;
           END
@@ -985,7 +985,7 @@ RSpec.describe SemanticAnnotator do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
         FN f() RETURNS !Void ->
           MUTABLE items = List[];
-          append(items, 42_i64);
+          append(&items, 42_i64);
           RETURN;
         END
       CLEAR

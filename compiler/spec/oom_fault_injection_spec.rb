@@ -20,7 +20,7 @@ RSpec.describe "OOM fault injection (alloc-as-FAULT model)", :integration do
       MUTABLE xs: []Int64 = [];
       MUTABLE i = 0;
       WHILE i < n DO
-        xs.append(i);
+        &xs.append(i);
         i += 1;
       END
       RETURN xs.length();

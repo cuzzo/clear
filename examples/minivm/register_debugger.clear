@@ -42,7 +42,7 @@ END
 
 # Stdin-based debugger pause for the register VM. The runner is
 # compiled via the Zig backend (`clear build vm.clear`), not via the
-# register VM, so it can use `readLine!` and `print` directly -- no
+# register VM, so it can use `readLine` and `print` directly -- no
 # file polling, no temp files, no external driver.
 #
 # Action codes (returned to the dispatch loop's trap arm):
@@ -105,7 +105,7 @@ FN debugPrintHelp() RETURNS Void ->
 END
 
 # Print all visible bindings frozen in `varSnapshot`.
-FN debugPrintInfo!(varSnapshot: {String}String) RETURNS !Void ->
+FN debugPrintInfo(varSnapshot: {String}String) RETURNS !Void ->
     keys = varSnapshot.keys();
     IF keys.length() == 0_i64 THEN
         print("no bindings in scope");
@@ -131,7 +131,7 @@ END
 # caret on the line below, pointing at that column. Reads the file
 # fresh each call -- cheap; the user is at an interactive prompt
 # and we want changes-on-disk to show.
-FN debugPrintList!(sourcePath: String, line: Int64, column: Int64) RETURNS !Void ->
+FN debugPrintList(sourcePath: String, line: Int64, column: Int64) RETURNS !Void ->
     raw = readFile(sourcePath) OR_ELSE "";
     IF raw.length() == 0_i64 THEN
         print("no source available for " $+ sourcePath);
@@ -176,7 +176,7 @@ END
 # (i.e. the IP recorded by ICALL/FCALL at the call site). The frame
 # matching `activeFrame` is marked with a leading `*` so `:up` /
 # `:down` / `:frame N` are visible against the stack.
-FN debugPrintBacktrace!(frameRetIps: []Int64, currentIp: Int64, currentLine: Int64, currentColumn: Int64, sourceLines: []Int64, sourceColumns: []Int64, activeFrame: Int64) RETURNS !Void ->
+FN debugPrintBacktrace(frameRetIps: []Int64, currentIp: Int64, currentLine: Int64, currentColumn: Int64, sourceLines: []Int64, sourceColumns: []Int64, activeFrame: Int64) RETURNS !Void ->
     currentIpStr = currentIp.toString() OR_ELSE "?";
     currentLineStr = currentLine.toString() OR_ELSE "?";
     MUTABLE marker0: String = "  ";
@@ -216,7 +216,7 @@ END
 # List all breakpoints. The `enabled` column is derived live from
 # `isBreakpoint[ip]` rather than the entry snapshot, so `:bd N` is
 # reflected on the next `:info b`.
-FN debugPrintBreakpoints!(
+FN debugPrintBreakpoints(
     breakpointEntries: []BreakpointEntry,
     isBreakpoint: []Int64
 ) RETURNS !Void ->
@@ -242,7 +242,7 @@ END
 # line->ip map is the existing parallel `sourceLines` array; we pick
 # the first IP whose source line matches (byebug-style "one pause
 # per line" semantics, same as `BC_PAUSE_ON`).
-FN debugAddBreakpoint!(
+FN debugAddBreakpoint(
     line: Int64,
     sourceLines: []Int64,
     MUTABLE isBreakpoint: []Int64,
@@ -269,7 +269,7 @@ FN debugAddBreakpoint!(
     END
     isBreakpoint[targetIp] = 1_i64;
     nextId = breakpointEntries.length() + 1_i64;
-    breakpointEntries.append(BreakpointEntry{
+    &breakpointEntries.append(BreakpointEntry{
         id: nextId,
         sourceLine: line,
         ip: targetIp,
@@ -286,7 +286,7 @@ END
 # the list entry -- ids stay stable so the user can keep referencing
 # them in a session. `:info b` derives the `on/off` column from the
 # live `isBreakpoint[ip]` flag, so zeroing the flag is enough.
-FN debugDeleteBreakpoint!(
+FN debugDeleteBreakpoint(
     id: Int64,
     MUTABLE isBreakpoint: []Int64,
     breakpointEntries: []BreakpointEntry
@@ -342,7 +342,7 @@ END
 # Strict `<` (not `<=`) because pause-at-line-N happens before line N's
 # instructions execute, so a binding declared on line N hasn't yet
 # taken effect.
-FN snapshotRegisterVars!(
+FN snapshotRegisterVars(
     varNames: []RegisterVarName,
     ip: Int64,
     pauseLine: Int64,
@@ -424,7 +424,7 @@ END
 # Walk the trace events backward, undoing each register-write event
 # whose `step` is in `(toStep, fromStep]`. Restores the register
 # files to what they were just after `step == toStep`.
-FN replayBackward!(
+FN replayBackward(
     events: []TraceEvent,
     traceStrings: []String,
     fromStep: Int64,
@@ -458,7 +458,7 @@ FN replayBackward!(
     RETURN;
 END
 
-FN registerDebugPause!(
+FN registerDebugPause(
     sourcePath: String,
     line: Int64,
     column: Int64,
@@ -493,7 +493,7 @@ FN registerDebugPause!(
     MUTABLE viewIp: Int64 = ip;
     MUTABLE viewLine: Int64 = line;
     MUTABLE viewColumn: Int64 = column;
-    MUTABLE varSnapshot = snapshotRegisterVars!(
+    MUTABLE varSnapshot = snapshotRegisterVars(
         varNames, viewIp, viewLine, iregs, fregs, sregs, iBase, fBase
     );
     # Time-travel scrub cursor: index into `traceEvents` for the
@@ -507,7 +507,7 @@ FN registerDebugPause!(
     MUTABLE polling = TRUE;
     TIGHT WHILE polling DO
         print("(rdb) ");
-        cmd = readLine!();
+        cmd = readLine();
         trimmed = trim(cmd);
         # EOF (closed stdin or empty input on a closed pipe) is treated
         # as `:c` so non-interactive callers (test drivers, batch
@@ -528,13 +528,13 @@ FN registerDebugPause!(
         ELSE_IF trimmed == ":q" OR trimmed == ":quit" THEN
             action = -1_i64; polling = FALSE;
         ELSE_IF trimmed == ":info" THEN
-            debugPrintInfo!(varSnapshot);
+            debugPrintInfo(varSnapshot);
         ELSE_IF trimmed == ":info b" THEN
-            debugPrintBreakpoints!(breakpointEntries, isBreakpoint);
+            debugPrintBreakpoints(breakpointEntries, isBreakpoint);
         ELSE_IF trimmed == ":l" OR trimmed == ":list" THEN
-            debugPrintList!(sourcePath, viewLine, viewColumn);
+            debugPrintList(sourcePath, viewLine, viewColumn);
         ELSE_IF trimmed == ":bt" OR trimmed == ":backtrace" THEN
-            debugPrintBacktrace!(frameRetIps, ip, line, column, sourceLines, sourceColumns, currentFrame);
+            debugPrintBacktrace(frameRetIps, ip, line, column, sourceLines, sourceColumns, currentFrame);
         ELSE_IF trimmed == ":up" THEN
             IF currentFrame >= frameRetIps.length() THEN
                 print("already at outermost frame");
@@ -558,7 +558,7 @@ FN registerDebugPause!(
                     END
                     probe = probe + 1_i64;
                 END
-                varSnapshot = snapshotRegisterVars!(
+                varSnapshot = snapshotRegisterVars(
                     varNames, viewIp, viewLine, iregs, fregs, sregs, fIBase, fFBase
                 );
                 print("#" $+ (currentFrame.toString() OR_ELSE "?") $+ "  ip=" $+ (viewIp.toString() OR_ELSE "?") $+ " (line " $+ (viewLine.toString() OR_ELSE "?") $+ ")");
@@ -586,7 +586,7 @@ FN registerDebugPause!(
                     END
                     probe = probe + 1_i64;
                 END
-                varSnapshot = snapshotRegisterVars!(
+                varSnapshot = snapshotRegisterVars(
                     varNames, viewIp, viewLine, iregs, fregs, sregs, fIBase, fFBase
                 );
                 print("#" $+ (currentFrame.toString() OR_ELSE "?") $+ "  ip=" $+ (viewIp.toString() OR_ELSE "?") $+ " (line " $+ (viewLine.toString() OR_ELSE "?") $+ ")");
@@ -616,7 +616,7 @@ FN registerDebugPause!(
                     END
                     probe = probe + 1_i64;
                 END
-                varSnapshot = snapshotRegisterVars!(
+                varSnapshot = snapshotRegisterVars(
                     varNames, viewIp, viewLine, iregs, fregs, sregs, fIBase, fFBase
                 );
                 print("#" $+ (currentFrame.toString() OR_ELSE "?") $+ "  ip=" $+ (viewIp.toString() OR_ELSE "?") $+ " (line " $+ (viewLine.toString() OR_ELSE "?") $+ ")");
@@ -639,14 +639,14 @@ FN registerDebugPause!(
         ELSE_IF startsWith?(trimmed, ":b ") THEN
             arg = substr(trimmed, 3_i64, trimmed.length() - 3_i64);
             target = toInt(trim(arg)) OR_ELSE -1_i64;
-            debugAddBreakpoint!(target, sourceLines, isBreakpoint, breakpointEntries);
+            debugAddBreakpoint(target, sourceLines, &isBreakpoint, &breakpointEntries);
         ELSE_IF startsWith?(trimmed, ":bd ") THEN
             arg = substr(trimmed, 4_i64, trimmed.length() - 4_i64);
             target = toInt(trim(arg)) OR_ELSE -1_i64;
             IF target < 0_i64 THEN
                 print("usage: :bd N (breakpoint id)");
             ELSE
-                debugDeleteBreakpoint!(target, isBreakpoint, breakpointEntries);
+                debugDeleteBreakpoint(target, &isBreakpoint, breakpointEntries);
             END
         ELSE_IF trimmed == ":dumpevents" THEN
             FOR di IN (0_i64 ..< traceEvents.length()) DO
@@ -712,7 +712,7 @@ FN registerDebugPause!(
                     slotStr = target.slot.toString() OR_ELSE "?";
                     print("reversed step " $+ stepStr $+ " (" $+ kindStr $+ " #" $+ slotStr $+ ")");
                     # Snapshot the now-restored register state for `:p`/`:info`.
-                    varSnapshot = snapshotRegisterVars!(
+                    varSnapshot = snapshotRegisterVars(
                         varNames, viewIp, viewLine, iregs, fregs, sregs, iBase, fBase
                     );
                 END
@@ -747,7 +747,7 @@ FN registerDebugPause!(
                 END
                 slotStr = target.slot.toString() OR_ELSE "?";
                 print("re-applied step " $+ stepStr $+ " (" $+ kindStr $+ " #" $+ slotStr $+ ")");
-                varSnapshot = snapshotRegisterVars!(
+                varSnapshot = snapshotRegisterVars(
                     varNames, viewIp, viewLine, iregs, fregs, sregs, iBase, fBase
                 );
             END

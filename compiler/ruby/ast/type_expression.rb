@@ -20,6 +20,21 @@ class NamedTypeExpression < T::Struct
   const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
 end
 
+# A protocol-associated type selected from a generic type parameter, such as
+# M::Key or M::Value.  This remains symbolic while a generic body is checked
+# and is replaced from the concrete conformance witness at instantiation.
+class TypeProjectionExpression < T::Struct
+  include TypeExpression
+
+  const :owner, Symbol
+  const :member, Symbol
+  # Filled by semantic analysis after the owner's bounds are known. Keeping
+  # this on the immutable syntax node makes `M::Item` unambiguous when M is
+  # constrained by more than one protocol with an Item associated type.
+  const :protocol, T.nilable(Symbol), default: nil
+  const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
+end
+
 class FunctionTypeExpression < T::Struct
   include TypeExpression
 
@@ -122,6 +137,9 @@ class TypeExpressionTree
       FutureTypeExpression.new(inner: expression.inner, capabilities: capabilities)
     when NamedTypeExpression
       NamedTypeExpression.new(name: expression.name, arguments: expression.arguments, capabilities: capabilities)
+    when TypeProjectionExpression
+      TypeProjectionExpression.new(owner: expression.owner, member: expression.member,
+        protocol: expression.protocol, capabilities: capabilities)
     when FunctionTypeExpression
       FunctionTypeExpression.new(signature: expression.signature, capabilities: capabilities)
     when TupleTypeExpression
@@ -261,6 +279,97 @@ class TypeExpressionTree
     end
   end
 
+  # Rebuild a complete type-expression tree without flattening it through the
+  # legacy type-string representation. The callback sees every node after its
+  # children have been transformed, which lets semantic passes attach facts to
+  # nested projections while preserving tenses, collection topology, and
+  # per-layer capabilities.
+  sig do
+    params(
+      expression: TypeExpression,
+      transform: T.proc.params(node: TypeExpression).returns(TypeExpression),
+    ).returns(TypeExpression)
+  end
+  def self.transform(expression, &transform)
+    rebuilt = case expression
+    when NamedTypeExpression
+      NamedTypeExpression.new(
+        name: expression.name,
+        arguments: expression.arguments.map { |argument| transform(argument, &transform) },
+        capabilities: expression.capabilities,
+      )
+    when TypeProjectionExpression
+      expression
+    when FunctionTypeExpression
+      signature = expression.signature
+      FunctionTypeExpression.new(
+        signature: Type::FunctionType.new(
+          params: signature.params.map do |param|
+            Type::FunctionTypeParam.new(type: transformed_type(param.type, &transform))
+          end,
+          return_type: transformed_type(signature.return_type, &transform),
+          reentrant: signature.reentrant,
+          source_signature: signature.source_signature,
+          abi: signature.abi,
+        ),
+        capabilities: expression.capabilities,
+      )
+    when TupleTypeExpression
+      TupleTypeExpression.new(
+        items: expression.items.map { |item| transform(item, &transform) },
+        capabilities: expression.capabilities,
+      )
+    when OptionalTypeExpression
+      OptionalTypeExpression.new(inner: transform(expression.inner, &transform),
+        capabilities: expression.capabilities)
+    when FallibleTypeExpression
+      FallibleTypeExpression.new(
+        inner: transform(expression.inner, &transform),
+        error_set: expression.error_set.nil? ? nil : transform(T.must(expression.error_set), &transform),
+        capabilities: expression.capabilities,
+      )
+    when FutureTypeExpression
+      FutureTypeExpression.new(inner: transform(expression.inner, &transform),
+        capabilities: expression.capabilities)
+    when LinearTypeExpression
+      LinearTypeExpression.new(
+        kind: expression.kind,
+        dimensions: expression.dimensions,
+        item: transform(expression.item, &transform),
+        allocation_hint: expression.allocation_hint,
+        capabilities: expression.capabilities,
+      )
+    when MapTypeExpression
+      MapTypeExpression.new(
+        key: transform(expression.key, &transform),
+        value: transform(expression.value, &transform),
+        key_implicit: expression.key_implicit,
+        legacy_separator: expression.legacy_separator,
+        capabilities: expression.capabilities,
+      )
+    when StreamTypeExpression
+      StreamTypeExpression.new(
+        cardinality: expression.cardinality,
+        item: transform(expression.item, &transform),
+        capabilities: expression.capabilities,
+      )
+    else
+      expression
+    end
+    transform.call(rebuilt)
+  end
+
+  sig do
+    params(
+      type: Type,
+      transform: T.proc.params(node: TypeExpression).returns(TypeExpression),
+    ).returns(Type)
+  end
+  def self.transformed_type(type, &transform)
+    Type.new(transform(type.shape.expression, &transform))
+  end
+  private_class_method :transformed_type
+
   sig { params(expression: TypeExpression).returns(Integer) }
   def self.node_count(expression)
     each_node(expression).length
@@ -300,6 +409,7 @@ class TypeExpressionTree
   def self.children(expression)
     case expression
     when NamedTypeExpression then expression.arguments
+    when TypeProjectionExpression then []
     when FunctionTypeExpression
       expression.signature.params.map { |param| param.type.shape.expression } +
         [expression.signature.return_type.shape.expression]
@@ -425,6 +535,13 @@ class TypeExpressionParser
 
   sig { params(source: String).returns(TypeExpression) }
   def self.parse_generic_or_named_source(source)
+    if (projection = /\A([A-Z]\w*)::([A-Z]\w*)\z/.match(source))
+      return TypeProjectionExpression.new(
+        owner: T.must(projection[1]).to_sym,
+        member: T.must(projection[2]).to_sym,
+      )
+    end
+
     generic = split_generic(source)
     unless generic.nil?
       arguments = generic.arguments.map { |argument| parse_source(argument) }
@@ -607,6 +724,8 @@ class TypeExpressionPrinter
       end
 
       "#{base}#{capability_suffix(expression.capabilities)}"
+    when TypeProjectionExpression
+      "#{expression.owner}::#{expression.member}#{capability_suffix(expression.capabilities)}"
     when FunctionTypeExpression
       "FN(#{expression.signature.params.map { |param| legacy(TypeExpressionParser.parse(param.type.raw)) }.join(",")}) -> #{legacy(TypeExpressionParser.parse(expression.signature.return_type.raw))}#{capability_suffix(expression.capabilities)}"
     when TupleTypeExpression
@@ -657,6 +776,8 @@ class TypeExpressionPrinter
       end
 
       "#{base}#{capability_suffix(expression.capabilities)}"
+    when TypeProjectionExpression
+      "#{expression.owner}::#{expression.member}#{capability_suffix(expression.capabilities)}"
     when FunctionTypeExpression
       "FN(#{expression.signature.params.map { |param| inline(TypeExpressionParser.parse(param.type.raw)) }.join(", ")}) -> #{inline(TypeExpressionParser.parse(expression.signature.return_type.raw))}#{capability_suffix(expression.capabilities)}"
     when TupleTypeExpression

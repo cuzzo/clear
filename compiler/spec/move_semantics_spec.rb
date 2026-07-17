@@ -28,7 +28,7 @@ RSpec.describe "Move semantics for heap-owning types" do
         FN main() RETURNS Void ->
             MUTABLE m = makeMap();
             MUTABLE items: []{String}Int64 = List[];
-            items.append(m);
+            &items.append(m);
             RETURN;
         END
       CLEAR
@@ -50,7 +50,7 @@ RSpec.describe "Move semantics for heap-owning types" do
         UNION Value { Num: Float64, Items: Int64[] }
         FN makeItems() RETURNS !Value ->
             MUTABLE items: []Int64 = List[];
-            items.append(1_i64);
+            &items.append(1_i64);
             RETURN Value{ Items: items };
         END
         FN main() RETURNS Void ->
@@ -159,7 +159,7 @@ RSpec.describe "Move semantics for heap-owning types" do
         UNION Value { Num: Float64, Items: Int64[] }
         FN main() RETURNS Void ->
             MUTABLE items: []Int64 = List[];
-            items.append(1_i64);
+            &items.append(1_i64);
             v = Value{ Items: items };
             RETURN;
         END
@@ -184,7 +184,7 @@ RSpec.describe "Move semantics for heap-owning types" do
         UNION Value { Num: Float64, Items: Int64[] }
         FN makeItems() RETURNS !Value ->
             MUTABLE items: []Int64 = List[];
-            items.append(1_i64);
+            &items.append(1_i64);
             RETURN Value{ Items: items };
         END
         FN main() RETURNS Void ->
@@ -211,7 +211,7 @@ RSpec.describe "Move semantics for heap-owning types" do
         END
         FN main() RETURNS Void ->
             MUTABLE vals: []Int64 = List[];
-            vals.append(1_i64);
+            &vals.append(1_i64);
             n = consume(vals);
             RETURN;
         END
@@ -237,12 +237,12 @@ RSpec.describe "Move semantics for heap-owning types" do
         UNION Value { Num: Float64, Items: Int64[] }
         FN makeItems() RETURNS !Value ->
             MUTABLE items: []Int64 = List[];
-            items.append(1_i64);
+            &items.append(1_i64);
             RETURN Value{ Items: items };
         END
         FN main() RETURNS Void ->
             MUTABLE results: []Value = List[];
-            results.append(makeItems());
+            &results.append(makeItems());
             RETURN;
         END
       CLEAR

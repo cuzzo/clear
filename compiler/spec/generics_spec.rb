@@ -692,7 +692,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Box { value: Int64 }
           STRUCT Cache<T> { value: T }
           FN get<T>(c: Cache<T>) RETURNS T -> RETURN c.value; END
-          FN set!<T>(MUTABLE c: Cache<T>, TAKES v: T) RETURNS Void ->
+          FN set<T>(MUTABLE c: Cache<T>, TAKES v: T) RETURNS Void ->
             c.value = v;
             RETURN;
           END
@@ -700,7 +700,7 @@ RSpec.describe SemanticAnnotator do
             b = Box{ value: 1 } @shared:locked;
             MUTABLE c = Cache<Box @shared:locked>{ value: b };
             got = get(c);
-            set!(c, got);
+            set(&c, got);
             RETURN;
           END
         CLEAR
@@ -913,7 +913,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Box { value: Int64 }
           STRUCT Cache<T> { value: T }
           FN get<T>(c: Cache<T>) RETURNS T -> RETURN c.value; END
-          FN set!<T>(MUTABLE c: Cache<T>, TAKES v: T) RETURNS Void ->
+          FN set<T>(MUTABLE c: Cache<T>, TAKES v: T) RETURNS Void ->
             c.value = v;
             RETURN;
           END
@@ -921,7 +921,7 @@ RSpec.describe SemanticAnnotator do
             b = Box{ value: 1 } @shared:locked;
             MUTABLE c = Cache<Box @shared:locked>{ value: b };
             got = get(c);
-            set!(c, got);
+            set(&c, got);
             RETURN;
           END
         CLEAR

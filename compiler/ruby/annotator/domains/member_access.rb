@@ -18,6 +18,24 @@ module Annotator
           node.target.safe_nav_chain == true
         target_type_info = T.must(target_type_info.wrapped_type) if implicit_safe_nav
 
+        if target_type_info.c_array_view?
+          root = AST.root_identifier(node.target)
+          if root.is_a?(AST::Identifier)
+            emit_foreign_index_needs_unsafe_view!(node, root.name)
+          else
+            error!(node, :FOREIGN_POINTER_DIRECT_INDEX, name: "foreign pointer")
+          end
+        end
+
+        if target_type_info.future? && target_type_info.observable?
+          root = AST.root_identifier(node.target)
+          if root.is_a?(AST::Identifier)
+            emit_direct_view_access_finding!(node, root.name, permission: "VIEW")
+          else
+            error!(node, :DIRECT_VIEW_ACCESS_REQUIRES_WITH, name: "observable", permission: "VIEW")
+          end
+        end
+
         if target_type_info.rank?
           indices = node.index.is_a?(AST::TupleLit) ? node.index.items : [node.index]
           if indices.length != target_type_info.rank
@@ -34,6 +52,21 @@ module Annotator
 
         if target_type_info.tuple?
           error!(node, :TUPLE_INDEX_SYNTAX)
+        end
+
+        if map_requires_protocol_lowering?(target_type_info)
+          require_generic_map_access_scope!(node.target, target_type_info)
+          key_type = protocol_map_associated_type(target_type_info, :Key)
+          index_type = node.index.full_type!(context: "Map protocol index key")
+          unless key_type.accepts?(index_type)
+            error!(node, :GENERIC_MAP_KEY_MISMATCH,
+              expected: Type.surface_name(key_type), actual: Type.surface_name(index_type))
+          end
+          value_type = protocol_map_associated_type(target_type_info, :Value)
+          stamp_type!(node, Type.optional_of(value_type))
+          node.protocol_operation = :map_get
+          node.container_borrow = true
+          return
         end
 
         # Look up index operation from the registry
@@ -94,6 +127,14 @@ module Annotator
         emit_moved_field_path_error_if_needed!(node)
 
         target_type = node.target.full_type!(context: "field receiver")
+        if target_type.future? && target_type.observable?
+          root = AST.root_identifier(node.target)
+          if root.is_a?(AST::Identifier)
+            emit_direct_view_access_finding!(node, root.name, permission: "VIEW")
+          else
+            error!(node, :DIRECT_VIEW_ACCESS_REQUIRES_WITH, name: "observable", permission: "VIEW")
+          end
+        end
         implicit_safe_nav = target_type.optional? && node.target.respond_to?(:safe_nav_chain) &&
           node.target.safe_nav_chain == true
         if target_type.optional? && !node.target.is_a?(AST::OptionalUnwrap) && !implicit_safe_nav
@@ -351,7 +392,7 @@ module Annotator
         node.storage = :stack
       end
 
-      sig { params(node: AST::StructLit).returns(T.nilable(Symbol)) }
+      sig { params(node: AST::StructLit).returns(T.nilable(T.any(Symbol, Type))) }
       def visit_StructLit(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
@@ -444,7 +485,7 @@ module Annotator
               error!(node, :STRUCT_LITERAL_MISSING_FIELDS, name: node.name, fields: missing.join(', '))
             end
           end
-          stamp_type!(node, node.name.to_sym)
+          stamp_type!(node, literal_instance_type(node))
           return
         end
 

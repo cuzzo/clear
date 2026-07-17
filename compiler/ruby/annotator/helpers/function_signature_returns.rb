@@ -31,12 +31,16 @@ class FunctionSignature
     index = T.let(0, Integer)
     while index < specs.length
       arg_spec = specs.fetch(index)
+      contract_param = params[index]
       validation_params << AST::Param.new(
         name: arg_spec.name || "arg#{index}",
         type: arg_spec.type,
         required: true,
-        mutable: arg_spec.mutable,
-        takes: arg_spec.takes
+        # Receiver mutation and registry-level TAKES metadata are normalized
+        # onto the signature params. Rebuilding solely from arg specs silently
+        # discarded those effects at validation time.
+        mutable: arg_spec.mutable || contract_param&.mutable == true,
+        takes: arg_spec.takes || contract_param&.takes == true
       )
       index += 1
     end

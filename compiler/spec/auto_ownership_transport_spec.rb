@@ -184,7 +184,7 @@ RSpec.describe "automatic ownership transport" do
       FN main() RETURNS Void ->
         MUTABLE x: []Int64 = [1];
         y = x;
-        x.append(2);
+        &x.append(2);
         ASSERT y[0] == 1;
       END
     CLEAR
@@ -192,13 +192,15 @@ RSpec.describe "automatic ownership transport" do
 
     user_source = <<~CLEAR
       STRUCT User { id: Int64, name: String }
-      FN replaceId!(MUTABLE user: User, id: Int64) RETURNS Void ->
-        user.id = id;
-      END
+      IMPLEMENTATION User {
+        METHOD replaceId(MUTABLE self, id: Int64) RETURNS Void ->
+          self.id = id;
+        END
+      }
       FN main() RETURNS Void ->
         MUTABLE x = User{ id: 1, name: "Ada" };
         y = x;
-        x.replaceId!(2);
+        &x.replaceId(2);
         ASSERT y.id == 1;
       END
     CLEAR
@@ -206,7 +208,9 @@ RSpec.describe "automatic ownership transport" do
 
     readonly_source = <<~CLEAR
       STRUCT User { id: Int64 }
-      FN readId(user: User) RETURNS Int64 -> RETURN user.id; END
+      IMPLEMENTATION User {
+        METHOD readId(self) RETURNS Int64 -> RETURN self.id; END
+      }
       FN main() RETURNS Void ->
         x = User{ id: 1 };
         y = x;
@@ -220,13 +224,13 @@ RSpec.describe "automatic ownership transport" do
   it "rejects mutation through any resolved MUTABLE function parameter" do
     source = <<~CLEAR
       STRUCT Foo { value: Int64, label: String }
-      FN mutate!(MUTABLE value: Foo) RETURNS Void ->
+      FN mutate(MUTABLE value: Foo) RETURNS Void ->
         value.value = value.value + 1;
       END
       FN main() RETURNS Void ->
         MUTABLE x = Foo{ value: 1, label: "original" };
         y = x;
-        mutate!(x);
+        mutate(&x);
         ASSERT y.value == 1;
       END
     CLEAR
@@ -243,7 +247,7 @@ RSpec.describe "automatic ownership transport" do
       FN main() RETURNS Void ->
         MUTABLE holder = Holder{ values: [1], name: "Ada" };
         snapshot = holder;
-        holder.values.append(2);
+        &holder.values.append(2);
         ASSERT snapshot.values.length() == 1;
       END
     CLEAR
@@ -288,13 +292,13 @@ RSpec.describe "automatic ownership transport" do
       end
       source = <<~CLEAR
         STRUCT Foo { value: Int64, label: String }
-        FN mutate!(MUTABLE value: Foo) RETURNS Void ->
+        FN mutate(MUTABLE value: Foo) RETURNS Void ->
           value.value = value.value + 1;
         END
         FN main() RETURNS !Void ->
           MUTABLE x = #{construction};
           y = x;
-          pending: ~Void = BG { mutate!(x); };
+          pending: ~Void = BG { mutate(x); };
           ASSERT y.value == 1;
           NEXT pending;
           RETURN;
@@ -327,12 +331,12 @@ RSpec.describe "automatic ownership transport" do
   it "plans aliases declared inside execution boundaries instead of skipping nested bodies" do
     source = <<~CLEAR
       STRUCT Foo { value: Int64, label: String }
-      FN mutate!(MUTABLE value: Foo) RETURNS Void -> value.value = value.value + 1; END
+      FN mutate(MUTABLE value: Foo) RETURNS Void -> value.value = value.value + 1; END
       FN main() RETURNS !Void ->
         pending: ~Void = BG {
           MUTABLE x = Foo{ value: 1, label: "nested" };
           y = x;
-          mutate!(x);
+          mutate(&x);
           ASSERT y.value == 1;
         };
         NEXT pending;
@@ -346,11 +350,11 @@ RSpec.describe "automatic ownership transport" do
   it "propagates captured-binding mutations out of nested routine fact frames" do
     source = <<~CLEAR
       STRUCT Foo { value: Int64, label: String }
-      FN mutate!(MUTABLE value: Foo) RETURNS Void -> value.value = 2_i64; END
+      FN mutate(MUTABLE value: Foo) RETURNS Void -> value.value = 2_i64; END
       FN main() RETURNS Void ->
         MUTABLE x = Foo{ value: 1, label: "outer" };
         y = x;
-        callback: FN() -> Void = %() USE(MUTABLE x) -> mutate!(x);
+        callback: FN() -> Void = %() USE(MUTABLE x) -> mutate(&x);
         callback();
         ASSERT y.value == 1;
       END

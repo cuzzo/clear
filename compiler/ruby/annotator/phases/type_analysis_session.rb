@@ -54,6 +54,7 @@ require_relative "../helpers/method_analysis"
 require_relative "../helpers/union"
 require_relative "../helpers/auto_inference"
 require_relative "capability_evidence"
+require_relative "conformance_validation"
 require_relative "phase_handoffs"
 require_relative "../../compiler/module_importer"
 
@@ -84,6 +85,7 @@ class Annotator::Phases::TypeAnalysisSession
   include TestAnnotation
   include Annotator::Phases::AutoFinalization
   include Annotator::Phases::BodyAnalysis
+  include Annotator::Phases::ConformanceValidation
   include Annotator::Phases::DeferredValidation
   include Annotator::Phases::ExpressionDomains
   include Annotator::Phases::ProgramFinalization
@@ -198,6 +200,21 @@ class Annotator::Phases::TypeAnalysisSession
     @resolution.program
   end
 
+  sig { params(name: String).returns(T.nilable(AST::ProtocolDef)) }
+  def semantic_protocol(name)
+    @resolution.protocols[name]
+  end
+
+  sig { returns(T::Hash[String, AST::ProtocolDef]) }
+  def semantic_protocols
+    @resolution.protocols
+  end
+
+  sig { returns(T::Array[Annotator::Phases::ConformanceResolution]) }
+  def semantic_conformance_resolutions
+    @resolution.conformance_resolutions
+  end
+
   sig { returns(T::Array[HeldLockTypeEntry]) }
   def semantic_held_lock_types
     current_held_lock_types
@@ -228,7 +245,14 @@ class Annotator::Phases::TypeAnalysisSession
     ctx = current_fn_ctx
     ctx ? ctx.type_params : []
   end
-  private :current_function_type_params
+  private :current_function_type_params, :semantic_protocol, :semantic_protocols,
+    :semantic_conformance_resolutions
+
+  sig { returns(T::Array[AST::GenericParamDecl]) }
+  def current_function_generic_params
+    current_fn_ctx&.generic_params || []
+  end
+  private :current_function_generic_params
 
   sig { params(type_name: T.nilable(Symbol)).returns(T::Boolean) }
   def current_function_type_param?(type_name)
@@ -622,6 +646,7 @@ class Annotator::Phases::TypeAnalysisSession
   sig { params(resolution: Annotator::Phases::ResolutionFacts).returns(OwnershipGraph) }
   def analyze_resolution!(resolution)
     adopt_resolution_facts!(resolution)
+    validate_conformances!(resolution.conformance_resolutions)
     bridge_reentrance!(resolution.program)
     validate_and_resolve_sync_policy!(resolution.program)
     seed_error_type_registrations!(resolution.declarations)
@@ -824,6 +849,7 @@ private
     when AST::Placeholder then visit_Placeholder(node)
     when AST::CapabilityWrap then visit_CapabilityWrap(node)
     when AST::OptionalUnwrap then visit_OptionalUnwrap(node)
+    when AST::MutableBorrow then visit_MutableBorrow(node)
     when AST::FuncCall then visit_FuncCall(node)
     when AST::MethodCall then visit_MethodCall(node)
     when AST::StaticCall then visit_StaticCall(node)
@@ -1002,7 +1028,7 @@ private
   # `sync` values that DON'T wrap the underlying data in a
   # reference-bound layer. :raw / :symbol are pure data-access modes
   # (not locks), so they don't bind the capture's lifetime.
-  SYNC_DOES_NOT_BIND_CAPTURE = T.let(Set[:raw, :symbol].freeze, T.untyped)
+  SYNC_DOES_NOT_BIND_CAPTURE = T.let(Set[:raw, :symbol, :c, :size].freeze, T.untyped)
 
   # `storage` values whose memory has its own lifetime mechanism
   # independent of the declaring scope. `:shared` means Arc — own

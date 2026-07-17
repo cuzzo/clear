@@ -221,6 +221,7 @@ class MIRPass
   sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
   def finalized_runtime_input?(fn)
       fn.name.to_s == Compiler::Entrypoint::NAME ||
+      !fn.conformance_protocol.nil? ||
       fn.uses_rt == true ||
       function_error_context?(fn) ||
       fn.uses_alloc == true ||
@@ -307,6 +308,7 @@ class MIRPass
     return false unless node.name.is_a?(AST::GetIndex)
     target_node = node.name.target
     return false unless target_node.is_a?(AST::Locatable)
+    return true if node.name.protocol_operation == :map_put
     ti = target_node.full_type!(context: "indexed assignment target")
     return false if ti.fixed? && !ti.string? && !ti.collection?
 

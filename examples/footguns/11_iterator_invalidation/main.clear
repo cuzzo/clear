@@ -51,7 +51,7 @@ FN shared_list_access() RETURNS !Void ->
   writer = BG {
     WITH EXCLUSIVE items AS list {
       # Only runs after reader releases lock.
-      list.append(50);
+      &list.append(50);
       print("appended 50");
     }
   };

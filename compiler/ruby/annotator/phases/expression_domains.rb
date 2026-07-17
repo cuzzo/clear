@@ -15,10 +15,17 @@ module Annotator
       def visit_FuncCall(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
+        normalize_explicit_mutable_arguments!(node)
         node.args.each { |arg| annotate_call_argument!(node, arg) }
 
         if node.name == "native_call"
           stamp_type!(node, :Any)
+          return
+        end
+
+        if resolve_user_protocol_function_call!(node)
+          record_predicate_call_site!(node)
+          record_named_call_site!(node)
           return
         end
 
@@ -29,12 +36,60 @@ module Annotator
         nil
       end
 
+      sig { params(node: AST::FuncCall).returns(T::Boolean) }
+      def resolve_user_protocol_function_call!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        return false if lookup_scope_for(node.name)
+
+        matches = T.let([], T::Array[[AST::ProtocolDef, AST::ProtocolRequirement, Type, Integer]])
+        node.args.each_with_index do |argument, index|
+          receiver = argument.full_type!(context: "protocol function dispatch")
+          user_protocol_names_for_receiver(receiver).each do |name|
+            next if name == "Map"
+
+            protocol = semantic_protocol(name)
+            requirement = protocol&.requirements&.find do |candidate|
+              !candidate.is_method && candidate.name == node.name &&
+                candidate.params[index]&.type&.resolved == :Self
+            end
+            matches << [protocol, requirement, receiver, index] if protocol && requirement
+          end
+        end
+        matches.uniq! { |protocol, requirement, _receiver| [protocol.name, requirement.name] }
+        return false if matches.empty?
+        if matches.length > 1
+          error!(node, :GENERIC_PROTOCOL_FUNCTION_AMBIGUOUS,
+            name: node.name, protocols: matches.map { |match| match.first.name }.join(", "))
+        end
+
+        protocol, requirement, receiver, receiver_index = T.must(matches.first)
+        signature = protocol_requirement_signature(protocol, requirement, receiver)
+        verify_function_signature!(node, signature, node.args)
+        node.matched_signature = signature
+        node.protocol_name = protocol.name
+        node.protocol_operation = requirement.name.to_sym
+        node.protocol_receiver_index = receiver_index
+        stamp_resolved_call_result!(node, signature.return_type)
+        record_effect(EffectTracker::REENTRANT) if signature.reentrant
+        current_fn_ctx&.mark_runtime_used!
+        true
+      end
+      private :resolve_user_protocol_function_call!
+
       sig { params(node: AST::MethodCall).void }
       def visit_MethodCall(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
+        normalize_explicit_mutable_arguments!(node)
         visit(node.object)
         node.args.each { |arg| visit(arg) }
+
+        reject_legacy_foreign_slice_view!(node)
+        reject_direct_observable_method_access!(node)
+
+        if resolve_protocol_method_call!(node)
+          return
+        end
 
         if resolve_collection_method(node)
           validate_indirect_collection_insertion!(node)
@@ -54,18 +109,256 @@ module Annotator
           reject_mutating_borrowed_receiver!(node)
           return
         end
+        if resolve_inherent_method_call!(node)
+          reject_mutating_borrowed_receiver!(node)
+          return
+        end
         if resolve_intrinsic_method_call!(node)
           validate_indirect_collection_insertion!(node)
           reject_mutating_borrowed_receiver!(node)
           return
         end
 
-        # Fall through to UFCS: obj.method(args) -> method(obj, args).
+        if semantic_root_scope.resolve_entry(node.name)
+          error!(node, :DOT_CALL_REQUIRES_METHOD, name: node.name)
+        end
+        error!(node, :UNKNOWN_INHERENT_METHOD,
+          name: node.name, type: Type.surface_name(node.object.full_type!(context: "method receiver")))
+      end
+
+      sig { params(node: T.any(AST::FuncCall, AST::MethodCall, AST::StaticCall)).void }
+      def normalize_explicit_mutable_arguments!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        node.args.each_with_index do |argument, index|
+          next unless argument.is_a?(AST::MutableBorrow)
+
+          node.mark_explicit_mutable_argument!(index, argument.token)
+          node.args[index] = argument.target
+        end
+      end
+      private :normalize_explicit_mutable_arguments!
+
+      sig { params(node: AST::MutableBorrow).void }
+      def visit_MutableBorrow(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        error!(node, :MUTABLE_MARKER_REQUIRES_CALL)
+      end
+
+      sig { params(node: AST::MethodCall).returns(T::Boolean) }
+      def resolve_protocol_method_call!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        receiver = node.object.full_type!(context: "protocol method receiver")
+        return true if resolve_user_protocol_method_call!(node, receiver)
+        return false unless map_requires_protocol_lowering?(receiver)
+        require_generic_map_access_scope!(node.object, receiver)
+
+        operation = {"put" => :put, "delete" => :delete, "contains?" => :contains,
+                     "count" => :count, "length" => :count,
+                     "empty?" => :empty, "any?" => :any}[node.name]
+        unless operation
+          error!(node, :GENERIC_MAP_METHOD_UNKNOWN,
+            name: node.name, available: "put, delete, contains?, count, length, empty?, any?")
+        end
+        operation = T.must(operation)
+        expected_arity = %i[count empty any].include?(operation) ? 0 : (operation == :put ? 2 : 1)
+        if node.args.length != expected_arity
+          error!(node, :GENERIC_MAP_METHOD_ARITY,
+            name: node.name, expected: expected_arity, actual: node.args.length)
+        end
+
+        key_type = protocol_map_associated_type(receiver, :Key)
+        value_type = protocol_map_associated_type(receiver, :Value)
+        verify_generic_map_receiver_mutability!(node, receiver, operation)
+        verify_protocol_method_argument!(node, 0, key_type) if expected_arity.positive?
+        verify_protocol_method_argument!(node, 1, value_type) if operation == :put
+
+        consume_generic_map_value!(T.must(node.args[1]), value_type) if operation == :put
+
+        result = case operation
+        when :contains, :empty, :any then Type.new(:Bool)
+        when :count then Type.new(:Int64)
+        else Type.new(:Void)
+        end
+        node.protocol_operation = operation
+        stamp_type!(node, result)
+        if operation == :put
+          current_fn_ctx&.record_heap_use!
+          current_fn_ctx&.record_alloc_use!
+          record_effect(EffectTracker::HEAP)
+          node.can_fail = true
+        end
+        true
+      end
+      private :resolve_protocol_method_call!
+
+      sig { params(node: AST::MethodCall, receiver: Type, operation: Symbol).void }
+      def verify_generic_map_receiver_mutability!(node, receiver, operation)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        mutates = %i[put delete].include?(operation)
+        return unless mutates
+
+        params = T.let([
+          AST::Param.new(name: "receiver", type: receiver, required: true, mutable: true, takes: false)
+        ], T::Array[AST::Param])
+        node.args.each_with_index do |argument, index|
+          params << AST::Param.new(
+            name: "arg#{index + 1}",
+            type: argument.full_type!(context: "generic map method argument"),
+            required: true,
+            mutable: false,
+            takes: false,
+          )
+        end
+        verify_function_signature!(node,
+          FunctionSignature.new(params: params, return_type: Type.new(:Void)),
+          [node.object] + node.args)
+      end
+      private :verify_generic_map_receiver_mutability!
+
+      sig { params(node: AST::MethodCall, receiver: Type).returns(T::Boolean) }
+      def resolve_user_protocol_method_call!(node, receiver)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        protocol_names = user_protocol_names_for_receiver(receiver)
+        return false if protocol_names.empty?
+
+        matches = protocol_names.filter_map do |name|
+          protocol = semantic_protocol(name)
+          requirement = protocol&.requirements&.find { |candidate| candidate.is_method && candidate.name == node.name }
+          [protocol, requirement] if protocol && requirement
+        end
+        if matches.length > 1
+          error!(node, :GENERIC_PROTOCOL_METHOD_AMBIGUOUS,
+            name: node.name, protocols: matches.map { |match| match.first.name }.join(", "))
+        end
+        if matches.empty?
+          available = protocol_names.flat_map do |name|
+            semantic_protocol(name)&.requirements&.select(&:is_method)&.map(&:name) || []
+          end.uniq.sort
+          error!(node, :GENERIC_PROTOCOL_METHOD_UNKNOWN,
+            name: node.name, protocols: protocol_names.join(" & "),
+            available: available.empty? ? "none" : available.join(", "))
+        end
+
+        protocol, requirement = T.must(matches.first)
+        signature = protocol_requirement_signature(protocol, requirement, receiver)
+        verify_function_signature!(node, signature, [node.object] + node.args)
+        node.matched_signature = signature
+        node.protocol_name = protocol.name
+        node.protocol_operation = requirement.name.to_sym
+        stamp_resolved_call_result!(node, signature.return_type)
+        record_effect(EffectTracker::REENTRANT) if signature.reentrant
+        current_fn_ctx&.mark_runtime_used!
+        record_predicate_call_site!(node)
+        true
+      end
+      private :resolve_user_protocol_method_call!
+
+      sig { params(receiver: Type).returns(T::Array[String]) }
+      def user_protocol_names_for_receiver(receiver)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        bounded = generic_parameter_protocol_names(receiver.resolved).reject { |name| name == "Map" }
+        return bounded unless bounded.empty?
+
+        semantic_protocols.keys.select do |name|
+          !conformance_match(name, receiver).nil?
+        end
+      end
+      private :user_protocol_names_for_receiver
+
+      sig do
+        params(
+          protocol: AST::ProtocolDef,
+          requirement: AST::ProtocolRequirement,
+          receiver: Type,
+        ).returns(FunctionSignature)
+      end
+      def protocol_requirement_signature(protocol, requirement, receiver)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        substitutions = protocol.associated_types.each_with_object({Self: receiver}) do |associated, table|
+          table[associated.name.to_sym] = Type.new(TypeProjectionExpression.new(
+            owner: receiver.resolved,
+            member: associated.name.to_sym,
+            protocol: protocol.name.to_sym,
+          ))
+        end
+        FunctionSignature.new(
+          params: requirement.params.map do |param|
+            AST::Param.new(
+              name: param.name,
+              type: apply_type_subst(param.type, substitutions),
+              required: true,
+              mutable: param.mutable,
+              takes: param.takes,
+            )
+          end,
+          return_type: apply_type_subst(requirement.return_type, substitutions),
+          reentrant: requirement.effects_decl == :reentrant,
+        )
+      end
+      private :protocol_requirement_signature
+
+      sig { params(node: AST::MethodCall, index: Integer, expected: Type).void }
+      def verify_protocol_method_argument!(node, index, expected)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        argument = T.must(node.args[index])
+        actual = argument.full_type!(context: "Map protocol method argument")
+        return if expected.accepts?(actual)
+
+        error!(argument, :GENERIC_MAP_METHOD_ARGUMENT,
+          name: node.name, position: index + 1,
+          expected: Type.surface_name(expected), actual: Type.surface_name(actual))
+      end
+      private :verify_protocol_method_argument!
+
+      sig { params(node: AST::MethodCall).returns(T::Boolean) }
+      def resolve_inherent_method_call!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        receiver_type = node.object.full_type!(context: "inherent method receiver")
+        owner = receiver_type.generic_instance? ? receiver_type.generic_base : receiver_type.resolved
+        schema = lookup_type_schema(owner)
+        return false unless Schemas.struct?(schema)
+        return false unless schema.methods.key?(node.name)
+
+        source_name = node.name
+        node.source_method_name = source_name
+        node[:name] = ImplementationRegistration.function_name(owner.to_s, source_name)
         resolve_call(node, [node.object] + node.args)
         reject_mutating_borrowed_receiver!(node)
         record_predicate_call_site!(node)
-        record_call_site(node.name) if node.name.is_a?(String)
+        record_call_site(node.name)
+        true
       end
+      private :resolve_inherent_method_call!
+
+      sig { params(node: AST::MethodCall).void }
+      def reject_legacy_foreign_slice_view!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        receiver_type = node.object.full_type!(context: "foreign view receiver")
+        return unless receiver_type.c_array_view? && node.name == "view"
+
+        error!(node, :FOREIGN_VIEW_REQUIRES_WITH)
+      end
+      private :reject_legacy_foreign_slice_view!
+
+      sig { params(node: AST::MethodCall).void }
+      def reject_direct_observable_method_access!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        receiver_type = node.object.full_type!(context: "observable method receiver")
+        return unless receiver_type.future? && receiver_type.observable?
+        root = AST.root_identifier(node.object)
+        if root.is_a?(AST::Identifier)
+          emit_direct_view_access_finding!(node, root.name, permission: "VIEW")
+        else
+          error!(node, :DIRECT_VIEW_ACCESS_REQUIRES_WITH, name: "observable", permission: "VIEW")
+        end
+      end
+      private :reject_direct_observable_method_access!
 
       sig { params(node: AST::MethodCall).void }
       def reject_mutating_borrowed_receiver!(node)
@@ -83,6 +376,7 @@ module Annotator
       def visit_StaticCall(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
+        normalize_explicit_mutable_arguments!(node)
         node.args.each { |arg| visit(arg) }
 
         # `File` in `File::open(...)` is a TYPE reference, not a runtime
@@ -95,6 +389,11 @@ module Annotator
 
         unless schema
           error!(node, :STATIC_UNKNOWN_TYPE, type: type_name)
+          return
+        end
+
+        if Schemas.struct?(schema) && schema.static_methods.key?(node.method_name)
+          resolve_inherent_static_call!(node, type_name)
           return
         end
 
@@ -152,6 +451,26 @@ module Annotator
         node.error_type = method_def.intrinsic_error_type
         current_fn_ctx&.record_alloc_use! if method_allocates || method_def.can_fail
       end
+
+      sig { params(node: AST::StaticCall, owner: Symbol).void }
+      def resolve_inherent_static_call!(node, owner)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        call = AST::FuncCall.new(
+          node.token,
+          ImplementationRegistration.function_name(owner.to_s, node.method_name),
+          node.args,
+        )
+        node.explicit_mutable_argument_tokens.each do |index, token|
+          call.mark_explicit_mutable_argument!(index, token)
+        end
+        resolve_call(call, node.args)
+        AST.copy_pipeline_rewrite_metadata!(call, node, include_call_metadata: true)
+        node.inherent_call = call
+        record_predicate_call_site!(call)
+        record_named_call_site!(call)
+      end
+      private :resolve_inherent_static_call!
 
       sig { params(node: T.any(AST::FuncCall, AST::MethodCall), args: T::Array[AST::Node], matched_def: T.nilable(FunctionSignature)).returns(T.nilable(Type)) }
       def visit_IntrinsicFunc(node, args, matched_def: nil)
@@ -259,8 +578,10 @@ module Annotator
         return false unless (Schemas.struct?(type_schema) || Schemas.resource?(type_schema)) && type_schema.methods&.key?(node.name)
 
         method_sig = type_schema.methods[node.name]
+        return false unless method_sig.extern
         node.extern_call = true
         node.extern_effects = method_sig.extern_effects if method_sig.extern_effects
+        node.extern_source = method_sig.extern_source if node.respond_to?(:extern_source=)
         stamp_type!(node, method_sig.return_type)
         record_effect(EffectTracker::EXTERN)
         record_extern_method_alloc!(method_sig)
@@ -307,7 +628,12 @@ module Annotator
 
         ufcs_args = [resolution_receiver] + node.args
         matched_def = find_matching_intrinsic(method_overloads, ufcs_args)
-        return false unless matched_def
+        unless matched_def
+          sigs = method_overloads.map(&:intrinsic_args_label).join(" or ")
+          arg_types = ufcs_args.map { |arg| arg.resolved_type }.join(", ")
+          error!(node, :INTRINSIC_NO_OVERLOAD,
+            name: node.name, args: arg_types, candidates: sigs)
+        end
 
         visit_IntrinsicFunc(node, ufcs_args, matched_def: matched_def)
         navigation = node.object.is_a?(AST::OptionalUnwrap) || implicit_safe_nav

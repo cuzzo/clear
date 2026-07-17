@@ -8,23 +8,23 @@ UNION Val {
 }
 
 # Case 1: simple union constructor with frame string
-FN makeStr!(a: String, b: String) RETURNS !Val ->
+FN makeStr(a: String, b: String) RETURNS !Val ->
     RETURN Val{ Str: a $+ b };
 END
 
 # Case 2: inline struct variant with frame strings
-FN makePair!(a: String, b: String) RETURNS !Val ->
+FN makePair(a: String, b: String) RETURNS !Val ->
     RETURN Val.Pair{ car: a $+ b, cdr: b $+ a };
 END
 
 FN main() RETURNS Void ->
-    v1 = makeStr!("hel", "lo");
+    v1 = makeStr("hel", "lo");
     PARTIAL MATCH v1 START
         Val.Str AS s -> ASSERT s == "hello", "case1: Str variant";,
         DEFAULT -> ASSERT FALSE, "case1: should be Str";
     END
 
-    v2 = makePair!("wor", "ld");
+    v2 = makePair("wor", "ld");
     PARTIAL MATCH v2 START
         Val.Pair AS p -> ASSERT p.car == "world" AND p.cdr == "ldwor", "case2: Pair variant";,
         DEFAULT -> ASSERT FALSE, "case2: should be Pair";

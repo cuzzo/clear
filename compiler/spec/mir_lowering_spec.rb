@@ -30,6 +30,7 @@ RSpec.describe MIRLowering do
       bindings: {},
       binding_types: {},
       collection_params: Set.new,
+      protocol_map_allocators: {},
       mutable_scalar_params: Set.new,
       param_names: Set.new,
       takes_param_names: Set.new,
@@ -610,7 +611,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers identifier with bang suffix" do
-      node = make_id("push!")
+      node = make_id("push")
       result = lowering.lower(node)
       expect(emit(result)).to eq("push")
     end
@@ -682,6 +683,17 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::BinOp)
       expect(emit(result)).to eq("(x > 10.0)")
+    end
+
+    it "lowers bitwise operators directly and casts runtime shift counts" do
+      left = make_id("bits", full_type: :Int64)
+      right = make_id("amount", full_type: :Int64)
+
+      expect(emit(lowering.lower(make_binop(left, :BIT_AND, right)))).to eq("(bits & amount)")
+      expect(emit(lowering.lower(make_binop(left, :BIT_OR, right)))).to eq("(bits | amount)")
+      expect(emit(lowering.lower(make_binop(left, :XOR, right)))).to eq("(bits ^ amount)")
+      expect(emit(lowering.lower(make_binop(left, :SHL, right)))).to eq("(bits << @intCast(amount))")
+      expect(emit(lowering.lower(make_binop(left, :SHR, right)))).to eq("(bits >> @intCast(amount))")
     end
 
     it "lowers left-optional equality to a nil-safe payload comparison" do
@@ -1901,6 +1913,22 @@ RSpec.describe MIRLowering do
       expect(field_value.expr).to eq(MIR::Ident.new("items"))
       expect(field_value.safe).to eq(true)
     end
+
+    it "retains an Rc-backed identifier stored in a struct field" do
+      source = make_id("node", full_type: Type.new(:Node, ownership: :multiowned))
+      node = AST::StructLit.new(tok, "Wrapper", { "inner" => source }, nil, nil)
+      node.full_type = :Wrapper
+
+      low = lowering(struct_schemas: {
+        Wrapper: Schemas::StructSchema.new(fields: {
+          "inner" => Type.new(:Node, ownership: :multiowned),
+        }),
+      })
+      result = low.lower(node)
+
+      expect(emit(low.function_state.pending_stmts)).to include("rcRetain")
+      expect(emit(result)).to include(".inner = __tmp_")
+    end
   end
 
   describe "indirect aggregate field ownership" do
@@ -2382,7 +2410,7 @@ RSpec.describe MIRLowering do
 
         FN main() RETURNS Void ->
           MUTABLE pool: [Pool(4)]Env = [];
-          id: Id<Env> = pool.insert(Env{ vars: {} });
+          id: Id<Env> = &pool.insert(Env{ vars: {} });
           IF pool[id] EXISTS AS env THEN
             env.vars["a"] = 1_i64;
           END
@@ -3614,7 +3642,7 @@ RSpec.describe MIRLowering do
 
         FN run() RETURNS !Void ->
           MUTABLE outer: []String = [];
-          outer.append(inner() OR_ELSE PASS);
+          &outer.append(inner() OR_ELSE PASS);
           RETURN;
         END
       CLEAR

@@ -15,24 +15,24 @@ FN main() RETURNS Void ->
     MUTABLE nodes: []Node = [];
     MUTABLE n0 = Node{ keys: [], vals: [] };
     MUTABLE n1 = Node{ keys: [], vals: [] };
-    nodes.append(n0);
-    nodes.append(n1);
+    &nodes.append(n0);
+    &nodes.append(n1);
 
     # Test 1: Mutation via method call on nested indexed field
     IF nodes[0] EXISTS AS node0 THEN
-        node0.keys.append(10);
-        node0.keys.append(20);
-        node0.keys.append(30);
+        &node0.keys.append(10);
+        &node0.keys.append(20);
+        &node0.keys.append(30);
     END
     IF nodes[1] EXISTS AS node1 THEN
-        node1.keys.append(40);
-        node1.keys.append(50);
+        &node1.keys.append(40);
+        &node1.keys.append(50);
     END
 
     MUTABLE db = DB{ nodes: [] };
     MUTABLE n2 = Node{ keys: [], vals: [] };
-    n2.keys.append(100);
-    db.nodes.append(n2);
+    &n2.keys.append(100);
+    &db.nodes.append(n2);
     ASSERT countKeys(db, 0) == 1, "db node 0 has 1 key";
 
     # Test 2: Read values back from nested indexed field

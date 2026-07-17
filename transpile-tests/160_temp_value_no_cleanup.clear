@@ -16,21 +16,21 @@ FN getStr(v: Val) RETURNS String ->
     RETURN "nil";
 END
 
-FN makeLambda!() RETURNS !Val ->
+FN makeLambda() RETURNS !Val ->
     MUTABLE params: []Val = List[];
-    params.append(Val{ Str: "x" });
+    &params.append(Val{ Str: "x" });
     RETURN Val.Lambda{ params: COPY params, body: Val{ Str: "body" }, envId: 0 };
 END
 
-FN wrapStr!(v: Val) RETURNS String ->
+FN wrapStr(v: Val) RETURNS String ->
     RETURN getStr(v);
 END
 
 FN main() RETURNS Void ->
     # g() returns Lambda with heap data, f() extracts a string.
-    # The Lambda temporary from makeLambda!() is never cleaned up.
-    s = wrapStr!(makeLambda!());
-    s2 = wrapStr!(makeLambda!());
-    s3 = wrapStr!(makeLambda!());
+    # The Lambda temporary from makeLambda() is never cleaned up.
+    s = wrapStr(makeLambda());
+    s2 = wrapStr(makeLambda());
+    s3 = wrapStr(makeLambda());
     print("PASS");
 END

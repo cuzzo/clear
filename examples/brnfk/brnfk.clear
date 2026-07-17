@@ -28,10 +28,10 @@ END
 
 FN bytesToString(bytes: []Int64) RETURNS !String ->
   MUTABLE parts: []String = [];
-  parts.reserve(bytes.length());
+  &parts.reserve(bytes.length());
   MUTABLE i = 0;
   WHILE i < bytes.length() DO
-    parts.append(byteToString(bytes[i] OR_ELSE 0_i64));
+    &parts.append(byteToString(bytes[i] OR_ELSE 0_i64));
     i += 1;
   END
   RETURN parts.join("");
@@ -60,10 +60,10 @@ END
 
 FN stringToBytes(s: String) RETURNS ![]Int64 ->
   MUTABLE bytes: []Int64 = [];
-  bytes.reserve(s.length());
+  &bytes.reserve(s.length());
   MUTABLE i = 0;
   WHILE i < s.length() DO
-    bytes.append(stringToByte(s.charAt(i)));
+    &bytes.append(stringToByte(s.charAt(i)));
     i += 1;
   END
   RETURN bytes;
@@ -71,10 +71,10 @@ END
 
 FN copyBytes(bytes: []Int64) RETURNS ![]Int64 ->
   MUTABLE copied: []Int64 = [];
-  copied.reserve(bytes.length());
+  &copied.reserve(bytes.length());
   MUTABLE i = 0;
   WHILE i < bytes.length() DO
-    copied.append(bytes[i] OR_ELSE 0_i64);
+    &copied.append(bytes[i] OR_ELSE 0_i64);
     i += 1;
   END
   RETURN copied;
@@ -91,7 +91,7 @@ FN commands(program: String) RETURNS !String ->
   WHILE i < program.length() DO
     ch = program.charAt(i);
     IF isCommand(ch) THEN
-      parts.append(ch);
+      &parts.append(ch);
     END
     i += 1;
   END
@@ -104,10 +104,10 @@ FN makeTape(size: Int64) RETURNS ![]Int64 ->
   END
 
   MUTABLE tape: []Int64 = [];
-  tape.reserve(size);
+  &tape.reserve(size);
   MUTABLE i = 0;
   WHILE i < size DO
-    tape.append(0);
+    &tape.append(0);
     i += 1;
   END
   RETURN tape;
@@ -115,10 +115,10 @@ END
 
 FN makeJumpTable(program: String) RETURNS ![]Int64 ->
   MUTABLE jumps: []Int64 = [];
-  jumps.reserve(program.length());
+  &jumps.reserve(program.length());
   MUTABLE i = 0;
   WHILE i < program.length() DO
-    jumps.append(-1);
+    &jumps.append(-1);
     i += 1;
   END
 
@@ -127,9 +127,9 @@ FN makeJumpTable(program: String) RETURNS ![]Int64 ->
   WHILE i < program.length() DO
     ch = program.charAt(i);
     IF ch == "[" THEN
-      stack.append(i);
+      &stack.append(i);
     ELSE_IF ch == "]" THEN
-      open = stack.pop() OR_ELSE -1;
+      open = &stack.pop() OR_ELSE -1;
       IF open < 0 THEN
         RAISE "brnfk unmatched ] at instruction ${i.toString()}";
       END
@@ -140,7 +140,7 @@ FN makeJumpTable(program: String) RETURNS ![]Int64 ->
   END
 
   IF stack.any?() THEN
-    open = stack.pop() OR_ELSE -1;
+    open = &stack.pop() OR_ELSE -1;
     RAISE "brnfk unmatched [ at instruction ${open.toString()}";
   END
 
@@ -231,7 +231,7 @@ RETURNS ![]Int64 ->
     ELSE_IF op == "-" THEN
       tape[pointer] = decByte(tape[pointer] OR_ELSE 0_i64);
     ELSE_IF op == "." THEN
-      output.append(tape[pointer] OR_ELSE 0_i64);
+      &output.append(tape[pointer] OR_ELSE 0_i64);
     ELSE_IF op == "," THEN
       IF inputPos < inputBytes.length() THEN
         tape[pointer] = inputBytes[inputPos] OR_ELSE 0_i64;

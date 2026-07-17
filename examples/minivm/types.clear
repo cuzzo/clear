@@ -201,7 +201,7 @@ FN prStr(v: Value, readably: Bool) RETURNS !String EFFECTS REENTRANT ->
     RETURN "";
 END
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value
+FN envGet(envId: Id<Env>, name: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Value
   REQUIRES pool: LOCKED
   EFFECTS REENTRANT
 ->
@@ -218,7 +218,7 @@ FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: [Pool(50000)]Env) RETURNS
             END
         END
     }
-    IF recurseTo EXISTS AS pid THEN RETURN envGet!(pid, name, pool); END
+    IF recurseTo EXISTS AS pid THEN RETURN envGet(pid, name, &pool); END
     RETURN Value.Nil;
 END
 

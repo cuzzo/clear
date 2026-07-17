@@ -13,6 +13,14 @@ require_relative "struct_field"
 module Schemas
     extend T::Sig
 
+  class ExternSource < T::Struct
+    const :dependency, String
+    const :abi, Symbol, default: :zig
+    const :symbol, T.nilable(String), default: nil
+    const :callconv, Symbol, default: :c
+    const :header, T.nilable(String), default: nil
+  end
+
   # Plain classes (not Data.define) so Sorbet's 4010 doesn't fire on
   # the kwarg-only initialize signatures we need for default values.
   # Frozen at the end of initialize so callers see immutable shapes
@@ -60,6 +68,7 @@ module Schemas
     enums do
       Method = new("method")
       Function = new("function")
+      CFunction = new("c_function")
     end
   end
 
@@ -105,6 +114,16 @@ module Schemas
           call_kind: ResourceCloseCallKind::Function,
           name: name,
           runtime_heap_alloc_args: runtime_heap_alloc_args,
+        ),
+      ])
+    end
+
+    sig { params(name: String).returns(ResourceClosePlan) }
+    def self.c_function(name)
+      new(actions: [
+        ResourceCloseAction.new(
+          call_kind: ResourceCloseCallKind::CFunction,
+          name: name,
         ),
       ])
     end
@@ -386,11 +405,17 @@ module Schemas
     MethodsMap = T.type_alias { T::Hash[T.any(Symbol, String), FunctionSignature] }
 
     attr_reader :fields, :type_params, :methods, :visibility, :extern_module, :as_type
-    sig { params(fields: FieldInputMap, type_params: T::Array[Symbol], methods: MethodsMap, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
-    def initialize(fields: {}, type_params: [], methods: {}, visibility: :package, extern_module: nil, as_type: nil)
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    attr_reader :generic_params
+    sig { returns(MethodsMap) }
+    attr_reader :static_methods
+    sig { params(fields: FieldInputMap, type_params: T::Array[Symbol], generic_params: T::Array[AST::GenericParamDecl], methods: MethodsMap, static_methods: MethodsMap, visibility: Symbol, extern_module: T.nilable(String), as_type: T.nilable(String)).void }
+    def initialize(fields: {}, type_params: [], generic_params: [], methods: {}, static_methods: {}, visibility: :package, extern_module: nil, as_type: nil)
       @fields = T.let(normalize_fields(fields), T::Hash[String, AST::StructField])
       @type_params = T.let(type_params.dup, T::Array[Symbol])
+      @generic_params = T.let(generic_params.dup, T::Array[AST::GenericParamDecl])
       @methods = T.let(methods, MethodsMap)
+      @static_methods = T.let(static_methods, MethodsMap)
       @visibility = T.let(visibility, Symbol)
       @extern_module = T.let(extern_module, T.nilable(String))
       @as_type = T.let(as_type, T.nilable(String))

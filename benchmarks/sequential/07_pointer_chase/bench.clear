@@ -46,13 +46,13 @@ FN main() RETURNS Void ->
   n_nodes = 2_000_000;
   step = 999_983;
 
-  pool: [Pool(2000000)]Node = [];
+  MUTABLE pool: [Pool(2000000)]Node = [];
   MUTABLE id_list: []Id<Node> = [];
 
   # Phase 1: insert N nodes, record IDs in insertion order.
   TIGHT FOR i IN (0 ..< n_nodes) DO
-    id = pool.insert(Node{ val: i });
-    id_list.append(id);
+    id = &pool.insert(Node{ val: i });
+    &id_list.append(id);
   END
 
   # Phase 2: walk N steps via arithmetic permutation, accumulate sum.

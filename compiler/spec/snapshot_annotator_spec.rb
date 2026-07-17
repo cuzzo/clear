@@ -250,7 +250,7 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
       expect {
         run(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN main!() RETURNS !Void ->
+          FN main() RETURNS !Void ->
             c = C{ v: 0 };
             WITH SNAPSHOT c AS s { _ = s.v; }
             RETURN;
@@ -262,7 +262,7 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
     it "compiles when the source is @versioned" do
       run(<<~CLEAR)
         STRUCT C { v: Int64 }
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
           c = C{ v: 0 } @versioned;
           WITH SNAPSHOT c AS s { _ = s.v; }
           RETURN;

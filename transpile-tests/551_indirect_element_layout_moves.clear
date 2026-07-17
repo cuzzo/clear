@@ -5,24 +5,24 @@
 
 STRUCT BoxedItem { name: String }
 
-FN appendBox!(TAKES item: BoxedItem@boxed, MUTABLE items: []BoxedItem@boxed) RETURNS Void ->
-  items.append(item);
+FN appendBox(TAKES item: BoxedItem@boxed, MUTABLE items: []BoxedItem@boxed) RETURNS Void ->
+  &items.append(item);
 END
 
-FN appendInline!(TAKES item: BoxedItem@boxed, MUTABLE items: []BoxedItem) RETURNS Void ->
-  items.append(item);
+FN appendInline(TAKES item: BoxedItem@boxed, MUTABLE items: []BoxedItem) RETURNS Void ->
+  &items.append(item);
 END
 
 FN main() RETURNS Void ->
   MUTABLE boxed: []BoxedItem@boxed = [];
   first = BoxedItem{ name: COPY "boxed" } @boxed;
-  appendBox!(first, boxed);
+  appendBox(first, &boxed);
   ASSERT boxed.length() == 1;
   ASSERT boxed[0]?.name == "boxed";
 
   MUTABLE direct_items: []BoxedItem = [];
   second = BoxedItem{ name: COPY "inline" } @boxed;
-  appendInline!(second, direct_items);
+  appendInline(second, &direct_items);
   ASSERT direct_items.length() == 1;
   ASSERT direct_items[0]?.name == "inline";
 END

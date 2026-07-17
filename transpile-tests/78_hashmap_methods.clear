@@ -22,7 +22,7 @@ FN main() RETURNS Void ->
   ASSERT scores.contains?("dave") == TRUE, "dave should now be present";
 
   # delete(): remove a key
-  scores.delete("bob");
+  &scores.delete("bob");
   ASSERT scores.count() == 3, "count should be 3 after deleting bob";
   ASSERT scores.contains?("bob") == FALSE, "bob should no longer be present";
 
@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
   ASSERT scores["bob"] OR_ELSE 0 == 0, "missing key should return default 0 via OR_ELSE";
 
   # delete() on non-existent key is a no-op
-  scores.delete("nobody");
+  &scores.delete("nobody");
   ASSERT scores.count() == 3, "count should still be 3 after no-op delete";
 
   # keys(): returns String[] of all current keys

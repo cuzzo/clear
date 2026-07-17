@@ -7,14 +7,14 @@ UNION Val {
     Pair { car: String, cdr: String }
 }
 
-FN buildAndDiscard!() RETURNS !Void ->
+FN buildAndDiscard() RETURNS !Void ->
     MUTABLE items: []Val = List[];
-    items.append(Val{ Str: "hello" });
-    items.append(Val{ Str: "world" });
+    &items.append(Val{ Str: "hello" });
+    &items.append(Val{ Str: "world" });
     RETURN;
 END
 
 FN main() RETURNS Void ->
-    buildAndDiscard!();
+    buildAndDiscard();
     print("PASS");
 END

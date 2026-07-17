@@ -1,7 +1,7 @@
 FN benchDenseIntList(n: Int64) RETURNS !Int64 ->
     MUTABLE values: []Int64 = [];
     FOR i IN (0_i64 ..< n) DO
-        values.append(0_i64);
+        &values.append(0_i64);
     END
     t0 = timestampMs();
     FOR i IN (0_i64 ..< n) DO
@@ -35,7 +35,7 @@ FN benchFloatList(n: Int64) RETURNS !Int64 ->
     MUTABLE values: []Float64 = [];
     t0 = timestampMs();
     FOR i IN (0_i64 ..< n) DO
-        values.append(1.5);
+        &values.append(1.5);
     END
     MUTABLE total: Float64 = 0.0;
     FOR i IN (0_i64 ..< n) DO

@@ -72,11 +72,11 @@ end
 def com_decl(shape, name = "v")
   case shape
   when :string then "#{name}: String = COPY \"abc\";"
-  when :list then "MUTABLE #{name}: Int64[]@list = []; #{name}.append(1_i64);"
+  when :list then "MUTABLE #{name}: Int64[]@list = []; &#{name}.append(1_i64);"
   when :string_list then "#{name}: String[]@list = mkStringList() OR_ELSE RAISE;"
   when :struct_string then "#{name}: Box = Box{ name: COPY \"abc\" };"
   when :union_owned then "#{name}: Val = Val{ Items: mkStringList() OR_ELSE RAISE };"
-  when :nested_list then "MUTABLE inner: Int64[]@list = []; inner.append(1_i64); #{name}: Nest = Nest{ items: inner };"
+  when :nested_list then "MUTABLE inner: Int64[]@list = []; &inner.append(1_i64); #{name}: Nest = Nest{ items: inner };"
   when :nested_string_list then "#{name}: StringNest = StringNest{ items: mkStringList() OR_ELSE RAISE };"
   end
 end
@@ -115,13 +115,13 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
   helper_list = <<~CHT
     FN mkList() RETURNS !Int64[]@list ->
       MUTABLE xs: Int64[]@list = [];
-      xs.append(1_i64);
+      &xs.append(1_i64);
       RETURN xs;
     END
 
     FN mkStringList() RETURNS !String[]@list ->
       MUTABLE xs: String[]@list = List[];
-      xs.append(COPY "a");
+      &xs.append(COPY "a");
       RETURN xs;
     END
   CHT
@@ -229,11 +229,11 @@ FuzzGenerator.register(:call_ownership_contract_matrix, cells: CALL_OWNERSHIP_CE
 
   when :receiver_mutation
     append = case p[:shape]
-             when :list then "v.append(2_i64);"
-             when :string_list then 'v.append(COPY "z");'
+             when :list then "&v.append(2_i64);"
+             when :string_list then '&v.append(COPY "z");'
              when :struct_string then 'v.name = v.name $+ COPY "d";'
-             when :nested_list then "v.items.append(2_i64);"
-             when :nested_string_list then 'v.items.append(COPY "z");'
+             when :nested_list then "&v.items.append(2_i64);"
+             when :nested_string_list then '&v.items.append(COPY "z");'
              end
     assert_expr = case p[:shape]
                   when :list then "v.length()"

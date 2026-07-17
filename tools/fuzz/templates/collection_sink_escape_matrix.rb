@@ -56,7 +56,7 @@ FuzzGenerator.register(:collection_sink_escape_matrix, cells: COLLECTION_SINK_ES
     <<~CHT
       #{prelude}FN main() RETURNS Void ->
           MUTABLE out: #{ty}[]@list = [];
-          out.append(#{val});
+          &out.append(#{val});
           ASSERT out.length() == 1_i64, "collection list sink";
           RETURN;
       END
@@ -65,7 +65,7 @@ FuzzGenerator.register(:collection_sink_escape_matrix, cells: COLLECTION_SINK_ES
     <<~CHT
       #{prelude}FN main() RETURNS Void ->
           MUTABLE out: #{ty}[]@set = [];
-          out.insert(#{val});
+          &out.insert(#{val});
           ASSERT out.length() == 1_i64, "collection set sink";
           RETURN;
       END
@@ -83,7 +83,7 @@ FuzzGenerator.register(:collection_sink_escape_matrix, cells: COLLECTION_SINK_ES
     <<~CHT
       #{prelude}FN main() RETURNS Void ->
           MUTABLE out: #{ty}[8]@pool = [];
-          _ = out.insert(#{val});
+          _ = &out.insert(#{val});
           ASSERT out.length() == 1_i64, "collection pool sink";
           RETURN;
       END

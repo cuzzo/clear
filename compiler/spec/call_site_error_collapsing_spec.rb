@@ -39,7 +39,7 @@ RSpec.describe "Call-site error collapsing (#329)" do
     it "passing @versioned to REQUIRES SNAPSHOTTED → {MvccConflict}" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
-        FN tick!(MUTABLE c: C) RETURNS !Void
+        FN tick(MUTABLE c: C) RETURNS !Void
           REQUIRES c: SNAPSHOTTED
         ->
           WITH SNAPSHOT c AS MUTABLE x { x.v = x.v + 1; }
@@ -47,18 +47,18 @@ RSpec.describe "Call-site error collapsing (#329)" do
         END
         FN main() RETURNS Void ->
           MUTABLE c = C{ v: 0 } @versioned;
-          tick!(c);
+          tick(&c);
           RETURN;
         END
       CLEAR
-      call = first_call(ast, "tick!")
+      call = first_call(ast, "tick")
       expect(call.collapsed_errors).to eq(Set[:MvccConflict])
     end
 
     it "passing @boxed:atomic to REQUIRES SNAPSHOTTED → {AtomicConflict}" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
-        FN tick!(MUTABLE c: C) RETURNS !Void
+        FN tick(MUTABLE c: C) RETURNS !Void
           REQUIRES c: SNAPSHOTTED
         ->
           WITH SNAPSHOT c AS MUTABLE x { x.v = x.v + 1; }
@@ -66,18 +66,18 @@ RSpec.describe "Call-site error collapsing (#329)" do
         END
         FN main() RETURNS Void ->
           MUTABLE c = C{ v: 0 } @boxed:atomic;
-          tick!(c);
+          tick(&c);
           RETURN;
         END
       CLEAR
-      call = first_call(ast, "tick!")
+      call = first_call(ast, "tick")
       expect(call.collapsed_errors).to eq(Set[:AtomicConflict])
     end
 
     it "passing @shared:locked to REQUIRES LOCKED → {LockTimeout}" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
-        FN tick!(MUTABLE c: C) RETURNS Void
+        FN tick(MUTABLE c: C) RETURNS Void
           REQUIRES c: LOCKED
         ->
           WITH POLYMORPHIC EXCLUSIVE c AS x { x.v = x.v + 1; }
@@ -85,11 +85,11 @@ RSpec.describe "Call-site error collapsing (#329)" do
         END
         FN main() RETURNS Void ->
           MUTABLE c = C{ v: 0 } @shared:locked;
-          tick!(c);
+          tick(&c);
           RETURN;
         END
       CLEAR
-      call = first_call(ast, "tick!")
+      call = first_call(ast, "tick")
       expect(call.collapsed_errors).to eq(Set[:LockTimeout])
     end
   end
@@ -104,37 +104,37 @@ RSpec.describe "Call-site error collapsing (#329)" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
 
-        FN c!(MUTABLE x: C) RETURNS !Void
+        FN c(MUTABLE x: C) RETURNS !Void
           REQUIRES x: SNAPSHOTTED
         ->
           WITH SNAPSHOT x AS MUTABLE xa { xa.v = xa.v + 1; }
           RETURN;
         END
 
-        FN a!(MUTABLE b: C) RETURNS !Void
+        FN a(MUTABLE b: C) RETURNS !Void
           REQUIRES b: VERSIONED
         ->
-          c!(b);
+          c(&b);
           RETURN;
         END
 
         FN main() RETURNS Void ->
           MUTABLE v = C{ v: 0 } @versioned;
-          a!(v);
+          a(&v);
           RETURN;
         END
       CLEAR
 
       # Inside a's body, the call to c! projects only MvccConflict
       # because a's REQUIRES narrows the param to VERSIONED.
-      a_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "a!" }
-      inner_call = a_fn.body.find { |s| s.is_a?(AST::FuncCall) && s.name == "c!" }
+      a_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "a" }
+      inner_call = a_fn.body.find { |s| s.is_a?(AST::FuncCall) && s.name == "c" }
       expect(inner_call.collapsed_errors).to eq(Set[:MvccConflict])
 
       # And the outer call from main to a: a's full !T is
       # {MvccConflict} (since REQUIRES VERSIONED), and the actual
       # binding is @versioned, so the projection is the same.
-      outer_call = first_call(ast, "a!")
+      outer_call = first_call(ast, "a")
       expect(outer_call.collapsed_errors).to eq(Set[:MvccConflict])
     end
 
@@ -142,29 +142,29 @@ RSpec.describe "Call-site error collapsing (#329)" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
 
-        FN c!(MUTABLE x: C) RETURNS !Void
+        FN c(MUTABLE x: C) RETURNS !Void
           REQUIRES x: SNAPSHOTTED
         ->
           WITH SNAPSHOT x AS MUTABLE xa { xa.v = xa.v + 1; }
           RETURN;
         END
 
-        FN a!(MUTABLE b: C) RETURNS !Void
+        FN a(MUTABLE b: C) RETURNS !Void
           REQUIRES b: ATOMIC
         ->
-          c!(b);
+          c(&b);
           RETURN;
         END
 
         FN main() RETURNS Void ->
           MUTABLE v = C{ v: 0 } @boxed:atomic;
-          a!(v);
+          a(&v);
           RETURN;
         END
       CLEAR
 
-      a_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "a!" }
-      inner_call = a_fn.body.find { |s| s.is_a?(AST::FuncCall) && s.name == "c!" }
+      a_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "a" }
+      inner_call = a_fn.body.find { |s| s.is_a?(AST::FuncCall) && s.name == "c" }
       expect(inner_call.collapsed_errors).to eq(Set[:AtomicConflict])
     end
 
@@ -172,23 +172,23 @@ RSpec.describe "Call-site error collapsing (#329)" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
 
-        FN c!(MUTABLE x: C) RETURNS !Void
+        FN c(MUTABLE x: C) RETURNS !Void
           REQUIRES x: SNAPSHOTTED
         ->
           WITH SNAPSHOT x AS MUTABLE xa { xa.v = xa.v + 1; }
           RETURN;
         END
 
-        FN a!(MUTABLE b: C) RETURNS !Void
+        FN a(MUTABLE b: C) RETURNS !Void
           REQUIRES b: SNAPSHOTTED
         ->
-          c!(b);
+          c(&b);
           RETURN;
         END
 
         FN main() RETURNS Void ->
           MUTABLE v = C{ v: 0 } @versioned;
-          a!(v);
+          a(&v);
           RETURN;
         END
       CLEAR
@@ -197,8 +197,8 @@ RSpec.describe "Call-site error collapsing (#329)" do
       # the full union (the binding is still polymorphic at this point;
       # the actual-family pin only happens when a concrete binding is
       # passed to a from the outside).
-      a_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "a!" }
-      inner_call = a_fn.body.find { |s| s.is_a?(AST::FuncCall) && s.name == "c!" }
+      a_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "a" }
+      inner_call = a_fn.body.find { |s| s.is_a?(AST::FuncCall) && s.name == "c" }
       expect(inner_call.collapsed_errors).to eq(Set[:MvccConflict, :AtomicConflict])
     end
   end

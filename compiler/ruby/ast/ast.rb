@@ -341,7 +341,8 @@ module AST
   end
 
   Capability = Struct.new(:capability, :var_node, :alias, :alias_mutable, :guard_expr,
-                          :snapshot_token, :view_token, :resolved_type, :old_scope,
+                          :snapshot_token, :view_token, :view_length, :as_token,
+                          :resolved_type, :old_scope,
                           keyword_init: true) do
     extend T::Sig
 
@@ -475,6 +476,7 @@ module AST
   sig { params(node: AST::Node).returns(T.nilable(AST::Identifier)) }
   def self.root_identifier(node)
     case node
+    when AST::MutableBorrow             then root_identifier(node.target)
     when AST::GetField, AST::GetIndex then root_identifier(node.target)
     when AST::Identifier              then node
     end
@@ -504,6 +506,7 @@ module AST
   def self.container_borrow?(node)
     return false unless node
     return true if node.respond_to?(:container_borrow) && T.unsafe(node).container_borrow == true
+    return container_borrow?(node.target) if node.is_a?(AST::OptionalUnwrap)
     return false unless node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_ELSE)
 
     container_borrow?(node.left)
@@ -750,8 +753,10 @@ module AST
     when ListLit
       (expr.items || []).compact
     when Cast, MoveNode, CopyNode, CloneNode, ShareNode, LinkNode, ResolveNode,
+         MutableBorrow,
          FreezeNode, CapabilityWrap
-      expr.value ? [expr.value] : []
+      child = expr.is_a?(MutableBorrow) ? expr.target : expr.value
+      child ? [child] : []
     else
       []
     end
@@ -766,9 +771,10 @@ module AST
     case node
     when CopyNode, CloneNode, FreezeNode
       skip_copy ? [] : [node.value].compact
-    when MoveNode, ShareNode, CapabilityWrap, Cast, ReturnNode, Assignment, VarDecl, BindExpr,
+    when MoveNode, ShareNode, CapabilityWrap, Cast, MutableBorrow, ReturnNode, Assignment, VarDecl, BindExpr,
          DestructuringAssignment
-      [node.value].compact
+      child = node.is_a?(MutableBorrow) ? node.target : node.value
+      [child].compact
     when BinaryOp
       [node.left, node.right].compact
     when UnaryOp
@@ -1655,6 +1661,53 @@ module AST
   end
   # kind: :local (REQUIRE "file.clear") or :package (REQUIRE "pkg:name")
   RequireNode  = Struct.new(:token, :path, :namespace, :kind) { include Locatable }
+
+  class GenericBoundDecl < T::Struct
+    const :token, T.nilable(Lexer::Token), default: nil
+    const :type, Type
+  end
+
+  class GenericParamDecl < T::Struct
+    const :token, T.nilable(Lexer::Token), default: nil
+    const :name, String
+    const :bounds, T::Array[GenericBoundDecl], default: []
+  end
+
+  class ProtocolRequirement < T::Struct
+    include Locatable
+
+    const :token, Lexer::Token
+    const :name, String
+    const :params, T::Array[AST::Param]
+    const :return_type, Type
+    const :is_method, T::Boolean, default: true
+    const :effects_decl, T.nilable(Symbol), default: nil
+    const :max_depth_n, T.nilable(Integer), default: nil
+    const :tight_reentrance, T::Boolean, default: false
+  end
+
+  ProtocolDef = Struct.new(:token, :name, :name_token, :associated_types, :requirements, :visibility) do
+    extend T::Sig
+    include Locatable
+    include HasBodies
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:associated_types] = (self[:associated_types] || []).dup
+      self[:requirements] = (self[:requirements] || []).dup
+    end
+
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    def associated_types = self[:associated_types]
+
+    sig { returns(T::Array[AST::ProtocolRequirement]) }
+    def requirements = self[:requirements]
+
+    sig { returns(T::Array[RawBody]) }
+    def child_bodies = []
+  end
+
   FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime,
                             :body, :catch_clauses, :default_catch, :visibility, :deferred_drops,
                             :uses_frame, :explicit_return_type, :type_params, :tail_call, :requires,
@@ -1686,7 +1739,13 @@ module AST
       self[:return_type] = Type.new(rt) unless rt.nil?
       self[:params] = self[:params] || []
       self[:type_params] = (self[:type_params] || []).dup
+      @generic_params = T.let(type_params.map do |name|
+        AST::GenericParamDecl.new(token: token, name: name)
+      end, T::Array[AST::GenericParamDecl])
       @semantic_with_blocks = T.let([], T::Array[AST::WithBlock])
+      @implementation_owner = T.let(nil, T.nilable(String))
+      @conformance_protocol = T.let(nil, T.nilable(String))
+      @source_name = T.let(name, String)
     end
 
     sig { params(val: T.nilable(T.any(Type, Symbol, String))).void }
@@ -1729,9 +1788,43 @@ module AST
       self[:type_params] = value.dup
     end
 
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    def generic_params
+      @generic_params
+    end
+
+    sig { params(value: T::Array[AST::GenericParamDecl]).void }
+    def generic_params=(value)
+      @generic_params = value.dup
+    end
+
     sig { returns(T::Boolean) }
     def generic?
       !type_params.empty?
+    end
+
+    sig { returns(T.nilable(String)) }
+    def implementation_owner = @implementation_owner
+
+    sig { params(value: T.nilable(String)).void }
+    def implementation_owner=(value)
+      @implementation_owner = value
+    end
+
+    sig { returns(T.nilable(String)) }
+    def conformance_protocol = @conformance_protocol
+
+    sig { params(value: T.nilable(String)).void }
+    def conformance_protocol=(value)
+      @conformance_protocol = value
+    end
+
+    sig { returns(String) }
+    def source_name = @source_name
+
+    sig { params(value: String).void }
+    def source_name=(value)
+      @source_name = value
     end
 
     # True when the user wrote RETURNS explicitly; fallible-signature checks
@@ -1864,6 +1957,69 @@ module AST
     # `clear fmt`. Semantically identical to FN — same lookup, same
     # call resolution, same UFCS at call sites at the language level.
   end
+
+  ImplementationDef = Struct.new(:token, :owner_name, :owner_token, :binders, :members) do
+    extend T::Sig
+    include Locatable
+    include HasBodies
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:binders] = (self[:binders] || []).dup
+      self[:members] = (self[:members] || []).dup
+    end
+
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    def binders = self[:binders]
+
+    sig { returns(T::Array[AST::FunctionDef]) }
+    def members = self[:members]
+
+    sig { returns(T::Array[RawBody]) }
+    def child_bodies = members.map(&:body)
+  end
+
+  ConformanceDef = Struct.new(:token, :binders, :protocol_type, :owner_type, :members) do
+    extend T::Sig
+    include Locatable
+    include HasBodies
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      self[:binders] = (self[:binders] || []).dup
+      self[:protocol_type] = Type.new(self[:protocol_type])
+      self[:owner_type] = Type.new(self[:owner_type])
+      self[:members] = (self[:members] || []).dup
+    end
+
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    def binders = self[:binders]
+
+    sig { params(value: T::Array[AST::GenericParamDecl]).void }
+    def binders=(value)
+      self[:binders] = value.dup
+    end
+
+    sig { returns(Type) }
+    def protocol_type = self[:protocol_type]
+
+    sig { returns(Type) }
+    def owner_type = self[:owner_type]
+
+    sig { params(value: Type).void }
+    def owner_type=(value)
+      self[:owner_type] = Type.new(value)
+    end
+
+    sig { returns(T::Array[AST::FunctionDef]) }
+    def members = self[:members]
+
+    sig { returns(T::Array[RawBody]) }
+    def child_bodies = members.map(&:body)
+  end
+
   class StructField
     extend T::Sig
 
@@ -1898,6 +2054,9 @@ module AST
     def initialize(*args)
       super
       self[:type_params] ||= []
+      @generic_params = T.let(type_params.map do |name|
+        AST::GenericParamDecl.new(token: token, name: name)
+      end, T::Array[AST::GenericParamDecl])
     end
 
     sig { returns(T::Hash[String, AST::StructField]) }
@@ -1911,6 +2070,16 @@ module AST
     sig { params(value: T::Array[String]).void }
     def type_params=(value)
       self[:type_params] = value.dup
+    end
+
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    def generic_params
+      @generic_params
+    end
+
+    sig { params(value: T::Array[AST::GenericParamDecl]).void }
+    def generic_params=(value)
+      @generic_params = value.dup
     end
   end
 	  VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
@@ -2352,7 +2521,20 @@ module AST
     sig { returns(T::Array[RawBody]) }
     def child_bodies = [do_branch].compact
     attr_accessor :mark_per_iter
-    attr_accessor :tight
+
+    sig { params(args: InitArgs).void }
+    def initialize(*args)
+      super
+      @tight = T.let(false, T::Boolean)
+    end
+
+    sig { returns(T::Boolean) }
+    def tight = @tight
+
+    sig { params(value: T::Boolean).void }
+    def tight=(value)
+      @tight = value
+    end
   end
   BreakNode    = Struct.new(:token) do
     include Locatable
@@ -2362,13 +2544,47 @@ module AST
     include Locatable
     include StatementVoidType
   end
+
+  # Shared syntax metadata for calls with explicit mutable arguments. The
+  # marker is consumed during annotation, so this keeps a source token rather
+  # than introducing first-class reference semantics into MIR.
+  module ExplicitMutableArguments
+    extend T::Sig
+
+    sig { params(index: Integer, token: Lexer::Token).void }
+    def mark_explicit_mutable_argument!(index, token)
+      explicit_mutable_argument_tokens[index] = token
+    end
+
+    sig { params(index: Integer).returns(T::Boolean) }
+    def explicit_mutable_argument?(index)
+      explicit_mutable_argument_tokens.key?(index)
+    end
+
+    sig { params(index: Integer).returns(T.nilable(Lexer::Token)) }
+    def explicit_mutable_argument_token(index)
+      explicit_mutable_argument_tokens[index]
+    end
+
+    sig { returns(T::Hash[Integer, Lexer::Token]) }
+    def explicit_mutable_argument_tokens
+      @explicit_mutable_argument_tokens = T.let(
+        @explicit_mutable_argument_tokens,
+        T.nilable(T::Hash[Integer, Lexer::Token])
+      )
+      @explicit_mutable_argument_tokens ||= {}
+    end
+  end
+
   FuncCall     = Struct.new(:token, :name, :args) do
     extend T::Sig
     include Locatable
+    include ExplicitMutableArguments
     # ruby-to-clear: field-type name=Any
     attr_accessor :module_alias
     attr_accessor :extern_call       # true when calling a native EXTERN FN (no rt, no try)
     attr_accessor :extern_effects    # Set of effect symbols (:Alloc, etc.) from EXTERN FN EFFECTS declaration
+    attr_accessor :extern_source
     attr_accessor :generic_type_args # Array of inferred type symbols for generic fns, e.g. [:Number]
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
     attr_accessor :pipe_lhs           # original LHS AST node when rewritten from pipeline (for CATCH snapshot)
@@ -2388,6 +2604,30 @@ module AST
                                      # original `!T` is stashed here for OR_ELSE consumers
                                      # that need to know whether to emit `catch fallback`
                                      # (error union) or `orelse fallback` (optional).
+    sig { returns(T.nilable(Symbol)) }
+    def protocol_operation
+      @protocol_operation = T.let(@protocol_operation, T.nilable(Symbol))
+    end
+    sig { params(value: Symbol).void }
+    def protocol_operation=(value)
+      @protocol_operation = value
+    end
+    sig { returns(T.nilable(String)) }
+    def protocol_name
+      @protocol_name = T.let(@protocol_name, T.nilable(String))
+    end
+    sig { params(value: String).void }
+    def protocol_name=(value)
+      @protocol_name = value
+    end
+    sig { returns(T.nilable(Integer)) }
+    def protocol_receiver_index
+      @protocol_receiver_index = T.let(@protocol_receiver_index, T.nilable(Integer))
+    end
+    sig { params(value: Integer).void }
+    def protocol_receiver_index=(value)
+      @protocol_receiver_index = value
+    end
     sig { returns(FalseClass) }
     def wildcard?; false end
     sig { returns(String) }
@@ -2397,14 +2637,54 @@ module AST
   MethodCall   = Struct.new(:token, :object, :name, :args) do
     extend T::Sig
     include Locatable
+    include ExplicitMutableArguments
     attr_accessor :pool_method    # :insert, :get, :remove — set by annotator for Pool dispatch
     attr_accessor :set_method     # :insert, :contains, :remove, :count — set by annotator for Set dispatch
     attr_accessor :map_method     # :delete, :contains, :count, :keys, :values — set by annotator for HashMap dispatch
     attr_accessor :extern_call       # true when calling a native EXTERN method
     attr_accessor :extern_effects    # Hash of effect symbols from EXTERN FN EFFECTS declaration
+    attr_accessor :extern_source
     attr_accessor :generic_type_args # Array of inferred type symbols for generic methods
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     attr_accessor :safe_nav_chain    # implicit continuation of an earlier ?. over non-optional members
+    attr_accessor :error_union_type  # full !T requirement result before expression-level propagation unwraps it
+    sig { params(token: Lexer::Token).void }
+    def mark_explicit_mutable_receiver!(token)
+      @explicit_mutable_receiver_token = T.let(token, T.nilable(Lexer::Token))
+    end
+    sig { returns(T::Boolean) }
+    def explicit_mutable_receiver?
+      !explicit_mutable_receiver_token.nil?
+    end
+    sig { returns(T.nilable(Lexer::Token)) }
+    def explicit_mutable_receiver_token
+      @explicit_mutable_receiver_token = T.let(@explicit_mutable_receiver_token, T.nilable(Lexer::Token))
+    end
+    sig { returns(T.nilable(Symbol)) }
+    def protocol_operation
+      @protocol_operation = T.let(@protocol_operation, T.nilable(Symbol))
+    end
+    sig { params(value: Symbol).void }
+    def protocol_operation=(value)
+      @protocol_operation = value
+    end
+    sig { returns(T.nilable(String)) }
+    def protocol_name
+      @protocol_name = T.let(@protocol_name, T.nilable(String))
+    end
+    sig { params(value: String).void }
+    def protocol_name=(value)
+      @protocol_name = value
+    end
+    sig { returns(T.nilable(String)) }
+    def source_method_name
+      @source_method_name = T.let(@source_method_name, T.nilable(String))
+    end
+
+    sig { params(value: String).void }
+    def source_method_name=(value)
+      @source_method_name = value
+    end
     sig { returns(FalseClass) }
     def wildcard?; false end
     sig { returns(String) }
@@ -2443,6 +2723,14 @@ module AST
     extend T::Sig
     include Locatable
     attr_accessor :safe_nav_chain
+    sig { returns(T.nilable(Symbol)) }
+    def protocol_operation
+      @protocol_operation = T.let(@protocol_operation, T.nilable(Symbol))
+    end
+    sig { params(value: Symbol).void }
+    def protocol_operation=(value)
+      @protocol_operation = value
+    end
     sig { returns(String) }
     def name; target.name end
   end
@@ -2514,7 +2802,8 @@ module AST
       @arms = value
     end
     # :view is a cheap immutable borrow on ~T@observable; :materialized_view is
-    # an owned snapshot on any ~T aggregate. nil for traditional capability blocks.
+    # an owned snapshot on any ~T aggregate; :unsafe_view is a scoped assertion
+    # that a foreign pointer contains LENGTH elements. nil for traditional blocks.
     attr_accessor :view_kind
     # Rolled-up snapshot classification used by downstream passes. Each
     # capability entry still carries the per-cell `:alias_mutable` flag.
@@ -2613,6 +2902,13 @@ module AST
     # ruby-to-clear: skip
     sig { returns(T.nilable(String)) }
     def name; target.respond_to?(:name) ? target.name : nil end
+  end
+  # Explicit call-site mutation marker. It never denotes a first-class
+  # reference: call annotation consumes it and records the marker on the
+  # enclosing call before type checking/lowering the target value.
+  MutableBorrow = Struct.new(:token, :target) do
+    extend T::Sig
+    include Locatable
   end
   OrElseRaise        = Struct.new(:token) { include Locatable }  # OR_ELSE RAISE - bubble up error (Zig's try)
   # OR_ELSE EXIT forms under the unified error system. Unspecified fields
@@ -2873,7 +3169,7 @@ module AST
   # Or method:    EXTERN FN TypeName<T>.method(params) RETURNS type FROM "module"
   # Declares a native Zig/C function importable via @import("module").
   ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects,
-                                :owner_type, :owner_type_params, :fn_type_params) do
+                                :owner_type, :owner_type_params, :fn_type_params, :extern_source) do
     # ruby-to-clear: field-type return_type=?Type
     # ruby-to-clear: field-type owner_type=?String
     # ruby-to-clear: field-type owner_type_params=String[]@symbol
@@ -2900,6 +3196,10 @@ module AST
       self[:return_type] = Type.new(rt) unless rt.nil?
       self[:owner_type_params] = (self[:owner_type_params] || []).dup
       self[:fn_type_params] = (self[:fn_type_params] || []).dup
+      self[:extern_source] ||= Schemas::ExternSource.new(
+        dependency: self[:from_module] || "",
+        symbol: self[:name]
+      )
     end
 
     sig { params(value: T::Array[Symbol]).void }
@@ -2931,7 +3231,7 @@ module AST
   # Declares a native Zig/C struct type for CLEAR type-checking purposes.
   # CLOSE registers the type as a resource with auto-defer cleanup (RAII).
   ExternStructDecl = Struct.new(:token, :name, :field_decls, :from_module,
-                                :type_params, :close_method, :as_type) do
+                                :type_params, :close_method, :as_type, :extern_source) do
     # ruby-to-clear: field-type from_module=?String
     # ruby-to-clear: field-type type_params=String[]@symbol
     # ruby-to-clear: field-type close_method=?String
@@ -2948,6 +3248,10 @@ module AST
     def initialize(*args)
       super
       self[:type_params] = (self[:type_params] || []).dup
+      self[:extern_source] ||= Schemas::ExternSource.new(
+        dependency: self[:from_module] || "",
+        symbol: self[:as_type] || self[:name]
+      )
     end
 
     sig { params(value: T::Array[Symbol]).void }
@@ -3006,11 +3310,24 @@ module AST
     def initialize(*args)
       super
       self[:type_params] = (self[:type_params] || []).dup
+      @generic_params = T.let(type_params.map do |name|
+        AST::GenericParamDecl.new(token: token, name: name)
+      end, T::Array[AST::GenericParamDecl])
     end
 
     sig { params(value: T::Array[String]).void }
     def type_params=(value)
       self[:type_params] = value.dup
+    end
+
+    sig { returns(T::Array[AST::GenericParamDecl]) }
+    def generic_params
+      @generic_params
+    end
+
+    sig { params(value: T::Array[AST::GenericParamDecl]).void }
+    def generic_params=(value)
+      @generic_params = value.dup
     end
   end
 
@@ -3023,7 +3340,24 @@ module AST
   # StaticCall: TypeName::method(args) — type-level static method call.
   # type_name: AST::Identifier (the type), method_name: String, args: Array of ASTNode
   StaticCall        = Struct.new(:token, :type_name, :method_name, :args) do
+    extend T::Sig
     include Locatable
+    include ExplicitMutableArguments
+
+    sig { returns(String) }
+    def name = "#{type_name.name}::#{method_name}"
+
+    sig { returns(T.nilable(AST::FuncCall)) }
+    def inherent_call
+      @inherent_call = T.let(@inherent_call, T.nilable(AST::FuncCall))
+    end
+
+    sig { params(value: AST::FuncCall).void }
+    def inherent_call=(value)
+      @inherent_call = value
+    end
+
+
   end
 
   class DoBranch < T::Struct
@@ -3457,7 +3791,8 @@ module AST
   PRIMITIVE_TYPES = [:Number, :Bool, :Byte, :Int64, :Float64,
                      :Int8, :Int16, :Int32,
                      :UInt8, :UInt16, :UInt32, :UInt64,
-                     :Float32]
+                     :Float32, :TargetInt, :TargetUInt, :TargetLong,
+                     :TargetULong, :TargetLongLong, :TargetULongLong]
 
   # ruby-to-clear: data-api
   sig { params(ops: T::Array[String], assoc: Symbol).returns(PrecedenceInfo) }
@@ -3469,15 +3804,19 @@ module AST
   end
 
   PRECEDENCE_MAP = T.let({
-    8 => precedence_info(ops: ['**'], assoc: :right),
-    7 => precedence_info(ops: ['*', '/', 'MOD'], assoc: :left),
-    6 => precedence_info(ops: ['+', '$+', '-'], assoc: :left),
-    5 => precedence_info(ops: ['==', '!=', '<', '>', '<=', '>='], assoc: :left),
-    4 => precedence_info(ops: ['AND'], assoc: :left),
-    3 => precedence_info(ops: ['OR'], assoc: :left),
-    # LEVEL 1: Both Pipe and fallback live here.
-    # They bind loosely and strictly left-to-right.
-    1 => precedence_info(ops: ['OR_ELSE', '|>', 'AS'], assoc: :left)
+    13 => precedence_info(ops: ['**'], assoc: :right),
+    12 => precedence_info(ops: ['*', '/', 'MOD'], assoc: :left),
+    11 => precedence_info(ops: ['+', '$+', '-'], assoc: :left),
+    10 => precedence_info(ops: ['<<', '>>'], assoc: :left),
+    9 => precedence_info(ops: ['BIT_AND'], assoc: :left),
+    8 => precedence_info(ops: ['XOR'], assoc: :left),
+    7 => precedence_info(ops: ['BIT_OR'], assoc: :left),
+    6 => precedence_info(ops: ['IS_A', '==', '!=', '<', '>', '<=', '>='], assoc: :left),
+    5 => precedence_info(ops: ['AND'], assoc: :left),
+    4 => precedence_info(ops: ['OR'], assoc: :left),
+    3 => precedence_info(ops: ['..<', '..<=', '..='], assoc: :left),
+    2 => precedence_info(ops: ['OR_ELSE', 'AS'], assoc: :left),
+    1 => precedence_info(ops: ['|>'], assoc: :left)
   }, T::Hash[Integer, PrecedenceInfo])
   MAX_PRECEDENCE = T.let(T.must(PRECEDENCE_MAP.keys.max), Integer)
 
@@ -3494,6 +3833,11 @@ module AST
     :LTE => :<=,
     :GTE => :>=,
     :BITWISE_NOT => :~,
+    :XOR => :^,
+    :BIT_AND => :&,
+    :BIT_OR => :|,
+    :SHL => :<<,
+    :SHR => :>>,
   }, T::Hash[Symbol, Symbol])
 
   # Canonical definitions are in Type class. These aliases maintain backward compat.
@@ -3520,6 +3864,11 @@ module AST
     'MOD' => :MOD,
     'OR_ELSE' => :OR_ELSE,
     '~' => :BITWISE_NOT,
+    'XOR' => :XOR,
+    'BIT_AND' => :BIT_AND,
+    'BIT_OR' => :BIT_OR,
+    '<<' => :SHL,
+    '>>' => :SHR,
     'AS' => :BIND_VAR,
     '%+' => :WRAP_ADD,
     '%-' => :WRAP_SUB,
@@ -3530,7 +3879,7 @@ module AST
   }, T::Hash[String, Symbol])
 
   # ruby-to-clear: data-api
-  CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED, :VIEW, :MATERIALIZED_VIEW, :SNAPSHOT]
+  CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED, :VIEW, :MATERIALIZED_VIEW, :UNSAFE_VIEW, :SNAPSHOT]
 end
 
 # ==========================================

@@ -1,6 +1,65 @@
 # FFI — Foreign Function Interface
 
-CLEAR interfaces directly with Zig and C libraries via `EXTERN FN` and `EXTERN STRUCT` declarations. Declare the types and functions in CLEAR, and the transpiler generates the correct `@import` and call code.
+CLEAR interfaces directly with Zig modules and C libraries via `EXTERN FN` and
+`EXTERN STRUCT`. Omitted `ABI` retains the legacy Zig-module behavior; C
+boundaries explicitly use `ABI C`.
+
+## C ABI quick start
+
+Manual declarations use the same surface as Zig FFI:
+
+```clear
+EXTERN STRUCT Database {} CLOSE "sqlite3_close" FROM "sqlite3" ABI C;
+EXTERN FN sqlite3_open(path: String@c, MUTABLE database: ?Database)
+  RETURNS TargetInt FROM "sqlite3" ABI C;
+```
+
+An empty C extern struct is an opaque handle, `MUTABLE` passes an address for
+out/inout parameters, nullable C pointers map to `?T`, and C `CLOSE` names a
+free function. `String@c` is a borrowed NUL-terminated C string; ordinary
+`String` remains a length-carrying CLEAR string.
+
+Zig can also import the supported declarations directly from a header:
+
+```clear
+EXTERN FROM HEADER "fixture.h"
+  LINK "fixture"
+  ABI C;
+```
+
+For reviewable or checked-in bindings, generate the equivalent declarations:
+
+```bash
+clear c-ffi fixture.h fixture.ffi.clear --link fixture
+clear c-ffi fixture.h fixture.ffi.clear --link fixture --check
+```
+
+The generator uses the same `clear fmt` engine as ordinary source formatting;
+it does not maintain a second FFI pretty-printer. Generated files record the
+source path, direct-header SHA-256, and link name. Existing edited output is
+protected unless `--force` is supplied, while `--check` fails when output is
+missing or stale. `clear fmt` also formats the inline header directive and
+handwritten/generated `EXTERN` declarations idempotently.
+
+Target-dependent C integers are transparent numeric-family members:
+`TargetInt`, `TargetUInt`, `TargetLong`, `TargetULong`, `TargetLongLong`, and
+`TargetULongLong`. `TargetUInt@size` maps `size_t`; `TargetInt@size` maps a
+pointer-difference-sized signed value. C `float` and `double` use ordinary
+`Float32` and `Float64`.
+
+A returned data pointer is a non-owning `[]@c T`. It cannot be indexed until a
+separate count has bounded it:
+
+```clear
+pointer = nativeValues(handle)?;
+WITH UNSAFE VIEW pointer LENGTH nativeValueCount(handle) AS values {
+  ASSERT values[0] == 10;
+}
+```
+
+Synchronous non-capturing callbacks use
+`FN(TargetInt) -> TargetInt CALLCONV C`. C must not retain the adapter after
+the call returns.
 
 ## EXTERN STRUCT — declare native types
 
@@ -185,13 +244,14 @@ EXTERN FN parseFromSliceLeaky<T>(...) FROM "std.json";
 EXTERN FN cwd() RETURNS Dir FROM "std.fs";
 ```
 
-## What You Can't Import Yet
+## Remaining C limitations
 
 | Pattern | Why not | Planned |
 |---------|---------|---------|
-| Callbacks (fn pointers to CLEAR) | One-way FFI only | v0.3 |
-| C header auto-parsing | Must write Zig wrapper | v0.2 |
-| Functions taking `*T` (pointer) | CLEAR passes by value | v0.2 |
+| Retained/capturing callbacks | Need an explicit context and lifetime contract | Deferred |
+| Runtime `String` to `String@c` | Needs checked allocation and embedded-NUL validation | Deferred |
+| Variadic functions | C promotions are target-specific and untyped | Deferred |
+| `long double`, arbitrary pointer graphs | No coherent portable CLEAR semantic contract yet | Deferred |
 
 ## g0 Trampoline
 
@@ -215,3 +275,6 @@ The benchmark runner detects `.zig` files in the benchmark directory automatical
 - `transpile-tests/ffi-struct-test/` — EXTERN STRUCT with slices
 - `transpile-tests/ffi-effects-test/` — EFFECTS :alloc and !T returns
 - `transpile-tests/ffi-close-test/` — EXTERN STRUCT CLOSE (RAII)
+- `transpile-tests/c-ffi-test/` — C scalars, structs, arrays, out parameters,
+  strings, callbacks, cleanup, errors, pointer/count views, and header import
+- `examples/sqlite/` — prepared-statement SQLite integration written only in CLEAR

@@ -104,7 +104,7 @@ def ownership_surface_cleanup_cell(shape)
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE xs: String[]@list = [];
-          xs.append(COPY "list");
+          &xs.append(COPY "list");
           ASSERT xs.length() == 1_i64, "heap list cleanup shape";
           RETURN;
       END
@@ -115,7 +115,7 @@ def ownership_surface_cleanup_cell(shape)
 
       FN main() RETURNS Void ->
           MUTABLE pool: Item[8]@pool = [];
-          id = pool.insert(Item{ name: COPY "pool" });
+          id = &pool.insert(Item{ name: COPY "pool" });
           ASSERT pool.get(id) != NIL, "pool cleanup shape";
           RETURN;
       END
@@ -124,7 +124,7 @@ def ownership_surface_cleanup_cell(shape)
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE set: String[]@set = [];
-          set.insert(COPY "set");
+          &set.insert(COPY "set");
           ASSERT set.length() == 1_i64, "set cleanup shape";
           RETURN;
       END
@@ -142,7 +142,7 @@ def ownership_surface_cleanup_cell(shape)
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE xs: Float64[]@list:sharded(2) = [];
-          xs.append(1.0);
+          &xs.append(1.0);
           total = xs |> SUM _;
           ASSERT total == 1.0, "sharded list cleanup shape";
           RETURN;
@@ -154,7 +154,7 @@ def ownership_surface_cleanup_cell(shape)
 
       FN main() RETURNS Void ->
           MUTABLE pool: Item[8]@pool:sharded(2) = [];
-          id = pool.insert(Item{ name: COPY "sp" });
+          id = &pool.insert(Item{ name: COPY "sp" });
           ASSERT pool.get(id) != NIL, "sharded pool cleanup shape";
           RETURN;
       END
@@ -163,7 +163,7 @@ def ownership_surface_cleanup_cell(shape)
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE set: Int64[]@set:sharded(2) = [];
-          set.insert(1_i64);
+          &set.insert(1_i64);
           ASSERT set.length() == 1_i64, "sharded set cleanup shape";
           RETURN;
       END
@@ -183,7 +183,7 @@ def ownership_surface_cleanup_cell(shape)
 
       FN main() RETURNS Void ->
           MUTABLE xs: Item[]@list:soa = [];
-          xs.append(Item{ value: 1.0, other: 10.0 });
+          &xs.append(Item{ value: 1.0, other: 10.0 });
           total = xs |> SUM _.value;
           ASSERT total == 1.0, "soa list cleanup shape";
           RETURN;
@@ -195,7 +195,7 @@ def ownership_surface_cleanup_cell(shape)
 
       FN main() RETURNS Void ->
           MUTABLE pool: Item[8]@pool:soa = [];
-          pool.insert(Item{ value: 1.0, other: 10.0 });
+          &pool.insert(Item{ value: 1.0, other: 10.0 });
           ASSERT pool.length() == 1_i64, "soa pool cleanup shape";
           RETURN;
       END
@@ -233,7 +233,7 @@ def ownership_surface_cleanup_cell(shape)
       FN main() RETURNS Void ->
           MUTABLE outer: Int64[][]@list = [];
           inner: Int64[] = [5_i64, 6_i64];
-          outer.append(inner);
+          &outer.append(inner);
           ASSERT outer.length() == 1_i64, "nested container cleanup shape";
           RETURN;
       END
@@ -266,7 +266,7 @@ def ownership_surface_escape_sink_cell(sink)
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE xs: String[]@list = [];
-          xs.append(COPY "list");
+          &xs.append(COPY "list");
           ASSERT xs.length() == 1_i64, "list append sink";
           RETURN;
       END
@@ -275,7 +275,7 @@ def ownership_surface_escape_sink_cell(sink)
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE xs: String[]@set = [];
-          xs.insert(COPY "set");
+          &xs.insert(COPY "set");
           ASSERT xs.contains?("set"), "set insert sink";
           RETURN;
       END
@@ -294,7 +294,7 @@ def ownership_surface_escape_sink_cell(sink)
       STRUCT Item { value: Int64 }
       FN main() RETURNS Void ->
           MUTABLE pool: Item[8]@pool = [];
-          id = pool.insert(Item{ value: 7_i64 });
+          id = &pool.insert(Item{ value: 7_i64 });
           ASSERT pool.get(id) != NIL, "pool insert sink";
           RETURN;
       END
@@ -423,10 +423,10 @@ def ownership_surface_contract_cell(contract)
     CHT
   when :move_suppresses_cleanup
     <<~CHT
-      FN consume!(TAKES s: String) RETURNS Int64 -> RETURN s.length(); END
+      FN consume(TAKES s: String) RETURNS Int64 -> RETURN s.length(); END
       FN main() RETURNS Void ->
           s = COPY "move";
-          ASSERT consume!(GIVE s) == 4_i64, "move suppresses cleanup";
+          ASSERT consume(GIVE s) == 4_i64, "move suppresses cleanup";
           RETURN;
       END
     CHT
@@ -451,23 +451,23 @@ def ownership_surface_contract_cell(contract)
     CHT
   when :collection_mutation_visible_to_mir
     <<~CHT
-      FN add!(MUTABLE xs: Int64[]@list) RETURNS !Void ->
-          xs.append(1_i64);
+      FN add(MUTABLE xs: Int64[]@list) RETURNS !Void ->
+          &xs.append(1_i64);
           RETURN;
       END
       FN main() RETURNS Void ->
           MUTABLE xs: Int64[]@list = [];
-          add!(xs);
+          add(&xs);
           ASSERT xs.length() == 1_i64, "collection mutation visible";
           RETURN;
       END
     CHT
   when :non_copy_requires_explicit_move_or_copy
     <<~CHT
-      FN consume!(TAKES s: String) RETURNS Int64 -> RETURN s.length(); END
+      FN consume(TAKES s: String) RETURNS Int64 -> RETURN s.length(); END
       FN main() RETURNS Void ->
           s = COPY "owned";
-          _ = consume!(s);
+          _ = consume(s);
           RETURN;
       END
     CHT

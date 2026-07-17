@@ -202,6 +202,10 @@ class AST::FuncCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def extern_effects=(value); end
   sig { returns(T.untyped) }
+  def extern_source; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def extern_source=(value); end
+  sig { returns(T.untyped) }
   def fn_var_call; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def fn_var_call=(value); end
@@ -414,6 +418,10 @@ end
 
 class AST::MethodCall
   sig { returns(T.untyped) }
+  def error_union_type; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_union_type=(value); end
+  sig { returns(T.untyped) }
   def extern_call; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def extern_call=(value); end
@@ -421,6 +429,10 @@ class AST::MethodCall
   def extern_effects; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def extern_effects=(value); end
+  sig { returns(T.untyped) }
+  def extern_source; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def extern_source=(value); end
   sig { returns(T.untyped) }
   def generic_type_args; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -542,10 +554,6 @@ class AST::WhileBindLoop
   def mark_per_iter; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mark_per_iter=(value); end
-  sig { returns(T.untyped) }
-  def tight; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tight=(value); end
 end
 
 class AST::WhileLoop
@@ -617,14 +625,20 @@ class Annotator::Phases::CapabilityAuditReport
 end
 
 class Annotator::Phases::ResolutionFacts
+  sig { returns(T::Array[Annotator::Phases::ConformanceResolution]) }
+  def conformance_resolutions; end
   sig { returns(Annotator::Phases::DeclarationIndex) }
   def declarations; end
   sig { returns(T::Array[String]) }
   def function_names; end
   sig { returns(Annotator::FunctionRegistry) }
   def function_registry; end
+  sig { returns(T::Array[Annotator::Phases::ImplementationResolution]) }
+  def implementation_resolutions; end
   sig { returns(AST::Program) }
   def program; end
+  sig { returns(T::Hash[String, AST::ProtocolDef]) }
+  def protocols; end
   sig { returns(Scope) }
   def root_scope; end
   sig { returns(T::Array[Symbol]) }
@@ -634,6 +648,8 @@ end
 class Annotator::Phases::ResolutionSession
   sig { returns(Annotator::FunctionRegistry) }
   def function_registry; end
+  sig { returns(T::Hash[String, AST::ProtocolDef]) }
+  def protocols; end
   sig { returns(Scope) }
   def root_scope; end
   sig { returns(T.nilable(String)) }
@@ -973,6 +989,10 @@ class FuncCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def extern_effects=(value); end
   sig { returns(T.untyped) }
+  def extern_source; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def extern_source=(value); end
+  sig { returns(T.untyped) }
   def fn_var_call; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def fn_var_call=(value); end
@@ -1018,6 +1038,8 @@ class FunctionContext
   def frame_count; end
   sig { params(value: Integer).returns(Integer) }
   def frame_count=(value); end
+  sig { returns(T::Array[AST::GenericParamDecl]) }
+  def generic_params; end
   sig { returns(Integer) }
   def heap_count; end
   sig { params(value: Integer).returns(Integer) }
@@ -1152,6 +1174,11 @@ class FunctionReturn
   def kind; end
 end
 
+class FunctionSignature
+  sig { returns(FunctionSignature::GenericBounds) }
+  def generic_bounds; end
+end
+
 class FunctionSignature::Contract
   sig { returns(T::Boolean) }
   def extern; end
@@ -1159,6 +1186,8 @@ class FunctionSignature::Contract
   def extern_effects; end
   sig { params(value: FunctionSignature::ExternEffects).returns(FunctionSignature::ExternEffects) }
   def extern_effects=(value); end
+  sig { returns(T.nilable(Schemas::ExternSource)) }
+  def extern_source; end
   sig { returns(T::Array[Symbol]) }
   def fn_type_params; end
   sig { params(value: T::Array[Symbol]).returns(T::Array[Symbol]) }
@@ -1430,6 +1459,10 @@ end
 
 class MethodCall
   sig { returns(T.untyped) }
+  def error_union_type; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_union_type=(value); end
+  sig { returns(T.untyped) }
   def extern_call; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def extern_call=(value); end
@@ -1437,6 +1470,10 @@ class MethodCall
   def extern_effects; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def extern_effects=(value); end
+  sig { returns(T.untyped) }
+  def extern_source; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def extern_source=(value); end
   sig { returns(T.untyped) }
   def generic_type_args; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1541,8 +1578,12 @@ class Schemas::StructSchema
   def extern_module; end
   sig { returns(T::Hash[String, AST::StructField]) }
   def fields; end
+  sig { returns(T::Array[AST::GenericParamDecl]) }
+  def generic_params; end
   sig { returns(Schemas::StructSchema::MethodsMap) }
   def methods; end
+  sig { returns(Schemas::StructSchema::MethodsMap) }
+  def static_methods; end
   sig { returns(Symbol) }
   def visibility; end
 end
@@ -1640,6 +1681,10 @@ class SymbolEntry
   sig { params(value: T.nilable(Schemas::ResourceClosePlan)).returns(T.nilable(Schemas::ResourceClosePlan)) }
   def close_plan=(value); end
   sig { returns(T::Boolean) }
+  def foreign_out_owner; end
+  sig { params(value: T::Boolean).returns(T::Boolean) }
+  def foreign_out_owner=(value); end
+  sig { returns(T::Boolean) }
   def init_contents_heap; end
   sig { returns(T.nilable(String)) }
   def invalid_reason; end
@@ -1669,6 +1714,10 @@ class SymbolEntry
   def mutated; end
   sig { returns(T::Boolean) }
   def non_escaping; end
+  sig { returns(T::Boolean) }
+  def owned_optional_capture; end
+  sig { params(value: T::Boolean).returns(T::Boolean) }
+  def owned_optional_capture=(value); end
   sig { returns(Integer) }
   def ownership_binding_id; end
   sig { returns(T.nilable(Symbol)) }
@@ -1885,10 +1934,6 @@ class WhileBindLoop
   def mark_per_iter; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mark_per_iter=(value); end
-  sig { returns(T.untyped) }
-  def tight; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tight=(value); end
 end
 
 class WhileLoop

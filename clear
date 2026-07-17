@@ -5,6 +5,7 @@
 #   clear build foo.clear [-o output] [--release|--safe]
 #   clear run foo.clear [-- args...]
 #   clear test foo.clear
+#   clear c-ffi header.h bindings.ffi.clear --link library
 #
 # See docs/clear-man.md for full documentation.
 
@@ -132,6 +133,55 @@ end
 def error(msg)
   $stderr.puts "\e[31merror:\e[0m #{msg}"
   exit 1
+end
+
+# Return the native libraries named by explicit C ABI declarations. Zig-backed
+# EXTERN declarations use the same FROM spelling, so ABI C is deliberately
+# required before a dependency is treated as a linker input.
+def c_ffi_libraries(source_text)
+  explicit = source_text.scan(/FROM\s+"([^"]+)"(?:(?!;).)*?\bABI\s+C\b/im).flatten
+  header_imports = source_text.scan(
+    /EXTERN\s+FROM\s+HEADER\s+"[^"]+"(?:(?!;).)*?\bLINK\s+"([^"]+)"(?:(?!;).)*?\bABI\s+C\b/im
+  ).flatten
+  (explicit + header_imports).uniq
+end
+
+def zig_ffi_modules(source_text)
+  c_libraries = c_ffi_libraries(source_text).to_set
+  source_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq.reject { |name| c_libraries.include?(name) }
+end
+
+def c_ffi_link_flags(libraries, build_dir, cleanup_paths)
+  configured_dirs = ENV.fetch('CLEAR_EXTRA_LINK_DIRS', '').split(File::PATH_SEPARATOR).reject(&:empty?)
+  configured_dirs.each do |dir|
+    error "C ABI link directory does not exist: #{dir}" unless Dir.exist?(dir)
+  end
+  search_dirs = [
+    *configured_dirs,
+    '/usr/local/lib', '/usr/lib', '/lib', '/usr/lib64', '/lib64',
+    *Dir.glob('/usr/lib/*-linux-gnu'), *Dir.glob('/lib/*-linux-gnu')
+  ].uniq
+  flags = configured_dirs.flat_map do |dir|
+    absolute = File.expand_path(dir)
+    ["-L#{absolute}", "-rpath", absolute]
+  end
+  libraries.each do |library|
+    error "Invalid C ABI library name: #{library}" unless library.match?(/\A[A-Za-z0-9_.+\-]+\z/)
+    unversioned = search_dirs.any? do |dir|
+      File.exist?(File.join(dir, "lib#{library}.so")) || File.exist?(File.join(dir, "lib#{library}.a"))
+    end
+    unless unversioned
+      versioned = search_dirs.flat_map { |dir| Dir.glob(File.join(dir, "lib#{library}.so.*")) }.sort.first
+      if versioned
+        local_link = File.join(build_dir, "lib#{library}.so")
+        FileUtils.ln_sf(versioned, local_link)
+        cleanup_paths << local_link
+        flags << "-L#{build_dir}"
+      end
+    end
+    flags << "-l#{library}"
+  end
+  flags.uniq
 end
 
 def find_project_build_zig(source)
@@ -341,7 +391,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   ffi_scan_text = ffi_dependency_paths.map { |path| File.exist?(path) ? File.read(path) : "" }.join("\n")
   extra_native_dirs = ENV.fetch('CLEAR_EXTRA_NATIVE_DIRS', '').split(File::PATH_SEPARATOR).reject(&:empty?)
   ffi_search_dirs = ([source_dir] + ffi_dependency_paths.map { |path| File.dirname(path) } + extra_native_dirs).map { |dir| File.expand_path(dir) }.uniq
-  extern_modules = ffi_scan_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
+  c_libraries = c_ffi_libraries(ffi_scan_text)
+  extern_modules = zig_ffi_modules(ffi_scan_text)
   ffi_modules = extern_modules.filter_map do |m|
     next if m.start_with?('std.')
 
@@ -439,6 +490,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     error "Invalid CLEAR_EXTRA_LINK_LIBS entry: #{lib}" unless lib.match?(/\A[A-Za-z0-9_.+\-]+\z/)
     cmd_parts << "-l#{lib}"
   end
+  cmd_parts.concat(c_ffi_link_flags(c_libraries, build_dir, cleanup_paths))
 
   unless module_mode
     bin_name = "#{File.basename(output)}-#{$$}"
@@ -592,7 +644,7 @@ when 'build'
       opt_level = 'Debug'
       extra_flags = []
       i += 1
-    when '--gradual'
+    when '--gradual', '--easy'
       # Gradual-typing mode (see docs/agents/gradual-typing.md).
       # Parser inserts implicit Auto for omitted parameter / return
       # type annotations; the inference pass resolves each Auto from
@@ -805,7 +857,7 @@ when 'run'
       use_c_allocator = true
     when '--no-cache'
       no_cache = true
-    when '--gradual'
+    when '--gradual', '--easy'
       ownership_mode = :easy
     when '--strict'
       ownership_mode = :strict
@@ -818,6 +870,10 @@ when 'run'
   error "Usage: clear run <file.clear> [--optimized|--safe] [-- args...]" unless source
 
   source = File.expand_path(source)
+  if ownership_mode == :easy
+    require_relative 'compiler/ruby/tools/clear_fix_support'
+    ClearFixSupport.run_args(['--loop', '--auto', source])
+  end
   output = File.join(File.dirname(source), File.basename(source, '.clear'))
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
   if find_project_build_zig(source)
@@ -1061,7 +1117,8 @@ when 'test'
     ffi_scan_text = ffi_dependency_paths.map { |path| File.exist?(path) ? File.read(path) : "" }.join("\n")
     extra_native_dirs = ENV.fetch('CLEAR_EXTRA_NATIVE_DIRS', '').split(File::PATH_SEPARATOR).reject(&:empty?)
     ffi_search_dirs = ([source_dir] + ffi_dependency_paths.map { |path| File.dirname(path) } + extra_native_dirs).map { |dir| File.expand_path(dir) }.uniq
-    extern_modules = ffi_scan_text.scan(/FROM\s+"([^"]+)"/).flatten.uniq
+    c_libraries = c_ffi_libraries(ffi_scan_text)
+    extern_modules = zig_ffi_modules(ffi_scan_text)
     ffi_modules = extern_modules.filter_map do |m|
       next if m.start_with?('std.')
 
@@ -1097,6 +1154,7 @@ when 'test'
     cmd_parts += ['--global-cache-dir', File.join(build_dir, '.zig-global-cache')]
     cmd_parts += [tmp_name, 'runtime/switch.S', 'runtime/onRoot.S']
     cmd_parts += ['-lc']
+    cmd_parts.concat(c_ffi_link_flags(c_libraries, build_dir, cleanup_paths))
     if tag_filters.empty?
       cmd_parts += ['--test-filter', File.basename(source)]
     else
@@ -1355,6 +1413,60 @@ when 'fix', 'autofix'
     error e.message
   end
 
+when 'c-ffi'
+  require_relative 'compiler/ruby/tools/c_ffi_generator'
+
+  args = ARGV[1..] || []
+  library = nil
+  check_only = false
+  force = false
+  positional = []
+  i = 0
+  while i < args.length
+    arg = args[i]
+    case arg
+    when '--link'
+      library = args[i + 1]
+      error "--link requires a C library name" unless library
+      i += 2
+    when /\A--link=(.+)\z/
+      library = Regexp.last_match(1)
+      i += 1
+    when '--check'
+      check_only = true
+      i += 1
+    when '--force'
+      force = true
+      i += 1
+    when /\A-/
+      error "Unknown flag for c-ffi: #{arg}"
+    else
+      positional << arg
+      i += 1
+    end
+  end
+
+  usage = "Usage: clear c-ffi <header.h> <output.ffi.clear> --link <library> [--check|--force]"
+  error usage unless positional.length == 2 && library && !library.empty?
+  error "--check and --force cannot be used together" if check_only && force
+
+  header, output = positional
+  begin
+    content = CFFIGenerator.generate(header: header, output: output, library: library)
+    if check_only
+      unless CFFIGenerator.current?(output: output, content: content)
+        warn "#{output}: generated C FFI declarations are stale or missing"
+        exit 1
+      end
+      puts "#{output}: up to date"
+    else
+      result = CFFIGenerator.write(output: output, content: content, force: force)
+      puts(result == :written ? output : "#{output}: unchanged")
+    end
+  rescue CFFIGenerator::Error, CHeaderImporter::Error, Formatter::Error => e
+    error e.message
+  end
+
 when 'fmt', 'format'
   require_relative 'compiler/ruby/tools/formatter'
 
@@ -1596,6 +1708,8 @@ when 'help', '--help', '-h', nil
       clear fix --dry-run <file>    Show findings and chosen fixes, do not write
       clear fix --yes <file>        Take the first fix for every finding
       clear fix --only=lint,... <f> Restrict to categories (lint, ownership, ...)
+      clear c-ffi <h> <out> --link <lib>  Generate formatted CLEAR C declarations
+      clear c-ffi <h> <out> --link <lib> --check  Fail when generated declarations are stale
       clear fmt <file|dir>...       Format CLEAR source in place
       clear fmt --check <path>...   Exit 1 if any file is not formatted
       clear fmt --stdout <file>     Print formatted output, do not write
@@ -1610,6 +1724,7 @@ when 'help', '--help', '-h', nil
       test     Build and run tests (uses test harness with leak detection)
       profile  Build with allocation tracking, run with perf (if available)
       doctor   Analyze .profile/ directory, print actionable optimization advice
+      c-ffi    Generate portable CLEAR declarations from a C header
       fmt      Format CLEAR source files (see docs/agents/fmt.md)
 
     Build flags:

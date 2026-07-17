@@ -143,16 +143,16 @@ if $PROGRAM_NAME == __FILE__
       base = runner_src_text[0...main_idx] if main_idx
 
       runner_main = "FN main() RETURNS !Void ->\n"
-      runner_main += "    program = loadPackedRegisterProgram!(\"#{register_packed_ops_file}\") OR_ELSE RAISE;\n"
-      runner_main += "    consts = loadRegisterConsts!(\"#{register_consts_file}\") OR_ELSE RAISE;\n"
-      runner_main += "    sourceLines = loadRegisterSourceLines!(\"#{register_lines_file}\") OR_ELSE RAISE;\n"
-      runner_main += "    sourceColumns = loadRegisterSourceLines!(\"#{register_columns_file}\") OR_ELSE RAISE;\n"
-      runner_main += "    sourcePaths = loadRegisterSourcePaths!(\"#{register_source_path_file}\") OR_ELSE RAISE;\n"
-      runner_main += "    breakpoints = loadRegisterBreakpoints!(\"#{register_breakpoints_file}\") OR_ELSE RAISE;\n"
-      runner_main += "    varNames = loadRegisterVarNames!(\"#{register_names_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    program = loadPackedRegisterProgram(\"#{register_packed_ops_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    consts = loadRegisterConsts(\"#{register_consts_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    sourceLines = loadRegisterSourceLines(\"#{register_lines_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    sourceColumns = loadRegisterSourceLines(\"#{register_columns_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    sourcePaths = loadRegisterSourcePaths(\"#{register_source_path_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    breakpoints = loadRegisterBreakpoints(\"#{register_breakpoints_file}\") OR_ELSE RAISE;\n"
+      runner_main += "    varNames = loadRegisterVarNames(\"#{register_names_file}\") OR_ELSE RAISE;\n"
       runner_main += "    rootCaps: RegisterValue[]@list = List[];\n"
       runner_main += "    MUTABLE rootSharedCells: RegisterValue[]@list:shared:locked = List[];\n"
-      runner_main += "    result = runRegisterBytecode!(program.ops, program.opcodes, consts, sourceLines, sourceColumns, sourcePaths, breakpoints, varNames, 0_i64, rootCaps, rootSharedCells) OR_ELSE RAISE;\n"
+      runner_main += "    result = runRegisterBytecode(program.ops, program.opcodes, consts, sourceLines, sourceColumns, sourcePaths, breakpoints, varNames, 0_i64, rootCaps, &rootSharedCells) OR_ELSE RAISE;\n"
       runner_main += "    printRegisterResult(result) OR_ELSE RAISE;\n"
       runner_main += "    RETURN;\nEND\n"
 
@@ -302,7 +302,7 @@ if $PROGRAM_NAME == __FILE__
       # Inherit stdin so the in-process debugger REPL (registerDebugPause!
       # in vm.clear) can read commands from the user's terminal. With
       # popen2e+stdin.close the runner saw EOF immediately and the trap
-      # arm spun forever on empty readLine! results. Streaming stdout
+      # arm spun forever on empty readLine results. Streaming stdout
       # line-by-line keeps tests' output deterministic; stderr is merged.
       pid = Process.spawn(jemalloc_env, register_runner_path, in: $stdin, out: $stdout, err: [:child, :out])
       _, status = Process.waitpid2(pid)
@@ -356,11 +356,11 @@ if $PROGRAM_NAME == __FILE__
     bc_runner_main  = "FN main() RETURNS Void ->\n"
     bc_runner_main += "    MUTABLE pool: Env[50000]@pool:shared:locked = [];\n"
     bc_runner_main += "    MUTABLE penv: HashMap<Value> = {};\n"
-    bc_runner_main += "    rootId = setupEnv!(pool) OR_ELSE RAISE;\n"
-    bc_runner_main += "    bcOps = loadBytecodeOps!(\"#{bc_ops_file}\", pool) OR_ELSE RAISE;\n"
-    bc_runner_main += "    bcConsts = loadBytecodeConsts!(\"#{bc_consts_file}\", pool) OR_ELSE RAISE;\n"
+    bc_runner_main += "    rootId = setupEnv(&pool) OR_ELSE RAISE;\n"
+    bc_runner_main += "    bcOps = loadBytecodeOps(\"#{bc_ops_file}\", &pool) OR_ELSE RAISE;\n"
+    bc_runner_main += "    bcConsts = loadBytecodeConsts(\"#{bc_consts_file}\", &pool) OR_ELSE RAISE;\n"
     bc_runner_main += "    mainCaps: Value[] = [];\n"
-    bc_runner_main += "    bcResult = exec!(bcOps, bcConsts, rootId, pool, 0_i64, mainCaps) OR_ELSE RAISE;\n"
+    bc_runner_main += "    bcResult = exec(bcOps, bcConsts, rootId, &pool, 0_i64, mainCaps) OR_ELSE RAISE;\n"
     bc_runner_main += "    IF isError?(bcResult) THEN\n"
     bc_runner_main += "        print(\"SCHEME ASSERT FAILED: \" + getErrMsg(bcResult));\n"
     bc_runner_main += "    ELSE\n"

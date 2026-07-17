@@ -15,7 +15,7 @@
 # blocks are kept alive until restoreFrameMark fires at function exit, and the
 # block-index arithmetic in getMark/trimExcess is never invoked per-iteration.
 
-FN heavyInner!(outer: Int64) RETURNS !Void ->
+FN heavyInner(outer: Int64) RETURNS !Void ->
     MUTABLE resp = "";
     MUTABLE i: Int64 = 0;
     WHILE i < 8 DO
@@ -25,7 +25,7 @@ FN heavyInner!(outer: Int64) RETURNS !Void ->
         MUTABLE parts: []String = [];
         MUTABLE k: Int64 = 0;
         WHILE k < 150 DO
-            parts.append(k.toString());
+            &parts.append(k.toString());
             k += 1;
         END
         resp = resp $+ i.toString() $+ ",";
@@ -40,7 +40,7 @@ FN main() RETURNS !Void ->
     # nested rewind path with overflow blocks.
     MUTABLE outer: Int64 = 0;
     WHILE outer < 50 DO
-        heavyInner!(outer) OR_ELSE EXIT;
+        heavyInner(outer) OR_ELSE EXIT;
         outer += 1;
     END
     print("PASS");

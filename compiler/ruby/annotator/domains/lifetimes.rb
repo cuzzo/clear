@@ -18,6 +18,10 @@ module Annotator
           error!(node, :MOVE_NEEDS_IDENTIFIER)
         end
 
+        if node.value.symbol&.owned_optional_capture
+          error!(node, :MOVE_OWNED_OPTIONAL_CAPTURE, name: node.value.name)
+        end
+
         ti = node.value.full_type!(context: "MOVE value")
 
         # Check if the identifier is a resource
@@ -159,6 +163,7 @@ module Annotator
           ti.mark_heap_allocated! if ti.is_a?(Type)
           node.storage = :heap
           current_fn_ctx&.record_heap_use!
+          current_fn_ctx&.record_alloc_use!
         end
 
         deep_copy = collection_copy_deep_copy_required(node)
@@ -1243,6 +1248,32 @@ module Annotator
         end
         og_set_moved(node.name, at_token: node.token, action: action, consumer_param_type: consumer_param_type)
         node.was_moved = true
+      end
+
+      # A generic Map value is an owned sink even though its associated type is
+      # not concrete while the generic body is checked. Reject a borrowed
+      # source conservatively: a later specialization may make M::Value a
+      # cleanup-bearing type. TAKES parameters and explicit COPY/CLONE values
+      # are owned and can be consumed normally.
+      sig { params(node: AST::Node, value_type: Type).void }
+      def consume_generic_map_value!(node, value_type)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        borrowed = if node.is_a?(AST::GetIndex)
+          true
+        elsif node.is_a?(AST::Identifier)
+          ownership_graph[node.name]&.kind == :borrowed
+        else
+          false
+        end
+        if borrowed
+          if node.is_a?(AST::GetIndex)
+            error!(node, :TAKES_NEEDS_OWNED_INDEX)
+          else
+            error!(node, :TAKES_NEEDS_OWNED_BORROW)
+          end
+        end
+        move_if_takes_ownership!(node, action: :takes, consumer_param_type: value_type)
       end
 
       # Reject storing a borrowed value into an owned container (struct, union, TAKES param).

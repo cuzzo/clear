@@ -39,7 +39,7 @@ HOT_CELLS = []
   # dropped here -- escape_via_return's struct_with_list covers E1's
   # GetField branch callee-side and a valid in-template construct for
   # it conflates value-shape with the binding-form axis.
-  # `:or_else` -- producer's RETURN is `mkInner!() OR_ELSE RAISE`, which
+  # `:or_else` -- producer's RETURN is `mkInner() OR_ELSE RAISE`, which
   # parses to a BinaryOp(:OR_ELSE) wrapping the inner call. Valid
   # only for fallible producers (RETURNS !T) since OR_ELSE RAISE bubbles
   # an error. Drives the OR_ELSE arms in return_value_is_heap? and
@@ -82,7 +82,7 @@ end
 # faultable in every form (uniform: all OR_ELSE-bind forms valid).
 def hot_build(value, var)
   if value == :list
-    "    MUTABLE #{var}: Int64[]@list = [];\n    #{var}.append(1_i64);\n    #{var}.append(2_i64);\n"
+    "    MUTABLE #{var}: Int64[]@list = [];\n    &#{var}.append(1_i64);\n    &#{var}.append(2_i64);\n"
   else
     "    #{var}: String = \"a\" $+ \"b\";\n"
   end

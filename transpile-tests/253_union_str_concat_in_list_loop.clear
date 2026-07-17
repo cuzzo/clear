@@ -27,7 +27,7 @@ FN main() RETURNS Void ->
         s2 = i.toString();
         # Concat `s1 + s2` is frame-allocated. Wrapping it in a union
         # variant and appending to a heap list must promote the string.
-        list.append(Value{ Str: s1 $+ s2 });
+        &list.append(Value{ Str: s1 $+ s2 });
     END
 
     # After 10 loop iterations the frame has been rewound 10 times.

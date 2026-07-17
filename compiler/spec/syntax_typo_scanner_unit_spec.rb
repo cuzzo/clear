@@ -73,6 +73,25 @@ RSpec.describe SyntaxTypoScanner do
     end
   end
 
+  describe ".scan! retired mutation-name suffix" do
+    it "removes bang suffixes from declarations and calls" do
+      findings = scan("FN update!(MUTABLE x: Int64) -> update!(x); END")
+      expect(findings.length).to eq(2)
+      expect(findings.map { |finding| finding.fixes.first.edits.first.replacement }).to eq(["", ""])
+      expect(findings.map { |finding| finding.fixes.first.edits.first.span.col }).to eq([10, 39])
+    end
+
+    it "does not confuse fallible types, negation, !=, or the new raise suffix" do
+      findings = scan("FN f(x: !Int64) RETURNS !Bool -> ok = !false; x != 1; f(x)!!; END")
+      expect(findings).to be_empty
+    end
+
+    it "ignores bang-shaped text in strings and comments" do
+      findings = scan("FN f() -> text = \"call!()\"; # mutate!()\nEND")
+      expect(findings).to be_empty
+    end
+  end
+
   it "is a no-op when FixCollector is disabled" do
     FixCollector.disable!
     expect {

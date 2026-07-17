@@ -6,7 +6,7 @@ FN main() RETURNS Void ->
     MUTABLE total: Int64 = 0;
     FOR i IN (1_i64 ..= 200) DO
         MUTABLE parts: []String = [];
-        FOR j IN (1_i64 ..= 10) -> parts.append(j.toString());
+        FOR j IN (1_i64 ..= 10) -> &parts.append(j.toString());
         result = join(parts, ",");
         total += result.length();
     END

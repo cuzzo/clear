@@ -50,7 +50,7 @@ def iam_decl(c)
 end
 
 def iam_prep(c)
-  c == :list ? "    box.append(0_i64);" : ""
+  c == :list ? "    &box.append(0_i64);" : ""
 end
 
 def iam_key_expr(c, k)

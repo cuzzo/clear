@@ -112,7 +112,7 @@ RSpec.describe "Polymorphic-warning surface (#327)" do
     it "fires no warning when the baked-in SYNC POLICY covers everything" do
       _ast, notes = annotate_capturing_notes(<<~CLEAR)
         STRUCT Counter { value: Int64 }
-        FN bump!(c: Counter) RETURNS Void
+        FN bump(c: Counter) RETURNS Void
           REQUIRES c: SNAPSHOTTED
         ->
           WITH POLYMORPHIC EXCLUSIVE c AS x { x.value = x.value + 1; }
@@ -120,7 +120,7 @@ RSpec.describe "Polymorphic-warning surface (#327)" do
         END
         FN main() RETURNS Void ->
           c = Counter{ value: 0 } @versioned;
-          bump!(c);
+          bump(c);
           RETURN;
         END
       CLEAR
@@ -130,7 +130,7 @@ RSpec.describe "Polymorphic-warning surface (#327)" do
     it "fires no warning when REQUIRES LOCKED is covered by the baked-in policy" do
       _ast, notes = annotate_capturing_notes(<<~CLEAR)
         STRUCT Counter { value: Int64 }
-        FN bump!(c: Counter) RETURNS Void
+        FN bump(c: Counter) RETURNS Void
           REQUIRES c: LOCKED
         ->
           WITH POLYMORPHIC EXCLUSIVE c AS x { x.value = x.value + 1; }
@@ -138,7 +138,7 @@ RSpec.describe "Polymorphic-warning surface (#327)" do
         END
         FN main() RETURNS Void ->
           c = Counter{ value: 0 } @shared:locked;
-          bump!(c);
+          bump(c);
           RETURN;
         END
       CLEAR

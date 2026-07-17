@@ -4,16 +4,16 @@ UNION Value { Num: Float64, Items: Int64[] }
 
 FN makeItems() RETURNS !Value ->
     MUTABLE xs: []Int64 = List[];
-    xs.append(1_i64);
-    xs.append(2_i64);
+    &xs.append(1_i64);
+    &xs.append(2_i64);
     RETURN Value{ Items: xs };
 END
 
 FN main() RETURNS Void ->
     MUTABLE items: []Value = List[];
-    items.append(makeItems());
-    items.append(makeItems());
-    items.append(makeItems());
+    &items.append(makeItems());
+    &items.append(makeItems());
+    &items.append(makeItems());
 
     # Overwrite slot 1: old Value.Items must be cleaned up before new value written
     items[1] = makeItems();

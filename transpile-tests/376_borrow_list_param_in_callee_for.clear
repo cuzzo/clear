@@ -14,9 +14,9 @@ END
 
 FN main() RETURNS Void ->
     MUTABLE vals: []Int64 = List[];
-    vals.append(1_i64);
-    vals.append(2_i64);
-    vals.append(3_i64);
-    vals.append(4_i64);
+    &vals.append(1_i64);
+    &vals.append(2_i64);
+    &vals.append(3_i64);
+    &vals.append(4_i64);
     ASSERT sumDoubled(vals) == 20_i64, "for-loop over borrowed @list iterates current items";
 END

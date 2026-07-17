@@ -49,9 +49,9 @@ FuzzGenerator.register(:match_payload_cleanup, cells: MATCH_PAYLOAD_CELLS) do |p
   when :list
     <<~PRE.chomp
       MUTABLE built: Int64[]@list = [];
-          built.append(1_i64);
-          built.append(2_i64);
-          built.append(3_i64);
+          &built.append(1_i64);
+          &built.append(2_i64);
+          &built.append(3_i64);
     PRE
   when :map
     <<~PRE.chomp
@@ -70,7 +70,7 @@ FuzzGenerator.register(:match_payload_cleanup, cells: MATCH_PAYLOAD_CELLS) do |p
     <<~CHT
       #{union_def}
 
-      FN consume!(TAKES b: Box) RETURNS Void ->
+      FN consume(TAKES b: Box) RETURNS Void ->
           #{match_kw} b START
               #{variant} AS x -> #{observe},
               DEFAULT -> ASSERT FALSE, "expected Payload variant";
@@ -80,7 +80,7 @@ FuzzGenerator.register(:match_payload_cleanup, cells: MATCH_PAYLOAD_CELLS) do |p
 
       FN main() RETURNS Void ->
           #{prelude.empty? ? '' : prelude + "\n    "}boxed = #{build};
-          consume!(boxed);
+          consume(boxed);
           RETURN;
       END
     CHT

@@ -1,6 +1,7 @@
 # typed: strict
 require "sorbet-runtime"
 require_relative "../../ast/ast"
+require_relative "../protocol_projection_resolver"
 
 # ==========================================
 # GENERIC ANALYSIS
@@ -16,8 +17,13 @@ require_relative "../../ast/ast"
 #
 module GenericAnalysis
     extend T::Sig
+  include Annotator::ProtocolProjectionIssueEmission
 
-  BUILTIN_TYPES = %i[Number Bool Byte Int64 Float64 String Any Void Range].freeze
+  BUILTIN_TYPES = %i[
+    Number Bool Byte Int8 Int16 Int32 Int64 UInt8 UInt16 UInt32 UInt64
+    Float32 Float64 TargetInt TargetUInt TargetLong TargetULong
+    TargetLongLong TargetULongLong String Any Void Range Map
+  ].freeze
   DeclarationNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
   TypeShape = T.type_alias { T.any(Type, Symbol, String) }
   GenericSchema = T.type_alias { T.any(Schemas::EnumSchema, Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
@@ -93,8 +99,12 @@ module GenericAnalysis
   sig { params(node: AnnotationNode, type_obj: Type, is_param: T::Boolean).returns(NilClass) }
   def validate_type_annotation!(node, type_obj, is_param: false)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    return if type_obj.fn_type?
+    if type_obj.fn_type?
+      resolve_associated_projection_protocols!(node, type_obj)
+      return
+    end
 
+    resolve_associated_projection_protocols!(node, type_obj)
     facts = type_annotation_facts(node, type_obj, is_param)
     validate_param_annotation_capabilities!(facts)
     validate_collection_annotation_capabilities!(facts)
@@ -143,7 +153,7 @@ module GenericAnalysis
     type_obj = facts.type_obj
     has_ownership_cap = %i[multiowned split].include?(type_obj.ownership)
     primitive_atomic_param = type_obj.atomic? && type_obj.primitive?
-    has_sync_cap = type_obj.sync && !primitive_atomic_param && !%i[raw symbol].include?(type_obj.sync)
+    has_sync_cap = type_obj.sync && !primitive_atomic_param && !%i[raw symbol c size].include?(type_obj.sync)
     error!(facts.node, :FN_PARAM_NO_CAPABILITY) if has_ownership_cap || has_sync_cap
   end
 
@@ -172,7 +182,7 @@ module GenericAnalysis
     type_obj = facts.type_obj
     return unless type_obj.tense? && type_obj.observable?
 
-    offending_sync = type_obj.sync if type_obj.sync && !%i[raw symbol].include?(type_obj.sync)
+    offending_sync = type_obj.sync if type_obj.sync && !%i[raw symbol c size].include?(type_obj.sync)
     offending_own = type_obj.ownership if %i[multiowned shared split].include?(type_obj.ownership)
     return unless offending_sync || offending_own
 
@@ -213,6 +223,10 @@ module GenericAnalysis
 
   sig { params(facts: TypeAnnotationFacts).void }
   def validate_generic_annotation!(facts)
+    if facts.inner.projection?
+      validate_associated_projection!(facts.node, facts.inner)
+      return
+    end
     if facts.inner.generic_instance?
       validate_generic_instance_annotation!(facts)
     else
@@ -239,6 +253,12 @@ module GenericAnalysis
     actual = inner.generic_args.length
     error!(facts.node, :GENERIC_WRONG_ARG_COUNT, type: base_name, expected: expected, got: actual) if actual != expected
     inner.generic_args.each { |arg| validate_generic_type_arg!(facts, arg) }
+    if schema.is_a?(Schemas::StructSchema)
+      schema.generic_params.zip(inner.generic_args).each do |param, argument|
+        next unless param && argument
+        validate_generic_argument_bounds!(facts.node, param, argument)
+      end
+    end
   end
 
   sig { params(facts: TypeAnnotationFacts, arg: Type).void }
@@ -251,6 +271,10 @@ module GenericAnalysis
     end
     if arg.array?
       validate_generic_type_arg!(facts, T.must(arg.element_type))
+      return
+    end
+    if arg.projection?
+      validate_associated_projection!(facts.node, arg)
       return
     end
     # HashMap is a built-in composite type rather than a registered generic
@@ -358,9 +382,215 @@ module GenericAnalysis
       unless subst.key?(tp)
         error!(node, :GENERIC_FN_CANNOT_INFER, param: tp, fn: node.name, type: tp)
       end
+      validate_bound_types!(node, tp, Type.new(T.must(subst[tp])), signature.generic_bounds[tp] || [])
     end
     subst
   end
+
+  sig { params(node: AnnotationNode, param: AST::GenericParamDecl, argument: Type).void }
+  def validate_generic_argument_bounds!(node, param, argument)
+    validate_bound_types!(node, param.name.to_sym, argument, param.bounds.map(&:type))
+  end
+  private :validate_generic_argument_bounds!
+
+  sig { params(node: AnnotationNode, parameter: Symbol, argument: Type, bounds: T::Array[Type]).void }
+  def validate_bound_types!(node, parameter, argument, bounds)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    bounds.each do |bound|
+      protocol = protocol_base_name(bound)
+      next if type_conforms_to_protocol?(argument, protocol)
+
+      error!(node, :GENERIC_PROTOCOL_BOUND_FAILED,
+        parameter: parameter, actual: Type.surface_name(argument), protocol: protocol)
+    end
+    shared = bounds.any?(&:polymorphic_shared?)
+    if shared && !argument.shared? && !generic_parameter_has_shared_map_bound?(argument.resolved)
+      error!(node, :GENERIC_SHARED_BOUND_FAILED,
+        parameter: parameter, actual: Type.surface_name(argument), protocol: "Map")
+    end
+  end
+  private :validate_bound_types!
+
+  sig { params(node: AnnotationNode, projection: Type).void }
+  def validate_associated_projection!(node, projection)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    owner = T.must(projection.projection_owner)
+    member = T.must(projection.projection_member)
+    unless current_function_type_params.include?(owner)
+      error!(node, :GENERIC_PROJECTION_UNKNOWN_OWNER, owner: owner, member: member)
+    end
+  end
+  private :validate_associated_projection!
+
+  sig { params(node: AnnotationNode, type: Type).void }
+  def resolve_associated_projection_protocols!(node, type)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    result = Annotator::ProtocolProjectionResolver.new(semantic_protocols).resolve(
+      type.shape.expression,
+      current_function_generic_params,
+    )
+    issue = result.issues.first
+    emit_protocol_projection_issue!(node, issue) if issue
+    type.replace_shape!(type.shape.with_expression(result.expression))
+  end
+  private :resolve_associated_projection_protocols!
+
+  sig { params(name: Symbol).returns(T::Array[String]) }
+  def generic_parameter_protocol_names(name)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    param = current_function_generic_params.find { |candidate| candidate.name.to_sym == name }
+    return [] unless param
+
+    param.bounds.map { |bound| protocol_base_name(bound.type) }
+  end
+  private :generic_parameter_protocol_names
+
+  sig { params(type: Type).returns(String) }
+  def protocol_base_name(type)
+    (type.generic_instance? ? type.generic_base : type.resolved).to_s
+  end
+  private :protocol_base_name
+
+  sig { params(argument: Type, protocol: String).returns(T::Boolean) }
+  def type_conforms_to_protocol?(argument, protocol)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    return argument.map? || generic_parameter_has_map_bound?(argument.resolved) if protocol == "Map"
+    return true if generic_parameter_protocol_names(argument.resolved).include?(protocol)
+
+    !conformance_match(protocol, argument).nil?
+  end
+  private :type_conforms_to_protocol?
+
+  sig { params(protocol: String, concrete: Type).returns(T.nilable(Annotator::Phases::ConformanceMatch)) }
+  def conformance_match(protocol, concrete)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+    conformance_match_avoiding(protocol, concrete, Set.new)
+  end
+  private :conformance_match
+
+  sig do
+    params(
+      protocol: String,
+      concrete: Type,
+      active: T::Set[String],
+    ).returns(T.nilable(Annotator::Phases::ConformanceMatch))
+  end
+  def conformance_match_avoiding(protocol, concrete, active)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+    key = "#{protocol}:#{concrete.semantic_type_key}"
+    return nil if active.include?(key)
+
+    next_active = active.dup.add(key)
+
+    semantic_conformance_resolutions.each do |resolution|
+      next unless resolution.protocol.name == protocol
+
+      owner = resolution.declaration.owner_type
+      substitutions = conformance_owner_substitutions(owner, concrete)
+      next unless substitutions
+      next unless conformance_binder_bounds_satisfied?(resolution, substitutions, next_active)
+
+      return Annotator::Phases::ConformanceMatch.new(
+        resolution: resolution,
+        substitutions: substitutions,
+      )
+    end
+    nil
+  end
+  private :conformance_match_avoiding
+
+  sig do
+    params(
+      resolution: Annotator::Phases::ConformanceResolution,
+      substitutions: T::Hash[Symbol, Type],
+      active: T::Set[String],
+    ).returns(T::Boolean)
+  end
+  def conformance_binder_bounds_satisfied?(resolution, substitutions, active)
+    resolution.declaration.binders.all? do |binder|
+      concrete = substitutions[binder.name.to_sym]
+      next false unless concrete
+
+      binder.bounds.all? do |bound|
+        protocol = protocol_base_name(bound.type)
+        if protocol == "Map"
+          concrete.map? || generic_parameter_has_map_bound?(concrete.resolved)
+        elsif generic_parameter_protocol_names(concrete.resolved).include?(protocol)
+          true
+        else
+          !conformance_match_avoiding(protocol, concrete, active).nil?
+        end
+      end && (!binder.bounds.any? { |bound| bound.type.polymorphic_shared? } || concrete.shared?)
+    end
+  end
+  private :conformance_binder_bounds_satisfied?
+
+  sig { params(pattern: Type, concrete: Type).returns(T.nilable(T::Hash[Symbol, Type])) }
+  def conformance_owner_substitutions(pattern, concrete)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    if pattern.generic_instance?
+      return nil unless concrete.generic_instance? && pattern.generic_base == concrete.generic_base
+      return nil unless pattern.generic_args.length == concrete.generic_args.length
+
+      substitutions = T.let({}, T::Hash[Symbol, Type])
+      pattern.generic_args.zip(concrete.generic_args).each do |parameter, argument|
+        return nil unless parameter && argument
+        substitutions[parameter.resolved] = Type.new(argument)
+      end
+      return substitutions
+    end
+    return {} if pattern.bare_data_type.semantic_type_key == concrete.bare_data_type.semantic_type_key
+
+    nil
+  end
+  private :conformance_owner_substitutions
+
+  sig { params(name: Symbol).returns(T::Boolean) }
+  def generic_parameter_has_map_bound?(name)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    param = current_function_generic_params.find { |candidate| candidate.name.to_sym == name }
+    param&.bounds&.any? { |bound| bound.type.resolved == :Map } == true
+  end
+  private :generic_parameter_has_map_bound?
+
+  sig { params(type: Type).returns(T::Boolean) }
+  def map_requires_protocol_lowering?(type)
+    generic_parameter_has_map_bound?(type.resolved) ||
+      (type.map? && type.key_type.projection?)
+  end
+  private :map_requires_protocol_lowering?
+
+  sig { params(type: Type, member: Symbol).returns(Type) }
+  def protocol_map_associated_type(type, member)
+    return member == :Key ? type.key_type : type.value_type if type.map?
+
+    Type.new(TypeProjectionExpression.new(owner: type.resolved, member: member))
+  end
+  private :protocol_map_associated_type
+
+  sig { params(name: Symbol).returns(T::Boolean) }
+  def generic_parameter_has_shared_map_bound?(name)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    param = current_function_generic_params.find { |candidate| candidate.name.to_sym == name }
+    param&.bounds&.any? do |bound|
+      bound.type.resolved == :Map && bound.type.polymorphic_shared?
+    end == true
+  end
+  private :generic_parameter_has_shared_map_bound?
+
+  sig { params(node: AST::Node, receiver: Type).void }
+  def require_generic_map_access_scope!(node, receiver)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    return unless generic_parameter_has_shared_map_bound?(receiver.resolved)
+
+    root = AST.root_identifier(node)
+    return if root&.symbol&.borrowed_alias
+
+    error!(node, :GENERIC_SHARED_MAP_REQUIRES_WITH, type: receiver.resolved)
+  end
+  private :require_generic_map_access_scope!
 
   sig { params(node: GenericCallNode, signature: FunctionSignature, actual_args: GenericCallArgs, type_params: T::Array[Symbol]).returns(NilClass) }
   def enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
@@ -450,7 +680,8 @@ module GenericAnalysis
         params: params,
         return_type: apply_type_subst(fn_type.return_type, subst),
         reentrant: fn_type.reentrant,
-        source_signature: fn_type.source_signature
+        source_signature: fn_type.source_signature,
+        abi: fn_type.abi,
       ))
     else
       Type.new(apply_expression_subst(t.shape.expression, subst))
@@ -476,6 +707,35 @@ module GenericAnalysis
         arguments: expression.arguments.map { |argument| apply_expression_subst(argument, subst) },
         capabilities: expression.capabilities
       )
+    when TypeProjectionExpression
+      binding = subst[expression.owner]
+      return expression unless binding
+
+      concrete = Type.new(binding)
+      projected = case expression.member
+      when :Key then concrete.key_type if (expression.protocol.nil? || expression.protocol == :Map) && concrete.map?
+      when :Value then concrete.value_type if (expression.protocol.nil? || expression.protocol == :Map) && concrete.map?
+      end
+      if projected.nil? && expression.protocol && expression.protocol != :Map
+        match = conformance_match(expression.protocol.to_s, concrete)
+        if match
+          associated = match.resolution.associated_types[expression.member]
+          projected = apply_type_subst(associated, match.substitutions) if associated
+        end
+      end
+      unless projected
+        return TypeProjectionExpression.new(
+          owner: concrete.resolved,
+          member: expression.member,
+          protocol: expression.protocol,
+          capabilities: expression.capabilities,
+        )
+      end
+
+      TypeExpressionTree.with_root_capabilities(
+        projected.shape.expression,
+        expression.capabilities,
+      )
     when FunctionTypeExpression
       signature = expression.signature
       FunctionTypeExpression.new(
@@ -485,7 +745,8 @@ module GenericAnalysis
           end,
           return_type: apply_type_subst(signature.return_type, subst),
           reentrant: signature.reentrant,
-          source_signature: signature.source_signature
+          source_signature: signature.source_signature,
+          abi: signature.abi,
         ),
         capabilities: expression.capabilities
       )

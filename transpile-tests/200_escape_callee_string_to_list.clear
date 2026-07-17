@@ -10,7 +10,7 @@ END
 FN main() RETURNS Void ->
     MUTABLE keys: []String = [];
     FOR i IN (1_i64 ..= 5) DO
-        keys.append(buildKey(i));
+        &keys.append(buildKey(i));
     END
     ASSERT keys.length() == 5;
     ASSERT keys[0] == "key-1";

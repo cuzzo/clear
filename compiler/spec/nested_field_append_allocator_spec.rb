@@ -19,10 +19,10 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
         MUTABLE i: Int64 = 0_i64;
         WHILE i < n DO
             MUTABLE scratch: []Int64 = List[];
-            scratch.append(i);
-            handles.append(Handle{ values: [] });
+            &scratch.append(i);
+            &handles.append(Handle{ values: [] });
             IF handles[i] EXISTS AS handle THEN
-                handle.values.append(scratch[0] OR_ELSE panic("scratch index invariant"));
+                &handle.values.append(scratch[0] OR_ELSE panic("scratch index invariant"));
             END
             i = i + 1_i64;
         END

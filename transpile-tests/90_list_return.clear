@@ -41,9 +41,9 @@ FN buildList() RETURNS ![]Float64 ->
     c26: zero
   };
   MUTABLE vals: []Float64 = [];
-  append(vals, big.c1.a);
-  append(vals, big.c1.b);
-  append(vals, big.c1.c);
+  append(&vals, big.c1.a);
+  append(&vals, big.c1.b);
+  append(&vals, big.c1.c);
   RETURN vals;
 END
 

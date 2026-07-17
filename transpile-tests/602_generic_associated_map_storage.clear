@@ -1,0 +1,26 @@
+# A map whose key is another Map's associated Key selects its concrete Zig
+# representation only after M is specialized. The same implementation works
+# for owned String keys and inline numeric keys.
+STRUCT Index<M: Map> {
+  entries={}: {M::Key}M::Value,
+}
+
+IMPLEMENTATION Index<M> {
+  METHOD put(MUTABLE self, key: M::Key, value: M::Value) RETURNS !Void ->
+    self.entries[key] = COPY value;
+  END
+
+  METHOD get(self, key: M::Key) RETURNS !?M::Value ->
+    RETURN COPY self.entries[key];
+  END
+}
+
+FN main() RETURNS !Void ->
+  MUTABLE words = Index<{String}String>{};
+  &words.put("status", "ready");
+  ASSERT words.get("status") OR_ELSE RAISE OR_ELSE "" == "ready";
+
+  MUTABLE numbers = Index<{Int64}String>{};
+  &numbers.put(7_i64, "seven");
+  ASSERT numbers.get(7_i64) OR_ELSE RAISE OR_ELSE "" == "seven";
+END

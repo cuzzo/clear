@@ -14,7 +14,7 @@ UNION Value {
     EnvRef: Id<Env>
 }
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: [Pool(10000)]Env) RETURNS !Value EFFECTS REENTRANT ->
+FN envGet(envId: Id<Env>, name: String, MUTABLE pool: [Pool(10000)]Env) RETURNS !Value EFFECTS REENTRANT ->
     MUTABLE parentVal: Value = Value.Nil;
     IF pool[envId] EXISTS AS env THEN
         val = COPY (env.vars[name] OR_ELSE Value{ Number: 0.0 - 777777.0 });
@@ -30,7 +30,7 @@ FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: [Pool(10000)]Env) RETURNS
         END
     END
     PARTIAL MATCH parentVal START
-        Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool);,
+        Value.EnvRef AS pid -> RETURN envGet(pid, name, &pool);,
         DEFAULT -> RETURN Value.Nil;
     END
 END
@@ -39,27 +39,27 @@ FN main() RETURNS Void ->
     MUTABLE pool: [Pool(10000)]Env = [];
 
     # Create root env and set a=10
-    rootId: Id<Env> = pool.insert(Env{ vars: {} });
+    rootId: Id<Env> = &pool.insert(Env{ vars: {} });
     IF pool[rootId] EXISTS AS env THEN
         env.vars["a"] = Value{ Number: 10.0 };
     END
 
     # Create child env with __p -> root, set x=5
-    childId: Id<Env> = pool.insert(Env{ vars: {} });
+    childId: Id<Env> = &pool.insert(Env{ vars: {} });
     IF pool[childId] EXISTS AS env THEN
         env.vars["__p"] = Value{ EnvRef: rootId };
         env.vars["x"] = Value{ Number: 5.0 };
     END
 
     # Look up x in child (direct)
-    xVal = envGet!(childId, "x", pool);
+    xVal = envGet(childId, "x", &pool);
     PARTIAL MATCH xVal START
         Value.Number AS n -> ASSERT n == 5.0, "x=5";,
         DEFAULT -> ASSERT FALSE, "x not found";
     END
 
     # Look up a in child (should follow __p to root)
-    aVal = envGet!(childId, "a", pool);
+    aVal = envGet(childId, "a", &pool);
     PARTIAL MATCH aVal START
         Value.Number AS n -> ASSERT n == 10.0, "a=10 via parent";,
         DEFAULT -> ASSERT FALSE, "a not found via parent";

@@ -21,6 +21,75 @@ pub fn bind(comptime deps: type) type {
     return struct {
         const WaitGroup = fp.WaitGroup;
 
+        fn stripPointers(comptime T: type) type {
+            return if (@typeInfo(T) == .pointer)
+                stripPointers(@typeInfo(T).pointer.child)
+            else
+                T;
+        }
+
+        pub fn PolymorphicInner(comptime Wrapped: type) type {
+            const M = stripPointers(Wrapped);
+            if (@typeInfo(M) == .@"struct" and @hasField(M, "ctrl")) {
+                const CtrlPtr = std.meta.fieldInfo(M, .ctrl).type;
+                const Ctrl = @typeInfo(CtrlPtr).pointer.child;
+                const DataPtr = std.meta.fieldInfo(Ctrl, .data).type;
+                return PolymorphicInner(@typeInfo(DataPtr).pointer.child);
+            }
+            if (@typeInfo(M) == .@"struct" and @hasDecl(M, "Inner")) {
+                return PolymorphicInner(M.Inner);
+            }
+            if (@typeInfo(M) == .@"struct" and @hasField(M, "data") and
+                (@hasDecl(M, "acquire") or @hasDecl(M, "write")))
+            {
+                return PolymorphicInner(std.meta.fieldInfo(M, .data).type);
+            }
+            return M;
+        }
+
+        pub fn MapFacts(comptime M: type) type {
+            const Storage = PolymorphicInner(M);
+            const get_info = @typeInfo(@TypeOf(Storage.get)).@"fn";
+            const return_type = get_info.return_type.?;
+            return struct {
+                pub const StorageType = Storage;
+                pub const Key = get_info.params[1].type.?;
+                pub const Value = @typeInfo(return_type).optional.child;
+            };
+        }
+
+        pub fn mapProtocolGet(map: anytype, key: MapFacts(@typeInfo(@TypeOf(map)).pointer.child).Key) ?MapFacts(@typeInfo(@TypeOf(map)).pointer.child).Value {
+            return map.get(key);
+        }
+
+        pub fn mapProtocolPut(map: anytype, key_alloc: std.mem.Allocator, value_alloc: std.mem.Allocator, key: MapFacts(@typeInfo(@TypeOf(map)).pointer.child).Key, value: MapFacts(@typeInfo(@TypeOf(map)).pointer.child).Value) !void {
+            const M = @typeInfo(@TypeOf(map)).pointer.child;
+            const put_info = @typeInfo(@TypeOf(M.put)).@"fn";
+            if (comptime put_info.params.len == 5) {
+                try map.put(key_alloc, value_alloc, key, value);
+            } else {
+                try map.put(value_alloc, key, value);
+            }
+        }
+
+        pub fn mapProtocolDelete(map: anytype, alloc: std.mem.Allocator, key: MapFacts(@typeInfo(@TypeOf(map)).pointer.child).Key) void {
+            const M = @typeInfo(@TypeOf(map)).pointer.child;
+            const remove_info = @typeInfo(@TypeOf(M.remove)).@"fn";
+            if (comptime remove_info.params.len == 3) {
+                map.remove(alloc, key);
+            } else {
+                _ = map.remove(key);
+            }
+        }
+
+        pub fn mapProtocolContains(map: anytype, key: MapFacts(@typeInfo(@TypeOf(map)).pointer.child).Key) bool {
+            return map.contains(key);
+        }
+
+        pub fn mapProtocolCount(map: anytype) i64 {
+            return @intCast(map.count());
+        }
+
         /// A finite stream step keeps producer completion separate from the
         /// item payload. In particular, `StreamStep(?T).Item = null` is a
         /// yielded optional value; `.Closed` is end-of-stream.
@@ -316,6 +385,13 @@ pub fn bind(comptime deps: type) type {
             return std.HashMapUnmanaged(K, V, Ctx, 80);
         }
         return std.AutoHashMapUnmanaged(K, V);
+    }
+
+    /// Select the ordinary CLEAR map representation after a generic
+    /// associated key type becomes concrete. String keys retain StringMap's
+    /// owned-key behavior; numeric keys use NumericMapType.
+    pub fn MapType(comptime K: type, comptime V: type) type {
+        return if (K == []const u8) StringMap(V) else NumericMapType(K, V);
     }
 
     pub fn numericMapPut(comptime K: type, comptime V: type, alloc: std.mem.Allocator, map: *NumericMapType(K, V), key: K, value: V) !void {

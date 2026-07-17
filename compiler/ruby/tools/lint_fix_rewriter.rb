@@ -94,9 +94,12 @@ module LintFixRewriter
       return
     end
 
-    if node.is_a?(AST::FuncCall) && node.name.end_with?("!")
-      node.args.each { |arg| collect_identifier_names(arg, set) }
-    elsif node.is_a?(AST::MethodCall) && mutating_method_name?(node.name)
+    if node.is_a?(AST::FuncCall)
+      node.args.each_with_index do |arg, index|
+        collect_identifier_names(arg, set) if node.explicit_mutable_argument?(index)
+      end
+    elsif node.is_a?(AST::MethodCall) &&
+        (node.explicit_mutable_receiver? || mutating_method_name?(node.name))
       collect_identifier_names(node.object, set)
     end
 

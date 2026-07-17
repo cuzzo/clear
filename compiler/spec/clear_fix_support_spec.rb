@@ -26,8 +26,9 @@ RSpec.describe ClearFixSupport do
   end
 
   it "parses CLI options and rejects invalid combinations" do
-    options = described_class.parse_args(["--yes", "--loop=3", "--only=lint,ownership", "a.clear", "b.rb"])
+    options = described_class.parse_args(["--yes", "--auto", "--loop=3", "--only=lint,ownership", "a.clear", "b.rb"])
     expect(options.take_first).to be(true)
+    expect(options.auto_only).to be(true)
     expect(options.loop_until_clean).to be(true)
     expect(options.loop_max).to eq(3)
     expect(options.only_set).to eq(Set[:lint, :ownership])
@@ -135,18 +136,23 @@ RSpec.describe ClearFixSupport do
     local_expected = local_source.sub(" @local", "")
     expect_rewrite(local_source, local_expected)
 
+    legacy_bang = "!"
     arg_source = <<~CLEAR
-      FN bump!(MUTABLE x: Int64) RETURNS Int64 ->
+      FN bump#{legacy_bang}(MUTABLE x: Int64) RETURNS Int64 ->
         x = x + 1;
         RETURN x;
       END
 
       FN main() RETURNS Int64 ->
         y = 5;
-        RETURN bump!(y);
+        RETURN bump#{legacy_bang}(y);
       END
     CLEAR
-    expect_rewrite(arg_source, arg_source.sub("y = 5", "MUTABLE y = 5"))
+    # apply_to_source is deliberately one pass: lexical repair makes the
+    # program parseable; `clear fix --loop` performs the signature-aware
+    # MUTABLE/& rewrite on its next pass (covered by the Markdown test).
+    arg_expected = arg_source.gsub("bump!", "bump")
+    expect_rewrite(arg_source, arg_expected, count: 2)
 
     moved_source = <<~CLEAR
       STRUCT Config {id: Float64, data: HashMap<Float64>}
@@ -275,7 +281,7 @@ RSpec.describe ClearFixSupport do
       no_heredoc = File.join(dir, "plain.rb")
       File.write(no_heredoc, "puts 'none'\n")
       described_class.run_args([no_heredoc], out: out, err: StringIO.new, input: StringIO.new)
-      expect(out.string).to include("no CLEAR heredocs found")
+      expect(out.string).to include("no CLEAR code blocks found")
 
       raw_source = "source = <<CLEAR\nFN main() RETURNS Void ->\n  RETURN;\nEND\nCLEAR\n"
       raw_heredoc = described_class.extract_clear_heredocs(raw_source).first
@@ -283,6 +289,56 @@ RSpec.describe ClearFixSupport do
       expect(raw_heredoc.indent).to eq(0)
 
       expect(described_class.extract_clear_heredocs("source = <<CLEAR\nFN main() RETURNS Void ->\n")).to be_empty
+    end
+  end
+
+  it "ignores CLEAR heredoc examples inside Ruby comments" do
+    source = <<~RUBY
+      # Example: run(<<~CLEAR)
+      #   FN demo!() RETURNS Void -> PASS END
+      # CLEAR
+      ast = SemanticAnnotator.new.annotate!(program)
+      actual = <<~CLEAR
+        FN live!() RETURNS Void -> PASS END
+      CLEAR
+    RUBY
+
+    blocks = described_class.extract_clear_heredocs(source)
+    expect(blocks.length).to eq(1)
+    expect(blocks.first.content).to include("FN live!()")
+    expect(blocks.first.content).not_to include("annotate!")
+  end
+
+  it "extracts and rewrites labelled CLEAR Markdown fences only" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "guide.md")
+      source = <<~MARKDOWN
+        # Guide
+
+        ```clear
+        FN update!(MUTABLE value: Int64) RETURNS Void -> value = value + 1; END
+        FN main() RETURNS Void ->
+          value = 1;
+          update!(value);
+        END
+        ```
+
+        ```ruby
+        update!(value)
+        ```
+      MARKDOWN
+      File.write(path, source)
+
+      blocks = described_class.extract_clear_markdown_fences(source)
+      expect(blocks.map { |block| [block.start_line, block.indent] }).to eq([[4, 0]])
+
+      described_class.run_args(["--loop", "--auto", "--only=mutability", path],
+        out: StringIO.new, err: StringIO.new, input: StringIO.new)
+      rewritten = File.read(path)
+      expect(rewritten).to include("FN update(MUTABLE value: Int64)")
+      expect(rewritten).to include("MUTABLE value = 1;")
+      expect(rewritten).to include("update(&value);")
+      expect(rewritten).to include("```ruby\nupdate!(value)")
     end
   end
 

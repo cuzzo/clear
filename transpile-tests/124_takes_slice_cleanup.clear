@@ -2,15 +2,15 @@
 
 UNION Value { Nil, Symbol: String, List: Value[] }
 
-FN process!(TAKES items: Value[]) RETURNS Float64 ->
+FN process(TAKES items: Value[]) RETURNS Float64 ->
     RETURN 42.0;
 END
 
 FN main() RETURNS Void ->
     MUTABLE list: []Value = List[];
-    list.append(Value{ Symbol: COPY "hello" });
-    list.append(Value{ Symbol: COPY "world" });
-    result = process!(list);
+    &list.append(Value{ Symbol: COPY "hello" });
+    &list.append(Value{ Symbol: COPY "world" });
+    result = process(list);
     ASSERT result == 42.0, "ok";
     RETURN;
 END

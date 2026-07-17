@@ -94,7 +94,7 @@ END
 # -------------------------------------------------------------------------
 # CORRECT: Pass already-locked value to helpers (avoid re-entrancy)
 # -------------------------------------------------------------------------
-FN update_value!(MUTABLE inner: State) RETURNS Void ->
+FN update_value(MUTABLE inner: State) RETURNS Void ->
   # Receives the already-locked struct value — no lock needed.
   inner.value = 2;
 END
@@ -105,7 +105,7 @@ FN correct_no_reentrant() RETURNS !Void ->
   t = BG {
     WITH EXCLUSIVE s AS inner {
       inner.value = 1;
-      update_value!(inner);  # pass the value, not the lock
+      update_value(&inner);  # pass the value, not the lock
     }
   };
 

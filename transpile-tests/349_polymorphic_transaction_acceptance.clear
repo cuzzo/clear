@@ -24,7 +24,7 @@
 STRUCT Counter { value: Int64 }
 
 # ── LOCKED (mutex). Inline body -- can return from WITH. ──────
-FN tick_locked!(MUTABLE c: Counter) RETURNS Int64
+FN tick_locked(MUTABLE c: Counter) RETURNS Int64
   REQUIRES c: LOCKED
 ->
     MUTABLE r: Int64 = 0_i64;
@@ -33,7 +33,7 @@ FN tick_locked!(MUTABLE c: Counter) RETURNS Int64
 END
 
 # ── VERSIONED (MVCC). Mutate-only; caller reads separately. ──
-FN tick_versioned!(MUTABLE c: Counter) RETURNS !Void
+FN tick_versioned(MUTABLE c: Counter) RETURNS !Void
   REQUIRES c: VERSIONED
 ->
     WITH SNAPSHOT c AS MUTABLE x { x.value = x.value + 1_i64; } ON MvccConflict RAISE
@@ -49,7 +49,7 @@ FN read_versioned(c: Counter) RETURNS Int64
 END
 
 # ── ATOMIC indirect (AtomicPtr struct cell). Mutate-only. ────
-FN tick_atomic!(MUTABLE c: Counter) RETURNS !Void
+FN tick_atomic(MUTABLE c: Counter) RETURNS !Void
   REQUIRES c: ATOMIC
 ->
     WITH SNAPSHOT c AS MUTABLE x { x.value = x.value + 1_i64; }
@@ -68,7 +68,7 @@ END
 # WITH POLYMORPHIC on a LOCAL-typed param lowers to direct alias
 # access -- no lock, no Arc unwrap, no snapshot. The body's
 # mutation flows back through the alias's *T pointer.
-FN tick_local!(MUTABLE c: Counter) RETURNS Void
+FN tick_local(MUTABLE c: Counter) RETURNS Void
   REQUIRES c: LOCAL
 ->
     WITH POLYMORPHIC c AS x { x.value = x.value + 1_i64; }
@@ -87,9 +87,9 @@ FN main() RETURNS Void ->
     # LOCKED: three sequential transactions on @shared:locked.
     # The inline body returns the new value directly (no closure).
     MUTABLE locked_c = Counter{ value: 0 } @shared:locked;
-    r1 = tick_locked!(locked_c);
-    r2 = tick_locked!(locked_c);
-    r3 = tick_locked!(locked_c);
+    r1 = tick_locked(&locked_c);
+    r2 = tick_locked(&locked_c);
+    r3 = tick_locked(&locked_c);
     ASSERT r1 == 1_i64, "locked: first tick returns 1";
     ASSERT r2 == 2_i64, "locked: second tick returns 2";
     ASSERT r3 == 3_i64, "locked: third tick returns 3";
@@ -99,16 +99,16 @@ FN main() RETURNS Void ->
 
     # VERSIONED: mutate-then-read.
     MUTABLE versioned_c = Counter{ value: 0 } @shared:versioned;
-    tick_versioned!(versioned_c);
-    tick_versioned!(versioned_c);
-    tick_versioned!(versioned_c);
+    tick_versioned(&versioned_c);
+    tick_versioned(&versioned_c);
+    tick_versioned(&versioned_c);
     ASSERT read_versioned(versioned_c) == 3_i64, "versioned: cumulative result 3";
 
     # ATOMIC indirect: mutate-then-read.
     MUTABLE atomic_c = Counter{ value: 0 } @boxed:atomic;
-    tick_atomic!(atomic_c);
-    tick_atomic!(atomic_c);
-    tick_atomic!(atomic_c);
+    tick_atomic(&atomic_c);
+    tick_atomic(&atomic_c);
+    tick_atomic(&atomic_c);
     ASSERT read_atomic(atomic_c) == 3_i64, "atomic: cumulative result 3";
 
     # LOCAL family (#336): @local + @multiowned.
@@ -117,18 +117,18 @@ FN main() RETURNS Void ->
     # alias is the same *T -- mutation through the alias flows
     # back to the binding.
     MUTABLE local_c = Counter{ value: 0 } @local;
-    tick_local!(local_c);
-    tick_local!(local_c);
-    tick_local!(local_c);
+    tick_local(&local_c);
+    tick_local(&local_c);
+    tick_local(&local_c);
     ASSERT read_local(local_c) == 3_i64, "local: cumulative result 3";
 
     # @multiowned: Rc(T) wraps the value; the alias resolves to
     # the underlying *T via the comptime probe's `c.ctrl.data`
     # branch. Mutation flows back through the Rc.
     MUTABLE multi_c = Counter{ value: 0 } @multiowned;
-    tick_local!(multi_c);
-    tick_local!(multi_c);
-    tick_local!(multi_c);
+    tick_local(&multi_c);
+    tick_local(&multi_c);
+    tick_local(&multi_c);
     ASSERT read_local(multi_c) == 3_i64, "multiowned: cumulative result 3";
 
     # PENDING (closes the milestone): plain T mutation through a

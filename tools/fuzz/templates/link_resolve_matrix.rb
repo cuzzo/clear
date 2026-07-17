@@ -15,7 +15,7 @@ FuzzGenerator.register(:link_resolve_matrix, cells: LR_CELLS) do |p|
   when :struct_field
     "strong = Node{ value: 8, text: COPY \"field\" } #{cap}; edge = Edge{ target: LINK strong }; ASSERT (RESOLVE edge.target)?.text == \"field\";"
   when :list
-    "strong = Node{ value: 9, text: COPY \"list\" } #{cap}; MUTABLE links: Node@link[]@list = []; links.append(LINK strong); IF links[0] EXISTS AS weak THEN IF RESOLVE weak EXISTS AS resolved THEN ASSERT resolved.value == 9; ELSE ASSERT FALSE; END ELSE ASSERT FALSE; END"
+    "strong = Node{ value: 9, text: COPY \"list\" } #{cap}; MUTABLE links: Node@link[]@list = []; &links.append(LINK strong); IF links[0] EXISTS AS weak THEN IF RESOLVE weak EXISTS AS resolved THEN ASSERT resolved.value == 9; ELSE ASSERT FALSE; END ELSE ASSERT FALSE; END"
   when :multiple
     "strong = Node{ value: 10, text: COPY \"many\" } #{cap}; first = LINK strong; second = LINK strong; ASSERT (RESOLVE first)?.value == 10; ASSERT (RESOLVE second)?.value == 10;"
   when :dead

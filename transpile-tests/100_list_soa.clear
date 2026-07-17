@@ -6,9 +6,9 @@ STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float6
 
 FN main() RETURNS Void ->
     MUTABLE items: []@soa Entity = [];
-    items.append(Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 });
-    items.append(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
-    items.append(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });
+    &items.append(Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 });
+    &items.append(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
+    &items.append(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });
 
     # SUM: iterates only the health field array
     total = items |> SUM _.health;

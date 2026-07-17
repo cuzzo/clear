@@ -58,7 +58,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
     <<~CHT
       FN mk() RETURNS !Int64[]@list ->
           MUTABLE xs: Int64[]@list = [];
-          xs.append(1_i64);
+          &xs.append(1_i64);
           RETURN xs;
       END
 
@@ -138,7 +138,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
     <<~CHT
       FN main() RETURNS Void ->
           MUTABLE xs: String[]@list = [];
-          xs.append(COPY "seed");
+          &xs.append(COPY "seed");
           FOR i IN (1_i64 ..= 3_i64) DO
               s: String = i.toString();
               xs[0_i64] = s;
@@ -154,8 +154,8 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
           MUTABLE xs: Int64[][]@list = [];
           FOR i IN (1_i64 ..= 3_i64) DO
               MUTABLE inner: Int64[]@list = [];
-              inner.append(i);
-              xs.append(inner);
+              &inner.append(i);
+              &xs.append(inner);
           END
           ASSERT xs.length() == 3_i64, "list append";
           RETURN;
@@ -168,7 +168,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
           MUTABLE xs: String[]@set = [];
           FOR i IN (1_i64 ..= 3_i64) DO
               s: String = i.toString();
-              xs.insert(s);
+              &xs.insert(s);
           END
           ASSERT xs.length() == 3_i64, "set insert";
           RETURN;
@@ -196,7 +196,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
           MUTABLE pool: Item[8]@pool = [];
           FOR i IN (1_i64 ..= 3_i64) DO
               s: String = i.toString();
-              _ = pool.insert(Item{ value: COPY s });
+              _ = &pool.insert(Item{ value: COPY s });
           END
           ASSERT pool.length() == 3_i64, "pool insert";
           RETURN;
@@ -263,7 +263,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
       FN main() RETURNS Void ->
           MUTABLE xs: String[]@list = [];
           out: String = mk() OR_ELSE RAISE;
-          xs.append(out);
+          &xs.append(out);
           ASSERT (xs[0_i64]?.length() OR_ELSE 0_i64) == 3_i64, "call return receiver";
           RETURN;
       END
@@ -279,7 +279,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
       FN main() RETURNS Void ->
           MUTABLE xs: String[]@list = [];
           out: String = mk() OR_ELSE COPY "fallback";
-          xs.append(out);
+          &xs.append(out);
           ASSERT (xs[0_i64]?.length() OR_ELSE 0_i64) == 3_i64, "or rescue return receiver";
           RETURN;
       END
@@ -291,7 +291,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
 
       FN mk() RETURNS !Outer ->
           MUTABLE xs: Inner[]@list = [];
-          xs.append(Inner{ name: COPY "abc" });
+          &xs.append(Inner{ name: COPY "abc" });
           out = Outer{ items: xs };
           RETURN out;
       END
@@ -332,7 +332,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
           FOR i IN (1_i64 ..= 3_i64) DO
               s: String = i.toString();
               b = Box{ vals: [s] };
-              out.append(b);
+              &out.append(b);
           END
           IF out[2_i64] EXISTS AS box THEN
               ASSERT box.vals[0_i64].length() == 1_i64, "outer store nested array";
@@ -348,7 +348,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
 
       FN main() RETURNS Void ->
           MUTABLE xs: Item[]@list = [];
-          xs.append(Item{ label: COPY "abc" });
+          &xs.append(Item{ label: COPY "abc" });
           h = Holder{ items: xs };
           f: ~Int64 = BG {
               MUTABLE n: Int64 = 0_i64;
@@ -385,7 +385,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
 
       FN main() RETURNS Void ->
           MUTABLE xs: Item[]@list = [];
-          xs.append(Item{ label: COPY "abc" });
+          &xs.append(Item{ label: COPY "abc" });
           h = Holder{ items: xs };
           ASSERT consume(GIVE h) == 3_i64, "takes recursive aggregate";
           RETURN;
@@ -401,7 +401,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
           FOR i IN (1_i64 ..= 3_i64) DO
               s: String = i.toString();
               h = Holder{ table: { "k": s } };
-              out.append(h);
+              &out.append(h);
           END
           IF out[1_i64] EXISTS AS holder THEN
               ASSERT (holder.table["k"] OR_ELSE "").length() == 1_i64, "loop carry nested map";
@@ -417,7 +417,7 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
       FN mk() RETURNS !Payload ->
           MUTABLE xs: String[]@list = [];
           s: String = COPY "abc";
-          xs.append(s);
+          &xs.append(s);
           RETURN Payload{ Items: xs };
       END
 
@@ -491,8 +491,8 @@ FuzzGenerator.register(:escape_mechanism_matrix, cells: ESCAPE_MECHANISM_CELLS) 
           FOR i IN (1_i64 ..= 3_i64) DO
               s: String = i.toString();
               MUTABLE items: Item[]@list = [];
-              items.append(Item{ label: COPY s });
-              out.append(Payload{ Items: items });
+              &items.append(Item{ label: COPY s });
+              &out.append(Payload{ Items: items });
           END
           ASSERT out.length() == 3_i64, "loop carry union array combo";
           RETURN;

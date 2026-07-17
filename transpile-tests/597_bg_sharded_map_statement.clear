@@ -1,0 +1,16 @@
+# Expression-shaped map writes inside FSM-lowered BG bodies need a statement
+# terminator, just as they do in ordinary function bodies.
+
+FN main() RETURNS Void ->
+  MUTABLE values: {String}@shared:sharded(2):writeLocked Int64 = {};
+  worker = BG {
+    values["answer"] = 42_i64;
+    RETURN;
+  };
+  NEXT worker;
+  ASSERT values["answer"] == 42_i64;
+  print("OK");
+END
+
+# expect:
+# OK

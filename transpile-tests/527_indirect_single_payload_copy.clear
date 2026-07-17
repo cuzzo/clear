@@ -14,7 +14,7 @@ UNION U {
     Box: U @boxed
 }
 
-FN wrap!() RETURNS !U ->
+FN wrap() RETURNS !U ->
     RETURN U{ Box: U{ Lit: 9_i64 } };
 END
 
@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
         DEFAULT -> ASSERT FALSE, "expected Str";
     END
 
-    boxed = wrap!() OR_ELSE RAISE;
+    boxed = wrap() OR_ELSE RAISE;
     PARTIAL MATCH boxed START
         U.Box AS inner ->
             c = COPY inner;

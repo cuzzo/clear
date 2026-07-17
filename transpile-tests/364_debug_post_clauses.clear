@@ -19,7 +19,7 @@ END
 # POST + PRE on the same function. PRE raises (caller-recoverable);
 # POST panics (programmer-error). The function returns `!T` because
 # of PRE; POST sees the success-path result.
-FN safeDouble!(x: Int64) RETURNS !Int64
+FN safeDouble(x: Int64) RETURNS !Int64
     PRE: x > 0
     DEBUG_POST: result > x
 ->
@@ -31,7 +31,7 @@ END
 # void code path in build_post_outer_fn — the wrapper calls inner
 # without binding a result, runs the predicate, returns.
 STRUCT Counter { value: Int64 }
-FN bumpBy!(MUTABLE c: Counter, n: Int64) RETURNS Void
+FN bumpBy(MUTABLE c: Counter, n: Int64) RETURNS Void
     DEBUG_POST: n >= 0
 ->
     WITH EXCLUSIVE c AS x { x.value = x.value + n; }
@@ -42,7 +42,7 @@ END
 # inner call propagates via `try` and the POST wrapper never
 # evaluates the predicate. The caller sees the original error,
 # not a panic.
-FN doubleOrRaise!(x: Int64) RETURNS !Int64
+FN doubleOrRaise(x: Int64) RETURNS !Int64
     DEBUG_POST: result > 0
 ->
     IF x < 0 THEN RAISE Input, NegativeInput, "x must be non-negative"; END
@@ -79,18 +79,18 @@ FN main() RETURNS !Void ->
     ASSERT s == 7, "sum(3, 4) == 7";
 
     # safeDouble: PRE holds, POST holds.
-    sd = safeDouble!(3) OR_ELSE RAISE;
+    sd = safeDouble(3) OR_ELSE RAISE;
     ASSERT sd == 6, "safeDouble(3) == 6";
 
     # safeDouble: PRE fails, caller recovers via OR_ELSE.
-    sd_neg = safeDouble!(-1_i64) OR_ELSE -42_i64;
+    sd_neg = safeDouble(-1_i64) OR_ELSE -42_i64;
     ASSERT sd_neg == -42_i64, "safeDouble(-1): PRE x > 0 fails";
 
     # Void-return DEBUG_POST: predicate holds (n=7 >= 0), body runs,
     # void wrapper returns cleanly without trying to bind a `result`.
     # The Counter's @shared:locked allows side-effect verification.
     MUTABLE counter = Counter{ value: 0 } @shared:locked;
-    bumpBy!(counter, 7);
+    bumpBy(&counter, 7);
     WITH EXCLUSIVE counter AS x {
         ASSERT x.value == 7, "bumpBy ran the body";
     }
@@ -98,11 +98,11 @@ FN main() RETURNS !Void ->
     # Error-propagating body: the inner raises, `try` propagates
     # before the POST predicate evaluates. Caller catches the
     # error via OR_ELSE — no panic.
-    err_recovered = doubleOrRaise!(-5_i64) OR_ELSE -77_i64;
+    err_recovered = doubleOrRaise(-5_i64) OR_ELSE -77_i64;
     ASSERT err_recovered == -77_i64, "POST does not fire on error path";
 
     # Same fn, success path: POST predicate (result > 0) holds.
-    ok_path = doubleOrRaise!(4) OR_ELSE RAISE;
+    ok_path = doubleOrRaise(4) OR_ELSE RAISE;
     ASSERT ok_path == 8, "POST allows the success path";
 
     # Nested-call DEBUG_POST chain: top -> mid -> base. Each layer's

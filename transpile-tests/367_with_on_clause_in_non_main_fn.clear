@@ -18,7 +18,7 @@ STRUCT Counter { value: Int64 }
 
 # ON LockTimeout RETURN -1 — non-raising user action. The bubble
 # path for LockCycle/Deadlock still emits rt.setError + raise.
-FN bumpOrFallback!(MUTABLE c: Counter) RETURNS !Int64 ->
+FN bumpOrFallback(MUTABLE c: Counter) RETURNS !Int64 ->
     MUTABLE v: Int64 = 0;
     WITH EXCLUSIVE c AS x {
         x.value = x.value + 1;
@@ -28,7 +28,7 @@ FN bumpOrFallback!(MUTABLE c: Counter) RETURNS !Int64 ->
 END
 
 # ON Transient -> { ... } block-form action. Same bubble shape.
-FN bumpOrBlock!(MUTABLE c: Counter) RETURNS !Int64 ->
+FN bumpOrBlock(MUTABLE c: Counter) RETURNS !Int64 ->
     MUTABLE v: Int64 = 0;
     MUTABLE fallback: Int64 = 0;
     WITH EXCLUSIVE c AS x {
@@ -41,7 +41,7 @@ END
 
 # RETRY(N) THEN PASS — yet another non-raising user action that
 # still exercises the bubble path.
-FN bumpOrPassWithRetry!(MUTABLE c: Counter) RETURNS !Int64 ->
+FN bumpOrPassWithRetry(MUTABLE c: Counter) RETURNS !Int64 ->
     MUTABLE v: Int64 = 0;
     WITH EXCLUSIVE c AS x {
         x.value = x.value + 1;
@@ -53,13 +53,13 @@ END
 FN main() RETURNS !Void ->
     MUTABLE c = Counter{ value: 0 } @shared:locked;
 
-    v1 = bumpOrFallback!(c) OR_ELSE RAISE;
+    v1 = bumpOrFallback(&c) OR_ELSE RAISE;
     ASSERT v1 == 1_i64, "bumpOrFallback ran the body";
 
-    v2 = bumpOrBlock!(c) OR_ELSE RAISE;
+    v2 = bumpOrBlock(&c) OR_ELSE RAISE;
     ASSERT v2 == 2_i64, "bumpOrBlock ran the body";
 
-    v3 = bumpOrPassWithRetry!(c) OR_ELSE RAISE;
+    v3 = bumpOrPassWithRetry(&c) OR_ELSE RAISE;
     ASSERT v3 == 3_i64, "bumpOrPassWithRetry ran the body";
 
     RETURN;

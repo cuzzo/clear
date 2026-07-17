@@ -122,7 +122,7 @@ FuzzGenerator.register(:fsm_suspension_matrix, cells: FSM_SUSPENSION_CELLS) do |
       FN main() RETURNS Void ->
         outer: ~Int64 = BG {
           MUTABLE items: Int64[]@list = [];
-          items.append(1_i64); items.append(2_i64); items.append(3_i64);
+          &items.append(1_i64); &items.append(2_i64); &items.append(3_i64);
           MUTABLE total = 0_i64;
           FOR v IN items DO
             sleep(1);
@@ -142,9 +142,9 @@ FuzzGenerator.register(:fsm_suspension_matrix, cells: FSM_SUSPENSION_CELLS) do |
       FN main() RETURNS Void ->
         outer: ~Int64 = BG {
           MUTABLE pool: Entity[8]@pool = [];
-          pool.insert(Entity{ value: 1_i64 });
-          pool.insert(Entity{ value: 2_i64 });
-          pool.insert(Entity{ value: 3_i64 });
+          &pool.insert(Entity{ value: 1_i64 });
+          &pool.insert(Entity{ value: 2_i64 });
+          &pool.insert(Entity{ value: 3_i64 });
           MUTABLE total = 0_i64;
           FOR e IN pool DO
             sleep(1);
@@ -255,7 +255,7 @@ FuzzGenerator.register(:fsm_suspension_matrix, cells: FSM_SUSPENSION_CELLS) do |
         outer = BG {
           sleep(1);
           MUTABLE xs: Int64[]@list = [];
-          xs.append(#{n}_i64);
+          &xs.append(#{n}_i64);
           xs;
         };
         out: Int64[]@list = NEXT outer;

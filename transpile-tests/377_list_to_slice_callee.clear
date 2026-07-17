@@ -16,10 +16,10 @@ END
 
 FN main() RETURNS Void ->
     MUTABLE xs: []Int64 = List[];
-    xs.append(1_i64);
-    xs.append(2_i64);
-    xs.append(3_i64);
-    xs.append(4_i64);
+    &xs.append(1_i64);
+    &xs.append(2_i64);
+    &xs.append(3_i64);
+    &xs.append(4_i64);
 
     ASSERT sumSlice(xs) == 10_i64, "@list -> []slice via .items, sum";
     ASSERT lenSlice(xs) == 4_i64,  "@list -> []slice via .items, length";

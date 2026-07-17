@@ -167,7 +167,7 @@ RSpec.describe "DEBUG_POST clauses on function signatures" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Counter { value: Int64 }
-          FN bump!(c: Counter) RETURNS Int64
+          FN bump(c: Counter) RETURNS Int64
             REQUIRES c: LOCKED
             DEBUG_POST: result > c.value
           ->
@@ -222,7 +222,7 @@ RSpec.describe "DEBUG_POST clauses on function signatures" do
 
     it "keeps MIR call contracts verifier-clean for rt-threaded POST wrappers" do
       zig = transpile(<<~CLEAR)
-        FN safeDouble!(x: Int64) RETURNS !Int64
+        FN safeDouble(x: Int64) RETURNS !Int64
           PRE: x > 0
           DEBUG_POST: result > x
         ->
@@ -230,7 +230,7 @@ RSpec.describe "DEBUG_POST clauses on function signatures" do
         END
 
         FN main() RETURNS !Void ->
-          y = safeDouble!(3) OR_ELSE RAISE;
+          y = safeDouble(3) OR_ELSE RAISE;
           ASSERT y == 6, "safeDouble";
           RETURN;
         END

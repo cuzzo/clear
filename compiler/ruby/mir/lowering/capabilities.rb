@@ -270,6 +270,8 @@ module MIRLoweringCapabilities
       materialization.add_binding(restrict) unless restrict.empty?
     when :VIEW
       materialization.add_binding(view_capability_binding(context))
+    when :UNSAFE_VIEW
+      materialization.add_binding(unsafe_foreign_view_binding(context))
     when :SNAPSHOT
       snapshot = snapshot_capability_binding(context)
       materialization.add_binding(snapshot) if snapshot
@@ -464,6 +466,20 @@ module MIRLoweringCapabilities
     stmts
   end
 
+  sig { params(context: WithCapabilityBindingContext).returns(T::Array[MIR::Emittable]) }
+  def unsafe_foreign_view_binding(context)
+    lowerer = T.cast(self, MIRLowering)
+    length = context.cap.view_length
+    Kernel.raise "Internal: WITH UNSAFE VIEW missing LENGTH expression" unless length
+    source_mir = with_capability_source_mir(context.var_node)
+    safe_alias = safe_with_capability_alias(context.alias_name)
+    view = MIR::ForeignSliceView.new(source_mir, lowerer.lower(length))
+    [
+      MIR::Let.new(safe_alias, view, false, nil, nil),
+      MIR::Suppress.new(safe_alias),
+    ]
+  end
+
   sig { returns(T::Array[MIR::Emittable]) }
   def coop_yield_mir
     scheduler = MIR::FieldGet.new(MIR::Ident.new("CheatHeader"), "scheduler")
@@ -617,6 +633,7 @@ module MIRLoweringCapabilities
   RcUnwrapMap = T.type_alias { T::Hash[String, String] }
   AliasAllocMap = T.type_alias { T::Hash[String, T.nilable(Symbol)] }
   AliasOwnerMap = T.type_alias { T::Hash[String, String] }
+  PolymorphicAliasTypeMap = T.type_alias { T::Hash[String, String] }
 
   sig do
     type_parameters(:Result)
@@ -629,22 +646,29 @@ module MIRLoweringCapabilities
     prev_rc = capability_state.rc_unwrap_map
     prev_alias_alloc = capability_state.with_alias_alloc_map
     prev_alias_owner = capability_state.with_alias_owner_map
+    prev_polymorphic_types = capability_state.polymorphic_alias_type_map
     locked_map = T.let((prev_locked || {}).dup, LockedUnwrapMap)
     rc_map = T.let((prev_rc || {}).dup, RcUnwrapMap)
     alias_alloc_map = T.let((prev_alias_alloc || {}).dup, AliasAllocMap)
     alias_owner_map = T.let((prev_alias_owner || {}).dup, AliasOwnerMap)
+    polymorphic_types = T.let((prev_polymorphic_types || {}).dup, PolymorphicAliasTypeMap)
     capability_state.locked_unwrap_map = locked_map
     capability_state.rc_unwrap_map = rc_map
     capability_state.with_alias_alloc_map = alias_alloc_map
     capability_state.with_alias_owner_map = alias_owner_map
+    capability_state.polymorphic_alias_type_map = polymorphic_types
 
     with_capability_specs(node).each do |cap|
       var_node = T.cast(cap.var_node, CapabilityVarNode)
       var_name = cap.target_label
       alias_name = cap.alias_name
       if cap.alias_explicit
-        alias_alloc_map[alias_name] = placement_for_node(var_node)
+        generic_inner = cap.resolved_type.generic_type_parameter?
+        alias_alloc_map[alias_name] = generic_inner ? :heap : placement_for_node(var_node)
         alias_owner_map[alias_name] = var_name.to_s
+        if node.universal_poly && generic_inner
+          polymorphic_types[alias_name] = "CheatLib.PolymorphicInner(#{cap.resolved_type.resolved})"
+        end
       end
       case cap.capability
       when :EXCLUSIVE, :write_locked_read
@@ -664,6 +688,7 @@ module MIRLoweringCapabilities
     capability_state.rc_unwrap_map = prev_rc
     capability_state.with_alias_alloc_map = prev_alias_alloc
     capability_state.with_alias_owner_map = prev_alias_owner
+    capability_state.polymorphic_alias_type_map = prev_polymorphic_types
   end
 
   # Structured representation of a fallible-acquire clause for the BC
@@ -761,8 +786,14 @@ module MIRLoweringCapabilities
     # post-sync-wrapper) for the closure signature.
     resolved_source = cap.resolved_type
     rt_obj = Type.from_node!(resolved_source, context: "WITH polymorphic capability resolved type")
-    bare_type = rt_obj.respond_to?(:bare_data_type) ? rt_obj.bare_data_type : rt_obj
-    body_mir = lower_body(node.body)
+    generic_inner = rt_obj.generic_type_parameter?
+    bare_type = Type.new(generic_inner ? "CheatLib.PolymorphicInner(#{rt_obj.resolved})" : rt_obj.bare_data_type)
+    # Keep the universal path on the same alias-attribution contract as the
+    # concrete WITH path.  Structural operations in the callback (for example
+    # a HashMap write through `cache AS writable`) must retain the original
+    # parameter as their allocator owner; attributing them to the callback-only
+    # alias leaves MIRChecker with no parameter or AllocMark to validate.
+    body_mir = with_capability_alias_maps(node) { lower_body(node.body) }
     guard_cond = combined_guard_cond(node)
     if polymorphic_flow_required?(node)
       guard_fail = guard_cond ? guard_fail_flow_body(node) : []
@@ -1217,6 +1248,7 @@ module MIRLoweringCapabilities
   private :sorted_lock_acquire
   private :structured_with_bindings
   private :view_capability_binding
+  private :unsafe_foreign_view_binding
   private :with_binding_materialization
   private :with_block_body_stmts
   private :with_block_control_label

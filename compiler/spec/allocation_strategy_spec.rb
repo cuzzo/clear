@@ -204,7 +204,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE parts: []Int64 = [];
-          parts.append(1_i64);
+          &parts.append(1_i64);
           RETURN;
         END
       CLEAR
@@ -220,7 +220,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE parts: []String = List[];
-          parts.append("hello");
+          &parts.append("hello");
           RETURN;
         END
       CLEAR
@@ -260,7 +260,7 @@ RSpec.describe "Allocation Strategy Invariants" do
         FN main() RETURNS Void ->
           FOR i IN (0_i64 ..< 5) DO
             MUTABLE parts: []Int64 = [];
-            parts.append(i);
+            &parts.append(i);
           END
           RETURN;
         END
@@ -302,8 +302,8 @@ RSpec.describe "Allocation Strategy Invariants" do
       ast = run_mir(<<~CLEAR)
         FN get_list() RETURNS ![]String ->
           MUTABLE parts: []String = [];
-          parts.append("a");
-          parts.append("b");
+          &parts.append("a");
+          &parts.append("b");
           RETURN parts;
         END
       CLEAR
@@ -317,7 +317,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       ast = run_mir(<<~CLEAR)
         FN build() RETURNS ![]String ->
           MUTABLE s: []String = [];
-          s.append("hello");
+          &s.append("hello");
           RETURN s;
         END
       CLEAR
@@ -334,8 +334,8 @@ RSpec.describe "Allocation Strategy Invariants" do
         FN get_parts() RETURNS ![]String ->
           MUTABLE result: []String = [];
           MUTABLE scratch: []Int64 = [];
-          scratch.append(1_i64);
-          result.append("keep");
+          &scratch.append(1_i64);
+          &result.append("keep");
           RETURN result;
         END
       CLEAR
@@ -359,9 +359,9 @@ RSpec.describe "Allocation Strategy Invariants" do
       ast = run_mir(<<~CLEAR)
         FN build() RETURNS ![]String ->
           MUTABLE local: []Int64 = [];
-          local.append(1_i64);
+          &local.append(1_i64);
           MUTABLE result: []String = [];
-          result.append("final");
+          &result.append("final");
           RETURN result;
         END
       CLEAR
@@ -378,9 +378,9 @@ RSpec.describe "Allocation Strategy Invariants" do
           MUTABLE a: []Int64 = [];
           MUTABLE b: []Int64 = [];
           MUTABLE out: []String = [];
-          a.append(1_i64);
-          b.append(2_i64);
-          out.append("result");
+          &a.append(1_i64);
+          &b.append(2_i64);
+          &out.append("result");
           RETURN out;
         END
       CLEAR
@@ -407,8 +407,8 @@ RSpec.describe "Allocation Strategy Invariants" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE items: []Float64 = [];
-          items.append(1.0);
-          p: ~Void = BG { items.append(2.0); };
+          &items.append(1.0);
+          p: ~Void = BG { &items.append(2.0); };
           NEXT p;
           RETURN;
         END
@@ -424,13 +424,13 @@ RSpec.describe "Allocation Strategy Invariants" do
     it ":heap_ptr_return — returned var in RETURNS Struct @boxed → storage :heap" do
       ast = run_mir(<<~CLEAR)
         STRUCT Node { val: Int64 }
-        FN makeNode!() RETURNS !Node @boxed ->
+        FN makeNode() RETURNS !Node @boxed ->
           n = Node { val: 42 };
           RETURN n;
         END
         FN main() RETURNS Void -> RETURN; END
       CLEAR
-      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeNode!" }
+      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeNode" }
       d = find_decl_in(fn, "n")
       expect(d.symbol.storage).to eq(:heap)
     end
@@ -443,7 +443,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       ast = run_mir(<<~CLEAR)
         STRUCT Inner { val: Float64 }
         STRUCT Outer { child: Inner }
-        FN test!() RETURNS !Void ->
+        FN test() RETURNS !Void ->
           MUTABLE outer: Outer @boxed = Outer { child: Inner { val: 0.0 } };
           child: Inner = Inner { val: 42.0 };
           outer.child = child;
@@ -451,7 +451,7 @@ RSpec.describe "Allocation Strategy Invariants" do
         END
         FN main() RETURNS Void -> RETURN; END
       CLEAR
-      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "test!" }
+      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "test" }
       d = find_decl_in(fn, "child")
       expect(d.symbol.storage).to eq(:heap)
     end
@@ -466,7 +466,7 @@ RSpec.describe "Allocation Strategy Invariants" do
           MUTABLE resp = "";
           WHILE i < 5 DO
             MUTABLE tmp: []String = [];
-            tmp.append("x");
+            &tmp.append("x");
             resp = resp $+ i.toString();
             i += 1;
           END
@@ -486,35 +486,35 @@ RSpec.describe "Allocation Strategy Invariants" do
     # apply_transitive_heap_promotion! handles this.
     it ":transitive_callee — binding of heap-returning call → cleanup :heap" do
       ast = run_mir(<<~CLEAR)
-        FN build!() RETURNS ![]Float64 ->
+        FN build() RETURNS ![]Float64 ->
           MUTABLE v: []Float64 = [];
-          v.append(1.0);
+          &v.append(1.0);
           RETURN v;
         END
-        FN caller!() RETURNS !Void ->
-          x = build!();
+        FN caller() RETURNS !Void ->
+          x = build();
           RETURN;
         END
         FN main() RETURNS Void -> RETURN; END
       CLEAR
-      caller_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "caller!" }
+      caller_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "caller" }
       expect(cleanup_entry(caller_fn, "x")&.dig(:alloc)).to eq(:heap)
     end
 
     it ":transitive_imported_callee — imported heap-returning call → cleanup :heap" do
       Dir.mktmpdir("clear-import-owned-return") do |dir|
         File.write(File.join(dir, "lib.clear"), <<~CLEAR)
-          FN build!() RETURNS ![]Float64 ->
+          FN build() RETURNS ![]Float64 ->
             MUTABLE v: []Float64 = [];
-            v.append(1.0);
+            &v.append(1.0);
             RETURN v;
           END
         CLEAR
 
         src = <<~CLEAR
           REQUIRE "lib.clear";
-          FN caller!() RETURNS !Void ->
-            x = build!();
+          FN caller() RETURNS !Void ->
+            x = build();
             RETURN;
           END
           FN main() RETURNS Void -> RETURN; END
@@ -522,7 +522,7 @@ RSpec.describe "Allocation Strategy Invariants" do
 
         importer = ModuleImporter.new(base_dir: dir, use_mir: true)
         result = CompilerFrontend.compile(src, importer: importer, source_dir: dir)
-        caller_fn = result.ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "caller!" }
+        caller_fn = result.ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "caller" }
         expect(cleanup_entry(caller_fn, "x")&.dig(:alloc)).to eq(:heap)
       end
     end
@@ -665,8 +665,7 @@ RSpec.describe "Allocation Strategy Invariants" do
       ast = run_mir(<<~CLEAR)
         FN borrowList(xs: []Int64) RETURNS xs: []Int64 -> RETURN xs; END
         FN main() RETURNS Void ->
-            src: []Int64 = [];
-            src.append(1_i64);
+            src: []Int64 = [1_i64];
             r = borrowList(src);
             RETURN;
         END
@@ -678,16 +677,16 @@ RSpec.describe "Allocation Strategy Invariants" do
     it ":aggregate_extract_ident_secondary_field — heap ident in non-first field" do
       ast = run_mir(<<~CLEAR)
         STRUCT Pair { first: []Int64, second: []Int64 }
-        FN mk!() RETURNS !Pair ->
-            a: []Int64 = [];
-            a.append(1_i64);
-            b: []Int64 = [];
-            b.append(2_i64);
+        FN mk() RETURNS !Pair ->
+            MUTABLE a: []Int64 = [];
+            &a.append(1_i64);
+            MUTABLE b: []Int64 = [];
+            &b.append(2_i64);
             RETURN Pair{ first: a, second: b };
         END
         FN main() RETURNS Void -> RETURN; END
       CLEAR
-      mk_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "mk!" }
+      mk_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "mk" }
       a_decl = find_decl_in(mk_fn, "a")
       b_decl = find_decl_in(mk_fn, "b")
       expect(a_decl.symbol.storage).to eq(:heap)

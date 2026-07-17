@@ -10,6 +10,7 @@ ROOT = File.expand_path("..", __dir__)
 opts = {
   examples: true,
   benchmarks: true,
+  exclude_prefixes: [],
   strict: true,
   shard: nil,
   limit: nil,
@@ -17,9 +18,10 @@ opts = {
 }
 
 OptionParser.new do |o|
-  o.banner = "Usage: ruby tools/corpus_runtime_coverage.rb [options]"
+  o.banner = "Usage: ruby tools/corpus_runtime_coverage.rb [--examples-only|--benchmarks-only] [--exclude-prefix PATH] [options]"
   o.on("--examples-only") { opts[:benchmarks] = false }
   o.on("--benchmarks-only") { opts[:examples] = false }
+  o.on("--exclude-prefix PATH") { |path| opts[:exclude_prefixes] << path.delete_suffix("/") }
   o.on("--strict") { opts[:strict] = true }
   o.on("--allow-failures") { opts[:strict] = false }
   o.on("--limit N", Integer) { |v| opts[:limit] = v }
@@ -111,6 +113,10 @@ skipped = 0
 if opts[:examples]
   examples = Dir.glob(File.join(ROOT, "examples", "**", "*.clear")).sort
                 .reject { |path| skipped_example?(path) }
+                .reject do |path|
+                  rel = path.delete_prefix("#{ROOT}/")
+                  opts[:exclude_prefixes].any? { |prefix| rel == prefix || rel.start_with?("#{prefix}/") }
+                end
   runnable, non_runnable = examples.partition { |path| runnable_example?(path) }
   skipped += non_runnable.size
   runnable = apply_shard(runnable, opts[:shard])
@@ -138,7 +144,7 @@ if opts[:benchmarks]
   end
 end
 
-merged = ZigCoverageSupport.merge!("examples-benchmarks")
+merged = ZigCoverageSupport.merge!(ENV.fetch("ZIG_COVERAGE_SUITE", "examples-benchmarks"))
 puts "Merged Zig coverage: #{merged}" if merged
 
 puts "Corpus runtime coverage summary: #{passed} ok, #{failed} failed, #{skipped} skipped"

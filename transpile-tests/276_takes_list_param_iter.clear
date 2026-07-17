@@ -1,4 +1,4 @@
-FN sum!(TAKES xs: []Int64) RETURNS Int64 ->
+FN sum(TAKES xs: []Int64) RETURNS Int64 ->
     MUTABLE total: Int64 = 0_i64;
     FOR x IN xs DO
         total = total + x;
@@ -8,12 +8,12 @@ END
 
 FN make_lst() RETURNS ![]Int64 ->
     MUTABLE lst: []Int64 = List[];
-    lst.append(10_i64); lst.append(20_i64); lst.append(30_i64);
+    &lst.append(10_i64); &lst.append(20_i64); &lst.append(30_i64);
     RETURN lst;
 END
 
 FN main() RETURNS Void ->
     lst = make_lst();
-    n: Int64 = sum!(GIVE lst);
+    n: Int64 = sum(GIVE lst);
     ASSERT n == 60_i64, "iterating a TAKES @list param via FOR-each";
 END

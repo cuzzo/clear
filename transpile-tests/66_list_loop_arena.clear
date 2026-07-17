@@ -9,7 +9,7 @@ FN main() RETURNS Void ->
         MUTABLE vals: []Float64 = [];
         MUTABLE inner = 0_i64;
         WHILE inner < 1000 DO
-            append(vals, inner + 0.0);
+            append(&vals, inner + 0.0);
             inner = inner + 1_i64;
         END
         s = vals |> SUM _;

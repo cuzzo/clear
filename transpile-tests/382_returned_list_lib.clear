@@ -1,5 +1,5 @@
 FN makeNumbersFromLib() RETURNS ![]Int64 ->
   MUTABLE xs: []Int64 = [];
-  xs.append(2);
+  &xs.append(2);
   RETURN xs;
 END

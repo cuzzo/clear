@@ -21,12 +21,13 @@ CWM_CELLS = %i[
   locked_direct_field write_locked_direct_field atomic_ptr_direct_field
   snapshot_plain borrowed_shared borrowed_write_locked
   materialized_plain view_plain
+  observable_direct_index observable_direct_binary observable_direct_field observable_direct_method
 ].each do |m|
   CWM_CELLS << { mode: m, expected: :compile_error }
 end
 
 %i[
-  restrict_plain materialized_distinct
+  restrict_plain materialized_distinct observable_view
 ].each do |m|
   CWM_CELLS << { mode: m }
 end
@@ -56,13 +57,30 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
       END
     CHT
   when :always_mutable
-    # Interior mutability: immutable binding, mutable data, direct.
+    # Interior mutability: immutable roots may mutate/call through the
+    # capability-bearing layer without acquiring ordinary mutability.
     <<~CHT
       STRUCT Counter { value: Int64 }
+      STRUCT Holder { counter: Counter@alwaysMutable }
+
+      FN increment(MUTABLE counter: Counter) RETURNS Void ->
+          counter.value = counter.value + 1_i64;
+      END
+
+      FN updateHolder(holder: Holder) RETURNS Void ->
+          holder.counter.value = holder.counter.value + 1_i64;
+          increment(holder.counter);
+      END
+
       FN main() RETURNS Void ->
           c = Counter{ value: 1_i64 } @alwaysMutable;
           c.value = 2_i64;
-          ASSERT c.value == 2_i64, "alwaysMutable interior mutate";
+          increment(c);
+          ASSERT c.value == 3_i64, "alwaysMutable interior mutate";
+
+          holder = Holder{ counter: Counter{ value: 3_i64 } @alwaysMutable };
+          updateHolder(holder);
+          ASSERT holder.counter.value == 5_i64, "nested alwaysMutable mutate";
           RETURN;
       END
     CHT
@@ -235,6 +253,53 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
           WITH MATERIALIZED VIEW vals AS snap { _ = snap.length(); }
           RETURN;
       END
+    CHT
+  when :observable_view
+    <<~CHT
+      FN main() RETURNS Void ->
+          stream: ~?Int64[] = BG STREAM { YIELD 1_i64; YIELD 2_i64; };
+          running: ~Int64@observable = stream |> SUM _;
+          WITH VIEW running AS snapshot {
+              ASSERT snapshot >= 0_i64, "observable view lower bound";
+              ASSERT snapshot <= 3_i64, "observable view upper bound";
+          }
+          ASSERT (NEXT running) == 3_i64, "observable final value";
+          RETURN;
+      END
+    CHT
+  when :observable_direct_index
+    <<~CHT
+      FN invalid(values: ~Int64[]@set:observable) RETURNS ?Int64 ->
+          RETURN values[0_i64];
+      END
+
+      FN main() RETURNS Void -> RETURN; END
+    CHT
+  when :observable_direct_binary
+    <<~CHT
+      FN invalid(value: ~Int64@observable) RETURNS Bool ->
+          RETURN value > 0_i64;
+      END
+
+      FN main() RETURNS Void -> RETURN; END
+    CHT
+  when :observable_direct_field
+    <<~CHT
+      STRUCT Reading { value: Int64 }
+
+      FN invalid(reading: ~Reading@observable) RETURNS Int64 ->
+          RETURN reading.value;
+      END
+
+      FN main() RETURNS Void -> RETURN; END
+    CHT
+  when :observable_direct_method
+    <<~CHT
+      FN invalid(values: ~Int64[]@set:observable) RETURNS Int64 ->
+          RETURN values.length();
+      END
+
+      FN main() RETURNS Void -> RETURN; END
     CHT
   end
 end

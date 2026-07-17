@@ -285,6 +285,7 @@ class Type
     const :return_type, Type
     const :reentrant, T::Boolean, default: false
     const :source_signature, T.nilable(BasicObject), default: nil
+    const :abi, Symbol, default: :clear
   end
 end
 
@@ -661,6 +662,8 @@ class Type
     local: "@local",
     raw: "@raw",
     symbol: "@symbol",
+    c: "@c",
+    size: "@size",
   }.freeze, T::Hash[Symbol, String])
 
   SYNC_FAMILY_NAMES = T.let({
@@ -899,12 +902,14 @@ class Type
 
   sig { params(value: Symbol).returns(T::Boolean) }
   def self.signed_integer_symbol?(value)
-    value == :Int8 || value == :Int16 || value == :Int32 || value == :Int64
+    value == :Int8 || value == :Int16 || value == :Int32 || value == :Int64 ||
+      value == :TargetInt || value == :TargetLong || value == :TargetLongLong
   end
 
   sig { params(value: Symbol).returns(T::Boolean) }
   def self.unsigned_integer_symbol?(value)
-    value == :UInt8 || value == :Byte || value == :UInt16 || value == :UInt32 || value == :UInt64
+    value == :UInt8 || value == :Byte || value == :UInt16 || value == :UInt32 || value == :UInt64 ||
+      value == :TargetUInt || value == :TargetULong || value == :TargetULongLong
   end
 
   sig { params(value: Symbol).returns(T::Boolean) }
@@ -955,6 +960,8 @@ class Type
     return "@local" if value == :local
     return "@raw" if value == :raw
     return "@symbol" if value == :symbol
+    return "@c" if value == :c
+    return "@size" if value == :size
 
     nil
   end
@@ -987,6 +994,12 @@ class Type
     return "u32" if value == :UInt32
     return "u64" if value == :UInt64
     return "f32" if value == :Float32
+    return "c_int" if value == :TargetInt
+    return "c_uint" if value == :TargetUInt
+    return "c_long" if value == :TargetLong
+    return "c_ulong" if value == :TargetULong
+    return "c_longlong" if value == :TargetLongLong
+    return "c_ulonglong" if value == :TargetULongLong
     return "f64" if value == :Any
     return "CheatLib.Range" if value == :Range
     return "CheatLib.File" if value == :File
@@ -1186,8 +1199,8 @@ class Type
     generic_instance_of(:StreamStep, [item_type])
   end
 
-  sig { params(param_types: T::Array[Type], return_type: Type, reentrant: T::Boolean, source_signature: T.nilable(BasicObject)).returns(Type) }
-  def self.function_type_from_parts(param_types, return_type, reentrant, source_signature)
+  sig { params(param_types: T::Array[Type], return_type: Type, reentrant: T::Boolean, source_signature: T.nilable(BasicObject), abi: Symbol).returns(Type) }
+  def self.function_type_from_parts(param_types, return_type, reentrant, source_signature, abi = :clear)
     params = T.let([], T::Array[FunctionTypeParam])
     i = T.let(0, Integer)
     while i < param_types.length
@@ -1199,7 +1212,8 @@ class Type
       params: params,
       return_type: copy_type(return_type),
       reentrant: reentrant,
-      source_signature: source_signature
+      source_signature: source_signature,
+      abi: abi,
     ))
   end
 
@@ -1241,13 +1255,16 @@ class Type
     fn_raw = T.must(type.function_type)
     params = fn_raw.params.map { |param| surface_name_type(param.type) }
 
-    "FN(#{params.join(', ')}) -> #{surface_name_type(fn_raw.return_type)}"
+    callconv = fn_raw.abi == :c ? " CALLCONV C" : ""
+    "FN(#{params.join(', ')}) -> #{surface_name_type(fn_raw.return_type)}#{callconv}"
   end
 
   # Operator categories
   EQUALITY_OPS = [:EQ, :NEQ].freeze
   ORDERING_OPS = [:LT, :GT, :LTE, :GTE].freeze
   LOGICAL_OPS = [:AND, :OR].freeze
+  BITWISE_OPS = [:XOR, :BIT_AND, :BIT_OR].freeze
+  SHIFT_OPS = [:SHL, :SHR].freeze
   BOOL_RESULT_OPS = T.let((EQUALITY_OPS + ORDERING_OPS).freeze, T::Array[Symbol])
   NUMBER_RESULT_OPS = [:SUB, :MUL, :DIV, :POW, :MOD, :WRAP_SUB, :WRAP_MUL, :CHECK_SUB, :CHECK_MUL]
 
@@ -1284,6 +1301,16 @@ class Type
       op == :CHECK_MUL
   end
 
+  sig { params(op: Symbol).returns(T::Boolean) }
+  def self.bitwise_op?(op)
+    BITWISE_OPS.include?(op)
+  end
+
+  sig { params(op: Symbol).returns(T::Boolean) }
+  def self.shift_op?(op)
+    SHIFT_OPS.include?(op)
+  end
+
   # Resolves the result type of a binary operation given two operand types.
   # Returns a BinaryOpResult with type, optional coercions, and storage.
   sig { params(op: Symbol, left_type: Type, right_type: Type).returns(BinaryOpResult) }
@@ -1314,6 +1341,7 @@ class Type
     return resolve_logical_op(op, left_type, right_type) if logical_op?(op)
     return resolve_equality_op(op, left_type, right_type) if equality_op?(op)
     return resolve_ordering_op(op, left_type, right_type) if ordering_op?(op)
+    return resolve_integer_op(op, left_type, right_type, preserve_left: shift_op?(op)) if bitwise_op?(op) || shift_op?(op)
     return resolve_numeric_op(left_type, right_type) if number_result_op?(op) || op == :WRAP_ADD || op == :CHECK_ADD
     return resolve_concat_op(t_left, t_right, left_type, right_type) if op == :CONCAT
     return resolve_add_op(t_left, t_right, left_type, right_type) if op == :ADD
@@ -1366,6 +1394,23 @@ class Type
   def self.resolve_ordering_op(op, left_type, right_type)
     return BinaryOpResult.new(type: Type.new(:Bool)) if ordered_compatible?(left_type, right_type)
     BinaryOpResult.new(error: "Operator #{op} requires ordered operands, got #{left_type.resolved} and #{right_type.resolved}")
+  end
+
+  sig { params(op: Symbol, left_type: Type, right_type: Type, preserve_left: T::Boolean).returns(BinaryOpResult) }
+  def self.resolve_integer_op(op, left_type, right_type, preserve_left:)
+    if left_type.any? || right_type.any?
+      return BinaryOpResult.new(type: Type.new(:Any))
+    end
+
+    unless left_type.integer? && right_type.integer?
+      return BinaryOpResult.new(
+        error: "Operator #{op} requires integer operands, got #{left_type.resolved} and #{right_type.resolved}"
+      )
+    end
+
+    return BinaryOpResult.new(type: copy_type(left_type)) if preserve_left
+
+    resolve_numeric_op(left_type, right_type)
   end
 
   sig { params(left_type: Type, right_type: Type).returns(T::Boolean) }
@@ -2469,6 +2514,16 @@ class Type
     # cannot satisfy it without a future runtime intern(rt, s) operation.
     return other_type.string? && other_type.symbol? if string? && symbol?
 
+    # String@c is a NUL-terminated foreign view. String literals live in
+    # rodata with a sentinel and cross without allocation; an arbitrary
+    # runtime String needs the explicit checked conversion added by the FFI
+    # boundary pass and must not be accepted as a slice header.
+    if c_string?
+      return false unless other_type.string?
+      return true if other_type.c_string?
+      return other_type.rodata?
+    end
+
     # 3. Exact match
     return true if self == other_type
 
@@ -2527,8 +2582,8 @@ class Type
   # ----------------------------------------------
   # Type Predicates
   # ----------------------------------------------
-  SIGNED_INT_TYPES   = [:Int8, :Int16, :Int32, :Int64].freeze
-  UNSIGNED_INT_TYPES = [:UInt8, :Byte, :UInt16, :UInt32, :UInt64].freeze
+  SIGNED_INT_TYPES   = [:Int8, :Int16, :Int32, :Int64, :TargetInt, :TargetLong, :TargetLongLong].freeze
+  UNSIGNED_INT_TYPES = [:UInt8, :Byte, :UInt16, :UInt32, :UInt64, :TargetUInt, :TargetULong, :TargetULongLong].freeze
   INT_TYPES          = T.let((SIGNED_INT_TYPES + UNSIGNED_INT_TYPES).freeze, T::Array[Symbol])
   FLOAT_TYPES        = [:Float32, :Float64].freeze
   NUMERIC_TYPES      = T.let((INT_TYPES + FLOAT_TYPES).freeze, T::Array[Symbol])
@@ -2911,10 +2966,26 @@ class Type
     sync == :symbol
   end
 
-  # True for any sync capability (excludes :raw and :symbol which are data-access modes, not locks)
+  sig { returns(T::Boolean) }
+  def c_string?
+    string? && sync == :c
+  end
+
+  sig { returns(T::Boolean) }
+  def c_array_view?
+    array? && !string? && sync == :c
+  end
+
+  sig { returns(T::Boolean) }
+  def target_size?
+    sync == :size
+  end
+
+  # True for synchronization capabilities. Raw/symbol/C-string/target-size
+  # are representation or data-access modes, not locks.
   sig { returns(T::Boolean) }
   def any_sync?
-    !sync.nil? && sync != :raw && sync != :symbol
+    !sync.nil? && !%i[raw symbol c size].include?(sync)
   end
 
   # Group 1 vs Group 2 separation: return a copy of this type with the
@@ -3141,6 +3212,7 @@ class Type
   # chains on type predicates in lowering or annotation code.
   sig { returns(T.nilable(Symbol)) }
   def dispatch_key
+    return nil if c_array_view?
     if numeric_map?         then :numeric_map
     elsif map?              then :string_map
     elsif pool?             then :pool
@@ -3236,6 +3308,12 @@ class Type
     UInt32:    "u32",
     UInt64:    "u64",
     Float32:   "f32",
+    TargetInt: "c_int",
+    TargetUInt: "c_uint",
+    TargetLong: "c_long",
+    TargetULong: "c_ulong",
+    TargetLongLong: "c_longlong",
+    TargetULongLong: "c_ulonglong",
     Any:       "f64",
     Range:     "CheatLib.Range",
     File:      "CheatLib.File",
@@ -3411,6 +3489,40 @@ class Type
   sig { returns(T::Boolean) }
   def generic_instance?
     shape.generic_instance
+  end
+
+  sig { returns(T::Boolean) }
+  def projection?
+    shape.expression.is_a?(TypeProjectionExpression)
+  end
+
+  # Generic projections and aggregates cannot settle their cleanup shape
+  # until Zig specializes the enclosing function. Treat them as potentially
+  # owning so COPY/field replacement emits comptime cleanup rather than a
+  # shallow value move that is only sound for primitive instantiations.
+  sig { returns(T::Boolean) }
+  def specialization_may_need_cleanup?
+    return true if projection? || generic_instance?
+
+    (optional? || error_union?) && wrapped_type&.specialization_may_need_cleanup? == true
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def projection_owner
+    expression = shape.expression
+    expression.is_a?(TypeProjectionExpression) ? expression.owner : nil
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def projection_member
+    expression = shape.expression
+    expression.is_a?(TypeProjectionExpression) ? expression.member : nil
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def projection_protocol
+    expression = shape.expression
+    expression.is_a?(TypeProjectionExpression) ? expression.protocol : nil
   end
 
   # The base type name of a generic instance: :"Pair<Number>" → :Pair
@@ -4417,7 +4529,7 @@ class Type
   # ruby-to-clear: effects reentrant
   def ownership_bearing_type?(schema_lookup = nil)
     return false if primitive? || void? || any?
-    return false if symbol? || raw?
+    return false if symbol? || raw? || c_string? || c_array_view?
 
     string? ||
       future? ||
@@ -4866,6 +4978,8 @@ class Type
     self_raw = T.must(function_type)
     other_raw = T.must(other_type.function_type)
 
+    return false unless self_raw.abi == other_raw.abi || (self_raw.abi == :c && other_raw.abi == :clear)
+
     self_params  = self_raw.params
     other_params = other_raw.params
     return false unless self_params.length == other_params.length
@@ -5048,7 +5162,7 @@ class Type
     param_keys = sig.params.map { |param| param.type.semantic_type_key }
     params_key = param_keys.join(",")
 
-    "fn(#{params_key})->#{sig.return_type.semantic_type_key};reentrant=#{sig.reentrant}"
+    "fn(#{params_key})->#{sig.return_type.semantic_type_key};reentrant=#{sig.reentrant};abi=#{sig.abi}"
   end
 
   sig { params(str: String).returns(TypeCapabilitySuffix) }
@@ -5202,6 +5316,9 @@ class Type
   # ruby-to-clear: effects reentrant
   def map_zig_type
     val_zig = value_type.nested_zig_type
+    if key_type.projection?
+      return "CheatLib.MapType(#{key_type.zig_type}, #{val_zig})"
+    end
     if striped?
       current_shard_count = T.must(shard_count)
       if numeric_map?
@@ -5233,6 +5350,12 @@ class Type
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
   # ruby-to-clear: effects reentrant
   def compute_zig_type(is_param: false, is_field: false)
+    if projection?
+      protocol = projection_protocol
+      facts = protocol.nil? || protocol == :Map ? "CheatLib.MapFacts" : "__clearProtocolFacts_#{protocol}"
+      return "#{facts}(#{T.must(projection_owner)}).#{T.must(projection_member)}"
+    end
+
     # 0. Handle Tense types:
     #    ~T[N]              -> CheatLib.BoundedStream(T, N)
     #    ~T@shared          -> CheatLib.SharedPromise(T)
@@ -5301,6 +5424,9 @@ class Type
         i += 1
       end
       ret_zig = fn_raw.return_type.zig_type
+      if fn_raw.abi == :c
+        return "*const fn(#{param_types_zig.join(', ')}) callconv(.c) #{ret_zig}"
+      end
       all_params = ["*Runtime"] + param_types_zig
       ret_str = ZigType.new(ret_zig).anyerror_return_type
       return "*const fn(#{all_params.join(', ')}) #{ret_str}"
@@ -5318,6 +5444,15 @@ class Type
     # Byte[N] is the inferred type for string literals; their contents are always const.
     # Strings are already fat pointers (slice = ptr + len); heap vs frame provenance
     # only affects where the backing bytes live, not the Zig type.
+    if c_string?
+      return "[*:0]const u8"
+    end
+    if c_array_view?
+      return "[*]const #{T.must(element_type).nested_zig_type(is_param: true)}"
+    end
+    if target_size?
+      return signed_integer? ? "isize" : "usize"
+    end
     if resolved == :String || string?
       return "[]const u8"
     end

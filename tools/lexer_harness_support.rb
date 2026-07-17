@@ -25,7 +25,7 @@ module LexerHarnessSupport
     {
       'name' => 'function_body',
       'source' => <<~'CLEAR'
-        PUB FN score!(items: Item[]@list) RETURNS !Int64 ->
+        PUB FN score(items: Item[]@list) RETURNS !Int64 ->
           MUTABLE total = 0;
           FOR item IN items DO
             IF item.enabled?() THEN

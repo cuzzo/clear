@@ -30,7 +30,7 @@ RSpec.describe "Bare mutation on @boxed:atomic (M3.10)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
-          FN main!() RETURNS Void ->
+          FN main() RETURNS Void ->
             MUTABLE cfg = Cfg{ port: 8080 } @boxed:atomic;
             cfg.port = 9090;
             RETURN;
@@ -46,7 +46,7 @@ RSpec.describe "Bare mutation on @boxed:atomic (M3.10)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
-          FN main!() RETURNS Void ->
+          FN main() RETURNS Void ->
             MUTABLE cfg = Cfg{ port: 8080 } @boxed:atomic;
             cfg.port += 1;
             RETURN;
@@ -61,7 +61,7 @@ RSpec.describe "Bare mutation on @boxed:atomic (M3.10)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
-          FN main!() RETURNS !Void ->
+          FN main() RETURNS !Void ->
             MUTABLE cfg = Cfg{ port: 8080 } @boxed:atomic;
             WITH SNAPSHOT cfg AS MUTABLE x {
               x.port = 9090;
@@ -76,7 +76,7 @@ RSpec.describe "Bare mutation on @boxed:atomic (M3.10)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
-          FN main!() RETURNS !Void ->
+          FN main() RETURNS !Void ->
             MUTABLE cfg = Cfg{ port: 8080 } @boxed:atomic;
             WITH SNAPSHOT cfg AS MUTABLE x {
               x.port = x.port + 1;
@@ -92,7 +92,7 @@ RSpec.describe "Bare mutation on @boxed:atomic (M3.10)" do
     it "accepts `c += 1` on Int64@shared:atomic (M1 primitive surface)" do
       expect {
         annotate(<<~CLEAR)
-          FN main!() RETURNS !Void ->
+          FN main() RETURNS !Void ->
             MUTABLE c: Int64 = 0 @shared:atomic;
             c += 1;
             RETURN;
@@ -104,7 +104,7 @@ RSpec.describe "Bare mutation on @boxed:atomic (M3.10)" do
     it "accepts `c = 5` on Int64@shared:atomic (atomic store)" do
       expect {
         annotate(<<~CLEAR)
-          FN main!() RETURNS !Void ->
+          FN main() RETURNS !Void ->
             MUTABLE c: Int64 = 0 @shared:atomic;
             c = 5;
             RETURN;
@@ -130,7 +130,7 @@ RSpec.describe "Bare mutation on @boxed:atomic (M3.10)" do
     it "raises on `c *= 2` against an @shared:atomic primitive" do
       expect {
         annotate(<<~CLEAR)
-          FN main!() RETURNS !Void ->
+          FN main() RETURNS !Void ->
             MUTABLE c: Int64 = 1 @shared:atomic;
             c *= 2;
             RETURN;
@@ -142,7 +142,7 @@ RSpec.describe "Bare mutation on @boxed:atomic (M3.10)" do
     it "compiles when the same op runs against an @shared:locked binding inside WITH EXCLUSIVE" do
       annotate(<<~CLEAR)
         STRUCT Counter { v: Int64 }
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
           c = Counter{ v: 1 } @shared:locked;
           WITH EXCLUSIVE c AS x { x.v = x.v * 2; }
           RETURN;

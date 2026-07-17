@@ -4,14 +4,14 @@
 
 STRUCT Counter { value: Int64 }
 
-FN bothPositive!(MUTABLE a: Counter, MUTABLE b: Counter) RETURNS !Bool ->
+FN bothPositive(MUTABLE a: Counter, MUTABLE b: Counter) RETURNS !Bool ->
     WITH EXCLUSIVE a AS x GUARD x.value > 0,
          EXCLUSIVE b AS y GUARD y.value > 0 {
         RETURN TRUE;
     } ON GuardFail RETURN FALSE
 END
 
-FN sumIfPositive!(MUTABLE a: Counter, MUTABLE b: Counter) RETURNS !Int64 ->
+FN sumIfPositive(MUTABLE a: Counter, MUTABLE b: Counter) RETURNS !Int64 ->
     WITH EXCLUSIVE a AS x GUARD x.value > 0,
          EXCLUSIVE b AS y GUARD y.value > 0 {
         s = x.value + y.value;
@@ -19,7 +19,7 @@ FN sumIfPositive!(MUTABLE a: Counter, MUTABLE b: Counter) RETURNS !Int64 ->
     } ON GuardFail RETURN -1_i64
 END
 
-FN bumpBoth!(MUTABLE a: Counter, MUTABLE b: Counter) RETURNS !Void ->
+FN bumpBoth(MUTABLE a: Counter, MUTABLE b: Counter) RETURNS !Void ->
     WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
         x.value = x.value + 1;
         y.value = y.value + 1;
@@ -30,7 +30,7 @@ END
 # Exercises the RETRY(N) THEN <action> path through the fallible
 # sorted-acquire emitter. Under no contention the inner loop succeeds
 # on the first iteration, so the body runs.
-FN bumpWithRetry!(MUTABLE a: Counter, MUTABLE b: Counter) RETURNS !Void ->
+FN bumpWithRetry(MUTABLE a: Counter, MUTABLE b: Counter) RETURNS !Void ->
     WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
         x.value = x.value + 10;
         y.value = y.value + 10;
@@ -43,33 +43,33 @@ FN main() RETURNS !Void ->
     MUTABLE b = Counter{ value: 2 } @shared:locked;
 
     # Both predicates hold: body runs, RETURN TRUE escapes WITH.
-    ok1 = bothPositive!(a, b) OR_ELSE RAISE;
+    ok1 = bothPositive(&a, &b) OR_ELSE RAISE;
     ASSERT ok1 == TRUE, "both-positive: predicates hold";
 
-    s1 = sumIfPositive!(a, b) OR_ELSE RAISE;
+    s1 = sumIfPositive(&a, &b) OR_ELSE RAISE;
     ASSERT s1 == 3, "both-positive: sum returned from inside WITH";
 
-    bumpBoth!(a, b) OR_ELSE RAISE;
-    s2 = sumIfPositive!(a, b) OR_ELSE RAISE;
+    bumpBoth(&a, &b) OR_ELSE RAISE;
+    s2 = sumIfPositive(&a, &b) OR_ELSE RAISE;
     ASSERT s2 == 5, "after bump: 2 + 3";
 
     # Drive one predicate false: ON GuardFail RETURN -1 fires.
     MUTABLE c = Counter{ value: 0 } @shared:locked;
-    s_neg = sumIfPositive!(a, c) OR_ELSE RAISE;
+    s_neg = sumIfPositive(&a, &c) OR_ELSE RAISE;
     ASSERT s_neg == -1_i64, "guard fail: ON-clause RETURN took over";
 
-    ok2 = bothPositive!(a, c) OR_ELSE RAISE;
+    ok2 = bothPositive(&a, &c) OR_ELSE RAISE;
     ASSERT ok2 == FALSE, "guard fail: bothPositive returned FALSE";
 
     # Same locks in reverse argument order also works (sorted-acquire is
     # by mutex address, not by declaration order).
-    s3 = sumIfPositive!(b, a) OR_ELSE RAISE;
+    s3 = sumIfPositive(&b, &a) OR_ELSE RAISE;
     ASSERT s3 == 5, "argument order swapped: still works";
 
     # Exercise the RETRY(N) path. No contention here, so the first
     # iteration of the acquire loop succeeds and the body runs.
-    bumpWithRetry!(a, b) OR_ELSE RAISE;
-    s4 = sumIfPositive!(a, b) OR_ELSE RAISE;
+    bumpWithRetry(&a, &b) OR_ELSE RAISE;
+    s4 = sumIfPositive(&a, &b) OR_ELSE RAISE;
     ASSERT s4 == 25, "after retry-bump: 12 + 13";
 
     RETURN;

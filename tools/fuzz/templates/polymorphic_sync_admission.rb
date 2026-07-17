@@ -90,21 +90,21 @@ def admission_callee_def(callee)
   case callee
   when :concrete
     <<~CHT.chomp
-      FN tick!(MUTABLE c: Counter) RETURNS Void ->
+      FN tick(MUTABLE c: Counter) RETURNS Void ->
           c.value = c.value + 1_i64;
           RETURN;
       END
     CHT
   when :shared_param
     <<~CHT.chomp
-      FN tick!(MUTABLE c: SHARED Counter) RETURNS !Void ->
+      FN tick(MUTABLE c: SHARED Counter) RETURNS !Void ->
           #{body_locked}
           RETURN;
       END
     CHT
   when :req_locked
     <<~CHT.chomp
-      FN tick!(MUTABLE c: Counter) RETURNS !Void
+      FN tick(MUTABLE c: Counter) RETURNS !Void
           REQUIRES c: LOCKED
       ->
           #{body_locked}
@@ -113,7 +113,7 @@ def admission_callee_def(callee)
     CHT
   when :req_versioned
     <<~CHT.chomp
-      FN tick!(MUTABLE c: Counter) RETURNS !Void
+      FN tick(MUTABLE c: Counter) RETURNS !Void
           REQUIRES c: VERSIONED
       ->
           #{body_versioned}
@@ -122,7 +122,7 @@ def admission_callee_def(callee)
     CHT
   when :req_local
     <<~CHT.chomp
-      FN tick!(MUTABLE c: Counter) RETURNS Void
+      FN tick(MUTABLE c: Counter) RETURNS Void
           REQUIRES c: LOCAL
       ->
           #{body_local}
@@ -131,7 +131,7 @@ def admission_callee_def(callee)
     CHT
   when :req_locked_or_local
     <<~CHT.chomp
-      FN tick!(MUTABLE c: Counter) RETURNS Void
+      FN tick(MUTABLE c: Counter) RETURNS Void
           REQUIRES c: LOCKED | LOCAL
       ->
           #{body_match}
@@ -155,7 +155,7 @@ end
 FuzzGenerator.register(:polymorphic_sync_admission, cells: POLYMORPHIC_ADMISSION_CELLS) do |p|
   callee_def = admission_callee_def(p[:callee])
   caller_decl = admission_caller_decl(p[:caller])
-  call = %i[shared_param req_locked req_versioned].include?(p[:callee]) ? "tick!(c) OR_ELSE RAISE" : "tick!(c)"
+  call = %i[shared_param req_locked req_versioned].include?(p[:callee]) ? "tick(&c) OR_ELSE RAISE" : "tick(&c)"
 
   <<~CHT
     STRUCT Counter { value: Int64 }

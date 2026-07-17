@@ -30,19 +30,19 @@ FuzzGenerator.register(:managed_payload_capability_matrix, cells: MPC_CELLS) do 
           END
     CLEAR
   when :list_append
-    "MUTABLE items: Managed#{cap}[]@list = []; items.append(Managed{ text: COPY \"append\" } #{cap}); ASSERT items[0]?.text == \"append\";"
+    "MUTABLE items: Managed#{cap}[]@list = []; &items.append(Managed{ text: COPY \"append\" } #{cap}); ASSERT items[0]?.text == \"append\";"
   when :list_overwrite
     "MUTABLE items: Managed#{cap}[]@list = [Managed{ text: COPY \"old\" } #{cap}]; items[0] = Managed{ text: COPY \"new\" } #{cap}; ASSERT items[0]?.text == \"new\";"
   when :list_copy
-    "MUTABLE items: Managed#{cap}[]@list = [Managed{ text: COPY \"copy\" } #{cap}]; copied = COPY items; items.clear(); ASSERT copied[0]?.text == \"copy\";"
+    "MUTABLE items: Managed#{cap}[]@list = [Managed{ text: COPY \"copy\" } #{cap}]; copied = COPY items; &items.clear(); ASSERT copied[0]?.text == \"copy\";"
   when :map_put
     "MUTABLE items: HashMap<Managed#{cap}> = {}; items[\"k\"] = Managed{ text: COPY \"put\" } #{cap}; ASSERT items[\"k\"]?.text == \"put\";"
   when :map_overwrite
     "MUTABLE items: HashMap<Managed#{cap}> = {}; items[\"k\"] = Managed{ text: COPY \"old\" } #{cap}; items[\"k\"] = Managed{ text: COPY \"new\" } #{cap}; ASSERT items[\"k\"]?.text == \"new\";"
   when :map_values
-    "MUTABLE items: HashMap<Managed#{cap}> = {}; items[\"k\"] = Managed{ text: COPY \"values\" } #{cap}; values = items.values(); items.delete(\"k\"); ASSERT values[0]?.text == \"values\";"
+    "MUTABLE items: HashMap<Managed#{cap}> = {}; items[\"k\"] = Managed{ text: COPY \"values\" } #{cap}; values = items.values(); &items.delete(\"k\"); ASSERT values[0]?.text == \"values\";"
   when :map_copy
-    "MUTABLE items: HashMap<Managed#{cap}> = {}; items[\"k\"] = Managed{ text: COPY \"mapcopy\" } #{cap}; copied = COPY items; items.delete(\"k\"); ASSERT copied[\"k\"]?.text == \"mapcopy\";"
+    "MUTABLE items: HashMap<Managed#{cap}> = {}; items[\"k\"] = Managed{ text: COPY \"mapcopy\" } #{cap}; copied = COPY items; &items.delete(\"k\"); ASSERT copied[\"k\"]?.text == \"mapcopy\";"
   end
 
   <<~CLEAR

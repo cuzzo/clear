@@ -148,7 +148,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT User { name: String }
             FN f() RETURNS !Void ->
               MUTABLE pool: [Pool(100)]User = [];
-              id: Id<User> = pool.insert(User{ name: "alice" });
+              id: Id<User> = &pool.insert(User{ name: "alice" });
               RETURN;
             END
           CLEAR
@@ -160,7 +160,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT User { name: String }
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]User = [];
-            id: Id<User> = pool.insert(User{ name: "alice" });
+            id: Id<User> = &pool.insert(User{ name: "alice" });
             RETURN;
           END
         CLEAR
@@ -185,7 +185,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT User { name: String }
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]User = [];
-            id = pool.insert(User{ name: "bob" });
+            id = &pool.insert(User{ name: "bob" });
             RETURN;
           END
         CLEAR
@@ -199,7 +199,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT User { name: String }
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]User = [];
-            id = pool.insert(User{ name: "bob" });
+            id = &pool.insert(User{ name: "bob" });
             RETURN;
           END
         CLEAR
@@ -243,7 +243,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT User { name: String }
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]User = [];
-            id = pool.insert(User{ name: "alice" });
+            id = &pool.insert(User{ name: "alice" });
             result = pool.get(id);
             RETURN;
           END
@@ -258,7 +258,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT User { name: String }
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]User = [];
-            id = pool.insert(User{ name: "alice" });
+            id = &pool.insert(User{ name: "alice" });
             result = pool.get(id);
             RETURN;
           END
@@ -290,8 +290,8 @@ RSpec.describe SemanticAnnotator do
           STRUCT User { name: String }
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]User = [];
-            id = pool.insert(User{ name: "alice" });
-            pool.remove(id);
+            id = &pool.insert(User{ name: "alice" });
+            &pool.remove(id);
             RETURN;
           END
         CLEAR
@@ -305,8 +305,8 @@ RSpec.describe SemanticAnnotator do
           STRUCT User { name: String }
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]User = [];
-            id = pool.insert(User{ name: "alice" });
-            pool.remove(id);
+            id = &pool.insert(User{ name: "alice" });
+            &pool.remove(id);
             RETURN;
           END
         CLEAR
@@ -354,9 +354,9 @@ RSpec.describe SemanticAnnotator do
           STRUCT User { name: String }
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]User = [];
-            id = pool.insert(User{ name: "alice" });
+            id = &pool.insert(User{ name: "alice" });
             result = pool.get(id);
-            pool.remove(id);
+            &pool.remove(id);
             RETURN;
           END
         CLEAR
@@ -371,13 +371,13 @@ RSpec.describe SemanticAnnotator do
       it "passes @pool parameter as pointer (&pool) not by value (.items)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Item { val: Int64 }
-          FN setup!(MUTABLE pool: [Pool(100)]Item) RETURNS !Void ->
-            pool.insert(Item{ val: 1 });
+          FN setup(MUTABLE pool: [Pool(100)]Item) RETURNS !Void ->
+            &pool.insert(Item{ val: 1 });
             RETURN;
           END
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]Item = [];
-            setup!(pool);
+            setup(&pool);
             RETURN;
           END
         CLEAR
@@ -447,7 +447,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               MUTABLE s: [Set]String = [];
-              s.insert("a");
+              &s.insert("a");
               n: Int64 = s.length();
               RETURN;
             END
@@ -459,7 +459,7 @@ RSpec.describe SemanticAnnotator do
         out = compile(<<~CLEAR)
           FN main() RETURNS Void ->
             MUTABLE s: [Set]String = [];
-            s.insert("hi");
+            &s.insert("hi");
             n: Int64 = s.length();
             RETURN;
           END
@@ -501,7 +501,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               MUTABLE list: []Int64 = List[];
-              list.append(1);
+              &list.append(1);
               found: Bool = contains?(list, 1);
               RETURN;
             END
@@ -544,7 +544,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT Item { v: Int64 }
             FN f() RETURNS !Void ->
               MUTABLE pool: [Pool(10)]Item = [];
-              id = pool.insert(Item{ v: 1 });
+              id = &pool.insert(Item{ v: 1 });
               found: Bool = pool.contains?(id);
               RETURN;
             END
@@ -557,7 +557,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Item { v: Int64 }
           FN main() RETURNS Void ->
             MUTABLE pool: [Pool(10)]Item = [];
-            id = pool.insert(Item{ v: 1 });
+            id = &pool.insert(Item{ v: 1 });
             found: Bool = pool.contains?(id);
             RETURN;
           END
@@ -575,8 +575,8 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               MUTABLE s: [Set]String = [];
-              s.insert("a");
-              s.insert("b");
+              &s.insert("a");
+              &s.insert("b");
               FOR item IN s DO
                 RETURN;
               END
@@ -589,7 +589,7 @@ RSpec.describe SemanticAnnotator do
         out = compile(<<~CLEAR)
           FN main() RETURNS Void ->
             MUTABLE s: [Set]String = [];
-            s.insert("hi");
+            &s.insert("hi");
             FOR item IN s DO
               RETURN;
             END
@@ -609,7 +609,7 @@ RSpec.describe SemanticAnnotator do
         ast = run(<<~CLEAR)
           FN f() RETURNS !Void ->
             MUTABLE s: [Set]Int64 = [];
-            s.insert(1);
+            &s.insert(1);
             val = s[1];
             RETURN;
           END
@@ -663,7 +663,7 @@ RSpec.describe SemanticAnnotator do
               ks = m.keys();
               MUTABLE typed_keys: []String = [];
               FOR ki IN (0_i64 ..< ks.length()) DO
-                  typed_keys.append(COPY ks[ki]);
+                  &typed_keys.append(COPY ks[ki]);
               END
               ASSERT typed_keys.length() == 2_i64;
               RETURN;

@@ -3,7 +3,7 @@ FN main() RETURNS Void ->
     MUTABLE values: []Float64 = [];
     MUTABLE current: Float64 = 0.0;
     FOR i IN (0_i64 ..< 5000_i64) DO
-        values.append(current);
+        &values.append(current);
         current = current + 1.5;
     END
     FOR j IN (0_i64 ..< values.length()) DO

@@ -392,7 +392,12 @@ module Annotator
         end
 
         value = T.must(raw_value)
-        value.coerced_type = expected if value.is_a?(AST::ListLit) && expected.tuple?
+        return_payload = expected.plain_return_payload_type || expected
+        if value.is_a?(AST::ListLit) && (return_payload.collection? || return_payload.tuple?)
+          value.coerced_type = return_payload
+        elsif value.is_a?(AST::HashLit) && return_payload.map?
+          value.coerced_type = return_payload
+        end
         visit(value)
 
         # Inline BG return: `RETURN BG { ... }`, plus composite returns such
@@ -420,7 +425,10 @@ module Annotator
           elsif value.is_a?(AST::GetField) && value.target.respond_to?(:symbol) && value.target.symbol&.non_escaping
             error!(node, :RETURN_FIELD_FROM_WITH_SCOPED)
           elsif value.is_a?(AST::GetIndex) && value.target.respond_to?(:symbol) && value.target.symbol&.non_escaping
-            error!(node, :RETURN_INDEX_FROM_WITH_SCOPED)
+            returned_type = value.full_type!(context: "WITH-scoped indexed return")
+            unless returned_type.implicitly_copyable? { |type| lookup_type_schema(type) }
+              error!(node, :RETURN_INDEX_FROM_WITH_SCOPED)
+            end
           end
         end
         promote_to_expr_if!(node, value) if value.is_a?(AST::IfStatement)

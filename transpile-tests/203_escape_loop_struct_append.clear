@@ -8,7 +8,7 @@ STRUCT Entry { id: Int64, name: String }
 FN main() RETURNS Void ->
     MUTABLE entries: []Entry = [];
     FOR i IN (1_i64 ..= 4) DO
-        entries.append(Entry{ id: i, name: "item-" $+ i.toString() });
+        &entries.append(Entry{ id: i, name: "item-" $+ i.toString() });
     END
     ASSERT entries.length() == 4;
     ASSERT entries[0]?.name == "item-1";

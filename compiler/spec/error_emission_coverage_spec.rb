@@ -879,11 +879,11 @@ RSpec.describe "error emission coverage" do
     it "raises when a RESTRICTed binding is passed to a MUTABLE param" do
       expect {
         run(<<~CLEAR)
-          FN inc!(MUTABLE x: Int64) -> x += 1; END
+          FN inc(MUTABLE x: Int64) -> x += 1; END
           FN main() RETURNS Void ->
             MUTABLE n: Int64 = 5;
             WITH RESTRICT n {
-              inc!(n);
+              inc(n);
             }
           END
         CLEAR
@@ -892,10 +892,10 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when the call is outside the RESTRICT block" do
       run(<<~CLEAR)
-        FN inc!(MUTABLE x: Int64) -> x += 1; END
+        FN inc(MUTABLE x: Int64) -> x += 1; END
         FN main() RETURNS Void ->
           MUTABLE n: Int64 = 5;
-          inc!(n);
+          inc(&n);
         END
       CLEAR
     end
@@ -1089,13 +1089,13 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when the parameter is declared MUTABLE" do
       run(<<~CLEAR)
-        FN bump!(MUTABLE p: Int64) RETURNS Int64 ->
+        FN bump(MUTABLE p: Int64) RETURNS Int64 ->
             p = p + 1;
             RETURN p;
         END
         FN main() RETURNS Void ->
             MUTABLE n: Int64 = 0_i64;
-            n = bump!(n);
+            n = bump(&n);
         END
       CLEAR
     end
@@ -1164,10 +1164,10 @@ RSpec.describe "error emission coverage" do
     it "raises when an immutable variable is passed to a MUTABLE parameter" do
       expect {
         run(<<~CLEAR)
-          FN bump!(MUTABLE x: Int64) RETURNS Void -> x = x + 1; END
+          FN bump(MUTABLE x: Int64) RETURNS Void -> x = x + 1; END
           FN main() RETURNS Void ->
               y = 5;
-              bump!(y);
+              bump(&y);
           END
         CLEAR
       }.to raise_error(CompilerError, /Argument 1.*MUTABLE.*passed immutable variable 'y'/)
@@ -1175,38 +1175,10 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when the caller's variable is also MUTABLE" do
       run(<<~CLEAR)
-        FN bump!(MUTABLE x: Int64) RETURNS Void -> x = x + 1; END
+        FN bump(MUTABLE x: Int64) RETURNS Void -> x = x + 1; END
         FN main() RETURNS Void ->
             MUTABLE y = 5;
-            bump!(y);
-        END
-      CLEAR
-    end
-  end
-
-  # @example_for: IMMUTABLE_ARG_PASSED_AS_EXPRESSION
-  # @fix: A `MUTABLE x: T` parameter takes a *binding* whose location
-  # @fix: the callee will write through. Literals and expressions
-  # @fix: have no location — bind the value to a MUTABLE variable
-  # @fix: first, then pass the variable.
-  describe ":IMMUTABLE_ARG_PASSED_AS_EXPRESSION — passing literal to MUTABLE param" do
-    it "raises when a literal is passed to a MUTABLE parameter" do
-      expect {
-        run(<<~CLEAR)
-          FN bump!(MUTABLE x: Int64) RETURNS Void -> x = x + 1; END
-          FN main() RETURNS Void ->
-              bump!(5);
-          END
-        CLEAR
-      }.to raise_error(CompilerError, /Argument 1.*MUTABLE.*pass a Mutable Variable/)
-    end
-
-    it "compiles when the value is bound to a MUTABLE variable" do
-      run(<<~CLEAR)
-        FN bump!(MUTABLE x: Int64) RETURNS Void -> x = x + 1; END
-        FN main() RETURNS Void ->
-            MUTABLE n = 5;
-            bump!(n);
+            bump(&y);
         END
       CLEAR
     end
@@ -1303,9 +1275,9 @@ RSpec.describe "error emission coverage" do
           FN main() RETURNS Void ->
               msg = Value.Nil;
               MUTABLE items: []Int64 = [];
-              items.append(1_i64);
-              items.append(2_i64);
-              WHILE items.pop() EXISTS AS i DO
+              &items.append(1_i64);
+              &items.append(2_i64);
+              WHILE &items.pop() EXISTS AS i DO
                   consume(msg);
               END
           END
@@ -1320,9 +1292,9 @@ RSpec.describe "error emission coverage" do
         FN main() RETURNS Void ->
             msg = Value.Nil;
             MUTABLE items: []Int64 = [];
-            items.append(1_i64);
-            items.append(2_i64);
-            WHILE items.pop() EXISTS AS i DO
+            &items.append(1_i64);
+            &items.append(2_i64);
+            WHILE &items.pop() EXISTS AS i DO
                 inspect(msg, i);
             END
         END
@@ -1437,11 +1409,11 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         UNION Value { Nil, Str: String }
         STRUCT Pair { a: Value, b: Value }
-        FN f!(TAKES v: Value) RETURNS !Void ->
+        FN f(TAKES v: Value) RETURNS !Void ->
             p = Pair{a: v, b: Value.Nil};
             RETURN;
         END
-        FN main() RETURNS Void -> f!(Value.Nil) OR_ELSE PASS; END
+        FN main() RETURNS Void -> f(Value.Nil) OR_ELSE PASS; END
       CLEAR
     end
   end
@@ -1568,11 +1540,11 @@ RSpec.describe "error emission coverage" do
     it "compiles when the parameter is declared TAKES" do
       run(<<~CLEAR)
         UNION Value { Nil, Lambda { body: Value @boxed } }
-        FN store!(TAKES v: Value) RETURNS !Void ->
+        FN store(TAKES v: Value) RETURNS !Void ->
             keep = v;
             RETURN;
         END
-        FN main() RETURNS Void -> store!(Value.Nil) OR_ELSE PASS; END
+        FN main() RETURNS Void -> store(Value.Nil) OR_ELSE PASS; END
       CLEAR
     end
   end
@@ -1592,7 +1564,7 @@ RSpec.describe "error emission coverage" do
           FN consume(TAKES v: Value) RETURNS Void -> END
           FN main() RETURNS Void ->
               MUTABLE list: []Value = [];
-              list.append(Value.Nil);
+              &list.append(Value.Nil);
             IF list[0_i64] EXISTS AS value THEN consume(value); END
           END
         CLEAR
@@ -1605,7 +1577,7 @@ RSpec.describe "error emission coverage" do
         FN inspect(v: Value) RETURNS Void -> END
         FN main() RETURNS Void ->
             MUTABLE list: []Value = [];
-            list.append(Value.Nil);
+            &list.append(Value.Nil);
             IF list[0_i64] EXISTS AS value THEN inspect(value); END
         END
       CLEAR
@@ -1760,63 +1732,22 @@ RSpec.describe "error emission coverage" do
   # primitives are pass-by-value), but the visitor isn't wired yet.
   # ============================================================
 
-  # @example_for: STYLE_MUTABLE_PARAM_NEEDS_BANG
-  # @fix: A function that has any `MUTABLE x: T` parameter mutates
-  # @fix: the caller's binding through that parameter — a kind of
-  # @fix: side effect. CLEAR's convention is that mutating functions
-  # @fix: end in `!` so the call site signals the side effect.
-  # @fix: Append `!` to the function name (and update every call
-  # @fix: site to match).
-  describe ":STYLE_MUTABLE_PARAM_NEEDS_BANG — MUTABLE-param fn missing trailing !" do
-    it "raises when a function with a MUTABLE param has no `!` in its name" do
-      expect {
-        run(<<~CLEAR)
-          FN bump(MUTABLE x: Int64) RETURNS Void -> x = x + 1; END
-          FN main() RETURNS Void -> END
-        CLEAR
-      }.to raise_error(CompilerError, /Style Error: Function 'bump' has MUTABLE parameters/)
-    end
-
-    it "compiles when the function name ends in !" do
-      run(<<~CLEAR)
-        FN bump!(MUTABLE x: Int64) RETURNS Void -> x = x + 1; END
-        FN main() RETURNS Void -> END
-      CLEAR
-    end
-  end
-
   # @example_for: WHILE_AS_IMMUTABLE_RECEIVER
-  # @fix: `WHILE expr EXISTS AS x DO ...` re-evaluates `expr` every
-  # @fix: iteration. If `expr` is `recv.method()` and `recv` is
-  # @fix: immutable, `method` returns the same value every time and
-  # @fix: the loop runs forever. Declare the receiver `MUTABLE` (so
-  # @fix: methods like `pop()` can advance state) — or use a
-  # @fix: regular `WHILE cond DO` with explicit termination.
-  describe ":WHILE_AS_IMMUTABLE_RECEIVER — `WHILE recv.method() EXISTS AS x` on immutable recv" do
-    it "raises when the bind-loop calls `pop()` on an immutable list" do
-      expect {
-        run(<<~CLEAR)
-          FN main() RETURNS !Void ->
-              items: []Int64 = [];
-              WHILE items.pop() EXISTS AS v DO
-                  _ = v;
-              END
-          END
-        CLEAR
-      }.to raise_error(CompilerError, /WHILE.*'pop'.*on immutable 'items'/)
-    end
-
-    it "compiles when the receiver is MUTABLE" do
+  # @fix: A read-only method over immutable state returns the same optional on
+  # @fix: every iteration. Mutating methods are checked by the ordinary
+  # @fix: MUTABLE/& call contract; use mutable advancing state or a Boolean
+  # @fix: WHILE condition instead.
+  it ":WHILE_AS_IMMUTABLE_RECEIVER rejects a stateless optional condition" do
+    expect {
       run(<<~CLEAR)
-        FN main() RETURNS !Void ->
-            MUTABLE items: []Int64 = [];
-            items.append(1_i64);
-            WHILE items.pop() EXISTS AS v DO
-                print(v);
-            END
+        FN main() RETURNS Void ->
+          text = "a,b";
+          WHILE text.indexOf(",") EXISTS AS position DO
+            _ = position;
+          END
         END
       CLEAR
-    end
+    }.to raise_error(CompilerError, /cannot advance|loop forever/)
   end
 
   # @example_for: PROMISE_NOT_CONSUMED
@@ -1859,14 +1790,14 @@ RSpec.describe "error emission coverage" do
     it "raises when the same MUTABLE variable is passed to two MUTABLE params" do
       expect {
         run(<<~CLEAR)
-          FN swap!(MUTABLE a: Int64, MUTABLE b: Int64) RETURNS Void ->
+          FN swap(MUTABLE a: Int64, MUTABLE b: Int64) RETURNS Void ->
               tmp = a;
               a = b;
               b = tmp;
           END
           FN main() RETURNS Void ->
               MUTABLE x = 1;
-              swap!(x, x);
+              swap(&x, &x);
           END
         CLEAR
       }.to raise_error(CompilerError, /Aliasing Error.*Argument 2 \('x'\) conflicts with argument 1/)
@@ -1874,7 +1805,7 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when the two arguments are distinct bindings" do
       run(<<~CLEAR)
-        FN swap!(MUTABLE a: Int64, MUTABLE b: Int64) RETURNS Void ->
+        FN swap(MUTABLE a: Int64, MUTABLE b: Int64) RETURNS Void ->
             tmp = a;
             a = b;
             b = tmp;
@@ -1882,7 +1813,7 @@ RSpec.describe "error emission coverage" do
         FN main() RETURNS Void ->
             MUTABLE x = 1;
             MUTABLE y = 2;
-            swap!(x, y);
+            swap(&x, &y);
         END
       CLEAR
     end
@@ -2240,11 +2171,11 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when at least the required arg is passed" do
       run(<<~CLEAR)
-        FN greet!(name: String, greeting="Hello": String) RETURNS !String ->
+        FN greet(name: String, greeting="Hello": String) RETURNS !String ->
             RETURN greeting $+ ", " $+ name;
         END
         FN main() RETURNS Void ->
-            s = greet!("Alice") OR_ELSE "Hi";
+            s = greet("Alice") OR_ELSE "Hi";
             print(s);
         END
       CLEAR
@@ -2364,7 +2295,7 @@ RSpec.describe "error emission coverage" do
         STRUCT Item { v: Int64 }
         FN main() RETURNS Void ->
             MUTABLE pool: [Pool(100)]Item = [];
-            id = pool.insert(Item{v: 1});
+            id = &pool.insert(Item{v: 1});
             IF pool[id] EXISTS AS got THEN
                 print(got.v.toString());
             END
@@ -2741,8 +2672,8 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         FN main() RETURNS !Void ->
             MUTABLE items: []Int64 = [];
-            items.append(1_i64);
-            WHILE items.pop() EXISTS AS v DO
+            &items.append(1_i64);
+            WHILE &items.pop() EXISTS AS v DO
                 print(v.toString());
             END
             RETURN;
@@ -4607,11 +4538,11 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when supplying a literal default for a primitive param" do
       run(<<~CLEAR)
-        FN takes!(n=42_i64: Int64) RETURNS !Void ->
+        FN takes(n=42_i64: Int64) RETURNS !Void ->
             print(n.toString());
             RETURN;
         END
-        FN main() RETURNS Void -> takes!() OR_ELSE PASS; END
+        FN main() RETURNS Void -> takes() OR_ELSE PASS; END
       CLEAR
     end
   end
@@ -4658,11 +4589,11 @@ RSpec.describe "error emission coverage" do
 
     it "compiles when the default's type matches the param type" do
       run(<<~CLEAR)
-        FN takes!(n=42_i64: Int64) RETURNS !Void ->
+        FN takes(n=42_i64: Int64) RETURNS !Void ->
             print(n.toString());
             RETURN;
         END
-        FN main() RETURNS Void -> takes!() OR_ELSE PASS; END
+        FN main() RETURNS Void -> takes() OR_ELSE PASS; END
       CLEAR
     end
   end
@@ -4928,10 +4859,10 @@ RSpec.describe "error emission coverage" do
     it "raises when a plain Int64 is passed to an `Int64@atomic` MUTABLE param" do
       expect {
         run(<<~CLEAR)
-          FN incrAtomic!(MUTABLE c: Int64@atomic) RETURNS Void -> END
+          FN incrAtomic(MUTABLE c: Int64@atomic) RETURNS Void -> END
           FN main() RETURNS Void ->
               MUTABLE n: Int64 = 5_i64;
-              incrAtomic!(n);
+              incrAtomic(&n);
           END
         CLEAR
       }.to raise_error(CompilerError, /expects an @atomic Int64 cell/)

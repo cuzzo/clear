@@ -29,7 +29,7 @@ FN main() RETURNS Void ->
   MUTABLE futures: ~Int64[]@list = [];
   FOR i IN (0 ..< 64) DO
     subscriber_msgs: ~?Msg[]@split = CLONE msgs;
-    futures
+    &futures
       .append(
         BG {
           @parallel ->

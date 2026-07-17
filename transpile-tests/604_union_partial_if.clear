@@ -1,0 +1,26 @@
+# Runtime IS_A is the concise, single-variant form of PARTIAL MATCH. The
+# payload alias exists only in the true branch, and a false tag check must not
+# extract the payload.
+UNION Value { Empty, Number: Float64, Text: String }
+
+FN main() RETURNS Void ->
+  number: Value = Value{ Number: 42.5 };
+  MUTABLE observed = 0.0;
+  IF number IS_A Number AS n -> observed = n;
+  ASSERT observed == 42.5, "payload-type shorthand binds the active payload";
+
+  explicit: Value = Value{ Number: 7.0 };
+  IF explicit IS_A Value.Number AS n THEN
+    ASSERT n == 7.0, "qualified variant binding";
+  ELSE
+    ASSERT FALSE, "qualified active variant must match";
+  END
+
+  text: Value = Value{ Text: "not a number" };
+  MUTABLE false_branch_ran = FALSE;
+  IF text IS_A Number AS n -> false_branch_ran = TRUE;
+  ASSERT !false_branch_ran, "inactive variant must not bind or enter the branch";
+
+  empty: Value = Value.Empty;
+  ASSERT empty IS_A Value.Empty, "unit variants support unbound tag checks";
+END

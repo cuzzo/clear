@@ -130,14 +130,14 @@ RSpec.describe "Annotator validation for @boxed:atomic (AtomicPtr M3.4)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Config { host: String, port: Int64 }
-          FN bumpPort!(MUTABLE c: Config) RETURNS Void
+          FN bumpPort(MUTABLE c: Config) RETURNS Void
             REQUIRES c: ATOMIC
           ->
             RETURN;
           END
           FN main() RETURNS Void ->
             MUTABLE cfg = Config{ host: "x", port: 80 } @boxed:atomic;
-            bumpPort!(cfg);
+            bumpPort(&cfg);
             RETURN;
           END
         CLEAR
@@ -148,7 +148,7 @@ RSpec.describe "Annotator validation for @boxed:atomic (AtomicPtr M3.4)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Config { host: String, port: Int64 }
-          FN bumpPort!(MUTABLE c: Config) RETURNS Void
+          FN bumpPort(MUTABLE c: Config) RETURNS Void
             REQUIRES c: ATOMIC | LOCKED
           ->
             WITH c AS x MATCH
@@ -159,7 +159,7 @@ RSpec.describe "Annotator validation for @boxed:atomic (AtomicPtr M3.4)" do
           END
           FN main() RETURNS Void ->
             MUTABLE cfg = Config{ host: "x", port: 80 } @boxed:atomic;
-            bumpPort!(cfg);
+            bumpPort(&cfg);
             RETURN;
           END
         CLEAR

@@ -55,15 +55,15 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
   it ":bt reports the active frame plus the caller chain" do
     Dir.mktmpdir do |dir|
       src = <<~CHT
-        FN add!(a: Int64, b: Int64) RETURNS !Int64 ->
+        FN add(a: Int64, b: Int64) RETURNS !Int64 ->
             sum: Int64 = a + b;
             RETURN sum;
         END
 
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
             x = 10_i64;
             y = 20_i64;
-            z = add!(x, y);
+            z = add(x, y);
             print(z.toString());
             RETURN;
         END
@@ -80,13 +80,13 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
   it ":fin runs until the current frame returns" do
     Dir.mktmpdir do |dir|
       src = <<~CHT
-        FN add!(a: Int64, b: Int64) RETURNS !Int64 ->
+        FN add(a: Int64, b: Int64) RETURNS !Int64 ->
             sum: Int64 = a + b;
             RETURN sum;
         END
 
-        FN main!() RETURNS !Void ->
-            z = add!(10_i64, 20_i64);
+        FN main() RETURNS !Void ->
+            z = add(10_i64, 20_i64);
             print(z.toString());
             RETURN;
         END
@@ -105,13 +105,13 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
   it ":n steps over a function call without pausing inside the callee" do
     Dir.mktmpdir do |dir|
       src = <<~CHT
-        FN add!(a: Int64, b: Int64) RETURNS !Int64 ->
+        FN add(a: Int64, b: Int64) RETURNS !Int64 ->
             sum: Int64 = a + b;
             RETURN sum;
         END
 
-        FN main!() RETURNS !Void ->
-            z = add!(10_i64, 20_i64);
+        FN main() RETURNS !Void ->
+            z = add(10_i64, 20_i64);
             print(z.toString());
             RETURN;
         END
@@ -175,15 +175,15 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
   it ":up / :down move the inspection cursor across frames" do
     Dir.mktmpdir do |dir|
       src = <<~CHT
-        FN add!(a: Int64, b: Int64) RETURNS !Int64 ->
+        FN add(a: Int64, b: Int64) RETURNS !Int64 ->
             sum: Int64 = a + b;
             RETURN sum;
         END
 
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
             x: Int64 = 10_i64;
             y: Int64 = 20_i64;
-            z = add!(x, y);
+            z = add(x, y);
             print(z.toString());
             RETURN;
         END
@@ -208,19 +208,19 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
   it ":frame N jumps to a frame by index" do
     Dir.mktmpdir do |dir|
       src = <<~CHT
-        FN inner!(v: Int64) RETURNS !Int64 ->
+        FN inner(v: Int64) RETURNS !Int64 ->
             r: Int64 = v + 1_i64;
             RETURN r;
         END
 
-        FN outer!(n: Int64) RETURNS !Int64 ->
+        FN outer(n: Int64) RETURNS !Int64 ->
             m: Int64 = n + 1_i64;
-            RETURN inner!(m);
+            RETURN inner(m);
         END
 
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
             top: Int64 = 5_i64;
-            result = outer!(top);
+            result = outer(top);
             print(result.toString());
             RETURN;
         END
@@ -243,7 +243,7 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
   it ":l / :bt / trap message include source columns when available" do
     Dir.mktmpdir do |dir|
       src = <<~CHT
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
             x: Int64 = 10_i64;
             y: Int64 = 20_i64;
             print(x.toString());
@@ -266,7 +266,7 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
   it ":info / :p NAME show the binding's CLEAR type alongside the value" do
     Dir.mktmpdir do |dir|
       src = <<~CHT
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
             x: Int64 = 42_i64;
             name: String = "alice";
             print(x.toString());
@@ -291,7 +291,7 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
   it ":rs / :fs scrub through the recorded trace" do
     Dir.mktmpdir do |dir|
       src = <<~CHT
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
             x: Int64 = 1_i64;
             y: Int64 = 2_i64;
             z: Int64 = 3_i64;

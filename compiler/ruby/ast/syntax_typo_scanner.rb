@@ -100,6 +100,12 @@ module SyntaxTypoScanner
       # char to be a non-identifier so we don't flag `selectors>` or
       # similar valid identifiers.
       matched = T.let(false, T::Boolean)
+      if source[i] == '!' && legacy_mutation_suffix?(source, i)
+        emit_legacy_mutation_suffix_finding!(line, col)
+        i += 1
+        col += 1
+        next
+      end
       RULES.each do |r|
         pat = r.match
         next unless source[i, pat.length] == pat
@@ -116,6 +122,40 @@ module SyntaxTypoScanner
 
       i, line, col = T.unsafe(advance(source, i, line, col))
     end
+  end
+
+  # The retired mutation convention attached `!` to an identifier. This is
+  # deliberately lexical and language-agnostic within CLEAR source: a bang is
+  # a legacy suffix iff an identifier character precedes it and it is not the
+  # first half of != or !!. Strings and comments have already been skipped by
+  # the scanner state machine above.
+  sig { params(source: String, index: Integer).returns(T::Boolean) }
+  def self.legacy_mutation_suffix?(source, index)
+    return false if index.zero?
+    return false unless source[index - 1] =~ /[A-Za-z0-9_]/
+
+    following = source[index + 1]
+    following != '=' && following != '!'
+  end
+
+  sig { params(line: Integer, col: Integer).void }
+  def self.emit_legacy_mutation_suffix_finding!(line, col)
+    fix = Fix.new(
+      description: DiagnosticRegistry.fix_description(:REMOVE_MUTATION_NAME_SUFFIX),
+      confidence: :auto,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: line, col: col, length: 1),
+        replacement: ''
+      )]
+    )
+    anchor = Struct.new(:line, :column).new(line, col)
+    FixCollector.push(FixableFinding.new(
+      level: :error,
+      message: T.must(DiagnosticRegistry.format(:LEGACY_MUTATION_NAME_SUFFIX)),
+      token: anchor,
+      category: :mutability,
+      fixes: [fix]
+    ))
   end
 
   sig { params(source: String, i: Integer, line: Integer, col: Integer).returns(T::Array[Integer]) }

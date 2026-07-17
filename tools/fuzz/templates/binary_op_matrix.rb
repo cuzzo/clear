@@ -4,12 +4,14 @@
 # The cell set is the dispatch's OWN discriminant set read from the
 # source: the string-compare `case node.op` has arms
 # {EQ,NEQ,LT,LTE,GT,GTE}; POW (**), DIV, MOD, wrapping/checked integer
-# arithmetic, concat (+), OR_ELSE (OR_ELSE) are the other op branches. Every
+# arithmetic, integer bitwise/shift operations, concat (+), and OR_ELSE
+# (OR_ELSE) are the other op branches. Every
 # comparison arm x every operand type is emitted -- exhaustive by construction,
 # not a guessed axis.
 #
 # Surface syntax confirmed from lexer/transpile-tests:
-#   == != < <= > >=  ;  **=POW  ;  MOD  ;  + (concat)  ;  OR_ELSE (rescue).
+#   == != < <= > >=  ;  **=POW  ;  MOD  ;  XOR BIT_AND BIT_OR << >> ;
+#   + (concat)  ;  OR_ELSE (rescue).
 # The symbol-path `case node.op {EQ,NEQ}` is EXCLUDED: CLEAR has no
 # surface symbol literal (only a union *variant* named Symbol), so
 # those 2 arms are not source-reachable -> accept/invariant_guarded,
@@ -39,6 +41,9 @@ BOM_CELLS << { op: :concat, type: :heap_str }
 BOM_CELLS << { op: :or_fallback, type: :heap_str }
 BOM_CELLS << { op: :logical_and, type: :bool }
 BOM_CELLS << { op: :logical_or, type: :bool }
+%i[xor bit_and bit_or shift_left shift_right].each do |op|
+  BOM_CELLS << { op: op, type: :int }
+end
 %i[error nil value].each do |outcome|
   BOM_CELLS << { op: :or_nested_fallback, type: outcome }
   BOM_CELLS << { op: :or_nested_managed, type: outcome }
@@ -86,6 +91,11 @@ def bom_body(op, t)
     "    ASSERT !(FALSE AND explode()), \"AND short circuit\";"
   when :logical_or
     "    ASSERT TRUE OR explode(), \"OR short circuit\";"
+  when :xor then "    ASSERT (10_i64 XOR 3_i64) == 9_i64, \"xor\";"
+  when :bit_and then "    ASSERT (10_i64 BIT_AND 3_i64) == 2_i64, \"bit and\";"
+  when :bit_or then "    ASSERT (10_i64 BIT_OR 3_i64) == 11_i64, \"bit or\";"
+  when :shift_left then "    amount: Int64 = 3_i64;\n    ASSERT (1_i64 << amount) == 8_i64, \"shift left\";"
+  when :shift_right then "    amount: Int64 = 2_i64;\n    ASSERT (8_i64 >> amount) == 2_i64, \"shift right\";"
   when :or_nested_fallback
     mode = { error: 0, nil: 1, value: 2 }.fetch(t)
     expected = { error: 5, nil: 5, value: 11 }.fetch(t)

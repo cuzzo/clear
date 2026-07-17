@@ -635,7 +635,12 @@ module MIRLoweringExpressions
   sig { params(plan: BinaryOperationPlan).returns(MIR::BinOp) }
   def emit_standard_binary_plan(plan)
     facts = plan.facts
-    MIR::BinOp.new(T.must(plan.op_str), facts.left, facts.right)
+    right = if facts.op == :SHL || facts.op == :SHR
+      MIR::Cast.new(facts.right, nil, :intCast)
+    else
+      facts.right
+    end
+    MIR::BinOp.new(T.must(plan.op_str), facts.left, right)
   end
 
   sig { params(facts: BinaryOperandFacts).returns(MIR::Node) }
@@ -1217,6 +1222,11 @@ module MIRLoweringExpressions
     else
       target_node.symbol&.sync
     end
+    # GetField nodes do not carry a binding SymbolEntry, but their semantic
+    # type can introduce a capability boundary of its own (for example
+    # `holder.cell: Cell@alwaysMutable`). Preserve that field-local sync when
+    # selecting the representation access path.
+    target_sync ||= target_node.full_type!(context: "field target capability").sync
     path = field_access_path(ti, target_sync, is_rc_unwrapped, is_locked_unwrapped)
 
     target_type_sym = ti.resolved.to_s.to_sym
@@ -1361,6 +1371,16 @@ module MIRLoweringExpressions
   sig { params(node: AST::GetIndex).returns(MIR::Node) }
   def lower_get_index(node)
     T.bind(self, MIRLowering) rescue nil
+    if node.protocol_operation == :map_get
+      receiver = T.cast(lower(node.target), MIR::Node)
+      receiver = MIR::AddressOf.new(receiver) unless collection_param_receiver?(node.target)
+      return MIR::ProtocolCall.new(
+        :Map,
+        :get,
+        receiver,
+        [T.cast(lower(node.index), MIR::Node)],
+      )
+    end
     plan = index_access_plan(node)
     value = index_access_value(plan)
     if plan.optional?
@@ -1586,6 +1606,38 @@ module MIRLoweringExpressions
       return replacement
     end
 
+    if t.projection?
+      owner = T.must(t.projection_owner)
+      concrete_input = subst[owner]
+      return raw_type unless concrete_input
+
+      concrete = Type.new(concrete_input)
+      projected = case t.projection_member
+      when :Key then concrete.key_type if concrete.map?
+      when :Value then concrete.value_type if concrete.map?
+      end
+      return projected if projected
+
+      return Type.new(TypeProjectionExpression.new(
+        owner: concrete.resolved,
+        member: T.must(t.projection_member),
+        protocol: t.projection_protocol,
+      ))
+    end
+
+    if t.map?
+      expression = T.cast(t.shape.expression, MapTypeExpression)
+      new_key = T.cast(substitute_mir_type(t.key_type, subst), Type::TypeInput)
+      new_value = T.cast(substitute_mir_type(t.value_type, subst), Type::TypeInput)
+      return Type.new(MapTypeExpression.new(
+        key: Type.new(new_key).shape.expression,
+        value: Type.new(new_value).shape.expression,
+        key_implicit: expression.key_implicit,
+        legacy_separator: expression.legacy_separator,
+        capabilities: expression.capabilities,
+      ))
+    end
+
     if t.generic_instance?
       new_args = t.generic_args.map { |arg| T.cast(substitute_mir_type(arg, subst), Type::TypeInput) }
       replacement = Type.generic_instance_of(t.generic_base, new_args)
@@ -1687,7 +1739,8 @@ module MIRLoweringExpressions
     # slices would otherwise be freed through the heap allocator at teardown.
     struct_alloc = coerced_destination&.node_reference? ? :heap : alloc_for_node(node)
 
-    fields = node.fields.map { |k, v|
+    literal_fields = struct_lit_fields_with_callsite_defaults(node)
+    fields = literal_fields.map { |k, v|
       ft = field_types[k.to_s]
       field_type_input = T.let(ft.is_a?(Schemas::InlineStructVariant) ? nil : ft, T.nilable(Type::TypeInput))
       borrowed_field = T.let(node.borrowed_field_names&.include?(k.to_s) == true, T::Boolean)
@@ -1700,7 +1753,7 @@ module MIRLoweringExpressions
         if borrowed_field
           aggregate_dynamic_slice_field_value(lower(field_node), expected_ft, true, field_sink_alloc, field_node)
         elsif rc_retain_needed?(field_node)
-          hoist_alloc(make_rc_retain(field_node), field_node, err_cleanup: true)
+          hoist_alloc(make_rc_retain(T.cast(field_node, AST::Identifier)), field_node, err_cleanup: true)
         elsif field_node.is_a?(AST::CopyNode) && expected_ft&.collection?
           hoist_alloc(MIR::DeepCopy.new(lower(field_node.value), expected_ft.zig_type, nil, :full_value, field_sink_alloc),
             field_node, err_cleanup: true)
@@ -1751,7 +1804,7 @@ module MIRLoweringExpressions
     }
 
     type_name = if node.type_args&.any?
-      zig_args = node.type_args.map { |a| Type.new(a.to_sym).zig_type }.join(", ")
+      zig_args = node.type_args.map { |a| Type.new(a).zig_type }.join(", ")
       "#{node.name}(#{zig_args})"
     else
       node.name.to_s
@@ -1771,6 +1824,23 @@ module MIRLoweringExpressions
 
     wrap_indirect_field_hoists(hoisted, result)
   end
+
+  sig { params(node: AST::StructLit).returns(T::Hash[String, AST::Node]) }
+  def struct_lit_fields_with_callsite_defaults(node)
+    T.bind(self, MIRLowering) rescue nil
+    fields = T.let(node.fields.dup, T::Hash[String, AST::Node])
+    schema = mir_schema_lookup.call(node.name.to_sym)
+    return fields unless schema.is_a?(Schemas::StructSchema)
+
+    schema.fields.each do |name, field|
+      next if fields.key?(name)
+      next unless callsite_struct_field_default?(field)
+
+      fields[name] = T.must(field.default)
+    end
+    fields
+  end
+  private :struct_lit_fields_with_callsite_defaults
 
   sig { params(node: AST::UnionVariantLit).returns(MIR::Node) }
   def lower_union_variant_lit(node)
@@ -2191,7 +2261,12 @@ module MIRLoweringExpressions
     # with_decl_alloc. Only a context-free explicit COPY defaults to heap.
     alloc = function_state.current_decl_alloc || node.alloc || :heap
 
-    if ti.optional? && ti.wrapped_type&.any_rc?
+    if ti.id_handle?
+      # Id<T> is an integer handle owned by its Pool, never an owning copy of
+      # T. Generic specialization must not turn COPY of the handle into a deep
+      # copy merely because its type argument may require cleanup.
+      MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
+    elsif ti.optional? && ti.wrapped_type&.any_rc?
       wrapped = T.must(ti.wrapped_type)
       capture = "__copy_rc_#{lowering_counters.next_tmp_id}"
       func = wrapped.shared? ? "arcRetain" : "rcRetain"
@@ -2203,7 +2278,8 @@ module MIRLoweringExpressions
       func = ti.shared? ? "arcRetain" : "rcRetain"
       MIR::RcRetain.new(source, rc_payload_zig_type(ti), func)
     elsif ti.optional? && (ti.needs_cleanup?(T.unsafe(mir_schema_lookup)) ||
-                           ti.wrapped_type&.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)))
+                           ti.wrapped_type&.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) ||
+                           ti.specialization_may_need_cleanup?)
       MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     elsif ti.string?
       MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
@@ -2212,6 +2288,12 @@ module MIRLoweringExpressions
       MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc)
     elsif ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup))
       MIR::DeepCopy.new(source, bare_zig_type(ti), nil, :full_value, alloc)
+    elsif ti.specialization_may_need_cleanup?
+      # Associated types are concrete after Zig specialization, not while the
+      # Ruby frontend checks the generic body. Preserve COPY semantically and
+      # let dupeValue's comptime cleanup predicate choose deep-copy vs value
+      # copy for the selected M::Value.
+      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
     else
       copy_zig = if dst_ti.collection? && !dst_ti.string?
                    dst_ti.zig_type

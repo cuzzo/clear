@@ -44,7 +44,7 @@ FN main() RETURNS Void ->
   t0_rw = timestampMs();
   MUTABLE rfutures_rw: ~Int64[]@list = [];
   FOR i IN (0 ..< n_readers) DO
-    rfutures_rw
+    &rfutures_rw
       .append(
         BG {
           @parallel ->
@@ -91,7 +91,7 @@ FN main() RETURNS Void ->
   t0_v = timestampMs();
   MUTABLE rfutures_v: ~Int64[]@list = [];
   FOR i IN (0 ..< n_readers) DO
-    rfutures_v
+    &rfutures_v
       .append(
         BG {
           @parallel ->
@@ -139,7 +139,7 @@ FN main() RETURNS Void ->
   t0_ap = timestampMs();
   MUTABLE rfutures_ap: ~Int64[]@list = [];
   FOR i IN (0 ..< n_readers) DO
-    rfutures_ap
+    &rfutures_ap
       .append(
         BG {
           @parallel ->

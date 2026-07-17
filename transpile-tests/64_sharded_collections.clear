@@ -9,16 +9,16 @@ FN main() RETURNS Void ->
     MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
 
     # insert / get / remove / count work identically to non-sharded pools
-    id_a: Id<Score> = sp.insert(Score{ value: 10.0 });
-    id_b: Id<Score> = sp.insert(Score{ value: 20.0 });
-    id_c: Id<Score> = sp.insert(Score{ value: 30.0 });
+    id_a: Id<Score> = &sp.insert(Score{ value: 10.0 });
+    id_b: Id<Score> = &sp.insert(Score{ value: 20.0 });
+    id_c: Id<Score> = &sp.insert(Score{ value: 30.0 });
 
     ASSERT sp.length() == 3, "sharded pool should have 3 items";
 
     pa = sp.get(id_a);
     ASSERT pa != NIL, "get should find id_a";
 
-    sp.remove(id_b);
+    &sp.remove(id_b);
     ASSERT sp.length() == 2, "should have 2 after removing id_b";
     ASSERT sp.get(id_b) == NIL, "id_b should be stale after remove";
     ASSERT sp.get(id_c) != NIL, "id_c should still be valid";
@@ -28,8 +28,8 @@ FN main() RETURNS Void ->
 
     # EACH on a regular @list (sequential iteration)
     MUTABLE items: []Score = [];
-    append(items, Score{ value: 1.0 });
-    append(items, Score{ value: 2.0 });
+    append(&items, Score{ value: 1.0 });
+    append(&items, Score{ value: 2.0 });
     items |> EACH { _.value = 0.0; };
 
     # @list:sharded(2): 2 independent list shards

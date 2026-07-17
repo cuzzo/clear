@@ -90,7 +90,7 @@ doesn't pair with a cleanup when the main scope ends.
 **Found by**: `polymorphic_sync_admission` (1 UNEXPECTED-PASS)
 - `(callee=:concrete, caller=:local)`
 
-A function declared `FN tick!(MUTABLE c: Counter)` (no REQUIRES) accepts
+A function declared `FN tick(MUTABLE c: Counter)` (no REQUIRES) accepts
 a `@local` argument. Per `docs/sharing-capabilities.md` concrete params
 should accept plain `T` only. This is the canonical viralization-risk
 surface from the `@local` design discussion — `@local` is structurally
@@ -106,13 +106,13 @@ identity-compatible)?
 
 **Repro**:
 ```clear
-FN tick!(MUTABLE c: SHARED Counter) RETURNS Void ->
+FN tick(MUTABLE c: SHARED Counter) RETURNS Void ->
     WITH POLYMORPHIC EXCLUSIVE c AS x { x.value = x.value + 1_i64; }
 END
 
 FN main() RETURNS Void ->
     c = Counter{ value: 0_i64 } @locked;   # short form
-    tick!(c);
+    tick(c);
 END
 ```
 
@@ -195,7 +195,7 @@ which accepts the same syntax.
 ```clear
 FN run() RETURNS !Int64[]@list ->
     MUTABLE outer: Int64[]@list = [];
-    outer.append(1_i64);
+    &outer.append(1_i64);
     RETURN outer;
 END
 

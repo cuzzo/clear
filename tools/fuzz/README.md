@@ -121,6 +121,10 @@ expected hard error is absent.
 | `nested_loop_escape`        | 48           | Loop-local list/map escape -> outer container (commit 9fa21926). `wrap_kind` axis (`:bare` / `:struct_field`) per docs/agents/bug9-forensic.md: struct-wrapped escapes fail today as designed, pass once escape-analysis walkers are unified. |
 | `collection_shape_smoke`    | 14           | Shape/admission smoke coverage for every collection form named in the surface registry, including direct `String[]@list` cleanup coverage. |
 | `tuple_collection_composition_matrix` | 19 | Recursive Tuple composition in both directions across collections and capable layers, plus optional/fallible/future tense binding on the Tuple, its fields, and nested collections. |
+| `c_ffi_type_matrix` | 54 | Target-resolved signed/unsigned C aliases across fixed arrays, lists, pools, sets, maps, and streams; foreign pointers require a scoped `WITH UNSAFE VIEW ... LENGTH ...` boundary and reject direct indexing, safe views, legacy method views, invalid lengths, and escaping aliases. |
+| `generic_map_protocol_matrix` | 20 | Static Map bounds and `M::Key`/`M::Value` projections across string/numeric maps, specialization-selected associated-key storage, generic allocator forwarding, cleanup-bearing value copies, value-shaped optional captures, reusable user-protocol declarations/conformances with zero-witness static dispatch (including shared capability wrappers), borrowed-value rejection, nested type syntax, and declaration-time constraint diagnostics. |
+| `generic_shared_map_capability_matrix` | 8 | `SHARED Map` specialization across locked, read/write-locked, versioned, and sharded maps; direct or non-polymorphic access is rejected before Zig. |
+| `inherent_method_matrix` | 8 | Owner-scoped METHOD dispatch across concrete/generic owners, method-local binders, same-name methods on distinct owners, static owner functions, and rejected free-function dot syntax. |
 | `ownership_surface_smoke`   | 35           | Global smoke coverage for cleanup shapes, escape sinks, and MIR ownership contracts. |
 | `escape_mechanism_matrix`   | 30           | Direct AST-bound escape mechanisms: return, yield, BG/BG STREAM/DO capture, enclosing assignment, field/index stores, collection/aggregate stores, recursive aggregate returns, TAKES/GIVE, loop carry, and call-return receiver stores. |
 | `takes_move_modality`       | 48           | EVERY :cleanup_value_shapes member passed to a TAKES param via GIVE / bare(implicit) / COPY. Registry-driven (no hand-picked shapes). |
@@ -131,14 +135,14 @@ expected hard error is absent.
 | `bg_capture_typing`         | 20              | Type-inference cells for BG-block captures. |
 | `bg_copy_param_reentrant`   | 8               | COPY of @list param into BG calling reentrant function. |
 | `infallible_signature`      | 60              | Cells exercising infallible (non-`!T`) function signature lowering. |
-| `binary_op_matrix`         | 45           | Binary operator lowering/admission combinations, including AND/OR short-circuiting and scalar/managed single-fallback `!?T` collapse. |
-| `capability_wrap_matrix`   | 21           | Capability wrapper construction/admission cells. |
+| `binary_op_matrix`         | 50           | Binary operator lowering/admission combinations, including integer bitwise/shift operators, AND/OR short-circuiting, and scalar/managed single-fallback `!?T` collapse. |
+| `capability_wrap_matrix`   | 26           | Capability wrapper construction/admission cells, including observable scoped views and rejected direct observable index, operator, field, and method access. |
 | `catch_allocator_matrix`   | 20           | Error/catch paths that preserve allocator identity. |
 | `catch_reassign_matrix`    | 16           | Catch/fallback reassignment ownership cells. |
 | `destructuring_assignment_matrix` | 6      | Fixed-shape destructuring declaration, typed/mutable targets, reassignment, mixed declaration, and discard. |
 | `indexed_assignment_matrix`| 20           | Indexed assignment into lists/maps across value shapes. |
 | `indirect_recursive_union` | 12           | Recursive union payloads through indirect storage. |
-| `match_matrix`             | 18           | MATCH lowering over union/scalar shapes plus AS payload bindings. |
+| `match_matrix`             | 24           | MATCH and runtime `IS_A` lowering over union/scalar shapes plus AS payload bindings. |
 | `mir_lowering_shape_matrix` | 87          | MIR lowering shape coverage for list/hash literals, var declarations, returns, branch locals, function args, loop locals, and node dispatch shapes. |
 | `stream_into_boundary`      | 66           | NEXT value passed across BG / DO / BG STREAM boundary, all sync wrappers |
 | `lifetimed_return`          | 36           | BG handle escape rejection — exercises bg_lifetime_sources stamping |
@@ -190,7 +194,7 @@ expected hard error is absent.
 | `lowering_boundary_matrix`   | 28           | MIR lowering boundary coverage for call contracts, WITH variants, BG/DO/NEXT, and pipeline terminals. |
 | `test_framework_matrix`      | 6            | TEST/WHEN/TEST THAT grammar through hooks, LET bindings, stubs, pending tests, benchmark, smash, and profile forms. |
 | `extern_boundary_matrix`     | 6            | Negative extern declaration/call boundaries for free functions, trampolines, extern methods/resources, generic comptime calls, and tight-loop rejection. |
-| `curated_gap_corpus`         | 475          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
+| `curated_gap_corpus`         | 486          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
 | `tense_predicate_matrix`     | 11           | Postfix tense predicates, stacked refinement, readiness polling, and ambiguous optional-Boolean rejection. |
 
 ### `stream_into_boundary` matrix
@@ -257,7 +261,7 @@ Patterns:
 - `bg_capture` — `RETURN BG { ref.value }` — must reject
 - `do_capture` — `append(handles, BG { ref.value })` inside WITH — must reject
 - `bg_stream_capture` — `RETURN BG STREAM { YIELD ref.value }` — must reject
-- `takes_consume` — `consume!(GIVE ref)` — must reject
+- `takes_consume` — `consume(GIVE ref)` — must reject
 - `store_field` — `outer.field = ref` — must reject
 - `list_append` — `list.append(ref)` — must reject
 
@@ -348,8 +352,8 @@ REQUIRES clause?
 
 Callee forms:
 
-- `:concrete` — `FN tick!(MUTABLE c: Counter) RETURNS Void`
-- `:shared_param` — `FN tick!(MUTABLE c: SHARED Counter) RETURNS Void`
+- `:concrete` — `FN tick(MUTABLE c: Counter) RETURNS Void`, called with `&c`
+- `:shared_param` — `FN tick(MUTABLE c: SHARED Counter) RETURNS Void`, called with `&c`
 - `:req_locked` — `REQUIRES c: LOCKED`, body `WITH POLYMORPHIC EXCLUSIVE`
 - `:req_versioned` — `REQUIRES c: VERSIONED`, body `WITH SNAPSHOT ... ON MvccConflict RAISE`
 - `:req_local` — `REQUIRES c: LOCAL`, body `WITH POLYMORPHIC c`

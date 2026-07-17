@@ -47,8 +47,8 @@ def hem_helpers(shape)
   list_helper = <<~CHT
     FN mkList() RETURNS !Int64[]@list ->
         MUTABLE xs: Int64[]@list = [];
-        xs.append(1_i64);
-        xs.append(2_i64);
+        &xs.append(1_i64);
+        &xs.append(2_i64);
         RETURN xs;
     END
   CHT
@@ -130,7 +130,7 @@ FuzzGenerator.register(:hoist_edge_matrix, cells: HOIST_EDGE_CELLS) do |p|
       #{helpers}
       FN main() RETURNS !Void ->
           MUTABLE out: #{ty}[]@list = [];
-          out.append(#{expr});
+          &out.append(#{expr});
           ASSERT out.length() == 1_i64, "hoist list append";
           RETURN;
       END

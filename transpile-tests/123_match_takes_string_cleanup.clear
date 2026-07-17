@@ -8,7 +8,7 @@ FN makeSymbol() RETURNS !Value ->
     RETURN Value{ Symbol: COPY "hello" };
 END
 
-FN consume!(TAKES v: Value) RETURNS !String ->
+FN consume(TAKES v: Value) RETURNS !String ->
     PARTIAL MATCH TAKES v START
         Value.Symbol AS s -> RETURN COPY s;,
         Value.List AS items -> RETURN "list";,
@@ -19,7 +19,7 @@ END
 
 FN main() RETURNS Void ->
     sym = makeSymbol();
-    result = consume!(sym);
+    result = consume(sym);
     ASSERT result == "hello", "got symbol";
     RETURN;
 END

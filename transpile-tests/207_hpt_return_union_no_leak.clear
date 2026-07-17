@@ -1,10 +1,10 @@
-# Test: RETURN f(g!()) where the return type is a non-Copy union.
+# Test: RETURN f(g()) where the return type is a non-Copy union.
 # Fix: the callee must deep-copy the union before returning so the HPT
-# (the g!() result) can be freed without dangling the returned value.
+# (the g() result) can be freed without dangling the returned value.
 
 UNION Value { Nil, Str: String, Num: Float64 }
 
-FN makeValue!(s: String) RETURNS !Value ->
+FN makeValue(s: String) RETURNS !Value ->
     RETURN Value{ Str: COPY s };
 END
 
@@ -14,15 +14,15 @@ FN identity(v: Value) RETURNS !Value ->
     RETURN COPY v;
 END
 
-FN wrapAndReturn!(input: String) RETURNS !Value ->
-    # Named binding: makeValue!()'s cleanup is a regular defer.
+FN wrapAndReturn(input: String) RETURNS !Value ->
+    # Named binding: makeValue()'s cleanup is a regular defer.
     # identity returns a deep copy, so the returned Value survives v's cleanup.
-    v = makeValue!(input);
+    v = makeValue(input);
     RETURN identity(v);
 END
 
 FN main() RETURNS Void ->
-    result = wrapAndReturn!("hello");
+    result = wrapAndReturn("hello");
     PARTIAL MATCH result START
         Value.Str AS s -> ASSERT s == "hello", "string survives HPT cleanup";,
         DEFAULT -> ASSERT FALSE, "expected Str variant";

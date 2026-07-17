@@ -171,6 +171,31 @@ class ClearParser
     current.type == type && (val.nil? || current.value == val)
   end
 
+  # `>>` is a shift in expression context, but it is also two adjacent generic
+  # closers in a type such as Outer<Inner<Int64>>. Split only while consuming a
+  # generic close so the lexer can keep one unambiguous shift token elsewhere.
+  sig { returns(T::Boolean) }
+  def generic_close?
+    match?(:CHAR, '>') || match?(:CHAR, '>>')
+  end
+
+  sig { returns(Lexer::Token) }
+  def consume_generic_close
+    return consume(:CHAR, '>') unless match?(:CHAR, '>>')
+
+    combined = current
+    first = T.let(combined.dup, Lexer::Token)
+    second = T.let(combined.dup, Lexer::Token)
+    first.value = '>'
+    first.end_offset = combined.start_offset + 1 if combined.start_offset
+    first.end_column = combined.column + 1
+    second.value = '>'
+    second.column = combined.column + 1
+    second.start_offset = combined.start_offset + 1 if combined.start_offset
+    @tokens[@pos] = second
+    first
+  end
+
   # Lookahead: peek `n` tokens past the current cursor and test type/value.
   sig { params(n: Integer, type: Symbol, val: T.nilable(String)).returns(T::Boolean) }
   def match_at?(n, type, val=nil)

@@ -30,7 +30,7 @@ RSpec.describe UseAfterMoveChecker do
       UNION Value { Num: Float64, List: Int64[] }
       FN makeList() RETURNS Value ->
           MUTABLE items: []Int64 = List[];
-          items.append(1_i64);
+          &items.append(1_i64);
           RETURN Value{ List: items };
       END
       FN main() RETURNS Void ->
@@ -51,7 +51,7 @@ RSpec.describe UseAfterMoveChecker do
       FN main() RETURNS Void ->
           MUTABLE v = Value{ Num: 1.0 };
           MUTABLE items: []Value = List[];
-          items.append(GIVE v);
+          &items.append(GIVE v);
           items.append(v);
           RETURN;
       END
@@ -64,7 +64,7 @@ RSpec.describe UseAfterMoveChecker do
       FN main() RETURNS Void ->
           MUTABLE pool: [Pool(10)]Item = [];
           item = Item{ v: 1 };
-          pool.insert(item);
+          &pool.insert(item);
           x = item.v;
           RETURN;
       END
@@ -134,7 +134,7 @@ RSpec.describe UseAfterMoveChecker do
       END
       FN main() RETURNS Void ->
           MUTABLE vals: []Int64 = List[];
-          vals.append(1_i64);
+          &vals.append(1_i64);
           n = consume(GIVE vals);
           n2 = consume(vals);
           RETURN;
@@ -195,7 +195,7 @@ RSpec.describe UseAfterMoveChecker do
       END
       FN main() RETURNS Void ->
           MUTABLE vals: []Int64 = List[];
-          vals.append(1_i64);
+          &vals.append(1_i64);
           n = consume(GIVE vals);
           RETURN;
       END
@@ -237,7 +237,7 @@ RSpec.describe UseAfterMoveChecker do
       UNION Value { Num: Float64, List: Int64[] }
       FN makeList() RETURNS !Value ->
           MUTABLE items: []Int64 = List[];
-          items.append(1_i64);
+          &items.append(1_i64);
           RETURN Value{ List: items };
       END
       FN main() RETURNS Void ->
@@ -256,11 +256,11 @@ RSpec.describe UseAfterMoveChecker do
   it "raises on use after move for union with @boxed struct variant" do
     expect_error(<<~CLEAR, /USE AFTER MOVE/)
       UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
-      FN makeLambda!() RETURNS Value ->
+      FN makeLambda() RETURNS Value ->
           RETURN Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
       END
       FN main() RETURNS Void ->
-          v1 = makeLambda!();
+          v1 = makeLambda();
           v2 = v1;
           v3 = v1;
           RETURN;

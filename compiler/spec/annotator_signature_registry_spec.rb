@@ -22,8 +22,8 @@ RSpec.describe Annotator::Phases::SignatureRegistry do
   it "builds ordinary function signatures from declared function facts" do
     default_value = AST::Literal.new(tok("1"), :INT64, 1, :stack)
     fn = AST::FunctionDef.new(
-      tok("sum!"),
-      "sum!",
+      tok("sum"),
+      "sum",
       [
         param("value", Type.new(:Int64), default: default_value, mutable: true, takes: true),
         param("cell", Type.new(:Int64, sync: :locked))

@@ -254,7 +254,7 @@ FuzzGenerator.register(:diagnostic_policy_matrix, cells: DIAGNOSTIC_POLICY_CELLS
 
       FN main() RETURNS Void ->
         MUTABLE xs: Int64[]@list = [];
-        xs.append(1_i64);
+        &xs.append(1_i64);
         a = take(GIVE xs);
         b = take(GIVE xs);
         RETURN;

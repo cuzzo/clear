@@ -2895,7 +2895,7 @@ class RegisterBcEmitter
     end
   end
 
-  # `readLine!` and friends lower to MIR::InlineZig with a `try
+  # `readLine` and friends lower to MIR::InlineZig with a `try
   # CheatLib.<name>(...)` template. The register VM doesn't (and
   # shouldn't) evaluate Zig text -- we recognize the small set of
   # stdlib intrinsics by their template and dispatch to a native
@@ -2916,7 +2916,7 @@ class RegisterBcEmitter
   # ops -- the underlying ops (`SCONST`, `SCONCAT`, `N_*` natives)
   # raise on failure -- so the fallback path is reachable only when
   # a string-producing native explicitly signals "no value" via an
-  # empty result. For `readLine!`, EOF returns "" which the caller
+  # empty result. For `readLine`, EOF returns "" which the caller
   # can match against; keeping the OR_ELSE fallback as a no-op preserves
   # source compatibility without expanding the bytecode contract.
   def compile_string_try_catch(expr)

@@ -18,6 +18,8 @@ class ClearParser
     when :parse_if_statement then parse_if_statement
     when :parse_comptime_statement then parse_comptime_statement
     when :parse_struct_def then parse_struct_def
+    when :parse_protocol_def then parse_protocol_def
+    when :parse_implementation_def then parse_implementation_def
     when :parse_enum_def then parse_enum_def
     when :parse_union_def then parse_union_def
     when :parse_while_loop then parse_while_loop

@@ -80,7 +80,7 @@ RSpec.describe "Provenance annotation" do
         STRUCT Holder { items: Int64[], label: String }
         FN build() RETURNS !Holder ->
             MUTABLE vals: []Int64 = [];
-            vals.append(1_i64);
+            &vals.append(1_i64);
             RETURN Holder{ items: vals, label: "test" };
         END
         FN main() RETURNS Void ->

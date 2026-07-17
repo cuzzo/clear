@@ -6,8 +6,8 @@
 
 FN makeList(n: Int64) RETURNS !Int64[] ->
     MUTABLE items: []Int64 = List[];
-    items.append(n);
-    items.append(n + 1_i64);
+    &items.append(n);
+    &items.append(n + 1_i64);
     RETURN items;
 END
 

@@ -1,0 +1,141 @@
+# Cross-language C ABI fixture. The implementation is ordinary C; every
+# declaration below crosses the same CLEAR EXTERN path used by SQLite.
+
+EXTERN STRUCT FixtureRecord {
+  id: Int64,
+  weight: Float64,
+  samples: [4]Int64
+}
+  FROM "clear_c_fixture"
+  ABI C
+  HEADER "fixture.h";
+EXTERN STRUCT FixtureHandle {} CLOSE "clear_fixture_close"
+  FROM "clear_c_fixture"
+  ABI C
+  HEADER "fixture.h";
+
+EXTERN FN echoInt(value: TargetInt) RETURNS TargetInt AS "clear_fixture_echo_int" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoUInt(value: TargetUInt) RETURNS TargetUInt AS "clear_fixture_echo_uint" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoLong(value: TargetLong) RETURNS TargetLong AS "clear_fixture_echo_long" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoULong(value: TargetULong) RETURNS TargetULong AS "clear_fixture_echo_ulong" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoLongLong(value: TargetLongLong) RETURNS TargetLongLong
+  AS "clear_fixture_echo_long_long"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN echoULongLong(value: TargetULongLong) RETURNS TargetULongLong
+  AS "clear_fixture_echo_ulong_long"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN echoSize(value: TargetUInt@size) RETURNS TargetUInt@size
+  AS "clear_fixture_echo_size"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN echoPtrdiff(value: TargetInt@size) RETURNS TargetInt@size
+  AS "clear_fixture_echo_ptrdiff"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN echoFloat(value: Float32) RETURNS Float32 AS "clear_fixture_echo_float" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoDouble(value: Float64) RETURNS Float64 AS "clear_fixture_echo_double" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoI32(value: Int32) RETURNS Int32 AS "clear_fixture_echo_i32" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoU32(value: UInt32) RETURNS UInt32 AS "clear_fixture_echo_u32" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoI8(value: Int8) RETURNS Int8 AS "clear_fixture_echo_i8" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoU8(value: UInt8) RETURNS UInt8 AS "clear_fixture_echo_u8" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoI16(value: Int16) RETURNS Int16 AS "clear_fixture_echo_i16" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoU16(value: UInt16) RETURNS UInt16 AS "clear_fixture_echo_u16" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoI64(value: Int64) RETURNS Int64 AS "clear_fixture_echo_i64" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoU64(value: UInt64) RETURNS UInt64 AS "clear_fixture_echo_u64" FROM "clear_c_fixture" ABI C;
+EXTERN FN echoBool(value: Bool) RETURNS Bool AS "clear_fixture_echo_bool" FROM "clear_c_fixture" ABI C;
+EXTERN FN cNoop() RETURNS Void AS "clear_fixture_noop" FROM "clear_c_fixture" ABI C;
+
+EXTERN FN makeRecord(id: Int64, weight: Float64) RETURNS FixtureRecord
+  AS "clear_fixture_make_record"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN sumRecord(record: FixtureRecord) RETURNS Int64 AS "clear_fixture_sum_record" FROM "clear_c_fixture" ABI C;
+EXTERN FN sumFixed(values: [4]Int64) RETURNS Int64 AS "clear_fixture_sum_fixed" FROM "clear_c_fixture" ABI C;
+EXTERN FN openHandle(name: String@c, MUTABLE out: ?FixtureHandle) RETURNS TargetInt
+  AS "clear_fixture_open"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN clear_fixture_close(handle: FixtureHandle) RETURNS TargetInt FROM "clear_c_fixture" ABI C;
+EXTERN FN handleName(handle: FixtureHandle) RETURNS String@c AS "clear_fixture_name" FROM "clear_c_fixture" ABI C;
+EXTERN FN findName(handle: FixtureHandle, key: TargetInt) RETURNS ?String@c
+  AS "clear_fixture_find"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN stringsEqual(left: String@c, right: String@c) RETURNS TargetInt
+  AS "clear_fixture_string_equal"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN fail(code: TargetInt, MUTABLE detail: TargetInt) RETURNS TargetInt
+  AS "clear_fixture_fail"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN applyCallback(value: TargetInt, callback: FN(TargetInt) -> TargetInt CALLCONV C) RETURNS TargetInt
+  AS "clear_fixture_apply"
+  FROM "clear_c_fixture"
+  ABI C;
+EXTERN FN values(handle: FixtureHandle) RETURNS ?[]@c Int64 AS "clear_fixture_values" FROM "clear_c_fixture" ABI C;
+EXTERN FN valueCount(handle: FixtureHandle) RETURNS TargetUInt@size
+  AS "clear_fixture_value_count"
+  FROM "clear_c_fixture"
+  ABI C;
+
+FN doubleForC(value: TargetInt) RETURNS TargetInt ->
+  RETURN value * 2;
+END
+
+FN main() RETURNS Void ->
+  ASSERT echoInt(-17) == -17;
+  ASSERT echoUInt(17) == 17;
+  ASSERT echoLong(-23) == -23;
+  ASSERT echoULong(23) == 23;
+  ASSERT echoLongLong(-29) == -29;
+  ASSERT echoULongLong(29) == 29;
+  ASSERT echoSize(31) == 31;
+  ASSERT echoPtrdiff(-31) == -31;
+  ASSERT echoFloat(1.5_f32) == 1.5_f32;
+  ASSERT echoDouble(2.5) == 2.5;
+  ASSERT echoI32(-37_i32) == -37_i32;
+  ASSERT echoU32(37_u32) == 37_u32;
+  ASSERT echoI8(-7_i8) == -7_i8;
+  ASSERT echoU8(7_u8) == 7_u8;
+  ASSERT echoI16(-17_i16) == -17_i16;
+  ASSERT echoU16(17_u16) == 17_u16;
+  ASSERT echoI64(-47) == -47;
+  ASSERT echoU64(47_u64) == 47_u64;
+  ASSERT echoBool(TRUE);
+  cNoop();
+
+  record = makeRecord(10, 3.5);
+  ASSERT record.id == 10;
+  ASSERT record.weight == 3.5;
+  ASSERT record.samples[2] == 7;
+  ASSERT sumRecord(record) == 36;
+  ASSERT sumFixed([1, 2, 4, 8]) == 15;
+
+  MUTABLE handle_out: ?FixtureHandle = NIL;
+  ASSERT openHandle("alpha", &handle_out) == 0;
+  handle = handle_out?;
+  ASSERT stringsEqual(handleName(handle), "alpha") == 1;
+  ASSERT findName(handle, 42) EXISTS;
+  ASSERT(findName(handle, 0)).nil?();
+
+  MUTABLE rejected: ?FixtureHandle = NIL;
+  ASSERT openHandle("reject", &rejected) == 7;
+  ASSERT rejected.nil?();
+  MUTABLE detail: TargetInt = 0;
+  ASSERT fail(9, &detail) == 9;
+  ASSERT detail == 90;
+  ASSERT applyCallback(21, doubleForC) == 42;
+  values_pointer = values(handle)?;
+  WITH UNSAFE VIEW values_pointer LENGTH valueCount(handle) AS borrowed_values {
+    ASSERT borrowed_values.length() == 4;
+    ASSERT borrowed_values[0] + borrowed_values[1] + borrowed_values[2] + borrowed_values[3] == 30;
+  }
+
+  print("C FFI scalars, structs, arrays PASS");
+  print("C FFI strings, out parameters, cleanup, errors PASS");
+  print("C FFI synchronous callback PASS");
+  print("C FFI pointer/count borrowed view PASS");
+END

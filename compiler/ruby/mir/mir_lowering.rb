@@ -367,6 +367,11 @@ class MIRLowering
     current_function_context&.collection_params&.include?(name) == true
   end
 
+  sig { params(name: String).returns(T.nilable(String)) }
+  def current_function_protocol_map_allocator(name)
+    current_function_context&.protocol_map_allocators&.[](name)
+  end
+
   sig { params(name: String).returns(T::Boolean) }
   def current_function_mutable_scalar_param?(name)
     current_function_context&.mutable_scalar_params&.include?(name) == true
@@ -397,11 +402,10 @@ class MIRLowering
     current_function_context&.zig_name
   end
 
-  sig { params(name: T.any(String, Symbol), bang_alias: T::Boolean).returns(T.nilable(FunctionSignature)) }
-  def fn_sig_for(name, bang_alias: false)
+  sig { params(name: T.any(String, Symbol)).returns(T.nilable(FunctionSignature)) }
+  def fn_sig_for(name)
     sigs = fn_sigs
     sig = sigs.dig(name) || sigs.dig(name.to_sym) || sigs.dig(name.to_s)
-    sig ||= sigs.dig("#{name}!") if bang_alias
     FunctionSignature.unwrap(sig)
   end
 
@@ -1097,6 +1101,7 @@ class MIRLowering
 
     # --- Top-level ---
     when AST::Program           then lower_program(node)
+    when AST::ImplementationDef, AST::ConformanceDef, AST::ProtocolDef then nil
 
     # --- Marker nodes from MIRPass ---
     when MIR::Drop              then lower_drop(node)
@@ -1172,7 +1177,11 @@ class MIRLowering
     when AST::StringConcat      then lower_string_concat(node)
     when AST::BlockExpr         then lower_block_expr(node)
     when AST::RangeLit          then lower_range_lit(node)
-    when AST::OptionalUnwrap    then MIR::OptionalUnwrap.new(lower(node.target))
+    when AST::OptionalUnwrap
+      target = lower(node.target)
+      owns_foreign_resource = node.target.is_a?(AST::Identifier) &&
+        node.target.symbol&.foreign_out_owner == true
+      owns_foreign_resource ? MIR::ForeignOwnedUnwrap.new(target) : MIR::OptionalUnwrap.new(target)
     when AST::Assert            then lower_assert(node)
     when AST::Raise             then lower_raise(node)
     when AST::Cast              then lower_cast(node)
@@ -2797,6 +2806,7 @@ class MIRLowering
     items << MIR::TypeAlias.new("Runtime", "CheatHeader.Runtime")
     items << MIR::TypeAlias.new("EbrContext", "CheatHeader.EbrContext")
     items << MIR::Import.new("safety", "runtime/../lib/safety.zig", nil) if needs_safety
+    items.concat(lower_protocol_adapters(node))
 
     if use_c_allocator || program_state.used_sharded_map
       items << MIR::PubConst.new("USE_C_ALLOCATOR", "true")
@@ -2826,6 +2836,90 @@ class MIRLowering
     end
     nil
   end
+
+  sig { params(program: AST::Program).returns(T::Array[MIR::ProtocolAdapterDef]) }
+  def lower_protocol_adapters(program)
+    protocols = program.statements.grep(AST::ProtocolDef).to_h { |protocol| [protocol.name, protocol] }
+    conformances = program.statements.grep(AST::ConformanceDef).group_by do |declaration|
+      protocol_base_name_for_lowering(declaration.protocol_type)
+    end
+    protocols.values.map do |protocol|
+      cases = (conformances[protocol.name] || []).map do |declaration|
+        lower_protocol_conformance_case(protocol, declaration)
+      end
+      requirements = protocol.requirements.map do |requirement|
+        MIR::ProtocolRequirementAdapter.new(
+          name: requirement.name,
+          argument_count: requirement.params.length,
+          return_type: protocol_requirement_return_type(protocol, requirement),
+        )
+      end
+      MIR::ProtocolAdapterDef.new(
+        protocol: protocol.name,
+        associated_types: protocol.associated_types.map(&:name),
+        requirements: requirements,
+        conformances: cases,
+      )
+    end
+  end
+  private :lower_protocol_adapters
+
+  sig do
+    params(protocol: AST::ProtocolDef, declaration: AST::ConformanceDef)
+      .returns(MIR::ProtocolConformanceCase)
+  end
+  def lower_protocol_conformance_case(protocol, declaration)
+    generic = declaration.binders.any?
+    associated = protocol.associated_types.each_with_index.to_h do |type, index|
+      binding = T.must(declaration.protocol_type.generic_args[index])
+      [type.name, transpile_type(binding)]
+    end
+    operations = declaration.members.to_h do |member|
+      [member.source_name || member.name, zig_safe_name(member.name)]
+    end
+    owner_name = protocol_base_name_for_lowering(declaration.owner_type)
+    MIR::ProtocolConformanceCase.new(
+      owner_type: generic ? nil : transpile_type(declaration.owner_type),
+      owner_marker: generic ? "__clear_nominal_#{zig_safe_name(owner_name)}" : nil,
+      type_params: declaration.binders.map(&:name),
+      associated_types: associated,
+      operations: operations,
+    )
+  end
+  private :lower_protocol_conformance_case
+
+  sig { params(protocol: AST::ProtocolDef, requirement: AST::ProtocolRequirement).returns(String) }
+  def protocol_requirement_return_type(protocol, requirement)
+    replacements = T.let({}, T::Hash[Symbol, TypeExpression])
+    protocol.associated_types.each do |associated|
+      replacements[associated.name.to_sym] = TypeProjectionExpression.new(
+        owner: :T,
+        member: associated.name.to_sym,
+        protocol: protocol.name.to_sym,
+      )
+    end
+    replacements[:Self] = NamedTypeExpression.new(name: :T)
+    expression = TypeExpressionTree.transform(requirement.return_type.shape.expression) do |candidate|
+      if candidate.is_a?(NamedTypeExpression) && candidate.arguments.empty? && replacements.key?(candidate.name)
+        T.must(replacements[candidate.name])
+      else
+        candidate
+      end
+    end
+    result = Type.new(expression)
+    if result.error_union?
+      payload = result.success_type || Type.new(:Void)
+      return "anyerror!#{transpile_type(payload)}"
+    end
+    transpile_type(result)
+  end
+  private :protocol_requirement_return_type
+
+  sig { params(type: Type).returns(String) }
+  def protocol_base_name_for_lowering(type)
+    (type.generic_instance? ? type.generic_base : type.resolved).to_s
+  end
+  private :protocol_base_name_for_lowering
 
   # Lower a module AST into MIR items for inlining via REQUIRE.
   # Emits only public declarations (types + functions + re-exports).
@@ -3150,6 +3244,8 @@ class MIRLowering
 
   sig { params(field: AST::StructField).returns(T.nilable(MIR::Emittable)) }
   def lower_struct_field_default(field)
+    return nil if callsite_struct_field_default?(field)
+
     if field.type.optional? && field.type.node_reference? &&
        field.default.is_a?(AST::Literal) && field.default.value.nil?
       return MIR::StructInit.new(field.type.zig_type(is_field: true), [])
@@ -3167,9 +3263,21 @@ class MIRLowering
     nil
   end
 
+  # Allocator-backed collection literals cannot be Zig field defaults: their
+  # initialization needs the active CLEAR runtime allocator. They are lowered
+  # into each struct literal at its construction site instead.
+  sig { params(field: AST::StructField).returns(T::Boolean) }
+  def callsite_struct_field_default?(field)
+    field.default.is_a?(AST::HashLit) || field.default.is_a?(AST::ListLit)
+  end
+  private :callsite_struct_field_default?
+
   sig { params(node: AST::StructDef).returns(MIR::Node) }
   def lower_struct_def(node)
-    lowering_schemas.register_struct(node.name, Schemas::StructSchema.new(fields: node.field_decls))
+    lowering_schemas.register_struct(node.name, Schemas::StructSchema.new(
+      fields: node.field_decls,
+      type_params: node.type_params.map(&:to_sym),
+    ))
 
     if node.type_params.any?
       # Generic struct: fn Name(comptime T: type) type { return struct { ... }; }
@@ -3179,7 +3287,11 @@ class MIRLowering
         default_mir = lower_struct_field_default(fd)
         MIR::FieldDef.new(name.to_s, zig_t, default_mir)
       }
-      inner_struct = MIR::StructDef.new(nil, fields_mir, nil, nil)
+      metadata = [
+        MIR::PubConst.new("__clear_nominal_#{zig_safe_name(node.name)}", "true"),
+        MIR::PubConst.new("__clear_type_args", ".{ #{node.type_params.join(', ')} }"),
+      ]
+      inner_struct = MIR::StructDef.new(nil, fields_mir, metadata, nil)
       body = [MIR::ReturnStmt.new(inner_struct)]
       MIR::FnDef.new(node.name, [], "type", body, nil, false, comptime_params)
     else
@@ -3391,8 +3503,11 @@ class MIRLowering
   # These helpers paper over the difference for the lowering loop.
 
   # User-visible name of the bound entity — used for naming guard vars.
-  sig { params(node: AST::StaticCall).returns(T.any(MIR::InlineBc, MIR::RegistryCall)) }
+  sig { params(node: AST::StaticCall).returns(MIR::Node) }
   def lower_static_call(node)
+    inherent_call = node.inherent_call
+    return lower_func_call(inherent_call) if inherent_call
+
     # Structural MIR::InlineBc when the matched stdlib_def opts in via
     # bc:true. Both backends consume the same node: Zig emits via
     # emit_inline_bc_as_zig (substituting {0}, {1}, ... from stdlib_def[:zig]),
@@ -4219,6 +4334,7 @@ class MIRLowering
   private :cleanup_entry_moved_guard?
   private :construct_lowered_body
   private :current_function_collection_param?
+  private :current_function_protocol_map_allocator
   private :current_function_heap_carry_return?
   private :current_function_param_name?
   private :destination_keep_plan

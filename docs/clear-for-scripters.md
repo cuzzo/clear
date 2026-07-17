@@ -85,12 +85,12 @@ STRUCT Node {
 }
 ```
 
-The "Gotcha": If you try to `.push!` or `.pop!` to a fixed-size array, the compiler will yell at you. It’s not being mean; it’s telling you that physics forbids it.
+The "Gotcha": If you try to append or pop a fixed-size array, the compiler will yell at you. It’s not being mean; it’s telling you that physics forbids it.
 
 ```ruby
-x = [1, 2, 3];
+MUTABLE x = [1, 2, 3];
 # ... do something, now I need to add to `x`, what do I do?
-x.append!(4);                  # COMPILER ERROR! `x` is immutable.
+&x.append(4);                  # COMPILER ERROR! fixed arrays cannot grow.
 ```
 
 ### 5. Physics of Capability: Capabilities vs Types
@@ -109,7 +109,7 @@ In CLEAR, we separate **Types** from **Capabilities**.
    * **coming soon** -> Mvcc = `shared:versioned`, `:actor` uses Object Actor Pattern combined with compiler aware SHARDING
  * **Interior Mutability:** Cell, RefCell -> combined = `alwaysMutable`
    * Automatically acts like Cell for data under 16 bytes
-   * `alwaysMutable` must be unwrapped before individually passing into a function as an argument, like any other capability
+   * `alwaysMutable` fields can satisfy `MUTABLE` parameters directly; their containing binding remains immutable
  * **Existence:** Option, Result => not a capability -> a tense:
    * `?T` = Optional `T`
    * Unwrapped like in Rust and Zig with `.?`
@@ -196,12 +196,13 @@ In 99% of cases, when you pass a variable to a function, you are just letting th
 
 ```ruby
 # This function promises to adopt the 'child'
-FN addChild!(MUTABLE parent: Node, TAKES child: Node) ->
-  parent.list.push!(GIVE child);
+FN addChild(MUTABLE parent: Node, TAKES child: Node) ->
+  &parent.list.push(GIVE child);
 END
 
+MUTABLE root = Node{val: 0};
 node = Node{val: 1};
-addChild!(root, GIVE node);   # I surrender ownership.
+addChild(&root, GIVE node);   # I allow root mutation and surrender node ownership.
 node.print();                 # COMPILER ERROR: Variable 'node' is dead.
 ```
 

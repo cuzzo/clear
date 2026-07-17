@@ -28,7 +28,7 @@ FN main() RETURNS Void ->
     ASSERT n == 3, "count should be 3";
 
     # Delete.
-    scores.delete("bob");
+    &scores.delete("bob");
     ASSERT scores.count() == 2, "count should be 2 after delete";
     ASSERT scores.contains?("bob") == FALSE, "bob should be removed";
 

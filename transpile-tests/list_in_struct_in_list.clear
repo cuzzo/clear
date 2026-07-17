@@ -18,8 +18,8 @@ FN main() RETURNS !Void ->
   MUTABLE p: Int64 = 0;
   WHILE p < 3 DO
     MUTABLE data: []Int64 = [];
-    data.append(p * 10);
-    items.append(Item{ data: data });
+    &data.append(p * 10);
+    &items.append(Item{ data: data });
     p += 1;
   END
 

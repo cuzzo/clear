@@ -781,6 +781,7 @@ module Annotator
         entry = scope.entry_for_write(name)
         return unless entry
         entry.mark_mutated!(touch_declaration: true)
+        audit_mark_mutated(name)
       end
 
       # Mark a binding as mutated INDIRECTLY (e.g. via a function call that
@@ -803,6 +804,7 @@ module Annotator
         entry = scope.entry_for_write(name)
         return unless entry
         entry.mark_mutated_via_reference!
+        audit_mark_mutated(name)
       end
 
       # Walk a chained access expression (GetField/GetIndex chain rooted at an
@@ -810,7 +812,9 @@ module Annotator
       # doesn't bottom out at one. Used to attribute receiver mutation back to
       # the declared binding.
 
-      sig { params(node: T.any(AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Identifier)).returns(T.nilable(String)) }
+      AccessPathNode = T.type_alias { T.any(AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Identifier) }
+
+      sig { params(node: AccessPathNode).returns(T.nilable(String)) }
       def chain_root_name(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
@@ -819,6 +823,20 @@ module Annotator
           curr = curr.target
         end
         curr.is_a?(AST::Identifier) ? curr.name : nil
+      end
+
+      sig { params(node: AccessPathNode).returns(T::Boolean) }
+      def interior_mutable_access_path?(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        curr = T.let(node, AccessPathNode)
+        loop do
+          type = curr.full_type!(context: "interior-mutable assignment path")
+          return true if SymbolEntry.always_mutable_sync?(type.sync)
+          break unless curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex) || curr.is_a?(AST::OptionalUnwrap)
+          curr = curr.target
+        end
+        false
       end
 
       # ==========================================
@@ -946,7 +964,12 @@ module Annotator
         end
 
         target_type = index_node.target.full_type!(context: "index assignment collection")
-        assign_type = if target_type&.map?
+        protocol_map = map_requires_protocol_lowering?(target_type)
+        assign_type = if protocol_map
+          require_generic_map_access_scope!(index_node.target, target_type)
+          index_node.protocol_operation = :map_put
+          protocol_map_associated_type(target_type, :Value)
+        elsif target_type&.map?
           # Map reads return ?V because the key may be absent, but map writes
           # store the declared value type V. If V itself is optional, preserve it.
           target_type.value_type
@@ -966,11 +989,14 @@ module Annotator
 
         validate_assignment_type(assignment_node, assign_type, assignment_node.value.resolved_type)
 
+        consume_generic_map_value!(assignment_node.value, T.must(assign_type)) if protocol_map
+
         stamp_type!(assignment_node, T.must(assign_type))
 
         # HashMap put may allocate, so needs_rt must propagate.
-        if target_type&.map?
+        if target_type&.map? || protocol_map
           current_fn_ctx&.record_heap_use!
+          current_fn_ctx&.record_alloc_use!
           record_effect(EffectTracker::HEAP)
         end
       end
@@ -1010,8 +1036,14 @@ module Annotator
           # Chained target (e.g. `y.items.field = ...` or `obj.f.g = ...`).
           # Attribute mutation to the chain root so post-annotation passes
           # see it without re-walking the AST.
-          root = chain_root_name(field_node.target)
-          mark_var_mutated(root) if root
+          target = T.cast(field_node.target, AccessPathNode)
+          root = chain_root_name(target)
+          if root
+            if current_scope.is_immutable?(root) && !interior_mutable_access_path?(target)
+              emit_immutable_field_assignment_error!(assignment_node, current_scope, root, field_node.field)
+            end
+            mark_var_mutated(root)
+          end
         end
 
         # 4. Type Check
@@ -1069,6 +1101,7 @@ module Annotator
       # INVALIDATION LOGIC (The "Dependencies" feature)
       # ==========================================
       private :assignment_value_type
+      private :interior_mutable_access_path?
       private :finalize_decl_node!
       private :accumulate_stack_bytes
       private :atomic_bind_operation

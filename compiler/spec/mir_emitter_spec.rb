@@ -1567,12 +1567,14 @@ RSpec.describe MIREmitter do
 
       mutate_zig = e.emit(mutate)
       expect(mutate_zig).to include("try CheatLib.polymorphicMutate(cell, rt")
-      expect(mutate_zig).to include("fn run(view: *Counter) void")
+      expect(mutate_zig).to include("fn run(view: *Counter, __captures: anytype) !void")
+      expect(mutate_zig).to include("}.run, .{.{rt}});")
       expect(mutate_zig).to include("view.value = 2;")
 
       flow_zig = e.emit(flow)
       expect(flow_zig).to include("const __PolyFlow = struct")
       expect(flow_zig).to include("try CheatLib.polymorphicMutateFlow(cell, rt")
+      expect(flow_zig).to include("__captures: anytype")
       expect(flow_zig).to include("if (!(ok))")
       expect(flow_zig).to include(".ret_commit, .ret_no_commit => return __poly_flow.ret")
 

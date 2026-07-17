@@ -32,8 +32,8 @@ RSpec.describe "RC ownership through optional collection bindings" do
       STRUCT Item { value: Int64 }
       FN main() RETURNS Void ->
         MUTABLE items: []Item@shared = [];
-        items.append(Item{ value: 1_i64 } @shared);
-        WHILE items.pop() EXISTS AS item DO ASSERT item.value == 1_i64; END
+        &items.append(Item{ value: 1_i64 } @shared);
+        WHILE &items.pop() EXISTS AS item DO ASSERT item.value == 1_i64; END
       END
     CLEAR
 
@@ -50,7 +50,7 @@ RSpec.describe "RC ownership through optional collection bindings" do
       STRUCT Item { value: Int64 }
       FN main() RETURNS Void ->
         MUTABLE items: []Item@multiowned = [];
-        items.append(Item{ value: 1_i64 } @multiowned);
+        &items.append(Item{ value: 1_i64 } @multiowned);
         window = items[0_i64..<1_i64];
         ASSERT window.length() == 1_i64;
       END

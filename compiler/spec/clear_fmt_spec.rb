@@ -13,9 +13,73 @@ require_relative "../ruby/ast/parser" unless defined?(ClearParser)
 # src/backends/formatter.rb.
 
 RSpec.describe Formatter do
+  it "preserves shift operators and adjacent nested generic closers" do
+    source = <<~CLEAR
+      FN shift(value: Int64, amount: Int64, nested: ProjectionBox<Store<Int64>>) RETURNS Int64 ->
+        RETURN value<<amount;
+      END
+    CLEAR
+
+    formatted = T.must(Formatter.format(source))
+    expect(formatted).to include("ProjectionBox<Store<Int64>>")
+    expect(formatted).to include("RETURN value << amount;")
+    expect(formatted).not_to include("value < < amount")
+    expect(Formatter.format(formatted)).to eq(formatted)
+  end
+
   it "keeps adjacent Inline Pivot collection layers flush" do
     source = "value: []{String}[2]Tuple<Int64, String> = DEFAULT;\n"
     expect(Formatter.format(source)).to include("[]{String}[2]Tuple<Int64, String>")
+  end
+
+  it "formats header imports without invoking Zig or rejecting the frontend directive" do
+    source = <<~CLEAR
+      EXTERN FROM HEADER "fixture.h" LINK "fixture" ABI C;
+      FN main() RETURNS Void -> RETURN; END
+    CLEAR
+
+    formatted = Formatter.format(source)
+    expect(formatted).to start_with(<<~CLEAR)
+      EXTERN FROM HEADER "fixture.h"
+        LINK "fixture"
+        ABI C;
+    CLEAR
+    expect(Formatter.format(T.must(formatted))).to eq(formatted)
+  end
+
+  it "keeps generated C declarations readable, bounded, and idempotent" do
+    source = <<~CLEAR
+      EXTERN STRUCT FixtureRecord { id: TargetInt, weight: Float64 } AS "fixture_record" FROM "fixture" ABI C HEADER "fixture.h";
+      EXTERN STRUCT FixtureHandle {} AS "fixture_handle" FROM "fixture" ABI C HEADER "fixture.h";
+      EXTERN STRUCT LocalWideRecord { first: Int64, second: Int64, third: Int64, fourth: Int64, fifth: Int64, sixth: Int64, seventh: Int64, eighth: Int64 };
+      EXTERN FN fixture_apply(value: TargetInt, callback: FN(TargetInt) -> TargetInt CALLCONV C) RETURNS TargetInt AS "fixture_apply" FROM "fixture" ABI C HEADER "fixture.h";
+      EXTERN FN fixture_values(handle: FixtureHandle) RETURNS ?[]@c Int64 AS "fixture_values" FROM "fixture" ABI C HEADER "fixture.h";
+    CLEAR
+
+    formatted = T.must(Formatter.format(source))
+    expect(formatted).to include("EXTERN STRUCT FixtureHandle {}")
+    expect(formatted).to include("callback: FN(TargetInt) -> TargetInt CALLCONV C")
+    expect(formatted).to include("RETURNS ?[]@c Int64")
+    expect(formatted.lines.map { |line| line.chomp.length }.max).to be <= 120
+    expect(Formatter.format(formatted)).to eq(formatted)
+  end
+
+  it "does not rewrite an EXTERN function that shadows a stdlib METHOD" do
+    source = <<~CLEAR
+      EXTERN STRUCT Handle {} FROM "fixture" ABI C;
+      EXTERN FN values(handle: Handle) RETURNS ?[]@c Int64 FROM "fixture" ABI C;
+      FN first(handle: Handle) RETURNS Int64 ->
+        pointer = values(handle)?;
+        WITH UNSAFE VIEW pointer LENGTH 1 AS view {
+          RETURN view[0];
+        }
+      END
+    CLEAR
+
+    formatted = T.must(Formatter.format(source))
+    expect(formatted).to include("pointer = values(handle)?;")
+    expect(formatted).to include("WITH UNSAFE VIEW pointer LENGTH 1 AS view {")
+    expect(formatted).not_to include("handle.values()")
   end
 
   # Mirrors the CLI's behaviour from `clear` (case 'fmt'):
@@ -152,14 +216,14 @@ RSpec.describe Formatter do
 
   it "keeps MUTABLE on bindings passed to bang helpers" do
     src = <<~CLEAR
-      FN appendOne!(MUTABLE xs: []Int64) RETURNS Void ->
-        xs.append(1_i64);
+      FN appendOne(MUTABLE xs: []Int64) RETURNS Void ->
+        &xs.append(1_i64);
         RETURN;
       END
 
       FN main() RETURNS Void ->
         MUTABLE xs: []Int64 = [];
-        appendOne!(xs);
+        appendOne(&xs);
         RETURN;
       END
     CLEAR
@@ -995,7 +1059,7 @@ RSpec.describe Formatter do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE futures: ~Void[]@list = [];
-          futures.append(BG {
+          &futures.append(BG {
             FOR i IN (0 ..< 5) DO
               MUTABLE x = i;
               MUTABLE y = i;
@@ -1232,7 +1296,7 @@ RSpec.describe Formatter do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE futures: ~Int64[]@list = [];
-          futures.append(BG { @parallel ->
+          &futures.append(BG { @parallel ->
             MUTABLE total: Int64 = 0;
             WHILE total < 10 DO
               total += 1;
@@ -1504,7 +1568,7 @@ RSpec.describe Formatter do
       src = <<~CLEAR
         ENUM Op { A, B, C }
 
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
           op = Op.A;
           IF op == Op.A THEN PARTIAL MATCH op START Op.A -> PASS;, DEFAULT -> PASS; END
           ELSE_IF op == Op.B THEN PARTIAL MATCH op START Op.B -> PASS;, DEFAULT -> PASS; END
@@ -1534,7 +1598,7 @@ RSpec.describe Formatter do
         ENUM Op { Get, Put }
         ENUM SubOp { A, B }
 
-        FN main!() RETURNS !Void ->
+        FN main() RETURNS !Void ->
           op = Op.Get;
           suboo = SubOp.A;
           MATCH op START
@@ -1628,7 +1692,7 @@ RSpec.describe Formatter do
     it "leaves a `REQUIRES x: LOCKED` clause alone" do
       src = <<~CLEAR
         STRUCT Counter { v: Int64 }
-        FN incr!(MUTABLE c: Counter) REQUIRES c: LOCKED -> RETURN; END
+        FN incr(MUTABLE c: Counter) REQUIRES c: LOCKED -> RETURN; END
       CLEAR
       out = Formatter.format(src)
       expect(out).to include("REQUIRES c: LOCKED")

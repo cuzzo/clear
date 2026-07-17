@@ -5,7 +5,7 @@ FN main() RETURNS Void ->
     MUTABLE nums: Int64[] = [];
     MUTABLE i = 0_i64;
     WHILE i < 10000 DO
-        nums.append(i);
+        &nums.append(i);
         i = i + 1_i64;
     END
 

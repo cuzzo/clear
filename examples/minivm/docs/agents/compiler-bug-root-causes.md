@@ -83,7 +83,7 @@ plainly rather than guessed.
 - **Earlier "INLINE_ALLOC_MISMATCH escape gap" framing: superseded
   by evidence.** A minimal faithful probe (post compiler-fix:
   `EFFECTS REENTRANT` + a dead-guarded `BG { @service ->
-  runRegisterBytecode!(COPY ops, COPY opcodes, ...) }`) does **not**
+  runRegisterBytecode(COPY ops, COPY opcodes, ...) }`) does **not**
   reach `INLINE_ALLOC_MISMATCH` — it fails **earlier** in generated
   Zig: `expected '*array_list.Aligned(i64,null)', found
   '*const []i64'` for `COPY ops` (a slice param) captured into the

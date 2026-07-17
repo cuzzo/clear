@@ -7,6 +7,7 @@
 #
 # Per-subcommand completion semantics:
 #   build / run / fmt / fix / profile / explain  -> *.clear files (+ dirs)
+#   c-ffi                                         -> header/output paths
 #   test                                          -> *.clear files OR directories
 #   doctor                                        -> *.profile/ directories
 #   completions                                   -> bash | zsh | fish
@@ -23,6 +24,7 @@ module Completions
     'profile'     => 'Build with profiling and run',
     'doctor'      => 'Analyze a .profile/ directory',
     'fix'         => 'Apply lint fixes to .clear files',
+    'c-ffi'       => 'Generate CLEAR declarations from a C header',
     'fmt'         => 'Format .clear files',
     'format'      => 'Alias for fmt',
     'explain'     => 'Explain a language feature',
@@ -65,6 +67,10 @@ module Completions
         case "$cmd" in
           build|run|fmt|format|fix|profile|explain)
             COMPREPLY=( $(compgen -f -X '!*.clear' -- "$cur") $(compgen -d -- "$cur") )
+            compopt -o filenames 2>/dev/null
+            ;;
+          c-ffi)
+            COMPREPLY=( $(compgen -f -- "$cur") $(compgen -d -- "$cur") )
             compopt -o filenames 2>/dev/null
             ;;
           test|benchmark)
@@ -117,6 +123,9 @@ module Completions
           build|run|fmt|format|fix|profile|explain|test|benchmark)
             _files -g '*.clear'
             ;;
+          c-ffi)
+            _files
+            ;;
           doctor)
             _files -/ -g '*.profile'
             ;;
@@ -147,6 +156,8 @@ module Completions
       # File arguments per subcommand
       complete -c clear -n '__fish_seen_subcommand_from build run fmt format fix profile explain test benchmark' \\
         -F -k -a "(__fish_complete_path '*.clear')"
+
+      complete -c clear -n '__fish_seen_subcommand_from c-ffi' -F
 
       # `doctor` wants *.profile/ directories
       complete -c clear -n '__fish_seen_subcommand_from doctor' \\

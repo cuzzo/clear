@@ -8,13 +8,13 @@ STRUCT Container { vals: []Int64 }
 
 FN make_container(n: Int64) RETURNS !Container ->
     MUTABLE vals: []Int64 = List[];
-    vals.append(n);
+    &vals.append(n);
     RETURN Container{ vals: vals };
 END
 
 FN make_optional_container(n: Int64) RETURNS !?Container ->
     MUTABLE vals: []Int64 = List[];
-    vals.append(n);
+    &vals.append(n);
     RETURN Container{ vals: vals };
 END
 
@@ -24,14 +24,14 @@ END
 FN test_while_pop_heap_capture() RETURNS !Void ->
     MUTABLE pool: []Container = [];
     MUTABLE c1 = make_container(10);
-    pool.append(GIVE c1);
+    &pool.append(GIVE c1);
     MUTABLE c2 = make_container(20);
-    pool.append(GIVE c2);
+    &pool.append(GIVE c2);
     MUTABLE c3 = make_container(30);
-    pool.append(GIVE c3);
+    &pool.append(GIVE c3);
 
     MUTABLE count: Int64 = 0;
-    WHILE pool.pop() EXISTS AS c DO
+    WHILE &pool.pop() EXISTS AS c DO
         count = count + c.vals.length();
     END
     ASSERT count == 3_i64, "should pop 3 containers (one val each)";
