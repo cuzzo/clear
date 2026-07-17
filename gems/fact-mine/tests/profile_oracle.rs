@@ -20,10 +20,7 @@ fn fixture(name: &str) -> PathBuf {
 
 #[test]
 fn python_profile_keeps_lexical_closures_out_of_owner_methods() -> Result<()> {
-    let document = syntax::parse_file(
-        fixture("python_state_projection.py"),
-        Language::Python,
-    )?;
+    let document = syntax::parse_file(fixture("python_state_projection.py"), Language::Python)?;
     let output = profile::extract(&document, Profile::Espalier);
     let methods = output
         .methods
@@ -37,10 +34,7 @@ fn python_profile_keeps_lexical_closures_out_of_owner_methods() -> Result<()> {
 
 #[test]
 fn python_profile_canonicalizes_and_projects_state_reads() -> Result<()> {
-    let document = syntax::parse_file(
-        fixture("python_state_projection.py"),
-        Language::Python,
-    )?;
+    let document = syntax::parse_file(fixture("python_state_projection.py"), Language::Python)?;
     let reads = document
         .state_reads
         .iter()
@@ -55,9 +49,425 @@ fn python_profile_canonicalizes_and_projects_state_reads() -> Result<()> {
 }
 
 #[test]
+fn declared_method_types_are_normalized_from_language_owned_syntax() -> Result<()> {
+    let python = syntax::parse_file(fixture("declared_types.py"), Language::Python)?;
+    let python = profile::extract(&python, Profile::NilKill);
+    let call = python
+        .type_definitions
+        .iter()
+        .find(|definition| definition.kind == "method_signature" && definition.name == "call")
+        .context("missing Python call signature")?;
+    assert_eq!(
+        call.return_type
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("str")
+    );
+    assert!(call.params.iter().any(|parameter| {
+        parameter.get("name") == Some(&json!("reason"))
+            && parameter.get("type").and_then(|value| value.get("data")) == Some(&json!("str"))
+    }));
+
+    let typescript = syntax::parse_file(fixture("typescript_interface.ts"), Language::TypeScript)?;
+    let typescript = profile::extract(&typescript, Profile::NilKill);
+    let interface_method = typescript
+        .type_definitions
+        .iter()
+        .find(|definition| {
+            definition.kind == "method_signature"
+                && definition.owner == "Client"
+                && definition.name == "fetch"
+        })
+        .context("missing TypeScript interface method signature")?;
+    assert_eq!(
+        interface_method
+            .return_type
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("T.nilable(string)")
+    );
+    Ok(())
+}
+
+#[test]
+fn typescript_variable_bound_callables_are_emitted_as_project_methods() -> Result<()> {
+    let document = syntax::parse_file(fixture("typescript_callable.ts"), Language::TypeScript)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let methods = output
+        .methods
+        .iter()
+        .map(|method| method.name.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(methods.contains(&"double"), "methods={methods:?}");
+    assert!(methods.contains(&"increment"), "methods={methods:?}");
+    assert!(methods.contains(&"useCallable"), "methods={methods:?}");
+    let double = output
+        .methods
+        .iter()
+        .find(|method| method.name == "double")
+        .context("missing double method")?;
+    let binding_column = fs::read_to_string(fixture("typescript_callable.ts"))?
+        .lines()
+        .next()
+        .and_then(|line| line.find("double"))
+        .context("missing double binding")?;
+    assert!(
+        double.span.is_some_and(|span| span[1] <= binding_column),
+        "span={:?}, binding_column={binding_column}",
+        double.span
+    );
+    assert!(output.calls.iter().any(|call| call.message == "double"));
+    assert!(output.calls.iter().any(|call| call.message == "increment"));
+    let nested_fact = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "nested")
+        .context("missing complexity facts for nested bound callable")?;
+    assert!(
+        nested_fact
+            .call_contexts
+            .iter()
+            .any(|context| context.message == "increment"),
+        "contexts={:?}",
+        nested_fact.call_contexts
+    );
+    Ok(())
+}
+
+#[test]
+fn source_facing_fields_preserve_native_declared_type_spelling() -> Result<()> {
+    for (fixture_name, language, field, expected) in [
+        (
+            "native_field_types.rs",
+            Language::Rust,
+            "items",
+            "Vec<String>",
+        ),
+        (
+            "native_field_types.hpp",
+            Language::Cpp,
+            "name",
+            "std::string",
+        ),
+        ("native_field_types.cs", Language::CSharp, "Name", "string"),
+    ] {
+        let document = syntax::parse_file(fixture(fixture_name), language)?;
+        let output = profile::extract(&document, Profile::NilKill);
+        let record = output
+            .fields
+            .iter()
+            .find(|record| record.name == field)
+            .with_context(|| format!("missing {fixture_name} field {field}"))?;
+        assert_eq!(
+            record.declared_type.as_deref(),
+            Some(expected),
+            "{fixture_name}"
+        );
+        let definition = output
+            .type_definitions
+            .iter()
+            .find(|definition| definition.kind == "state_field" && definition.name == field)
+            .with_context(|| format!("missing {fixture_name} state-field definition {field}"))?;
+        assert_eq!(
+            definition.declared_type.as_deref(),
+            Some(expected),
+            "{fixture_name}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn cpp_field_projections_and_named_casts_are_not_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Data { int value; };
+struct Holder { Data data; int read() { return data.value; } };
+int helper(int value) { return value; }
+int analyze(Data* data, int input) {
+    int projected = data->value;
+    long widened = static_cast<long>(input);
+    return helper(static_cast<int>(projected + widened));
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    assert!(
+        document
+            .state_reads
+            .iter()
+            .any(|read| read.receiver == "data" && read.field == "value"),
+        "field projection should remain a state read: {:?}",
+        document.state_reads
+    );
+    let output = profile::extract(&document, Profile::Espalier);
+    let messages = output
+        .calls
+        .iter()
+        .map(|call| call.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(messages.contains(&"helper"), "calls={messages:?}");
+    assert!(!messages.contains(&"value"), "calls={messages:?}");
+    assert!(!messages.contains(&"data"), "calls={messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|message| !message.starts_with("static_cast<")),
+        "calls={messages:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn go_short_declaration_does_not_reuse_outer_non_nil_proof() -> Result<()> {
     let document = syntax::parse_file(fixture("go_shadowing.go"), Language::Go)?;
     assert!(document.redundant_nil_guards.is_empty());
+    Ok(())
+}
+
+#[test]
+fn exact_native_stdlib_calls_emit_normalized_complexity_facts() -> Result<()> {
+    for (name, language, message, time, space) in [
+        ("stdlib_registry.c", Language::C, "strcmp", "O(N)", "O(1)"),
+        (
+            "stdlib_registry.go",
+            Language::Go,
+            "BinarySearch",
+            "O(log N)",
+            "O(1)",
+        ),
+        (
+            "stdlib_registry.java",
+            Language::Java,
+            "copyOf",
+            "O(N)",
+            "O(N)",
+        ),
+        (
+            "stdlib_registry.cs",
+            Language::CSharp,
+            "BinarySearch",
+            "O(log N)",
+            "O(1)",
+        ),
+        (
+            "stdlib_registry.py",
+            Language::Python,
+            "casefold",
+            "O(N)",
+            "O(N)",
+        ),
+    ] {
+        let document = syntax::parse_file(fixture(name), language)?;
+        let output = profile::extract(&document, Profile::Espalier);
+        let call = output
+            .complexity_facts
+            .iter()
+            .flat_map(|facts| facts.call_contexts.iter())
+            .find(|call| call.message == message)
+            .with_context(|| format!("missing {name} {message} complexity fact"))?;
+        assert_eq!(call.known_time_complexity.as_deref(), Some(time), "{name}");
+        assert_eq!(
+            call.known_space_complexity.as_deref(),
+            Some(space),
+            "{name}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn go_builtins_are_modeled_as_language_intrinsics_without_scip_targets() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    tmp.write_all(
+        br#"package sample
+
+func builtins(xs []int, values map[string]int, done chan int) int {
+    result := make([]int, len(xs))
+    result = append(result, xs...)
+    copy(result, xs)
+    delete(values, "missing")
+    close(done)
+    return int(int32(len(result)))
+}
+
+func fail() {
+    panic("failed")
+}
+
+type holder struct { values []int }
+
+// Go has no implicit method dispatch: the bare len below remains the
+// predeclared function even though its enclosing type has a method named len.
+func (h *holder) len() int {
+    return len(h.values)
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let expected = [
+        ("len", "O(1)", "O(1)"),
+        ("make", "O(N)", "O(N)"),
+        ("append", "O(N)", "O(N)"),
+        ("copy", "O(N)", "O(1)"),
+        ("delete", "O(1)", "O(1)"),
+        ("close", "O(1)", "O(1)"),
+        ("int", "O(1)", "O(1)"),
+        ("int32", "O(1)", "O(1)"),
+        ("panic", "O(N)", "O(1)"),
+    ];
+
+    for (message, time, space) in expected {
+        let matching = output
+            .calls
+            .iter()
+            .filter(|call| call.message == message)
+            .collect::<Vec<_>>();
+        assert!(!matching.is_empty(), "missing Go builtin {message}");
+        assert!(matching.iter().all(|call| call.target.is_none()));
+        assert!(matching
+            .iter()
+            .all(|call| call.known_time_complexity.as_deref() == Some(time)));
+        assert!(matching
+            .iter()
+            .all(|call| call.known_space_complexity.as_deref() == Some(space)));
+    }
+    let holder_len = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.owner == "holder" && fact.function == "len")
+        .context("missing holder.len complexity facts")?;
+    assert_eq!(holder_len.recursion.calls, 0);
+    Ok(())
+}
+
+#[test]
+fn go_top_level_calls_retain_declared_parameter_receiver_types() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    tmp.write_all(
+        br#"package sample
+
+type worker interface { Work() }
+
+func run(value worker) {
+    value.Work()
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    assert!(
+        output
+            .owners
+            .iter()
+            .any(|owner| owner.name == "worker" && owner.kind == "interface"),
+        "{:#?}",
+        output.owners
+    );
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "Work")
+        .context("missing Work call")?;
+
+    assert_eq!(call.receiver_type.as_deref(), Some("worker"));
+    assert_eq!(
+        call.receiver_type_origin.as_deref(),
+        Some("declared_parameter")
+    );
+    Ok(())
+}
+
+#[test]
+fn go_local_bindings_retain_provable_interface_types() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    tmp.write_all(
+        br#"package sample
+
+type bundle struct { errs []error }
+
+func run(value error, values bundle, ch chan error) {
+    var local error
+    local.Error()
+    for _, ranged := range values.errs { ranged.Error() }
+    if received := <-ch; received != nil { received.Error() }
+    switch narrowed := value.(type) {
+    default:
+        narrowed.Error()
+    }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.message == "Error")
+        .collect::<Vec<_>>();
+
+    assert_eq!(calls.len(), 4, "{calls:#?}");
+    assert!(
+        calls
+            .iter()
+            .all(|call| call.receiver_type.as_deref() == Some("error")),
+        "{calls:#?}"
+    );
+    assert!(
+        calls.iter().all(|call| {
+            call.known_time_complexity.as_deref() == Some("O(C)")
+                && call.complexity_bound_quality.as_deref()
+                    == Some("upper_bound_parametric_callback_once")
+        }),
+        "{calls:#?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn go_declared_function_fields_are_parametric_callbacks() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    tmp.write_all(
+        br#"package sample
+
+type worker struct { fn func(int) }
+type wrapper struct { worker *worker }
+
+func (w *worker) direct() { w.fn(1) }
+func (w *wrapper) projected() { w.worker.fn(1) }
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.message == "fn")
+        .collect::<Vec<_>>();
+
+    assert_eq!(calls.len(), 2, "{calls:#?}");
+    assert!(
+        calls.iter().all(|call| {
+            call.callback_receiver
+                && call.known_time_complexity.as_deref() == Some("O(C)")
+                && call.complexity_bound_quality.as_deref()
+                    == Some("upper_bound_parametric_callback_once")
+        }),
+        "{calls:#?}"
+    );
     Ok(())
 }
 
@@ -85,7 +495,11 @@ fn ruby_calculator_extracts_methods() -> Result<()> {
     assert!(add_method.raw_source.contains("def add"));
     assert_eq!(
         add_method.normalized_source,
-        add_method.raw_source.split_whitespace().collect::<Vec<_>>().join(" ")
+        add_method
+            .raw_source
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
     );
     assert!(
         !add_method.signature.is_empty() || true,
@@ -132,34 +546,68 @@ end
     let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
     let output = profile::extract(&document, Profile::Espalier);
 
-    let build = output.methods.iter().find(|method| method.name == "self.build").unwrap();
+    let build = output
+        .methods
+        .iter()
+        .find(|method| method.name == "self.build")
+        .unwrap();
     assert_eq!(build.kind, "class");
     assert_eq!(build.dispatch_name, "build");
 
-    let target_flow = output.flow_local_types.iter().find(|fact| {
-        fact.get("function").and_then(Value::as_str) == Some("run")
-            && fact.get("name").and_then(Value::as_str) == Some("target")
-            && fact.get("complete").and_then(Value::as_bool) == Some(true)
-    }).context("missing complete target flow type")?;
-    let resolved = target_flow.get("resolved_types").and_then(Value::as_array)
+    let target_flow = output
+        .flow_local_types
+        .iter()
+        .find(|fact| {
+            fact.get("function").and_then(Value::as_str) == Some("run")
+                && fact.get("name").and_then(Value::as_str) == Some("target")
+                && fact.get("complete").and_then(Value::as_bool) == Some(true)
+        })
+        .context("missing complete target flow type")?;
+    let resolved = target_flow
+        .get("resolved_types")
+        .and_then(Value::as_array)
         .context("missing normalized resolved flow types")?;
     assert_eq!(resolved.len(), 1);
-    assert_eq!(resolved[0].get("kind").and_then(Value::as_str), Some("Primitive"));
-    assert_eq!(resolved[0].get("data").and_then(Value::as_str), Some("Target"));
-    let static_call = output.calls.iter().find(|call| {
-        call.function == "run" && call.receiver == "Target" && call.message == "build"
-    }).with_context(|| format!("missing static Target.build call in {:?}", output.calls))?;
+    assert_eq!(
+        resolved[0].get("kind").and_then(Value::as_str),
+        Some("Primitive")
+    );
+    assert_eq!(
+        resolved[0].get("data").and_then(Value::as_str),
+        Some("Target")
+    );
+    let static_call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.receiver == "Target" && call.message == "build")
+        .with_context(|| format!("missing static Target.build call in {:?}", output.calls))?;
     assert_eq!(static_call.receiver_kind, "type");
-    let constructor = output.calls.iter().find(|call| {
-        call.function == "run" && call.receiver == "Target" && call.message == "new"
-    }).context("missing Target.new call")?;
-    assert_eq!(constructor.constructor_target.as_deref(), Some("initialize"));
-    let type_operation = output.calls.iter().find(|call| {
-        call.function == "run" && call.receiver == "T" && call.message == "let"
-    }).context("missing T.let call")?;
-    assert_eq!(type_operation.known_time_complexity.as_deref(), Some("O(1)"));
-    assert_eq!(type_operation.known_space_complexity.as_deref(), Some("O(1)"));
-    let record = output.struct_declarations.iter().find(|declaration| declaration.class == "Record")
+    let constructor = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.receiver == "Target" && call.message == "new")
+        .context("missing Target.new call")?;
+    assert_eq!(
+        constructor.constructor_target.as_deref(),
+        Some("initialize")
+    );
+    let type_operation = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.receiver == "T" && call.message == "let")
+        .context("missing T.let call")?;
+    assert_eq!(
+        type_operation.known_time_complexity.as_deref(),
+        Some("O(1)")
+    );
+    assert_eq!(
+        type_operation.known_space_complexity.as_deref(),
+        Some("O(1)")
+    );
+    let record = output
+        .struct_declarations
+        .iter()
+        .find(|declaration| declaration.class == "Record")
         .context("missing Record declaration")?;
     assert_eq!(record.constant_operations, ["new", "[]", "[]="]);
 
@@ -373,7 +821,8 @@ fn nil_kill_profile_preserves_weak_declared_shapes_without_marking_them_resolved
     use std::io::Write;
 
     let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
-    tmp.write_all(br#"class TypedInputs
+    tmp.write_all(
+        br#"class TypedInputs
   extend T::Sig
   sig { params(strong: String, weak: T::Array[T.untyped]).void }
   def run(strong, weak)
@@ -381,13 +830,17 @@ fn nil_kill_profile_preserves_weak_declared_shapes_without_marking_them_resolved
     weak.length
   end
 end
-"#)?;
+"#,
+    )?;
     let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
     let declared = document
         .method_param_types
-        .get("TypedInputs\0run")
+        .get("TypedInputs\0run\04")
         .context("missing declared parameter shapes")?;
-    assert_eq!(declared.get("weak").map(String::as_str), Some("T::Array[T.untyped]"));
+    assert_eq!(
+        declared.get("weak").map(String::as_str),
+        Some("T::Array[T.untyped]")
+    );
 
     let output = profile::extract(&document, Profile::NilKill);
     let parameter = |name: &str| {
@@ -412,9 +865,7 @@ fn nil_kill_profile_connects_program_globals_across_owners_and_files() -> Result
     use std::io::Write;
 
     let mut writer = tempfile::Builder::new().suffix(".rb").tempfile()?;
-    writer.write_all(
-        b"class Writer\n  def write\n    $shared = \"ready\"\n  end\nend\n",
-    )?;
+    writer.write_all(b"class Writer\n  def write\n    $shared = \"ready\"\n  end\nend\n")?;
     let mut reader = tempfile::Builder::new().suffix(".rb").tempfile()?;
     reader.write_all(b"class Reader\n  def read\n    $shared\n  end\nend\n")?;
 
@@ -549,16 +1000,22 @@ fn declaration_pressure_is_normalized_for_sorbet_and_typed_python() -> Result<()
     write!(ruby, "extend T::Sig\nPayload = T.type_alias {{ T.nilable(T.any(String, Integer, Float, Symbol)) }}\n")?;
     let ruby_doc = syntax::parse_file(ruby.path().to_path_buf(), Language::Ruby)?;
     let ruby_rows = profile::extract_declaration_type_pressures(&ruby_doc);
-    let ruby_alias = ruby_rows.iter().find(|row| row.declaration_name == "Payload")
+    let ruby_alias = ruby_rows
+        .iter()
+        .find(|row| row.declaration_name == "Payload")
         .context("missing Sorbet alias pressure")?;
     assert_eq!(ruby_alias.union_width, 4);
     assert!(ruby_alias.nilable);
 
     let mut python = tempfile::Builder::new().suffix(".py").tempfile()?;
-    write!(python, "def parse(value: str | int | float | bool | None) -> object:\n    return value\n")?;
+    write!(
+        python,
+        "def parse(value: str | int | float | bool | None) -> object:\n    return value\n"
+    )?;
     let python_doc = syntax::parse_file(python.path().to_path_buf(), Language::Python)?;
     let python_rows = profile::extract_declaration_type_pressures(&python_doc);
-    let python_param = python_rows.iter()
+    let python_param = python_rows
+        .iter()
         .find(|row| row.declaration_name == "parse" && row.slot == "param:value")
         .context("missing Python parameter pressure")?;
     assert_eq!(python_param.union_width, 4);
@@ -593,9 +1050,10 @@ end
     let output = profile::extract(&document, Profile::TracePlan);
 
     assert_eq!(output.methods.len(), 1);
-    assert!(output.tlet_sites.iter().any(|site| {
-        site.get("type").and_then(Value::as_str) == Some("T::Array[String]")
-    }));
+    assert!(output
+        .tlet_sites
+        .iter()
+        .any(|site| { site.get("type").and_then(Value::as_str) == Some("T::Array[String]") }));
     assert!(output.state_type_records.iter().any(|record| {
         record.owner == "Worker"
             && record.field == "items"
@@ -608,8 +1066,7 @@ end
     assert!(output.struct_declarations.iter().any(|declaration| {
         declaration.class == "MutableState"
             && declaration.fields == vec!["items".to_string(), "name".to_string()]
-            && declaration.field_types.get("items").map(String::as_str)
-                == Some("T::Array[String]")
+            && declaration.field_types.get("items").map(String::as_str) == Some("T::Array[String]")
             && declaration.field_types.get("name").map(String::as_str) == Some("String")
     }));
     assert!(output.flow_local_types.is_empty());
@@ -750,15 +1207,18 @@ end
         .find(|record| record["method"] == "nested_scope")
         .context("missing nested_scope return origin")?;
 
-    assert_eq!(origin["candidate_type"], serde_json::json!({
-        "kind": "Primitive",
-        "data": "Token",
-    }), "{origin:#}");
+    assert_eq!(
+        origin["candidate_type"],
+        serde_json::json!({
+            "kind": "Primitive",
+            "data": "Token",
+        }),
+        "{origin:#}"
+    );
     assert_eq!(origin["confidence"], "strong");
     assert_eq!(origin["blockers"], serde_json::json!([]));
     assert_eq!(
-        nested_origin["class"],
-        "Outer::Inner::Deep",
+        nested_origin["class"], "Outer::Inner::Deep",
         "nested owners must be qualified exactly once"
     );
     assert_eq!(
@@ -792,10 +1252,9 @@ end
         "a nil default must not replace the declared nilable parameter type"
     );
     assert!(
-        output
-            .dead_nil_checks
-            .iter()
-            .all(|record| !record["code"].as_str().is_some_and(|code| code.contains("class.name"))),
+        output.dead_nil_checks.iter().all(|record| !record["code"]
+            .as_str()
+            .is_some_and(|code| code.contains("class.name"))),
         "Module#name may be nil for anonymous classes"
     );
 
@@ -826,14 +1285,25 @@ fn nil_kill_all_profile_examples_extract_successfully() -> Result<()> {
         let output = profile::extract(&document, Profile::NilKill);
         method_count += output.methods.len();
         for method in output.methods {
-            assert!(!method.raw_source.is_empty(), "empty source for {}", method.name);
+            assert!(
+                !method.raw_source.is_empty(),
+                "empty source for {}",
+                method.name
+            );
             assert_eq!(
                 method.normalized_source,
-                method.raw_source.split_whitespace().collect::<Vec<_>>().join(" ")
+                method
+                    .raw_source
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
             );
         }
     }
-    assert!(method_count > 0, "profile examples should contain functions");
+    assert!(
+        method_count > 0,
+        "profile examples should contain functions"
+    );
     Ok(())
 }
 
@@ -1054,9 +1524,7 @@ fn normalize_for_oracle(value: &Value, expected: &Value) -> Value {
             });
             Value::Array(normalized)
         }
-        (Value::String(actual), Value::String(_)) => {
-            Value::String(normalize_opaque_id(actual))
-        }
+        (Value::String(actual), Value::String(_)) => Value::String(normalize_opaque_id(actual)),
         _ => value.clone(),
     }
 }

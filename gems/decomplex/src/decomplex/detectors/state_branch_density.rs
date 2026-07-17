@@ -170,15 +170,21 @@ fn method_parameter_type(document: &Document, function: &str, param: &str) -> Op
         return Some(type_name.clone());
     }
 
-    // FactMine keys owner-qualified methods as "Owner\0method" so methods
-    // with the same name in different owners cannot overwrite one another.
-    // Branch facts intentionally carry the display name. Resolve it only
-    // when the candidate parameter type is unambiguous across owners.
-    let suffix = format!("\0{function}");
+    // FactMine keys owner-qualified methods as "Owner\0method\0line". Older
+    // profiles may omit the line component. Branch facts intentionally carry
+    // only the display name, so accept both schemas and resolve the parameter
+    // only when its type is unambiguous across owners/overloads.
     let candidates = document
         .method_param_types
         .iter()
-        .filter(|(identity, _)| identity.ends_with(&suffix))
+        .filter(|(identity, _)| {
+            let mut parts = identity.split('\0');
+            let _owner = parts.next();
+            match parts.next() {
+                Some(name) => name == function,
+                None => identity.rsplit("::").next() == Some(function),
+            }
+        })
         .filter_map(|(_, params)| params.get(param))
         .cloned()
         .collect::<BTreeSet<_>>();
@@ -286,7 +292,7 @@ mod tests {
 
     #[test]
     fn test_branch_metadata() {
-        let doc: Document = serde_json::from_value(serde_json::json!({
+        let mut doc: Document = serde_json::from_value(serde_json::json!({
             "file": "foo.rb",
             "language": "ruby",
             "immutable_struct_readers": {
@@ -305,6 +311,9 @@ mod tests {
             }
         })).unwrap();
 
+        let params = doc.method_param_types.remove("foo").unwrap();
+        doc.method_param_types
+            .insert(format!("Owner\0foo\0{}", 12), params);
         let metadata = BranchMetadata::from_documents(&[doc.clone()]);
 
         // len < 2

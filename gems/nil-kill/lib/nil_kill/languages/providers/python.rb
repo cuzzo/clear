@@ -29,6 +29,10 @@ module NilKill
           true
         end
 
+        def type_next_annotation_advice?
+          true
+        end
+
         def runtime_trace_events
           %w[
             process_start

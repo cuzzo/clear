@@ -70,5 +70,35 @@
     "call_allocate_helper": "O(N)",
     "scan_partition": "O(N)",
     "scan_partitions": "O(N)"
+  },
+  "typed_operations.ts": {
+    "scanAndCopy": "O(N)"
+  },
+  "listener_fanout.cpp": {
+    "sum": "O(N)",
+    "dispatch": "unknown"
+  },
+  "cpp_header_fixture.h": {
+    "sum": "O(N)"
+  },
+  "typed_collections.java": {
+    "copyIfPresent": "O(N)"
+  },
+  "typed_collections.cs": {
+    "CopyIfPresent": "O(N)"
+  },
+  "typed_collections.go": {
+    "Size": "O(1)"
+  },
+  "typed_collections.py": {
+    "copy_if_present": "O(N)"
+  },
+  "typed_collections.cpp": {
+    "contains": "O(N)"
+  },
+  "static_capacity.ts": {
+    "fixedKeywords": "O(1)",
+    "dynamicKeywords": "O(N)",
+    "grownKeywords": "O(N)"
   }
 }

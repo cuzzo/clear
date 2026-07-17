@@ -59,6 +59,9 @@ class StaticEvidenceTest < Minitest::Test
       # State protocols include the field call, but never the explicit
       # owner-method call (`self.helper`).
       assert_equal ["fetch"], evidence.dig("facts", "state_protocols", "ClientUser\u0000@client")
+      coverage = evidence.dig("facts", "call_resolution_coverage")
+      assert_operator coverage.fetch("eligible_call_sites"), :>, 0
+      assert_equal coverage, evidence.dig("summary", "call_resolution_coverage")
       assert_equal false, evidence.dig("language_capabilities", "ruby", "runtime_tracing")
       assert_equal nil_kill_features, loaded_nil_kill_features
     end
@@ -292,6 +295,33 @@ class StaticEvidenceTest < Minitest::Test
     assert_equal "benchmark", Espalier::StaticEvidence.source_role("benchmarks/widget.rs")
     assert_equal "example", Espalier::StaticEvidence.source_role("examples/widget.rb")
     assert_equal "production", Espalier::StaticEvidence.source_role("rich/console.py")
+    assert_equal "test", Espalier::StaticEvidence.source_role("Sources/ArgumentParserTestHelpers/Helpers.swift")
+  end
+
+  def test_project_modules_prefers_a_primary_owner_over_an_extension_and_never_gives_protocols_state
+    evidence = {
+      "owners" => [
+        { "name" => "Counter", "kind" => "extension", "path" => "Sources/Counter+Extras.swift", "line" => 1, "language" => "swift" },
+        { "name" => "Counter", "kind" => "struct", "path" => "Sources/Counter.swift", "line" => 3, "language" => "swift" },
+        { "name" => "Renderable", "kind" => "protocol", "path" => "Sources/Renderable.swift", "line" => 1, "language" => "swift" }
+      ],
+      "methods" => [
+        { "id" => "counter-extra", "name" => "incremented", "owner" => "Counter", "path" => "Sources/Counter+Extras.swift", "line" => 2, "language" => "swift" },
+        { "id" => "renderable", "name" => "render", "owner" => "Renderable", "path" => "Sources/Renderable.swift", "line" => 2, "language" => "swift" }
+      ],
+      "fields" => [
+        { "name" => "cached", "owner" => "Renderable", "path" => "Sources/Renderable.swift", "line" => 1, "language" => "swift" }
+      ],
+      "facts" => {}
+    }
+
+    modules = Espalier::StaticEvidence.project_modules(evidence)
+    counter = modules.find { |mod| mod[:name] == "Counter" }
+    protocol = modules.find { |mod| mod[:name] == "Renderable" }
+    assert_equal "Sources/Counter.swift", counter[:file]
+    assert_equal :class, counter[:type]
+    assert_equal :module, protocol[:type]
+    assert_empty protocol[:states]
   end
 
   def test_project_modules_resolves_unique_static_and_flow_typed_targets
@@ -307,9 +337,9 @@ class StaticEvidenceTest < Minitest::Test
       "facts" => {
         "calls" => [
           { "source" => "source-run", "receiver" => "Target", "receiver_kind" => "type",
-            "message" => "build", "line" => 3 },
+            "message" => "build", "target" => "target-build", "line" => 3 },
           { "source" => "source-run", "receiver" => "target", "receiver_kind" => "value",
-            "message" => "work", "line" => 4 }
+            "message" => "work", "target" => "target-work", "line" => 4 }
         ],
         "flow_local_types" => [
           { "file" => "source.rb", "owner" => "Source", "function" => "run", "name" => "target",
@@ -326,8 +356,87 @@ class StaticEvidenceTest < Minitest::Test
 
     assert_equal ["Target", "self.build"], [static_call[:target_owner], static_call[:target_method]]
     assert_equal ["Target", "work"], [typed_call[:target_owner], typed_call[:target_method]]
+    assert_equal "target-build", static_call[:target_id]
+    assert_equal "target-work", typed_call[:target_id]
     assert_equal "high", static_call[:confidence]
     assert_equal "high", typed_call[:confidence]
+  end
+
+  def test_project_modules_preserves_scip_identity_and_deduplicates_protocol_projection
+    evidence = {
+      "methods" => [{
+        "id" => "source-run", "owner" => "Source", "name" => "run",
+        "kind" => "instance", "path" => "source.java", "line" => 2,
+        "language" => "java"
+      }],
+      "facts" => {
+        "calls" => [{
+          "source" => "source-run", "receiver" => "this.items", "state_receiver" => true,
+          "message" => "size",
+          "line" => 3, "semantic_symbol" => "scip-java maven jdk 21 java/util/List#size().",
+          "target_provenance" => "scip", "known_time_complexity" => "O(1)"
+        }],
+        "state_protocol_records" => [{
+          "owner" => "Source", "function" => "run", "field" => "items",
+          "protocol" => "size", "line" => 3, "path" => "source.java", "language" => "java"
+        }]
+      }
+    }
+
+    run = Espalier::StaticEvidence.project_modules(evidence).first[:methods].first
+    assert_equal 1, run[:delegations].count { |call| call[:message] == "size" && call[:line] == 3 }
+    assert_equal "scip", run[:delegations].first[:target_provenance]
+    assert_match(/java\/util\/List/, run[:delegations].first[:semantic_symbol])
+  end
+
+  def test_protocol_projection_deduplicates_canonical_call_by_exact_span
+    evidence = {
+      "methods" => [{
+        "id" => "source-run", "owner" => "Source", "name" => "run",
+        "kind" => "instance", "path" => "source.java", "line" => 2,
+        "span" => [2, 0, 5, 1], "language" => "java"
+      }],
+      "facts" => {
+        "calls" => [{
+          "id" => "call-add", "source" => "source-run", "receiver" => "builder.items",
+          "message" => "addAll", "line" => 3, "span" => [3, 4, 3, 31],
+          "semantic_symbol" => "scip-java maven jdk 21 java/util/List#addAll().",
+          "target_provenance" => "scip", "known_time_complexity" => "O(N)"
+        }],
+        "state_protocol_records" => [{
+          "owner" => "Source", "function" => "run", "field" => "builder",
+          "protocol" => "addAll", "line" => 3, "span" => [3, 4, 3, 31],
+          "path" => "source.java", "language" => "java"
+        }]
+      }
+    }
+
+    run = Espalier::StaticEvidence.project_modules(evidence).first[:methods].first
+    assert_equal 1, run[:delegations].count { |call| call[:message] == "addAll" }
+    assert_equal "call-add", run[:delegations].first[:call_id]
+    assert_equal "O(N)", run[:delegations].first[:known_time_complexity]
+  end
+
+  def test_protocol_projection_uses_the_containing_overload
+    evidence = {
+      "methods" => [{
+        "id" => "first", "owner" => "Source", "name" => "run", "kind" => "instance",
+        "path" => "source.java", "line" => 2, "span" => [2, 0, 4, 1], "language" => "java"
+      }, {
+        "id" => "second", "owner" => "Source", "name" => "run", "kind" => "instance",
+        "path" => "source.java", "line" => 7, "span" => [7, 0, 10, 1], "language" => "java"
+      }],
+      "facts" => {
+        "state_protocol_records" => [{
+          "owner" => "Source", "function" => "run", "field" => "items",
+          "protocol" => "size", "line" => 8, "path" => "source.java", "language" => "java"
+        }]
+      }
+    }
+
+    methods = Espalier::StaticEvidence.project_modules(evidence).first[:methods]
+    assert_empty methods.find { |method| method[:id] == "first" }[:delegations]
+    assert_equal ["size"], methods.find { |method| method[:id] == "second" }[:delegations].map { |call| call[:message] }
   end
 
   def test_project_modules_does_not_guess_ambiguous_or_incomplete_targets
@@ -380,7 +489,7 @@ class StaticEvidenceTest < Minitest::Test
       "facts" => {
         "calls" => [
           { "source" => "source-run", "receiver" => "Record", "receiver_kind" => "type",
-            "message" => "new", "constructor_target" => "initialize", "line" => 3 },
+            "message" => "new", "constructor_target" => "initialize", "target" => "record-init", "line" => 3 },
           { "source" => "source-run", "receiver" => "Generated", "receiver_kind" => "type",
             "message" => "new", "constructor_target" => "initialize", "line" => 4 },
           { "source" => "source-run", "receiver" => "self", "receiver_kind" => "value",

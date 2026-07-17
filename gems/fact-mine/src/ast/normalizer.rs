@@ -246,6 +246,17 @@ impl<'source> TreeSitterNormalizer<'source> {
             return Some(self.wrap("ROOT", children, node));
         }
         if self.normalization_adapter.check_node_role(node, "function") {
+            // A language adapter can reject a tree-sitter error-recovery
+            // node that only resembles a function definition. Do not drop
+            // its descendants: a malformed outer region can still contain
+            // valid declarations which remain useful to every consumer.
+            if !self
+                .normalization_adapter
+                .valid_function_definition(node, self.source)
+            {
+                let children = self.normalize_children(node);
+                return Some(self.wrap(&kind_type(node.kind()), children, node));
+            }
             return self.normalize_function(node);
         }
         if self.block_kind(node.kind()) {
@@ -401,6 +412,13 @@ impl<'source> TreeSitterNormalizer<'source> {
             return self.normalize_singleton_function(node);
         }
 
+        if !self
+            .normalization_adapter
+            .valid_function_definition(node, self.source)
+        {
+            return None;
+        }
+
         let name = self.function_name(node)?;
         let args = self.normalize_function_parameters(node);
         let body = self.with_dynamic_scope(node, true, |normalizer| {
@@ -418,10 +436,13 @@ impl<'source> TreeSitterNormalizer<'source> {
             normalizer.elide_implicit_nil_body(body)
         });
         let scope = self.scope(body, args, node);
+        let declaration_node = self
+            .normalization_adapter
+            .function_declaration_node(node, self.source);
         Some(self.wrap(
             "DEFN",
             vec![Child::Symbol(name), Child::Node(Box::new(scope))],
-            node,
+            declaration_node,
         ))
     }
 
@@ -876,7 +897,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
 
         let condition = self
-            .named_field(node, "condition")
+            .normalization_adapter
+            .loop_condition_node(node, self.source)
+            .or_else(|| self.named_field(node, "condition"))
             .or_else(|| self.first_named(node));
         let body = self
             .named_field(node, "body")
@@ -3030,7 +3053,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             && !node_text(node, self.source).trim().is_empty()
     }
 
-    pub(in crate::ast) fn normalize_terminal_statement(&self, node: TreeSitterNode<'_>) -> Node {
+    pub(in crate::ast) fn normalize_terminal_statement(
+        &mut self,
+        node: TreeSitterNode<'_>,
+    ) -> Node {
         let text = node_text(node, self.source).trim();
         if self
             .normalization_adapter
@@ -3038,7 +3064,10 @@ impl<'source> TreeSitterNormalizer<'source> {
         {
             return self.wrap("IVAR", vec![Child::String(text.to_string())], node);
         }
-        if text.starts_with('$') {
+        if let Some(name) = self.normalization_adapter.dollar_prefixed_local_name(text) {
+            return self.normalize_identifier_with_name(node, name);
+        }
+        if text.starts_with('$') && self.global_variable(node) {
             return self.normalize_global_variable(node);
         }
         if text == "nil" {
@@ -5731,6 +5760,13 @@ impl<'source> TreeSitterNormalizer<'source> {
             .statement_wrapped_call_target(node, self.source)
         {
             return self.call_block(target);
+        }
+
+        if let Some(block) = self
+            .normalization_adapter
+            .call_block_argument(node, self.source)
+        {
+            return Some(block);
         }
 
         self.named_children(node).into_iter().find(|child| {

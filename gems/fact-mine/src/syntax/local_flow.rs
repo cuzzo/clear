@@ -245,6 +245,15 @@ impl<'a> LocalFlow<'a> {
             self.collect_nested_owners(node, &next_owners, out);
         } else if METHOD_TYPES.contains(&node.r#type.as_str()) && owners.is_empty() {
             out.push(self.method_summary(node, None));
+            // A normalized DEFN is already an adapter-validated executable
+            // declaration. Continue through its body so named local
+            // functions and variable-bound callables receive the same
+            // CFG/DFG and complexity facts as top-level declarations.
+            if self.behavior.nested_function_is_local_callable(node) {
+                for child in node.children.iter().filter_map(ast::node) {
+                    self.collect_methods(child, owners, out);
+                }
+            }
         } else {
             for child in node.children.iter().filter_map(ast::node) {
                 self.collect_methods(child, owners, out);
@@ -253,13 +262,28 @@ impl<'a> LocalFlow<'a> {
     }
 
     fn collect_nested_owners(&self, node: &Node, owners: &[String], out: &mut Vec<MethodSummary>) {
-        if METHOD_TYPES.contains(&node.r#type.as_str()) {
-            return;
-        }
-
         for child in node.children.iter().filter_map(ast::node) {
             if OWNER_TYPES.contains(&child.r#type.as_str()) {
                 self.collect_methods(child, owners, out);
+            } else if METHOD_TYPES.contains(&child.r#type.as_str()) {
+                let span = [
+                    child.first_lineno,
+                    child.first_column,
+                    child.last_lineno,
+                    child.last_column,
+                ];
+                // Java anonymous classes contain owner methods below a
+                // constructor or initializer. Preserve only declarations the
+                // language adapter positively identifies as owner methods;
+                // ordinary nested/inline declarations stay out of this pass.
+                if (self.behavior.nested_function_is_owner_method(child)
+                    || (self.behavior.nested_function_is_local_callable(child)
+                        && self.methods_by_span.contains_key(&span)))
+                    && !out.iter().any(|method| method.span == span)
+                {
+                    out.push(self.method_summary(child, None));
+                }
+                self.collect_nested_owners(child, owners, out);
             } else {
                 self.collect_nested_owners(child, owners, out);
             }
@@ -291,7 +315,7 @@ impl<'a> LocalFlow<'a> {
             .enumerate()
             .map(|(index, stmt)| self.statement_summary(stmt, index, &local_names))
             .collect::<Vec<_>>();
-        let param_types = self.param_types_for(owner, &name);
+        let param_types = self.param_types_for(owner, &name, node.first_lineno);
         let params = metadata
             .map(|metadata| metadata.params.clone())
             .unwrap_or_default();
@@ -310,7 +334,8 @@ impl<'a> LocalFlow<'a> {
         }
     }
 
-    fn param_types_for(&self, owner: &str, name: &str) -> BTreeMap<String, String> {
+    fn param_types_for(&self, owner: &str, name: &str, line: usize) -> BTreeMap<String, String> {
+        let line_key = super::normalized_behavior::method_parameter_type_key(owner, name, line);
         let null_key = format!("{owner}\0{name}");
         let colon_key = if owner.is_empty() || owner == "(top-level)" {
             name.to_string()
@@ -318,7 +343,8 @@ impl<'a> LocalFlow<'a> {
             format!("{owner}::{name}")
         };
         self.method_param_types
-            .get(&null_key)
+            .get(&line_key)
+            .or_else(|| self.method_param_types.get(&null_key))
             .or_else(|| self.method_param_types.get(&colon_key))
             .or_else(|| self.method_param_types.get(name))
             .cloned()

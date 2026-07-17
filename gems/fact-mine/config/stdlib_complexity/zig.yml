@@ -1,0 +1,16 @@
+Array:
+  append: constant
+  appendSlice: linear_scan
+  pop: constant
+  getLast: constant
+  ensureTotalCapacity: linear_scan
+Hash:
+  get: constant
+  getPtr: constant
+  put: constant
+  remove: constant
+  contains: constant
+String:
+  eql: linear_scan
+  indexOf: linear_scan
+  split: linear_materialize

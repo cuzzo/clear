@@ -4,12 +4,47 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
-    NormalizedSemanticEffect, NormalizedStateRead, NormalizedStateWrite,
+    eliminable_guard_from_call, nil_guard_from_predicates, type_after_parameter_colon,
+    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
+    NormalizedNilGuardFact, NormalizedOwner, NormalizedSemanticEffect, NormalizedStateRead,
+    NormalizedStateWrite,
 };
 use super::{CallSite, StateDeclaration};
 use crate::ast::{Child, Node, Span};
+use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
+use crate::type_inference::TypeExpr;
+
+const ZIG_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
+    strip_prefixes: &[],
+    trim_prefix_chars: &[],
+    trim_suffix_chars: &[],
+    array_names: &["ArrayList", "ArrayListUnmanaged"],
+    hash_names: &["StringHashMap", "AutoHashMap", "AutoHashMapUnmanaged"],
+    set_names: &[],
+    string_names: &[],
+    bare_array_names: &[],
+    suffix_array: false,
+    bracket_array: false,
+};
+
+pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
+    // Zig generic type constructors use `Name(T)` rather than angle brackets.
+    // Normalize only adapter-owned container constructors before handing the
+    // structural split to the language-neutral helper.
+    let source = source.trim();
+    let normalized = source.find('(').and_then(|open| {
+        let close = source.rfind(')')?;
+        let base = source[..open].rsplit('.').next().unwrap_or(&source[..open]);
+        let recognized = ZIG_NOMINAL_TYPE_SYNTAX.array_names.contains(&base)
+            || ZIG_NOMINAL_TYPE_SYNTAX.hash_names.contains(&base);
+        (recognized && close > open)
+            .then(|| format!("{}<{}>", &source[..open], &source[(open + 1)..close]))
+    });
+    nominal::parse(
+        normalized.as_deref().unwrap_or(source),
+        &ZIG_NOMINAL_TYPE_SYNTAX,
+    )
+}
 
 const ZIG_CONTEXT_PAIRS: &[(&str, &[&str])] =
     &[("time", &["timestamp", "nanoTimestamp", "milliTimestamp"])];
@@ -63,6 +98,14 @@ const ZIG_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct ZigNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
+    fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
+        super::normalized_behavior::type_after_local_colon(source, name)
+    }
+
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("zig")
+    }
+
     // CFG-SPECIFIC START: expose the Zig CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &ZIG_CFG_PROFILE
@@ -226,6 +269,7 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
             field,
             owner: String::new(),
             r#type: Some(ty),
+            immutable: false,
             file: String::new(),
             line: node.first_lineno,
             span: span(node),
@@ -258,31 +302,53 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
         simple_identifier(before_colon).then(|| before_colon.to_string())
     }
 
+    fn parameter_type_from_signature(&self, param: &str) -> Option<String> {
+        type_after_parameter_colon(param)
+    }
+
     fn case_pattern_values(&self, pattern_values: Vec<String>) -> Vec<String> {
         pattern_values.into_iter().take(1).collect()
     }
 
-    fn initializer_writes(&self, node: &Node, _source_text: &str, span: Span) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
+    fn initializer_writes(
+        &self,
+        node: &Node,
+        _source_text: &str,
+        span: Span,
+    ) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
         let mut writes = Vec::new();
         if node.r#type == "STRUCT_INITIALIZER" {
             let mut type_name = ".literal".to_string();
             // Look for the type identifier
             for child in &node.children {
                 if let crate::ast::Child::Node(child) = child {
-                    if child.r#type == "TYPE_IDENTIFIER" || child.r#type == "IDENTIFIER" || child.r#type == "CONST" || child.r#type == "LVAR" {
+                    if child.r#type == "TYPE_IDENTIFIER"
+                        || child.r#type == "IDENTIFIER"
+                        || child.r#type == "CONST"
+                        || child.r#type == "LVAR"
+                    {
                         type_name = child.text.clone();
                     }
                 }
             }
-            
+
             // Look for the initializer list
             for child in &node.children {
                 if let crate::ast::Child::Node(child) = child {
                     if child.r#type == "INITIALIZER_LIST" {
                         for field in &child.children {
                             if let crate::ast::Child::Node(field) = field {
-                                if field.r#type == "ASSIGNMENT_EXPRESSION" || field.r#type == "FIELD_INITIALIZER" || field.r#type == "LASGN" {
-                                    let text = field.text.split('=').next().unwrap_or("").trim().trim_start_matches('.');
+                                if field.r#type == "ASSIGNMENT_EXPRESSION"
+                                    || field.r#type == "FIELD_INITIALIZER"
+                                    || field.r#type == "LASGN"
+                                {
+                                    let text = field
+                                        .text
+                                        .split('=')
+                                        .next()
+                                        .unwrap_or("")
+                                        .trim()
+                                        .trim_start_matches('.');
                                     if !text.is_empty() {
                                         writes.push(crate::syntax::normalized_behavior::NormalizedStateWrite {
                                             receiver: type_name.clone(),
@@ -636,14 +702,23 @@ mod tests {
     fn test_zig_behavior_uncovered_methods() {
         let behavior = ZigNormalizedBehavior;
         assert_eq!(behavior.format_array_type("i32"), "[]i32");
-        assert_eq!(behavior.format_hash_type("String", "i32"), "std.AutoHashMap(String, i32)");
-        assert_eq!(behavior.format_set_type("i32"), "std.AutoHashMap(i32, void)");
+        assert_eq!(
+            behavior.format_hash_type("String", "i32"),
+            "std.AutoHashMap(String, i32)"
+        );
+        assert_eq!(
+            behavior.format_set_type("i32"),
+            "std.AutoHashMap(i32, void)"
+        );
         assert_eq!(behavior.format_nilable_type(""), "");
         assert_eq!(behavior.format_nilable_type("?i32"), "?i32");
         assert_eq!(behavior.format_nilable_type("i32"), "?i32");
         assert_eq!(behavior.untyped_type(), "anytype");
         assert_eq!(behavior.untyped_array_type(), "[]anytype");
-        assert_eq!(behavior.untyped_hash_type(), "std.AutoHashMap(anytype, anytype)");
+        assert_eq!(
+            behavior.untyped_hash_type(),
+            "std.AutoHashMap(anytype, anytype)"
+        );
 
         // Test literal_state_writes with STRUCT_INITIALIZER
         let init_list = Node {

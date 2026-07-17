@@ -199,8 +199,11 @@ impl StateMesh {
                 if !syntax::receiver_targets_owner(&write.receiver, &write.owner) {
                     continue;
                 }
-                let norm =
-                    self.state_identity(&write.identity, &self.normalize(&write.field, &*dialect));
+                let norm = self.state_identity(
+                    &write.identity,
+                    &write.owner,
+                    &self.normalize(&write.field, &*dialect),
+                );
                 self.writes.push(Write {
                     attr: write.field.clone(),
                     norm,
@@ -224,8 +227,11 @@ impl StateMesh {
                 if !syntax::receiver_targets_owner(&read.receiver, &read.owner) {
                     continue;
                 }
-                let norm =
-                    self.state_identity(&read.identity, &self.normalize(&read.field, &*dialect));
+                let norm = self.state_identity(
+                    &read.identity,
+                    &read.owner,
+                    &self.normalize(&read.field, &*dialect),
+                );
                 if !field_norms.contains(&norm) {
                     continue;
                 }
@@ -273,12 +279,24 @@ impl StateMesh {
             let defn = parts[parts.len() - 2].to_string();
             let file = parts[..parts.len() - 2].join(":");
 
-            if let Some(matched) = field_norms
+            // Predicate facts are intentionally lightweight and do not carry
+            // a receiver owner. Match their bare field spelling only if that
+            // spelling maps to one known state identity; otherwise leave the
+            // re-derivation unreported rather than attaching it to an
+            // arbitrary same-named field from another owner.
+            let matches = field_norms
                 .iter()
-                .find(|fnorm| m.raw.contains(*fnorm) || m.canon.contains(*fnorm))
-            {
+                .filter(|field| {
+                    let bare = field.rsplit("::").next().unwrap_or(field);
+                    m.raw.contains(*field)
+                        || m.canon.contains(*field)
+                        || m.raw.contains(bare)
+                        || m.canon.contains(bare)
+                })
+                .collect::<Vec<_>>();
+            if let [matched] = matches.as_slice() {
                 self.re_derivations.push(ReDerivation {
-                    field: matched.clone(),
+                    field: (*matched).clone(),
                     file,
                     defn,
                     line,
@@ -607,10 +625,19 @@ impl StateMesh {
         dialect.clean_identifier(attr)
     }
 
-    fn state_identity(&self, identity: &str, field: &str) -> String {
-        // FactMine only supplies an explicit identity where the language can
-        // prove the bare spelling would conflate independent state slots.
-        if identity.is_empty() { field.to_string() } else { identity.to_string() }
+    fn state_identity(&self, identity: &str, owner: &str, field: &str) -> String {
+        // Prefer FactMine's explicit identity. Otherwise a state slot is at
+        // least owner-relative whenever the parser knows its owner. Treating
+        // every `options`, `size`, or `children` field in a project as one
+        // slot makes lifecycle advice unsafe in PHP, Swift, Java/Kotlin, Lua,
+        // and any future adapter that has not yet supplied a richer identity.
+        if !identity.is_empty() {
+            identity.to_string()
+        } else if state_owner_is_stable(owner) {
+            format!("{owner}::{field}")
+        } else {
+            field.to_string()
+        }
     }
 
     /// Keep the familiar field spelling when it identifies exactly one state
@@ -667,6 +694,10 @@ impl StateMesh {
         }
         norms
     }
+}
+
+fn state_owner_is_stable(owner: &str) -> bool {
+    !owner.is_empty() && !matches!(owner, "(top-level)" | "(anonymous)" | "Object" | "Kernel")
 }
 
 #[cfg(test)]
@@ -829,5 +860,58 @@ mod tests {
         let report = scan_documents_with_semantic_aliases_and_min_writes(&document, &aliases, 1);
         assert!(report.fields.contains_key("Alpha::flag"));
         assert!(report.fields.contains_key("Beta::flag"));
+    }
+
+    #[test]
+    fn owner_relative_identity_prevents_cross_language_field_collisions_without_adapter_hints() {
+        // These facts intentionally omit `identity`, mirroring adapters that
+        // know the owner but have not yet implemented an explicit field-id
+        // projection. The shared StateMesh layer must still never merge the
+        // two independently owned `options` slots.
+        let document: Document = serde_json::from_value(json!({
+            "file": "owners.php",
+            "language": "php",
+            "state_writes": [
+                { "field": "options", "receiver": "self", "file": "owners.php", "function": "set", "line": 2, "span": [2, 1, 2, 8], "owner": "First" },
+                { "field": "options", "receiver": "self", "file": "owners.php", "function": "set", "line": 8, "span": [8, 1, 8, 8], "owner": "Second" }
+            ],
+            "state_reads": [
+                { "field": "options", "receiver": "self", "file": "owners.php", "function": "get", "line": 3, "span": [3, 1, 3, 8], "owner": "First" },
+                { "field": "options", "receiver": "self", "file": "owners.php", "function": "get", "line": 9, "span": [9, 1, 9, 8], "owner": "Second" }
+            ]
+        }))
+        .unwrap();
+        let aliases = semantic_alias::scan_documents(&[document.clone()]);
+        let report = scan_documents_with_semantic_aliases_and_min_writes(&[document], &aliases, 1);
+
+        assert!(report.fields.contains_key("First::options"));
+        assert!(report.fields.contains_key("Second::options"));
+        assert_eq!(report.fields["First::options"].metrics.writes, 1);
+        assert_eq!(report.fields["Second::options"].metrics.reads, 1);
+
+        let ambiguous_aliases = semantic_alias::SemanticAliasReport {
+            alias_clusters: Vec::new(),
+            reification_misses: vec![semantic_alias::ReificationMiss {
+                predicate: "options?".to_string(),
+                canon: "options == true".to_string(),
+                at: "owners.php:check:12".to_string(),
+                spans: BTreeMap::new(),
+                raw: "options == true".to_string(),
+            }],
+        };
+        let safe_report = scan_documents_with_semantic_aliases_and_min_writes(
+            &[serde_json::from_value(json!({
+                "file": "owners.php",
+                "language": "php",
+                "state_writes": [
+                    { "field": "options", "receiver": "self", "file": "owners.php", "function": "set", "line": 2, "span": [2, 1, 2, 8], "owner": "First" },
+                    { "field": "options", "receiver": "self", "file": "owners.php", "function": "set", "line": 8, "span": [8, 1, 8, 8], "owner": "Second" }
+                ]
+            }))
+            .unwrap()],
+            &ambiguous_aliases,
+            1,
+        );
+        assert_eq!(safe_report.state_mesh.total_re_derivations, 0);
     }
 }

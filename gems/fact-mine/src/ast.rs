@@ -105,10 +105,7 @@ impl Node {
 }
 
 pub fn parse(file: &Path) -> Result<(Node, Vec<String>)> {
-    let language = file
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .and_then(Language::for_extension)
+    let language = Language::for_path(file)
         .with_context(|| format!("unsupported source extension for {}", file.display()))?;
     parse_with_language(file, language)
 }
@@ -130,6 +127,61 @@ pub fn parse_with_language(file: &Path, language: Language) -> Result<(Node, Vec
 
 pub fn normalize_tree(root: TreeSitterNode<'_>, source: &str, language: Language) -> Node {
     TreeSitterNormalizer::new(source, language).normalize(root)
+}
+
+pub(crate) fn raw_call_spans(
+    root: TreeSitterNode<'_>,
+    source: &str,
+    language: Language,
+) -> Vec<Span> {
+    fn visit(
+        node: TreeSitterNode<'_>,
+        normalizer: &TreeSitterNormalizer<'_>,
+        spans: &mut std::collections::BTreeSet<Span>,
+    ) {
+        if normalizer.call_node(node) {
+            let start = node.start_position();
+            let end = node.end_position();
+            spans.insert([start.row + 1, start.column, end.row + 1, end.column]);
+        }
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            visit(child, normalizer, spans);
+        }
+    }
+
+    let normalizer = TreeSitterNormalizer::new(source, language);
+    let mut spans = std::collections::BTreeSet::new();
+    visit(root, &normalizer, &mut spans);
+    spans.into_iter().collect()
+}
+
+pub(crate) fn symbol_scope(
+    root: TreeSitterNode<'_>,
+    source: &str,
+    language: Language,
+) -> (String, Vec<(String, String)>) {
+    adapters::normalization_adapter(language).symbol_scope(root, source)
+}
+
+pub(crate) fn declaration_namespaces(
+    root: TreeSitterNode<'_>,
+    source: &str,
+    language: Language,
+) -> Vec<(Span, String)> {
+    adapters::normalization_adapter(language).declaration_namespaces(root, source)
+}
+
+pub(crate) fn unqualified_types_use_current_namespace(language: Language) -> bool {
+    adapters::normalization_adapter(language).unqualified_types_use_current_namespace()
+}
+
+pub(crate) fn preprocessor_callable_names(
+    root: TreeSitterNode<'_>,
+    source: &str,
+    language: Language,
+) -> Vec<String> {
+    adapters::normalization_adapter(language).preprocessor_callable_names(root, source)
 }
 
 pub fn node(child: &Child) -> Option<&Node> {

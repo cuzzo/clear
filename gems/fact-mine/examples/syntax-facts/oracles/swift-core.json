@@ -334,23 +334,23 @@
       "owners": [
         {
           "kind": "class",
-          "line": 1,
-          "name": "Status",
-          "span": [
-            1,
-            0,
-            4,
-            1
-          ]
-        },
-        {
-          "kind": "class",
           "line": 6,
           "name": "SwiftSyntaxFactsCore",
           "span": [
             6,
             0,
             53,
+            1
+          ]
+        },
+        {
+          "kind": "enum",
+          "line": 1,
+          "name": "Status",
+          "span": [
+            1,
+            0,
+            4,
             1
           ]
         }

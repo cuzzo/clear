@@ -47,9 +47,9 @@
           "control": "conditional",
           "function": "process",
           "line": 33,
-          "message": "err",
+          "message": "println",
           "owner": "JavaSyntaxFactsCore",
-          "receiver": "System",
+          "receiver": "System.err",
           "safe_navigation": false,
           "span": [
             33,
@@ -108,9 +108,9 @@
           "control": "always",
           "function": "audit",
           "line": 44,
-          "message": "out",
+          "message": "println",
           "owner": "JavaSyntaxFactsCore",
-          "receiver": "System",
+          "receiver": "System.out",
           "safe_navigation": false,
           "span": [
             44,
@@ -186,15 +186,33 @@
           "control": "always",
           "function": "audit",
           "line": 46,
-          "message": "status",
+          "message": "name",
           "owner": "JavaSyntaxFactsCore",
-          "receiver": "self",
+          "receiver": "this.status",
           "safe_navigation": false,
           "span": [
             46,
             4,
             46,
             22
+          ]
+        },
+        {
+          "arguments": [],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 13,
+          "message": "name",
+          "owner": "JavaSyntaxFactsCore",
+          "receiver": "user.profile()",
+          "safe_navigation": false,
+          "span": [
+            13,
+            18,
+            13,
+            39
           ]
         },
         {
@@ -213,24 +231,6 @@
             18,
             13,
             32
-          ]
-        },
-        {
-          "arguments": [],
-          "block": false,
-          "conditional": false,
-          "control": "always",
-          "function": "process",
-          "line": 13,
-          "message": "profile()",
-          "owner": "JavaSyntaxFactsCore",
-          "receiver": "user",
-          "safe_navigation": false,
-          "span": [
-            13,
-            18,
-            13,
-            39
           ]
         },
         {
@@ -418,30 +418,6 @@
       ],
       "predicate_bodies": [],
       "semantic_effects": [
-        {
-          "detail": "System.err",
-          "function": "process",
-          "kind": "hidden_io",
-          "line": 33,
-          "span": [
-            33,
-            6,
-            33,
-            37
-          ]
-        },
-        {
-          "detail": "System.out",
-          "function": "audit",
-          "kind": "hidden_io",
-          "line": 44,
-          "span": [
-            44,
-            4,
-            44,
-            28
-          ]
-        },
         {
           "detail": "callback.call",
           "function": "process",

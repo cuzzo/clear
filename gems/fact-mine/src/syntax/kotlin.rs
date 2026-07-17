@@ -4,14 +4,113 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
-    NormalizedSemanticEffect,
+    configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
+    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
+    eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
+    scip_global_parts, type_after_parameter_colon, NormalizedCallParts, NormalizedCallProjection,
+    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
 };
-use super::CallSite;
 use super::StateDeclaration;
+use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata};
 use crate::ast::Child;
 use crate::ast::{Node, Span};
+use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
+use crate::type_inference::TypeExpr;
+
+const KOTLIN_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
+    strip_prefixes: &[],
+    trim_prefix_chars: &[],
+    trim_suffix_chars: &[],
+    array_names: &["ArrayList", "Array"],
+    hash_names: &["HashMap"],
+    set_names: &["HashSet"],
+    string_names: &["String"],
+    bare_array_names: &[],
+    suffix_array: false,
+    bracket_array: false,
+};
+
+pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
+    nominal::parse(source, &KOTLIN_NOMINAL_TYPE_SYNTAX)
+}
+
+fn scip_kotlin_parts(symbol: &str) -> Option<(&str, &str)> {
+    let (package, _version, descriptor) = scip_global_parts(symbol, "scip-java", "maven")?;
+    Some((package, descriptor))
+}
+
+fn kotlin_runtime_descriptor(descriptor: &str) -> bool {
+    descriptor == "kotlin" || descriptor.starts_with("kotlin/")
+}
+
+pub(crate) fn external_symbol_call_complexity(
+    symbol: &str,
+    message: &str,
+) -> Option<ExternalCallComplexity> {
+    // Kotlin/JVM source can call JDK declarations directly. Reuse Java's
+    // reviewed semantic contracts after scip-java has proved JDK ownership.
+    if symbol.starts_with("scip-java maven jdk ") {
+        return super::java::external_symbol_call_complexity(symbol, message);
+    }
+    let (_package, descriptor) = scip_kotlin_parts(symbol)?;
+    if !kotlin_runtime_descriptor(descriptor)
+        || configured_semantic_symbol_parametric_cost("kotlin", descriptor).is_some()
+    {
+        return None;
+    }
+    let owner = scip_descriptor_owner(descriptor);
+    let complexity = configured_semantic_symbol_call_complexity("kotlin", descriptor)
+        .or_else(|| {
+            owner.as_deref().and_then(|owner| {
+                KotlinNormalizedBehavior.call_complexity(&parse_declared_type(owner), message)
+            })
+        })
+        .or_else(|| configured_intrinsic_call_complexity("kotlin", None, message))?;
+    Some(ExternalCallComplexity {
+        time: complexity.time,
+        space: complexity.space,
+        provenance: "kotlin_scip_symbol_registry",
+        bound_quality: "upper_bound_exact_target",
+        candidates: Vec::new(),
+        assumption: None,
+    })
+}
+
+pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
+    if symbol.starts_with("scip-java maven jdk ") {
+        return super::java::external_symbol_metadata(symbol);
+    }
+    let Some((_package, descriptor)) = scip_kotlin_parts(symbol) else {
+        return ExternalSymbolMetadata {
+            scope: "dynamic",
+            missing_cost_kind: "callback_or_function_value_origin_unknown".to_string(),
+            parametric_cost: None,
+        };
+    };
+    if kotlin_runtime_descriptor(descriptor) {
+        ExternalSymbolMetadata {
+            scope: "stdlib",
+            missing_cost_kind: configured_semantic_symbol_kind("kotlin", descriptor)
+                .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
+            parametric_cost: configured_semantic_symbol_parametric_cost("kotlin", descriptor),
+        }
+    } else {
+        ExternalSymbolMetadata {
+            scope: "dependency",
+            missing_cost_kind: "dependency_cost_model_missing".to_string(),
+            parametric_cost: None,
+        }
+    }
+}
+
+pub(crate) fn external_symbol_owner(symbol: &str) -> Option<String> {
+    if symbol.starts_with("scip-java maven jdk ") {
+        let descriptor = symbol.split_whitespace().last()?;
+        return scip_descriptor_owner(descriptor);
+    }
+    let (_package, descriptor) = scip_kotlin_parts(symbol)?;
+    scip_descriptor_owner(descriptor)
+}
 
 const KOTLIN_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     (
@@ -81,7 +180,9 @@ const KOTLIN_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
 // CFG-SPECIFIC START: Kotlin control-flow vocabulary.
 const KOTLIN_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
-    iterator_messages: &["all", "any", "filter", "flatMap", "fold", "forEach", "map", "none", "reduce"],
+    iterator_messages: &[
+        "all", "any", "filter", "flatMap", "fold", "forEach", "map", "none", "reduce",
+    ],
     ignored_callback_body_sources: &[],
 };
 // CFG-SPECIFIC END
@@ -89,6 +190,30 @@ const KOTLIN_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct KotlinNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
+    fn external_symbol_call_complexity(
+        &self,
+        symbol: &str,
+        message: &str,
+    ) -> Option<ExternalCallComplexity> {
+        external_symbol_call_complexity(symbol, message)
+    }
+
+    fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
+        external_symbol_metadata(symbol)
+    }
+
+    fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
+        external_symbol_owner(symbol)
+    }
+
+    fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
+        super::normalized_behavior::type_after_local_colon(source, name)
+    }
+
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("kotlin")
+    }
+
     // CFG-SPECIFIC START: expose the Kotlin CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &KOTLIN_CFG_PROFILE
@@ -115,6 +240,10 @@ impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
             .unwrap_or(before_colon)
             .trim();
         simple_identifier(name).then(|| name.to_string())
+    }
+
+    fn parameter_type_from_signature(&self, param: &str) -> Option<String> {
+        type_after_parameter_colon(param)
     }
 
     fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
@@ -233,6 +362,7 @@ impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
                     field: name.to_string(),
                     owner: String::new(),
                     r#type: Some(type_part.to_string()),
+                    immutable: false,
                     file: String::new(),
                     line: node.first_lineno,
                     span: span(node),
@@ -337,6 +467,26 @@ fn is_keyword(name: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn scip_kotlin_symbols_use_proven_runtime_identity() {
+        let array_get = "scip-java maven . . kotlin/Array#get().";
+        let jdk_length = "scip-java maven jdk 21 java/lang/String#length().";
+        let dependency = "scip-java maven com.squareup.okio/okio 3.10.0 okio/Buffer#readByte().";
+
+        assert_eq!(external_symbol_metadata(array_get).scope, "stdlib");
+        assert_eq!(external_symbol_owner(array_get).as_deref(), Some("Array"));
+        assert_eq!(
+            external_symbol_call_complexity(array_get, "get").map(|cost| cost.time),
+            Some("O(1)")
+        );
+        assert_eq!(
+            external_symbol_call_complexity(jdk_length, "length").map(|cost| cost.time),
+            Some("O(1)")
+        );
+        assert_eq!(external_symbol_metadata(dependency).scope, "dependency");
+        assert!(external_symbol_call_complexity(dependency, "readByte").is_none());
+    }
+
     fn node(kind: &str, text: &str) -> Node {
         Node {
             r#type: kind.to_string(),
@@ -354,23 +504,40 @@ mod tests {
         let b = KotlinNormalizedBehavior;
 
         // 1. owner_name_span
-        assert!(b.owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4]).is_some());
+        assert!(b
+            .owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4])
+            .is_some());
 
         // 2. function_visibility
-        assert_eq!(b.function_visibility("foo", &node("FUN", "private fun foo()"), &[]), "private");
-        assert_eq!(b.function_visibility("foo", &node("FUN", "fun foo()"), &[]), "public");
+        assert_eq!(
+            b.function_visibility("foo", &node("FUN", "private fun foo()"), &[]),
+            "private"
+        );
+        assert_eq!(
+            b.function_visibility("foo", &node("FUN", "fun foo()"), &[]),
+            "public"
+        );
 
         // 3. parameter_name_from_signature
-        assert_eq!(b.parameter_name_from_signature("vararg items: String"), Some("items".to_string()));
-        assert_eq!(b.parameter_name_from_signature("items: String"), Some("items".to_string()));
+        assert_eq!(
+            b.parameter_name_from_signature("vararg items: String"),
+            Some("items".to_string())
+        );
+        assert_eq!(
+            b.parameter_name_from_signature("items: String"),
+            Some("items".to_string())
+        );
         assert_eq!(b.parameter_name_from_signature("invalid signature"), None);
 
         // 4. property_read_call
-        assert!(b.property_read_call(&node("CALL", "x.y"), &NormalizedCallParts {
-            receiver: "x".to_string(),
-            message: "y".to_string(),
-            arguments: Vec::new(),
-        }));
+        assert!(b.property_read_call(
+            &node("CALL", "x.y"),
+            &NormalizedCallParts {
+                receiver: "x".to_string(),
+                message: "y".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
 
         // 5. state_read_uses_access_span
         assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
@@ -382,19 +549,26 @@ mod tests {
         }));
 
         // 6. suppress_state_read_for_call
-        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
-            receiver: "self".to_string(),
-            message: "callback".to_string(),
-            arguments: Vec::new(),
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }, ""));
+        assert!(b.suppress_state_read_for_call(
+            &NormalizedCallProjection {
+                receiver: "self".to_string(),
+                message: "callback".to_string(),
+                arguments: Vec::new(),
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            },
+            ""
+        ));
 
         // 7. call_site_span
         assert_eq!(
             b.call_site_span(
                 &node("CALL", ""),
-                &NormalizedCallParts { receiver: "self".to_string(), message: "defaultCase".to_string(), arguments: Vec::new() },
+                &NormalizedCallParts {
+                    receiver: "self".to_string(),
+                    message: "defaultCase".to_string(),
+                    arguments: Vec::new()
+                },
                 [1, 2, 3, 4],
                 [5, 6, 7, 8],
                 "process"
@@ -404,7 +578,11 @@ mod tests {
         assert_eq!(
             b.call_site_span(
                 &node("CALL", ""),
-                &NormalizedCallParts { receiver: "item".to_string(), message: "children".to_string(), arguments: Vec::new() },
+                &NormalizedCallParts {
+                    receiver: "item".to_string(),
+                    message: "children".to_string(),
+                    arguments: Vec::new()
+                },
                 [1, 2, 3, 4],
                 [5, 6, 7, 8],
                 "foo"
@@ -414,7 +592,11 @@ mod tests {
         assert_eq!(
             b.call_site_span(
                 &node("CALL", ""),
-                &NormalizedCallParts { receiver: "other".to_string(), message: "foo".to_string(), arguments: Vec::new() },
+                &NormalizedCallParts {
+                    receiver: "other".to_string(),
+                    message: "foo".to_string(),
+                    arguments: Vec::new()
+                },
                 [1, 2, 3, 4],
                 [5, 6, 7, 8],
                 "foo"
@@ -432,27 +614,48 @@ mod tests {
         assert!(b.terminating_call_message("TODO"));
 
         // 11. semantic_effect_for_call
-        assert!(b.semantic_effect_for_call(&CallSite {
-            receiver: "x".to_string(),
-            message: "isNull".to_string(),
-            file: "".to_string(),
-            function: "".to_string(),
-            owner: "".to_string(),
-            line: 1,
-            span: [1, 2, 3, 4],
-            conditional: false,
-            arguments: Vec::new(),
-            control: None,
-            safe_navigation: false,
-            block: false,
-        }).is_some());
+        assert!(b
+            .semantic_effect_for_call(&CallSite {
+                receiver: "x".to_string(),
+                message: "isNull".to_string(),
+                file: "".to_string(),
+                function: "".to_string(),
+                owner: "".to_string(),
+                line: 1,
+                span: [1, 2, 3, 4],
+                conditional: false,
+                arguments: Vec::new(),
+                control: None,
+                safe_navigation: false,
+                block: false,
+            })
+            .is_some());
 
         // 12. local_flow_declaration_keyword
         assert!(b.local_flow_declaration_keyword("val"));
 
         // 13. local_flow_keyword
         assert!(b.local_flow_keyword("val"));
-        for kw in &["as", "break", "class", "continue", "else", "false", "for", "fun", "if", "in", "null", "private", "protected", "public", "return", "this", "true", "while"] {
+        for kw in &[
+            "as",
+            "break",
+            "class",
+            "continue",
+            "else",
+            "false",
+            "for",
+            "fun",
+            "if",
+            "in",
+            "null",
+            "private",
+            "protected",
+            "public",
+            "return",
+            "this",
+            "true",
+            "while",
+        ] {
             assert!(b.local_flow_keyword(kw));
         }
         assert!(!b.local_flow_keyword("not_a_keyword"));
@@ -466,7 +669,9 @@ mod tests {
         assert!(decl.is_some());
         assert_eq!(decl.as_ref().unwrap().field, "myProperty");
         assert_eq!(decl.as_ref().unwrap().r#type, Some("String".to_string()));
-        assert!(b.state_declaration_from_node(&prop_node, "MyClass", true).is_none());
+        assert!(b
+            .state_declaration_from_node(&prop_node, "MyClass", true)
+            .is_none());
 
         // 16-20. formatting
         assert_eq!(b.format_array_type("Int"), "List<Int>");

@@ -1,12 +1,76 @@
-use super::super::named_children;
+use super::super::{named_children, node_text};
 use super::base::AstNormalizationAdapter;
 use tree_sitter::Node as TreeSitterNode;
 
 pub(crate) struct JavaAstAdapter;
 
 impl AstNormalizationAdapter for JavaAstAdapter {
+    fn unqualified_types_use_current_namespace(&self) -> bool {
+        true
+    }
+
+    fn symbol_scope(
+        &self,
+        root: TreeSitterNode<'_>,
+        source: &str,
+    ) -> (String, Vec<(String, String)>) {
+        let mut namespace = String::new();
+        let mut imports = Vec::new();
+        for child in named_children(root) {
+            let text = node_text(child, source).trim();
+            match child.kind() {
+                "package_declaration" => {
+                    namespace = text
+                        .strip_prefix("package")
+                        .unwrap_or(text)
+                        .trim()
+                        .trim_end_matches(';')
+                        .trim()
+                        .to_string();
+                }
+                "import_declaration" if !text.starts_with("import static ") => {
+                    let qualified = text
+                        .strip_prefix("import")
+                        .unwrap_or(text)
+                        .trim()
+                        .trim_end_matches(';')
+                        .trim();
+                    if !qualified.ends_with(".*") {
+                        if let Some(short) = qualified.rsplit('.').next() {
+                            imports.push((short.to_string(), qualified.to_string()));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        (namespace, imports)
+    }
+
     fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
         matches!(node.kind(), "method_invocation")
+    }
+
+    fn call_block_argument<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() != "method_invocation" {
+            return None;
+        }
+        let name = node.child_by_field_name("name")?;
+        if !matches!(node_text(name, source), "forEach" | "forEachRemaining") {
+            return None;
+        }
+        let arguments = node.child_by_field_name("arguments").or_else(|| {
+            named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "argument_list")
+        })?;
+        named_children(arguments)
+            .into_iter()
+            .find(|argument| argument.kind() == "lambda_expression")
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {

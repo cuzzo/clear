@@ -24,8 +24,8 @@ module Espalier
       File.join(Espalier::ROOT, "gems", "fact-mine", "target", "release", "fact-mine-rust")
     ).freeze
 
-    def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true)
-      new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations).build
+    def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [])
+      new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations, scip_indexes: scip_indexes).build
     end
 
     def self.project_modules(evidence, source_roles: ["production"])
@@ -58,10 +58,12 @@ module Espalier
       # Group methods by owner
       methods_by_owner = Hash.new { |h, k| h[k] = [] }
       methods_by_id = {}
-      owner_kinds = Array(evidence["owners"]).each_with_object({}) do |owner, kinds|
+      owner_definitions = Array(evidence["owners"]).each_with_object(Hash.new { |h, k| h[k] = [] }) do |owner, definitions|
         key = resolve_owner.call(owner["name"], owner["path"], owner["language"])
-        kinds[key] = owner["kind"].to_s
+        definitions[key] << owner
       end
+      owner_definitions.transform_values! { |definitions| preferred_owner_definition(definitions) }
+      owner_kinds = owner_definitions.transform_values { |owner| owner["kind"].to_s }
       accesses_by_function = Hash.new { |h, k| h[k] = [] }
       Array(evidence.dig("facts", "state_accesses")).each do |access|
         accesses_by_function[access["function_id"]] << access
@@ -115,32 +117,12 @@ module Espalier
         methods_by_id[m["id"]] = meth
       end
 
-      methods_by_dispatch = Hash.new { |hash, key| hash[key] = [] }
-      methods_by_id.each_value do |method|
-        methods_by_dispatch[[method[:raw_owner].to_s, method[:dispatch_name].to_s, method[:dispatch_kind].to_s]] << method
-      end
-
-      flow_types = Hash.new { |hash, key| hash[key] = Set.new }
-      Array(evidence.dig("facts", "flow_local_types")).each do |fact|
-        next unless fact["complete"]
-
-        resolved = Array(fact["resolved_types"]).filter_map do |type|
-          if type.is_a?(FactMine::Syntax::TypeExpr) && type.kind == "Primitive"
-            type.data.to_s
-          elsif type.is_a?(Hash) && type["kind"] == "Primitive"
-            type["data"].to_s
-          end
-        end.uniq
-        next unless resolved.length == 1
-
-        key = [fact["file"].to_s, fact["owner"].to_s, fact["function"].to_s,
-               fact["line"].to_i, fact["name"].to_s]
-        flow_types[key] << resolved.first
-      end
-
       constant_operations = Hash.new { |hash, owner| hash[owner] = Set.new }
       Array(evidence.dig("facts", "struct_declarations")).each do |declaration|
         constant_operations[declaration["class"].to_s].merge(Array(declaration["constant_operations"]).map(&:to_s))
+      end
+      declared_operations = methods_by_id.each_value.each_with_object(Set.new) do |method, operations|
+        operations << [method[:raw_owner].to_s, method[:dispatch_name].to_s]
       end
 
       # Group fields by owner
@@ -162,45 +144,14 @@ module Espalier
         target = methods_by_id[call["target"]]
         receiver = call["receiver"].to_s
         implicit_receiver = receiver.empty? || receiver == "self" || receiver == "this"
-        operation_owner = nil
-        operation_overridden = false
-        unless target || !implicit_receiver
-          implicit_candidates = methods_by_dispatch[
-            [source[:raw_owner].to_s, call["message"].to_s, source[:dispatch_kind].to_s]
-          ]
-          operation_overridden ||= !implicit_candidates.empty?
-          target = implicit_candidates.first if implicit_candidates.length == 1
-          operation_owner = source[:raw_owner].to_s
-        end
-        unless target || call["receiver_kind"] != "type"
-          static_candidates = methods_by_dispatch[[call["receiver"].to_s, call["message"].to_s, "class"]]
-          operation_overridden ||= !static_candidates.empty?
-          target = static_candidates.first if static_candidates.length == 1
-          operation_owner = call["receiver"].to_s
-        end
-        unless target || call["constructor_target"].to_s.empty? || call["receiver_kind"] != "type"
-          constructor_candidates = methods_by_dispatch[
-            [call["receiver"].to_s, call["constructor_target"].to_s, "instance"]
-          ]
-          operation_overridden ||= !constructor_candidates.empty?
-          target = constructor_candidates.first if constructor_candidates.length == 1
-        end
-        unless target
-          flow_key = [(call["path"] || source[:file]).to_s,
-                      (call["owner"] || source[:raw_owner]).to_s,
-                      (call["function"] || source[:name]).to_s,
-                      call["line"].to_i, call["receiver"].to_s]
-          receiver_types = flow_types[flow_key]
-          if receiver_types.length == 1
-            typed_candidates = methods_by_dispatch[[receiver_types.first, call["message"].to_s, "instance"]]
-            operation_overridden ||= !typed_candidates.empty?
-            target = typed_candidates.first if typed_candidates.length == 1
-            operation_owner = receiver_types.first
-          end
-        end
+        # FactMine is the semantic authority for target identity. Rebuilding
+        # dispatch here from short owner names, capitalization, or flow-type
+        # strings silently crosses package and language boundaries.
+        operation_owner = implicit_receiver ? source[:raw_owner].to_s : call["receiver"].to_s
         known_time = call["known_time_complexity"]
         known_space = call["known_space_complexity"]
-        if !target && !operation_overridden && operation_owner &&
+        if !target && operation_owner &&
+            !declared_operations.include?([operation_owner, call["message"].to_s]) &&
             constant_operations[operation_owner].include?(call["message"].to_s)
           known_time ||= "O(1)"
           known_space ||= "O(1)"
@@ -213,14 +164,32 @@ module Espalier
           type: call["conditional"] ? :conditional : :always,
           confidence: call["confidence"],
           unresolved_reason: (target || known_time || known_space) ? nil : call["unresolved_reason"],
+          call_id: call["id"],
           target_id: target && target[:id],
           target_owner: target && target[:projected_owner],
           target_method: target && target[:name],
+          semantic_symbol: call["semantic_symbol"],
+          target_provenance: call["target_provenance"],
+          candidate_target_ids: Array(call["candidate_targets"]),
+          candidate_reason: call["candidate_reason"],
+          complexity_provenance: call["complexity_provenance"],
+          complexity_bound_quality: call["complexity_bound_quality"],
+          complexity_candidates: Array(call["complexity_candidates"]),
+          complexity_assumptions: Array(call["complexity_assumptions"]),
+          state_receiver: call["state_receiver"] == true,
           known_time_complexity: known_time,
           known_space_complexity: known_space
         }
         if target
           source[:delegations].last[:confidence] = "high"
+        end
+      end
+
+      calls_by_source = Array(evidence.dig("facts", "calls")).group_by { |call| call["source"].to_s }
+      methods_by_id.each do |method_id, method|
+        calls = Array(calls_by_source[method_id.to_s])
+        method[:semantic_call_identity_complete] = calls.any? && calls.all? do |call|
+          call["target_provenance"] == "scip" && !call["semantic_symbol"].to_s.empty?
         end
       end
 
@@ -233,8 +202,29 @@ module Espalier
 
         owner_key = resolve_owner.call(p_owner, record["path"], record["language"])
         meths = methods_by_owner[owner_key] || []
-        meth = meths.find { |m_item| m_item[:name] == func }
+        candidates = meths.select { |m_item| m_item[:name] == func }
+        record_line = record["line"].to_i
+        meth = candidates.find do |candidate|
+          span = candidate[:span]
+          span.is_a?(Array) && record_line >= span[0].to_i && record_line <= span[2].to_i
+        end
+        meth ||= candidates.first if candidates.one?
         if meth
+          duplicate = Array(meth[:delegations]).any? do |delegation|
+            same_span = delegation[:span].is_a?(Array) && record["span"].is_a?(Array) &&
+              delegation[:span].map(&:to_i) == record["span"].map(&:to_i)
+            receiver = delegation[:receiver].to_s
+            canonical_receiver = if delegation[:state_receiver]
+                                   receiver.split(".").last.to_s.delete_prefix("@")
+                                 else
+                                   receiver
+                                 end
+            delegation[:message].to_s == proto.to_s &&
+              (same_span || (canonical_receiver == field.to_s.delete_prefix("@") &&
+                delegation[:line].to_i == record_line))
+          end
+          next if duplicate
+
           meth[:delegations] << {
             receiver: field,
             message: proto,
@@ -251,7 +241,13 @@ module Espalier
 
         owner_key = resolve_owner.call(o_owner, record["path"], record["language"])
         meths = methods_by_owner[owner_key] || []
-        meth = meths.find { |m_item| m_item[:name] == func }
+        candidates = meths.select { |m_item| m_item[:name] == func }
+        record_line = record["line"].to_i
+        meth = candidates.find do |candidate|
+          span = candidate[:span]
+          span.is_a?(Array) && record_line >= span[0].to_i && record_line <= span[2].to_i
+        end
+        meth ||= candidates.first if candidates.one?
         meth # parameter origin is metadata, not proof of a write
       end
 
@@ -273,9 +269,13 @@ module Espalier
       end
       all_owners = (methods_by_owner.keys + fields_by_owner.keys).uniq.reject(&:empty?)
       all_owners.map do |owner|
-        meta = module_metadata(owner, methods_by_owner[owner], first_field_by_owner[owner])
+        meta = module_metadata(owner, methods_by_owner[owner], first_field_by_owner[owner], owner_definitions.fetch(owner, nil))
         owner_kind = owner_kinds[owner]
-        module_like = %w[module program namespace].include?(owner_kind) ||
+        # Extensions, protocols, traits, and interfaces can contribute
+        # behavior, but do not introduce independently-owned mutable stored
+        # state. Treating them as lifecycle classes produces unsafe advice in
+        # Swift and the same mistake in every other language with those forms.
+        module_like = %w[module program namespace extension protocol trait interface].include?(owner_kind) ||
           (%i[javascript typescript].include?(meta[:language]) && owner_kind == "owner")
         {
           type: module_like ? :module : :class,
@@ -294,14 +294,33 @@ module Espalier
       end
     end
 
-    def self.module_metadata(owner, methods, first_field)
+    def self.module_metadata(owner, methods, first_field, owner_definition = nil)
       first_meth = methods&.first
       {
-        file: first_meth ? first_meth[:file] : (first_field ? first_field["path"] : nil),
+        file: owner_definition ? owner_definition["path"] : (first_meth ? first_meth[:file] : (first_field ? first_field["path"] : nil)),
         language: first_meth ? first_meth[:language] : (first_field ? first_field["language"]&.to_sym : nil),
-        line: first_meth ? first_meth[:line] : (first_field ? first_field["line"] : 1),
-        span: first_meth ? first_meth[:span] : (first_field ? first_field["span"] : nil)
+        line: owner_definition ? owner_definition["line"] : (first_meth ? first_meth[:line] : (first_field ? first_field["line"] : 1)),
+        span: owner_definition ? owner_definition["span"] : (first_meth ? first_meth[:span] : (first_field ? first_field["span"] : nil))
       }
+    end
+
+    def self.preferred_owner_definition(definitions)
+      definitions.min_by do |owner|
+        [owner_definition_rank(owner["kind"]), owner["path"].to_s, owner["line"].to_i]
+      end
+    end
+
+    def self.owner_definition_rank(kind)
+      case kind.to_s
+      when "class", "struct", "enum"
+        0
+      when "protocol", "interface", "trait"
+        1
+      when "extension"
+        2
+      else
+        3
+      end
     end
 
     def self.source_role(path)
@@ -315,17 +334,22 @@ module Espalier
       return "example" if (parts & %w[example examples sample samples]).any?
       return "test" if (parts & %w[test tests spec specs __tests__]).any?
       return "test" if basename.match?(/(?:\A|[_\.])test(?:[_\.]|\z)|(?:\A|[_\.])spec(?:[_\.]|\z)/)
+      # Test-helper products are executable support code, not production
+      # library surface. Match common portable path spellings, including the
+      # Swift Package Manager `ArgumentParserTestHelpers` convention.
+      return "test" if parts.any? { |part| part.match?(/test(?:_|-)?(?:helpers?|support)/i) }
 
       "production"
     end
 
 
-    def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true)
+    def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [])
       @targets = Array(targets).compact
       @root = root
       @language = normalize_language(language)
       @vcs = normalize_vcs(vcs)
       @include_annotations = include_annotations
+      @scip_indexes = Array(scip_indexes).compact
     end
 
     def build
@@ -343,6 +367,7 @@ module Espalier
 
       args = [FACT_MINE_RUST_BINARY, "profile", profile, "--output", tmp.path]
       args.concat(["--language", @language.to_s]) if @language
+      @scip_indexes.each { |index| args.concat(["--scip-index", index.to_s]) }
       args.concat(files)
       ok = system(*args)
       raise "fact-mine-rust failed with exit status #{$?.exitstatus}" unless ok
@@ -413,6 +438,7 @@ module Espalier
       state_types = facts["state_types"] || {}
       signatures = facts["signatures"] || {}
       calls = Array(facts["calls"])
+      call_resolution_coverage = Hash(facts["call_resolution_coverage"])
       state_accesses = Array(facts["state_accesses"])
       call_graph_edges = Array(facts["call_graph_edges"])
       state_type_edges = Array(facts["state_type_edges"])
@@ -509,6 +535,7 @@ module Espalier
         "methods" => methods.sort_by { |method| [method["path"], method["owner"], method["line"].to_i, method["name"]] },
         "facts" => {
           "calls" => calls.sort_by { |call| [call["path"].to_s, call["line"].to_i, call["id"].to_s] },
+          "call_resolution_coverage" => call_resolution_coverage,
           "state_accesses" => state_accesses.sort_by { |access| [access["path"].to_s, access["line"].to_i, access["id"].to_s] },
           "complexity_facts" => complexity_facts.sort_by { |fact| [fact["path"].to_s, fact["line"].to_i, fact["function"].to_s] },
           "flow_local_types" => flow_local_types.sort_by do |fact|
@@ -558,6 +585,7 @@ module Espalier
           "methods" => methods.size,
           "fields" => fields.uniq { |field| field["id"] }.size,
           "calls" => calls.size,
+          "call_resolution_coverage" => call_resolution_coverage,
           "state_accesses" => state_accesses.size,
           "flow_local_types" => flow_local_types.size,
           "type_dependencies" => type_dependencies.size,

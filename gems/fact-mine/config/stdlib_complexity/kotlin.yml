@@ -1,0 +1,109 @@
+Array:
+  get: constant
+  size: constant
+  isEmpty: constant
+  first: constant
+  last: constant
+  add: constant
+  removeLast: constant
+  contains: linear_scan
+  indexOf: linear_scan
+  lastIndexOf: linear_scan
+  map: linear_materialize
+  filter: linear_materialize
+  reversed: linear_materialize
+  toList: linear_materialize
+  sorted: sort
+Hash:
+  get: constant
+  put: constant
+  containsKey: constant
+  size: constant
+  isEmpty: constant
+  keys: constant
+  values: constant
+Set:
+  add: constant
+  remove: constant
+  contains: constant
+  size: constant
+  isEmpty: constant
+String:
+  endsWith: linear_scan
+  length: constant
+  contains: linear_scan
+  indexOf: linear_scan
+  lastIndexOf: linear_scan
+  split: linear_materialize
+  startsWith: linear_scan
+  substring: linear_materialize
+
+# Exact descriptors emitted by scip-java's Kotlin compiler plugin. These
+# entries are deliberately overload-specific; SCIP identity is required
+# before they can supply a cost.
+SemanticSymbol:
+  'kotlin/IntArray#`<init>`().': linear_materialize
+  'kotlin/Double#toInt().': constant
+  'kotlin/Int#toDouble().': constant
+  'kotlin/collections/emptyList().': constant
+  'kotlin/collections/emptyMap().': constant
+  'kotlin/collections/listOf().': constant
+  'kotlin/collections/listOf(+1).': linear_materialize
+  'kotlin/collections/mapOf(+2).': linear_materialize
+  'kotlin/collections/copyOf(+11).': linear_materialize
+  'kotlin/collections/single(+19).': linear_scan
+  'kotlin/collections/sum(+8).': linear_scan
+  'kotlin/collections/toCharArray(+1).': linear_materialize
+  'kotlin/collections/toDoubleArray(+1).': linear_materialize
+  'kotlin/collections/toSet(+9).': linear_materialize
+  'kotlin/collections/toTypedArray().': linear_materialize
+  'kotlin/isNaN().': constant
+  'kotlin/math/ceil().': constant
+  'kotlin/math/floor().': constant
+  'kotlin/math/log10().': constant
+  'kotlin/math/sqrt().': constant
+  'kotlin/ranges/coerceAtLeast(+3).': constant
+  'kotlin/text/concatToString().': linear_materialize
+  'kotlin/text/format(+2).': linear_materialize
+  'kotlin/text/isNotEmpty().': constant
+  'kotlin/text/split(+2).': linear_materialize
+  'kotlin/text/startsWith().': linear_scan
+  'kotlin/text/substringAfter(+1).': linear_materialize
+  'kotlin/text/substringAfterLast().': linear_materialize
+  'kotlin/text/substringBefore(+1).': linear_materialize
+  'kotlin/text/substringBeforeLast().': linear_materialize
+  'kotlin/text/toInt().': linear_scan
+  'kotlin/text/toIntOrNull().': linear_scan
+  'kotlin/text/toLong().': linear_scan
+  'kotlin/text/trim(+5).': linear_materialize
+  'kotlin/text/uppercase(+2).': linear_materialize
+
+# Higher-order contracts retain the callback cost as a parameter. They are
+# upper bounds, not constant-cost stand-ins for the lambda body.
+SemanticSymbolParametricCost:
+  'kotlin/apply().': callback_once
+  'kotlin/let().': callback_once
+  'kotlin/run(+1).': callback_once
+  'kotlin/takeIf().': callback_once
+  'kotlin/with().': callback_once
+  'kotlin/IntArray#`<init>`(+1).': callback_linear
+  'kotlin/collections/any(+19).': callback_linear
+  'kotlin/collections/associateBy(+19).': callback_linear
+  'kotlin/collections/associate(+9).': callback_linear
+  'kotlin/collections/associateWith(+9).': callback_linear
+  'kotlin/collections/filter(+10).': callback_linear
+  'kotlin/collections/flatMap(+10).': callback_linear
+  'kotlin/collections/fold(+9).': callback_linear
+  'kotlin/collections/forEach().': callback_linear
+  'kotlin/collections/forEach(+10).': callback_linear
+  'kotlin/collections/forEach(+11).': callback_linear
+  'kotlin/collections/forEachIndexed(+9).': callback_linear
+  'kotlin/collections/groupBy(+19).': callback_linear
+  'kotlin/collections/joinToString(+9).': callback_linear
+  'kotlin/collections/map(+6).': callback_linear
+  'kotlin/collections/map(+9).': callback_linear
+  'kotlin/collections/maxOf(+29).': callback_linear
+  'kotlin/collections/sumOf(+24).': callback_linear
+  'kotlin/collections/sumOf(+27).': callback_linear
+  'kotlin/repeat().': callback_linear
+  'kotlin/text/buildString().': callback_once

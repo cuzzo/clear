@@ -73,6 +73,11 @@ pub struct ProfileOutput {
     /// after all files have been merged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<CallRecord>,
+    /// Denominator-aware coverage of exact project call targets. This is a
+    /// pure reduction over the final merged call records; it never resolves or
+    /// reconstructs a target itself.
+    #[serde(default, skip_serializing_if = "CallResolutionCoverage::is_empty")]
+    pub call_resolution_coverage: CallResolutionCoverage,
     /// Direct function/state relationships from normalized extraction.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub state_accesses: Vec<StateAccessRecord>,
@@ -136,6 +141,10 @@ pub struct OwnerRecord {
     pub line: usize,
     pub span: [usize; 4],
     pub confidence: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supertypes: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -144,18 +153,104 @@ pub struct CallRecord {
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// SemanticDB/SCIP symbol selected at this exact source occurrence. This
+    /// remains useful for dependency and standard-library calls that have no
+    /// project method ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_symbol: Option<String>,
+    /// Normalized ownership of a compiler-proven external symbol. The owning
+    /// language adapter supplies this classification; shared consumers never
+    /// parse language-specific symbol grammar.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_symbol_scope: Option<String>,
+    /// First missing cost proof for an external symbol (for example callback
+    /// substitution or dependency summary), independent of call resolution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complexity_missing_kind: Option<String>,
+    /// Authority that selected `target` or `semantic_symbol`. Consumers use
+    /// this to preserve compiler-proven identity instead of reconstructing it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_provenance: Option<String>,
+    /// Sound project declarations still possible when one exact target is
+    /// not justified. This is never promoted to `target` by ordering.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidate_targets: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_reason: Option<String>,
     pub kind: String,
     pub owner: String,
     pub function: String,
     pub receiver: String,
     pub receiver_kind: String,
+    /// Normalized binding role visible at the call site. `unbound` means the
+    /// spelling is not a parameter, local, or state slot; it does not by
+    /// itself prove a type outside language-owned name-resolution rules.
+    pub receiver_binding_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol_namespace: Option<String>,
+    /// Adapter-proven canonical lexical symbol for free/package calls.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lexical_symbol: Option<String>,
+    /// Proof that supplied `lexical_symbol`, kept separate from receiver
+    /// identity because bare imported functions have no receiver.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lexical_symbol_origin: Option<String>,
+    /// Exact normalized span of a direct call used as this call's receiver.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver_call_span: Option<[usize; 4]>,
+    /// Exact producer call spans for every reaching definition of a local
+    /// receiver. Empty means at least one definition was not a direct call.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub receiver_definition_call_spans: Vec<[usize; 4]>,
+    /// Adapter-proven canonical receiver type for cross-file resolution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver_symbol: Option<String>,
+    /// Native declared or flow-proven receiver type retained even when it
+    /// cannot yet be canonicalized against the merged project index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver_type: Option<String>,
+    /// First proof that supplied `receiver_type` (parameter, flow, or state).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver_type_origin: Option<String>,
+    /// How the canonical receiver identity was established. This lets the
+    /// coverage classifier distinguish an explicit dependency import from a
+    /// same-package project candidate without guessing from its spelling.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver_symbol_origin: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub implicit_receiver: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub state_receiver: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub callback_receiver: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub preprocessor_callable: bool,
+    /// Language-owned semantic proof that the call crosses a dynamic or
+    /// reflective dispatch boundary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispatch_boundary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub constructor_target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub known_time_complexity: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub known_space_complexity: Option<String>,
+    /// Registry or summary that supplied the cost independently of call
+    /// identity. Kept explicit so consumers never confuse a model with SCIP.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complexity_provenance: Option<String>,
+    /// Whether this is an exact-target upper bound or a conservative join over
+    /// a configured implementation universe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complexity_bound_quality: Option<String>,
+    /// Implementations participating in a closed/modelled-world upper-bound
+    /// join. Empty for exact declaration models.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub complexity_candidates: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub complexity_assumptions: Vec<String>,
     pub message: String,
+    pub argument_count: usize,
     pub path: String,
     pub line: usize,
     pub span: [usize; 4],
@@ -163,6 +258,94 @@ pub struct CallRecord {
     pub confidence: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unresolved_reason: Option<String>,
+    /// Merge-time first missing proof for an unresolved eligible call. This is
+    /// diagnostic evidence only and never participates in target selection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution_missing_proof: Option<String>,
+    /// Why no declaration candidate domain could be constructed. Present only
+    /// for the empty-domain subset of unresolved calls. The value separates
+    /// proven external surfaces from normalization loss and explicitly marks
+    /// cases where the retained evidence cannot distinguish them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub empty_domain_cause: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct CallResolutionCounts {
+    pub eligible_call_sites: usize,
+    pub exact_project_targets: usize,
+    pub modeled_without_project_target: usize,
+    /// Calls with a compiler-provided closed project candidate domain. The
+    /// domain is useful identity even when dispatch cannot justify one exact
+    /// target.
+    pub closed_candidate_identity_sites: usize,
+    pub semantically_accounted_call_sites: usize,
+    pub unresolved_call_sites: usize,
+    pub calls_with_project_candidate_set: usize,
+}
+
+/// Honest call-target coverage for one merged profile.
+///
+/// `eligible_call_sites` contains calls whose source is an emitted executable
+/// method. Exact project targets, modeled operations without a project target,
+/// and unresolved sites partition that denominator. Calls from owner bodies or
+/// top-level initialization remain visible in `total_call_sites` but are not
+/// counted as resolver failures until extraction gives them an executable
+/// source method.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct CallResolutionCoverage {
+    /// Tree-sitter nodes the active language adapter classifies as calls.
+    pub raw_parser_call_sites: usize,
+    /// Parser call spans for which normalization emitted no call record.
+    pub raw_calls_not_normalized: usize,
+    /// Normalized calls without an identical parser-call span (for example,
+    /// language-defined synthetic/operator calls).
+    pub normalized_calls_without_raw_span: usize,
+    pub total_call_sites: usize,
+    pub eligible_call_sites: usize,
+    pub outside_executable_function: usize,
+    pub exact_project_targets: usize,
+    pub modeled_without_project_target: usize,
+    /// Eligible calls accounted for by exact identity, a reviewed cost model,
+    /// or a compiler-provided closed implementation domain.
+    pub semantically_accounted_call_sites: usize,
+    pub unresolved_call_sites: usize,
+    /// Eligible non-exact calls with two or more sound project candidates.
+    /// This is diagnostic and does not alter the exact/modeled/unresolved
+    /// denominator partition.
+    pub calls_with_project_candidate_set: usize,
+    pub functions_with_unresolved_calls: usize,
+    pub exact_project_target_percent: f64,
+    pub accounted_call_percent: f64,
+    pub semantically_accounted_call_percent: f64,
+    pub unresolved_call_percent: f64,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub by_language: BTreeMap<String, CallResolutionCounts>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unresolved_by_reason: BTreeMap<String, usize>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unresolved_by_receiver_kind: BTreeMap<String, usize>,
+    /// Mutually exclusive first missing proofs. Unlike `unresolved_by_reason`,
+    /// these are computed after project merge and use the complete method
+    /// index plus retained normalization evidence.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unresolved_by_missing_proof: BTreeMap<String, usize>,
+    /// Mutually exclusive causes for unresolved calls whose project candidate
+    /// domain is empty. These counts are a subset of `unresolved_call_sites`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub empty_domain_by_cause: BTreeMap<String, usize>,
+    pub owners_with_supertypes: usize,
+    pub declared_supertype_edges: usize,
+    pub unresolved_with_unique_inherited_target: usize,
+    pub unresolved_with_ambiguous_inherited_targets: usize,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub inherited_target_opportunities_by_language: BTreeMap<String, usize>,
+}
+
+impl CallResolutionCoverage {
+    pub fn is_empty(&self) -> bool {
+        self.total_call_sites == 0 && self.raw_parser_call_sites == 0
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -207,9 +390,22 @@ pub struct StateTypeEdge {
 #[derive(Clone, Debug, Serialize)]
 pub struct MethodRecord {
     pub id: String,
+    /// Compiler index symbol for this declaration when one is available.
+    /// Excluded/dependency surfaces can therefore publish summaries without
+    /// reconstructing identity from a path or short owner name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_symbol: Option<String>,
     pub owner_id: String,
     pub key: Vec<String>,
     pub owner: String,
+    /// Adapter-proven canonical owner identity. A missing value means the
+    /// source language has not supplied enough scope facts for cross-file
+    /// identity; consumers must not substitute a short-name guess.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol_owner: Option<String>,
+    /// Adapter-proven canonical lexical identity for free/package functions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lexical_symbol: Option<String>,
     pub name: String,
     pub dispatch_name: String,
     pub kind: String,
@@ -245,7 +441,12 @@ pub struct FieldRecord {
     pub name: String,
     pub line: usize,
     pub span: Option<[usize; 4]>,
-    pub declared_type: Option<TypeExpr>,
+    /// Exact declaration spelling supplied by the language adapter. Semantic
+    /// analysis uses `state_type_records`; this source-facing projection must
+    /// not reverse-render a normalized `TypeExpr` and lose native syntax.
+    pub declared_type: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub immutable: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub type_references: Vec<serde_json::Value>,
     pub static_origin: String,
@@ -306,10 +507,17 @@ pub struct TypeDefinition {
     pub signature: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_type: Option<TypeExpr>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_dispatch_owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_symbol: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub declared_type: Option<TypeExpr>,
+    /// Exact source spelling for declared slots. Method parameter and return
+    /// types remain normalized `TypeExpr` values because those fields are
+    /// explicitly semantic projections.
+    pub declared_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -482,8 +690,10 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         );
     }
     let state_type_edges = extract_state_type_edges(document, &language, &path);
-    let call_graph_edges = extract_call_graph_edges(document);
-    let calls = extract_calls(document, &language, &path);
+    let mut calls = extract_calls(document, &language, &path);
+    resolve_project_calls(&owners, &methods, &type_definitions, &mut calls);
+    apply_merged_declared_callback_costs(&fields, &methods, &mut calls);
+    let call_graph_edges = extract_call_graph_edges(&calls);
     let state_accesses = extract_state_accesses(document, &language, &path);
     let complexity_facts = syntax::complexity_facts::facts(document);
 
@@ -716,6 +926,21 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         attach_return_type_dependencies(&type_dependencies, &mut return_origins);
     }
 
+    let raw_call_spans = document
+        .raw_call_spans
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let normalized_call_spans = calls.iter().map(|call| call.span).collect::<BTreeSet<_>>();
+    let call_resolution_coverage = CallResolutionCoverage {
+        raw_parser_call_sites: raw_call_spans.len(),
+        raw_calls_not_normalized: raw_call_spans.difference(&normalized_call_spans).count(),
+        normalized_calls_without_raw_span: normalized_call_spans
+            .difference(&raw_call_spans)
+            .count(),
+        ..CallResolutionCoverage::default()
+    };
+
     ProfileOutput {
         owners,
         methods,
@@ -735,6 +960,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         state_type_edges,
         call_graph_edges,
         calls,
+        call_resolution_coverage,
         state_accesses,
         complexity_facts,
         flow_local_types,
@@ -807,8 +1033,16 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut tuple_arrays = Vec::new();
     let mut struct_field_hash_shapes = BTreeMap::new();
     let mut struct_field_array_shapes = BTreeMap::new();
+    let mut raw_parser_call_sites = 0usize;
+    let mut raw_calls_not_normalized = 0usize;
+    let mut normalized_calls_without_raw_span = 0usize;
 
     for output in outputs {
+        raw_parser_call_sites += output.call_resolution_coverage.raw_parser_call_sites;
+        raw_calls_not_normalized += output.call_resolution_coverage.raw_calls_not_normalized;
+        normalized_calls_without_raw_span += output
+            .call_resolution_coverage
+            .normalized_calls_without_raw_span;
         owners.extend(output.owners);
         methods.extend(output.methods);
         fields.extend(output.fields);
@@ -874,6 +1108,8 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         .map(|(k, v)| (k, v.into_iter().collect()))
         .collect();
 
+    resolve_project_calls(&owners, &methods, &type_definitions, &mut calls);
+
     owners.sort_by(|a, b| a.id.cmp(&b.id));
     owners.dedup_by(|a, b| a.id == b.id);
     call_graph_edges.sort_by(|a, b| {
@@ -884,8 +1120,15 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     });
     calls.sort_by(|a, b| a.id.cmp(&b.id));
     calls.dedup_by(|a, b| a.id == b.id);
+    annotate_call_resolution_proofs(&owners, &methods, &mut calls);
+    let mut call_resolution_coverage = summarize_call_resolution(&owners, &methods, &calls);
+    call_resolution_coverage.raw_parser_call_sites = raw_parser_call_sites;
+    call_resolution_coverage.raw_calls_not_normalized = raw_calls_not_normalized;
+    call_resolution_coverage.normalized_calls_without_raw_span = normalized_calls_without_raw_span;
     state_accesses.sort_by(|a, b| a.id.cmp(&b.id));
     state_accesses.dedup_by(|a, b| a.id == b.id);
+    type_definitions.sort_by(|a, b| a.id.cmp(&b.id));
+    type_definitions.dedup_by(|a, b| a.id == b.id);
     type_dependencies.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
     type_dependencies.dedup_by(|left, right| left["id"] == right["id"]);
 
@@ -908,6 +1151,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         state_type_edges,
         call_graph_edges,
         calls,
+        call_resolution_coverage,
         state_accesses,
         complexity_facts,
         flow_local_types,
@@ -931,6 +1175,1329 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         tuple_arrays,
         struct_field_hash_shapes,
         struct_field_array_shapes,
+    }
+}
+
+fn apply_merged_declared_callback_costs(
+    fields: &[FieldRecord],
+    methods: &[MethodRecord],
+    calls: &mut [CallRecord],
+) {
+    let methods_by_id = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    for call in calls {
+        if call.target.is_some() || call.known_time_complexity.is_some() {
+            continue;
+        }
+        let Some(method) = methods_by_id.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Ok(language) = syntax::Language::parse(&method.language) else {
+            continue;
+        };
+        let behavior = crate::syntax::normalized_behavior::behavior(language);
+        let mut owner = call.owner.clone();
+        let mut failed = false;
+        for field_name in call
+            .receiver
+            .split('.')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .skip_while(|part| matches!(*part, "self" | "this"))
+        {
+            let candidates = fields
+                .iter()
+                .filter(|field| field.language == method.language)
+                .filter(|field| owner_name_matches(&field.owner, &owner))
+                .filter(|field| field.name.trim_start_matches('@') == field_name)
+                .filter_map(|field| field.declared_type.as_deref())
+                .collect::<BTreeSet<_>>();
+            if candidates.len() != 1 {
+                failed = true;
+                break;
+            }
+            owner = candidates.into_iter().next().unwrap().to_string();
+        }
+        if failed {
+            continue;
+        }
+        let costs = fields
+            .iter()
+            .filter(|field| field.language == method.language)
+            .filter(|field| owner_name_matches(&field.owner, &owner))
+            .filter(|field| field.name.trim_start_matches('@') == call.message)
+            .filter_map(|field| field.declared_type.as_deref())
+            .filter_map(|declared_type| behavior.declared_callable_cost(declared_type))
+            .collect::<BTreeSet<_>>();
+        if costs.len() != 1 {
+            continue;
+        }
+        let kind = costs.into_iter().next().unwrap();
+        let Some((time, space)) = crate::syntax::parametric_call_complexity(&kind) else {
+            continue;
+        };
+        call.callback_receiver = true;
+        call.known_time_complexity = Some(time.to_string());
+        call.known_space_complexity = Some(space.to_string());
+        call.complexity_provenance = Some("parametric_declared_field_contract".to_string());
+        call.complexity_bound_quality = Some(format!("upper_bound_parametric_{kind}"));
+        call.complexity_missing_kind = None;
+        call.unresolved_reason = None;
+        call.resolution_missing_proof = None;
+        call.empty_domain_cause = None;
+    }
+}
+
+pub(crate) fn reapply_declared_callback_costs(output: &mut ProfileOutput) {
+    apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
+}
+
+/// Summarize final call records without changing their resolution outcome.
+/// This must run after project merge so exact cross-file targets are already
+/// present and so consumers observe one authoritative denominator.
+pub fn summarize_call_resolution(
+    owners: &[OwnerRecord],
+    methods: &[MethodRecord],
+    calls: &[CallRecord],
+) -> CallResolutionCoverage {
+    let methods_by_id = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    let method_ids = methods_by_id.keys().copied().collect::<BTreeSet<_>>();
+    let mut coverage = CallResolutionCoverage {
+        total_call_sites: calls.len(),
+        owners_with_supertypes: owners
+            .iter()
+            .filter(|owner| !owner.supertypes.is_empty())
+            .count(),
+        declared_supertype_edges: owners.iter().map(|owner| owner.supertypes.len()).sum(),
+        ..CallResolutionCoverage::default()
+    };
+    let mut unresolved_functions = BTreeSet::new();
+    let mut closed_candidate_identity_sites = 0usize;
+
+    for call in calls {
+        let Some(source) = methods_by_id.get(call.source.as_str()).copied() else {
+            coverage.outside_executable_function += 1;
+            continue;
+        };
+        coverage.eligible_call_sites += 1;
+        let language = coverage
+            .by_language
+            .entry(source.language.clone())
+            .or_default();
+        language.eligible_call_sites += 1;
+        if call.target.is_none() && !call.candidate_targets.is_empty() {
+            closed_candidate_identity_sites += 1;
+            language.closed_candidate_identity_sites += 1;
+        }
+        if call.target.is_none() && call.candidate_targets.len() > 1 {
+            coverage.calls_with_project_candidate_set += 1;
+            language.calls_with_project_candidate_set += 1;
+        }
+
+        if call
+            .target
+            .as_deref()
+            .is_some_and(|target| method_ids.contains(target))
+        {
+            coverage.exact_project_targets += 1;
+            language.exact_project_targets += 1;
+            continue;
+        }
+        if call.target.is_none()
+            && (call.known_time_complexity.is_some() || call.known_space_complexity.is_some())
+        {
+            coverage.modeled_without_project_target += 1;
+            language.modeled_without_project_target += 1;
+            continue;
+        }
+
+        coverage.unresolved_call_sites += 1;
+        language.unresolved_call_sites += 1;
+        unresolved_functions.insert(call.source.as_str());
+        let reason = if call.target.is_some() {
+            "target_id_not_in_method_index"
+        } else {
+            call.unresolved_reason
+                .as_deref()
+                .unwrap_or("unclassified_unresolved")
+        };
+        *coverage
+            .unresolved_by_reason
+            .entry(reason.to_string())
+            .or_default() += 1;
+        let receiver_kind = if call.receiver_kind.is_empty() {
+            "unknown"
+        } else {
+            call.receiver_kind.as_str()
+        };
+        *coverage
+            .unresolved_by_receiver_kind
+            .entry(receiver_kind.to_string())
+            .or_default() += 1;
+        let inherited_targets = inherited_target_ids(owners, methods, call, source);
+        if inherited_targets.len() == 1 {
+            coverage.unresolved_with_unique_inherited_target += 1;
+            *coverage
+                .inherited_target_opportunities_by_language
+                .entry(source.language.clone())
+                .or_default() += 1;
+        } else if inherited_targets.len() > 1 {
+            coverage.unresolved_with_ambiguous_inherited_targets += 1;
+        }
+        let missing_proof = call.resolution_missing_proof.clone().unwrap_or_else(|| {
+            first_missing_call_proof(methods, calls, call, source, inherited_targets.len())
+        });
+        *coverage
+            .unresolved_by_missing_proof
+            .entry(missing_proof.clone())
+            .or_default() += 1;
+        if let Some(cause) = call
+            .empty_domain_cause
+            .clone()
+            .or_else(|| empty_domain_cause(owners, methods, call, source, &missing_proof))
+        {
+            *coverage.empty_domain_by_cause.entry(cause).or_default() += 1;
+        }
+    }
+
+    coverage.functions_with_unresolved_calls = unresolved_functions.len();
+    coverage.exact_project_target_percent =
+        percentage(coverage.exact_project_targets, coverage.eligible_call_sites);
+    coverage.accounted_call_percent = percentage(
+        coverage.exact_project_targets + coverage.modeled_without_project_target,
+        coverage.eligible_call_sites,
+    );
+    coverage.semantically_accounted_call_sites = coverage.exact_project_targets
+        + coverage.modeled_without_project_target
+        + closed_candidate_identity_sites;
+    coverage.semantically_accounted_call_percent = percentage(
+        coverage.semantically_accounted_call_sites,
+        coverage.eligible_call_sites,
+    );
+    for language in coverage.by_language.values_mut() {
+        language.semantically_accounted_call_sites = language.exact_project_targets
+            + language.modeled_without_project_target
+            + language.closed_candidate_identity_sites;
+    }
+    coverage.unresolved_call_percent =
+        percentage(coverage.unresolved_call_sites, coverage.eligible_call_sites);
+    coverage
+}
+
+fn annotate_call_resolution_proofs(
+    owners: &[OwnerRecord],
+    methods: &[MethodRecord],
+    calls: &mut [CallRecord],
+) {
+    let methods_by_id = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    let proofs = calls
+        .iter()
+        .map(|call| {
+            let source = methods_by_id.get(call.source.as_str()).copied()?;
+            if call.target.is_some()
+                || call.known_time_complexity.is_some()
+                || call.known_space_complexity.is_some()
+            {
+                return None;
+            }
+            let inherited = inherited_target_ids(owners, methods, call, source);
+            let proof = first_missing_call_proof(methods, calls, call, source, inherited.len());
+            let cause = empty_domain_cause(owners, methods, call, source, &proof);
+            Some((proof, cause))
+        })
+        .collect::<Vec<_>>();
+    for (call, proof) in calls.iter_mut().zip(proofs) {
+        if let Some((proof, cause)) = proof {
+            call.resolution_missing_proof = Some(proof);
+            call.empty_domain_cause = cause;
+        } else {
+            call.resolution_missing_proof = None;
+            call.empty_domain_cause = None;
+        }
+    }
+}
+
+fn empty_domain_cause(
+    owners: &[OwnerRecord],
+    methods: &[MethodRecord],
+    call: &CallRecord,
+    source: &MethodRecord,
+    missing_proof: &str,
+) -> Option<String> {
+    if !matches!(
+        missing_proof,
+        "declaration_not_in_analyzed_project"
+            | "declaration_not_in_analyzed_project_or_dynamic"
+            | "dependency_binding_known_declaration_unavailable"
+            | "receiver_identity_known_declaration_unavailable"
+            | "receiver_identity_missing_no_project_candidate"
+            | "receiver_type_known_declaration_unavailable"
+            | "stdlib_identity_proven_but_unmodeled"
+    ) {
+        return None;
+    }
+
+    let language = source.language.as_str();
+    let stdlib_type = call.receiver_type.as_deref().is_some_and(|name| {
+        crate::syntax::normalized_behavior::configured_stdlib_type(
+            language,
+            &TypeExpr::parse(name, language),
+        )
+    });
+    let stdlib_call = crate::syntax::normalized_behavior::configured_stdlib_call_identity(
+        language,
+        call.lexical_symbol.as_deref(),
+        call.receiver_symbol
+            .as_deref()
+            .or(call.receiver_type.as_deref()),
+        &call.message,
+    );
+    if missing_proof == "stdlib_identity_proven_but_unmodeled" || stdlib_type || stdlib_call {
+        return Some("external_stdlib_or_runtime_declaration_proven".to_string());
+    }
+
+    if crate::syntax::normalized_behavior::configured_non_call_construct(language, &call.message) {
+        return Some("normalization_non_call_construct".to_string());
+    }
+
+    if call.preprocessor_callable {
+        return Some("macro_or_preprocessor_surface".to_string());
+    }
+
+    let project_owner_known = call
+        .receiver_symbol
+        .as_deref()
+        .or(call.receiver_type.as_deref())
+        .is_some_and(|identity| project_owner_identity_exists(owners, language, identity));
+    let project_lexical_namespace_known = call
+        .lexical_symbol
+        .as_deref()
+        .is_some_and(|symbol| project_lexical_namespace_exists(owners, methods, language, symbol));
+    if call.receiver_symbol_origin.as_deref() == Some("project_declaration")
+        || project_owner_known
+        || project_lexical_namespace_known
+    {
+        return Some("normalization_project_declaration_surface_missing".to_string());
+    }
+
+    if matches!(
+        call.receiver_symbol_origin.as_deref(),
+        Some("unqualified_declared_type" | "same_namespace_declared_type")
+    ) {
+        return Some("normalization_import_or_type_symbol_binding_missing".to_string());
+    }
+
+    if missing_proof == "dependency_binding_known_declaration_unavailable"
+        || (missing_proof == "declaration_not_in_analyzed_project"
+            && call.lexical_symbol_origin.as_deref() == Some("explicit_import"))
+    {
+        return Some("imported_declaration_outside_analyzed_set".to_string());
+    }
+
+    if missing_proof == "receiver_identity_missing_no_project_candidate" {
+        return Some("normalization_receiver_or_module_identity_missing".to_string());
+    }
+
+    if source
+        .params
+        .iter()
+        .any(|parameter| parameter == &call.message)
+    {
+        return Some("dynamic_or_function_parameter_callable".to_string());
+    }
+
+    if missing_proof == "declaration_not_in_analyzed_project_or_dynamic"
+        && crate::syntax::normalized_behavior::configured_dynamic_global_binding(language)
+    {
+        return Some("dynamic_or_unbound_global_callable".to_string());
+    }
+
+    if matches!(
+        missing_proof,
+        "receiver_identity_known_declaration_unavailable"
+            | "receiver_type_known_declaration_unavailable"
+            | "declaration_not_in_analyzed_project"
+    ) {
+        return Some("external_or_excluded_declaration_indeterminate".to_string());
+    }
+
+    Some("static_lexical_surface_indeterminate".to_string())
+}
+
+fn project_owner_identity_exists(owners: &[OwnerRecord], language: &str, identity: &str) -> bool {
+    let nominal = declared_dispatch_owner_name_from_type(identity, language)
+        .unwrap_or_else(|| identity.to_string());
+    let exact = owners.iter().any(|owner| {
+        owner.language == language
+            && (owner.symbol.as_deref() == Some(identity)
+                || owner.symbol.as_deref() == Some(nominal.as_str()))
+    });
+    if exact || identity.contains(['.', ':']) {
+        return exact;
+    }
+    owners
+        .iter()
+        .filter(|owner| owner.language == language && owner.name == nominal)
+        .take(2)
+        .count()
+        == 1
+}
+
+fn project_lexical_namespace_exists(
+    owners: &[OwnerRecord],
+    methods: &[MethodRecord],
+    language: &str,
+    lexical_symbol: &str,
+) -> bool {
+    let Some((namespace, _)) = lexical_symbol.rsplit_once("::") else {
+        return false;
+    };
+    methods.iter().any(|method| {
+        method.language == language
+            && method.lexical_symbol.as_deref().is_some_and(|symbol| {
+                symbol
+                    .strip_prefix(namespace)
+                    .is_some_and(|suffix| suffix.starts_with("::"))
+            })
+    }) || owners.iter().any(|owner| {
+        owner.language == language
+            && owner.symbol.as_deref().is_some_and(|symbol| {
+                symbol == namespace
+                    || symbol
+                        .strip_prefix(namespace)
+                        .is_some_and(|suffix| suffix.starts_with(['.', ':']))
+            })
+    })
+}
+
+fn first_missing_call_proof(
+    methods: &[MethodRecord],
+    calls: &[CallRecord],
+    call: &CallRecord,
+    source: &MethodRecord,
+    inherited_target_count: usize,
+) -> String {
+    if call.target.is_some() {
+        return "normalization_defect_dangling_target".to_string();
+    }
+    if call.callback_receiver {
+        return "callback_function_value_origin_unknown".to_string();
+    }
+    if matches!(
+        call.dispatch_boundary.as_deref(),
+        Some("dynamic_dispatch" | "metaprogramming")
+    ) {
+        return "reflection_or_dynamic_dispatch".to_string();
+    }
+    if inherited_target_count == 1 {
+        return "hierarchy_edge_missing_unique_target".to_string();
+    }
+    if inherited_target_count > 1 {
+        return "hierarchy_dispatch_ambiguous".to_string();
+    }
+
+    let language_methods = methods
+        .iter()
+        .filter(|method| method.language == source.language)
+        .collect::<Vec<_>>();
+    let message_candidates = language_methods
+        .iter()
+        .copied()
+        .filter(|method| method.dispatch_name == call.message)
+        .collect::<Vec<_>>();
+
+    if let Some(symbol) = call.lexical_symbol.as_deref() {
+        let candidates = language_methods
+            .iter()
+            .copied()
+            .filter(|method| method.lexical_symbol.as_deref() == Some(symbol))
+            .collect::<Vec<_>>();
+        return match candidates.len() {
+            0 if message_candidates.is_empty() => "declaration_not_in_analyzed_project".to_string(),
+            0 => "project_lexical_binding_missing".to_string(),
+            1 => "normalization_defect_unique_lexical_target_dropped".to_string(),
+            _ => "overload_or_override_ambiguous".to_string(),
+        };
+    }
+
+    if let Some(symbol) = call.receiver_symbol.as_deref() {
+        let owner_methods = language_methods
+            .iter()
+            .copied()
+            .filter(|method| method.symbol_owner.as_deref() == Some(symbol))
+            .collect::<Vec<_>>();
+        if owner_methods.is_empty() {
+            let type_name = call.receiver_type.as_deref().unwrap_or(symbol);
+            let receiver_type = TypeExpr::parse(type_name, source.language.as_str());
+            if crate::syntax::normalized_behavior::configured_stdlib_type(
+                source.language.as_str(),
+                &receiver_type,
+            ) {
+                return "stdlib_identity_proven_but_unmodeled".to_string();
+            }
+            if call.receiver_symbol_origin.as_deref() == Some("explicit_import") {
+                return "dependency_binding_known_declaration_unavailable".to_string();
+            }
+            return "receiver_identity_known_declaration_unavailable".to_string();
+        }
+        let dispatch = if call.receiver_kind == "type" {
+            "class"
+        } else {
+            "instance"
+        };
+        let candidates = owner_methods
+            .iter()
+            .copied()
+            .filter(|method| method.dispatch_name == call.message && method.kind == dispatch)
+            .collect::<Vec<_>>();
+        return match candidates.len() {
+            0 => "project_receiver_known_member_absent".to_string(),
+            1 => "normalization_defect_unique_dispatch_target_dropped".to_string(),
+            _ => "overload_or_override_ambiguous".to_string(),
+        };
+    }
+
+    let producer_spans = call
+        .receiver_call_span
+        .into_iter()
+        .chain(call.receiver_definition_call_spans.iter().copied())
+        .collect::<BTreeSet<_>>();
+    if !producer_spans.is_empty() {
+        let producers = producer_spans
+            .iter()
+            .filter_map(|span| {
+                calls.iter().find(|candidate| {
+                    candidate.source == call.source
+                        && candidate.path == call.path
+                        && candidate.span == *span
+                })
+            })
+            .collect::<Vec<_>>();
+        if producers.len() != producer_spans.len()
+            || producers.iter().any(|producer| producer.target.is_none())
+        {
+            return "call_result_producer_target_missing".to_string();
+        }
+        return "direct_call_result_type_missing".to_string();
+    }
+
+    if let Some(receiver_type_name) = call.receiver_type.as_deref() {
+        let receiver_type = TypeExpr::parse(receiver_type_name, source.language.as_str());
+        if crate::syntax::normalized_behavior::configured_stdlib_type(
+            source.language.as_str(),
+            &receiver_type,
+        ) {
+            return "stdlib_identity_proven_but_unmodeled".to_string();
+        }
+        let nominal =
+            declared_dispatch_owner_name_from_type(receiver_type_name, source.language.as_str());
+        let owner_methods = nominal
+            .as_deref()
+            .map(|nominal| {
+                language_methods
+                    .iter()
+                    .copied()
+                    .filter(|method| {
+                        method.owner == nominal
+                            || method.symbol_owner.as_deref() == Some(nominal)
+                            || method
+                                .symbol_owner
+                                .as_deref()
+                                .is_some_and(|owner| owner.ends_with(&format!(".{nominal}")))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if !owner_methods.is_empty() {
+            return if owner_methods
+                .iter()
+                .any(|method| method.dispatch_name == call.message)
+            {
+                "canonical_project_receiver_binding_missing".to_string()
+            } else {
+                "project_receiver_known_member_absent".to_string()
+            };
+        }
+        return "receiver_type_known_declaration_unavailable".to_string();
+    }
+
+    if call.state_receiver {
+        return "declared_field_type_missing".to_string();
+    }
+    if call.implicit_receiver {
+        let local_candidates = message_candidates
+            .iter()
+            .copied()
+            .filter(|method| method.owner == call.owner && method.kind == source.kind)
+            .collect::<Vec<_>>();
+        let other_local_dispatch = message_candidates
+            .iter()
+            .any(|method| method.owner == call.owner && method.kind != source.kind);
+        return match local_candidates.len() {
+            1 if local_candidates[0].path != call.path => {
+                "cross_file_linkage_or_module_binding_missing".to_string()
+            }
+            1 => "normalization_defect_unique_local_target_dropped".to_string(),
+            n if n > 1 => "overload_or_override_ambiguous".to_string(),
+            _ if other_local_dispatch => "implicit_dispatch_semantics_missing".to_string(),
+            _ if !message_candidates.is_empty() => {
+                "project_binding_or_implicit_receiver_type_missing".to_string()
+            }
+            _ => "declaration_not_in_analyzed_project_or_dynamic".to_string(),
+        };
+    }
+    if message_candidates.is_empty() {
+        "receiver_identity_missing_no_project_candidate".to_string()
+    } else {
+        "project_candidate_receiver_type_missing".to_string()
+    }
+}
+
+fn inherited_target_ids(
+    owners: &[OwnerRecord],
+    methods: &[MethodRecord],
+    call: &CallRecord,
+    source: &MethodRecord,
+) -> BTreeSet<String> {
+    if call.constructor_target.is_some() {
+        return BTreeSet::new();
+    }
+    let start = if let Some(symbol) = call.receiver_symbol.as_deref() {
+        Some(symbol.to_string())
+    } else if let Some(receiver_type) = call.receiver_type.as_deref() {
+        declared_dispatch_owner_name_from_type(receiver_type, source.language.as_str())
+    } else if call.implicit_receiver {
+        source
+            .symbol_owner
+            .clone()
+            .or_else(|| Some(source.owner.clone()))
+    } else {
+        None
+    };
+    let Some(start) = start else {
+        return BTreeSet::new();
+    };
+    fn short_name(identity: &str) -> &str {
+        identity
+            .rsplit([':', '.'])
+            .find(|part| !part.is_empty())
+            .unwrap_or(identity)
+    }
+    let owner_matches = |owner: &OwnerRecord, identity: &str| {
+        owner.language == source.language
+            && (owner.symbol.as_deref() == Some(identity)
+                || owner.name == identity
+                || owner.name == short_name(identity))
+    };
+    let method_matches_owner = |method: &MethodRecord, identity: &str| {
+        method.language == source.language
+            && (method.symbol_owner.as_deref() == Some(identity)
+                || method.owner == identity
+                || method.owner == short_name(identity))
+    };
+    let dispatch = if call.receiver_kind == "type" || source.kind == "class" {
+        "class"
+    } else {
+        "instance"
+    };
+    let mut pending = owners
+        .iter()
+        .filter(|owner| owner_matches(owner, &start))
+        .flat_map(|owner| owner.supertypes.iter().cloned())
+        .collect::<Vec<_>>();
+    let mut visited = BTreeSet::new();
+    let mut targets = BTreeSet::new();
+    while let Some(identity) = pending.pop() {
+        if !visited.insert(identity.clone()) {
+            continue;
+        }
+        targets.extend(
+            methods
+                .iter()
+                .filter(|method| method_matches_owner(method, &identity))
+                .filter(|method| method.dispatch_name == call.message && method.kind == dispatch)
+                .map(|method| method.id.clone()),
+        );
+        pending.extend(
+            owners
+                .iter()
+                .filter(|owner| owner_matches(owner, &identity))
+                .flat_map(|owner| owner.supertypes.iter().cloned()),
+        );
+    }
+    targets
+}
+
+fn declared_dispatch_owner_name_from_type(name: &str, language: &str) -> Option<String> {
+    let normalized = name
+        .trim()
+        .trim_start_matches("declared:")
+        .trim_matches(['\'', '"'])
+        .trim_start_matches("const ")
+        .trim_start_matches("readonly ")
+        .trim_start_matches(['*', '&'])
+        .trim_end_matches(['*', '&', '?'])
+        .trim();
+    let TypeExpr::Primitive(mut nominal) = TypeExpr::parse(normalized, language) else {
+        return None;
+    };
+    nominal = nominal.trim().trim_end_matches('?').trim().to_string();
+    if let Some(open) = nominal.find(['<', '[']) {
+        nominal.truncate(open);
+    }
+    let nominal = nominal
+        .rsplit([':', '.'])
+        .find(|part| !part.is_empty())
+        .unwrap_or(&nominal)
+        .trim();
+    (!nominal.is_empty()).then(|| nominal.to_string())
+}
+
+fn percentage(numerator: usize, denominator: usize) -> f64 {
+    if denominator == 0 {
+        return 0.0;
+    }
+    ((numerator as f64 * 10_000.0 / denominator as f64).round()) / 100.0
+}
+
+fn resolve_project_calls(
+    owners: &[OwnerRecord],
+    methods: &[MethodRecord],
+    type_definitions: &[TypeDefinition],
+    calls: &mut [CallRecord],
+) {
+    let source_languages = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let mut by_lexical = BTreeMap::<&str, Vec<&MethodRecord>>::new();
+    for method in methods {
+        if let Some(symbol) = method.lexical_symbol.as_deref() {
+            by_lexical.entry(symbol).or_default().push(method);
+        }
+    }
+    for call in calls.iter_mut().filter(|call| call.target.is_none()) {
+        let Some(symbol) = call.lexical_symbol.as_deref() else {
+            continue;
+        };
+        let candidates = by_lexical
+            .get(symbol)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let Some(candidate) = unique_call_candidate(
+            candidates,
+            call,
+            source_languages.get(call.source.as_str()).copied(),
+        ) else {
+            continue;
+        };
+        call.target = Some(candidate.id.clone());
+        call.kind = if call.owner == candidate.owner {
+            "internal_call".to_string()
+        } else {
+            "resolved_call".to_string()
+        };
+        call.confidence = "high".to_string();
+        call.unresolved_reason = None;
+    }
+
+    resolve_same_namespace_static_calls(methods, calls);
+    resolve_same_namespace_declared_receiver_calls(methods, calls);
+
+    let mut by_dispatch: BTreeMap<(&str, &str, &str), Vec<&MethodRecord>> = BTreeMap::new();
+    for method in methods {
+        let Some(owner) = method.symbol_owner.as_deref() else {
+            continue;
+        };
+        by_dispatch
+            .entry((owner, method.dispatch_name.as_str(), method.kind.as_str()))
+            .or_default()
+            .push(method);
+    }
+
+    for call in calls.iter_mut().filter(|call| call.target.is_none()) {
+        let Some(owner) = call.receiver_symbol.as_deref() else {
+            continue;
+        };
+        let dispatch = if call.constructor_target.is_some() {
+            "instance"
+        } else if call.receiver_kind == "type" {
+            "class"
+        } else if call.receiver_symbol.is_some() {
+            "instance"
+        } else {
+            continue;
+        };
+        let message = call
+            .constructor_target
+            .as_deref()
+            .unwrap_or(call.message.as_str());
+        let candidates = by_dispatch
+            .get(&(owner, message, dispatch))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if let Some(candidate) = unique_call_candidate(
+            candidates,
+            call,
+            source_languages.get(call.source.as_str()).copied(),
+        ) {
+            call.target = Some(candidate.id.clone());
+            call.kind = "resolved_call".to_string();
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+        }
+    }
+
+    resolve_inherited_calls(owners, methods, calls);
+
+    resolve_direct_call_result_calls(methods, type_definitions, calls, &by_dispatch);
+    for call in calls.iter_mut().filter(|call| call.target.is_some()) {
+        call.candidate_targets.clear();
+        call.candidate_reason = None;
+    }
+    annotate_project_candidate_sets(owners, methods, calls, &by_lexical, &by_dispatch);
+}
+
+/// Bind an unqualified declared receiver type only when the merged project
+/// index contains the exact owner in the call's canonical namespace. The
+/// document pass must never fabricate `current.namespace.Type` for an
+/// arbitrary unqualified type: it may come from an import, dependency, or
+/// language runtime.
+fn resolve_same_namespace_declared_receiver_calls(
+    methods: &[MethodRecord],
+    calls: &mut [CallRecord],
+) {
+    let sources = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    for call in calls
+        .iter_mut()
+        .filter(|call| call.target.is_none() && call.receiver_symbol.is_none())
+    {
+        let Some(source) = sources.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Some(namespace) = call.symbol_namespace.as_deref() else {
+            continue;
+        };
+        let Some(receiver_type) = call.receiver_type.as_deref() else {
+            continue;
+        };
+        let Some(nominal) = declared_dispatch_owner_name_from_type(receiver_type, &source.language)
+        else {
+            continue;
+        };
+        if nominal.contains(['.', ':']) {
+            continue;
+        }
+        let expected_dot = format!("{namespace}.{nominal}");
+        let expected_scope = format!("{namespace}::{nominal}");
+        let candidates = methods
+            .iter()
+            .filter(|method| method.language == source.language)
+            .filter(|method| {
+                matches!(
+                    method.symbol_owner.as_deref(),
+                    Some(owner) if owner == expected_dot || owner == expected_scope
+                )
+            })
+            .filter(|method| method.kind == "instance" && method.dispatch_name == call.message)
+            .collect::<Vec<_>>();
+        let Some(candidate) =
+            unique_call_candidate(&candidates, call, Some(source.language.as_str()))
+        else {
+            continue;
+        };
+        call.target = Some(candidate.id.clone());
+        call.receiver_symbol = candidate.symbol_owner.clone();
+        call.receiver_symbol_origin = Some("same_namespace_project_declaration".to_string());
+        call.kind = "resolved_call".to_string();
+        call.confidence = "high".to_string();
+        call.unresolved_reason = None;
+    }
+}
+
+fn annotate_project_candidate_sets(
+    owners: &[OwnerRecord],
+    methods: &[MethodRecord],
+    calls: &mut [CallRecord],
+    by_lexical: &BTreeMap<&str, Vec<&MethodRecord>>,
+    by_dispatch: &BTreeMap<(&str, &str, &str), Vec<&MethodRecord>>,
+) {
+    let sources = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    for call in calls
+        .iter_mut()
+        .filter(|call| call.target.is_none() && call.candidate_targets.is_empty())
+    {
+        let Some(source) = sources.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let mut reason = None;
+        let mut candidates = BTreeSet::new();
+        if let Some(symbol) = call.lexical_symbol.as_deref() {
+            candidates.extend(
+                by_lexical
+                    .get(symbol)
+                    .into_iter()
+                    .flatten()
+                    .filter(|method| method.language == source.language)
+                    .filter(|method| {
+                        source.language != "java" || method.params.len() == call.argument_count
+                    })
+                    .map(|method| method.id.clone()),
+            );
+            reason = Some("lexical_ambiguity");
+        }
+        if candidates.len() < 2 {
+            candidates.clear();
+            if let Some(owner) = call.receiver_symbol.as_deref().or_else(|| {
+                call.implicit_receiver
+                    .then_some(source.symbol_owner.as_deref())
+                    .flatten()
+            }) {
+                let dispatch = if call.implicit_receiver {
+                    source.kind.as_str()
+                } else if call.receiver_kind == "type" {
+                    "class"
+                } else {
+                    "instance"
+                };
+                candidates.extend(
+                    by_dispatch
+                        .get(&(owner, call.message.as_str(), dispatch))
+                        .into_iter()
+                        .flatten()
+                        .filter(|method| method.language == source.language)
+                        .filter(|method| {
+                            source.language != "java" || method.params.len() == call.argument_count
+                        })
+                        .map(|method| method.id.clone()),
+                );
+                reason = Some("overload_or_override");
+            }
+        }
+        if candidates.len() < 2 {
+            candidates = conservative_inherited_target_ids(owners, methods, call, source);
+            reason = Some("hierarchy_dispatch");
+        }
+        if candidates.len() > 1 {
+            call.candidate_targets = candidates.into_iter().collect();
+            call.candidate_reason = reason.map(str::to_string);
+        }
+    }
+}
+
+fn unique_call_candidate<'a>(
+    candidates: &[&'a MethodRecord],
+    call: &CallRecord,
+    source_language: Option<&str>,
+) -> Option<&'a MethodRecord> {
+    if candidates.len() == 1 {
+        return Some(candidates[0]);
+    }
+    if source_language != Some("java") {
+        return None;
+    }
+    let arity = call.argument_count;
+    let matches = candidates
+        .iter()
+        .copied()
+        .filter(|candidate| candidate.params.len() == arity)
+        .collect::<Vec<_>>();
+    (matches.len() == 1).then(|| matches[0])
+}
+
+fn resolve_inherited_calls(
+    owners: &[OwnerRecord],
+    methods: &[MethodRecord],
+    calls: &mut [CallRecord],
+) {
+    let sources = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    let resolutions = calls
+        .iter()
+        .map(|call| {
+            let source = sources.get(call.source.as_str()).copied()?;
+            // These adapters expose nominal inheritance or language-defined
+            // method promotion. Other languages keep the normalized edge facts
+            // for measurement until their dispatch rules have exact oracles.
+            if !matches!(
+                source.language.as_str(),
+                "java" | "csharp" | "python" | "go"
+            ) {
+                return None;
+            }
+            let targets = conservative_inherited_target_ids(owners, methods, call, source);
+            (targets.len() == 1).then(|| targets.into_iter().next().unwrap())
+        })
+        .collect::<Vec<_>>();
+    for (call, target) in calls.iter_mut().zip(resolutions) {
+        if call.target.is_some() {
+            continue;
+        }
+        let Some(target) = target else {
+            continue;
+        };
+        call.target = Some(target);
+        call.kind = "resolved_call".to_string();
+        call.confidence = "high".to_string();
+        call.unresolved_reason = None;
+    }
+}
+
+fn conservative_inherited_target_ids(
+    owners: &[OwnerRecord],
+    methods: &[MethodRecord],
+    call: &CallRecord,
+    source: &MethodRecord,
+) -> BTreeSet<String> {
+    if call.constructor_target.is_some() {
+        return BTreeSet::new();
+    }
+    let start = if let Some(symbol) = call.receiver_symbol.as_deref() {
+        Some(symbol.to_string())
+    } else if let Some(receiver_type) = call.receiver_type.as_deref() {
+        declared_dispatch_owner_name_from_type(receiver_type, source.language.as_str())
+    } else if call.implicit_receiver {
+        source
+            .symbol_owner
+            .clone()
+            .or_else(|| Some(source.owner.clone()))
+    } else {
+        None
+    };
+    let Some(start) = start else {
+        return BTreeSet::new();
+    };
+
+    let resolve_owner = |identity: &str, context: Option<&OwnerRecord>| {
+        let exact = owners
+            .iter()
+            .filter(|owner| {
+                owner.language == source.language && owner.symbol.as_deref() == Some(identity)
+            })
+            .collect::<Vec<_>>();
+        if exact.len() == 1 {
+            return exact.into_iter().next();
+        }
+        if exact.len() > 1 || identity.contains(['.', ':']) {
+            return None;
+        }
+        if let Some(namespace) =
+            context
+                .and_then(|owner| owner.symbol.as_deref())
+                .and_then(|symbol| {
+                    symbol
+                        .rsplit_once(['.', ':'])
+                        .map(|(namespace, _)| namespace)
+                })
+        {
+            let same_namespace = owners
+                .iter()
+                .filter(|owner| owner.language == source.language)
+                .filter(|owner| {
+                    owner.symbol.as_deref().is_some_and(|symbol| {
+                        symbol == format!("{namespace}.{identity}")
+                            || symbol == format!("{namespace}::{identity}")
+                    })
+                })
+                .collect::<Vec<_>>();
+            if same_namespace.len() == 1 {
+                return same_namespace.into_iter().next();
+            }
+            if same_namespace.len() > 1 {
+                return None;
+            }
+        }
+        let by_name = owners
+            .iter()
+            .filter(|owner| owner.language == source.language && owner.name == identity)
+            .collect::<Vec<_>>();
+        (by_name.len() == 1).then(|| by_name[0])
+    };
+
+    let Some(start_owner) = resolve_owner(&start, None) else {
+        return BTreeSet::new();
+    };
+    let dispatch = if call.receiver_kind == "type" {
+        "class"
+    } else if call.implicit_receiver {
+        source.kind.as_str()
+    } else {
+        "instance"
+    };
+    let mut pending = start_owner
+        .supertypes
+        .iter()
+        .map(|identity| (identity.clone(), start_owner))
+        .collect::<Vec<_>>();
+    let mut visited = BTreeSet::new();
+    let mut targets = BTreeSet::new();
+    while let Some((identity, context)) = pending.pop() {
+        let Some(owner) = resolve_owner(&identity, Some(context)) else {
+            // A declaration outside the project may supply or override this
+            // member, so project uniqueness alone is not proof.
+            return BTreeSet::new();
+        };
+        if !visited.insert(owner.id.as_str()) {
+            continue;
+        }
+        let owner_targets = methods
+            .iter()
+            .filter(|method| method.language == source.language)
+            .filter(|method| {
+                owner
+                    .symbol
+                    .as_deref()
+                    .is_some_and(|symbol| method.symbol_owner.as_deref() == Some(symbol))
+                    || (owner.symbol.is_none()
+                        && method.owner == owner.name
+                        && method.path == owner.path)
+            })
+            .filter(|method| method.dispatch_name == call.message && method.kind == dispatch)
+            .filter(|method| {
+                source.language != "java" || method.params.len() == call.argument_count
+            })
+            .map(|method| method.id.clone())
+            .collect::<BTreeSet<_>>();
+        if owner_targets.is_empty() {
+            pending.extend(
+                owner
+                    .supertypes
+                    .iter()
+                    .map(|supertype| (supertype.clone(), owner)),
+            );
+        } else {
+            // A member declared on this branch hides more distant ancestors.
+            targets.extend(owner_targets);
+        }
+    }
+    targets
+}
+
+fn resolve_same_namespace_static_calls(methods: &[MethodRecord], calls: &mut [CallRecord]) {
+    let source_languages = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let mut candidates = BTreeMap::<(String, String, String), Vec<&MethodRecord>>::new();
+    for method in methods
+        .iter()
+        .filter(|method| method.language == "java" && method.kind == "class")
+    {
+        let Some(symbol_owner) = method.symbol_owner.as_deref() else {
+            continue;
+        };
+        let Some((namespace, owner)) = symbol_owner.rsplit_once('.') else {
+            continue;
+        };
+        candidates
+            .entry((
+                namespace.to_string(),
+                owner.to_string(),
+                method.dispatch_name.clone(),
+            ))
+            .or_default()
+            .push(method);
+    }
+    for call in calls.iter_mut().filter(|call| call.target.is_none()) {
+        if source_languages.get(call.source.as_str()).copied() != Some("java")
+            || call.receiver_binding_kind != "unbound"
+            || call.receiver.contains(['.', ':', '(', ')', '[', ']'])
+        {
+            continue;
+        }
+        let Some(namespace) = call.symbol_namespace.as_deref() else {
+            continue;
+        };
+        let matches = candidates
+            .get(&(
+                namespace.to_string(),
+                call.receiver.clone(),
+                call.message.clone(),
+            ))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let Some(candidate) = unique_call_candidate(matches, call, Some("java")) else {
+            continue;
+        };
+        call.target = Some(candidate.id.clone());
+        call.receiver_kind = "type".to_string();
+        call.receiver_symbol = candidate.symbol_owner.clone();
+        call.receiver_symbol_origin = Some("same_namespace_project_declaration".to_string());
+        call.kind = "resolved_call".to_string();
+        call.confidence = "high".to_string();
+        call.unresolved_reason = None;
+    }
+}
+
+fn resolve_direct_call_result_calls(
+    methods: &[MethodRecord],
+    type_definitions: &[TypeDefinition],
+    calls: &mut [CallRecord],
+    by_dispatch: &BTreeMap<(&str, &str, &str), Vec<&MethodRecord>>,
+) {
+    let methods_by_id = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    let return_facts = type_definitions
+        .iter()
+        .filter(|definition| definition.kind == "method_signature")
+        .filter(|definition| definition.return_type.is_some())
+        .map(|definition| {
+            (
+                (
+                    definition.language.as_str(),
+                    definition.path.as_str(),
+                    definition.owner.as_str(),
+                    definition.name.as_str(),
+                    definition.line,
+                ),
+                definition,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let local_dispatch = methods.iter().fold(
+        BTreeMap::<(&str, &str, &str, &str), Vec<&MethodRecord>>::new(),
+        |mut rows, method| {
+            rows.entry((
+                method.path.as_str(),
+                method.owner.as_str(),
+                method.dispatch_name.as_str(),
+                method.kind.as_str(),
+            ))
+            .or_default()
+            .push(method);
+            rows
+        },
+    );
+
+    loop {
+        let inner_targets = calls
+            .iter()
+            .filter_map(|call| {
+                Some((
+                    (call.source.as_str(), call.path.as_str(), call.span),
+                    call.target.as_deref()?,
+                ))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut resolved = Vec::new();
+        for (index, call) in calls
+            .iter()
+            .enumerate()
+            .filter(|(_, call)| call.target.is_none())
+        {
+            let receiver_spans = call
+                .receiver_call_span
+                .into_iter()
+                .chain(call.receiver_definition_call_spans.iter().copied())
+                .collect::<BTreeSet<_>>();
+            if receiver_spans.is_empty() {
+                continue;
+            }
+            let producer_facts = receiver_spans
+                .iter()
+                .filter_map(|receiver_span| {
+                    let inner_target = inner_targets.get(&(
+                        call.source.as_str(),
+                        call.path.as_str(),
+                        *receiver_span,
+                    ))?;
+                    let inner_method = methods_by_id.get(inner_target).copied()?;
+                    let return_fact = return_facts.get(&(
+                        inner_method.language.as_str(),
+                        inner_method.path.as_str(),
+                        inner_method.owner.as_str(),
+                        inner_method.name.as_str(),
+                        inner_method.line,
+                    ))?;
+                    Some((inner_method, *return_fact))
+                })
+                .collect::<Vec<_>>();
+            if producer_facts.len() != receiver_spans.len() {
+                continue;
+            }
+            let symbols = producer_facts
+                .iter()
+                .filter_map(|(_, fact)| fact.return_symbol.as_deref())
+                .collect::<BTreeSet<_>>();
+            let local_owners = producer_facts
+                .iter()
+                .filter_map(|(method, fact)| {
+                    Some((method.path.as_str(), fact.return_dispatch_owner.as_deref()?))
+                })
+                .collect::<BTreeSet<_>>();
+            let (candidates, receiver_symbol) = if symbols.len() == 1
+                && producer_facts
+                    .iter()
+                    .all(|(_, fact)| fact.return_symbol.is_some())
+            {
+                let symbol = symbols.into_iter().next().expect("one return symbol");
+                by_dispatch
+                    .get(&(symbol, call.message.as_str(), "instance"))
+                    .map(Vec::as_slice)
+                    .map(|candidates| (candidates, Some(symbol.to_string())))
+                    .unwrap_or((&[], None))
+            } else if local_owners.len() == 1
+                && producer_facts
+                    .iter()
+                    .all(|(_, fact)| fact.return_dispatch_owner.is_some())
+            {
+                let (path, owner) = local_owners
+                    .into_iter()
+                    .next()
+                    .expect("one local return owner");
+                local_dispatch
+                    .get(&(path, owner, call.message.as_str(), "instance"))
+                    .map(Vec::as_slice)
+                    .map(|candidates| (candidates, None))
+                    .unwrap_or((&[], None))
+            } else {
+                continue;
+            };
+            if let Some(candidate) = unique_call_candidate(
+                candidates,
+                call,
+                methods_by_id
+                    .get(call.source.as_str())
+                    .map(|source| source.language.as_str()),
+            ) {
+                resolved.push((index, candidate.id.clone(), receiver_symbol));
+            }
+        }
+        if resolved.is_empty() {
+            break;
+        }
+        for (index, target, receiver_symbol) in resolved {
+            let call = &mut calls[index];
+            call.target = Some(target);
+            call.receiver_kind = "value".to_string();
+            call.receiver_symbol = receiver_symbol;
+            call.receiver_type_origin = Some("declared_call_result".to_string());
+            call.receiver_symbol_origin = call
+                .receiver_symbol
+                .as_ref()
+                .map(|_| "declared_call_result".to_string());
+            call.kind = "resolved_call".to_string();
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+        }
     }
 }
 
@@ -1408,7 +2975,11 @@ fn extract_methods(
             let owner = fn_def.owner.clone();
             let name = fn_def.name.clone();
             let dispatch_name = behavior.function_dispatch_name(&name);
-            let kind = behavior.function_dispatch_kind(&name, &owner);
+            let kind = if fn_def.dispatch_kind.is_empty() {
+                behavior.function_dispatch_kind(&name, &owner)
+            } else {
+                fn_def.dispatch_kind.clone()
+            };
             let signature = method_signature(lines, fn_def, language);
             let source = method_source(&signature, language);
             let raw_source = source_for_span(lines, fn_def.span);
@@ -1419,8 +2990,20 @@ fn extract_methods(
 
             MethodRecord {
                 id: function_id(language, path, fn_def),
+                semantic_symbol: None,
                 owner_id: owner_id(language, path, &owner, owner_span(document, &owner)),
                 key: vec![owner.clone(), name.clone(), kind.clone()],
+                symbol_owner: canonical_symbol_owner(document, &owner, Some(fn_def.span)),
+                lexical_symbol: (kind == "top"
+                    && document.symbol_scope.canonical
+                    && declaration_namespace(document, fn_def.span).is_some())
+                .then(|| {
+                    format!(
+                        "{}::{}",
+                        declaration_namespace(document, fn_def.span).unwrap(),
+                        dispatch_name
+                    )
+                }),
                 owner,
                 name,
                 dispatch_name,
@@ -1461,6 +3044,15 @@ fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerR
             line: owner.line,
             span: owner.span,
             confidence: "high".to_string(),
+            symbol: canonical_symbol_owner(document, &owner.name, Some(owner.span)),
+            supertypes: owner
+                .supertypes
+                .iter()
+                .map(|supertype| {
+                    canonical_declared_type(document, supertype)
+                        .unwrap_or_else(|| supertype.clone())
+                })
+                .collect(),
         })
         .collect::<Vec<_>>();
 
@@ -1480,6 +3072,8 @@ fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerR
             line: function.line,
             span: function.span,
             confidence: "partial".to_string(),
+            symbol: canonical_symbol_owner(document, &function.owner, Some(function.span)),
+            supertypes: Vec::new(),
         });
     }
     owners
@@ -1581,16 +3175,18 @@ fn method_signature(lines: &[String], fn_def: &syntax::FunctionDef, language: &s
             String::new()
         }
         "python" | "typescript" | "javascript" => source_signature_for(lines, fn_def),
-        // C and C# keep FunctionDef.signature as display text (`name (arg)`),
-        // which loses the declaration annotations required by CFG/DFG. The
-        // declaration header is the source of truth for static type facts.
-        "c" | "csharp" => get_def_header(lines, fn_def.line)
-            .split('{')
-            .next()
-            .unwrap_or_default()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" "),
+        // Typed adapters may keep FunctionDef.signature as display text
+        // (`name (arg)`), which loses return annotations required by CFG/DFG.
+        // Their declaration header is the source of truth for static facts.
+        "c" | "cpp" | "csharp" | "go" | "java" | "kotlin" | "php" | "rust" | "swift" | "zig" => {
+            get_def_header(lines, fn_def.line)
+                .split('{')
+                .next()
+                .unwrap_or_default()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
         _ => {
             let params = fn_def.params.join(", ");
             if params.is_empty() {
@@ -1729,7 +3325,11 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
             name,
             line: state.line,
             span: Some(state.span),
-            declared_type: state.r#type.as_ref().map(|t| TypeExpr::parse(t, language)),
+            declared_type: state
+                .r#type
+                .as_deref()
+                .map(|declared_type| normalized_declared_alias(document, declared_type)),
+            immutable: state.immutable,
             type_references: Vec::new(),
             static_origin: "state_declaration".to_string(),
             source: "syntax".to_string(),
@@ -1790,6 +3390,7 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
             line: write.line,
             span: Some(write.span),
             declared_type: None,
+            immutable: false,
             type_references: Vec::new(),
             static_origin: "state_write".to_string(),
             source: "syntax".to_string(),
@@ -1797,6 +3398,21 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
     }
 
     out
+}
+
+fn normalized_declared_alias(document: &Document, declared_type: &str) -> String {
+    let trimmed = declared_type.trim();
+    let base = trimmed
+        .trim_start_matches('*')
+        .split(['[', '<'])
+        .next()
+        .unwrap_or(trimmed)
+        .trim();
+    document
+        .type_aliases
+        .get(base)
+        .cloned()
+        .unwrap_or_else(|| declared_type.to_string())
 }
 
 fn field_id(language: &str, path: &str, owner: &str, name: &str) -> String {
@@ -2022,6 +3638,12 @@ fn extract_type_definitions(
             continue;
         }
 
+        let return_dispatch_owner = return_type
+            .as_deref()
+            .and_then(|type_name| declared_dispatch_owner_name(document, type_name));
+        let return_symbol = return_type
+            .as_deref()
+            .and_then(|type_name| canonical_declared_type(document, type_name));
         let return_type_expr = return_type.map(|t| TypeExpr::parse(&t, language));
         let params_json: Vec<serde_json::Value> = params
             .into_iter()
@@ -2060,6 +3682,8 @@ fn extract_type_definitions(
             line: fn_def.line,
             signature: Some(sig),
             return_type: return_type_expr,
+            return_dispatch_owner,
+            return_symbol,
             params: params_json,
             declared_type: None,
             target: None,
@@ -2092,6 +3716,8 @@ fn extract_type_definitions(
             line,
             signature: None,
             return_type: None,
+            return_dispatch_owner: None,
+            return_symbol: None,
             params: Vec::new(),
             declared_type: None,
             target: Some(target.clone()),
@@ -2126,8 +3752,10 @@ fn extract_type_definitions(
             line: state.line,
             signature: None,
             return_type: None,
+            return_dispatch_owner: None,
+            return_symbol: None,
             params: Vec::new(),
-            declared_type: Some(TypeExpr::parse(&type_text, language)),
+            declared_type: Some(type_text),
             target: None,
             source: Some("syntax".to_string()),
         });
@@ -2135,18 +3763,20 @@ fn extract_type_definitions(
 
     // Method param types from Document method_param_types
     for (fn_key, param_types) in &document.method_param_types {
-        let (owner, name) = split_method_key(fn_key);
+        let (owner, name, declared_line) = split_method_key(fn_key);
         let mut clean_name = name.clone();
         let name_to_find = name.clone();
         if clean_name.starts_with("self.") {
             clean_name = clean_name.strip_prefix("self.").unwrap().to_string();
         }
-        let line = document
-            .function_defs
-            .iter()
-            .find(|fd| fd.owner == owner && fd.name == name_to_find)
-            .map(|fd| fd.line)
-            .unwrap_or(0);
+        let line = declared_line.unwrap_or_else(|| {
+            document
+                .function_defs
+                .iter()
+                .find(|fd| fd.owner == owner && fd.name == name_to_find)
+                .map(|fd| fd.line)
+                .unwrap_or(0)
+        });
         let ts = language_type_system(language);
         let params: Vec<serde_json::Value> = param_types
             .iter()
@@ -2157,19 +3787,20 @@ fn extract_type_definitions(
                 })
             })
             .collect();
+        let id = [
+            language,
+            path,
+            &owner,
+            "method_signature",
+            &clean_name,
+            &line.to_string(),
+            ts,
+        ]
+        .join("\u{0}");
 
-        if !params.is_empty() {
+        if !params.is_empty() && !out.iter().any(|definition| definition.id == id) {
             out.push(TypeDefinition {
-                id: [
-                    language,
-                    path,
-                    &owner,
-                    "method_signature",
-                    &clean_name,
-                    &line.to_string(),
-                    ts,
-                ]
-                .join("\u{0}"),
+                id,
                 language: language.to_string(),
                 type_system: ts.to_string(),
                 kind: "method_signature".to_string(),
@@ -2179,6 +3810,8 @@ fn extract_type_definitions(
                 line,
                 signature: None,
                 return_type: None,
+                return_dispatch_owner: None,
+                return_symbol: None,
                 params,
                 declared_type: None,
                 target: None,
@@ -2210,7 +3843,11 @@ fn declaration_type_pressures_from_definitions(definitions: &[TypeDefinition]) -
             out.push(type_pressure_row(definition, "return", declared_type.clone()));
         }
         if let Some(declared_type) = &definition.declared_type {
-            out.push(type_pressure_row(definition, "declared", declared_type.clone()));
+            out.push(type_pressure_row(
+                definition,
+                "declared",
+                TypeExpr::parse(declared_type, &definition.language),
+            ));
         }
         if let Some(target) = &definition.target {
             out.push(type_pressure_row(
@@ -3226,44 +4863,25 @@ fn extract_array_shapes(lines: &[String], language: &str, path: &str) -> Vec<Arr
 // Call-graph edges (Phase 2d)
 // ---------------------------------------------------------------------------
 
-fn extract_call_graph_edges(document: &Document) -> Vec<CallGraphEdge> {
+fn extract_call_graph_edges(calls: &[CallRecord]) -> Vec<CallGraphEdge> {
     let mut edges = Vec::new();
 
-    // Build function name index per owner
-    let fn_by_owner: BTreeMap<String, BTreeSet<String>> =
-        document
-            .function_defs
-            .iter()
-            .fold(BTreeMap::new(), |mut acc, f| {
-                acc.entry(f.owner.clone())
-                    .or_default()
-                    .insert(f.name.clone());
-                acc
-            });
-
-    for call in &document.call_sites {
-        let receiver = call.receiver.as_str();
-        // Internal call: self/this receiver or implicit self (empty)
-        if receiver == "self" || receiver == "this" || receiver.is_empty() {
-            let owner_fns = match fn_by_owner.get(&call.owner) {
-                Some(fns) => fns,
-                None => continue,
-            };
-            if owner_fns.contains(&call.message) {
-                edges.push(CallGraphEdge {
-                    source: format!("fn:{}#{}", call.owner, call.function),
-                    target: format!("fn:{}#{}", call.owner, call.message),
-                    kind: "internal_call".to_string(),
-                    label: if call.conditional {
-                        "conditional internal".to_string()
-                    } else {
-                        "internal".to_string()
-                    },
-                    conditional: call.conditional,
-                    weight: 1,
-                });
-            }
-        }
+    // This is a compatibility projection for older graph consumers. Target
+    // discovery belongs exclusively to `extract_calls`; graph construction
+    // must never grow a second resolver with weaker identity semantics.
+    for call in calls.iter().filter(|call| call.kind == "internal_call") {
+        edges.push(CallGraphEdge {
+            source: format!("fn:{}#{}", call.owner, call.function),
+            target: format!("fn:{}#{}", call.owner, call.message),
+            kind: "internal_call".to_string(),
+            label: if call.conditional {
+                "conditional internal".to_string()
+            } else {
+                "internal".to_string()
+            },
+            conditional: call.conditional,
+            weight: 1,
+        });
     }
 
     // Deduplicate and aggregate weights
@@ -3294,31 +4912,470 @@ fn source_function_id(
     function: &str,
     line: usize,
 ) -> String {
+    source_function(document, owner, function, line)
+        .map(|row| function_id(language, path, row))
+        .unwrap_or_else(|| stable_id("fn", &[language, path, owner, function]))
+}
+
+fn declaration_namespace(document: &Document, span: [usize; 4]) -> Option<&str> {
+    document
+        .symbol_scope
+        .declaration_namespaces
+        .get(&span)
+        .map(String::as_str)
+        .or_else(|| {
+            (!document.symbol_scope.namespace.is_empty())
+                .then_some(document.symbol_scope.namespace.as_str())
+        })
+}
+
+fn cpp_symbol_without_template_arguments(name: &str) -> String {
+    let mut output = String::with_capacity(name.len());
+    let mut depth = 0usize;
+    for character in name.chars() {
+        match character {
+            '<' => depth += 1,
+            '>' if depth > 0 => depth -= 1,
+            _ if depth == 0 => output.push(character),
+            _ => {}
+        }
+    }
+    if depth == 0 {
+        output
+    } else {
+        name.to_string()
+    }
+}
+
+fn canonical_symbol_owner(
+    document: &Document,
+    owner: &str,
+    declaration_span: Option<[usize; 4]>,
+) -> Option<String> {
+    if !document.symbol_scope.canonical || owner.is_empty() {
+        return None;
+    }
+    let owner = owner.replace("::", ".");
+    let namespace = declaration_span
+        .and_then(|span| declaration_namespace(document, span))
+        .unwrap_or(document.symbol_scope.namespace.as_str());
+    if namespace.is_empty() {
+        Some(owner)
+    } else {
+        Some(format!("{}.{}", namespace.replace("::", "."), owner))
+    }
+}
+
+fn canonical_receiver_symbol(document: &Document, receiver: &str) -> Option<String> {
+    if !document.symbol_scope.canonical || receiver.is_empty() {
+        return None;
+    }
+    if let Some(imported) = document.symbol_scope.explicit_imports.get(receiver) {
+        return Some(imported.clone());
+    }
+    document
+        .owner_defs
+        .iter()
+        .find(|owner| owner.name == receiver)
+        .and_then(|owner| canonical_symbol_owner(document, &owner.name, Some(owner.span)))
+}
+
+fn canonical_receiver_symbol_origin(document: &Document, receiver: &str) -> Option<String> {
+    if !document.symbol_scope.canonical || receiver.is_empty() {
+        return None;
+    }
+    if document
+        .symbol_scope
+        .explicit_imports
+        .contains_key(receiver)
+    {
+        return Some("explicit_import".to_string());
+    }
+    document
+        .owner_defs
+        .iter()
+        .any(|owner| owner.name == receiver)
+        .then(|| "project_declaration".to_string())
+}
+
+fn canonical_declared_type(document: &Document, name: &str) -> Option<String> {
+    let name = declared_dispatch_owner_name(document, name)?;
+    document
+        .symbol_scope
+        .explicit_imports
+        .get(&name)
+        .cloned()
+        .or_else(|| {
+            document
+                .owner_defs
+                .iter()
+                .find(|candidate| candidate.name == name)
+                .and_then(|candidate| {
+                    canonical_symbol_owner(document, &candidate.name, Some(candidate.span))
+                })
+        })
+        .or_else(|| {
+            (document
+                .symbol_scope
+                .unqualified_types_use_current_namespace
+                && !document.symbol_scope.namespace.is_empty()
+                && !name.contains(['.', ':', '[', ' ']))
+            .then(|| format!("{}.{}", document.symbol_scope.namespace, name))
+        })
+}
+
+fn canonical_declared_type_origin(document: &Document, name: &str) -> Option<String> {
+    let name = declared_dispatch_owner_name(document, name)?;
+    if document.symbol_scope.explicit_imports.contains_key(&name) {
+        Some("explicit_import".to_string())
+    } else if document.owner_defs.iter().any(|owner| owner.name == name) {
+        Some("project_declaration".to_string())
+    } else if document
+        .symbol_scope
+        .unqualified_types_use_current_namespace
+        && !document.symbol_scope.namespace.is_empty()
+        && !name.contains(['.', ':', '[', ' '])
+    {
+        Some("same_namespace_declared_type".to_string())
+    } else if !name.contains(['.', ':']) {
+        Some("unqualified_declared_type".to_string())
+    } else {
+        None
+    }
+}
+
+fn declared_dispatch_owner_name(document: &Document, name: &str) -> Option<String> {
+    let mut name = name.strip_prefix("declared:").unwrap_or(name).trim();
+    let mut visited = BTreeSet::new();
+    while let Some(target) = document.type_aliases.get(name) {
+        if !visited.insert(name.to_string()) {
+            return None;
+        }
+        name = target.trim();
+    }
+    let TypeExpr::Primitive(mut nominal) = TypeExpr::parse(name, document.language.as_str()) else {
+        return None;
+    };
+    nominal = nominal.trim().trim_end_matches('?').trim().to_string();
+    if nominal.contains('|') {
+        return None;
+    }
+    if let Some(open) = nominal.find('<') {
+        if nominal.ends_with('>') {
+            nominal.truncate(open);
+        }
+    }
+    let nominal = nominal.trim();
+    (!nominal.is_empty()).then(|| nominal.to_string())
+}
+
+fn declared_receiver_type(
+    document: &Document,
+    definition: Option<&syntax::FunctionDef>,
+    receiver: &str,
+) -> Option<String> {
+    let definition = definition?;
+    let key = format!(
+        "{}\0{}\0{}",
+        definition.owner, definition.name, definition.line
+    );
+    document
+        .method_param_types
+        .get(&key)
+        .and_then(|parameters| parameters.get(receiver))
+        .or_else(|| {
+            document
+                .method_local_types
+                .get(&key)
+                .and_then(|locals| locals.get(receiver))
+        })
+        .cloned()
+}
+
+fn declared_state_receiver_type(
+    document: &Document,
+    owner: &str,
+    receiver: &str,
+) -> Option<String> {
+    let receiver = receiver
+        .strip_prefix("self.")
+        .or_else(|| receiver.strip_prefix("this."))
+        .unwrap_or(receiver)
+        .trim_start_matches('@');
+    let types = document
+        .state_declarations
+        .iter()
+        .filter(|declaration| declaration.owner == owner)
+        .filter(|declaration| declaration.field.trim_start_matches('@') == receiver)
+        .filter_map(|declaration| declaration.r#type.as_deref())
+        .map(str::trim)
+        .filter(|type_name| !type_name.is_empty())
+        .collect::<BTreeSet<_>>();
+    (types.len() == 1)
+        .then(|| types.into_iter().next().map(str::to_string))
+        .flatten()
+}
+
+fn flow_receiver_type(
+    document: &Document,
+    function: &str,
+    receiver: &str,
+    call_span: [usize; 4],
+) -> Option<String> {
+    let place_ids = document
+        .places
+        .iter()
+        .filter(|place| place.function == function && place.name == receiver)
+        .map(|place| place.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let node_ids = document
+        .control_flow_nodes
+        .iter()
+        .filter(|node| {
+            node.function == function
+                && node.span[0] <= call_span[0]
+                && call_span[2] <= node.span[2]
+        })
+        .map(|node| node.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let types = document
+        .flow_types
+        .iter()
+        .filter(|fact| {
+            fact.complete
+                && place_ids.contains(fact.place_id.as_str())
+                && node_ids.contains(fact.node_id.as_str())
+        })
+        .flat_map(|fact| fact.types.iter())
+        .map(|name| name.strip_prefix("declared:").unwrap_or(name).to_string())
+        .collect::<BTreeSet<_>>();
+    let exact = (types.len() == 1)
+        .then(|| types.into_iter().next())
+        .flatten();
+    if exact.is_some() || document.language.as_str() != "java" {
+        return exact;
+    }
+
+    // Java locals retain their declared type across assignments. CFG flow
+    // may be incomplete at a branch node even though the declaration fact is
+    // present on the same normalized place.
+    let declared = document
+        .flow_types
+        .iter()
+        .filter(|fact| fact.complete && place_ids.contains(fact.place_id.as_str()))
+        .flat_map(|fact| fact.types.iter())
+        .filter_map(|name| name.strip_prefix("declared:"))
+        .map(str::trim)
+        .filter(|name| valid_java_declared_local_type(name))
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+    (declared.len() == 1)
+        .then(|| declared.into_iter().next())
+        .flatten()
+}
+
+fn valid_java_declared_local_type(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .next()
+            .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        && !name.contains(['=', '(', ')', ';', '\n'])
+        && !name.contains("//")
+        && !name.contains("&&")
+}
+
+fn reaching_call_result_spans(
+    document: &Document,
+    function: &str,
+    receiver: &str,
+    call_span: [usize; 4],
+) -> Vec<[usize; 4]> {
+    let place_ids = document
+        .places
+        .iter()
+        .filter(|place| place.function == function && place.name == receiver)
+        .map(|place| place.id.as_str())
+        .collect::<BTreeSet<_>>();
+    if place_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let mut candidates = document
+        .control_flow_nodes
+        .iter()
+        .filter(|node| {
+            node.function == function
+                && node.span[0] <= call_span[0]
+                && call_span[2] <= node.span[2]
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|node| {
+        (
+            node.span[2].saturating_sub(node.span[0]),
+            node.span[3].saturating_sub(node.span[1]),
+        )
+    });
+
+    let mut proven_sets = BTreeSet::new();
+    for node in candidates {
+        for place_id in &place_ids {
+            let Some(effect) = document
+                .node_effects
+                .iter()
+                .find(|effect| effect.node_id == node.id)
+            else {
+                continue;
+            };
+            if !effect.reads.iter().any(|read| read == place_id) {
+                continue;
+            }
+            let Some(reaching) = document
+                .reaching_definitions
+                .iter()
+                .find(|fact| fact.node_id == node.id && fact.place_id == **place_id)
+            else {
+                continue;
+            };
+            if reaching.definitions.is_empty() {
+                continue;
+            }
+            let mut spans = BTreeSet::new();
+            let complete = reaching.definitions.iter().all(|definition| {
+                document
+                    .node_effects
+                    .iter()
+                    .find(|definition_effect| definition_effect.node_id == *definition)
+                    .and_then(|definition_effect| {
+                        definition_effect.write_call_sources.get(*place_id)
+                    })
+                    .map(|span| spans.insert(*span))
+                    .is_some()
+            });
+            if complete && !spans.is_empty() {
+                proven_sets.insert(spans.into_iter().collect::<Vec<_>>());
+            }
+        }
+        if !proven_sets.is_empty() {
+            break;
+        }
+    }
+    (proven_sets.len() == 1)
+        .then(|| proven_sets.into_iter().next())
+        .flatten()
+        .unwrap_or_default()
+}
+
+fn exact_document_owner<'a>(document: &'a Document, type_name: &str) -> Option<&'a str> {
+    let type_name = declared_dispatch_owner_name(document, type_name)?;
+    let owners = document
+        .owner_defs
+        .iter()
+        .filter(|owner| owner.name == type_name)
+        .map(|owner| owner.name.as_str())
+        .collect::<BTreeSet<_>>();
+    (owners.len() == 1)
+        .then(|| owners.into_iter().next())
+        .flatten()
+}
+
+fn source_function<'a>(
+    document: &'a Document,
+    owner: &str,
+    function: &str,
+    line: usize,
+) -> Option<&'a syntax::FunctionDef> {
     let candidates = document
         .function_defs
         .iter()
         .filter(|row| row.owner == owner && row.name == function)
         .collect::<Vec<_>>();
-    let selected = candidates
+    let exact = candidates
         .iter()
         .copied()
         .find(|row| row.span[0] <= line && line <= row.span[2])
         .or_else(|| candidates.first().copied());
-    selected
-        .map(|row| function_id(language, path, row))
-        .unwrap_or_else(|| stable_id("fn", &[language, path, owner, function]))
+    if exact.is_some() {
+        return exact;
+    }
+
+    // File/module owners and lexical top-level owners are intentionally
+    // normalized differently in several languages. A unique declaration with
+    // the same function name that contains the call is stronger evidence than
+    // dropping all declared parameter/local types because those owner labels
+    // differ.
+    let containing = document
+        .function_defs
+        .iter()
+        .filter(|row| row.name == function && row.span[0] <= line && line <= row.span[2])
+        .collect::<Vec<_>>();
+    (containing.len() == 1).then(|| containing[0])
+}
+
+fn owner_type_name(value: &str) -> &str {
+    let value = value.trim().trim_start_matches('*');
+    let value = value.split(['[', '<']).next().unwrap_or(value);
+    value
+        .rsplit([':', '.'])
+        .find(|part| !part.is_empty())
+        .unwrap_or(value)
+}
+
+fn owner_name_matches(left: &str, right: &str) -> bool {
+    owner_type_name(left) == owner_type_name(right)
+}
+
+/// Follow declared state projections to the selected field. The language
+/// adapter proves whether the final native declared type is callable.
+fn declared_field_callback_cost(
+    document: &Document,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    call: &syntax::CallSite,
+) -> Option<String> {
+    let mut owner = call.owner.clone();
+    let receiver_fields = call
+        .receiver
+        .split('.')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .skip_while(|part| matches!(*part, "self" | "this"))
+        .collect::<Vec<_>>();
+    for field in receiver_fields {
+        let declaration = document.state_declarations.iter().find(|declaration| {
+            owner_name_matches(&declaration.owner, &owner)
+                && declaration.field.trim_start_matches('@') == field
+        })?;
+        owner = declaration.r#type.clone()?;
+    }
+    let costs = document
+        .state_declarations
+        .iter()
+        .filter(|declaration| owner_name_matches(&declaration.owner, &owner))
+        .filter(|declaration| declaration.field.trim_start_matches('@') == call.message)
+        .filter_map(|declaration| declaration.r#type.as_deref())
+        .filter_map(|declared_type| {
+            behavior.declared_callable_cost(declared_type).or_else(|| {
+                let normalized = normalized_declared_alias(document, declared_type);
+                behavior.declared_callable_cost(&normalized)
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    (costs.len() == 1)
+        .then(|| costs.into_iter().next())
+        .flatten()
 }
 
 fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRecord> {
     let behavior = crate::syntax::normalized_behavior::behavior(document.language);
+    let receiver_call_spans = document
+        .call_receiver_projections
+        .iter()
+        .map(|projection| (projection.outer_span, projection.receiver_call_span))
+        .collect::<BTreeMap<_, _>>();
     document
         .call_sites
         .iter()
         .map(|call| {
-            let intrinsic = behavior.intrinsic_call_complexity(
-                (!call.receiver.is_empty()).then_some(call.receiver.as_str()),
-                &call.message,
-            );
             let source = source_function_id(
                 document,
                 language,
@@ -3327,27 +5384,228 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 &call.function,
                 call.line,
             );
+            let source_definition =
+                source_function(document, &call.owner, &call.function, call.line);
             let implicit =
                 call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this";
-            let target_def = implicit
+            // A type receiver is a normalized fact only when the language
+            // adapter proves it or this document declares that exact owner.
+            // Capitalization is never used as a shared type heuristic.
+            let adapter_receiver_is_type = behavior.receiver_is_type_reference(&call.receiver);
+            let static_receiver_symbol = canonical_receiver_symbol(document, &call.receiver)
+                .or_else(|| {
+                    adapter_receiver_is_type
+                        .then(|| canonical_declared_type(document, &call.receiver))
+                        .flatten()
+                });
+            let receiver_is_type = static_receiver_symbol.is_some()
+                || adapter_receiver_is_type
+                || document
+                    .owner_defs
+                    .iter()
+                    .any(|owner| owner.name == call.receiver);
+            let declared_receiver_type = (!receiver_is_type)
+                .then(|| declared_receiver_type(document, source_definition, &call.receiver))
+                .flatten();
+            let flow_receiver_type = (!receiver_is_type && declared_receiver_type.is_none())
+                .then(|| flow_receiver_type(document, &call.function, &call.receiver, call.span))
+                .flatten();
+            let state_receiver_type = (!receiver_is_type
+                && declared_receiver_type.is_none()
+                && flow_receiver_type.is_none())
+            .then(|| declared_state_receiver_type(document, &call.owner, &call.receiver))
+            .flatten();
+            let receiver_type_origin = if declared_receiver_type.is_some() {
+                Some("declared_parameter".to_string())
+            } else if flow_receiver_type.is_some() {
+                Some("flow".to_string())
+            } else if state_receiver_type.is_some() {
+                Some("declared_state".to_string())
+            } else {
+                None
+            };
+            let receiver_has_flow_type = flow_receiver_type.is_some();
+            let instance_receiver_type = declared_receiver_type
+                .or(flow_receiver_type)
+                .or(state_receiver_type);
+            let known_complexity = instance_receiver_type
+                .as_deref()
+                .map(|type_name| TypeExpr::parse(type_name, language))
+                .and_then(|receiver_type| behavior.call_complexity(&receiver_type, &call.message))
+                .or_else(|| {
+                    if implicit {
+                        // Bare calls may be language intrinsics (`len`) or
+                        // implicit-owner dispatch (`self.foo`). Prefer the
+                        // receiver-free identity, then retain the normalized
+                        // language owner as a fallback.
+                        behavior
+                            .intrinsic_call_complexity(None, &call.message)
+                            .or_else(|| {
+                                behavior.intrinsic_call_complexity(
+                                    (!call.receiver.is_empty())
+                                        .then_some(call.receiver.as_str()),
+                                    &call.message,
+                                )
+                            })
+                    } else {
+                        behavior.intrinsic_call_complexity(
+                            (!call.receiver.is_empty()).then_some(call.receiver.as_str()),
+                            &call.message,
+                        )
+                    }
+                });
+            let parametric_cost = known_complexity
+                .is_none()
                 .then(|| {
-                    document
-                        .function_defs
-                        .iter()
-                        .find(|row| row.owner == call.owner && row.name == call.message)
+                    instance_receiver_type
+                        .as_deref()
+                        .map(|type_name| TypeExpr::parse(type_name, language))
+                        .and_then(|receiver_type| {
+                            behavior.parametric_call_cost(&receiver_type, &call.message)
+                        })
+                        .or_else(|| declared_field_callback_cost(document, behavior, call))
                 })
                 .flatten();
+            let parametric_complexity = parametric_cost
+                .as_deref()
+                .and_then(crate::syntax::parametric_call_complexity);
+            let instance_receiver_owner = instance_receiver_type
+                .as_deref()
+                .and_then(|type_name| exact_document_owner(document, type_name));
+            let instance_receiver_symbol = instance_receiver_type
+                .as_deref()
+                .and_then(|type_name| canonical_declared_type(document, type_name));
+            let receiver_symbol_origin = if static_receiver_symbol.is_some() {
+                canonical_receiver_symbol_origin(document, &call.receiver).or_else(|| {
+                    adapter_receiver_is_type
+                        .then(|| canonical_declared_type_origin(document, &call.receiver))
+                        .flatten()
+                })
+            } else {
+                instance_receiver_type
+                    .as_deref()
+                    .and_then(|type_name| canonical_declared_type_origin(document, type_name))
+            };
+            let receiver_symbol = static_receiver_symbol.or(instance_receiver_symbol.clone());
+            let source_dispatch = source_definition
+                .map(|definition| definition.dispatch_kind.as_str())
+                .filter(|kind| !kind.is_empty());
+            let source_namespace = source_definition
+                .and_then(|definition| declaration_namespace(document, definition.span))
+                .or_else(|| {
+                    (!document.symbol_scope.namespace.is_empty())
+                        .then_some(document.symbol_scope.namespace.as_str())
+                });
+            let imported_lexical_symbol = if implicit {
+                document
+                    .symbol_scope
+                    .explicit_imports
+                    .get(&call.message)
+                    .and_then(|target| target.rsplit_once('.'))
+                    .map(|(namespace, name)| format!("{namespace}::{name}"))
+            } else {
+                document
+                    .symbol_scope
+                    .explicit_imports
+                    .get(&call.receiver)
+                    .map(|namespace| format!("{namespace}::{}", call.message))
+            };
+            let lexical_symbol_origin = imported_lexical_symbol
+                .as_ref()
+                .map(|_| "explicit_import".to_string())
+                .or_else(|| {
+                    (implicit && document.symbol_scope.canonical && source_dispatch == Some("top"))
+                        .then(|| "project_namespace".to_string())
+                });
+            let target_candidates = document
+                .function_defs
+                .iter()
+                .filter(|definition| {
+                    if definition.name != call.message {
+                        return false;
+                    }
+                    let dispatch = definition.dispatch_kind.as_str();
+                    if dispatch.is_empty() {
+                        return false;
+                    }
+                    if implicit && source_dispatch == Some("top") {
+                        dispatch == "top"
+                    } else if implicit && behavior.supports_implicit_owner_dispatch() {
+                        definition.owner == call.owner && Some(dispatch) == source_dispatch
+                    } else if receiver_is_type {
+                        definition.owner == call.receiver && dispatch == "class"
+                    } else if instance_receiver_owner == Some(definition.owner.as_str()) {
+                        dispatch == "instance"
+                    } else if let Some(receiver_symbol) = instance_receiver_symbol.as_deref() {
+                        canonical_symbol_owner(document, &definition.owner, Some(definition.span))
+                            .as_deref()
+                            == Some(receiver_symbol)
+                            && dispatch == "instance"
+                    } else {
+                        false
+                    }
+                })
+                .collect::<Vec<_>>();
+            // Overload selection requires argument/type semantics. Preserve
+            // ambiguity instead of choosing declaration order.
+            let target_def = (target_candidates.len() == 1).then(|| target_candidates[0]);
             let target = target_def.map(|row| function_id(language, path, row));
+            let resolved = target.is_some();
             let state_receiver = document.state_declarations.iter().any(|row| {
-                call.receiver == row.field
-                    || call.receiver.trim_start_matches('@') == row.field.trim_start_matches('@')
-                    || call.receiver.strip_prefix("self.")
-                        == Some(row.field.trim_start_matches('@'))
-                    || call.receiver.strip_prefix("this.")
-                        == Some(row.field.trim_start_matches('@'))
+                row.owner == call.owner
+                    && (call.receiver == row.field
+                        || call.receiver.trim_start_matches('@')
+                            == row.field.trim_start_matches('@')
+                        || call.receiver.strip_prefix("self.")
+                            == Some(row.field.trim_start_matches('@'))
+                        || call.receiver.strip_prefix("this.")
+                            == Some(row.field.trim_start_matches('@')))
             });
-            let kind = if target.is_some() {
+            let receiver_is_parameter = source_definition.is_some_and(|definition| {
+                definition
+                    .params
+                    .iter()
+                    .any(|parameter| parameter == &call.receiver)
+            });
+            let receiver_is_local = receiver_has_flow_type;
+            let receiver_binding_kind = if implicit {
+                "implicit"
+            } else if receiver_is_type {
+                "type"
+            } else if receiver_is_parameter {
+                "parameter"
+            } else if state_receiver {
+                "state"
+            } else if receiver_is_local {
+                "local"
+            } else {
+                "unbound"
+            };
+            let callback_receiver = parametric_cost.is_some() || source_definition.is_some_and(|definition| {
+                definition
+                    .callback_params
+                    .iter()
+                    .any(|parameter| parameter == &call.receiver)
+            });
+            let dispatch_boundary = document
+                .semantic_effect_sites
+                .iter()
+                .filter(|effect| {
+                    effect.function == call.function
+                        && effect.span == call.span
+                        && matches!(effect.kind.as_str(), "dynamic_dispatch" | "metaprogramming")
+                })
+                .map(|effect| effect.kind.as_str())
+                .collect::<BTreeSet<_>>();
+            let dispatch_boundary = (dispatch_boundary.len() == 1)
+                .then(|| dispatch_boundary.into_iter().next().map(str::to_string))
+                .flatten();
+            let kind = if target_def
+                .is_some_and(|definition| implicit && definition.owner == call.owner)
+            {
                 "internal_call"
+            } else if target.is_some() {
+                "resolved_call"
             } else if state_receiver {
                 "delegation"
             } else if implicit {
@@ -3371,32 +5629,90 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 ),
                 source,
                 target,
+                semantic_symbol: None,
+                external_symbol_scope: None,
+                complexity_missing_kind: None,
+                target_provenance: None,
+                candidate_targets: Vec::new(),
+                candidate_reason: None,
                 kind: kind.to_string(),
                 owner: call.owner.clone(),
                 function: call.function.clone(),
                 receiver: call.receiver.clone(),
-                receiver_kind: if behavior.receiver_is_type_reference(&call.receiver) {
-                    "type"
+                receiver_kind: if receiver_is_type { "type" } else { "value" }.to_string(),
+                receiver_binding_kind: receiver_binding_kind.to_string(),
+                symbol_namespace: document
+                    .symbol_scope
+                    .canonical
+                    .then(|| source_namespace.map(str::to_string))
+                    .flatten(),
+                lexical_symbol: imported_lexical_symbol.or_else(|| {
+                    (implicit && document.symbol_scope.canonical)
+                        .then(|| {
+                            if language == "cpp" {
+                                let symbol = cpp_symbol_without_template_arguments(&call.message);
+                                if symbol.contains("::") {
+                                    Some(symbol)
+                                } else if source_dispatch == Some("top") {
+                                    source_namespace
+                                        .map(|namespace| format!("{namespace}::{symbol}"))
+                                } else {
+                                    None
+                                }
+                            } else if source_dispatch == Some("top") {
+                                source_namespace
+                                    .map(|namespace| format!("{namespace}::{}", call.message))
+                            } else {
+                                None
+                            }
+                        })
+                        .flatten()
+                }),
+                lexical_symbol_origin,
+                receiver_call_span: receiver_call_spans.get(&call.span).copied(),
+                receiver_definition_call_spans: if receiver_is_type {
+                    Vec::new()
                 } else {
-                    "value"
-                }
-                .to_string(),
+                    reaching_call_result_spans(document, &call.function, &call.receiver, call.span)
+                },
+                receiver_symbol,
+                receiver_type: instance_receiver_type,
+                receiver_type_origin,
+                receiver_symbol_origin,
+                implicit_receiver: implicit,
+                state_receiver,
+                callback_receiver,
+                preprocessor_callable: document
+                    .symbol_scope
+                    .preprocessor_callables
+                    .contains(call.message.as_str()),
+                dispatch_boundary,
                 constructor_target: behavior
                     .constructor_dispatch_name(&call.receiver, &call.message),
-                known_time_complexity: intrinsic.map(|cost| cost.time.to_string()),
-                known_space_complexity: intrinsic.map(|cost| cost.space.to_string()),
+                known_time_complexity: known_complexity
+                    .map(|cost| cost.time.to_string())
+                    .or_else(|| parametric_complexity.map(|cost| cost.0.to_string())),
+                known_space_complexity: known_complexity
+                    .map(|cost| cost.space.to_string())
+                    .or_else(|| parametric_complexity.map(|cost| cost.1.to_string())),
+                complexity_provenance: known_complexity
+                    .map(|_| "language_stdlib_registry".to_string())
+                    .or_else(|| parametric_complexity.map(|_| "parametric_declared_receiver_contract".to_string())),
+                complexity_bound_quality: known_complexity
+                    .map(|_| "upper_bound_declared_receiver".to_string())
+                    .or_else(|| parametric_cost.as_ref().map(|kind| format!("upper_bound_parametric_{kind}"))),
+                complexity_candidates: Vec::new(),
+                complexity_assumptions: Vec::new(),
                 message: call.message.clone(),
+                argument_count: call.arguments.len(),
                 path: path.to_string(),
                 line: call.line,
                 span: call.span,
                 conditional: call.conditional,
-                confidence: if kind == "internal_call" {
-                    "high"
-                } else {
-                    "partial"
-                }
-                .to_string(),
+                confidence: if resolved { "high" } else { "partial" }.to_string(),
                 unresolved_reason,
+                resolution_missing_proof: None,
+                empty_domain_cause: None,
             }
         })
         .collect()
@@ -3489,12 +5805,16 @@ pub(crate) fn state_key(owner: &str, field: &str) -> String {
     format!("{}\u{0}{}", owner, field)
 }
 
-fn split_method_key(key: &str) -> (String, String) {
+fn split_method_key(key: &str) -> (String, String, Option<usize>) {
     let parts: Vec<&str> = key.split('\u{0}').collect();
     if parts.len() >= 2 {
-        (parts[0].to_string(), parts[1].to_string())
+        (
+            parts[0].to_string(),
+            parts[1].to_string(),
+            parts.get(2).and_then(|line| line.parse::<usize>().ok()),
+        )
     } else {
-        (String::new(), key.to_string())
+        (String::new(), key.to_string(), None)
     }
 }
 
@@ -3508,10 +5828,13 @@ pub(crate) mod tests {
             file: "test.rb".to_string(),
             language: Language::Ruby,
             source_digest: String::new(),
+            raw_call_spans: Vec::new(),
+            symbol_scope: syntax::SymbolScope::default(),
             function_defs: vec![syntax::FunctionDef {
                 file: "test.rb".to_string(),
                 name: "hello".to_string(),
                 owner: "Greeter".to_string(),
+                dispatch_kind: "instance".to_string(),
                 line: 1,
                 span: [1, 0, 1, 10],
                 body: crate::ast::RawNode {
@@ -3532,6 +5855,7 @@ pub(crate) mod tests {
                 name: "Greeter".to_string(),
                 kind: "class".to_string(),
                 reopenable: false,
+                supertypes: Vec::new(),
                 line: 1,
                 span: [1, 0, 1, 16],
             }],
@@ -3539,6 +5863,7 @@ pub(crate) mod tests {
                 field: "@name".to_string(),
                 owner: "Greeter".to_string(),
                 r#type: Some("String".to_string()),
+                immutable: false,
                 file: "test.rb".to_string(),
                 line: 2,
                 span: [2, 0, 2, 14],
@@ -3554,6 +5879,7 @@ pub(crate) mod tests {
                 span: [2, 0, 2, 14],
             }],
             call_sites: vec![],
+            call_receiver_projections: vec![],
             state_reads: vec![],
             state_writes: vec![],
             decision_sites: vec![],
@@ -3586,6 +5912,7 @@ pub(crate) mod tests {
             type_aliases: Default::default(),
             type_alias_lines: Default::default(),
             method_param_types: Default::default(),
+            method_local_types: Default::default(),
         }
     }
 
@@ -3738,6 +6065,7 @@ def py_fn(a: int) -> str:
             file: file_path.clone(),
             name: "typed_method".to_string(),
             owner: "Greeter".to_string(),
+            dispatch_kind: "instance".to_string(),
             line: 11, // def typed_method line
             span: [11, 0, 11, 19],
             body: crate::ast::RawNode {
@@ -3759,6 +6087,7 @@ def py_fn(a: int) -> str:
             file: file_path.clone(),
             name: "explicit_method".to_string(),
             owner: "Greeter".to_string(),
+            dispatch_kind: "instance".to_string(),
             line: 12,
             span: [12, 0, 12, 19],
             body: crate::ast::RawNode {
@@ -3780,6 +6109,7 @@ def py_fn(a: int) -> str:
             file: file_path.clone(),
             name: "top_level_fn".to_string(),
             owner: "".to_string(),
+            dispatch_kind: "top".to_string(),
             line: 13,
             span: [13, 0, 13, 19],
             body: crate::ast::RawNode {
@@ -3930,6 +6260,7 @@ def py_fn(a: int) -> str:
             name: "Database".to_string(),
             kind: "class".to_string(),
             reopenable: false,
+            supertypes: Vec::new(),
             line: 1,
             span: [1, 0, 1, 15],
         });
@@ -3937,6 +6268,7 @@ def py_fn(a: int) -> str:
             field: "@db".to_string(),
             owner: "Greeter".to_string(),
             r#type: Some("Database".to_string()),
+            immutable: false,
             file: file_path.clone(),
             line: 2,
             span: [2, 0, 2, 10],
@@ -3946,6 +6278,7 @@ def py_fn(a: int) -> str:
             field: "@db".to_string(),
             owner: "Greeter".to_string(),
             r#type: Some("Database".to_string()),
+            immutable: false,
             file: file_path.clone(),
             line: 2,
             span: [2, 0, 2, 10],
@@ -3954,6 +6287,7 @@ def py_fn(a: int) -> str:
             field: "@nested_db".to_string(),
             owner: "Greeter".to_string(),
             r#type: Some("Client::Database".to_string()),
+            immutable: false,
             file: file_path.clone(),
             line: 3,
             span: [3, 0, 3, 10],
@@ -3963,6 +6297,7 @@ def py_fn(a: int) -> str:
             field: "@nodb".to_string(),
             owner: "Greeter".to_string(),
             r#type: None,
+            immutable: false,
             file: file_path.clone(),
             line: 4,
             span: [4, 0, 4, 10],
@@ -3971,6 +6306,7 @@ def py_fn(a: int) -> str:
             field: "@candidate_db".to_string(),
             owner: "Greeter".to_string(),
             r#type: Some("<,>Database".to_string()),
+            immutable: false,
             file: file_path.clone(),
             line: 5,
             span: [5, 0, 5, 10],
@@ -4150,6 +6486,7 @@ def py_fn(a: int) -> str:
             file: file_path.clone(),
             name: "py_fn".to_string(),
             owner: "PyClass".to_string(),
+            dispatch_kind: "instance".to_string(),
             line: 19,
             span: [19, 0, 19, 19],
             body: crate::ast::RawNode {
@@ -4248,6 +6585,7 @@ def py_fn(a: int) -> str:
             file: "test.py".to_string(),
             name: "foo".to_string(),
             owner: "".to_string(),
+            dispatch_kind: "top".to_string(),
             line: 1,
             span: [1, 0, 1, 10],
             body: crate::ast::RawNode {
@@ -4263,12 +6601,12 @@ def py_fn(a: int) -> str:
             callback_params: Vec::new(),
             signature: "".to_string(),
         };
-        let sig = method_signature(&lines, &fn_def, "go");
+        let sig = method_signature(&lines, &fn_def, "unknown");
         assert_eq!(sig, "foo (a, b)");
 
         let mut fn_def_empty = fn_def.clone();
         fn_def_empty.params = vec![];
-        let sig_empty = method_signature(&lines, &fn_def_empty, "go");
+        let sig_empty = method_signature(&lines, &fn_def_empty, "unknown");
         assert_eq!(sig_empty, "foo");
 
         let mut fn_def_ruby = fn_def.clone();
@@ -4323,6 +6661,7 @@ def py_fn(a: int) -> str:
                     "file": "test.rb",
                     "name": "hello",
                     "owner": "Greeter",
+                    "dispatch_kind": "instance",
                     "line": 1,
                     "span": [1, 0, 1, 10],
                     "body": {
@@ -4341,6 +6680,7 @@ def py_fn(a: int) -> str:
                     "file": "test.rb",
                     "name": "helper",
                     "owner": "Greeter",
+                    "dispatch_kind": "instance",
                     "line": 2,
                     "span": [2, 0, 2, 10],
                     "body": {
@@ -4388,7 +6728,8 @@ def py_fn(a: int) -> str:
             ]
         });
         let doc_edges: Document = serde_json::from_value(doc_edges_json).unwrap();
-        let edges = extract_call_graph_edges(&doc_edges);
+        let calls = extract_calls(&doc_edges, "ruby", "test.rb");
+        let edges = extract_call_graph_edges(&calls);
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].weight, 2);
 
@@ -4487,21 +6828,49 @@ def py_fn(a: int) -> str:
             id: "edge:call".into(),
             source: "fn:a".into(),
             target: Some("fn:b".into()),
+            semantic_symbol: None,
+            external_symbol_scope: None,
+            complexity_missing_kind: None,
+            target_provenance: None,
+            candidate_targets: Vec::new(),
+            candidate_reason: None,
             kind: "internal_call".into(),
             owner: "Demo".into(),
             function: "a".into(),
             receiver: "self".into(),
             message: "b".into(),
+            argument_count: 0,
             path: "demo.rb".into(),
             line: 2,
             receiver_kind: "value".into(),
+            receiver_binding_kind: "unbound".into(),
+            symbol_namespace: None,
+            lexical_symbol: None,
+            lexical_symbol_origin: None,
+            receiver_call_span: None,
+            receiver_definition_call_spans: Vec::new(),
+            receiver_symbol: None,
+            receiver_type: None,
+            receiver_type_origin: None,
+            receiver_symbol_origin: None,
+            implicit_receiver: false,
+            state_receiver: false,
+            callback_receiver: false,
+            preprocessor_callable: false,
+            dispatch_boundary: None,
             constructor_target: None,
             known_time_complexity: None,
             known_space_complexity: None,
+            complexity_provenance: None,
+            complexity_bound_quality: None,
+            complexity_candidates: Vec::new(),
+            complexity_assumptions: Vec::new(),
             span: [2, 0, 2, 3],
             conditional: false,
             confidence: "high".into(),
             unresolved_reason: None,
+            resolution_missing_proof: None,
+            empty_domain_cause: None,
         });
         output.state_accesses.push(StateAccessRecord {
             id: "edge:state".into(),

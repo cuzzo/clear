@@ -1,8 +1,8 @@
 pub(crate) mod c;
-pub(crate) mod complexity_facts;
 pub mod cfg;
 pub(crate) mod clone_similarity;
 pub(crate) mod complexity;
+pub(crate) mod complexity_facts;
 pub(crate) mod cpp;
 pub(crate) mod csharp;
 pub(crate) mod effects;
@@ -34,8 +34,80 @@ pub use crate::ast::{Child, Node, Span};
 use crate::parallel;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+/// Map a compiler-proven external symbol through the owning language's
+/// reviewed complexity registry. Symbol parsing stays at the adapter boundary;
+/// the SCIP importer and downstream analyzers remain language-neutral.
+pub(crate) struct ExternalCallComplexity {
+    pub time: &'static str,
+    pub space: &'static str,
+    pub provenance: &'static str,
+    pub bound_quality: &'static str,
+    pub candidates: Vec<String>,
+    pub assumption: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ExternalSymbolMetadata {
+    pub scope: &'static str,
+    pub missing_cost_kind: String,
+    pub parametric_cost: Option<String>,
+}
+
+pub(crate) fn external_symbol_call_complexity(
+    language: &str,
+    symbol: &str,
+    message: &str,
+) -> Option<ExternalCallComplexity> {
+    let language = Language::parse(language).ok()?;
+    normalized_behavior::behavior(language).external_symbol_call_complexity(symbol, message)
+}
+
+/// Classify an exact external symbol at the language boundary. Shared SCIP
+/// ingestion and diagnostics consume only these normalized values.
+pub(crate) fn external_symbol_metadata(language: &str, symbol: &str) -> ExternalSymbolMetadata {
+    Language::parse(language)
+        .ok()
+        .map(normalized_behavior::behavior)
+        .map(|behavior| behavior.external_symbol_metadata(symbol))
+        .unwrap_or(ExternalSymbolMetadata {
+            scope: "external",
+            missing_cost_kind: "external_cost_model_missing".to_string(),
+            parametric_cost: None,
+        })
+}
+
+pub(crate) fn external_symbol_owner(language: &str, symbol: &str) -> Option<String> {
+    Language::parse(language)
+        .ok()
+        .and_then(|language| normalized_behavior::behavior(language).external_symbol_owner(symbol))
+}
+
+/// Whether a compiler symbol without callable descriptor punctuation denotes
+/// a source-language access that can execute user code. This is intentionally
+/// language-owned: C# properties dispatch through accessors, while an
+/// identically shaped field symbol in most languages is only data projection.
+pub(crate) fn scip_noncall_access_is_callable(language: &str, symbol: &str) -> bool {
+    Language::parse(language)
+        .map(|language| {
+            normalized_behavior::behavior(language).scip_noncall_access_is_callable(symbol)
+        })
+        .unwrap_or(false)
+}
+
+/// Shared algebra for calls whose target identity is proven but whose cost is
+/// parameterized by callback/implementation work.
+pub(crate) fn parametric_call_complexity(kind: &str) -> Option<(&'static str, &'static str)> {
+    match kind {
+        "callback_once" => Some(("O(C)", "O(S)")),
+        "callback_linear" => Some(("O(N*C)", "O(N*S)")),
+        "callback_sort" => Some(("O(N log N*C)", "O(N+S)")),
+        "reflective_once" => Some(("O(R)", "O(S)")),
+        _ => None,
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Language {
@@ -118,6 +190,38 @@ impl Language {
             _ => None,
         }
     }
+
+    /// Detect a source language from a path. `.h` is the one ambiguous common
+    /// extension: keep C as the conservative extension default, but recognize
+    /// unmistakable C++ syntax before choosing a grammar. This belongs at the
+    /// source-adapter boundary so every downstream consumer receives one
+    /// correctly normalized language, rather than teaching analyzers about
+    /// headers or repository conventions.
+    pub fn for_path(path: &Path) -> Option<Self> {
+        let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+        if extension != "h" {
+            return Self::for_extension(&extension);
+        }
+        let source = std::fs::read_to_string(path).ok()?;
+        Some(if looks_like_cpp_header(&source) {
+            Self::Cpp
+        } else {
+            Self::C
+        })
+    }
+}
+
+fn looks_like_cpp_header(source: &str) -> bool {
+    [
+        "namespace ",
+        "template <",
+        "typename ",
+        "constexpr ",
+        "std::",
+        "class ",
+    ]
+    .iter()
+    .any(|marker| source.contains(marker))
 }
 
 impl<'de> Deserialize<'de> for Language {
@@ -137,11 +241,17 @@ pub struct Document {
     #[serde(default)]
     pub source_digest: String,
     #[serde(default)]
+    pub raw_call_spans: Vec<Span>,
+    #[serde(default)]
+    pub symbol_scope: SymbolScope,
+    #[serde(default)]
     pub function_defs: Vec<FunctionDef>,
     #[serde(default)]
     pub owner_defs: Vec<OwnerDef>,
     #[serde(default)]
     pub call_sites: Vec<CallSite>,
+    #[serde(default)]
+    pub call_receiver_projections: Vec<CallReceiverProjection>,
     #[serde(default)]
     pub state_declarations: Vec<StateDeclaration>,
     #[serde(default)]
@@ -209,7 +319,28 @@ pub struct Document {
     #[serde(default)]
     pub method_param_types: BTreeMap<String, BTreeMap<String, String>>,
     #[serde(default)]
+    pub method_local_types: BTreeMap<String, BTreeMap<String, String>>,
+    #[serde(default)]
     pub state_param_origins: Vec<StateParamOrigin>,
+}
+
+/// Minimal, adapter-proven facts needed to canonicalize source symbols.
+/// Consumers must leave cross-file targets unknown when these facts do not
+/// establish an identity.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct SymbolScope {
+    pub canonical: bool,
+    #[serde(default)]
+    pub unqualified_types_use_current_namespace: bool,
+    pub namespace: String,
+    pub explicit_imports: BTreeMap<String, String>,
+    #[serde(default)]
+    pub preprocessor_callables: BTreeSet<String>,
+    /// Language-owned namespace enclosing a particular declaration span.
+    /// File-level namespaces are insufficient for languages such as C++
+    /// where one translation unit may contain several namespace blocks.
+    #[serde(default)]
+    pub declaration_namespaces: BTreeMap<Span, String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -217,6 +348,10 @@ pub struct FunctionDef {
     pub file: String,
     pub name: String,
     pub owner: String,
+    /// Adapter-proven dispatch domain. This is syntax knowledge: the generic
+    /// profile must not infer static/free/instance semantics from owner text.
+    #[serde(default)]
+    pub dispatch_kind: String,
     pub line: usize,
     pub span: Span,
     pub(crate) body: RawNode,
@@ -237,6 +372,11 @@ pub struct OwnerDef {
     /// declaration with the same name.
     #[serde(default)]
     pub reopenable: bool,
+    /// Language-adapter extracted direct base classes, interfaces, or promoted
+    /// owner types. These are native spellings; project merge canonicalizes
+    /// them before any hierarchy traversal.
+    #[serde(default)]
+    pub supertypes: Vec<String>,
     pub line: usize,
     pub span: Span,
 }
@@ -257,11 +397,21 @@ pub struct CallSite {
     pub block: bool,
 }
 
+/// Structural identity for a direct call used as another call's receiver.
+/// The normalizer emits spans rather than reconstructing receiver source text.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CallReceiverProjection {
+    pub outer_span: Span,
+    pub receiver_call_span: Span,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StateDeclaration {
     pub field: String,
     pub owner: String,
     pub r#type: Option<String>,
+    #[serde(default)]
+    pub immutable: bool,
     pub file: String,
     pub line: usize,
     pub span: Span,
@@ -564,6 +714,23 @@ mod tests {
         assert_eq!(Language::parse("php").unwrap(), Language::Php);
         assert!(Language::parse("invalid").is_err());
         assert!(Language::for_extension("invalid").is_none());
+
+        let mut c_header = tempfile::Builder::new()
+            .suffix(".h")
+            .tempfile()
+            .expect("C header");
+        c_header
+            .write_all(b"typedef struct item { int value; } item;")
+            .expect("write C header");
+        assert_eq!(Language::for_path(c_header.path()), Some(Language::C));
+        let mut cpp_header = tempfile::Builder::new()
+            .suffix(".h")
+            .tempfile()
+            .expect("C++ header");
+        cpp_header
+            .write_all(b"namespace eventpp { template <typename T> class CallbackList {}; }")
+            .expect("write C++ header");
+        assert_eq!(Language::for_path(cpp_header.path()), Some(Language::Cpp));
 
         // Enable profile variable to cover profiling path
         std::env::set_var("DECOMPLEX_RUST_PROFILE", "1");

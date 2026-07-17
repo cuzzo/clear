@@ -1,0 +1,232 @@
+Array:
+  len: constant
+  is_empty: constant
+  capacity: constant
+  get: constant
+  first: constant
+  last: constant
+  # Worst-case upper bound includes capacity growth and element movement.
+  push: linear_materialize
+  pop: constant
+  contains: linear_scan
+  insert: linear_scan
+  remove: linear_scan
+  reverse: linear_scan
+  position: linear_scan
+  binary_search: logarithmic
+  clone: linear_materialize
+  sort: sort
+  sort_by: sort
+  sort_by_key: sort
+  iter: constant
+  into_iter: constant
+  extend: linear_materialize
+  join: linear_materialize
+  to_vec: linear_materialize
+  dedup: linear_scan
+  dedup_by: linear_scan
+  retain: linear_scan
+Hash:
+  len: constant
+  is_empty: constant
+  get: constant
+  contains_key: constant
+  insert: constant
+  remove: constant
+Set:
+  len: constant
+  is_empty: constant
+  contains: constant
+  insert: constant
+  remove: constant
+String:
+  len: constant
+  is_empty: constant
+  contains: linear_scan
+  find: linear_scan
+  split: linear_materialize
+  replace: linear_materialize
+  trim: linear_scan
+  trim_start: linear_scan
+  trim_end: linear_scan
+  trim_start_matches: linear_scan
+  trim_end_matches: linear_scan
+  starts_with: linear_scan
+  ends_with: linear_scan
+  strip_prefix: linear_scan
+  strip_suffix: linear_scan
+  chars: constant
+  lines: constant
+  as_str: constant
+  clone: linear_materialize
+  to_ascii_lowercase: linear_materialize
+  iter: constant
+  split_once: linear_scan
+  rsplit_once: linear_scan
+  split_whitespace: constant
+  rsplit: constant
+  rfind: linear_scan
+  get: constant
+  as_bytes: constant
+  trim_matches: linear_scan
+  char_indices: constant
+  push: linear_materialize
+  cmp: linear_scan
+BTreeMap:
+  len: constant
+  is_empty: constant
+  get: logarithmic
+  contains_key: logarithmic
+  insert: logarithmic
+  remove: logarithmic
+  entry: logarithmic
+  iter: constant
+  clone: linear_materialize
+  new: constant
+  keys: constant
+  into_iter: constant
+  extend: sort
+BTreeSet:
+  len: constant
+  is_empty: constant
+  contains: logarithmic
+  insert: logarithmic
+  remove: logarithmic
+  iter: constant
+  clone: linear_materialize
+  into_iter: constant
+  extend: sort
+  is_disjoint: linear_scan
+  intersection: constant
+Option:
+  unwrap: constant
+  expect: constant
+  unwrap_or: constant
+  unwrap_or_default: constant
+  is_some: constant
+  is_none: constant
+  as_ref: constant
+  as_deref: constant
+  flatten: constant
+  cloned: linear_materialize
+  copied: constant
+  into_iter: constant
+  or: constant
+  ok: constant
+  clone: linear_materialize
+Result:
+  unwrap: constant
+  expect: constant
+  ok: constant
+  is_ok: constant
+Iterator:
+  iter: constant
+  into_iter: constant
+  next: constant
+  map: constant
+  filter: constant
+  filter_map: constant
+  flat_map: constant
+  cloned: constant
+  copied: constant
+  rev: constant
+  enumerate: constant
+  collect: linear_materialize
+  any: linear_scan
+  all: linear_scan
+  find: linear_scan
+  find_map: linear_scan
+  flatten: constant
+  chain: constant
+  skip: constant
+  take_while: constant
+  nth: linear_scan
+  last: linear_scan
+  count: linear_scan
+  position: linear_scan
+  min_by_key: linear_scan
+  max_by_key: linear_scan
+  next_back: constant
+Box:
+  new: constant
+  as_ref: constant
+  clone: linear_materialize
+Entry:
+  or_insert: constant
+Path:
+  new: constant
+  parent: constant
+  join: linear_materialize
+  to_string_lossy: linear_materialize
+  to_path_buf: linear_materialize
+PathBuf:
+  from: linear_materialize
+char:
+  is_ascii_alphanumeric: constant
+  is_ascii_alphabetic: constant
+  is_ascii_uppercase: constant
+  is_ascii_digit: constant
+  is_alphanumeric: constant
+  len_utf8: constant
+bool:
+  then_some: constant
+usize:
+  saturating_sub: constant
+  cmp: constant
+u32:
+  saturating_sub: constant
+Ord:
+  min: constant
+  max: constant
+ToString:
+  to_string: linear_materialize
+SemanticSymbol:
+  'impl#[`Node<''tree>`]kind().': constant
+  'impl#[`Node<''tree>`]walk().': constant
+  'impl#[Tree]root_node().': constant
+  'impl#[`Node<''tree>`]children().': constant
+  'impl#[`Node<''tree>`]child().': constant
+  'impl#[`Node<''tree>`]is_named().': constant
+  'impl#[`Node<''tree>`]child_by_field_name().': constant
+  'impl#[`Node<''tree>`]parent().': constant
+  'impl#[`Node<''tree>`]start_byte().': constant
+  'impl#[`Node<''tree>`]end_byte().': constant
+  'impl#[Parser]parse().': linear_materialize
+  'impl#[Parser]set_language().': constant
+  'value/impl#[Value]get().': logarithmic
+  'value/impl#[Value]as_str().': constant
+  'value/impl#[Value][Clone]clone().': linear_materialize
+  'map/impl#[`Map<String, Value>`]insert().': logarithmic
+  'map/impl#[`Map<String, Value>`]new().': constant
+  'dir/impl#[TempDir]path().': constant
+  'file/impl#[`NamedTempFile<F>`]path().': constant
+  'impl#[`Builder<''a, ''b>`]new().': constant
+  'impl#[`Builder<''a, ''b>`]suffix().': constant
+SemanticSymbolParametricCost:
+  'string/impl#[T][ToString]to_string().': reflective_once
+  'iter/traits/iterator/Iterator#collect().': callback_linear
+  'iter/traits/iterator/Iterator#any().': callback_linear
+  'iter/traits/iterator/Iterator#all().': callback_linear
+  'iter/traits/iterator/Iterator#find().': callback_linear
+  'iter/traits/iterator/Iterator#find_map().': callback_linear
+  'option/impl#[`Option<T>`]map().': callback_once
+  'option/impl#[`Option<T>`]and_then().': callback_once
+  'option/impl#[`Option<T>`]or_else().': callback_once
+  'option/impl#[`Option<T>`]unwrap_or_else().': callback_once
+  'option/impl#[`Option<T>`]is_some_and().': callback_once
+  'bool/impl#[bool]then().': callback_once
+  'cmp/impl#[Ordering]then_with().': callback_once
+  'option/impl#[`Option<T>`]filter().': callback_once
+  'option/impl#[`Option<T>`]map_or().': callback_once
+  'slice/iter/impl#[`Iter<''a, T>`][Iterator]any().': callback_linear
+  'slice/iter/impl#[`Iter<''a, T>`][Iterator]find().': callback_linear
+  'vec/impl#[`Vec<T, A>`][Clone]clone().': callback_linear
+  'context/impl#[`Option<T>`][`Context<T, Infallible>`]with_context().': callback_once
+  'context/impl#[`Result<T, E>`][`Context<T, E>`]with_context().': callback_once
+ExternalLatency:
+  fs.write: linear_materialize
+  fs.read_to_string: linear_materialize
+  fs.create_dir_all: linear_materialize
+  Builder.tempfile: constant
+  dir.tempdir: constant
+  NamedTempFile.write_all: linear_materialize

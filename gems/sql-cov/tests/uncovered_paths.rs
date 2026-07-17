@@ -32,9 +32,10 @@ fn test_parameter_value_parsing() {
 
 #[tokio::test]
 async fn test_pool_connection_failures() {
-    // Passing invalid URLs to verify connection error handling
-    assert!(postgres_pool("postgres://invalid-host-name-12345.com").await.is_err());
-    assert!(mysql_pool("mysql://invalid-host-name-12345.com").await.is_err());
+    // Malformed URLs exercise connection error handling without waiting for a
+    // real network timeout.
+    assert!(postgres_pool("invalid").await.is_err());
+    assert!(mysql_pool("invalid").await.is_err());
     assert!(sqlite_pool("sqlite://invalid-sqlite-path/non-existent-dir/db.sqlite").await.is_err());
 }
 

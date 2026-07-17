@@ -1,0 +1,353 @@
+Array:
+  len: constant
+Hash:
+  len: constant
+String:
+  len: constant
+reflect.Value:
+  Bool: constant
+  CanAddr: constant
+  CanSet: constant
+  Elem: constant
+  Float: constant
+  Field: constant
+  Index: constant
+  Int: constant
+  Interface: constant
+  IsNil: constant
+  IsValid: constant
+  Kind: constant
+  Len: constant
+  MapIndex: constant
+  MapKeys: linear_materialize
+  Set: constant
+  SetBool: constant
+  SetFloat: constant
+  SetInt: constant
+  SetMapIndex: constant
+  SetString: constant
+  SetUint: constant
+  String: linear_materialize
+  Slice: constant
+  Convert: linear_materialize
+  Type: constant
+  Uint: constant
+reflect.Type:
+  AssignableTo: constant
+  Bits: constant
+  Elem: constant
+  Field: constant
+  Key: constant
+  Kind: constant
+  Len: constant
+  NumField: constant
+  ConvertibleTo: constant
+reflect.StructTag:
+  Get: linear_scan
+strings.Builder:
+  Len: constant
+  String: constant
+  WriteString: linear_materialize
+time.Time:
+  Add: constant
+  After: constant
+  Before: constant
+  Truncate: constant
+  UnixNano: constant
+  Unix: constant
+  Sub: constant
+  Nanosecond: constant
+time.Duration:
+  Truncate: constant
+crypto.Hash:
+  Available: constant
+  New: constant
+hash.Hash:
+  Sum: constant
+context.Context:
+  Done: constant
+  Err: constant
+sync.Pool:
+  Get: constant
+  Put: constant
+list.List:
+  Back: constant
+  Front: constant
+  Init: constant
+  InsertAfter: constant
+  InsertBefore: constant
+  Len: constant
+  MoveAfter: constant
+  MoveBefore: constant
+  MoveToBack: constant
+  MoveToFront: constant
+  PushBack: constant
+  PushFront: constant
+  Remove: constant
+list.Element:
+  Next: constant
+  Prev: constant
+time.Ticker:
+  Stop: constant
+regexp.Regexp:
+  ReplaceAll: linear_materialize
+http.Header:
+  Get: linear_scan
+json.Number:
+  Float64: linear_scan
+  Int64: linear_scan
+json.Decoder:
+  UseNumber: constant
+base64.Encoding:
+  Strict: constant
+  EncodeToString: linear_materialize
+  DecodeString: linear_materialize
+big.Int:
+  FillBytes: linear_materialize
+  SetBytes: linear_materialize
+Intrinsic:
+  len: constant
+  cap: constant
+  # Package-qualified APIs only. Do not add fmt, reflection, interfaces, or
+  # synchronization: their work can include user-defined code or blocking.
+  "bytes.Compare": linear_scan
+  "bytes.Contains": linear_scan
+  "bytes.ContainsAny": linear_scan
+  "bytes.ContainsRune": linear_scan
+  "bytes.Equal": linear_scan
+  "bytes.HasPrefix": linear_scan
+  "bytes.HasSuffix": linear_scan
+  "bytes.Index": linear_scan
+  "bytes.LastIndex": linear_scan
+  "bytes.Repeat": linear_materialize
+  "bytes.Replace": linear_materialize
+  "bytes.ReplaceAll": linear_materialize
+  "bytes.Split": linear_materialize
+  "bytes.SplitAfter": linear_materialize
+  "bytes.ToLower": linear_materialize
+  "bytes.ToUpper": linear_materialize
+  "errors.New": constant
+  "context.Background": constant
+  "context.WithTimeout": constant
+  "context.WithCancel": constant
+  "context.WithCancelCause": constant
+  "bytes.NewBuffer": constant
+  "big.NewInt": constant
+  "debug.Stack": linear_materialize
+  "ed25519.Verify": linear_scan
+  "errors.Join": linear_materialize
+  "hmac.Equal": linear_scan
+  "math.Log10": constant
+  "math.Modf": constant
+  "reflect.Append": linear_materialize
+  "reflect.ArrayOf": constant
+  "reflect.MakeSlice": linear_materialize
+  "reflect.MapOf": constant
+  "reflect.SliceOf": constant
+  "reflect.Indirect": constant
+  "reflect.MakeMap": constant
+  "reflect.New": constant
+  "reflect.TypeOf": constant
+  "reflect.ValueOf": constant
+  "reflect.Zero": constant
+  "runtime.Gosched": constant
+  "runtime.Goexit": constant
+  "runtime.Stack": linear_materialize
+  "strconv.Itoa": linear_materialize
+  "strconv.FormatFloat": linear_materialize
+  "strconv.FormatInt": linear_materialize
+  "strconv.FormatUint": linear_materialize
+  "strconv.ParseBool": linear_scan
+  "strconv.ParseFloat": linear_scan
+  "strconv.ParseInt": linear_scan
+  "strconv.ParseUint": linear_scan
+  "strings.SplitN": linear_materialize
+  "time.NewTicker": constant
+  "time.Until": constant
+  "time.Parse": linear_scan
+  "time.ParseDuration": linear_scan
+  "time.Unix": constant
+  "regexp.MustCompile": linear_materialize
+  "net.ParseCIDR": linear_scan
+  "net.ParseIP": linear_scan
+  "json.NewDecoder": constant
+  "sync.NewCond": constant
+  "maps.Clone": linear_materialize
+  "maps.Copy": linear_scan
+  "slices.BinarySearch": logarithmic
+  "slices.Clone": linear_materialize
+  "slices.Contains": linear_scan
+  "slices.Index": linear_scan
+  "slices.Sort": sort
+  "sort.Ints": sort
+  "sort.Search": logarithmic
+  "sort.Strings": sort
+  "strings.Compare": linear_scan
+  "strings.Contains": linear_scan
+  "strings.ContainsAny": linear_scan
+  "strings.ContainsRune": linear_scan
+  "strings.Cut": linear_scan
+  "strings.EqualFold": linear_scan
+  "strings.Fields": linear_materialize
+  "strings.HasPrefix": linear_scan
+  "strings.HasSuffix": linear_scan
+  "strings.Index": linear_scan
+  "strings.LastIndex": linear_scan
+  "strings.Join": linear_materialize
+  "strings.Repeat": linear_materialize
+  "strings.Replace": linear_materialize
+  "strings.ReplaceAll": linear_materialize
+  "strings.Split": linear_materialize
+  "strings.SplitAfter": linear_materialize
+  "strings.ToLower": linear_materialize
+  "strings.ToUpper": linear_materialize
+  "strings.Trim": linear_scan
+  "strings.TrimPrefix": linear_scan
+  "strings.TrimSuffix": linear_scan
+  "strings.TrimSpace": linear_scan
+  "time.Now": constant
+  "atomic.LoadInt32": constant
+  "atomic.LoadInt64": constant
+  "atomic.LoadPointer": constant
+  "atomic.StoreInt32": constant
+  "atomic.StoreInt64": constant
+  "atomic.StorePointer": constant
+  "atomic.CompareAndSwapInt32": constant
+  "atomic.CompareAndSwapInt64": constant
+  "atomic.CompareAndSwapPointer": constant
+  "atomic.CompareAndSwapUint32": constant
+  "atomic.AddInt32": constant
+  "atomic.AddInt64": constant
+  "atomic.AddUint32": constant
+  "atomic.AddUint64": constant
+  "atomic.LoadUint32": constant
+  "atomic.LoadUint64": constant
+  "atomic.StoreUint32": constant
+  "atomic.StoreUint64": constant
+  # Language builtins. These are syntax-proven by the Go adapter and do not
+  # require a SCIP declaration. Materializing operations use worst-case upper
+  # bounds, including allocation/copy during append growth.
+  append: linear_materialize
+  make: linear_materialize
+  new: constant
+  copy: linear_scan
+  delete: constant
+  clear: linear_scan
+  close: constant
+  panic: linear_scan
+  recover: constant
+  complex: constant
+  real: constant
+  imag: constant
+  bool: constant
+  byte: constant
+  complex64: constant
+  complex128: constant
+  error: constant
+  float32: constant
+  float64: constant
+  int: constant
+  int8: constant
+  int16: constant
+  int32: constant
+  int64: constant
+  rune: constant
+  string: linear_materialize
+  uint: constant
+  uint8: constant
+  uint16: constant
+  uint32: constant
+  uint64: constant
+  uintptr: constant
+  print: declaration
+  println: declaration
+ParametricCall:
+  # `error` is a predeclared open interface. The declared receiver proves one
+  # dispatch, but the implementation cost remains the symbolic callback C.
+  "error.Error": callback_once
+CallableType:
+  "context.CancelFunc": callback_once
+ExternalLatency:
+  "io.ReadAll": linear_materialize
+  "os.ReadFile": linear_materialize
+  "os.Open": linear_scan
+  "os.File.Close": constant
+  "os.Exit": constant
+  "sync.Cond.Wait": constant
+  "sync.RWMutex.Lock": constant
+  "sync.RWMutex.Unlock": constant
+  "sync.Locker.Lock": constant
+  "sync.Locker.Unlock": constant
+  "sync.RWMutex.RLock": constant
+  "sync.RWMutex.RUnlock": constant
+  "sync.Cond.Signal": constant
+  "sync.Cond.Broadcast": linear_scan
+  "sync.Mutex.Lock": constant
+  "sync.Mutex.Unlock": constant
+  "sync.WaitGroup.Add": constant
+  "sync.WaitGroup.Done": constant
+  "sync.WaitGroup.Wait": constant
+  "time.Sleep": constant
+SemanticSymbolParametricCost:
+  'sort/Sort().': callback_sort
+  '`crypto/elliptic`/Curve#Params().': callback_once
+  'crypto/Signer#Sign().': callback_once
+  'flag/Usage.': callback_once
+  'fmt/Errorf().': reflective_once
+  'fmt/Fprintf().': reflective_once
+  'fmt/Printf().': reflective_once
+  'fmt/Println().': reflective_once
+  'fmt/Sprintf().': reflective_once
+  'sync/Once#Do().': callback_once
+  'reflect/Value#Call().': reflective_once
+  '`encoding/json`/Marshal().': reflective_once
+  '`encoding/json`/Unmarshal().': reflective_once
+  '`encoding/json`/Decoder#Decode().': reflective_once
+  '`encoding/json`/MarshalIndent().': reflective_once
+  'errors/Is().': reflective_once
+  'flag/Parse().': reflective_once
+  'flag/PrintDefaults().': reflective_once
+  'flag/Var().': reflective_once
+  '`net/http`/Request#ParseMultipartForm().': reflective_once
+  '`crypto/hmac`/New().': reflective_once
+  'io/Writer#Write().': callback_linear
+SemanticSymbol:
+  '`crypto/rsa`/VerifyPKCS1v15().': cubic
+  '`crypto/rsa`/VerifyPSS().': cubic
+Namespace:
+  bytes: declaration
+  context: declaration
+  encoding: declaration
+  errors: declaration
+  fmt: declaration
+  io: declaration
+  math: declaration
+  os: declaration
+  reflect: declaration
+  runtime: declaration
+  sort: declaration
+  strconv: declaration
+  strings: declaration
+  sync: declaration
+  time: declaration
+NonCallConstruct:
+  bool: declaration
+  byte: declaration
+  complex64: declaration
+  complex128: declaration
+  error: declaration
+  float32: declaration
+  float64: declaration
+  int: declaration
+  int8: declaration
+  int16: declaration
+  int32: declaration
+  int64: declaration
+  rune: declaration
+  string: declaration
+  uint: declaration
+  uint8: declaration
+  uint16: declaration
+  uint32: declaration
+  uint64: declaration
+  uintptr: declaration

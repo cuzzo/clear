@@ -4,14 +4,105 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
+    configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
+    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
+    eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
+    type_after_parameter_colon, CardinalityCallSemantics, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedSemanticEffect, NormalizedStateWrite,
 };
-use super::CallSite;
 use super::StateDeclaration;
+use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata};
 use crate::ast::Child;
 use crate::ast::{Node, Span};
+use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
+use crate::type_inference::TypeExpr;
+
+const SWIFT_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
+    strip_prefixes: &[],
+    trim_prefix_chars: &[],
+    trim_suffix_chars: &[],
+    array_names: &["Array"],
+    hash_names: &["Dictionary"],
+    set_names: &["Set"],
+    string_names: &["String"],
+    bare_array_names: &[],
+    suffix_array: false,
+    bracket_array: true,
+};
+
+pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
+    nominal::parse(source, &SWIFT_NOMINAL_TYPE_SYNTAX)
+}
+
+/// The available Swift IndexStore converter predates a registered SCIP symbol
+/// scheme and emits `swift <module> <descriptor>`. Keep that producer grammar
+/// here; the shared importer remains language-neutral.
+fn scip_swift_parts(symbol: &str) -> Option<(&str, &str)> {
+    let rest = symbol.strip_prefix("swift ")?;
+    rest.split_once(' ')
+}
+
+fn swift_stdlib_module(module: &str) -> bool {
+    matches!(module, "Swift" | "Foundation" | "_Concurrency")
+}
+
+pub(crate) fn external_symbol_call_complexity(
+    symbol: &str,
+    message: &str,
+) -> Option<ExternalCallComplexity> {
+    let (module, descriptor) = scip_swift_parts(symbol)?;
+    if !swift_stdlib_module(module)
+        || configured_semantic_symbol_parametric_cost("swift", descriptor).is_some()
+    {
+        return None;
+    }
+    let owner = scip_descriptor_owner(descriptor);
+    let complexity = configured_semantic_symbol_call_complexity("swift", descriptor)
+        .or_else(|| {
+            owner.as_deref().and_then(|owner| {
+                SwiftNormalizedBehavior.call_complexity(&parse_declared_type(owner), message)
+            })
+        })
+        .or_else(|| configured_intrinsic_call_complexity("swift", None, message))?;
+    Some(ExternalCallComplexity {
+        time: complexity.time,
+        space: complexity.space,
+        provenance: "swift_scip_symbol_registry",
+        bound_quality: "upper_bound_exact_target",
+        candidates: Vec::new(),
+        assumption: None,
+    })
+}
+
+pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
+    let Some((module, descriptor)) = scip_swift_parts(symbol) else {
+        return ExternalSymbolMetadata {
+            scope: "dynamic",
+            missing_cost_kind: "callback_or_function_value_origin_unknown".to_string(),
+            parametric_cost: None,
+        };
+    };
+    if swift_stdlib_module(module) {
+        ExternalSymbolMetadata {
+            scope: "stdlib",
+            missing_cost_kind: configured_semantic_symbol_kind("swift", descriptor)
+                .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
+            parametric_cost: configured_semantic_symbol_parametric_cost("swift", descriptor),
+        }
+    } else {
+        ExternalSymbolMetadata {
+            scope: "dependency",
+            missing_cost_kind: "dependency_cost_model_missing".to_string(),
+            parametric_cost: None,
+        }
+    }
+}
+
+pub(crate) fn external_symbol_owner(symbol: &str) -> Option<String> {
+    let (_module, descriptor) = scip_swift_parts(symbol)?;
+    scip_descriptor_owner(descriptor)
+}
 
 const SWIFT_CONTEXT_PAIRS: &[(&str, &[&str])] = &[("Date", &["now"]), ("UUID", &["init"])];
 
@@ -74,7 +165,15 @@ const SWIFT_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
 // CFG-SPECIFIC START: Swift control-flow vocabulary.
 const SWIFT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
-    iterator_messages: &["allSatisfy", "compactMap", "filter", "flatMap", "forEach", "map", "reduce"],
+    iterator_messages: &[
+        "allSatisfy",
+        "compactMap",
+        "filter",
+        "flatMap",
+        "forEach",
+        "map",
+        "reduce",
+    ],
     ignored_callback_body_sources: &[],
 };
 // CFG-SPECIFIC END
@@ -82,6 +181,30 @@ const SWIFT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct SwiftNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
+    fn external_symbol_call_complexity(
+        &self,
+        symbol: &str,
+        message: &str,
+    ) -> Option<ExternalCallComplexity> {
+        external_symbol_call_complexity(symbol, message)
+    }
+
+    fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
+        external_symbol_metadata(symbol)
+    }
+
+    fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
+        external_symbol_owner(symbol)
+    }
+
+    fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
+        super::normalized_behavior::type_after_local_colon(source, name)
+    }
+
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("swift")
+    }
+
     // CFG-SPECIFIC START: expose the Swift CFG profile.
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         &SWIFT_CFG_PROFILE
@@ -90,6 +213,31 @@ impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
 
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
         (node.r#type == "CLASS").then_some(default_span)
+    }
+
+    fn owner_kind(&self, node: &Node, default_kind: &str) -> String {
+        let declaration = node.text.trim_start();
+        if declaration.starts_with("extension ") {
+            "extension".to_string()
+        } else if declaration.starts_with("protocol ") {
+            "protocol".to_string()
+        } else if declaration.starts_with("struct ") {
+            "struct".to_string()
+        } else if declaration.starts_with("enum ") {
+            "enum".to_string()
+        } else {
+            default_kind.to_string()
+        }
+    }
+
+    fn reopenable_owner(&self, node: &Node) -> bool {
+        node.text.trim_start().starts_with("extension ")
+    }
+
+    fn cardinality_call_semantics(&self, message: &str) -> CardinalityCallSemantics {
+        (message == "count")
+            .then_some(CardinalityCallSemantics::MeasuresReceiver)
+            .unwrap_or(CardinalityCallSemantics::Unknown)
     }
 
     fn function_visibility(&self, _name: &str, node: &Node, _lines: &[String]) -> String {
@@ -109,6 +257,10 @@ impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
             .next_back()
             .filter(|name| simple_identifier(name))
             .map(ToString::to_string)
+    }
+
+    fn parameter_type_from_signature(&self, param: &str) -> Option<String> {
+        type_after_parameter_colon(param)
     }
 
     fn local_assignment_writes(
@@ -251,6 +403,7 @@ impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
                     field: name.to_string(),
                     owner: String::new(),
                     r#type: Some(type_part.to_string()),
+                    immutable: false,
                     file: String::new(),
                     line: node.first_lineno,
                     span: span(node),
@@ -273,7 +426,8 @@ impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None" {
+        if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None"
+        {
             return type_text.to_string();
         }
         if type_text.ends_with('?') {
@@ -374,6 +528,21 @@ fn is_keyword(name: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn scip_swift_symbols_use_proven_module_identity() {
+        let append = "swift Swift Array#append().";
+        let dependency = "swift Tagged Tagged#rawValue().";
+
+        assert_eq!(external_symbol_metadata(append).scope, "stdlib");
+        assert_eq!(external_symbol_owner(append).as_deref(), Some("Array"));
+        assert_eq!(
+            external_symbol_call_complexity(append, "append").map(|cost| cost.time),
+            Some("O(1)")
+        );
+        assert_eq!(external_symbol_metadata(dependency).scope, "dependency");
+        assert!(external_symbol_call_complexity(dependency, "rawValue").is_none());
+    }
+
     fn node(kind: &str, text: &str) -> Node {
         Node {
             r#type: kind.to_string(),
@@ -391,33 +560,57 @@ mod tests {
         let b = SwiftNormalizedBehavior;
 
         // 1. owner_name_span
-        assert!(b.owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4]).is_some());
+        assert!(b
+            .owner_name_span("MyClass", &node("CLASS", ""), [1, 2, 3, 4])
+            .is_some());
 
         // 2. function_visibility
-        assert_eq!(b.function_visibility("foo", &node("FUNC", "private func foo()"), &[]), "private");
-        assert_eq!(b.function_visibility("foo", &node("FUNC", "func foo()"), &[]), "public");
+        assert_eq!(
+            b.function_visibility("foo", &node("FUNC", "private func foo()"), &[]),
+            "private"
+        );
+        assert_eq!(
+            b.function_visibility("foo", &node("FUNC", "func foo()"), &[]),
+            "public"
+        );
 
         // 3. parameter_name_from_signature
-        assert_eq!(b.parameter_name_from_signature("_ name: String"), Some("name".to_string()));
-        assert_eq!(b.parameter_name_from_signature("name: String"), Some("name".to_string()));
+        assert_eq!(
+            b.parameter_name_from_signature("_ name: String"),
+            Some("name".to_string())
+        );
+        assert_eq!(
+            b.parameter_name_from_signature("name: String"),
+            Some("name".to_string())
+        );
         assert_eq!(b.parameter_name_from_signature("invalid signature"), None);
 
         // 4. local_assignment_writes
-        assert!(b.local_assignment_writes(None, &node("ASGN", ""), [1, 2, 3, 4]).is_empty());
-        assert!(b.local_assignment_writes(Some("invalid"), &node("ASGN", ""), [1, 2, 3, 4]).is_empty());
+        assert!(b
+            .local_assignment_writes(None, &node("ASGN", ""), [1, 2, 3, 4])
+            .is_empty());
+        assert!(b
+            .local_assignment_writes(Some("invalid"), &node("ASGN", ""), [1, 2, 3, 4])
+            .is_empty());
         // Cover dotted_assignment_target returning None
-        assert!(b.local_assignment_writes(Some("self..myField"), &node("ASGN", ""), [1, 2, 3, 4]).is_empty());
-        let writes = b.local_assignment_writes(Some("self.myField"), &node("ASGN", ""), [1, 2, 3, 4]);
+        assert!(b
+            .local_assignment_writes(Some("self..myField"), &node("ASGN", ""), [1, 2, 3, 4])
+            .is_empty());
+        let writes =
+            b.local_assignment_writes(Some("self.myField"), &node("ASGN", ""), [1, 2, 3, 4]);
         assert_eq!(writes.len(), 1);
         assert_eq!(writes[0].receiver, "self");
         assert_eq!(writes[0].field, "myField");
 
         // 5. property_read_call
-        assert!(b.property_read_call(&node("CALL", "x.y"), &NormalizedCallParts {
-            receiver: "x".to_string(),
-            message: "y".to_string(),
-            arguments: Vec::new(),
-        }));
+        assert!(b.property_read_call(
+            &node("CALL", "x.y"),
+            &NormalizedCallParts {
+                receiver: "x".to_string(),
+                message: "y".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
 
         // 6. state_read_uses_access_span
         assert!(b.state_read_uses_access_span(&NormalizedCallProjection {
@@ -429,19 +622,26 @@ mod tests {
         }));
 
         // 7. suppress_state_read_for_call
-        assert!(b.suppress_state_read_for_call(&NormalizedCallProjection {
-            receiver: "self".to_string(),
-            message: "callback".to_string(),
-            arguments: Vec::new(),
-            access_span: [1, 2, 3, 4],
-            span: [1, 2, 3, 4],
-        }, ""));
+        assert!(b.suppress_state_read_for_call(
+            &NormalizedCallProjection {
+                receiver: "self".to_string(),
+                message: "callback".to_string(),
+                arguments: Vec::new(),
+                access_span: [1, 2, 3, 4],
+                span: [1, 2, 3, 4],
+            },
+            ""
+        ));
 
         // 8. call_site_span
         assert_eq!(
             b.call_site_span(
                 &node("CALL", ""),
-                &NormalizedCallParts { receiver: "self".to_string(), message: "fallback".to_string(), arguments: Vec::new() },
+                &NormalizedCallParts {
+                    receiver: "self".to_string(),
+                    message: "fallback".to_string(),
+                    arguments: Vec::new()
+                },
                 [1, 2, 3, 4],
                 [5, 6, 7, 8],
                 "foo"
@@ -451,7 +651,11 @@ mod tests {
         assert_eq!(
             b.call_site_span(
                 &node("CALL", ""),
-                &NormalizedCallParts { receiver: "self".to_string(), message: "other".to_string(), arguments: Vec::new() },
+                &NormalizedCallParts {
+                    receiver: "self".to_string(),
+                    message: "other".to_string(),
+                    arguments: Vec::new()
+                },
                 [1, 2, 3, 4],
                 [5, 6, 7, 8],
                 "foo"
@@ -472,27 +676,32 @@ mod tests {
         assert!(b.terminating_call_message("fatalError"));
 
         // 12. semantic_effect_for_call
-        assert!(b.semantic_effect_for_call(&CallSite {
-            receiver: "x".to_string(),
-            message: "isNull".to_string(),
-            file: "".to_string(),
-            function: "".to_string(),
-            owner: "".to_string(),
-            line: 1,
-            span: [1, 2, 3, 4],
-            conditional: false,
-            arguments: Vec::new(),
-            control: None,
-            safe_navigation: false,
-            block: false,
-        }).is_some());
+        assert!(b
+            .semantic_effect_for_call(&CallSite {
+                receiver: "x".to_string(),
+                message: "isNull".to_string(),
+                file: "".to_string(),
+                function: "".to_string(),
+                owner: "".to_string(),
+                line: 1,
+                span: [1, 2, 3, 4],
+                conditional: false,
+                arguments: Vec::new(),
+                control: None,
+                safe_navigation: false,
+                block: false,
+            })
+            .is_some());
 
         // 13. local_flow_declaration_keyword
         assert!(b.local_flow_declaration_keyword("let"));
 
         // 14. local_flow_keyword
         assert!(b.local_flow_keyword("let"));
-        for kw in &["as", "break", "case", "class", "continue", "default", "else", "false", "for", "func", "if", "in", "nil", "private", "public", "return", "self", "static", "true", "while"] {
+        for kw in &[
+            "as", "break", "case", "class", "continue", "default", "else", "false", "for", "func",
+            "if", "in", "nil", "private", "public", "return", "self", "static", "true", "while",
+        ] {
             assert!(b.local_flow_keyword(kw));
         }
         assert!(!b.local_flow_keyword("not_a_keyword"));
@@ -510,7 +719,9 @@ mod tests {
         assert!(decl.is_some());
         assert_eq!(decl.as_ref().unwrap().field, "myProperty");
         assert_eq!(decl.as_ref().unwrap().r#type, Some("String".to_string()));
-        assert!(b.state_declaration_from_node(&prop_node, "MyClass", true).is_none());
+        assert!(b
+            .state_declaration_from_node(&prop_node, "MyClass", true)
+            .is_none());
 
         // 18-24. formatting
         assert_eq!(b.format_array_type("Int"), "[Int]");

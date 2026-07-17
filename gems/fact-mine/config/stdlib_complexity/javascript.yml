@@ -1,0 +1,211 @@
+# ECMAScript built-ins. Kept separately from TypeScript so each language has
+# an independently reviewable native API contract.
+Array:
+  at: constant
+  length: constant
+  pop: constant
+  push: linear_materialize
+  shift: linear_scan
+  unshift: linear_scan
+  includes: linear_scan
+  find: linear_scan
+  findIndex: linear_scan
+  indexOf: linear_scan
+  lastIndexOf: linear_scan
+  concat: linear_materialize
+  filter: linear_materialize
+  flatMap: linear_materialize
+  map: linear_materialize
+  slice: linear_materialize
+  splice: linear_materialize
+  reverse: linear_scan
+  forEach: linear_scan
+  every: linear_scan
+  some: linear_scan
+  reduce: linear_scan
+  sort: sort
+  join: linear_materialize
+Object:
+  assign: linear_materialize
+  create: constant
+  defineProperty: constant
+  defineProperties: linear_scan
+  entries: linear_materialize
+  keys: linear_materialize
+  values: linear_materialize
+  getPrototypeOf: constant
+  setPrototypeOf: linear_scan
+  getOwnPropertySymbols: linear_materialize
+JSON:
+  parse: linear_materialize
+  stringify: linear_materialize
+Date:
+  getTime: constant
+  getTimezoneOffset: constant
+  toISOString: constant
+RegExp:
+  exec: linear_scan
+  test: linear_scan
+Math:
+  ceil: constant
+  floor: constant
+  round: constant
+  trunc: constant
+  log: constant
+  max: constant
+Number:
+  isFinite: constant
+  isInteger: constant
+  isNaN: constant
+  parseInt: linear_scan
+  toFixed: linear_materialize
+BigInt:
+  toString: linear_materialize
+Function:
+  bind: constant
+Symbol:
+  for: constant
+EventEmitter:
+  on: constant
+  removeListener: linear_scan
+Process:
+  on: constant
+  removeListener: linear_scan
+Map:
+  get: linear_scan
+  has: linear_scan
+  set: linear_scan
+  delete: linear_scan
+  clear: linear_scan
+  size: constant
+  entries: constant
+  keys: constant
+  values: constant
+WeakMap:
+  get: linear_scan
+  has: linear_scan
+  set: linear_scan
+  delete: linear_scan
+Buffer:
+  toString: linear_materialize
+BufferConstructor:
+  from: linear_materialize
+PlatformPath:
+  isAbsolute: linear_scan
+  join: linear_materialize
+  dirname: linear_materialize
+  basename: linear_materialize
+  relative: linear_materialize
+  resolve: linear_materialize
+  normalize: linear_materialize
+  parse: linear_materialize
+Module:
+  createRequire: constant
+Hash:
+  get: linear_scan
+  has: linear_scan
+  set: linear_scan
+  delete: linear_scan
+  size: constant
+  entries: linear_materialize
+  keys: linear_materialize
+  values: linear_materialize
+Set:
+  add: linear_scan
+  has: linear_scan
+  delete: linear_scan
+  size: constant
+  entries: linear_materialize
+  keys: linear_materialize
+  values: linear_materialize
+string:
+  includes: linear_scan
+  indexOf: linear_scan
+  lastIndexOf: linear_scan
+  match: linear_scan
+  search: linear_scan
+  split: linear_materialize
+  slice: linear_materialize
+  substring: linear_materialize
+  trim: linear_materialize
+  startsWith: linear_scan
+  endsWith: linear_scan
+  charAt: constant
+  length: constant
+String:
+  includes: linear_scan
+  indexOf: linear_scan
+  lastIndexOf: linear_scan
+  match: linear_scan
+  search: linear_scan
+  split: linear_materialize
+  slice: linear_materialize
+  substring: linear_materialize
+  trim: linear_materialize
+  startsWith: linear_scan
+  endsWith: linear_scan
+  charAt: constant
+  length: constant
+  repeat: linear_materialize
+  toUpperCase: linear_materialize
+  toLowerCase: linear_materialize
+Intrinsic:
+  "Array.isArray": constant
+  "path.isAbsolute": linear_scan
+  "path.join": linear_materialize
+  "PlatformPath.isAbsolute": linear_scan
+  "PlatformPath.join": linear_materialize
+  "PlatformPath.dirname": linear_materialize
+  "PlatformPath.basename": linear_materialize
+  "PlatformPath.relative": linear_materialize
+  "PlatformPath.resolve": linear_materialize
+  "PlatformPath.normalize": linear_materialize
+  "PlatformPath.parse": linear_materialize
+  decodeURIComponent: linear_materialize
+  isFinite: constant
+  isNaN: constant
+  "url.fileURLToPath": linear_materialize
+ExternalLatency:
+  "fs.existsSync": linear_scan
+  "fs.mkdirSync": linear_scan
+  "fs.readdirSync": linear_materialize
+  "fs.statSync": linear_scan
+  "fs.unlinkSync": linear_scan
+  "fs.writeFileSync": linear_scan
+  "fs/promises.mkdir": linear_scan
+  "fs/promises.readFile": linear_materialize
+  "fs/promises.writeFile": linear_scan
+  "Console.error": linear_materialize
+  "Console.log": linear_materialize
+  "MessagePort.postMessage": linear_materialize
+  "Worker.postMessage": linear_materialize
+  "Process.cwd": linear_materialize
+  "Process.emitWarning": constant
+  "Module.resolve": linear_scan
+  "Stream.pipeline": linear_scan
+SemanticSymbolParametricCost:
+  'lib/`lib.es5.d.ts`/Array#every().': callback_linear
+  'lib/`lib.es5.d.ts`/Array#filter().': callback_linear
+  'lib/`lib.es5.d.ts`/Array#forEach().': callback_linear
+  'lib/`lib.es5.d.ts`/Array#map().': callback_linear
+  'lib/`lib.es5.d.ts`/Array#reduce().': callback_linear
+  'lib/`lib.es5.d.ts`/Array#some().': callback_linear
+  'lib/`lib.es2015.core.d.ts`/Array#find().': callback_linear
+  'lib/`lib.es2015.core.d.ts`/Array#findIndex().': callback_linear
+  'lib/`lib.es5.d.ts`/Function#apply().': callback_once
+  'lib/`lib.es5.d.ts`/Function#call().': callback_once
+  'lib/`lib.es5.d.ts`/CallableFunction#call().': callback_once
+  '`events.d.ts`/`"node:events"`/global/NodeJS/EventEmitter#emit().': callback_linear
+  '`diagnostics_channel.d.ts`/`"node:diagnostics_channel"`/TracingChannel#traceSync().': callback_once
+Namespace:
+  Array: declaration
+  Date: declaration
+  JSON: declaration
+  Math: declaration
+  Object: declaration
+  Promise: declaration
+  Reflect: declaration
+  RegExp: declaration
+  String: declaration
+DynamicGlobalBinding:
+  enabled: declaration

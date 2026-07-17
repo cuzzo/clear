@@ -75,6 +75,7 @@ module NilKill
         concat_fact("hash_record_member_calls", facts["hash_record_member_calls"])
         concat_fact("flow_local_types", facts["flow_local_types"])
         concat_fact("type_dependencies", facts["type_dependencies"])
+        store.facts["call_resolution_coverage"] = Hash(facts["call_resolution_coverage"])
         merge_fact_map("ivar_protocols", facts["ivar_protocols"])
         merge_fact_map("ivar_param_origins", facts["ivar_param_origins"])
       end

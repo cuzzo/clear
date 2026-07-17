@@ -1,0 +1,593 @@
+Array:
+  get: constant
+  size: constant
+  isEmpty: constant
+  add: constant
+  addAll: linear_materialize
+  contains: linear_scan
+  indexOf: linear_scan
+  lastIndexOf: linear_scan
+  removeAll: pairwise
+  toArray: linear_materialize
+  sort: sort
+Hash:
+  get: constant
+  put: constant
+  containsKey: constant
+  size: constant
+  isEmpty: constant
+  keySet: linear_materialize
+  values: linear_materialize
+  entrySet: linear_materialize
+Set:
+  add: constant
+  remove: constant
+  contains: constant
+  size: constant
+  isEmpty: constant
+  toArray: linear_materialize
+String:
+  charAt: constant
+  codePointAt: constant
+  length: constant
+  isEmpty: constant
+  equals: linear_scan
+  equalsIgnoreCase: linear_scan
+  startsWith: linear_scan
+  endsWith: linear_scan
+  hashCode: linear_scan
+  contains: linear_scan
+  compareTo: linear_scan
+  compareToIgnoreCase: linear_scan
+  indexOf: linear_scan
+  lastIndexOf: linear_scan
+  split: linear_materialize
+  substring: linear_materialize
+  getBytes: linear_materialize
+  join: linear_materialize
+  replace: linear_materialize
+  strip: linear_materialize
+  stripLeading: linear_materialize
+  stripTrailing: linear_materialize
+  toLowerCase: linear_materialize
+  toUpperCase: linear_materialize
+  trim: linear_materialize
+  toCharArray: linear_materialize
+StringBuilder:
+  append: constant
+  appendCodePoint: constant
+  delete: linear_scan
+  length: constant
+  toString: linear_materialize
+StringBuffer:
+  append: constant
+  length: constant
+  toString: linear_materialize
+Appendable:
+  append: declaration
+CharSequence:
+  charAt: constant
+  length: constant
+Object:
+  getClass: constant
+  toString: declaration
+AbstractStringBuilder:
+  length: constant
+  setLength: linear_materialize
+Class:
+  cast: constant
+  getDeclaredMethods: linear_materialize
+  getComponentType: constant
+  getEnclosingClass: constant
+  getName: constant
+  getModifiers: constant
+  getSimpleName: constant
+  getSuperclass: constant
+  isAnnotation: constant
+  isAnonymousClass: constant
+  isArray: constant
+  isEnum: constant
+  isInterface: constant
+  isPrimitive: constant
+  isSynthetic: constant
+Enum:
+  compareTo: constant
+  equals: constant
+  name: constant
+  ordinal: constant
+  getDeclaringClass: constant
+Character:
+  charCount: constant
+  digit: constant
+  getType: constant
+  isDigit: constant
+  isBmpCodePoint: constant
+  isISOControl: constant
+  isJavaIdentifierPart: constant
+  isJavaIdentifierStart: constant
+  isLetter: constant
+  isLetterOrDigit: constant
+  isLowerCase: constant
+  isUpperCase: constant
+  isWhitespace: constant
+  toLowerCase: constant
+  toUpperCase: constant
+  toString: constant
+Buffer:
+  capacity: constant
+  hasRemaining: constant
+  limit: constant
+  position: constant
+  remaining: constant
+ByteBuffer:
+  array: constant
+  capacity: constant
+  duplicate: constant
+  get: constant
+  getDouble: constant
+  getFloat: constant
+  getInt: constant
+  getLong: constant
+  getShort: constant
+  hasRemaining: constant
+  limit: constant
+  order: constant
+  position: constant
+  put: constant
+  putDouble: constant
+  putFloat: constant
+  putInt: constant
+  putLong: constant
+  putShort: constant
+  remaining: constant
+  slice: constant
+  wrap: constant
+Enumeration:
+  hasMoreElements: constant
+  nextElement: constant
+GenericArrayType:
+  getGenericComponentType: constant
+Method:
+  getDefaultValue: constant
+  getName: constant
+  getParameterCount: constant
+Modifier:
+  isAbstract: constant
+  isFinal: constant
+  isPrivate: constant
+  isProtected: constant
+  isPublic: constant
+  isStatic: constant
+ParameterizedType:
+  getActualTypeArguments: linear_materialize
+  getOwnerType: constant
+  getRawType: constant
+TypeVariable:
+  getName: constant
+WildcardType:
+  getLowerBounds: linear_materialize
+  getUpperBounds: linear_materialize
+Throwable:
+  getMessage: constant
+Properties:
+  getProperty: linear_scan
+  propertyNames: linear_materialize
+Matcher:
+  group: linear_materialize
+  regionEnd: constant
+Pattern:
+  matcher: constant
+PriorityQueue:
+  add: linear_materialize
+  peek: constant
+  poll: logarithmic
+  size: constant
+UUID:
+  randomUUID: constant
+  toString: constant
+Hashtable:
+  put: linear_materialize
+AtomicBoolean:
+  compareAndSet: constant
+  get: constant
+  getAndSet: constant
+  set: constant
+AtomicInteger:
+  addAndGet: constant
+  compareAndSet: constant
+  decrementAndGet: constant
+  get: constant
+  getAndAdd: constant
+  getAndIncrement: constant
+  incrementAndGet: constant
+  set: constant
+AtomicLong:
+  addAndGet: constant
+  compareAndSet: constant
+  decrementAndGet: constant
+  get: constant
+  getAndAdd: constant
+  getAndIncrement: constant
+  incrementAndGet: constant
+  set: constant
+Integer: {}
+Long: {}
+Float:
+  compare: constant
+  isNaN: constant
+  isInfinite: constant
+  floatToIntBits: constant
+  intBitsToFloat: constant
+Double:
+  compare: constant
+  isNaN: constant
+  isInfinite: constant
+  doubleToLongBits: constant
+  longBitsToDouble: constant
+Boolean: {}
+Optional:
+  empty: constant
+  of: constant
+  ofNullable: constant
+  get: constant
+  isPresent: constant
+  isEmpty: constant
+  orElse: constant
+Intrinsic:
+  "Arrays.asList": constant
+  "Arrays.binarySearch": logarithmic
+  "Arrays.copyOf": linear_materialize
+  "Arrays.copyOfRange": linear_materialize
+  "Arrays.equals": linear_scan
+  "Arrays.fill": linear_scan
+  "Arrays.hashCode": linear_scan
+  "Arrays.mismatch": linear_scan
+  "Arrays.toString": linear_materialize
+  "Arrays.sort": sort
+  "Collections.emptyList": constant
+  "Collections.emptyMap": constant
+  "Collections.emptySet": constant
+  "Collections.singleton": constant
+  "Collections.singletonList": constant
+  "Collections.singletonMap": constant
+  "Collections.sort": sort
+  "Collections.binarySearch": logarithmic
+  "Collections.unmodifiableCollection": constant
+  "Collections.unmodifiableList": constant
+  "Collections.unmodifiableMap": constant
+  "Collections.unmodifiableSet": constant
+  "Math.abs": constant
+  "Math.ceil": constant
+  "Math.floor": constant
+  "Math.max": constant
+  "Math.min": constant
+  "Math.pow": constant
+  "Math.round": constant
+  "Math.sqrt": constant
+  "Objects.isNull": constant
+  "Objects.nonNull": constant
+  "Objects.requireNonNull": constant
+  "Array.getLength": constant
+  "Array.newInstance": linear_materialize
+  "Charset.forName": linear_scan
+  "Collector.of": constant
+  "Collections.reverse": linear_scan
+  "Double.parseDouble": linear_scan
+  "Integer.parseInt": linear_scan
+  "Integer.toHexString": linear_materialize
+  "Math.signum": constant
+  "System.currentTimeMillis": constant
+  "URI.create": linear_materialize
+  "EnumSet.of": constant
+  "StreamSupport.stream": constant
+  "SourceVersion.isIdentifier": linear_scan
+  "SourceVersion.isKeyword": linear_scan
+  "SourceVersion.isName": linear_scan
+  "AbstractTypeVisitor6.visitUnknown": constant
+  "System.lineSeparator": constant
+  "StrictMath.abs": constant
+  "StrictMath.ceil": constant
+  "StrictMath.floor": constant
+  "StrictMath.max": constant
+  "StrictMath.min": constant
+  "StrictMath.pow": constant
+  "StrictMath.round": constant
+  "StrictMath.sqrt": constant
+SemanticSymbol:
+  "java/awt/Color#getHSBColor().": constant
+  "java/lang/Object#clone().": linear_materialize
+  "java/lang/String#valueOf(+4).": constant
+  "java/util/Comparator#comparing(+1).": constant
+  "java/util/Objects#hash().": linear_materialize
+  "java/util/stream/Stream#filter().": constant
+  "java/util/stream/Stream#map().": constant
+  "java/util/regex/Matcher#lookingAt().": exponential
+  "java/util/regex/Matcher#matches().": exponential
+SemanticSymbolUpperBound:
+  "java/lang/Object#equals().": linear_scan
+  "java/lang/Object#toString().": linear_materialize
+  "java/lang/String#format().": linear_materialize
+  "java/lang/String#valueOf().": linear_materialize
+  "java/util/Objects#deepEquals().": linear_scan
+  "java/util/Objects#equals().": linear_scan
+  "java/util/stream/Stream#collect(+1).": linear_materialize
+  "java/util/stream/Stream#count().": linear_scan
+  "java/util/stream/Stream#findFirst().": linear_scan
+  "java/util/stream/Stream#max().": linear_scan
+  "javax/lang/model/element/Element#accept().": linear_scan
+  "javax/lang/model/type/TypeMirror#accept().": linear_scan
+SemanticSymbolCandidates:
+  "java/lang/Object#equals().": "identity Object, primitive wrappers, String, Enum, reviewed project value overrides"
+  "java/lang/Object#toString().": "identity Object, primitive wrappers, String, Enum, reviewed project value overrides"
+  "java/lang/String#format().": "primitive and String formatting, reviewed Formattable and toString overrides"
+  "java/lang/String#valueOf().": "primitive wrappers, String, Enum, reviewed project toString overrides"
+  "java/util/Objects#deepEquals().": "primitive arrays, object arrays, reviewed value equals overrides"
+  "java/util/Objects#equals().": "identity Object, primitive wrappers, String, Enum, reviewed project value overrides"
+  "java/util/stream/Stream#collect(+1).": "reviewed sequential stream collectors"
+  "java/util/stream/Stream#count().": "reviewed sequential stream stages and callbacks"
+  "java/util/stream/Stream#findFirst().": "reviewed sequential stream stages and callbacks"
+  "java/util/stream/Stream#max().": "reviewed sequential stream comparators"
+  "javax/lang/model/element/Element#accept().": "reviewed javac element visitors and project visitor overrides"
+  "javax/lang/model/type/TypeMirror#accept().": "reviewed javac type visitors and project visitor overrides"
+SemanticSymbolAssumptions:
+  "java/lang/Object#equals().": "runtime receiver belongs to the reviewed JDK/project value universe and its override is at most linear in reachable value size"
+  "java/lang/Object#toString().": "runtime receiver belongs to the reviewed JDK/project value universe and rendering is at most linear in reachable value size"
+  "java/lang/String#format().": "format arguments use reviewed renderers whose work is at most linear in reachable argument and output size"
+  "java/lang/String#valueOf().": "the selected runtime renderer belongs to the reviewed JDK/project value universe"
+  "java/util/Objects#deepEquals().": "the compared value graph is acyclic and nested equals implementations belong to the reviewed universe"
+  "java/util/Objects#equals().": "the selected equals implementation belongs to the reviewed JDK/project value universe"
+  "java/util/stream/Stream#collect(+1).": "the collector belongs to the reviewed sequential collector universe with bounded per-element callbacks"
+  "java/util/stream/Stream#count().": "the stream is sequential and each upstream callback has at most linear cost in its argument"
+  "java/util/stream/Stream#findFirst().": "the stream is sequential and each upstream callback has at most linear cost in its argument"
+  "java/util/stream/Stream#max().": "the stream is sequential and the comparator has at most linear cost in its arguments"
+  "javax/lang/model/element/Element#accept().": "the visitor belongs to the reviewed javac/project visitor universe"
+  "javax/lang/model/type/TypeMirror#accept().": "the visitor belongs to the reviewed javac/project visitor universe"
+SemanticSymbolKind:
+  "java/lang/reflect/Method#invoke().": reflective_target_cost_missing
+  "java/util/Collections#min(+1).": callback_cost_missing
+  "java/util/Comparator#compare().": callback_cost_missing
+  "java/util/Optional#map().": callback_cost_missing
+  "java/util/Optional#orElseGet().": callback_cost_missing
+  "java/util/concurrent/Callable#call().": callback_cost_missing
+  "java/util/function/BiFunction#apply().": callback_cost_missing
+  "java/util/function/Consumer#accept().": callback_cost_missing
+  "java/util/function/Function#apply().": callback_cost_missing
+  "java/util/function/Supplier#get().": callback_cost_missing
+SemanticSymbolParametricCost:
+  "java/lang/reflect/Method#invoke().": reflective_once
+  "java/util/Collections#min(+1).": callback_linear
+  "java/util/Comparator#compare().": callback_once
+  "java/util/Optional#map().": callback_once
+  "java/util/Optional#orElseGet().": callback_once
+  "java/util/concurrent/Callable#call().": callback_once
+  "java/util/function/BiFunction#apply().": callback_once
+  "java/util/function/Consumer#accept().": callback_once
+  "java/util/function/Function#apply().": callback_once
+  "java/util/function/Supplier#get().": callback_once
+InterfaceCandidates:
+  Annotation: "JDK annotation proxy"
+  AnnotationValue: "javac annotation model"
+  AnnotationMirror: "javac annotation model"
+  Appendable: "StringBuilder, StringBuffer, CharBuffer, Writer, PrintStream"
+  CharSequence: "String, StringBuilder, StringBuffer, CharBuffer"
+  Collection: "ArrayList, LinkedList, ArrayDeque, HashSet, TreeSet, CopyOnWriteArrayList, CopyOnWriteArraySet"
+  Deque: "ArrayDeque, LinkedList, ConcurrentLinkedDeque, LinkedBlockingDeque"
+  Iterable: "Collection, Path, ServiceLoader"
+  Iterator: "ArrayList.Itr, LinkedList.ListItr, HashMap.HashIterator, TreeMap.PrivateEntryIterator, CopyOnWriteArrayList.COWIterator"
+  List: "ArrayList, LinkedList, Vector, Stack, CopyOnWriteArrayList"
+  ListIterator: "ArrayList.ListItr, LinkedList.ListItr, Vector.ListItr, CopyOnWriteArrayList.COWIterator"
+  Map: "HashMap, LinkedHashMap, TreeMap, IdentityHashMap, WeakHashMap, ConcurrentHashMap, ConcurrentSkipListMap"
+  Queue: "ArrayDeque, LinkedList, PriorityQueue, ConcurrentLinkedQueue, ArrayBlockingQueue, LinkedBlockingQueue"
+  Set: "HashSet, LinkedHashSet, TreeSet, CopyOnWriteArraySet, ConcurrentSkipListSet"
+  DeclaredType: "javac declared type model"
+  Element: "javac element model"
+  ExecutableElement: "javac executable element model"
+  ExecutableType: "javac executable type model"
+  PackageElement: "javac package element model"
+  TypeElement: "javac type element model"
+  TypeParameterElement: "javac type-parameter element model"
+  TypeMirror: "javac type model"
+  TypeVariable: "javac type-variable model"
+  VariableElement: "javac variable element model"
+  ArrayType: "javac array type model"
+  WildcardType: "javac wildcard type model"
+  Types: "javac type utilities"
+InterfaceUpperBound:
+  "Annotation.annotationType": constant
+  "Appendable.append": linear_materialize
+  "CharSequence.charAt": constant
+  "CharSequence.length": constant
+  "CharSequence.subSequence": linear_materialize
+  "CharSequence.toString": linear_materialize
+  "Collection.add": linear_materialize
+  "Collection.addAll": pairwise
+  "Collection.clear": linear_materialize
+  "Collection.contains": linear_scan
+  "Collection.containsAll": pairwise
+  "Collection.isEmpty": constant
+  "Collection.iterator": constant
+  "Collection.remove": linear_materialize
+  "Collection.removeAll": pairwise
+  "Collection.retainAll": pairwise
+  "Collection.size": constant
+  "Collection.spliterator": constant
+  "Collection.stream": constant
+  "Collection.toArray": linear_materialize
+  "Collections.addAll": pairwise
+  "Deque.add": linear_materialize
+  "Deque.addFirst": linear_materialize
+  "Deque.addLast": linear_materialize
+  "Deque.contains": linear_scan
+  "Deque.element": constant
+  "Deque.getFirst": constant
+  "Deque.getLast": constant
+  "Deque.isEmpty": constant
+  "Deque.iterator": constant
+  "Deque.offer": linear_materialize
+  "Deque.offerFirst": linear_materialize
+  "Deque.offerLast": linear_materialize
+  "Deque.peek": constant
+  "Deque.peekFirst": constant
+  "Deque.peekLast": constant
+  "Deque.poll": logarithmic
+  "Deque.pollFirst": constant
+  "Deque.pollLast": constant
+  "Deque.pop": constant
+  "Deque.push": linear_materialize
+  "Deque.remove": linear_scan
+  "Deque.removeFirst": constant
+  "Deque.removeLast": constant
+  "Deque.size": constant
+  "Iterable.iterator": constant
+  "Iterable.spliterator": constant
+  "Iterable.forEach": linear_scan
+  "Iterator.hasNext": constant
+  "Iterator.next": constant
+  "Iterator.remove": linear_materialize
+  "Iterator.forEachRemaining": linear_scan
+  "List.add": linear_materialize
+  "List.addAll": linear_materialize
+  "List.clear": linear_materialize
+  "List.contains": linear_scan
+  "List.containsAll": pairwise
+  "List.get": linear_scan
+  "List.indexOf": linear_scan
+  "List.isEmpty": constant
+  "List.iterator": constant
+  "List.lastIndexOf": linear_scan
+  "List.listIterator": constant
+  "List.remove": linear_materialize
+  "List.removeAll": pairwise
+  "List.retainAll": pairwise
+  "List.set": linear_materialize
+  "List.size": constant
+  "List.sort": sort
+  "List.spliterator": constant
+  "List.subList": constant
+  "List.toArray": linear_materialize
+  "ListIterator.add": linear_materialize
+  "ListIterator.hasNext": constant
+  "ListIterator.hasPrevious": constant
+  "ListIterator.next": constant
+  "ListIterator.nextIndex": constant
+  "ListIterator.previous": constant
+  "ListIterator.previousIndex": constant
+  "ListIterator.remove": linear_materialize
+  "ListIterator.set": linear_materialize
+  "Map.clear": linear_scan
+  "Map.containsKey": linear_scan
+  "Map.containsValue": linear_scan
+  "Map.entrySet": constant
+  "Map.get": linear_scan
+  "Map.getOrDefault": linear_scan
+  "Map.computeIfAbsent": linear_scan
+  "Map.isEmpty": constant
+  "Map.keySet": constant
+  "Map.put": linear_materialize
+  "Map.putAll": pairwise
+  "Map.remove": linear_scan
+  "Map.replace": linear_scan
+  "Map.size": constant
+  "Map.values": constant
+  "Map.getKey": constant
+  "Map.getValue": constant
+  "Queue.add": linear_materialize
+  "Queue.contains": linear_scan
+  "Queue.element": constant
+  "Queue.isEmpty": constant
+  "Queue.iterator": constant
+  "Queue.offer": linear_materialize
+  "Queue.peek": constant
+  "Queue.poll": logarithmic
+  "Queue.remove": linear_scan
+  "Queue.size": constant
+  "Set.add": linear_materialize
+  "Set.addAll": pairwise
+  "Set.clear": linear_materialize
+  "Set.contains": linear_scan
+  "Set.containsAll": pairwise
+  "Set.equals": pairwise
+  "Set.isEmpty": constant
+  "Set.iterator": constant
+  "Set.remove": linear_materialize
+  "Set.removeAll": pairwise
+  "Set.retainAll": pairwise
+  "Set.size": constant
+  "Set.spliterator": constant
+  "Set.toArray": linear_materialize
+  # Copies exactly the requested element range. The shared complexity algebra
+  # treats `linear_scan` as O(N) time/O(1) auxiliary space; no Java-specific
+  # consumer logic is required.
+  "System.arraycopy": linear_scan
+  "Buffer.clear": constant
+  "AnnotationValue.accept": constant
+  "AnnotationMirror.getAnnotationType": constant
+  "AnnotationMirror.getElementValues": constant
+  "DeclaredType.asElement": constant
+  "DeclaredType.getEnclosingType": constant
+  "DeclaredType.getTypeArguments": constant
+  "Element.asType": constant
+  "Element.getKind": constant
+  "Element.getModifiers": constant
+  "Element.getSimpleName": constant
+  "ExecutableElement.getEnclosingElement": constant
+  "ExecutableElement.getReturnType": constant
+  "ExecutableElement.getSimpleName": constant
+  "ExecutableElement.isVarArgs": constant
+  "ExecutableType.getParameterTypes": constant
+  "ExecutableType.getReturnType": constant
+  "ExecutableType.getThrownTypes": constant
+  "PackageElement.getQualifiedName": constant
+  "TypeElement.getEnclosingElement": constant
+  "TypeElement.getSuperclass": constant
+  "TypeElement.getSimpleName": constant
+  "TypeMirror.getKind": constant
+  "TypeParameterElement.asType": constant
+  "TypeParameterElement.getBounds": constant
+  "TypeVariable.asElement": constant
+  "VariableElement.asType": constant
+  "VariableElement.getSimpleName": constant
+  "ArrayType.getComponentType": constant
+  "WildcardType.getExtendsBound": constant
+  "WildcardType.getSuperBound": constant
+  "Types.asMemberOf": linear_scan
+ExternalLatency:
+  "AlphaComposite.getInstance": constant
+  "BufferedImage.getGraphics": constant
+  "BufferedReader.readLine": linear_materialize
+  "ByteArrayOutputStream.toByteArray": linear_materialize
+  "File.toPath": constant
+  "FileObject.delete": constant
+  "FileObject.openWriter": constant
+  "Filer.createSourceFile": linear_scan
+  "Files.createDirectories": linear_scan
+  "Files.isDirectory": constant
+  "Files.newOutputStream": constant
+  "Files.notExists": constant
+  "InputStream.close": constant
+  "InputStream.read": linear_materialize
+  "ImageIO.write": linear_scan
+  "ObjectInputStream.close": constant
+  "ObjectInputStream.readObject": linear_materialize
+  "ObjectOutputStream.close": constant
+  "ObjectOutputStream.writeObject": linear_materialize
+  "OutputStream.close": constant
+  "OutputStream.flush": constant
+  "OutputStream.write": linear_scan
+  "Path.resolve": linear_materialize
+  "Path.toFile": constant
+  "PrintWriter.close": constant
+  "PrintWriter.flush": constant
+  "PrintWriter.print": linear_scan
+  "PrintWriter.println": linear_scan
+  "PrintStream.print": linear_scan
+  "PrintStream.println": linear_scan
+  "Graphics.clearRect": linear_scan
+  "Graphics.drawRect": linear_scan
+  "Graphics.setColor": constant
+  "Graphics2D.setBackground": constant
+  "Graphics2D.setComposite": constant
+  "Graphics2D.setStroke": constant
+Namespace:
+  java: declaration
+  javax: declaration

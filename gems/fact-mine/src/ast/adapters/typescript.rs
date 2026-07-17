@@ -20,6 +20,41 @@ const TYPESCRIPT_TERNARY_KINDS: &[&str] = &[
 pub(crate) struct TypeScriptAstAdapter;
 
 impl AstNormalizationAdapter for TypeScriptAstAdapter {
+    fn function_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "method"
+                | "function_definition"
+                | "function_declaration"
+                | "method_definition"
+                | "method_declaration"
+                | "method_signature"
+                | "arrow_function"
+                | "function_expression"
+        )
+    }
+
+    fn custom_function_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+        typescript_bound_callable_name(node, source)
+    }
+
+    fn valid_function_definition(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        !matches!(node.kind(), "arrow_function" | "function_expression")
+            || typescript_bound_callable_name(node, source).is_some()
+    }
+
+    fn function_declaration_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> TreeSitterNode<'tree> {
+        if typescript_bound_callable_name(node, source).is_some() {
+            node.parent().unwrap_or(node)
+        } else {
+            node
+        }
+    }
+
     fn explicit_alternative<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -64,12 +99,13 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
     fn lambda_target<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
-        _source: &str,
+        source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
         if matches!(
             node.kind(),
             "arrow_function" | "function_expression" | "lambda"
-        ) {
+        ) && typescript_bound_callable_name(node, source).is_none()
+        {
             Some(node)
         } else {
             None
@@ -295,4 +331,45 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
             _ => None,
         }
     }
+
+    fn loop_condition_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        // In tree-sitter TypeScript, a `for (const item of items)` header has
+        // both a binding (`left`) and the cardinality-bearing iterable
+        // (`right`). The generic first-named-child fallback selected the
+        // binding, which made every `for..of` loop look like an unbounded
+        // local domain. Preserve the iterable in the normalized `FOR`
+        // condition so all downstream CFG/DFG and complexity consumers see
+        // the same source of cardinality.
+        (node.kind() == "for_in_statement")
+            .then(|| node.child_by_field_name("right"))
+            .flatten()
+    }
+}
+
+/// TypeScript represents `const f = (...) => ...` and
+/// `const f = function (...) { ... }` as anonymous callable expressions. The
+/// binding identifier is nevertheless a compiler-owned project declaration,
+/// so expose only that thin grammar fact and let the shared method/profile
+/// pipeline analyze its body normally.
+fn typescript_bound_callable_name(node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+    if !matches!(node.kind(), "arrow_function" | "function_expression") {
+        return None;
+    }
+    if let Some(name) = node.child_by_field_name("name") {
+        let text = node_text(name, source).trim();
+        if !text.is_empty() {
+            return Some(text.to_string());
+        }
+    }
+    let parent = node.parent()?;
+    if parent.kind() != "variable_declarator" || parent.child_by_field_name("value") != Some(node) {
+        return None;
+    }
+    let name = parent.child_by_field_name("name")?;
+    let text = node_text(name, source).trim();
+    (!text.is_empty()).then(|| text.to_string())
 }

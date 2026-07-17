@@ -5,6 +5,10 @@ use tree_sitter::Node as TreeSitterNode;
 pub(crate) struct CAstAdapter;
 
 impl AstNormalizationAdapter for CAstAdapter {
+    fn preprocessor_callable_names(&self, root: TreeSitterNode<'_>, source: &str) -> Vec<String> {
+        preprocessor_callable_names(root, source)
+    }
+
     fn case_arm_body_nodes<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -40,4 +44,25 @@ impl AstNormalizationAdapter for CAstAdapter {
         }
         None
     }
+}
+
+pub(super) fn preprocessor_callable_names(root: TreeSitterNode<'_>, source: &str) -> Vec<String> {
+    fn visit(node: TreeSitterNode<'_>, source: &str, names: &mut Vec<String>) {
+        if node.kind() == "preproc_function_def" {
+            if let Some(name) = node.child_by_field_name("name") {
+                let name = super::super::node_text(name, source).trim();
+                if !name.is_empty() {
+                    names.push(name.to_string());
+                }
+            }
+        }
+        for child in named_children(node) {
+            visit(child, source, names);
+        }
+    }
+    let mut names = Vec::new();
+    visit(root, source, &mut names);
+    names.sort();
+    names.dedup();
+    names
 }

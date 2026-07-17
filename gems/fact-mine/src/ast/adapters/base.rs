@@ -30,6 +30,38 @@ pub(crate) struct ConditionalBranchParts<'tree> {
 
 use super::super::TreeSitterNormalizer;
 pub(crate) trait AstNormalizationAdapter: Sync {
+    /// Language-native namespace and explicit-import facts used to form
+    /// canonical symbol identities. The empty default deliberately means
+    /// "not proven", rather than treating a filename or short owner as a
+    /// namespace.
+    fn symbol_scope(
+        &self,
+        _root: TreeSitterNode<'_>,
+        _source: &str,
+    ) -> (String, Vec<(String, String)>) {
+        (String::new(), Vec::new())
+    }
+
+    /// Canonical namespace identities keyed by native declaration span.
+    /// This remains empty unless the language grammar proves the scope.
+    fn declaration_namespaces(
+        &self,
+        _root: TreeSitterNode<'_>,
+        _source: &str,
+    ) -> Vec<([usize; 4], String)> {
+        Vec::new()
+    }
+
+    /// Whether an unqualified declared type with no explicit import is owned
+    /// by the current namespace according to native language rules.
+    fn unqualified_types_use_current_namespace(&self) -> bool {
+        false
+    }
+
+    fn preprocessor_callable_names(&self, _root: TreeSitterNode<'_>, _source: &str) -> Vec<String> {
+        Vec::new()
+    }
+
     fn scope_locals(
         &self,
         _node: TreeSitterNode<'_>,
@@ -210,6 +242,25 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn custom_function_name(&self, _node: TreeSitterNode<'_>, _source: &str) -> Option<String> {
         None
+    }
+
+    /// Source declaration whose span owns the callable's compiler symbol.
+    /// Most languages define the symbol on the function node itself. Some
+    /// grammars represent a named callable as an anonymous expression bound
+    /// by its parent declaration.
+    fn function_declaration_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> TreeSitterNode<'tree> {
+        node
+    }
+
+    /// Tree-sitter error recovery can occasionally label a malformed region
+    /// as a function definition. Adapters with syntax that makes a reliable
+    /// declaration check possible may reject that recovery node here.
+    fn valid_function_definition(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        true
     }
 
     fn begin_statement(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
@@ -1026,6 +1077,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    /// Return a callback expression that is syntactically carried as a call
+    /// argument. Languages with trailing-block syntax use `call_block`
+    /// directly; adapters only override this for native lambda-argument
+    /// forms whose body is available in the source AST.
+    fn call_block_argument<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
     fn intrinsic_call_name(
         &self,
         _node: TreeSitterNode<'_>,
@@ -1252,6 +1315,17 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         }
     }
 
+    /// Supplies the iterable/range expression for `FOR` syntaxes whose
+    /// binding is the first named child. Returning the binding as the loop
+    /// condition loses the cardinality domain and collapses nested products.
+    fn loop_condition_node<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
     fn modifier_loop_kind(&self, _kind: &str) -> bool {
         false
     }
@@ -1290,6 +1364,12 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn dynamic_instance_variable_text(&self, _text: &str) -> bool {
         false
+    }
+
+    /// Some grammars spell compiler-provided closure parameters with a dollar
+    /// prefix. They are lexical locals, not process-global variables.
+    fn dollar_prefixed_local_name(&self, _text: &str) -> Option<String> {
+        None
     }
 
     fn literal_fragment_assignment_context(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {

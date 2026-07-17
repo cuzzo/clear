@@ -1,0 +1,106 @@
+Array:
+  get: constant
+  Count: constant
+  Add: linear_materialize
+  Remove: linear_scan
+  Contains: linear_scan
+  IndexOf: linear_scan
+  ToArray: linear_materialize
+  ToList: linear_materialize
+  OrderBy: sort
+Hash:
+  get_Item: constant
+  TryGetValue: linear_scan
+  ContainsKey: linear_scan
+  Add: linear_materialize
+  Count: constant
+  Keys: linear_materialize
+  Values: linear_materialize
+Set:
+  Add: linear_materialize
+  Remove: linear_scan
+  Contains: linear_scan
+  Count: constant
+  ToArray: linear_materialize
+String:
+  Length: constant
+  Contains: linear_scan
+  IndexOf: linear_scan
+  Split: linear_materialize
+  Substring: linear_materialize
+  Format: linear_materialize
+  StartsWith: linear_scan
+  EndsWith: linear_scan
+  Equals: linear_scan
+  Replace: linear_materialize
+  TrimStart: linear_materialize
+StringBuilder:
+  Append: linear_materialize
+  AppendLine: linear_materialize
+  ToString: linear_materialize
+  Length: constant
+List:
+  Add: linear_materialize
+  AddRange: linear_materialize
+  Remove: linear_scan
+  Contains: linear_scan
+  IndexOf: linear_scan
+  Count: constant
+Dictionary:
+  get_Item: linear_scan
+  TryGetValue: linear_scan
+  ContainsKey: linear_scan
+  Add: linear_materialize
+  Count: constant
+Type:
+  ToString: linear_materialize
+  GetGenericTypeDefinition: constant
+  MakeGenericType: linear_materialize
+  IsAssignableFrom: linear_scan
+MemberInfo:
+  Name: constant
+Object:
+  ReferenceEquals: constant
+  GetType: constant
+Int32:
+  Parse: linear_scan
+Intrinsic:
+  "Array.BinarySearch": logarithmic
+  "Array.Clear": linear_scan
+  "Array.Copy": linear_scan
+  "Array.Fill": linear_scan
+  "Array.IndexOf": linear_scan
+  "Array.LastIndexOf": linear_scan
+  "Array.Reverse": linear_scan
+  "Array.Resize": linear_materialize
+  "Array.Sort": sort
+  "Enumerable.ToArray": linear_materialize
+  "Enumerable.ToList": linear_materialize
+  "Math.Abs": constant
+  "Math.Ceiling": constant
+  "Math.Clamp": constant
+  "Math.Floor": constant
+  "Math.Max": constant
+  "Math.Min": constant
+  "Math.Pow": constant
+  "Math.Round": constant
+  "Math.Sign": constant
+  "Math.Sqrt": constant
+  "Math.Truncate": constant
+  "Path.ChangeExtension": linear_materialize
+  "Path.Combine": linear_materialize
+  "Path.GetDirectoryName": linear_materialize
+  "Path.GetExtension": linear_materialize
+  "Path.GetFileName": linear_materialize
+  "String.Compare": linear_scan
+  "String.Concat": linear_materialize
+  "String.Equals": linear_scan
+  "String.IsNullOrEmpty": constant
+  "String.IsNullOrWhiteSpace": linear_scan
+  "String.Join": linear_materialize
+Namespace:
+  System: declaration
+NonCallConstruct:
+  nameof: declaration
+  sizeof: declaration
+  typeof: declaration

@@ -697,7 +697,9 @@ pub(crate) fn ruby_vcall_identifier(
     node: TreeSitterNode<'_>,
     name: &str,
 ) -> bool {
-    normalizer.normalization_adapter.tracks_dynamic_local_scope()
+    normalizer
+        .normalization_adapter
+        .tracks_dynamic_local_scope()
         && normalizer.identifier_kind(node.kind())
         && !normalizer.assignment_lhs(node)
         && !ruby_definition_identifier(normalizer, node)
@@ -705,7 +707,8 @@ pub(crate) fn ruby_vcall_identifier(
 }
 
 pub(crate) fn ruby_local_name(normalizer: &TreeSitterNormalizer<'_>, name: &str) -> bool {
-    normalizer.local_stack
+    normalizer
+        .local_stack
         .iter()
         .rev()
         .any(|scope| scope.contains(name))
@@ -810,7 +813,10 @@ pub(crate) fn collect_identifier_names(
     }
 }
 
-pub(crate) fn ruby_scope_boundary(normalizer: &TreeSitterNormalizer<'_>, node: TreeSitterNode<'_>) -> bool {
+pub(crate) fn ruby_scope_boundary(
+    normalizer: &TreeSitterNormalizer<'_>,
+    node: TreeSitterNode<'_>,
+) -> bool {
     if matches!(node.kind(), "block" | "do_block")
         && node
             .parent()
@@ -827,11 +833,17 @@ pub(crate) fn ruby_scope_boundary(normalizer: &TreeSitterNormalizer<'_>, node: T
         || normalizer.module_node(node)
 }
 
-pub(crate) fn ruby_scope_child_boundary(normalizer: &TreeSitterNormalizer<'_>, node: TreeSitterNode<'_>) -> bool {
+pub(crate) fn ruby_scope_child_boundary(
+    normalizer: &TreeSitterNormalizer<'_>,
+    node: TreeSitterNode<'_>,
+) -> bool {
     ruby_scope_boundary(normalizer, node)
 }
 
-pub(crate) fn ruby_definition_identifier(normalizer: &TreeSitterNormalizer<'_>, node: TreeSitterNode<'_>) -> bool {
+pub(crate) fn ruby_definition_identifier(
+    normalizer: &TreeSitterNormalizer<'_>,
+    node: TreeSitterNode<'_>,
+) -> bool {
     let Some(parent) = normalizer.parent_node(node) else {
         return false;
     };
@@ -852,7 +864,10 @@ pub(crate) fn ruby_definition_identifier(normalizer: &TreeSitterNormalizer<'_>, 
     )
 }
 
-pub(crate) fn ruby_assignment_node(normalizer: &TreeSitterNormalizer<'_>, node: TreeSitterNode<'_>) -> bool {
+pub(crate) fn ruby_assignment_node(
+    normalizer: &TreeSitterNormalizer<'_>,
+    node: TreeSitterNode<'_>,
+) -> bool {
     if matches!(node.kind(), "assignment" | "operator_assignment") {
         return true;
     }
@@ -864,10 +879,7 @@ pub(crate) fn ruby_assignment_node(normalizer: &TreeSitterNormalizer<'_>, node: 
         return true;
     }
     let raw_named = normalizer.raw_named_children(node);
-    if node.kind() == "block_body"
-        && raw_named.len() == 1
-        && raw_named[0].kind() == "assignment"
-    {
+    if node.kind() == "block_body" && raw_named.len() == 1 && raw_named[0].kind() == "assignment" {
         return true;
     }
 
@@ -939,21 +951,29 @@ mod tests {
         assert!(adapter
             .elsif_parts(*elsif_node, "if a; 1; elsif b; 2; end")
             .is_some());
-        assert!(adapter.elsif_parts(node, "if a; 1; elsif b; 2; end").is_none());
+        assert!(adapter
+            .elsif_parts(node, "if a; 1; elsif b; 2; end")
+            .is_none());
 
         // variables
         let tree = raw_tree("@x = 1\n");
         let node = tree.root_node();
         let mut nodes = Vec::new();
         collect_all_nodes(node, &mut nodes);
-        let ivar_node = nodes.iter().find(|n| n.kind() == "instance_variable").unwrap();
+        let ivar_node = nodes
+            .iter()
+            .find(|n| n.kind() == "instance_variable")
+            .unwrap();
         assert!(adapter.instance_variable(*ivar_node, "@x = 1\n"));
 
         let tree = raw_tree("$x = 1\n");
         let node = tree.root_node();
         let mut nodes = Vec::new();
         collect_all_nodes(node, &mut nodes);
-        let gvar_node = nodes.iter().find(|n| n.kind() == "global_variable").unwrap();
+        let gvar_node = nodes
+            .iter()
+            .find(|n| n.kind() == "global_variable")
+            .unwrap();
         assert!(adapter.global_variable(*gvar_node, "$x = 1\n"));
 
         // dynamic matching
@@ -992,7 +1012,6 @@ mod tests {
         assert!(adapter.conditional_branch_skip_kind("elsif"));
         assert!(adapter.branch_child_skip_kind("elsif"));
 
-
         let tree = raw_tree("def foo; a; rescue StandardError, CustomError => e; nil; end\n");
         let mut nodes = Vec::new();
         collect_all_nodes(tree.root_node(), &mut nodes);
@@ -1003,14 +1022,25 @@ mod tests {
         assert!(!adapter
             .rescue_clause_exceptions(*rescue_node, src_text)
             .is_empty());
-        let exceptions_node = adapter.rescue_clause_exceptions_source(*rescue_node, src_text).unwrap();
-        assert_eq!(node_text(exceptions_node, src_text), "StandardError, CustomError");
-        let var_name_node = adapter.rescue_clause_exception_variable_name(*rescue_node).unwrap();
+        let exceptions_node = adapter
+            .rescue_clause_exceptions_source(*rescue_node, src_text)
+            .unwrap();
+        assert_eq!(
+            node_text(exceptions_node, src_text),
+            "StandardError, CustomError"
+        );
+        let var_name_node = adapter
+            .rescue_clause_exception_variable_name(*rescue_node)
+            .unwrap();
         assert_eq!(node_text(var_name_node, src_text), "e");
-        let var_source_node = adapter.rescue_clause_exception_variable_source(*rescue_node).unwrap();
+        let var_source_node = adapter
+            .rescue_clause_exception_variable_source(*rescue_node)
+            .unwrap();
         assert_eq!(node_text(var_source_node, src_text), "=> e");
         let body_statement_node = nodes.iter().find(|n| n.kind() == "body_statement").unwrap();
-        assert!(adapter.rescue_body_target(*body_statement_node, src_text).is_some());
+        assert!(adapter
+            .rescue_body_target(*body_statement_node, src_text)
+            .is_some());
 
         // ensure
         let tree_ensure = raw_tree("def foo; a; ensure; b; end");
@@ -1019,8 +1049,13 @@ mod tests {
         let ensure_node = nodes_ensure.iter().find(|n| n.kind() == "ensure").unwrap();
         assert!(adapter.ensure_clause_kind(*ensure_node));
         assert!(adapter.ensure_clause_statement(*ensure_node, "def foo; a; ensure; b; end"));
-        let body_statement_node = nodes_ensure.iter().find(|n| n.kind() == "body_statement").unwrap();
-        assert!(adapter.ensure_body_target(*body_statement_node, "def foo; a; ensure; b; end").is_some());
+        let body_statement_node = nodes_ensure
+            .iter()
+            .find(|n| n.kind() == "body_statement")
+            .unwrap();
+        assert!(adapter
+            .ensure_body_target(*body_statement_node, "def foo; a; ensure; b; end")
+            .is_some());
 
         // elsif statement
         let tree_elsif = raw_tree("if a; 1; elsif b; 2; end");
@@ -1028,7 +1063,9 @@ mod tests {
         collect_all_nodes(tree_elsif.root_node(), &mut nodes_elsif);
         let elsif_node = nodes_elsif.iter().find(|n| n.kind() == "elsif").unwrap();
         assert!(adapter.elsif_statement(*elsif_node, "if a; 1; elsif b; 2; end"));
-        let parts = adapter.elsif_parts(*elsif_node, "if a; 1; elsif b; 2; end").unwrap();
+        let parts = adapter
+            .elsif_parts(*elsif_node, "if a; 1; elsif b; 2; end")
+            .unwrap();
         assert_eq!(parts.condition.kind(), "identifier");
 
         // inline def receiver
@@ -1057,17 +1094,19 @@ mod tests {
         let mut nodes_var = Vec::new();
         collect_all_nodes(tree_var.root_node(), &mut nodes_var);
         let method_node = nodes_var.iter().find(|n| n.kind() == "method").unwrap();
-        
+
         let mut locals_set = BTreeSet::new();
         collect_ruby_scope_locals(&normalizer, *method_node, &mut locals_set, false);
         assert!(locals_set.is_empty());
 
         assert!(!ruby_definition_identifier(&normalizer, *method_node));
         // cover parent None
-        assert!(!ruby_definition_identifier(&normalizer, tree_var.root_node()));
+        assert!(!ruby_definition_identifier(
+            &normalizer,
+            tree_var.root_node()
+        ));
 
         // cover ruby_definition_identifier method name child fallback
-
 
         let tree_pat = raw_tree("case 1; in 1; end");
         let mut nodes_pat = Vec::new();
@@ -1083,7 +1122,12 @@ mod tests {
         let mut nodes_call = Vec::new();
         collect_all_nodes(tree_call.root_node(), &mut nodes_call);
         let call_node = nodes_call.iter().find(|n| n.kind() == "call").unwrap();
-        assert_eq!(adapter.inline_def_function_text_source(*call_node, "foo()").kind(), "identifier");
+        assert_eq!(
+            adapter
+                .inline_def_function_text_source(*call_node, "foo()")
+                .kind(),
+            "identifier"
+        );
 
         // super(a) and super text fallback
         assert!(adapter.super_statement(*call_node, "super"));
@@ -1093,7 +1137,10 @@ mod tests {
         let tree_case_arg = raw_tree("foo case x; when 1; end");
         let mut nodes_case_arg = Vec::new();
         collect_all_nodes(tree_case_arg.root_node(), &mut nodes_case_arg);
-        let case_arg_node = nodes_case_arg.iter().find(|n| n.kind() == "argument_list").unwrap();
+        let case_arg_node = nodes_case_arg
+            .iter()
+            .find(|n| n.kind() == "argument_list")
+            .unwrap();
         assert!(adapter.case_argument_list(*case_arg_node, "foo case x; when 1; end"));
 
         // heredoc helper mock text slice coverage
@@ -1101,7 +1148,10 @@ mod tests {
         let mut nodes_heredoc = Vec::new();
         let tree_heredoc = raw_tree("<<EOF\nhello\nEOF");
         collect_all_nodes(tree_heredoc.root_node(), &mut nodes_heredoc);
-        let heredoc_start = nodes_heredoc.iter().find(|n| n.kind() == "heredoc_beginning").unwrap();
+        let heredoc_start = nodes_heredoc
+            .iter()
+            .find(|n| n.kind() == "heredoc_beginning")
+            .unwrap();
         assert!(adapter.heredoc_literal_argument(*call_node, "<<EOF", &[]));
         assert!(adapter.heredoc_literal_argument(*call_node, "<<EOF", &[*heredoc_start]));
         // heredoc_call_for_body nested return false coverage

@@ -1,43 +1,13 @@
 # frozen_string_literal: true
 
-require "yaml"
 require_relative "symbolic_complexity"
 require "set"
 
 module Espalier
   class BigOAnalyzer
-    STDLIB_RETURN_TYPES = {
-      "Array" => {
-        "compact" => "Array",
-        "filter_map" => "Array",
-        "flatten" => "Array",
-        "map" => "Array",
-        "reject" => "Array",
-        "select" => "Array",
-        "sort" => "Array",
-        "sort_by" => "Array",
-        "to_a" => "Array"
-      },
-      "Hash" => {
-        "keys" => "Array",
-        "map" => "Array",
-        "sort" => "Array",
-        "sort_by" => "Array",
-        "to_a" => "Array",
-        "values" => "Array"
-      },
-      "Set" => {
-        "map" => "Array",
-        "sort" => "Array",
-        "sort_by" => "Array",
-        "to_a" => "Array"
-      }
-    }.freeze
+    attr_reader :nil_kill_evidence
 
-    attr_reader :registry, :nil_kill_evidence
-
-    def initialize(language: :ruby, nil_kill_evidence: {}, class_name: nil, ivar_types: {}, nil_kill: nil, local_types: {}, declared_fields: {})
-      @language = language
+    def initialize(language: nil, nil_kill_evidence: {}, class_name: nil, ivar_types: {}, nil_kill: nil, local_types: {}, declared_fields: {})
       @nil_kill_evidence = nil_kill_evidence
       @class_name = class_name
       @ivar_types = ivar_types || {}
@@ -46,13 +16,6 @@ module Espalier
       @declared_fields = declared_fields.each_with_object({}) do |(owner, fields), index|
         index[clean_type_name(owner)] = Set.new(Array(fields).map { |field| field.to_s.delete_prefix("@") })
       end
-      @registry = load_registry(language)
-    end
-
-    def load_registry(language)
-      path = File.join(__dir__, "stdlib_complexity_#{language}.yml")
-      return {} unless File.exist?(path)
-      YAML.load_file(path) || {}
     end
 
     # Prototypical analyzer for a method.
@@ -69,7 +32,17 @@ module Espalier
       is_dynamic = false
       trigger = nil
       unknown_operations = []
+      unknown_operation_evidence = Hash.new do |operations, operation|
+        operations[operation] = {
+          "occurrences" => 0,
+          "typed_unmodeled_occurrences" => 0,
+          "evidence_gaps" => Hash.new(0)
+        }
+      end
       warnings = []
+      evidence_gaps = []
+      bound_qualities = []
+      complexity_assumptions = []
 
       # Lower bound calculation
       # For a prototype, we just scan for the most complex operation in the flat AST.
@@ -83,6 +56,9 @@ module Espalier
           next if node[:internal_call]
 
           if node[:known_time_complexity]
+            bound_qualities << node[:complexity_bound_quality] if node[:complexity_bound_quality]
+            bound_qualities.concat(Array(node[:complexity_bound_qualities]))
+            complexity_assumptions.concat(Array(node[:complexity_assumptions]))
             known_complexity = node[:known_time_complexity].to_s
             if node[:symbolic_time]
               symbolic_time = Espalier::SymbolicComplexity.sum(symbolic_time, node[:symbolic_time])
@@ -97,34 +73,24 @@ module Espalier
             next
           end
 
-          receiver_type = resolve_type(node[:receiver], node[:line])
           method_called = node[:method].to_s
+          receiver_type = resolve_type(node[:receiver], node[:line])
 
-          if receiver_type
-            known_complexity = @registry.dig(receiver_type, method_called)
-            if known_complexity
-              known_complexity = multiply_complexity(known_complexity, node[:execution_complexity]) if node[:execution_complexity]
-              # If it's sequential, we just take the max of what we've seen so far.
-              complexity = max_complexity(complexity, known_complexity)
-            elsif (chained_complexity = flattened_chain_complexity(node, ast_nodes))
-              chained_complexity = multiply_complexity(chained_complexity, node[:execution_complexity]) if node[:execution_complexity]
-              complexity = max_complexity(complexity, chained_complexity)
-            elsif declared_field?(receiver_type, method_called) || state_accessor_return_type(receiver_type, method_called)
-              complexity = max_complexity(complexity, "O(1)")
-            else
-              unknown_operations << "#{receiver_type}##{method_called}"
-              time_complete = false
-              space_complete = false
-              warnings << "Missing method complexity for `#{receiver_type}##{method_called}` in stdlib_complexity_ruby.yml at line #{node[:line]}."
-              if Array(node[:collection_arguments]).any? && !node[:internal_call]
-                warnings << unknown_collection_call_warning(node, method_called)
-              end
-            end
+          if receiver_type && (declared_field?(receiver_type, method_called) || state_accessor_return_type(receiver_type, method_called))
+            complexity = max_complexity(complexity, "O(1)")
           else
-            unknown_operations << "#{node[:receiver]}.#{method_called}"
+            operation = receiver_type ? "#{receiver_type}##{method_called}" : "#{node[:receiver]}.#{method_called}"
+            unknown_operations << operation
             time_complete = false
             space_complete = false
-            warnings << "Unknown receiver type for `#{node[:receiver]}` at line #{node[:line]}. Defaulting to O(1) for `.#{method_called}`, but this could be worse."
+            operation_gaps = Array(node[:evidence_gaps] || node[:evidence_gap]).map(&:to_s).reject(&:empty?)
+            operation_gaps = ["unmodeled_operation"] if operation_gaps.empty?
+            evidence_gaps.concat(operation_gaps)
+            operation_evidence = unknown_operation_evidence[operation]
+            operation_evidence["occurrences"] += 1
+            operation_evidence["typed_unmodeled_occurrences"] += 1 if operation_gaps == ["unmodeled_typed_operation"]
+            operation_gaps.each { |gap| operation_evidence["evidence_gaps"][gap] += 1 }
+            warnings << "Fact-Mine did not provide a normalized complexity fact for `#{operation}` at line #{node[:line]}."
             if Array(node[:collection_arguments]).any?
               warnings << unknown_collection_call_warning(node, method_called)
             end
@@ -136,6 +102,9 @@ module Espalier
           complexity = max_complexity(complexity, "O(N)")
           is_dynamic = true
         elsif node[:type] == :structural
+          bound_qualities << node[:complexity_bound_quality] if node[:complexity_bound_quality]
+          bound_qualities.concat(Array(node[:complexity_bound_qualities]))
+          complexity_assumptions.concat(Array(node[:complexity_assumptions]))
           structural_complexity = node[:complexity].to_s
           if node[:symbolic_time]
             symbolic_time = Espalier::SymbolicComplexity.sum(symbolic_time, node[:symbolic_time])
@@ -146,6 +115,7 @@ module Espalier
           end
           time_complete = false if node[:time_complete] == false
           space_complete = false if node[:space_complete] == false
+          evidence_gaps.concat(Array(node[:evidence_gaps] || node[:evidence_gap])) if node[:time_complete] == false || node[:space_complete] == false || structural_complexity == "unknown"
           if structural_complexity == "unknown"
             time_complete = false
           else
@@ -166,6 +136,7 @@ module Espalier
         elsif node[:type] == :callback || node[:type] == :yield
           time_complete = false
           space_complete = false
+          evidence_gaps << "callback_dispatch"
           warnings << "Function pointer / callback executed at line #{node[:line]}. This could execute arbitrary O(N^x) code, meaning our calculation is strictly a LOWER BOUND."
         end
       end
@@ -183,6 +154,12 @@ module Espalier
         is_dynamic: is_dynamic,
         trigger: trigger,
         unknown_operations: unknown_operations.uniq,
+        unknown_operation_evidence: unknown_operation_evidence.transform_values do |entry|
+          entry.merge("evidence_gaps" => entry.fetch("evidence_gaps").sort.to_h)
+        end,
+        evidence_gaps: evidence_gaps.compact.uniq.sort,
+        bound_qualities: bound_qualities.compact.uniq.sort,
+        complexity_assumptions: complexity_assumptions.compact.uniq.sort,
         warnings: warnings.uniq
       }
     ensure
@@ -332,9 +309,6 @@ module Espalier
         return state_type if state_type
       end
 
-      stdlib_type = STDLIB_RETURN_TYPES.dig(class_name, method_name)
-      return clean_type_name(stdlib_type) if stdlib_type
-
       nil
     end
 
@@ -347,26 +321,6 @@ module Espalier
     def declared_field?(class_name, method_name)
       fields = @declared_fields[clean_type_name(class_name)]
       fields&.include?(method_name.to_s.delete_prefix("@"))
-    end
-
-    def flattened_chain_complexity(node, ast_nodes)
-      receiver = node[:receiver].to_s
-      method_called = node[:method].to_s
-      line = node[:line]
-
-      Array(ast_nodes).each do |candidate|
-        next unless candidate[:type] == :call
-        next unless candidate[:receiver].to_s == receiver
-        next unless candidate[:line] == line
-        accessor = candidate[:method].to_s
-        next if accessor == method_called
-
-        chained_type = resolve_type("#{receiver}.#{accessor}", line)
-        known_complexity = @registry.dig(chained_type, method_called)
-        return known_complexity if known_complexity
-      end
-
-      nil
     end
 
     def max_complexity(current, added)
@@ -459,12 +413,17 @@ module Espalier
     end
 
     def space_complexity_rank(space)
-      case space.to_s
-      when "O(N)" then 10
-      when "O(log N)" then 5
-      when "O(1)" then 1
-      else 1
-      end
+      return 1 if space.nil? || space == "O(1)" || space == "unknown"
+      return 5 if space == "O(log N)"
+
+      rank = Espalier::SymbolicComplexity.rank_string(space)
+      return 1 if rank.negative?
+
+      # Keep the complete symbolic polynomial for space. A local collection
+      # grown under two independent input loops is O(N*M), and treating every
+      # non-O(N) spelling as constant would discard the fact Fact-Mine just
+      # proved.
+      (rank * 10).ceil
     end
   end
 end

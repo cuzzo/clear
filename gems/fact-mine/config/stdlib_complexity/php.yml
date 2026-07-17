@@ -1,0 +1,55 @@
+# PHP core functions cannot be redefined in normal application code. Map only
+# documented array/string operations with a receiver-independent bound; never
+# framework helpers or `Countable` dispatch with similar names.
+Intrinsic:
+  abs: constant
+  array_chunk: linear_materialize
+  in_array: linear_scan
+  array_search: linear_scan
+  array_map: linear_materialize
+  array_filter: linear_materialize
+  array_key_exists: constant
+  array_reverse: linear_materialize
+  array_values: linear_materialize
+  array_keys: linear_materialize
+  array_merge: linear_materialize
+  array_unique: linear_materialize
+  sort: sort
+  asort: sort
+  ksort: sort
+  base64_decode: linear_materialize
+  bin2hex: linear_materialize
+  ceil: constant
+  decbin: linear_materialize
+  dechex: linear_materialize
+  hex2bin: linear_materialize
+  hexdec: linear_scan
+  implode: linear_materialize
+  is_array: constant
+  is_float: constant
+  is_int: constant
+  is_numeric: linear_scan
+  is_string: constant
+  max: linear_scan
+  pack: linear_materialize
+  preg_quote: linear_materialize
+  round: constant
+  sprintf: linear_materialize
+  strlen: constant
+  str_contains: linear_scan
+  str_pad: linear_materialize
+  str_repeat: linear_materialize
+  str_replace: pairwise
+  str_starts_with: linear_scan
+  strcmp: linear_scan
+  strtolower: linear_materialize
+  strtoupper: linear_materialize
+  strpos: linear_scan
+  strrpos: linear_scan
+  explode: linear_materialize
+  substr: linear_materialize
+  substr_replace: linear_materialize
+  trim: linear_materialize
+  ltrim: linear_materialize
+  rtrim: linear_materialize
+  unpack: linear_materialize

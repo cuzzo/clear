@@ -1,5 +1,6 @@
 use super::{
     normalized_behavior, parser_grammar::grammar_for_language, passes, Document, Language,
+    SymbolScope,
 };
 use crate::ast::normalize_tree;
 use anyhow::{Context, Result};
@@ -40,7 +41,29 @@ fn parse_normalized_file(
     total_started: Instant,
 ) -> Result<Document> {
     let started = Instant::now();
+    let raw_call_spans =
+        crate::ast::raw_call_spans(parsed.tree.root_node(), &parsed.source, language);
     let normalized_root = normalize_tree(parsed.tree.root_node(), &parsed.source, language);
+    let (mut namespace, mut explicit_imports) =
+        crate::ast::symbol_scope(parsed.tree.root_node(), &parsed.source, language);
+    let declaration_namespaces =
+        crate::ast::declaration_namespaces(parsed.tree.root_node(), &parsed.source, language);
+    let preprocessor_callables =
+        crate::ast::preprocessor_callable_names(parsed.tree.root_node(), &parsed.source, language);
+    if language == Language::Go && !namespace.is_empty() {
+        let directory = parsed
+            .file
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_string_lossy();
+        namespace = format!("{directory}::{namespace}");
+    }
+    if language == Language::Python {
+        namespace = python_module_namespace(&parsed.file);
+        for (_, target) in &mut explicit_imports {
+            *target = canonical_python_import(&parsed.file, &namespace, target);
+        }
+    }
     profile_parse_phase(profile, file_label, "normalized_root", started.elapsed());
 
     let lines = parsed
@@ -71,9 +94,23 @@ fn parse_normalized_file(
         file: parsed.file.to_string_lossy().to_string(),
         language,
         source_digest: format!("sha256:{:x}", Sha256::digest(parsed.source.as_bytes())),
+        raw_call_spans,
+        symbol_scope: SymbolScope {
+            canonical: matches!(
+                language,
+                Language::Java | Language::Go | Language::CSharp | Language::Cpp | Language::Python
+            ),
+            unqualified_types_use_current_namespace:
+                crate::ast::unqualified_types_use_current_namespace(language),
+            namespace,
+            explicit_imports: explicit_imports.into_iter().collect(),
+            preprocessor_callables: preprocessor_callables.into_iter().collect(),
+            declaration_namespaces: declaration_namespaces.into_iter().collect(),
+        },
         function_defs: facts.function_defs,
         owner_defs: facts.owner_defs,
         call_sites: facts.call_sites,
+        call_receiver_projections: facts.call_receiver_projections,
         state_declarations: facts.state_declarations,
         state_reads: facts.state_reads,
         state_writes: facts.state_writes,
@@ -107,6 +144,7 @@ fn parse_normalized_file(
         type_aliases: metadata.syntax.type_aliases,
         type_alias_lines: metadata.syntax.type_alias_lines,
         method_param_types: metadata.syntax.method_param_types,
+        method_local_types: metadata.syntax.method_local_types,
         state_param_origins: Vec::new(),
     };
     profile_parse_phase(
@@ -116,6 +154,54 @@ fn parse_normalized_file(
         total_started.elapsed(),
     );
     Ok(document)
+}
+
+fn python_module_namespace(file: &std::path::Path) -> String {
+    let mut package = Vec::new();
+    let mut directory = file.parent();
+    while let Some(current) = directory {
+        if !current.join("__init__.py").is_file() {
+            break;
+        }
+        let Some(name) = current.file_name().and_then(|name| name.to_str()) else {
+            break;
+        };
+        package.push(name.to_string());
+        directory = current.parent();
+    }
+    package.reverse();
+    let stem = file
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default();
+    if stem != "__init__" && !stem.is_empty() {
+        package.push(stem.to_string());
+    }
+    package.join(".")
+}
+
+fn canonical_python_import(file: &std::path::Path, namespace: &str, target: &str) -> String {
+    let dots = target
+        .chars()
+        .take_while(|character| *character == '.')
+        .count();
+    if dots == 0 {
+        return target.to_string();
+    }
+    let mut package = namespace.split('.').map(str::to_string).collect::<Vec<_>>();
+    if file.file_stem().and_then(|stem| stem.to_str()) != Some("__init__") {
+        package.pop();
+    }
+    for _ in 1..dots {
+        package.pop();
+    }
+    package.extend(
+        target[dots..]
+            .split('.')
+            .filter(|part| !part.is_empty())
+            .map(str::to_string),
+    );
+    package.join(".")
 }
 
 fn rust_profile_enabled() -> bool {

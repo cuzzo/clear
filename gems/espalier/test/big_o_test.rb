@@ -1,10 +1,41 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
+require "json"
 require_relative "../lib/espalier/big_o_analyzer"
 require_relative "../lib/espalier/structural_big_o"
 
 class BigOTest < Minitest::Test
+  def test_symbolic_complexity_renders_callback_cost_as_a_distinct_parameter
+    expression = Espalier::SymbolicComplexity.parameterized_cost(
+      id: "cost:call-1",
+      name: "predicate.apply",
+      source_kind: "callback_cost",
+      multiplicity_domain: "param:items",
+      domains: [{
+        "id" => "param:items", "name" => "items", "source_kind" => "parameter"
+      }]
+    )
+
+    rendered, variables = Espalier::SymbolicComplexity.render(expression)
+    assert_equal "O(N*C)", rendered
+    assert_equal ["parameter", "callback_cost"], variables.map { |row| row[:source_kind] }
+  end
+
+  def test_language_neutral_nested_independent_domains_render_a_product
+    fixture = JSON.parse(File.read(File.join(__dir__, "fixtures", "big_o", "nested_independent_domains.json")))
+    consumer = Espalier::StructuralBigO.new(
+      facts_by_method: { "matrix-fill" => [fixture] }
+    )
+
+    hint = consumer.hints_for(nil, { id: "matrix-fill", name: "fill", line: 1 }, "Matrix").first
+    assert_equal "O(N*M)", hint.fetch(:complexity)
+    assert hint.fetch(:time_complete)
+    assert_equal %w[rows columns], hint.fetch(:symbolic_time).then { |expression|
+      Espalier::SymbolicComplexity.render(expression).last.map { |variable| variable[:name] }
+    }
+  end
+
   def test_complexity_arithmetic_and_ranking
     analyzer = Espalier::BigOAnalyzer.new
     assert_equal "O(N)", analyzer.send(:multiply_complexity, "O(1)", "O(N)")
@@ -26,7 +57,7 @@ class BigOTest < Minitest::Test
     expected.each { |value, rank| assert_equal rank, analyzer.send(:complexity_rank, value) }
   end
 
-  def test_type_resolution_and_chained_stdlib_calls
+  def test_type_resolution_and_fact_mine_normalized_operations
     nil_kill = Object.new
     def nil_kill.method_signatures
       {
@@ -57,15 +88,20 @@ class BigOTest < Minitest::Test
     assert_equal "Array", analyzer.send(:resolve_type, "cfg.blocks", 1)
 
     result = analyzer.analyze_method("sort", [
-      { type: :call, receiver: "cfg", method: "blocks", line: 2 },
-      { type: :call, receiver: "cfg", method: "sort_by", line: 2 }
+      { type: :call, receiver: "cfg", method: "blocks", line: 2,
+        known_time_complexity: "O(1)", known_space_complexity: "O(1)" },
+      { type: :call, receiver: "cfg", method: "sort_by", line: 2,
+        known_time_complexity: "O(N log N)", known_space_complexity: "O(N)" }
     ])
     assert_equal "O(N log N)", result[:lower_bound_complexity]
-    refute_includes result[:unknown_operations], "FunctionCFG#sort_by"
+    assert result[:time_complete]
+    assert result[:space_complete]
 
     chain = analyzer.analyze_method("join", [
-      { type: :call, receiver: "values", method: "map", line: 3 },
-      { type: :call, receiver: "values", method: "join", line: 3 }
+      { type: :call, receiver: "values", method: "map", line: 3,
+        known_time_complexity: "O(N)", known_space_complexity: "O(N)" },
+      { type: :call, receiver: "values", method: "join", line: 3,
+        known_time_complexity: "O(N)", known_space_complexity: "O(N)" }
     ])
     assert_equal "O(N)", chain[:lower_bound_complexity]
   end
@@ -106,8 +142,8 @@ class BigOTest < Minitest::Test
   def test_unknown_and_known_receiver_warnings
     analyzer = Espalier::BigOAnalyzer.new(class_name: "Owner", ivar_types: { "@thing" => "Widget" })
     result = analyzer.analyze_method("unknowns", [
-      { type: :call, receiver: "thing", method: "work", line: 1 },
-      { type: :call, receiver: "mystery", method: "work", line: 2 },
+      { type: :call, receiver: "thing", method: "work", line: 1, evidence_gap: "unmodeled_typed_operation" },
+      { type: :call, receiver: "mystery", method: "work", line: 2, evidence_gap: "unresolved_receiver_type" },
       { type: :yield, line: 3 }
     ])
     assert_includes result[:unknown_operations], "Widget#work"
@@ -117,6 +153,9 @@ class BigOTest < Minitest::Test
     refute result[:time_complete]
     refute result[:space_complete]
     assert_equal 3, result[:warnings].size
+    assert_equal 1, result.dig(:unknown_operation_evidence, "Widget#work", "typed_unmodeled_occurrences")
+    assert_equal({ "unmodeled_typed_operation" => 1 }, result.dig(:unknown_operation_evidence, "Widget#work", "evidence_gaps"))
+    assert_equal({ "unresolved_receiver_type" => 1 }, result.dig(:unknown_operation_evidence, "mystery.work", "evidence_gaps"))
   end
 
   def test_declared_struct_fields_are_constant_without_hiding_methods
@@ -215,10 +254,10 @@ class BigOTest < Minitest::Test
     assert_equal "O(1)", consumer.send(:multiply, "O(1)", "O(1)")
     assert_equal "O(N^3 log N)", consumer.send(:multiply, "O(N^2 log N)", "O(N)")
     assert_equal "unknown", consumer.send(:multiply, "unknown", "O(N)")
-    assert_nil consumer.send(:allocation_complexity, [])
-    assert_equal "unknown", consumer.send(:allocation_complexity, [{ "cardinality_relation" => "unknown" }])
-    assert_equal "O(N)", consumer.send(:allocation_complexity, [{ "bound_classification" => "input" }])
-    assert_equal "O(1)", consumer.send(:allocation_complexity, [{ "bound_classification" => "fixed" }])
+    assert_equal [nil, nil], consumer.send(:allocation_complexity, [], [])
+    assert_equal ["unknown", nil], consumer.send(:allocation_complexity, [{ "cardinality_relation" => "unknown" }], [])
+    assert_equal ["O(N)", nil], consumer.send(:allocation_complexity, [{ "bound_classification" => "input" }], [])
+    assert_equal ["O(1)", nil], consumer.send(:allocation_complexity, [{ "bound_classification" => "fixed" }], [])
     assert_equal "O(N)", consumer.send(:max_space_complexity, nil, "O(N)")
     assert_equal "O(N)", consumer.send(:max_space_complexity, "O(N)", nil)
     assert_equal "unknown", consumer.send(:max_space_complexity, "unknown", "O(N)")
@@ -226,9 +265,12 @@ class BigOTest < Minitest::Test
     assert_equal "O(N)", consumer.send(:propagated_call_complexity, {
       "execution_multiplicity" => "O(N)", "argument_cardinality_relation" => "partition_of"
     }, "O(N)")
-    assert_equal "unknown", consumer.send(:propagated_call_complexity, {
+    assert_equal "O(N^2)", consumer.send(:propagated_call_complexity, {
       "execution_multiplicity" => "O(N)", "argument_cardinality_relation" => "unknown"
     }, "O(N)")
+    assert_equal "O(N)", consumer.send(:propagated_call_complexity, {
+      "execution_multiplicity" => "O(N)", "argument_cardinality_relation" => "unknown"
+    }, "O(1)")
 
     recursive_consumer = Espalier::StructuralBigO.new(
       facts_by_method: facts,
@@ -415,6 +457,15 @@ class BigOTest < Minitest::Test
     assert_equal "O(1)", propagated[:space]
     assert propagated[:time_complete]
     assert propagated[:space_complete]
+    assert_same hints, consumer.hints_for(nil, { name: "run", line: 2 }, "Caller")
+
+    consumer.apply_summary_delta!(nil, "Target", "work", {
+      time: "O(N^2)", space: "O(1)", time_complete: true, space_complete: true,
+      symbolic_time: nil, bound_qualities: [], assumptions: []
+    })
+    changed_hints = consumer.hints_for(nil, { name: "run", line: 2 }, "Caller")
+    refute_same hints, changed_hints
+    assert_equal "O(N^2)", changed_hints.find { |hint| hint[:operation] == "work" }[:complexity]
 
     recursive = Espalier::StructuralBigO.new(
       facts_by_method: facts,
@@ -423,10 +474,12 @@ class BigOTest < Minitest::Test
       resolved_recursive_edges: { ["Caller", "run", "Target", "work"] => true }
     ).hints_for(nil, { name: "run", line: 2 }, "Caller")
       .find { |hint| hint[:operation] == "work" }
-    assert_equal "unknown", recursive[:complexity]
-    assert_equal "unknown", recursive[:space]
-    refute recursive[:time_complete]
-    refute recursive[:space_complete]
+    assert_equal "O(2^N)", recursive[:complexity]
+    assert_equal "O(N)", recursive[:space]
+    assert recursive[:time_complete]
+    assert recursive[:space_complete]
+    assert_equal "upper_bound_acyclic_project_scc", recursive[:complexity_bound_quality]
+    assert recursive[:complexity_assumptions].first.include?("finite and acyclic")
   end
 
   def test_remaining_complexity_lattice_and_type_resolution_paths
@@ -444,6 +497,7 @@ class BigOTest < Minitest::Test
     assert_equal "O(N^5 log N)", analyzer.send(:multiply_complexity, "O(N^2 log N)", "O(N^3 log N)")
     assert_equal "O(N^2 log N)", analyzer.send(:multiply_complexity, "O(N log N)", "O(N log N)")
     assert_equal 10, analyzer.send(:space_complexity_rank, "O(N)")
+    assert_equal 20, analyzer.send(:space_complexity_rank, "O(N*M)")
     assert_equal 1, analyzer.send(:space_complexity_rank, "unknown")
   end
 
@@ -451,7 +505,8 @@ class BigOTest < Minitest::Test
     analyzer = Espalier::BigOAnalyzer.new(local_types: { "items" => "Array" })
     result = analyzer.analyze_method("repeated_sort", [{
       type: :call, receiver: "items", method: "sort", line: 4,
-      execution_complexity: "O(N)"
+      execution_complexity: "O(N)", known_time_complexity: "O(N log N)",
+      known_space_complexity: "O(N)"
     }])
     assert_equal "O(N^2 log N)", result[:lower_bound_complexity]
   end
@@ -486,5 +541,45 @@ class BigOTest < Minitest::Test
       execution_complexity: "O(N)", collection_arguments: ["items"]
     }])
     assert_equal "unknown", unresolved[:lower_bound_complexity]
+  end
+
+  def test_fact_mine_evidence_gaps_are_preserved_without_language_fallbacks
+    analyzer = Espalier::BigOAnalyzer.new
+    result = analyzer.analyze_method("partial", [{
+      type: :call,
+      receiver: "items",
+      method: "custom_scan",
+      line: 8,
+      evidence_gap: "unmodeled_typed_operation"
+    }])
+
+    assert_equal "unknown", result[:lower_bound_complexity]
+    assert_equal ["unmodeled_typed_operation"], result[:evidence_gaps]
+    assert result[:warnings].first.include?("Fact-Mine did not provide")
+  end
+
+  def test_symbolic_collection_growth_preserves_all_input_domains_for_space
+    rows = [
+      { "id" => "param:Build:rows", "name" => "rows", "source_kind" => "parameter" },
+      { "id" => "param:Build:columns", "name" => "columns", "source_kind" => "parameter" }
+    ]
+    fact = {
+      "line" => 1, "parameters" => %w[rows columns], "iterations" => [],
+      "recursion" => { "calls" => 0 }, "size_domains" => rows,
+      "allocations" => [{
+        "line" => 4, "kind" => "collection_growth", "cardinality_relation" => "same",
+        "bound_classification" => "input", "symbolic_size" => {
+          "factors" => [
+            { "domain_id" => "param:Build:rows", "exponent" => 1 },
+            { "domain_id" => "param:Build:columns", "exponent" => 1 }
+          ], "complete" => true
+        }
+      }]
+    }
+    hint = Espalier::StructuralBigO.new(facts_by_method: { "build" => [fact] })
+      .hints_for(nil, { id: "build", name: "build", line: 1 }, "Build").first
+
+    assert_equal "O(N*M)", hint[:space]
+    assert_equal %w[columns rows], Espalier::SymbolicComplexity.render(hint[:symbolic_space]).last.map { |value| value[:name] }
   end
 end

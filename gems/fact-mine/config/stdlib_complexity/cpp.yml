@@ -1,0 +1,58 @@
+Array:
+  at: constant
+  back: constant
+  data: constant
+  front: constant
+  size: constant
+  empty: constant
+  push_back: linear_materialize
+  pop_back: constant
+  find: linear_scan
+  begin: constant
+  end: constant
+  sort: sort
+Hash:
+  at: constant
+  find: linear_scan
+  contains: linear_scan
+  size: constant
+  empty: constant
+Set:
+  find: linear_scan
+  contains: linear_scan
+  size: constant
+  empty: constant
+String:
+  c_str: constant
+  compare: linear_scan
+  data: constant
+  ends_with: linear_scan
+  length: constant
+  size: constant
+  empty: constant
+  find: linear_scan
+  starts_with: linear_scan
+  substr: linear_materialize
+Namespace:
+  std: declaration
+Intrinsic:
+  # These free functions are modeled only after a SCIP symbol proves `std`
+  # ownership. Their standard semantics do not execute user callbacks.
+  std.move: constant
+  std.forward: constant
+  std.addressof: constant
+  std.get: constant
+  std.as_const: constant
+  std.launder: constant
+  assert: declaration
+  malloc: declaration
+  calloc: declaration
+  realloc: declaration
+  free: declaration
+  puts: declaration
+  strlen: linear_scan
+NonCallPrefix:
+  "static_cast<": declaration
+  "reinterpret_cast<": declaration
+  "const_cast<": declaration
+  "dynamic_cast<": declaration

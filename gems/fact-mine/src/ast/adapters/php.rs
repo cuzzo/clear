@@ -83,7 +83,14 @@ impl AstNormalizationAdapter for PhpAstAdapter {
         }
         let field = php_member_name(node)?;
         let field = php_identifier_text(node_text(field, source));
-        (!field.is_empty()).then_some(format!("$this->{field}"))
+        // Keep the source spelling language-specific, but expose the same
+        // owner-relative field name as every other instance-state adapter.
+        // `$this->options` is not a process-global variable.
+        (!field.is_empty()).then_some(field)
+    }
+
+    fn dynamic_instance_variable_text(&self, text: &str) -> bool {
+        php_this_property(text).is_some()
     }
 
     fn class_node(&self, node: TreeSitterNode<'_>) -> bool {
@@ -194,6 +201,15 @@ fn php_member_name<'tree>(node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<
 
 fn php_identifier_text(text: &str) -> String {
     text.trim().trim_start_matches('$').to_string()
+}
+
+fn php_this_property(text: &str) -> Option<&str> {
+    let field = text.trim().strip_prefix("$this->")?;
+    (!field.is_empty()
+        && field
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric()))
+    .then_some(field)
 }
 
 fn php_constant_identifier(text: &str) -> bool {

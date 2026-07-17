@@ -47,6 +47,12 @@ class BigOGoldenTest < Minitest::Test
         assert_equal expected, actual_space.dig(file, name, key), "space #{file}:#{name}"
       end
     end
+    JSON.parse(File.read(File.join(FIXTURE_ROOT, "partial_oracle.json"))).each do |file, functions|
+      functions.each do |name, expected|
+        assert_equal expected.fetch("time"), actual.dig(file, name, :known), "partial time #{file}:#{name}"
+        assert_equal expected.fetch("space"), actual_space.dig(file, name, :known), "partial space #{file}:#{name}"
+      end
+    end
     cartesian_variables = actual.dig("ruby_product.rb", "cartesian_product", :variables)
     assert_equal %w[N M], cartesian_variables.map { |variable| variable[:symbol] }
     assert_equal %w[xs ys], cartesian_variables.map { |variable| variable[:name] }

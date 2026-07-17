@@ -23,15 +23,120 @@ macro_rules! eprintln {
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 
 use super::normalized_behavior::{
-    eliminable_guard_from_call, matching_paren_index, BlockCallSemantics, CardinalityCallSemantics,
-    CollectionAllocationSemantics, NormalizedCallParts, NormalizedCallProjection,
-    NormalizedCallComplexity, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
-    NormalizedVisibilityEvent, SyntaxMetadata,
+    configured_collection_operation, configured_external_latency_bound,
+    configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
+    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
+    configured_stdlib_call_identity, eliminable_guard_from_call, matching_paren_index,
+    method_parameter_type_key, BlockCallSemantics, CardinalityCallSemantics,
+    CollectionAllocationSemantics, NormalizedCallComplexity, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedCollectionOperation, NormalizedLanguageBehavior,
+    NormalizedNilGuardFact, NormalizedSemanticEffect, NormalizedVisibilityEvent, SyntaxMetadata,
 };
-use super::{CallSite, FunctionDef, StateDeclaration};
+use super::{CallSite, ExternalCallComplexity, FunctionDef, StateDeclaration};
 use crate::ast::{self, Node, Span};
 use crate::type_inference::TypeExpr;
 use std::collections::{BTreeMap, BTreeSet};
+
+fn scip_ruby_descriptor(symbol: &str) -> Option<&str> {
+    let rest = symbol.strip_prefix("scip-ruby gem ")?;
+    let mut fields = rest.splitn(3, ' ');
+    fields.next()?; // gem name
+    fields.next()?; // gem version
+    fields.next()
+}
+
+fn ruby_descriptor_owner(descriptor: &str) -> Option<String> {
+    let owner = descriptor.split_once('#')?.0.trim_matches('`');
+    let owner = owner
+        .strip_prefix("<Class:")
+        .and_then(|owner| owner.strip_suffix('>'))
+        .unwrap_or(owner);
+    if owner.starts_with("Proc")
+        && owner[4..]
+            .chars()
+            .all(|character| character.is_ascii_digit())
+    {
+        Some("Proc".to_string())
+    } else {
+        Some(owner.to_string())
+    }
+}
+
+fn ruby_stdlib_descriptor(descriptor: &str, message: &str) -> bool {
+    ruby_descriptor_owner(descriptor)
+        .is_some_and(|owner| configured_stdlib_call_identity("ruby", Some(&owner), None, message))
+}
+
+pub(crate) fn external_symbol_call_complexity(
+    symbol: &str,
+    message: &str,
+) -> Option<ExternalCallComplexity> {
+    let descriptor = scip_ruby_descriptor(symbol)?;
+    if !ruby_stdlib_descriptor(descriptor, message)
+        || configured_semantic_symbol_parametric_cost("ruby", descriptor).is_some()
+    {
+        return None;
+    }
+    let owner = ruby_descriptor_owner(descriptor)?;
+    let behavior = RubyNormalizedBehavior;
+    let complexity = configured_semantic_symbol_call_complexity("ruby", descriptor)
+        .or_else(|| behavior.call_complexity(&TypeExpr::Primitive(owner.clone()), message))
+        .or_else(|| behavior.intrinsic_call_complexity(Some(&owner), message));
+    if let Some(complexity) = complexity {
+        return Some(ExternalCallComplexity {
+            time: complexity.time,
+            space: complexity.space,
+            provenance: "ruby_stdlib_registry",
+            bound_quality: "upper_bound_exact_target",
+            candidates: Vec::new(),
+            assumption: None,
+        });
+    }
+    let complexity = configured_external_latency_bound("ruby", &owner, message)?;
+    Some(ExternalCallComplexity {
+        time: complexity.time,
+        space: complexity.space,
+        provenance: "ruby_external_effect_registry",
+        bound_quality: "upper_bound_external_latency_excluded",
+        candidates: Vec::new(),
+        assumption: Some(
+            "computational Big-O only; filesystem, process, stream, or terminal latency is excluded"
+                .to_string(),
+        ),
+    })
+}
+
+pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMetadata {
+    let Some(descriptor) = scip_ruby_descriptor(symbol) else {
+        return super::ExternalSymbolMetadata {
+            scope: "dynamic",
+            missing_cost_kind: "callback_or_function_value_origin_unknown".to_string(),
+            parametric_cost: None,
+        };
+    };
+    let message = descriptor
+        .rsplit_once('#')
+        .map(|(_, member)| member)
+        .unwrap_or_default()
+        .trim_matches('`')
+        .split('(')
+        .next()
+        .unwrap_or_default();
+    if ruby_stdlib_descriptor(descriptor, message) {
+        super::ExternalSymbolMetadata {
+            scope: "stdlib",
+            missing_cost_kind: configured_semantic_symbol_kind("ruby", descriptor)
+                .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
+            parametric_cost: configured_semantic_symbol_parametric_cost("ruby", descriptor),
+        }
+    } else {
+        super::ExternalSymbolMetadata {
+            scope: "project_declaration",
+            missing_cost_kind: "project_declaration_body_or_generated_member_missing".to_string(),
+            parametric_cost: None,
+        }
+    }
+}
 
 const RUBY_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
     ("Dir", &["pwd", "getwd", "home"]),
@@ -61,19 +166,79 @@ const RUBY_CALLBACK_SET: &[&str] = &[
 ];
 
 const RUBY_ITERATION_METHODS: &[&str] = &[
-    "each", "each_key", "each_value", "each_pair", "each_with_index", "each_with_object",
-    "each_entry", "each_index", "each_slice", "each_cons", "each_char", "each_line", "cycle",
-    "with_index", "with_object", "map", "map!", "collect", "collect!",
-    "select", "reject", "filter", "filter_map", "flat_map", "group_by", "partition", "delete_if",
-    "keep_if", "select!", "reject!", "sort_by", "sort_by!", "reverse_each", "times", "upto",
-    "downto", "step", "any?", "all?", "none?", "one?", "count", "find", "find_index",
-    "index", "rindex", "detect", "reduce", "inject", "sum", "min_by", "max_by", "uniq",
-    "merge!", "to_h", "gsub", "scan", "loop",
-    "transform_keys", "transform_keys!", "transform_values", "transform_values!",
+    "each",
+    "each_key",
+    "each_value",
+    "each_pair",
+    "each_with_index",
+    "each_with_object",
+    "each_entry",
+    "each_index",
+    "each_slice",
+    "each_cons",
+    "each_char",
+    "each_line",
+    "cycle",
+    "with_index",
+    "with_object",
+    "map",
+    "map!",
+    "collect",
+    "collect!",
+    "select",
+    "reject",
+    "filter",
+    "filter_map",
+    "flat_map",
+    "group_by",
+    "partition",
+    "delete_if",
+    "keep_if",
+    "select!",
+    "reject!",
+    "sort_by",
+    "sort_by!",
+    "reverse_each",
+    "times",
+    "upto",
+    "downto",
+    "step",
+    "any?",
+    "all?",
+    "none?",
+    "one?",
+    "count",
+    "find",
+    "find_index",
+    "index",
+    "rindex",
+    "detect",
+    "reduce",
+    "inject",
+    "sum",
+    "min_by",
+    "max_by",
+    "uniq",
+    "merge!",
+    "to_h",
+    "gsub",
+    "scan",
+    "loop",
+    "transform_keys",
+    "transform_keys!",
+    "transform_values",
+    "transform_values!",
 ];
 
 const RUBY_ONCE_BLOCK_METHODS: &[&str] = &[
-    "tap", "then", "yield_self", "synchronize", "with_lock", "transaction", "atomic", "reentrant",
+    "tap",
+    "then",
+    "yield_self",
+    "synchronize",
+    "with_lock",
+    "transaction",
+    "atomic",
+    "reentrant",
 ];
 
 const RUBY_CORE_CONSTS: &[&str] = &[
@@ -206,7 +371,34 @@ const RUBY_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
 
 // CFG-SPECIFIC START: Ruby control-flow vocabulary.
 const RUBY_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
-    iterator_messages: &["all", "any", "collect", "detect", "downto", "each", "each_cons", "each_entry", "each_key", "each_pair", "each_slice", "each_value", "filter_map", "find", "find_all", "flat_map", "inject", "loop", "map", "none", "reduce", "reject", "select", "step", "times", "upto"],
+    iterator_messages: &[
+        "all",
+        "any",
+        "collect",
+        "detect",
+        "downto",
+        "each",
+        "each_cons",
+        "each_entry",
+        "each_key",
+        "each_pair",
+        "each_slice",
+        "each_value",
+        "filter_map",
+        "find",
+        "find_all",
+        "flat_map",
+        "inject",
+        "loop",
+        "map",
+        "none",
+        "reduce",
+        "reject",
+        "select",
+        "step",
+        "times",
+        "upto",
+    ],
     ignored_callback_body_sources: &["do end", "{}"],
 };
 // CFG-SPECIFIC END
@@ -214,6 +406,30 @@ const RUBY_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct RubyNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
+    fn external_symbol_call_complexity(
+        &self,
+        symbol: &str,
+        message: &str,
+    ) -> Option<ExternalCallComplexity> {
+        external_symbol_call_complexity(symbol, message)
+    }
+
+    fn external_symbol_metadata(&self, symbol: &str) -> super::ExternalSymbolMetadata {
+        external_symbol_metadata(symbol)
+    }
+
+    fn owner_supertypes(&self, node: &Node) -> Vec<String> {
+        let header = node.text.lines().next().unwrap_or(&node.text);
+        header
+            .split_once(" < ")
+            .map(|(_, supertype)| super::normalized_behavior::split_declared_supertypes(supertype))
+            .unwrap_or_default()
+    }
+
+    fn stdlib_language(&self) -> Option<&'static str> {
+        Some("ruby")
+    }
+
     fn reopenable_owner(&self, node: &Node) -> bool {
         matches!(node.r#type.as_str(), "CLASS" | "MODULE")
     }
@@ -241,8 +457,13 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         let receiver = receiver.strip_prefix("::").unwrap_or(receiver);
         !receiver.is_empty()
             && receiver.split("::").all(|segment| {
-                segment.chars().next().is_some_and(|first| first.is_ascii_uppercase())
-                    && segment.chars().all(|character| character.is_ascii_alphanumeric() || character == '_')
+                segment
+                    .chars()
+                    .next()
+                    .is_some_and(|first| first.is_ascii_uppercase())
+                    && segment
+                        .chars()
+                        .all(|character| character.is_ascii_alphanumeric() || character == '_')
             })
     }
 
@@ -260,7 +481,11 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         } else {
             value
         };
-        let receiver = call.children.first().and_then(ast::node).map(|node| node.text.as_str());
+        let receiver = call
+            .children
+            .first()
+            .and_then(ast::node)
+            .map(|node| node.text.as_str());
         let message = call.children.get(1).and_then(|child| match child {
             ast::Child::Symbol(value) | ast::Child::String(value) => Some(value.as_str()),
             _ => None,
@@ -290,10 +515,26 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
 
     fn collection_allocation_semantics(&self, message: &str) -> CollectionAllocationSemantics {
         if [
-            "map", "collect", "select", "reject", "filter", "filter_map", "group_by",
-            "partition", "compact", "sort", "sort_by", "reverse", "to_a", "keys", "values",
-            "transform_keys", "transform_values",
-        ].contains(&message) {
+            "map",
+            "collect",
+            "select",
+            "reject",
+            "filter",
+            "filter_map",
+            "group_by",
+            "partition",
+            "compact",
+            "sort",
+            "sort_by",
+            "reverse",
+            "to_a",
+            "keys",
+            "values",
+            "transform_keys",
+            "transform_values",
+        ]
+        .contains(&message)
+        {
             CollectionAllocationSemantics::PreservesReceiver
         } else if ["flat_map", "flatten"].contains(&message) {
             CollectionAllocationSemantics::UnknownSize
@@ -318,10 +559,30 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         if ["length", "size", "count"].contains(&message) {
             CardinalityCallSemantics::MeasuresReceiver
         } else if [
-            "map", "map!", "collect", "collect!", "select", "reject", "filter", "filter_map",
-            "flat_map", "compact", "flatten", "sort", "sort_by", "reverse", "to_a", "keys", "values",
-            "transform_keys", "transform_keys!", "transform_values", "transform_values!",
-        ].contains(&message) {
+            "map",
+            "map!",
+            "collect",
+            "collect!",
+            "select",
+            "reject",
+            "filter",
+            "filter_map",
+            "flat_map",
+            "compact",
+            "flatten",
+            "sort",
+            "sort_by",
+            "reverse",
+            "to_a",
+            "keys",
+            "values",
+            "transform_keys",
+            "transform_keys!",
+            "transform_values",
+            "transform_values!",
+        ]
+        .contains(&message)
+        {
             CardinalityCallSemantics::PreservesReceiver
         } else {
             CardinalityCallSemantics::Unknown
@@ -373,42 +634,17 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 
     fn collection_parameter_type(&self, type_name: &str) -> bool {
-        ["Array", "Hash", "Set", "Enumerable"].iter().any(|name| type_name.contains(name))
+        ["Array", "Hash", "Set", "Enumerable"]
+            .iter()
+            .any(|name| type_name.contains(name))
     }
 
-    fn call_complexity(&self, receiver_type: &TypeExpr, message: &str) -> Option<NormalizedCallComplexity> {
-        let receiver = match receiver_type.strip_nilable() {
-            TypeExpr::Array(_) => "Array",
-            TypeExpr::Hash { .. } => "Hash",
-            TypeExpr::Set(_) => "Set",
-            TypeExpr::Primitive(name) => match name.rsplit("::").next().unwrap_or(&name) {
-                "Array" => "Array", "Hash" => "Hash", "Set" => "Set", "String" => "String",
-                _ => return None,
-            },
-            _ => return None,
-        };
-        let (time, space) = match (receiver, message) {
-            ("Array", "[]" | "length" | "size" | "first" | "last" | "empty?" | "push" | "pop") => ("O(1)", "O(1)"),
-            ("Array", "include?" | "index" | "rindex") => ("O(N)", "O(1)"),
-            ("Array", "join") => ("O(N)", "O(N)"),
-            ("Array", "each" | "each_with_index" | "each_index" | "reverse_each") => ("O(N)", "O(1)"),
-            ("Array", "map" | "collect" | "select" | "reject" | "filter" | "filter_map" | "compact" | "flatten" | "values" | "to_set" | "+" | "concat") => ("O(N)", "O(N)"),
-            ("Array", "sort" | "sort_by") => ("O(N log N)", "O(N)"),
-            ("Array", "-" | "&" | "|") => ("O(N * M)", "O(N)"),
-            ("Hash", "[]" | "key?" | "has_key?" | "include?" | "length" | "size" | "empty?") => ("O(1)", "O(1)"),
-            ("Hash", "each" | "each_key" | "each_value" | "each_pair" | "delete_if") => ("O(N)", "O(1)"),
-            ("Hash", "map" | "merge" | "keys" | "values" | "dup" | "to_set" | "transform_keys" | "transform_values") => ("O(N)", "O(N)"),
-            ("Hash", "sort" | "sort_by") => ("O(N log N)", "O(N)"),
-            ("Set", "include?" | "contains" | "length" | "size" | "empty?" | "add" | "insert") => ("O(1)", "O(1)"),
-            ("Set", "each") => ("O(N)", "O(1)"),
-            ("Set", "map" | "select" | "reject" | "to_a") => ("O(N)", "O(N)"),
-            ("String", "empty?") => ("O(1)", "O(1)"),
-            ("String", "length" | "size") => ("O(N)", "O(1)"),
-            ("String", "[]") => ("O(N)", "O(N)"),
-            ("String", "scan" | "gsub" | "split" | "+") => ("O(N)", "O(N)"),
-            _ => return None,
-        };
-        Some(NormalizedCallComplexity { time, space })
+    fn collection_operation(
+        &self,
+        receiver_type: &TypeExpr,
+        message: &str,
+    ) -> Option<NormalizedCollectionOperation> {
+        configured_collection_operation("ruby", receiver_type, message)
     }
 
     fn intrinsic_call_complexity(
@@ -418,12 +654,20 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     ) -> Option<NormalizedCallComplexity> {
         let sorbet_type_operation = receiver == Some("T")
             && [
-                "any", "bind", "cast", "let", "must", "nilable", "proc", "type_parameter",
-                "unsafe", "untyped",
+                "any",
+                "bind",
+                "cast",
+                "let",
+                "must",
+                "nilable",
+                "proc",
+                "type_parameter",
+                "unsafe",
+                "untyped",
             ]
             .contains(&message);
-        let sorbet_generic_operation = receiver.is_some_and(|receiver| receiver.starts_with("T::"))
-            && message == "[]";
+        let sorbet_generic_operation =
+            receiver.is_some_and(|receiver| receiver.starts_with("T::")) && message == "[]";
         if sorbet_type_operation || sorbet_generic_operation {
             return Some(NormalizedCallComplexity {
                 time: "O(1)",
@@ -431,14 +675,12 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             });
         }
 
-        None
+        configured_intrinsic_call_complexity("ruby", receiver, message)
     }
 
     fn literal_receiver_type(&self, node: &Node) -> Option<TypeExpr> {
         match node.r#type.as_str() {
-            "ARRAY" | "LIST" | "ZLIST" => {
-                Some(TypeExpr::Array(Box::new(TypeExpr::Untyped)))
-            }
+            "ARRAY" | "LIST" | "ZLIST" => Some(TypeExpr::Array(Box::new(TypeExpr::Untyped))),
             "HASH" => Some(TypeExpr::Hash {
                 key: Box::new(TypeExpr::Untyped),
                 value: Box::new(TypeExpr::Untyped),
@@ -490,6 +732,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             field,
             owner: owner.to_string(),
             r#type: Some(declared_type),
+            immutable: false,
             file: String::new(),
             line: node.first_lineno,
             span: [
@@ -525,7 +768,8 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
                     if let Some(args_node) = call_node.children.get(2).and_then(ast::node) {
                         let first_arg = args_node.children.first().and_then(ast::node);
                         if let Some(arg) = first_arg {
-                            if arg.r#type == "RANGE" || arg.r#type == "DOT2" || arg.r#type == "DOT3" {
+                            if arg.r#type == "RANGE" || arg.r#type == "DOT2" || arg.r#type == "DOT3"
+                            {
                                 is_range = true;
                             }
                         }
@@ -609,6 +853,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             type_aliases: metadata.type_aliases,
             type_alias_lines: metadata.type_alias_lines,
             method_param_types: metadata.method_param_types,
+            method_local_types: BTreeMap::new(),
         }
     }
 
@@ -732,7 +977,8 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             "to_s" | "to_str" | "inspect" => Some("String".to_string()),
             "to_i" | "size" | "length" | "count" | "hash" => Some("Integer".to_string()),
             "to_f" => Some("Float".to_string()),
-            "nil?" | "empty?" | "include?" | "any?" | "all?" | "none?" | "one?" | "key?" | "has_key?" | "!" => Some("T::Boolean".to_string()),
+            "nil?" | "empty?" | "include?" | "any?" | "all?" | "none?" | "one?" | "key?"
+            | "has_key?" | "!" => Some("T::Boolean".to_string()),
             _ => None,
         }
     }
@@ -746,7 +992,15 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             (r.to_string(), false)
         };
 
-        if message == "==" || message == "!=" || message == "===" || message == ">>" || message == "<" || message == "<=" || message == ">" || message == ">=" {
+        if message == "=="
+            || message == "!="
+            || message == "==="
+            || message == ">>"
+            || message == "<"
+            || message == "<="
+            || message == ">"
+            || message == ">="
+        {
             return Some("T::Boolean".to_string());
         }
         if message == "<=>" {
@@ -758,7 +1012,25 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         if message == "inspect" {
             return Some("String".to_string());
         }
-        if message == "clone" || message == "dup" || message == "freeze" || message == "taint" || message == "untaint" || message == "+" || message == "-" || message == "*" || message == "/" || message == "%" || message == "**" || message == "&" || message == "|" || message == "^" || message == "~" || message == "+@" || message == "-@" || message == "<<" {
+        if message == "clone"
+            || message == "dup"
+            || message == "freeze"
+            || message == "taint"
+            || message == "untaint"
+            || message == "+"
+            || message == "-"
+            || message == "*"
+            || message == "/"
+            || message == "%"
+            || message == "**"
+            || message == "&"
+            || message == "|"
+            || message == "^"
+            || message == "~"
+            || message == "+@"
+            || message == "-@"
+            || message == "<<"
+        {
             return receiver_type.map(|t| t.to_string());
         }
 
@@ -855,7 +1127,13 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
                 return Some(wrap_nilable(inner));
             }
         }
-        if message == "map" || message == "select" || message == "reject" || message == "filter" || message == "sort" || message == "split" {
+        if message == "map"
+            || message == "select"
+            || message == "reject"
+            || message == "filter"
+            || message == "sort"
+            || message == "split"
+        {
             return Some("T::Array[T.untyped]".to_string());
         }
         if message == "compact" {
@@ -1471,7 +1749,7 @@ fn method_param_types(
         .iter()
         .map(|function| {
             (
-                format!("{}\u{0}{}", function.owner, function.name),
+                method_parameter_type_key(&function.owner, &function.name, function.line),
                 sig_param_types(source, function.line),
             )
         })
@@ -1600,7 +1878,6 @@ fn wrap_nilable(ty: &str) -> String {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1702,8 +1979,14 @@ mod tests {
         let param_types = sig_param_types(source, 18);
 
         assert_eq!(param_types.get("first").map(String::as_str), Some("String"));
-        assert_eq!(param_types.get("thirteenth").map(String::as_str), Some("Thread"));
-        assert_eq!(param_types.get("weak").map(String::as_str), Some("T::Array[T.untyped]"));
+        assert_eq!(
+            param_types.get("thirteenth").map(String::as_str),
+            Some("Thread")
+        );
+        assert_eq!(
+            param_types.get("weak").map(String::as_str),
+            Some("T::Array[T.untyped]")
+        );
         assert_eq!(param_types.len(), 14);
     }
 
@@ -1714,16 +1997,38 @@ mod tests {
 
         // format_array_type etc
         assert_eq!(behavior.format_array_type("String"), "T::Array[String]");
-        assert_eq!(behavior.format_hash_type("Symbol", "Integer"), "T::Hash[Symbol, Integer]");
+        assert_eq!(
+            behavior.format_hash_type("Symbol", "Integer"),
+            "T::Hash[Symbol, Integer]"
+        );
         assert_eq!(behavior.format_set_type("String"), "T::Set[String]");
         assert_eq!(behavior.untyped_type(), "T.untyped");
         assert_eq!(behavior.untyped_array_type(), "T::Array[T.untyped]");
-        assert_eq!(behavior.untyped_hash_type(), "T::Hash[T.untyped, T.untyped]");
-        for message in ["each_pair", "with_index", "index", "to_h", "gsub", "transform_values"] {
-            assert_eq!(behavior.block_call_semantics(message), BlockCallSemantics::Iteration);
+        assert_eq!(
+            behavior.untyped_hash_type(),
+            "T::Hash[T.untyped, T.untyped]"
+        );
+        for message in [
+            "each_pair",
+            "with_index",
+            "index",
+            "to_h",
+            "gsub",
+            "transform_values",
+        ] {
+            assert_eq!(
+                behavior.block_call_semantics(message),
+                BlockCallSemantics::Iteration
+            );
         }
-        assert_eq!(behavior.block_call_semantics("lambda"), BlockCallSemantics::Deferred);
-        assert_eq!(behavior.block_call_semantics("proc"), BlockCallSemantics::Deferred);
+        assert_eq!(
+            behavior.block_call_semantics("lambda"),
+            BlockCallSemantics::Deferred
+        );
+        assert_eq!(
+            behavior.block_call_semantics("proc"),
+            BlockCallSemantics::Deferred
+        );
         let array = TypeExpr::Array(Box::new(TypeExpr::Primitive("String".into())));
         let hash = TypeExpr::Hash {
             key: Box::new(TypeExpr::Primitive("String".into())),
@@ -1732,28 +2037,49 @@ mod tests {
         let set = TypeExpr::Set(Box::new(TypeExpr::Primitive("String".into())));
         let string = TypeExpr::Primitive("String".into());
         for message in ["[]", "include?", "each", "map", "sort", "-"] {
-            assert!(behavior.call_complexity(&array, message).is_some(), "Array##{message}");
+            assert!(
+                behavior.call_complexity(&array, message).is_some(),
+                "Array##{message}"
+            );
         }
         for message in ["[]", "each_value", "keys", "sort"] {
-            assert!(behavior.call_complexity(&hash, message).is_some(), "Hash##{message}");
+            assert!(
+                behavior.call_complexity(&hash, message).is_some(),
+                "Hash##{message}"
+            );
         }
         for message in ["include?", "each", "map"] {
-            assert!(behavior.call_complexity(&set, message).is_some(), "Set##{message}");
+            assert!(
+                behavior.call_complexity(&set, message).is_some(),
+                "Set##{message}"
+            );
         }
         for message in ["length", "split"] {
-            assert!(behavior.call_complexity(&string, message).is_some(), "String##{message}");
+            assert!(
+                behavior.call_complexity(&string, message).is_some(),
+                "String##{message}"
+            );
         }
-        assert!(behavior.call_complexity(&TypeExpr::Primitive("T::Array".into()), "concat").is_some());
-        assert!(behavior.call_complexity(&TypeExpr::Nilable(Box::new(hash)), "key?").is_some());
+        assert!(behavior
+            .call_complexity(&TypeExpr::Primitive("T::Array".into()), "concat")
+            .is_some());
+        assert!(behavior
+            .call_complexity(&TypeExpr::Nilable(Box::new(hash)), "key?")
+            .is_some());
         assert!(behavior.call_complexity(&array, "mystery").is_none());
-        assert!(behavior.call_complexity(&TypeExpr::Untyped, "each").is_none());
+        assert!(behavior
+            .call_complexity(&TypeExpr::Untyped, "each")
+            .is_none());
         assert!(behavior.iteration_yields_collection_value("each_value"));
         assert!(!behavior.iteration_yields_collection_value("each_pair"));
 
         // format_nilable_type
         assert_eq!(behavior.format_nilable_type(""), "");
         assert_eq!(behavior.format_nilable_type("nil"), "nil");
-        assert_eq!(behavior.format_nilable_type("T.nilable(String)"), "T.nilable(String)");
+        assert_eq!(
+            behavior.format_nilable_type("T.nilable(String)"),
+            "T.nilable(String)"
+        );
         assert_eq!(behavior.format_nilable_type("String"), "T.nilable(String)");
 
         // clean_identifier / clean_receiver
@@ -1761,27 +2087,83 @@ mod tests {
         assert_eq!(behavior.clean_receiver("@foo"), "foo");
 
         // known_return_type
-        assert_eq!(behavior.known_return_type("puts"), Some("NilClass".to_string()));
-        assert_eq!(behavior.known_return_type("to_s"), Some("String".to_string()));
-        assert_eq!(behavior.known_return_type("size"), Some("Integer".to_string()));
-        assert_eq!(behavior.known_return_type("to_f"), Some("Float".to_string()));
-        assert_eq!(behavior.known_return_type("nil?"), Some("T::Boolean".to_string()));
+        assert_eq!(
+            behavior.known_return_type("puts"),
+            Some("NilClass".to_string())
+        );
+        assert_eq!(
+            behavior.known_return_type("to_s"),
+            Some("String".to_string())
+        );
+        assert_eq!(
+            behavior.known_return_type("size"),
+            Some("Integer".to_string())
+        );
+        assert_eq!(
+            behavior.known_return_type("to_f"),
+            Some("Float".to_string())
+        );
+        assert_eq!(
+            behavior.known_return_type("nil?"),
+            Some("T::Boolean".to_string())
+        );
         assert_eq!(behavior.known_return_type("invalid"), None);
 
         // static_return_type
-        assert_eq!(behavior.static_return_type("<=>", None), Some("T.nilable(Integer)".to_string()));
-        assert_eq!(behavior.static_return_type("hash", None), Some("Integer".to_string()));
-        assert_eq!(behavior.static_return_type("inspect", None), Some("String".to_string()));
-        assert_eq!(behavior.static_return_type("to_sym", None), Some("Symbol".to_string()));
-        assert_eq!(behavior.static_return_type("to_f", None), Some("Float".to_string()));
-        assert_eq!(behavior.static_return_type("to_a", None), Some("T::Array[T.untyped]".to_string()));
-        assert_eq!(behavior.static_return_type("to_h", None), Some("T::Hash[T.untyped, T.untyped]".to_string()));
-        assert_eq!(behavior.propagated_collection_return_type("compact", Some("T::Array[T.nilable(String)]")), Some("T::Array[String]".to_string()));
-        assert_eq!(behavior.propagated_collection_return_type("flatten", Some("T::Array[T::Array[String]]")), Some("T::Array[String]".to_string()));
-        assert_eq!(behavior.propagated_collection_return_type("keys", Some("T::Hash[Symbol, Integer]")), Some("T::Array[Symbol]".to_string()));
-        assert_eq!(behavior.propagated_collection_return_type("values", Some("T::Hash[Symbol, Integer]")), Some("T::Array[Integer]".to_string()));
-        assert_eq!(behavior.propagated_collection_return_type("to_a", Some("T::Array[String]")), Some("T::Array[String]".to_string()));
-        assert_eq!(behavior.propagated_collection_return_type("to_h", Some("T::Hash[Symbol, Integer]")), Some("T::Hash[Symbol, Integer]".to_string()));
+        assert_eq!(
+            behavior.static_return_type("<=>", None),
+            Some("T.nilable(Integer)".to_string())
+        );
+        assert_eq!(
+            behavior.static_return_type("hash", None),
+            Some("Integer".to_string())
+        );
+        assert_eq!(
+            behavior.static_return_type("inspect", None),
+            Some("String".to_string())
+        );
+        assert_eq!(
+            behavior.static_return_type("to_sym", None),
+            Some("Symbol".to_string())
+        );
+        assert_eq!(
+            behavior.static_return_type("to_f", None),
+            Some("Float".to_string())
+        );
+        assert_eq!(
+            behavior.static_return_type("to_a", None),
+            Some("T::Array[T.untyped]".to_string())
+        );
+        assert_eq!(
+            behavior.static_return_type("to_h", None),
+            Some("T::Hash[T.untyped, T.untyped]".to_string())
+        );
+        assert_eq!(
+            behavior
+                .propagated_collection_return_type("compact", Some("T::Array[T.nilable(String)]")),
+            Some("T::Array[String]".to_string())
+        );
+        assert_eq!(
+            behavior
+                .propagated_collection_return_type("flatten", Some("T::Array[T::Array[String]]")),
+            Some("T::Array[String]".to_string())
+        );
+        assert_eq!(
+            behavior.propagated_collection_return_type("keys", Some("T::Hash[Symbol, Integer]")),
+            Some("T::Array[Symbol]".to_string())
+        );
+        assert_eq!(
+            behavior.propagated_collection_return_type("values", Some("T::Hash[Symbol, Integer]")),
+            Some("T::Array[Integer]".to_string())
+        );
+        assert_eq!(
+            behavior.propagated_collection_return_type("to_a", Some("T::Array[String]")),
+            Some("T::Array[String]".to_string())
+        );
+        assert_eq!(
+            behavior.propagated_collection_return_type("to_h", Some("T::Hash[Symbol, Integer]")),
+            Some("T::Hash[Symbol, Integer]".to_string())
+        );
 
         // is_noreturn_method
         assert!(behavior.is_noreturn_method("raise"));
@@ -1871,6 +2253,7 @@ mod tests {
             file: "foo.rb".to_string(),
             name: "bar".to_string(),
             owner: "Parent".to_string(),
+            dispatch_kind: "instance".to_string(),
             line: 5,
             span: [5, 0, 7, 0],
             body: mock_body.clone(),
@@ -1895,16 +2278,40 @@ mod tests {
         }
 
         // static_return_type string chars and lines
-        assert_eq!(behavior.static_return_type("chars", Some("String")), Some("T::Array[String]".to_string()));
-        assert_eq!(behavior.static_return_type("lines", Some("String")), Some("T::Array[String]".to_string()));
+        assert_eq!(
+            behavior.static_return_type("chars", Some("String")),
+            Some("T::Array[String]".to_string())
+        );
+        assert_eq!(
+            behavior.static_return_type("lines", Some("String")),
+            Some("T::Array[String]".to_string())
+        );
 
         // propagated_collection_return_type skipped blocks
-        assert_eq!(behavior.propagated_collection_return_type("compact", Some("Integer")), None);
-        assert_eq!(behavior.propagated_collection_return_type("flatten", Some("Integer")), None);
-        assert_eq!(behavior.propagated_collection_return_type("keys", Some("Integer")), None);
-        assert_eq!(behavior.propagated_collection_return_type("values", Some("Integer")), None);
-        assert_eq!(behavior.propagated_collection_return_type("to_a", Some("Integer")), None);
-        assert_eq!(behavior.propagated_collection_return_type("to_h", Some("Integer")), None);
+        assert_eq!(
+            behavior.propagated_collection_return_type("compact", Some("Integer")),
+            None
+        );
+        assert_eq!(
+            behavior.propagated_collection_return_type("flatten", Some("Integer")),
+            None
+        );
+        assert_eq!(
+            behavior.propagated_collection_return_type("keys", Some("Integer")),
+            None
+        );
+        assert_eq!(
+            behavior.propagated_collection_return_type("values", Some("Integer")),
+            None
+        );
+        assert_eq!(
+            behavior.propagated_collection_return_type("to_a", Some("Integer")),
+            None
+        );
+        assert_eq!(
+            behavior.propagated_collection_return_type("to_h", Some("Integer")),
+            None
+        );
 
         // static_call_return_type for Arrays, Hashes, and Iters
         let mut index_arg = Node {
@@ -1938,7 +2345,10 @@ mod tests {
             last_column: 4,
             text: "arr[1..3]".to_string(),
         };
-        assert_eq!(behavior.static_call_return_type(&lookup_node, "[]", Some("T::Array[String]")), Some("T::Array[String]".to_string()));
+        assert_eq!(
+            behavior.static_call_return_type(&lookup_node, "[]", Some("T::Array[String]")),
+            Some("T::Array[String]".to_string())
+        );
 
         // Iter / block lookup
         let iter_node = Node {
@@ -1950,7 +2360,10 @@ mod tests {
             last_column: 4,
             text: "arr[1..3] { }".to_string(),
         };
-        assert_eq!(behavior.static_call_return_type(&iter_node, "[]", Some("T::Array[String]")), Some("T::Array[String]".to_string()));
+        assert_eq!(
+            behavior.static_call_return_type(&iter_node, "[]", Some("T::Array[String]")),
+            Some("T::Array[String]".to_string())
+        );
 
         // Hash split_once None path
         let simple_lookup = Node {
@@ -1962,8 +2375,14 @@ mod tests {
             last_column: 4,
             text: "hash[x]".to_string(),
         };
-        assert_eq!(behavior.static_call_return_type(&simple_lookup, "[]", Some("T::Hash[Invalid]")), None);
-        assert_eq!(behavior.static_call_return_type(&simple_lookup, "[]", Some("T::Array[String]")), Some("T.nilable(String)".to_string()));
+        assert_eq!(
+            behavior.static_call_return_type(&simple_lookup, "[]", Some("T::Hash[Invalid]")),
+            None
+        );
+        assert_eq!(
+            behavior.static_call_return_type(&simple_lookup, "[]", Some("T::Array[String]")),
+            Some("T.nilable(String)".to_string())
+        );
 
         // parameter_list_source no closing parenthesis
         assert_eq!(behavior.parameter_list_source("def foo(a"), "");
@@ -2004,7 +2423,9 @@ mod tests {
             last_column: 4,
             text: "MyAlias = Struct.new".to_string(),
         };
-        assert!(behavior.declarative_owner(&lasgn_with_invalid_call, "").is_none());
+        assert!(behavior
+            .declarative_owner(&lasgn_with_invalid_call, "")
+            .is_none());
 
         // struct_declaration_fields non-node children
         let mut invalid_args = Node {
@@ -2044,11 +2465,20 @@ mod tests {
             last_column: 4,
             text: "Struct = Struct.new(123)".to_string(),
         };
-        assert!(behavior.struct_declaration_fields(&invalid_struct_node).unwrap().is_empty());
+        assert!(behavior
+            .struct_declaration_fields(&invalid_struct_node)
+            .unwrap()
+            .is_empty());
 
         // keys and values fallback coverage
-        assert_eq!(behavior.propagated_collection_return_type("keys", Some("T::Hash[Invalid]")), None);
-        assert_eq!(behavior.propagated_collection_return_type("values", Some("T::Hash[Invalid]")), None);
+        assert_eq!(
+            behavior.propagated_collection_return_type("keys", Some("T::Hash[Invalid]")),
+            None
+        );
+        assert_eq!(
+            behavior.propagated_collection_return_type("values", Some("T::Hash[Invalid]")),
+            None
+        );
 
         // index lookup empty args
         let mut empty_args_node = Node {
@@ -2073,7 +2503,10 @@ mod tests {
             last_column: 4,
             text: "arr[]".to_string(),
         };
-        assert_eq!(behavior.static_call_return_type(&lookup_empty_args, "[]", Some("T::Array[String]")), Some("T.nilable(String)".to_string()));
+        assert_eq!(
+            behavior.static_call_return_type(&lookup_empty_args, "[]", Some("T::Array[String]")),
+            Some("T.nilable(String)".to_string())
+        );
 
         // is_valid_type
         assert!(!is_valid_type(""));
@@ -2111,7 +2544,10 @@ mod tests {
             text: "MyStruct = Struct.new".to_string(),
         };
         assert_eq!(
-            behavior.declarative_owner(&struct_with_owner, "MyModule").unwrap().name,
+            behavior
+                .declarative_owner(&struct_with_owner, "MyModule")
+                .unwrap()
+                .name,
             "MyModule::MyStruct"
         );
 
@@ -2158,7 +2594,10 @@ mod tests {
             last_column: 4,
             text: "MyStruct = Struct.new(:x) { }".to_string(),
         };
-        assert_eq!(behavior.struct_declaration_fields(&struct_decl_with_iter), Some(vec!["x".to_string()]));
+        assert_eq!(
+            behavior.struct_declaration_fields(&struct_decl_with_iter),
+            Some(vec!["x".to_string()])
+        );
 
         // struct_declaration_fields empty ITER
         let empty_iter = Node {
@@ -2182,28 +2621,52 @@ mod tests {
             last_column: 4,
             text: "MyStruct = { }".to_string(),
         };
-        assert!(behavior.struct_declaration_fields(&struct_decl_empty_iter).is_none());
+        assert!(behavior
+            .struct_declaration_fields(&struct_decl_empty_iter)
+            .is_none());
 
         // static_return_type nilable receiver and comparison / conversion operators
-        assert_eq!(behavior.static_return_type("==", Some("T.nilable(String)")), Some("T::Boolean".to_string()));
-        assert_eq!(behavior.static_return_type("to_i", None), Some("Integer".to_string()));
-        assert_eq!(behavior.static_return_type("class", None), Some("Class".to_string()));
+        assert_eq!(
+            behavior.static_return_type("==", Some("T.nilable(String)")),
+            Some("T::Boolean".to_string())
+        );
+        assert_eq!(
+            behavior.static_return_type("to_i", None),
+            Some("Integer".to_string())
+        );
+        assert_eq!(
+            behavior.static_return_type("class", None),
+            Some("Class".to_string())
+        );
         assert_eq!(
             behavior.static_return_type("name", Some("Class")),
             Some("T.nilable(String)".to_string())
         );
-        assert_eq!(behavior.static_return_type("upcase", Some("String")), Some("String".to_string()));
+        assert_eq!(
+            behavior.static_return_type("upcase", Some("String")),
+            Some("String".to_string())
+        );
 
         // propagated_collection_return_type first and join
-        assert_eq!(behavior.propagated_collection_return_type("first", Some("T::Array[String]")), Some("T.nilable(String)".to_string()));
-        assert_eq!(behavior.propagated_collection_return_type("join", Some("T::Array[String]")), Some("String".to_string()));
-        assert_eq!(behavior.propagated_collection_return_type("join", Some("Array")), Some("String".to_string()));
+        assert_eq!(
+            behavior.propagated_collection_return_type("first", Some("T::Array[String]")),
+            Some("T.nilable(String)".to_string())
+        );
+        assert_eq!(
+            behavior.propagated_collection_return_type("join", Some("T::Array[String]")),
+            Some("String".to_string())
+        );
+        assert_eq!(
+            behavior.propagated_collection_return_type("join", Some("Array")),
+            Some("String".to_string())
+        );
 
         // type alias blank target / invalid type / blank type declaration
         let mock_fn_for_sig = FunctionDef {
             file: "foo.rb".to_string(),
             name: "bar".to_string(),
             owner: "Parent".to_string(),
+            dispatch_kind: "instance".to_string(),
             line: 8,
             span: [8, 0, 10, 0],
             body: mock_body.clone(),
@@ -2225,8 +2688,38 @@ mod tests {
               end
             end
             ",
-            &[mock_fn_for_sig]
+            &[mock_fn_for_sig],
         );
         assert!(metadata.type_aliases.contains_key("MyAlias"));
+    }
+
+    #[test]
+    fn scip_ruby_symbols_use_proven_core_identity() {
+        let length = "scip-ruby gem clear-compiler workspace Array#length().";
+        let file = "scip-ruby gem clear-compiler workspace `<Class:File>`#join().";
+        let generated = "scip-ruby gem clear-compiler workspace AST#BinaryOp#left().";
+
+        assert_eq!(
+            external_symbol_call_complexity(length, "length").map(|complexity| complexity.time),
+            Some("O(1)")
+        );
+        assert_eq!(
+            external_symbol_call_complexity(file, "join").map(|complexity| complexity.time),
+            Some("O(N)")
+        );
+        assert_eq!(external_symbol_metadata(length).scope, "stdlib");
+        assert_eq!(
+            external_symbol_metadata(generated).scope,
+            "project_declaration"
+        );
+    }
+
+    #[test]
+    fn ruby_callback_contracts_remain_parametric() {
+        let each = "scip-ruby gem clear-compiler workspace Array#each().";
+        let metadata = external_symbol_metadata(each);
+
+        assert_eq!(metadata.parametric_cost.as_deref(), Some("callback_linear"));
+        assert!(external_symbol_call_complexity(each, "each").is_none());
     }
 }

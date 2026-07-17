@@ -1,10 +1,24 @@
-use super::super::named_children;
+use super::super::{named_children, node_text};
 use super::base::AstNormalizationAdapter;
 use tree_sitter::Node as TreeSitterNode;
 
 pub(crate) struct GoAstAdapter;
 
 impl AstNormalizationAdapter for GoAstAdapter {
+    fn symbol_scope(
+        &self,
+        root: TreeSitterNode<'_>,
+        source: &str,
+    ) -> (String, Vec<(String, String)>) {
+        let package = named_children(root)
+            .into_iter()
+            .find(|child| child.kind() == "package_clause")
+            .map(|child| node_text(child, source))
+            .and_then(|text| text.split_whitespace().nth(1).map(str::to_string))
+            .unwrap_or_default();
+        (package, Vec::new())
+    }
+
     fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
         go_statement_without_inner_call(node)
     }
@@ -56,6 +70,7 @@ impl AstNormalizationAdapter for GoAstAdapter {
             .collect::<Vec<_>>();
         (!body.is_empty()).then_some(body)
     }
+
 }
 
 fn go_statement_without_inner_call(node: TreeSitterNode<'_>) -> bool {
@@ -79,7 +94,9 @@ mod tests {
             .unwrap();
 
         // test case_arm_body_nodes fallback None path (line 51)
-        let tree = parser.parse("package main\nfunc main() { var x = 5 }", None).unwrap();
+        let tree = parser
+            .parse("package main\nfunc main() { var x = 5 }", None)
+            .unwrap();
         let var_node = tree.root_node().child(1).unwrap();
         assert!(adapter.case_arm_body_nodes(var_node, "").is_none());
 
@@ -87,7 +104,9 @@ mod tests {
         assert!(adapter.call_argument_nodes(var_node, None, "").is_none());
 
         // go statement with parenthesized_expression argument
-        let tree_go = parser.parse("package main\nfunc main() { go (x) }", None).unwrap();
+        let tree_go = parser
+            .parse("package main\nfunc main() { go (x) }", None)
+            .unwrap();
         let mut go_node = None;
         let mut queue = vec![tree_go.root_node()];
         while let Some(n) = queue.pop() {
@@ -104,4 +123,5 @@ mod tests {
         assert_eq!(args.len(), 1);
         assert_eq!(args[0].kind(), "identifier");
     }
+
 }

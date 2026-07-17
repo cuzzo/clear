@@ -8,6 +8,12 @@ module Espalier
 
     LETTERS = %w[N M K L P Q R S T U V W X Y Z].freeze
 
+    def reset_intern_pool!
+      @term_pool = {}
+      @domain_pool = {}
+      @expression_pool = {}
+    end
+
     def from_fact(term, domains)
       return nil unless term.is_a?(Hash)
 
@@ -19,15 +25,34 @@ module Espalier
       logarithmic = term["logarithmic"] || term[:logarithmic]
       logarithmic_domain = term["logarithmic_domain_id"] || term[:logarithmic_domain_id]
       logarithmic_domain ||= factors.keys.first if logarithmic && factors.length == 1
-      {
+      normalize(
         terms: [{ factors: factors, logs: logarithmic_domain ? { logarithmic_domain => 1 } : {} }],
         domains: domain_index(domains),
         complete: term.key?("complete") ? term["complete"] : term.fetch(:complete, true)
-      }
+      )
     end
 
     def constant
-      { terms: [{ factors: {}, logs: {} }], domains: {}, complete: true }
+      normalize(terms: [{ factors: {}, logs: {} }], domains: {}, complete: true)
+    end
+
+    # A compiler-proven callback/reflection boundary has a precise parametric
+    # cost even when the caller-supplied body is not available. Keep that cost
+    # as an algebraic atom so loops and interprocedural propagation can compose
+    # O(C), O(N*C), and similar bounds without inventing a scalar polynomial.
+    def parameterized_cost(id:, name:, source_kind:, multiplicity_domain: nil, domains: [])
+      factors = { id.to_s => 1 }
+      factors[multiplicity_domain.to_s] = 1 if multiplicity_domain
+      parameter = {
+        "id" => id.to_s,
+        "name" => name.to_s,
+        "source_kind" => source_kind.to_s
+      }
+      normalize(
+        terms: [{ factors: factors, logs: {} }],
+        domains: domain_index(Array(domains) + [parameter]),
+        complete: true
+      )
     end
 
     def relative_call(complexity, receiver_domains:, argument_domains:, domains:)
@@ -127,8 +152,25 @@ module Espalier
          -(log_exponents.max || 0), -log_exponents.sum,
          *domain_sort_key(expression[:domains]&.fetch(id, nil), id)]
       end
-      symbols = ids.each_with_index.to_h do |id, index|
+      parameter_ids, size_ids = ids.partition do |id|
+        domain = expression[:domains]&.fetch(id, nil) || {}
+        (domain["source_kind"] || domain[:source_kind]).to_s.end_with?("_cost")
+      end
+      symbols = size_ids.each_with_index.to_h do |id, index|
         [id, LETTERS[index] || "D#{index + 1}"]
+      end
+      callback_index = 0
+      reflection_index = 0
+      parameter_ids.each do |id|
+        domain = expression[:domains]&.fetch(id, nil) || {}
+        kind = (domain["source_kind"] || domain[:source_kind]).to_s
+        if kind == "reflective_target_cost"
+          reflection_index += 1
+          symbols[id] = reflection_index == 1 ? "R" : "R#{reflection_index}"
+        else
+          callback_index += 1
+          symbols[id] = callback_index == 1 ? "C" : "C#{callback_index}"
+        end
       end
       order = symbols.keys.each_with_index.to_h
       ordered_terms = Array(expression[:terms]).sort_by do |term|
@@ -203,15 +245,49 @@ module Espalier
 
     def normalize(expression)
       terms = Array(expression[:terms]).map do |term|
-        {
-          factors: term[:factors].select { |_, exponent| exponent.to_i.positive? }.transform_values(&:to_i),
-          logs: (term[:logs] || {}).select { |_, exponent| exponent.to_i.positive? }.transform_values(&:to_i)
-        }
+        intern_term(
+          term[:factors].select { |_, exponent| exponent.to_i.positive? }.transform_values(&:to_i),
+          (term[:logs] || {}).select { |_, exponent| exponent.to_i.positive? }.transform_values(&:to_i)
+        )
       end.uniq
       terms.reject! do |candidate|
         terms.any? { |other| other != candidate && dominates?(other, candidate) }
       end
-      expression.merge(terms: terms.sort_by { |term| [term[:factors].to_a, term[:logs].to_a] })
+      canonical_terms = terms.sort_by { |term| [term[:factors].to_a, term[:logs].to_a] }.freeze
+      canonical_domains = intern_domains(expression[:domains] || {})
+      canonical = expression.merge(terms: canonical_terms, domains: canonical_domains).freeze
+      @expression_pool ||= {}
+      key = [canonical_terms, canonical_domains, canonical.fetch(:complete, true)]
+      @expression_pool[key] ||= canonical
+    end
+
+    def intern_term(factors, logs)
+      @term_pool ||= {}
+      canonical_factors = factors.sort.to_h.freeze
+      canonical_logs = logs.sort.to_h.freeze
+      key = [canonical_factors, canonical_logs]
+      @term_pool[key] ||= { factors: canonical_factors, logs: canonical_logs }.freeze
+    end
+
+    def intern_domains(domains)
+      @domain_pool ||= {}
+      canonical = domains.sort_by { |id, _| id.to_s }.to_h do |id, domain|
+        [id.to_s.freeze, deep_freeze_copy(domain)]
+      end.freeze
+      @domain_pool[canonical] ||= canonical
+    end
+
+    def deep_freeze_copy(value)
+      case value
+      when Hash
+        value.to_h { |key, child| [deep_freeze_copy(key), deep_freeze_copy(child)] }.freeze
+      when Array
+        value.map { |child| deep_freeze_copy(child) }.freeze
+      when String
+        value.dup.freeze
+      else
+        value.freeze
+      end
     end
 
     def dominates?(left, right)
@@ -220,10 +296,11 @@ module Espalier
     end
 
     def domain_index(domains)
-      Array(domains).each_with_object({}) do |domain, out|
+      index = Array(domains).each_with_object({}) do |domain, out|
         id = domain["id"] || domain[:id]
         out[id.to_s] = domain if id
       end
+      intern_domains(index)
     end
 
     def domain_sort_key(domain, id)

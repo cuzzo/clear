@@ -42,7 +42,10 @@ fn type_inference_language_grammars_live_in_language_modules() {
 
     let languages = crate_src().join("type_inference/languages");
     for file in ["ruby.rs", "python.rs", "typescript.rs", "go.rs"] {
-        assert!(languages.join(file).is_file(), "missing type semantics module {file}");
+        assert!(
+            languages.join(file).is_file(),
+            "missing type semantics module {file}"
+        );
     }
 }
 
