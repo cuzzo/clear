@@ -66,8 +66,8 @@ IMPLEMENTATION Cache<M> {
     oldTail = COPY self.tail;
     IF oldTail EXISTS AS tailKey THEN
       &self.detach(tailKey);
-      self.values.delete(tailKey);
-      self.recency.delete(tailKey);
+      &self.values.delete(tailKey);
+      &self.recency.delete(tailKey);
     END
   END
 
@@ -97,8 +97,8 @@ IMPLEMENTATION Cache<M> {
     existing = COPY self.values[key];
     IF existing EXISTS AS unused THEN
       &self.detach(key);
-      self.values.delete(key);
-      self.recency.delete(key);
+      &self.values.delete(key);
+      &self.recency.delete(key);
     END
   END
 
