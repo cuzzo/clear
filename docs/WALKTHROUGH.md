@@ -39,9 +39,10 @@ requires its root binding (`box`) to be `MUTABLE`. The exception is
 an `@alwaysMutable` binding or field may satisfy a `MUTABLE` parameter without
 `&` and without making its containing binding mutable.
 
-DEFAULT and STRICT report a fixable error when either `MUTABLE` or `&` is
-missing. `clear run --easy` applies that fix to the source before building and
-running it.
+> **NOTE — EASY mode:** DEFAULT and STRICT report a fixable error when either
+> `MUTABLE` or `&` is missing. Running `clear run --easy` automatically applies
+> that fix to the source—adding the mutable declaration and explicit call-site
+> address where needed—before building and running the corrected program.
 
 ## 2. Primitive Types
 
