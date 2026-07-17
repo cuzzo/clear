@@ -1207,6 +1207,11 @@ mod tests {
                 "Demo.php",
                 "scip-php composer example/demo 1.0.0 callee().",
             ),
+            (
+                "lua",
+                "demo.lua",
+                "scip-lua luarocks example-demo workspace demo/L0C0/callee().",
+            ),
             ("swift", "Demo.swift", "swift Demo callee()."),
             (
                 "typescript",
@@ -1310,6 +1315,13 @@ mod tests {
                 "typescript",
                 "scip-typescript npm @types/node 22.13.4 `process.d.ts`/`\"process\"`/global/NodeJS/Process#cwd().",
                 "cwd",
+                "O(N)",
+                "stdlib",
+            ),
+            (
+                "lua",
+                "scip-lua luarocks lua . table/insert().",
+                "insert",
                 "O(N)",
                 "stdlib",
             ),

@@ -1,10 +1,70 @@
 # Lua's standard table/string modules are explicitly-qualified globals.
 Intrinsic:
-  "table.insert": constant
+  assert: constant
+  error: constant
+  getmetatable: constant
+  ipairs: constant
+  rawequal: constant
+  setmetatable: constant
+  type: constant
+  tonumber: linear_scan
+  next: linear_scan
+  unpack: linear_materialize
+  coroutine.wrap: constant
+  coroutine.yield: constant
+  io.type: constant
+  math.abs: constant
+  math.ceil: constant
+  math.floor: constant
+  math.max: linear_scan
+  math.min: linear_scan
+  math.sqrt: constant
+  math.random: constant
+  math.tointeger: constant
+  os.date: linear_materialize
+  os.difftime: constant
+  os.getenv: linear_materialize
+  os.time: constant
+  "table.insert": linear_scan
   "table.remove": linear_scan
   "table.sort": sort
   "table.concat": linear_materialize
+  "string.byte": linear_materialize
+  "string.char": linear_materialize
   "string.find": linear_scan
+  "string.format": linear_materialize
+  "string.len": constant
+  "string.lower": linear_materialize
   "string.match": linear_scan
   "string.gsub": linear_materialize
+  "string.gmatch": constant
+  "string.rep": linear_materialize
+  "string.reverse": linear_materialize
   "string.sub": linear_materialize
+  "string.upper": linear_materialize
+
+# Exact descriptors emitted by FactMine's LuaLS-to-SCIP producer. Callback
+# execution remains explicit rather than being hidden in a constant model.
+SemanticSymbolParametricCost:
+  "pairs().": callback_once
+  "pcall().": callback_once
+  "table/sort().": callback_sort
+  "tostring().": callback_once
+  "xpcall().": callback_once
+
+# These bounds cover computation performed by the Lua wrapper only. They do
+# not claim to bound filesystem, process, stream, scheduler, or terminal wait.
+ExternalLatency:
+  "_G.print": linear_scan
+  "io.close": constant
+  "io.flush": constant
+  "io.open": linear_scan
+  "io.popen": linear_scan
+  "io.read": linear_materialize
+  "io.seek": constant
+  "io.write": linear_scan
+  "os.execute": linear_scan
+  "os.exit": constant
+  "os.remove": linear_scan
+  "os.rename": linear_scan
+  "os.tmpname": constant

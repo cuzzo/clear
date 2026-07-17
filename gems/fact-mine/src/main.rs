@@ -93,6 +93,29 @@ fn run() -> Result<()> {
                 println!("{}", rendered);
             }
         }
+        Command::LuaScip {
+            files,
+            output,
+            root,
+            server,
+        } => {
+            let generated =
+                fact_mine_rust::lua_scip::generate(&files, root.as_deref(), server.as_deref())?;
+            if let Some(output) = output {
+                fs::write(&output, &generated.json)
+                    .with_context(|| format!("failed to write {}", output.display()))?;
+            } else {
+                println!("{}", generated.json);
+            }
+            eprintln!(
+                "Lua SCIP: {} calls, {} semantic occurrences, {} project definitions, {} external definitions, {} unresolved",
+                generated.stats.calls,
+                generated.stats.semantic_occurrences,
+                generated.stats.project_definitions,
+                generated.stats.external_definitions,
+                generated.stats.unresolved_calls,
+            );
+        }
     }
     Ok(())
 }
@@ -229,6 +252,12 @@ enum Command {
         scip_indexes: Vec<PathBuf>,
         complexity_summaries: Vec<PathBuf>,
     },
+    LuaScip {
+        files: Vec<PathBuf>,
+        output: Option<PathBuf>,
+        root: Option<PathBuf>,
+        server: Option<PathBuf>,
+    },
 }
 
 fn parse_args(args: Vec<String>) -> Result<Command> {
@@ -236,6 +265,54 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
     let command = iter.next().unwrap_or_default();
 
     match command.as_str() {
+        "scip-lua" => {
+            let mut output = None;
+            let mut root = None;
+            let mut server = None;
+            let mut files = Vec::new();
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--output" => {
+                        output = Some(PathBuf::from(
+                            iter.next().with_context(|| "--output requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--output=") => {
+                        output = Some(PathBuf::from(other.strip_prefix("--output=").unwrap()));
+                    }
+                    "--root" => {
+                        root = Some(PathBuf::from(
+                            iter.next().with_context(|| "--root requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--root=") => {
+                        root = Some(PathBuf::from(other.strip_prefix("--root=").unwrap()));
+                    }
+                    "--lua-language-server" => {
+                        server = Some(PathBuf::from(
+                            iter.next()
+                                .with_context(|| "--lua-language-server requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--lua-language-server=") => {
+                        server = Some(PathBuf::from(
+                            other.strip_prefix("--lua-language-server=").unwrap(),
+                        ));
+                    }
+                    other if other.starts_with("--") => bail!("unsupported option: {other}"),
+                    path => files.push(PathBuf::from(path)),
+                }
+            }
+            if files.is_empty() {
+                bail!("scip-lua requires at least one Lua file");
+            }
+            Ok(Command::LuaScip {
+                files,
+                output,
+                root,
+                server,
+            })
+        }
         "syntax-facts" => {
             let mut language = "ruby".to_string();
             let mut files = Vec::new();
@@ -386,7 +463,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             })
         }
         other => bail!(
-            "usage: fact-mine-rust {{syntax-facts|profile|call-resolution}} FILE... (got: {other})"
+            "usage: fact-mine-rust {{syntax-facts|profile|call-resolution|scip-lua}} FILE... (got: {other})"
         ),
     }
 }

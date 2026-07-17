@@ -713,6 +713,53 @@ producer from SourceKit-LSP/IndexStoreDB that preserves USRs, owners, overloads,
 and standard SCIP serialization; it does not require more language logic in
 the shared importer.
 
+### Lua SCIP integration
+
+Lua has no maintained upstream SCIP indexer. FactMine therefore includes a
+thin LuaLS producer rather than recreating Lua name resolution. The reusable
+LSP transport converts definition locations, UTF-8/UTF-16 ranges, project
+declarations, and multiple targets into standard SCIP JSON. The Lua-specific
+layer only identifies LuaLS core metadata, canonicalizes native module/function
+descriptors, and supplies workspace settings. The existing shared SCIP importer
+continues to own target joins and ambiguity handling.
+
+Generate and consume an index with:
+
+```bash
+fact-mine-rust scip-lua \
+  --root /path/to/repository \
+  --lua-language-server /path/to/lua-language-server \
+  --output index.scip.json \
+  SOURCE_FILES...
+
+fact-mine-rust call-resolution \
+  --language lua \
+  --scip-index index.scip.json \
+  SOURCE_FILES...
+```
+
+The producer also accepts `LUA_LANGUAGE_SERVER`; otherwise it invokes
+`lua-language-server` from `PATH`.
+
+Measured with LuaLS 3.18.2 over the 99 production files in
+`luarocks/luarocks` at `324eda29177b6a6811c75480928384b9ff83f04f`:
+
+| Metric | Baseline | Lua SCIP | Delta |
+| --- | ---: | ---: | ---: |
+| Eligible calls | 4,259 | 4,259 | — |
+| Exact project targets | 319 (7.49%) | 1,263 (29.65%) | +944 / +22.16 points |
+| Modeled external calls | 740 | 1,271 | +531 |
+| Accounted calls | 1,059 (24.86%) | 2,534 (59.50%) | +1,475 / +34.64 points |
+| Unresolved calls | 3,200 (75.14%) | 1,725 (40.50%) | -1,475 / -34.64 points |
+| Known time/space Big-O | 125/734 (17.03%) | 177/734 (24.11%) | +52 / +7.08 points |
+
+The exact-target fixture resolves both cross-file module calls and models both
+compiler-proven core calls (4/4 accounted). LuaRocks' 1,725 eligible residuals
+are 1,663 receiver calls, 15 bare calls, 46 compiler-identified external calls
+without cost summaries, and one closed candidate set awaiting a cost join.
+These remain unknown; the producer does not infer table shapes or promote an
+enclosing function when LuaLS points to a non-callable table slot.
+
 ## By Language
 
 These are weighted by eligible call sites, not averages of repository rates.
@@ -725,6 +772,7 @@ These are weighted by eligible call sites, not averages of repository rates.
 | Go | 1,479 | 168 | 11.36% | 86 | 17.17% | 0 | 82.83% |
 | Java | 4,315 | 1,382 | 32.03% | 406 | 41.44% | 313 | 58.56% |
 | JavaScript | 787 | 159 | 20.20% | 31 | 24.14% | 0 | 75.86% |
+| Lua | 4,259 | 1,263 | 29.65% | 1,271 | 59.50% | 1 | 40.50% |
 | Python | 3,871 | 758 | 19.58% | 168 | 23.92% | 17 | 76.08% |
 | TypeScript | 805 | 76 | 9.44% | 19 | 11.80% | 6 | 88.20% |
 

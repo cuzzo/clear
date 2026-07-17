@@ -4,12 +4,14 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
-    NormalizedSemanticEffect, NormalizedStateRead, NormalizedStateWrite,
+    configured_external_latency_bound, configured_intrinsic_call_complexity,
+    configured_semantic_symbol_call_complexity,
+    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
+    eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
+    scip_global_parts, NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
+    NormalizedNilGuardFact, NormalizedSemanticEffect, NormalizedStateRead, NormalizedStateWrite,
 };
-use super::CallSite;
-use super::StateDeclaration;
+use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata, StateDeclaration};
 use crate::ast::{Child, Node, Span};
 
 const LUA_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
@@ -61,6 +63,79 @@ const LUA_NIL_PREDICATES: &[&str] = &["isNull", "is_null", "nil"];
 const LUA_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const LUA_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
+fn scip_lua_parts(symbol: &str) -> Option<(&str, &str)> {
+    let (package, _version, descriptor) = scip_global_parts(symbol, "scip-lua", "luarocks")?;
+    Some((package, descriptor))
+}
+
+pub(crate) fn external_symbol_call_complexity(
+    symbol: &str,
+    message: &str,
+) -> Option<ExternalCallComplexity> {
+    let (package, descriptor) = scip_lua_parts(symbol)?;
+    if package != "lua" || configured_semantic_symbol_parametric_cost("lua", descriptor).is_some() {
+        return None;
+    }
+    let owner = scip_descriptor_owner(descriptor);
+    if let Some(complexity) = configured_semantic_symbol_call_complexity("lua", descriptor)
+        .or_else(|| configured_intrinsic_call_complexity("lua", owner.as_deref(), message))
+    {
+        return Some(ExternalCallComplexity {
+            time: complexity.time,
+            space: complexity.space,
+            provenance: "lua_scip_symbol_registry",
+            bound_quality: "upper_bound_exact_target",
+            candidates: Vec::new(),
+            assumption: None,
+        });
+    }
+    let complexity = configured_external_latency_bound(
+        "lua",
+        owner.as_deref().unwrap_or("_G"),
+        message,
+    )?;
+    Some(ExternalCallComplexity {
+        time: complexity.time,
+        space: complexity.space,
+        provenance: "lua_external_effect_registry",
+        bound_quality: "upper_bound_external_latency_excluded",
+        candidates: Vec::new(),
+        assumption: Some(
+            "computational Big-O only; filesystem, process, stream, or terminal latency is excluded"
+                .to_string(),
+        ),
+    })
+}
+
+pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
+    let Some((package, descriptor)) = scip_lua_parts(symbol) else {
+        return ExternalSymbolMetadata {
+            scope: "dynamic",
+            missing_cost_kind: "callback_or_function_value_origin_unknown".to_string(),
+            parametric_cost: None,
+        };
+    };
+    if package == "lua" {
+        ExternalSymbolMetadata {
+            scope: "stdlib",
+            missing_cost_kind: configured_semantic_symbol_kind("lua", descriptor)
+                .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
+            parametric_cost: configured_semantic_symbol_parametric_cost("lua", descriptor),
+        }
+    } else {
+        ExternalSymbolMetadata {
+            scope: "dependency",
+            missing_cost_kind: "dependency_cost_model_missing".to_string(),
+            parametric_cost: None,
+        }
+    }
+}
+
+pub(crate) fn external_symbol_owner(symbol: &str) -> Option<String> {
+    let (_package, descriptor) = scip_lua_parts(symbol)?;
+    scip_descriptor_owner(descriptor)
+}
+
 // CFG-SPECIFIC START: Lua control-flow vocabulary.
 const LUA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
     iterator_messages: &[],
@@ -71,6 +146,22 @@ const LUA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct LuaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
+    fn external_symbol_call_complexity(
+        &self,
+        symbol: &str,
+        message: &str,
+    ) -> Option<ExternalCallComplexity> {
+        external_symbol_call_complexity(symbol, message)
+    }
+
+    fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
+        external_symbol_metadata(symbol)
+    }
+
+    fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
+        external_symbol_owner(symbol)
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("lua")
     }
@@ -762,5 +853,44 @@ mod tests {
         node_with_int.children = vec![Child::Integer(1)];
         assert_eq!(child_symbol(&node_with_int, 0), None);
         assert_eq!(first_string_or_symbol(&node_with_int), None);
+    }
+
+    #[test]
+    fn scip_lua_symbols_require_proven_stdlib_ownership() {
+        let insert = "scip-lua luarocks lua . table/insert().";
+        let dependency = "scip-lua luarocks inspect.lua 3.1.2 inspect/call().";
+        let dynamic = "unparseable";
+
+        let cost = external_symbol_call_complexity(insert, "insert").unwrap();
+        assert_eq!(cost.time, "O(N)");
+        assert_eq!(cost.space, "O(1)");
+        assert_eq!(cost.provenance, "lua_scip_symbol_registry");
+        assert_eq!(external_symbol_metadata(insert).scope, "stdlib");
+        assert_eq!(external_symbol_metadata(dependency).scope, "dependency");
+        assert_eq!(external_symbol_metadata(dynamic).scope, "dynamic");
+        assert_eq!(external_symbol_owner(insert).as_deref(), Some("table"));
+        assert!(external_symbol_call_complexity(dependency, "call").is_none());
+
+        let print = external_symbol_call_complexity(
+            "scip-lua luarocks lua . print().",
+            "print",
+        )
+        .unwrap();
+        assert_eq!(print.time, "O(N)");
+        assert_eq!(print.provenance, "lua_external_effect_registry");
+        assert_eq!(
+            print.bound_quality,
+            "upper_bound_external_latency_excluded"
+        );
+        assert!(print.assumption.is_some());
+    }
+
+    #[test]
+    fn scip_lua_callback_costs_remain_parametric() {
+        let sort = "scip-lua luarocks lua . table/sort().";
+        let metadata = external_symbol_metadata(sort);
+        assert_eq!(metadata.scope, "stdlib");
+        assert_eq!(metadata.parametric_cost.as_deref(), Some("callback_sort"));
+        assert!(external_symbol_call_complexity(sort, "sort").is_none());
     }
 }
