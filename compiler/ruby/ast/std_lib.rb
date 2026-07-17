@@ -16,6 +16,9 @@ FO = FsmOps::DSL
 
 STD_LIB = T.let({
   # Method Name => { args: [Type...], return: Type, zig: Pattern }
+  # A non-receiver parameter that the intrinsic may mutate is declared inline:
+  #   args: [:Receiver, { name: "out", type: :Value, mutable: true }]
+  # The shared call-contract verifier then requires `&out` at the CLEAR call site.
 
   "symbol" => {
     args: [STRING_TYPE],

@@ -16,6 +16,32 @@ RSpec.describe "explicit mutable call sites" do
     program
   end
 
+  def with_mutable_param_intrinsics
+    fixtures = {
+      "mutateParamFixture" => {
+        args: [
+          {name: "source", type: :Box},
+          {name: "target", type: :Box, mutable: true},
+        ],
+        return: :Void,
+        zig: "mutateParamFixture({0}, {1})",
+        bc: false,
+      },
+      "mutateMethodParamFixture" => {
+        args: [
+          {name: "receiver", type: :Box},
+          {name: "target", type: :Box, mutable: true},
+        ],
+        return: :Void,
+        zig: "mutateMethodParamFixture({0}, {1})",
+        bc: false,
+        is_method: true,
+      },
+    }
+    stub_const("STD_LIB", STD_LIB.merge(fixtures).freeze)
+    yield
+  end
+
   let(:function_prefix) do
     <<~CLEAR
       FN update(MUTABLE value: Int64) RETURNS Void ->
@@ -143,6 +169,118 @@ RSpec.describe "explicit mutable call sites" do
       END
     CLEAR
     expect { annotate(source) }.not_to raise_error
+  end
+
+  it "requires & for an explicitly mutable non-receiver stdlib parameter" do
+    source = <<~CLEAR
+      STRUCT Box { value: Int64 }
+      FN main() RETURNS Void ->
+        source = Box{ value: 1_i64 };
+        MUTABLE target = Box{ value: 2_i64 };
+        mutateParamFixture(source, target);
+      END
+    CLEAR
+
+    with_mutable_param_intrinsics do
+      expect { annotate(source) }.to raise_error(CompilerError, /'target'.*'&target'/)
+    end
+  end
+
+  it "accepts & for an explicitly mutable non-receiver stdlib parameter" do
+    source = <<~CLEAR
+      STRUCT Box { value: Int64 }
+      FN main() RETURNS Void ->
+        source = Box{ value: 1_i64 };
+        MUTABLE target = Box{ value: 2_i64 };
+        mutateParamFixture(source, &target);
+      END
+    CLEAR
+
+    with_mutable_param_intrinsics do
+      expect { annotate(source) }.not_to raise_error
+    end
+  end
+
+  it "requires a named stdlib mutable parameter argument to have a mutable root" do
+    source = <<~CLEAR
+      STRUCT Box { value: Int64 }
+      FN main() RETURNS Void ->
+        source = Box{ value: 1_i64 };
+        target = Box{ value: 2_i64 };
+        mutateParamFixture(source, &target);
+      END
+    CLEAR
+
+    with_mutable_param_intrinsics do
+      expect { annotate(source) }.to raise_error(CompilerError, /immutable variable 'target'/)
+    end
+  end
+
+  it "allows an anonymous value for a mutable stdlib parameter without &" do
+    source = <<~CLEAR
+      STRUCT Box { value: Int64 }
+      FN main() RETURNS Void ->
+        source = Box{ value: 1_i64 };
+        mutateParamFixture(source, Box{ value: 2_i64 });
+      END
+    CLEAR
+
+    with_mutable_param_intrinsics do
+      expect { annotate(source) }.not_to raise_error
+    end
+  end
+
+  it "offers one EASY fix for a mutable stdlib parameter root and marker" do
+    source = <<~CLEAR
+      STRUCT Box { value: Int64 }
+      FN main() RETURNS Void ->
+        source = Box{ value: 1_i64 };
+        target = Box{ value: 2_i64 };
+        mutateParamFixture(source, target);
+      END
+    CLEAR
+
+    with_mutable_param_intrinsics do
+      FixCollector.enable!
+      begin
+        annotate(source, mode: :easy)
+        finding = FixCollector.drain.find { |item| item.message.include?("&target") }
+        expect(finding).not_to be_nil
+        expect(finding.fixes.first.edits.map(&:replacement)).to contain_exactly("&", "MUTABLE ")
+      ensure
+        FixCollector.disable!
+      end
+    end
+  end
+
+  it "requires & for a mutable stdlib method parameter independent of its receiver" do
+    source = <<~CLEAR
+      STRUCT Box { value: Int64 }
+      FN main() RETURNS Void ->
+        source = Box{ value: 1_i64 };
+        MUTABLE target = Box{ value: 2_i64 };
+        source.mutateMethodParamFixture(target);
+      END
+    CLEAR
+
+    with_mutable_param_intrinsics do
+      expect { annotate(source) }.to raise_error(CompilerError, /'target'.*'&target'/)
+    end
+  end
+
+  it "accepts & for a mutable stdlib method parameter without addressing its immutable receiver" do
+    source = <<~CLEAR
+      STRUCT Box { value: Int64 }
+      FN main() RETURNS Void ->
+        source = Box{ value: 1_i64 };
+        MUTABLE target = Box{ value: 2_i64 };
+        source.mutateMethodParamFixture(&target);
+      END
+    CLEAR
+
+    with_mutable_param_intrinsics do
+      expect { annotate(source) }.not_to raise_error
+    end
   end
 
   it "requires an explicitly addressed method receiver root to be MUTABLE" do
