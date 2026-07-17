@@ -135,8 +135,8 @@ FN main() RETURNS Void ->
   ASSERT &locked.get(1_i64)!! OR_ELSE FALSE;
   &locked.put(3_i64, TRUE)!!;
   ASSERT &locked.get(2_i64)!! == NIL, "locked cache evicts in O(1)";
-  first = BG { &locked.put(4_i64, TRUE)!!; RETURN; };
-  second = BG { &locked.put(5_i64, TRUE)!!; RETURN; };
+  first = BG { &locked.put(4_i64, TRUE)!!; };
+  second = BG { &locked.put(5_i64, TRUE)!!; };
   NEXT first;
   NEXT second;
   ASSERT &locked.length()!! == 2_i64, "concurrent writes preserve capacity";
