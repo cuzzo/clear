@@ -114,7 +114,7 @@ FuzzGenerator.register(:match_matrix, cells: MM_CELLS) do |p|
       if p[:outcome] == :default_taken
         ""
       else
-        "MUTABLE xs: Int64[]@list = [];\n    xs.append(1_i64);\n    xs.append(2_i64);\n    "
+        "MUTABLE xs: Int64[]@list = [];\n    &xs.append(1_i64);\n    &xs.append(2_i64);\n    "
       end
     expected = p[:outcome] == :default_taken ? "9_i64" : "2_i64"
     <<~CHT

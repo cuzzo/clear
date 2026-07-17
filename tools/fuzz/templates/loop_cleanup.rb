@@ -54,7 +54,7 @@ def loop_cleanup_body(p)
   when :raise        then "IF i == 2_i64 THEN RAISE; END"
   end
 
-  escape = (p[:dest] == :appended_to_outer) ? "outer.append(v);" : nil
+  escape = (p[:dest] == :appended_to_outer) ? "&outer.append(v);" : nil
 
   # Order matters for the disruptor: continue jumps over the use, so put
   # use BEFORE continue. Other disruptors AFTER decl + use so the alloc

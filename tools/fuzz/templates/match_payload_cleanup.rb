@@ -49,9 +49,9 @@ FuzzGenerator.register(:match_payload_cleanup, cells: MATCH_PAYLOAD_CELLS) do |p
   when :list
     <<~PRE.chomp
       MUTABLE built: Int64[]@list = [];
-          built.append(1_i64);
-          built.append(2_i64);
-          built.append(3_i64);
+          &built.append(1_i64);
+          &built.append(2_i64);
+          &built.append(3_i64);
     PRE
   when :map
     <<~PRE.chomp

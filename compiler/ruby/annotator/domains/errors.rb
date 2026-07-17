@@ -392,7 +392,12 @@ module Annotator
         end
 
         value = T.must(raw_value)
-        value.coerced_type = expected if value.is_a?(AST::ListLit) && expected.tuple?
+        return_payload = expected.plain_return_payload_type || expected
+        if value.is_a?(AST::ListLit) && (return_payload.collection? || return_payload.tuple?)
+          value.coerced_type = return_payload
+        elsif value.is_a?(AST::HashLit) && return_payload.map?
+          value.coerced_type = return_payload
+        end
         visit(value)
 
         # Inline BG return: `RETURN BG { ... }`, plus composite returns such

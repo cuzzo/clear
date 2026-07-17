@@ -84,7 +84,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
         FN main() RETURNS !Void ->
             MUTABLE out: #{ty}[]@list = [];
             x: #{ty} = #{expr};
-            out.append(x);
+            &out.append(x);
             ASSERT out.length() == 1_i64, "lower stdlib append";
             RETURN;
         END

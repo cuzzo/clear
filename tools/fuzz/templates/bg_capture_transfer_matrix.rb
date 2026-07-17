@@ -78,7 +78,7 @@ def bct_decl(shape)
   when :struct_owned
     'v: Box = Box{ label: COPY "abc" };'
   when :list_owned
-    "MUTABLE v: Int64[]@list = [];\n    v.append(1_i64);\n    v.append(2_i64);\n    v.append(3_i64);"
+    "MUTABLE v: Int64[]@list = [];\n    &v.append(1_i64);\n    &v.append(2_i64);\n    &v.append(3_i64);"
   when :string_list_owned
     "v: String[]@list = mkStringList();"
   when :union_owned

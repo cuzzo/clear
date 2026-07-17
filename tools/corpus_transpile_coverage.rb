@@ -24,13 +24,15 @@ require_relative '../compiler/ruby/backends/transpiler'
 ROOT = File.expand_path('..', __dir__)
 opts = { examples: true, benchmarks: true, exclude_prefixes: [], shard: nil, strict: true }
 
-# Historical MiniVM snapshots, retained as source/reference material. They are
-# not active programs: _bc_runner.clear is the maintained runner and exercises
-# the same compiler surface. Keep this list exact and visible; strict mode must
-# still fail for every active example and benchmark rather than swallowing an
-# open-ended set of errors.
+# Historical MiniVM snapshots and non-standalone debugger modules, retained as
+# source/reference material. They are not active programs: _bc_runner.clear is
+# the maintained runner and exercises the same compiler surface. Keep this list
+# exact and visible; strict mode must still fail for every active example and
+# benchmark rather than swallowing an open-ended set of errors.
 REFERENCE_ONLY = %w[
   examples/minivm/_scheme_runner.clear
+  examples/minivm/debugger.clear
+  examples/minivm/register_debugger.clear
   examples/minivm/sus-int.clear
 ].freeze
 

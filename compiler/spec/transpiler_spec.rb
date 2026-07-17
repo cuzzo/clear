@@ -34,7 +34,40 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "fallible intrinsic spelling" do
+    it "exposes line input without the retired bang suffix" do
+      zig = transpile(<<~CLEAR)
+        FN main() RETURNS !Void ->
+          line = readLine() OR_ELSE RAISE;
+          prompted = readLinePrompt("> ") OR_ELSE RAISE;
+          print(line $+ prompted);
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("try CheatLib.readLine(")
+      expect(zig).to include("try CheatLib.readLinePrompt(")
+    end
+  end
+
   describe "collection ownership regressions" do
+    it "contextually types an empty hash literal from its declared return type" do
+      zig = transpile(<<~CLEAR)
+        FN make() RETURNS !HashMap<Int64> ->
+          RETURN {};
+        END
+
+        FN main() RETURNS Void ->
+          result = make();
+          ASSERT result.count() == 0_i64;
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("fn make(rt: *Runtime) !CheatLib.StringMap(i64)")
+      expect(zig).not_to include("CheatLib.StringMap(f64)")
+    end
+
     it "cleans popped frame-list string captures with the receiver allocator" do
       zig = transpile(<<~CLEAR)
         FN main() RETURNS Void ->

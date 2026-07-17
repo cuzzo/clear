@@ -42,7 +42,7 @@ END
 
 # Stdin-based debugger pause for the register VM. The runner is
 # compiled via the Zig backend (`clear build vm.clear`), not via the
-# register VM, so it can use `readLine!` and `print` directly -- no
+# register VM, so it can use `readLine` and `print` directly -- no
 # file polling, no temp files, no external driver.
 #
 # Action codes (returned to the dispatch loop's trap arm):

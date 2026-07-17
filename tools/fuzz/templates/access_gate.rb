@@ -292,7 +292,7 @@ FuzzGenerator.register(:access_gate, cells: ACCESS_GATE_CELLS) do |p|
           #{decl}
           MUTABLE list: Counter[]@list = [];
           #{head} {
-              list.append(ref);
+              &list.append(ref);
           }
           RETURN;
       END

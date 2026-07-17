@@ -151,7 +151,7 @@ def isig_body(fs, retval)
   when :alloc_concat
     %(    cat = a $+ a;\n    IF cat.length() == 999_i64 THEN RETURN #{retval}; END\n)
   when :alloc_list_build
-    %(    MUTABLE xs: Int64[]@list = [];\n    xs.append(3_i64);\n    IF xs.length() == 999_i64 THEN RETURN #{retval}; END\n)
+    %(    MUTABLE xs: Int64[]@list = [];\n    &xs.append(3_i64);\n    IF xs.length() == 999_i64 THEN RETURN #{retval}; END\n)
   when :direct_raise
     # Statically a RAISE path; the guard is impossible at runtime.
     %(    IF a.length() == 999_i64 THEN RAISE "never"; END\n)

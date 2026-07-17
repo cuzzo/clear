@@ -33,7 +33,7 @@ def phc_producer_body(value)
   when :int then "40_i64;"
   when :string then "COPY \"forty\";"
   when :list
-    "MUTABLE xs: Int64[]@list = [];\n              xs.append(40_i64);\n              Payload{ items: xs };"
+    "MUTABLE xs: Int64[]@list = [];\n              &xs.append(40_i64);\n              Payload{ items: xs };"
   end
 end
 

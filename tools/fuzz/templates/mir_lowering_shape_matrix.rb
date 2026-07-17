@@ -65,7 +65,7 @@ end
 def mlsm_list_setup(element, name)
   type = mlsm_list_type(element)
   if element == :struct
-    "MUTABLE #{name}: #{type} = [];\n    #{name}.append(Item{ v: 1_i64 });\n    #{name}.append(Item{ v: 2_i64 });"
+    "MUTABLE #{name}: #{type} = [];\n    &#{name}.append(Item{ v: 1_i64 });\n    &#{name}.append(Item{ v: 2_i64 });"
   else
     "#{name}: #{type} = #{mlsm_list_literal(element)};"
   end
@@ -94,7 +94,7 @@ def mlsm_list_program(element, context)
       END
     CHT
   when :return_direct
-    build = element == :struct ? "MUTABLE xs: #{type} = [];\n    xs.append(Item{ v: 1_i64 });\n    xs.append(Item{ v: 2_i64 });\n    RETURN xs;" : "RETURN #{literal};"
+    build = element == :struct ? "MUTABLE xs: #{type} = [];\n    &xs.append(Item{ v: 1_i64 });\n    &xs.append(Item{ v: 2_i64 });\n    RETURN xs;" : "RETURN #{literal};"
     expected = element == :struct ? 2 : (element == :call_result ? 2 : 3)
     <<~CHT
       #{prelude}FN build() RETURNS !#{type} ->

@@ -18,7 +18,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
 
   if p[:shape] == :bare_list
     consume = "FN consume(xs: #{list_t}) RETURNS Int64 -> RETURN xs.length(); END"
-    ctor    = "MUTABLE c0: #{list_t} = List[];\n        c0.append(#{push});"
+    ctor    = "MUTABLE c0: #{list_t} = List[];\n        &c0.append(#{push});"
     if p[:origin] == :local
       body = <<~CHT.chomp
         FN runit() RETURNS !Int64 ->
@@ -39,7 +39,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
     end
   elsif p[:shape] == :struct_field # struct with a nested @list field
     consume = "STRUCT Bag { items: #{list_t} }\n    FN consume(b: Bag) RETURNS Int64 -> RETURN b.items.length(); END"
-    ctor    = "MUTABLE inner: #{list_t} = List[];\n        inner.append(#{push});\n        MUTABLE bg0: Bag = Bag{ items: inner };"
+    ctor    = "MUTABLE inner: #{list_t} = List[];\n        &inner.append(#{push});\n        MUTABLE bg0: Bag = Bag{ items: inner };"
     if p[:origin] == :local
       body = <<~CHT.chomp
         FN runit() RETURNS !Int64 ->
@@ -61,7 +61,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
   elsif p[:shape] == :nested_list
     nested_t = "#{zig}[][]@list"
     consume = "FN consume(xs: #{nested_t}) RETURNS Int64 -> RETURN xs.length(); END"
-    ctor    = "MUTABLE inner: #{list_t} = List[];\n        inner.append(#{push});\n        MUTABLE c0: #{nested_t} = List[];\n        c0.append(inner);"
+    ctor    = "MUTABLE inner: #{list_t} = List[];\n        &inner.append(#{push});\n        MUTABLE c0: #{nested_t} = List[];\n        &c0.append(inner);"
     if p[:origin] == :local
       body = <<~CHT.chomp
         FN runit() RETURNS !Int64 ->
@@ -83,7 +83,7 @@ FuzzGenerator.register(:bg_capture_typing, cells: BG_CAPTURE_TYPING_CELLS) do |p
   elsif p[:shape] == :set_field
     set_t = "#{zig}[]@set"
     consume = "STRUCT Bag { items: #{set_t} }\n    FN consume(b: Bag) RETURNS Int64 -> RETURN b.items.length(); END"
-    ctor    = "MUTABLE inner: #{set_t} = Set[];\n        inner.insert(#{push});\n        MUTABLE bg0: Bag = Bag{ items: inner };"
+    ctor    = "MUTABLE inner: #{set_t} = Set[];\n        &inner.insert(#{push});\n        MUTABLE bg0: Bag = Bag{ items: inner };"
     if p[:origin] == :local
       body = <<~CHT.chomp
         FN runit() RETURNS !Int64 ->

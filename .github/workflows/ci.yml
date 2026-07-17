@@ -78,6 +78,10 @@ jobs:
       COVERAGE: "1"  # SimpleCov writes coverage/coverage.xml for Codecov upload below
     steps:
       - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+          use-cache: false
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}

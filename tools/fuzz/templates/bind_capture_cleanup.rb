@@ -43,11 +43,11 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
     when :rc_borrow
       setup, lookup = case p[:source]
                       when :list_index
-                        ["MUTABLE source: RefItem#{cap}[]@list = [];\n    source.append(RefItem{ value: 7_i64 } #{cap});", "source[0_i64]"]
+                        ["MUTABLE source: RefItem#{cap}[]@list = [];\n    &source.append(RefItem{ value: 7_i64 } #{cap});", "source[0_i64]"]
                       when :map_index
                         ["MUTABLE source: HashMap<RefItem#{cap}> = {};\n    source[\"item\"] = RefItem{ value: 7_i64 } #{cap};", "source[\"item\"]"]
                       when :pool_index
-                        ["MUTABLE source: RefItem#{cap}[4]@pool = [];\n    id = source.insert(RefItem{ value: 7_i64 } #{cap});", "source[id]"]
+                        ["MUTABLE source: RefItem#{cap}[4]@pool = [];\n    id = &source.insert(RefItem{ value: 7_i64 } #{cap});", "source[id]"]
                       when :optional_var
                         ["MUTABLE source: ?RefItem#{cap} = RefItem{ value: 7_i64 } #{cap};", "source"]
                       when :optional_field
@@ -68,12 +68,12 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
       bind = if p[:form] == :while
         <<~CLEAR.chomp
           MUTABLE total = 0_i64;
-              WHILE source.pop() EXISTS AS item DO total += item.value; END
+              WHILE &source.pop() EXISTS AS item DO total += item.value; END
               ASSERT total == 15_i64, "owned RC pop cleanup";
         CLEAR
       else
         <<~CLEAR.chomp
-          IF source.pop() EXISTS AS item THEN ASSERT item.value == 8_i64, "owned RC pop cleanup";
+          IF &source.pop() EXISTS AS item THEN ASSERT item.value == 8_i64, "owned RC pop cleanup";
               ELSE ASSERT FALSE, "expected RC item"; END
         CLEAR
       end
@@ -81,8 +81,8 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
         #{type_decl}
         FN main() RETURNS Void ->
             MUTABLE source: RefItem#{cap}[]@list = [];
-            source.append(RefItem{ value: 7_i64 } #{cap});
-            source.append(RefItem{ value: 8_i64 } #{cap});
+            &source.append(RefItem{ value: 7_i64 } #{cap});
+            &source.append(RefItem{ value: 8_i64 } #{cap});
             #{bind}
             RETURN;
         END
@@ -189,13 +189,13 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
            end
 
   # Build the population block for the source list.
-  populate = push_vals.map { |s| "    src.append(#{s});" }.join("\n")
+  populate = push_vals.map { |s| "    &src.append(#{s});" }.join("\n")
 
   drain =
     if p[:form] == :while
       <<~DR.chomp
         MUTABLE seen = 0_i64;
-            WHILE src.pop() EXISTS AS v DO
+            WHILE &src.pop() EXISTS AS v DO
                 #{observe}
                 seen = seen + 1_i64;
             END
@@ -203,7 +203,7 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
       DR
     else
       <<~DR.chomp
-        IF src.pop() EXISTS AS v THEN
+        IF &src.pop() EXISTS AS v THEN
                 #{observe}
             ELSE
                 ASSERT FALSE, "expected a popped value";

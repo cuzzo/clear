@@ -302,7 +302,7 @@ if $PROGRAM_NAME == __FILE__
       # Inherit stdin so the in-process debugger REPL (registerDebugPause!
       # in vm.clear) can read commands from the user's terminal. With
       # popen2e+stdin.close the runner saw EOF immediately and the trap
-      # arm spun forever on empty readLine! results. Streaming stdout
+      # arm spun forever on empty readLine results. Streaming stdout
       # line-by-line keeps tests' output deterministic; stderr is merged.
       pid = Process.spawn(jemalloc_env, register_runner_path, in: $stdin, out: $stdout, err: [:child, :out])
       _, status = Process.waitpid2(pid)

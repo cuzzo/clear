@@ -28,5 +28,5 @@ FN main() RETURNS Void ->
   "\"A*$\";?@![#>>+<<]>[>>]<<<<[>++<[-]]>.>.";
   ASSERT runWithLimits(obscureProbe, "", 30_000, 1_000_000) == "H\n", "Cristofani obscure parser probe";
 
-  &RETURN;
+  RETURN;
 END

@@ -93,11 +93,11 @@ FuzzGenerator.register(:c_ffi_type_matrix, cells: C_FFI_TYPE_CELLS) do |p|
   when :fixed
     "values: [2]#{type} = [#{value}, #{value}]; ASSERT values[1_i64] == #{value}, \"target fixed\";"
   when :list
-    "MUTABLE values: [List]#{type} = List[]; values.append(#{value}); ASSERT values.length() == 1_i64, \"target list\";"
+    "MUTABLE values: [List]#{type} = List[]; &values.append(#{value}); ASSERT values.length() == 1_i64, \"target list\";"
   when :pool
-    "MUTABLE values: [Pool(2)]#{type} = Pool[]; values.insert(#{value}); ASSERT values.length() == 1_i64, \"target pool\";"
+    "MUTABLE values: [Pool(2)]#{type} = Pool[]; &values.insert(#{value}); ASSERT values.length() == 1_i64, \"target pool\";"
   when :set
-    "MUTABLE values: [Set]#{type} = Set[]; values.insert(#{value}); ASSERT values.contains?(#{value}), \"target set\";"
+    "MUTABLE values: [Set]#{type} = Set[]; &values.insert(#{value}); ASSERT values.contains?(#{value}), \"target set\";"
   when :map
     "MUTABLE values: {String}#{type} = {}; values[\"value\"] = #{value}; ASSERT (values[\"value\"] OR_ELSE 0) == #{value}, \"target map\";"
   when :stream

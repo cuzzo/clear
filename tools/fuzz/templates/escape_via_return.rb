@@ -223,7 +223,7 @@ FuzzGenerator.register(:escape_via_return, cells: ESCAPE_VIA_RETURN_CELLS) do |p
     return_type = "#{zig_type}[]@list"
     decl_init   = "MUTABLE lst: #{return_type} = [];"
     return_var  = "lst"
-    append      = ->(v) { "    lst.append(#{v});" }
+    append      = ->(v) { "    &lst.append(#{v});" }
     values      = (1..size).map { |i| p[:elem] == :int ? "#{i}_i64" : %("v#{i}") }
     len_check   = "ASSERT length(result) == #{size}_i64, \"returned length\";"
     first_check = (p[:elem] == :int) ?
@@ -236,7 +236,7 @@ FuzzGenerator.register(:escape_via_return, cells: ESCAPE_VIA_RETURN_CELLS) do |p
     return_type = "#{zig_type}[]@set"
     decl_init   = "MUTABLE s: #{return_type} = Set[];"
     return_var  = "s"
-    append      = ->(v) { "    s.insert(#{v});" }
+    append      = ->(v) { "    &s.insert(#{v});" }
     values      = (1..size).map { |i| p[:elem] == :set_int ? "#{i}_i64" : %("v#{i}") }
     len_check   = "ASSERT result.length() == #{size}_i64, \"returned set length\";"
     first_check = ""  # sets are unordered; length suffices
@@ -246,7 +246,7 @@ FuzzGenerator.register(:escape_via_return, cells: ESCAPE_VIA_RETURN_CELLS) do |p
     return_type = "Point[100]@pool"
     decl_init   = "MUTABLE p: #{return_type} = [];"
     return_var  = "p"
-    append      = ->(_v, i = nil) { i ||= 1; "    p.insert(Point{ x: #{i}.0, y: #{i}.0 });" }
+    append      = ->(_v, i = nil) { i ||= 1; "    &p.insert(Point{ x: #{i}.0, y: #{i}.0 });" }
     values      = (1..size).to_a
     len_check   = "ASSERT result.length() == #{size}_i64, \"returned pool length\";"
     first_check = ""
@@ -276,7 +276,7 @@ FuzzGenerator.register(:escape_via_return, cells: ESCAPE_VIA_RETURN_CELLS) do |p
     return_type = "Container"
     decl_init   = "MUTABLE c = Container{ items: [] };"
     return_var  = "c"
-    append      = ->(v) { "    c.items.append(#{v});" }
+    append      = ->(v) { "    &c.items.append(#{v});" }
     values      = (1..size).map { |i| "#{i}_i64" }
     len_check   = "ASSERT result.items.length() == #{size}_i64, \"returned struct.items length\";"
     first_check = "ASSERT result.items[0] == 1_i64, \"first items element\";"
@@ -286,7 +286,7 @@ FuzzGenerator.register(:escape_via_return, cells: ESCAPE_VIA_RETURN_CELLS) do |p
     return_type = "Wrap"
     decl_init   = "MUTABLE lst: Int64[]@list = [];"
     return_var  = "Wrap{ Has: lst }"
-    append      = ->(v) { "    lst.append(#{v});" }
+    append      = ->(v) { "    &lst.append(#{v});" }
     values      = (1..size).map { |i| "#{i}_i64" }
     len_check   = <<~CHK.strip
       PARTIAL MATCH result START
@@ -303,7 +303,7 @@ FuzzGenerator.register(:escape_via_return, cells: ESCAPE_VIA_RETURN_CELLS) do |p
     values.each_with_index.map { |v, _| append.call(v) }.join("\n")
   when :loop
     if p[:elem] == :int
-      "    FOR i IN (1_i64 ..= #{size}_i64) DO\n        lst.append(i);\n    END"
+      "    FOR i IN (1_i64 ..= #{size}_i64) DO\n        &lst.append(i);\n    END"
     else
       values.each_with_index.map { |v, _| append.call(v) }.join("\n")
     end

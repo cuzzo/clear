@@ -1475,10 +1475,13 @@ module MIRLoweringFunctions
   sig { params(a: AST::Node).returns(T::Boolean) }
   private def with_alias_pointer_shaped?(a)
     T.bind(self, MIRLowering) rescue nil
-    a.is_a?(AST::Identifier) &&
-      capability_state.with_alias_owner_map&.key?(a.name.to_s) == true &&
-      (a.symbol&.borrowed_alias == true ||
-       capability_state.if_bind_pointer_aliases.include?(a.name.to_s))
+    return false unless a.is_a?(AST::Identifier)
+
+    name = a.name.to_s
+    return false unless capability_state.with_alias_owner_map&.key?(name) == true
+    return capability_state.if_bind_pointer_aliases.include?(name) if capability_state.if_bind_aliases.include?(name)
+
+    a.symbol&.borrowed_alias == true
   end
 
   sig { params(node: AST::FuncCall).returns(MIR::Node) }
@@ -1554,8 +1557,11 @@ module MIRLoweringFunctions
   def lower_method_call(node)
     T.bind(self, MIRLowering) rescue nil
     # Stub interception: a UFCS call `x.query(args)` lowers to `query(x, args)`,
-    # so STUB query intercepts must apply here too.
-    if (intercept = stub_intercept_for(node.name, node.object, node.args))
+    # so STUB query intercepts must apply here too. Inherent-method resolution
+    # mangles `name` for Zig dispatch while preserving the declared spelling in
+    # `source_method_name`; STUB declarations always use that source spelling.
+    stub_name = node.source_method_name || node.name
+    if (intercept = stub_intercept_for(stub_name, node.object, node.args))
       return intercept
     end
 

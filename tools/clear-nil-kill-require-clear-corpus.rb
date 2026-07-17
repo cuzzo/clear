@@ -22,6 +22,7 @@ LIVE_DATA_EXCLUDES = %w[
   examples/minivm/bench_pool_ops_nosync.clear
   examples/minivm/debugger.clear
   examples/minivm/parser.clear
+  examples/minivm/register_debugger.clear
   examples/minivm/sus-int.clear
   examples/minivm/types.clear
   examples/minivm/vm.clear

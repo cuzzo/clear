@@ -7,13 +7,15 @@ STRUCT Client {
   host: String
 }
 
-FN query(client: Client, sql: String) RETURNS String ->
-  RETURN "real database result";
-END
+IMPLEMENTATION Client {
+  METHOD query(self, sql: String) RETURNS String ->
+    RETURN "real database result";
+  END
 
-FN execute(client: Client, sql: String) RETURNS Void ->
-  RETURN;
-END
+  METHOD execute(self, sql: String) RETURNS Void ->
+    RETURN;
+  END
+}
 
 FN main() RETURNS Void ->
   RETURN;

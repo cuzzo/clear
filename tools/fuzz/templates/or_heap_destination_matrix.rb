@@ -73,7 +73,7 @@ def ohd_make_body(shape)
   when :struct_owned
     'out: ?Box = Box{ label: COPY "ok" }; RETURN out;'
   when :list_owned
-    "MUTABLE xs: Int64[]@list = [];\n    xs.append(1_i64);\n    xs.append(2_i64);\n    out: ?(Int64[]@list) = xs;\n    RETURN out;"
+    "MUTABLE xs: Int64[]@list = [];\n    &xs.append(1_i64);\n    &xs.append(2_i64);\n    out: ?(Int64[]@list) = xs;\n    RETURN out;"
   when :string_list_owned
     "out: ?(String[]@list) = mkStringList(); RETURN out;"
   when :union_owned
@@ -211,7 +211,7 @@ FuzzGenerator.register(:or_heap_destination_matrix, cells: OR_HEAP_DESTINATION_C
       #{helpers}
       FN main() RETURNS Void ->
           MUTABLE out: #{ty}[]@list = [];
-          out.append(#{expr});
+          &out.append(#{expr});
           ASSERT out.length() == 1_i64, "or heap list append";
           RETURN;
       END

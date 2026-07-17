@@ -39,7 +39,7 @@ FuzzGenerator.register(:cross_fiber_consumer, cells: CROSS_FIBER_CELLS) do |p|
     ]
   when :bg_stream_list
     [
-      "STRUCT PayloadList { items: Int64[]@list }\n\n    gen: [~]PayloadList = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO MUTABLE xs: Int64[]@list = []; xs.append(k); YIELD PayloadList{ items: xs }; k = k + 1_i64; END\n    };",
+      "STRUCT PayloadList { items: Int64[]@list }\n\n    gen: [~]PayloadList = BG STREAM {\n        MUTABLE k: Int64 = 0_i64;\n        WHILE k < 3_i64 DO MUTABLE xs: Int64[]@list = []; &xs.append(k); YIELD PayloadList{ items: xs }; k = k + 1_i64; END\n    };",
       "gen", "PayloadList",
       'final.items.length() == 1_i64', true,
     ]

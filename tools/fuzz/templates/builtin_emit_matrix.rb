@@ -36,13 +36,13 @@ FuzzGenerator.register(:builtin_emit_matrix, cells: BUILTIN_EMIT_CELLS) do |p|
   when :int_to_string
     %(FN main() RETURNS Void ->\n    s = 42_i64.toString();\n    ASSERT s.length() == 2_i64, "int toString";\n    RETURN;\nEND\n)
   when :list_length_method
-    %(FN main() RETURNS Void ->\n    MUTABLE xs: Int64[]@list = [];\n    xs.append(1_i64);\n    ASSERT xs.length() == 1_i64, "list length method";\n    RETURN;\nEND\n)
+    %(FN main() RETURNS Void ->\n    MUTABLE xs: Int64[]@list = [];\n    &xs.append(1_i64);\n    ASSERT xs.length() == 1_i64, "list length method";\n    RETURN;\nEND\n)
   when :list_length_global
-    %(FN main() RETURNS Void ->\n    MUTABLE xs: Int64[]@list = [];\n    xs.append(1_i64);\n    ASSERT length(xs) == 1_i64, "list length global";\n    RETURN;\nEND\n)
+    %(FN main() RETURNS Void ->\n    MUTABLE xs: Int64[]@list = [];\n    &xs.append(1_i64);\n    ASSERT length(xs) == 1_i64, "list length global";\n    RETURN;\nEND\n)
   when :map_count
     %(FN main() RETURNS Void ->\n    MUTABLE m: HashMap<Int64> = {};\n    m["a"] = 1_i64;\n    ASSERT m.count() == 1_i64, "map count";\n    RETURN;\nEND\n)
   when :set_length
-    %(FN main() RETURNS Void ->\n    MUTABLE s: Int64[]@set = [];\n    s.insert(1_i64);\n    ASSERT s.length() == 1_i64, "set length";\n    RETURN;\nEND\n)
+    %(FN main() RETURNS Void ->\n    MUTABLE s: Int64[]@set = [];\n    &s.insert(1_i64);\n    ASSERT s.length() == 1_i64, "set length";\n    RETURN;\nEND\n)
   when :active_union_match
     <<~CHT
       UNION V { Empty, Text: String }

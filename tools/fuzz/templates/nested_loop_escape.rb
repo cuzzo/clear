@@ -79,28 +79,28 @@ FuzzGenerator.register(:nested_loop_escape, cells: NESTED_LOOP_ESCAPE_CELLS) do 
     when :list
       <<~BODY.chomp
                 MUTABLE inner: Int64[]@list = [];
-                inner.append(i);
-                inner.append(i + 1_i64);
-                outer.append(#{append_arg});
+                &inner.append(i);
+                &inner.append(i + 1_i64);
+                &outer.append(#{append_arg});
       BODY
     when :array
       <<~BODY.chomp
                 inner: Int64[] = [i, i + 1_i64];
-                outer.append(#{append_arg});
+                &outer.append(#{append_arg});
       BODY
     when :set
       <<~BODY.chomp
                 MUTABLE inner: Int64[]@set = [];
-                inner.insert(i);
-                inner.insert(i + 1_i64);
-                outer.append(#{append_arg});
+                &inner.insert(i);
+                &inner.insert(i + 1_i64);
+                &outer.append(#{append_arg});
       BODY
     when :map
       <<~BODY.chomp
                 MUTABLE inner: HashMap<Int64> = {};
                 inner["a"] = i;
                 inner["b"] = i + 1_i64;
-                outer.append(#{append_arg});
+                &outer.append(#{append_arg});
       BODY
     end
 

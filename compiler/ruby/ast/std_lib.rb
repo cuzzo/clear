@@ -429,7 +429,7 @@ STD_LIB = T.let({
   },
 
   # 6. Read Line from stdin
-  "readLine!" => {
+  "readLine" => {
     args: [],
     return: STRING_TYPE,
     return_alloc: :frame,
@@ -440,7 +440,7 @@ STD_LIB = T.let({
   },
 
   # 6b. Read Line with prompt, editing, and history
-  "readLinePrompt!" => {
+  "readLinePrompt" => {
     args: [STRING_TYPE],
     return: STRING_TYPE,
     return_alloc: :frame,

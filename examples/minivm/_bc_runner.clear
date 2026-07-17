@@ -11,7 +11,7 @@ REQUIRE "debugger.clear";
 FN nativeSum(arr: Int64[]) RETURNS Int64 ->
     MUTABLE total: Int64 = 0;
     FOR i IN (0_i64 ..< arr.length()) DO
-        total += arr[i];&
+        total += arr[i];
     END
     RETURN total;
 END
@@ -30,7 +30,7 @@ FN nativeDot(a: Float64[], b: Float64[]) RETURNS Float64 ->
         total = total + a[i] * b[i];
     END
     RETURN total;
-END&
+END
 
 # FFI for typed structs: operate on raw Int64[] backing data
 FN nativePointManhattan(a: Int64[], b: Int64[]) RETURNS Int64 ->
@@ -41,13 +41,12 @@ FN nativePointManhattan(a: Int64[], b: Int64[]) RETURNS Int64 ->
     RETURN dx + dy;
 END
 
-FN nativeTranslate(point: Int64[], dx: Int64, &dy: Int64) RETURNS !Int64[] ->
+FN nativeTranslate(point: Int64[], dx: Int64, dy: Int64) RETURNS !Int64[] ->
     MUTABLE result: []Int64 = List[];
     &result.append(point[0] + dx);
     &result.append(point[1] + dy);
     RETURN result;
 END
-&
 FN nativeContains(arr: Int64[], needle: Int64) RETURNS Bool ->
     FOR i IN (0_i64 ..< arr.length()) DO
         IF arr[i] == needle THEN RETURN TRUE; END
@@ -62,15 +61,15 @@ END
 # Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
 
 # Native function dispatch by numeric ID.
-# IDs: 1=+ 2=- 3=* 4=/ 5== 6=< &7=> 8=<= 9=>=
+# IDs: 1=+ 2=- 3=* 4=/ 5== 6=< 7=> 8=<= 9=>=
 #      10=list 11=list? 12=empty? 13=count 14=not 15=prn
-#      16=vector 17=vector-ref 18=vecto&r-set! 19=vector-length 20=vector?
+#      16=vector 17=vector-ref 18=vector-set! 19=vector-length 20=vector?
 #      21=cons 22=car 23=cdr 24=pair? 25=eq?
 #      26=string-append 27=string-length 28=substring 29=string-ref
 #      30=number->string 31=string->number 32=string? 33=display
 #      34=list-ref 35=list-length 36=list-push 62=list-set!
 
-FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value E&FFECTS REENTRANT ->
+FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     # Arithmetic
     # Modulo. For Int64-valued operands, avoid the float round-trip:
     # toInt(toFloat(big)) loses precision past 2^53 and panics with
@@ -92,7 +91,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value E&FFECTS REENTRANT ->
     END
     IF id == 1 THEN
         # + works on i64, f64, and strings
-        PARTIAL MATCH e&valed[1] START
+        PARTIAL MATCH evaled[1] START
             Value.Str AS s1 -> RETURN Value{ Str: s1 $+ getStr(evaled[2]) };,
             Value.Int64Val AS ia ->
                 IF isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: ia + getInt(evaled[2]) };
@@ -100,7 +99,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value E&FFECTS REENTRANT ->
             DEFAULT -> RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) };
         END
         RETURN Value{ Number: getNum(evaled[1]) + getNum(evaled[2]) };
-    END&
+    END
     IF id == 2 THEN
         IF isInt64?(evaled[1]) AND isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: getInt(evaled[1]) - getInt(evaled[2]) }; END
         RETURN Value{ Number: getNum(evaled[1]) - getNum(evaled[2]) };
@@ -117,13 +116,13 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value E&FFECTS REENTRANT ->
             RETURN Value{ Int64Val: ia / ib };
         END
         RETURN Value{ Number: getNum(evaled[1]) / getNum(evaled[2]) };
-    END&
+    END
     # Comparison
     IF id == 5 THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
     IF id == 6 THEN RETURN boolVal(getNum(evaled[1]) < getNum(evaled[2])); END
     IF id == 7 THEN RETURN boolVal(getNum(evaled[1]) > getNum(evaled[2])); END
-    IF id == 8 THEN RETURN boolVal(g&etNum(evaled[1]) <= getNum(evaled[2])); END
-    IF id == 9 T&HEN RETURN boolVal(getNum(evaled[1]) >= getNum(evaled[2])); END
+    IF id == 8 THEN RETURN boolVal(getNum(evaled[1]) <= getNum(evaled[2])); END
+    IF id == 9 THEN RETURN boolVal(getNum(evaled[1]) >= getNum(evaled[2])); END
     # List
     IF id == 10 THEN
         MUTABLE litems: []Value = List[];
@@ -218,7 +217,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value E&FFECTS REENTRANT ->
         END
         RETURN Value{ List: parts };
     END
-    IF id == 40 THEN&
+    IF id == 40 THEN
         # indexOf(str, needle) -> ?Int64: index when found, Nil when not.
         # CLEAR's indexOf returns an optional; consumers use IF ... AS bind
         # or `OR_ELSE -1` fallback. Returning -1 inline broke the Nil-check path.

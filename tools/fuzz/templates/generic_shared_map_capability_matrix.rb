@@ -32,7 +32,7 @@ FuzzGenerator.register(:generic_shared_map_capability_matrix, cells: GENERIC_SHA
       FN main() RETURNS !Void ->
         storage: {String}#{capability} Int64 = {};
         MUTABLE cache = Cache<{String}#{capability} Int64>{ values: storage };
-        cache.put("key", 9_i64);
+        &cache.put("key", 9_i64);
       END
     CLEAR
   else

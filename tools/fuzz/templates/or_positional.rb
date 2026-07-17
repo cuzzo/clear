@@ -71,7 +71,7 @@ end
 
 def or_inner_construct(t)
   case t
-  when :heap_list   then "MUTABLE v: Int64[]@list = []; v.append(1_i64);"
+  when :heap_list   then "MUTABLE v: Int64[]@list = []; &v.append(1_i64);"
   when :heap_string then "MUTABLE v: String = \"\"; v = v $+ \"x\";"
   end
 end
@@ -110,7 +110,7 @@ def or_body(p)
     "MUTABLE len: Int64 = consume(#{expr});"
   when :method_arg
     # method-arg position: append a heap-allocated value into outer list.
-    "MUTABLE outer: #{or_outer_list_type(p[:inner_t])} = []; outer.append(#{expr});"
+    "MUTABLE outer: #{or_outer_list_type(p[:inner_t])} = []; &outer.append(#{expr});"
   when :return_expr
     # The OR_ELSE expression IS the function's return; signature differs from
     # other positions. Caller binds the result.

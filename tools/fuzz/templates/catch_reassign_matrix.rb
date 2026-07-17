@@ -38,7 +38,7 @@ def crm_succ(vt)
   when :string then "RETURN COPY s;"
   when :int    then "RETURN s.length();"
   when :list
-    "MUTABLE xs: Int64[]@list = [];\n    xs.append(s.length());\n    RETURN xs;"
+    "MUTABLE xs: Int64[]@list = [];\n    &xs.append(s.length());\n    RETURN xs;"
   when :struct then "RETURN Box{ name: COPY s };"
   end
 end
@@ -78,7 +78,7 @@ end
 FuzzGenerator.register(:catch_reassign_matrix, cells: CRM_CELLS) do |p|
   if p[:var] == :local
     init = if p[:value] == :list
-             "MUTABLE acc: Int64[]@list = [];\n        acc.append(7_i64);"
+             "MUTABLE acc: Int64[]@list = [];\n        &acc.append(7_i64);"
            else
              "MUTABLE acc = #{crm_init(p[:value])};"
            end
@@ -112,7 +112,7 @@ FuzzGenerator.register(:catch_reassign_matrix, cells: CRM_CELLS) do |p|
           when :struct then p[:taken] == :success ? "1_i64" : "4_i64"
           end
     holder_init = if p[:value] == :list
-                    "MUTABLE start: Int64[]@list = [];\n        start.append(7_i64);\n        MUTABLE h = Holder{ acc: start };"
+                    "MUTABLE start: Int64[]@list = [];\n        &start.append(7_i64);\n        MUTABLE h = Holder{ acc: start };"
                   else
                     "MUTABLE h = Holder{ acc: #{crm_init(p[:value])} };"
                   end

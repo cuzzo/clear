@@ -32,7 +32,7 @@ FuzzGenerator.register(:bg_copy_param_reentrant, cells: BG_COPY_PARAM_REENTRANT_
 
     FN main() RETURNS !Void ->
         MUTABLE xs: #{lt} = List[];
-        xs.append(#{push});
+        &xs.append(#{push});
         n: Int64 = worker(GIVE xs, #{n}_i64) OR_ELSE RAISE;
         ASSERT n == 1_i64, "COPY @list param through reentrant BG";
         RETURN;

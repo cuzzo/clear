@@ -42,7 +42,7 @@ def cam_inner(vt)
     "FN maybe(s: String) RETURNS !Int64[]@list ->\n" \
     "    IF s.length() == 0_i64 THEN RAISE \"empty\"; END\n" \
     "    MUTABLE xs: Int64[]@list = [];\n" \
-    "    xs.append(s.length());\n" \
+    "    &xs.append(s.length());\n" \
     "    RETURN xs;\nEND"
   else
     "STRUCT Box { name: String }\n\n" \
@@ -79,7 +79,7 @@ def cam_fallback_setup(vt, fb)
   when :string then "    fbv: String = \"fb\";"
   when :int    then "    fbv: Int64 = 0_i64;"
   when :list
-    "    MUTABLE fbv: Int64[]@list = [];\n    fbv.append(0_i64);"
+    "    MUTABLE fbv: Int64[]@list = [];\n    &fbv.append(0_i64);"
   else
     "    fbv: Box = Box{ name: \"fb\" };"
   end

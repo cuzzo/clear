@@ -92,4 +92,3 @@ FN debugPause(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE poo
     writeFile("/tmp/_debug_break.txt", "");
     RETURN debugAction;
 END
-&

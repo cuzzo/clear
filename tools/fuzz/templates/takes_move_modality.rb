@@ -30,25 +30,25 @@ TAKES_MOVE_SHAPE_SPECS = {
   dynamic_array: [
     "",
     "Int64[]",
-    "MUTABLE xs: Int64[] = [];\n    xs.append(4_i64);",
+    "MUTABLE xs: Int64[] = [];\n    &xs.append(4_i64);",
     false,
   ],
   heap_list: [
     "",
     "Int64[]@list",
-    "MUTABLE xs: Int64[]@list = [];\n    xs.append(4_i64);",
+    "MUTABLE xs: Int64[]@list = [];\n    &xs.append(4_i64);",
     false,
   ],
   set: [
     "",
     "Int64[]@set",
-    "MUTABLE xs: Int64[]@set = [];\n    xs.insert(4_i64);",
+    "MUTABLE xs: Int64[]@set = [];\n    &xs.insert(4_i64);",
     false,
   ],
   pool: [
     "STRUCT It { v: Int64 }\n",
     "It[8]@pool",
-    "MUTABLE xs: It[8]@pool = [];\n    _ = xs.insert(It{ v: 4_i64 });",
+    "MUTABLE xs: It[8]@pool = [];\n    _ = &xs.insert(It{ v: 4_i64 });",
     false,
   ],
   hash_map: [
@@ -60,19 +60,19 @@ TAKES_MOVE_SHAPE_SPECS = {
   sharded_list: [
     "",
     "Int64[]@list:sharded(2)",
-    "MUTABLE xs: Int64[]@list:sharded(2) = [];\n    xs.append(4_i64);",
+    "MUTABLE xs: Int64[]@list:sharded(2) = [];\n    &xs.append(4_i64);",
     false,
   ],
   sharded_pool: [
     "STRUCT It { v: Int64 }\n",
     "It[8]@pool:sharded(2)",
-    "MUTABLE xs: It[8]@pool:sharded(2) = [];\n    _ = xs.insert(It{ v: 4_i64 });",
+    "MUTABLE xs: It[8]@pool:sharded(2) = [];\n    _ = &xs.insert(It{ v: 4_i64 });",
     false,
   ],
   sharded_set: [
     "",
     "Int64[]@set:sharded(2)",
-    "MUTABLE xs: Int64[]@set:sharded(2) = [];\n    xs.insert(4_i64);",
+    "MUTABLE xs: Int64[]@set:sharded(2) = [];\n    &xs.insert(4_i64);",
     false,
   ],
   sharded_hash_map: [
@@ -84,13 +84,13 @@ TAKES_MOVE_SHAPE_SPECS = {
   soa_list: [
     "STRUCT It { v: Float64 }\n",
     "It[]@list:soa",
-    "MUTABLE xs: It[]@list:soa = [];\n    xs.append(It{ v: 1.0 });",
+    "MUTABLE xs: It[]@list:soa = [];\n    &xs.append(It{ v: 1.0 });",
     false,
   ],
   soa_pool: [
     "STRUCT It { v: Float64 }\n",
     "It[8]@pool:soa",
-    "MUTABLE xs: It[8]@pool:soa = [];\n    _ = xs.insert(It{ v: 1.0 });",
+    "MUTABLE xs: It[8]@pool:soa = [];\n    _ = &xs.insert(It{ v: 1.0 });",
     false,
   ],
   struct_owned_fields: [
@@ -102,7 +102,7 @@ TAKES_MOVE_SHAPE_SPECS = {
   union_owned_payload: [
     "UNION V { Nil, Heap: Int64[]@list }\n",
     "V",
-    "MUTABLE inner: Int64[]@list = [];\n    inner.append(7_i64);\n    xs: V = V{ Heap: inner };",
+    "MUTABLE inner: Int64[]@list = [];\n    &inner.append(7_i64);\n    xs: V = V{ Heap: inner };",
     true,
   ],
   option_owned_payload: [
@@ -114,7 +114,7 @@ TAKES_MOVE_SHAPE_SPECS = {
   nested_container: [
     "",
     "Int64[][]@list",
-    "MUTABLE inner: Int64[]@list = [];\n    inner.append(5_i64);\n    MUTABLE xs: Int64[][]@list = [];\n    xs.append(inner);",
+    "MUTABLE inner: Int64[]@list = [];\n    &inner.append(5_i64);\n    MUTABLE xs: Int64[][]@list = [];\n    &xs.append(inner);",
     false,
   ],
 }.freeze

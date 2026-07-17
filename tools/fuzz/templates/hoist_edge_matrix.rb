@@ -130,7 +130,7 @@ FuzzGenerator.register(:hoist_edge_matrix, cells: HOIST_EDGE_CELLS) do |p|
       #{helpers}
       FN main() RETURNS !Void ->
           MUTABLE out: #{ty}[]@list = [];
-          out.append(#{expr});
+          &out.append(#{expr});
           ASSERT out.length() == 1_i64, "hoist list append";
           RETURN;
       END

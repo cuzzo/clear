@@ -28,7 +28,7 @@ FN bounds(cells: []Cell) RETURNS ![]Cell ->
     IF cells[i] EXISTS AS cell THEN
       IF cell.x < minX -> minX = cell.x;
       IF cell.x > maxX -> maxX = cell.x;
-    &  IF cell.y < minY -> minY = cell.y;
+      IF cell.y < minY -> minY = cell.y;
       IF cell.y > maxY -> maxY = cell.y;
     END
     i += 1;
@@ -40,7 +40,7 @@ FN bounds(cells: []Cell) RETURNS ![]Cell ->
 END
 
 FN graph(cells: []Cell) RETURNS ![]String ->
-  live =& liveCellMap(cells);
+  live = liveCellMap(cells);
   b = bounds(cells);
   min = b[0] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };
   max = b[1] OR_ELSE Cell{ x: 0_i64, y: 0_i64 };

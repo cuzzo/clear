@@ -337,6 +337,37 @@ RSpec.describe "Test Framework DSL" do
       # The "unstubbed" test should call the real getData, not the stub
       expect(zig).to include('test "Scope: unstubbed: uses real"')
     end
+
+    it "intercepts inherent METHOD calls by their source name" do
+      src = <<~CLEAR
+        STRUCT Client { host: String }
+
+        IMPLEMENTATION Client {
+          METHOD query(self, sql: String) RETURNS String -> RETURN "real"; END
+          METHOD execute(self, sql: String) RETURNS Void -> RETURN; END
+        }
+
+        FN main() RETURNS Void -> RETURN; END
+
+        TEST MethodStubs DO
+          WHEN "stubbed" DO
+            STUB query RETURNS "mock";
+            STUB execute CAPTURES count;
+            TEST THAT "uses both stubs" DO
+              client = Client{ host: "localhost" };
+              ASSERT client.query("SELECT 1") == "mock";
+              client.execute("UPDATE users SET active = TRUE");
+              ASSERT count == 1;
+            END
+          END
+        END
+      CLEAR
+
+      zig = transpile(src)
+      expect(zig.scan("__stub_query").length).to be >= 2
+      expect(zig).to include("var count: i64 = 0")
+      expect(zig).to include("count = (count + 1)")
+    end
   end
 
   describe "BENCHMARK transpilation" do

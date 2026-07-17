@@ -34,15 +34,15 @@ def ulc_build_setup(payload)
   when :string
     ["", 'U{ Text: COPY "abc" }', "U.Text", "x.length()"]
   when :list
-    ["MUTABLE xs: Int64[]@list = [];\n    xs.append(1_i64);\n    xs.append(2_i64);", "U{ Items: xs }", "U.Items", "x.length()"]
+    ["MUTABLE xs: Int64[]@list = [];\n    &xs.append(1_i64);\n    &xs.append(2_i64);", "U{ Items: xs }", "U.Items", "x.length()"]
   when :map
     ['MUTABLE xs: HashMap<Int64> = {};' + "\n    xs[\"a\"] = 1_i64;\n    xs[\"b\"] = 2_i64;", "U{ Table: xs }", "U.Table", "x.count()"]
   when :inline_struct
     ["", 'U.Item{ label: COPY "abc", count: 2_i64 }', "U.Item", "x.label.length()"]
   when :nested_inline
-    ["MUTABLE xs: Int64[]@list = [];\n    xs.append(1_i64);\n    xs.append(2_i64);", 'U.Item{ label: COPY "abc", items: xs }', "U.Item", "x.items.length()"]
+    ["MUTABLE xs: Int64[]@list = [];\n    &xs.append(1_i64);\n    &xs.append(2_i64);", 'U.Item{ label: COPY "abc", items: xs }', "U.Item", "x.items.length()"]
   when :slice_like
-    ["MUTABLE xs: Int64[] = [];\n    xs.append(1_i64);\n    xs.append(2_i64);", "U{ Items: xs }", "U.Items", "x.length()"]
+    ["MUTABLE xs: Int64[] = [];\n    &xs.append(1_i64);\n    &xs.append(2_i64);", "U{ Items: xs }", "U.Items", "x.length()"]
   end
 end
 
@@ -115,7 +115,7 @@ FuzzGenerator.register(:union_lowering_cleanup_matrix, cells: UNION_LOWERING_CLE
       #{union_def}
       FN main() RETURNS Void ->
           #{setup_line}MUTABLE out: U[]@list = [];
-          out.append(#{expr});
+          &out.append(#{expr});
           ASSERT out.length() == 1_i64, "union list append";
           RETURN;
       END
