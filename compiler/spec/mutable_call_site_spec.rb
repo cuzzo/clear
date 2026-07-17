@@ -1,6 +1,7 @@
 require "rspec"
 require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 require_relative "../ruby/ast/fixable_error" unless defined?(FixCollector)
+require_relative "../ruby/tools/clear_fix_support" unless defined?(ClearFixSupport)
 
 RSpec.describe "explicit mutable call sites" do
   def parse(source, mode: :default)
@@ -108,6 +109,22 @@ RSpec.describe "explicit mutable call sites" do
     expect { annotate(source) }.to raise_error(CompilerError, /only valid on an argument/)
   end
 
+  it "preserves the addressed root in the parsed call syntax" do
+    source = function_prefix + <<~CLEAR
+      FN main() RETURNS Void ->
+        MUTABLE value = 1_i64;
+        update(&value);
+      END
+    CLEAR
+    program = parse(source)
+    main = program.statements.grep(AST::FunctionDef).find { |fn| fn.name == "main" }
+    call = main.body.find { |node| node.is_a?(AST::FuncCall) }
+    marker = call.args.first
+
+    expect(marker).to be_a(AST::MutableBorrow)
+    expect(AST.root_identifier(marker).name).to eq("value")
+  end
+
   it "requires & before a mutating method receiver" do
     source = <<~CLEAR
       FN main() RETURNS Void ->
@@ -182,6 +199,21 @@ RSpec.describe "explicit mutable call sites" do
     CLEAR
     zig = ZigTranspiler.new.transpile(source)
     expect(zig).to include("update(&box.data);")
+  end
+
+  it "transfers explicit mutation through an owner-qualified static call" do
+    source = <<~CLEAR
+      STRUCT Box { value: Int64 }
+      IMPLEMENTATION Box {
+        FN update(MUTABLE box: Box) RETURNS Void -> box.value = 2_i64; END
+      }
+      FN main() RETURNS Void ->
+        MUTABLE box = Box{ value: 1_i64 };
+        Box::update(&box);
+      END
+    CLEAR
+    zig = ZigTranspiler.new.transpile(source)
+    expect(zig).to include("__inherent_Box_update(&box);")
   end
 
   it "does not require & for an @alwaysMutable field" do
@@ -278,6 +310,21 @@ RSpec.describe "explicit mutable call sites" do
     ensure
       FixCollector.disable!
     end
+  end
+
+  it "promotes an explicitly addressed immutable root in EASY mode" do
+    source = function_prefix + <<~CLEAR
+      FN main() RETURNS Void ->
+        value = 1_i64;
+        update(&value);
+      END
+    CLEAR
+    expect { annotate(source, mode: :easy) }.not_to raise_error
+
+    rewritten, count, = ClearFixSupport.apply_to_source(source)
+    expect(count).to be >= 1
+    expect(rewritten).to include("MUTABLE value = 1_i64;")
+    expect(rewritten).to include("update(&value);")
   end
 
   it "allows EASY mode to promote and implicitly address an existing binding" do

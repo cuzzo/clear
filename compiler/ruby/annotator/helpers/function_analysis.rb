@@ -11,7 +11,6 @@ module FunctionAnalysis
   RoutineNode = T.type_alias { T.any(AST::FunctionDef, AST::LambdaLit) }
   RoutineBody = T.type_alias { T.any(AST::RawBody, AST::Node) }
   CallNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall) }
-  SignatureCallNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall, AST::StaticCall) }
   CallArgList = T.type_alias { T::Array[AST::Locatable] }
   DeclaredReturn = T.type_alias { T.nilable(Type::TypeInput) }
   LifetimeSourceList = T.type_alias { T::Array[FunctionSignature::LifetimeSource] }
@@ -19,7 +18,7 @@ module FunctionAnalysis
   class CallSignatureSite < T::Struct
     extend T::Sig
 
-    const :node, SignatureCallNode
+    const :node, CallNode
     const :name, String
     prop :args, T::Array[AST::Locatable]
 
@@ -583,7 +582,7 @@ module FunctionAnalysis
   # values in this allocator (per "one collection = one allocator").
   # Returns nil when the call has no container context (plain function call,
   # or receiver storage not yet determined).
-  sig { params(node: SignatureCallNode).returns(T.nilable(Symbol)) }
+  sig { params(node: CallNode).returns(T.nilable(Symbol)) }
   def receiver_container_alloc(node)
     return nil unless node.is_a?(AST::MethodCall)
     obj = node.object
@@ -595,7 +594,7 @@ module FunctionAnalysis
     nil
   end
 
-  sig { params(node: SignatureCallNode, signature: FunctionSignature, args: T.nilable(CallArgList)).returns(NilClass) }
+  sig { params(node: CallNode, signature: FunctionSignature, args: T.nilable(CallArgList)).returns(NilClass) }
   def verify_function_signature!(node, signature, args = nil)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     args ||= node.args
@@ -625,12 +624,10 @@ module FunctionAnalysis
     nil
   end
 
-  sig { params(node: SignatureCallNode, args: T.nilable(CallArgList)).returns(CallSignatureSite) }
+  sig { params(node: CallNode, args: T.nilable(CallArgList)).returns(CallSignatureSite) }
   def call_signature_site(node, args = nil)
     args ||= node.args
-    source_name = if node.is_a?(AST::StaticCall)
-      "#{node.type_name.name}::#{node.method_name}"
-    elsif node.is_a?(AST::MethodCall) && node.source_method_name
+    source_name = if node.is_a?(AST::MethodCall) && node.source_method_name
       T.must(node.source_method_name)
     else
       node.name.to_s
@@ -763,7 +760,6 @@ module FunctionAnalysis
     if current_scope.is_immutable?(root.name) && !missing_marker
       if language_mode == :easy
         promote_mutable_call_argument!(root)
-        emit_immutable_arg_error!(root, current_scope, facts.index + 1, facts.param.name) if FixCollector.enabled? && facts.explicit_mutable
       else
         emit_immutable_arg_error!(root, current_scope, facts.index + 1, facts.param.name)
       end
@@ -1095,7 +1091,7 @@ module FunctionAnalysis
     type.atomic? && type.primitive?
   end
 
-  sig { params(node: SignatureCallNode, atomic_args: CallArgList).void }
+  sig { params(node: CallNode, atomic_args: CallArgList).void }
   def warn_multi_atomic_bare_value_call!(node, atomic_args)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     unique_args = atomic_args.compact
