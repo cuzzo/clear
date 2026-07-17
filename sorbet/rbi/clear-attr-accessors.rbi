@@ -554,10 +554,6 @@ class AST::WhileBindLoop
   def mark_per_iter; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mark_per_iter=(value); end
-  sig { returns(T.untyped) }
-  def tight; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tight=(value); end
 end
 
 class AST::WhileLoop
@@ -1938,10 +1934,6 @@ class WhileBindLoop
   def mark_per_iter; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mark_per_iter=(value); end
-  sig { returns(T.untyped) }
-  def tight; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def tight=(value); end
 end
 
 class WhileLoop
