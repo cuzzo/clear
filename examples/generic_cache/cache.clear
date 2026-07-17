@@ -121,33 +121,33 @@ IMPLEMENTATION Cache<M> {
 
 FN main() RETURNS Void ->
   MUTABLE local = Cache<{String}Int64>{ capacity: 2_i64 };
-  &local.put("a", 1_i64) OR_ELSE RAISE;
-  &local.put("b", 2_i64) OR_ELSE RAISE;
-  ASSERT &local.get("a") OR_ELSE RAISE OR_ELSE 0_i64 == 1_i64;
-  &local.put("c", 3_i64) OR_ELSE RAISE;
-  ASSERT &local.get("b") OR_ELSE RAISE == NIL, "least-recently-used key was evicted";
-  ASSERT &local.get("a") OR_ELSE RAISE OR_ELSE 0_i64 == 1_i64;
-  ASSERT &local.get("c") OR_ELSE RAISE OR_ELSE 0_i64 == 3_i64;
+  &local.put("a", 1_i64)!!;
+  &local.put("b", 2_i64)!!;
+  ASSERT &local.get("a")!! OR_ELSE 0_i64 == 1_i64;
+  &local.put("c", 3_i64)!!;
+  ASSERT &local.get("b")!! == NIL, "least-recently-used key was evicted";
+  ASSERT &local.get("a")!! OR_ELSE 0_i64 == 1_i64;
+  ASSERT &local.get("c")!! OR_ELSE 0_i64 == 3_i64;
 
   MUTABLE locked = Cache<{Int64}Bool>{ capacity: 2_i64 } @shared:locked;
-  &locked.put(1_i64, TRUE) OR_ELSE RAISE;
-  &locked.put(2_i64, FALSE) OR_ELSE RAISE;
-  ASSERT &locked.get(1_i64) OR_ELSE RAISE OR_ELSE FALSE;
-  &locked.put(3_i64, TRUE) OR_ELSE RAISE;
-  ASSERT &locked.get(2_i64) OR_ELSE RAISE == NIL, "locked cache evicts in O(1)";
-  first = BG { &locked.put(4_i64, TRUE) OR_ELSE RAISE; RETURN; };
-  second = BG { &locked.put(5_i64, TRUE) OR_ELSE RAISE; RETURN; };
+  &locked.put(1_i64, TRUE)!!;
+  &locked.put(2_i64, FALSE)!!;
+  ASSERT &locked.get(1_i64)!! OR_ELSE FALSE;
+  &locked.put(3_i64, TRUE)!!;
+  ASSERT &locked.get(2_i64)!! == NIL, "locked cache evicts in O(1)";
+  first = BG { &locked.put(4_i64, TRUE)!!; RETURN; };
+  second = BG { &locked.put(5_i64, TRUE)!!; RETURN; };
   NEXT first;
   NEXT second;
-  ASSERT &locked.length() OR_ELSE RAISE == 2_i64, "concurrent writes preserve capacity";
+  ASSERT &locked.length()!! == 2_i64, "concurrent writes preserve capacity";
 
   MUTABLE rw = Cache<{String}Int64>{ capacity: 1_i64 } @shared:writeLocked;
-  &rw.put("rw", 4_i64) OR_ELSE RAISE;
-  ASSERT &rw.get("rw") OR_ELSE RAISE OR_ELSE 0_i64 == 4_i64;
+  &rw.put("rw", 4_i64)!!;
+  ASSERT &rw.get("rw")!! OR_ELSE 0_i64 == 4_i64;
 
   MUTABLE versioned = Cache<{String}Int64>{ capacity: 1_i64 } @shared:versioned;
-  &versioned.put("mvcc", 5_i64) OR_ELSE RAISE;
-  ASSERT &versioned.get("mvcc") OR_ELSE RAISE OR_ELSE 0_i64 == 5_i64;
+  &versioned.put("mvcc", 5_i64)!!;
+  ASSERT &versioned.get("mvcc")!! OR_ELSE 0_i64 == 5_i64;
 
   print("generic-cache: exact O(1) LRU across 4 policies PASS");
 END

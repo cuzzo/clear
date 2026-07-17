@@ -595,8 +595,7 @@ class ClearParser
     if current.type == :CHAR && v == '&'
       marker = consume(:CHAR, '&')
       target = parse_unary
-      if target.is_a?(AST::MethodCall)
-        target.mark_explicit_mutable_receiver!(marker)
+      if mark_explicit_mutable_receiver!(target, marker)
         return target
       end
       return AST::MutableBorrow.new(marker, target)
@@ -624,6 +623,29 @@ class ClearParser
     end
     parse_primary
   end
+
+  # `&` marks the mutating call even when a postfix result operator wraps it.
+  # For example, `&cache.put(key, value)!!` is `(&cache.put(...))!!`, not an
+  # attempt to address the result of `OR_ELSE RAISE`. Field/index/navigation
+  # suffixes remain transparent so `&loadAndMutate()!!.field` composes too.
+  sig { params(node: AST::Node, marker: Lexer::Token).returns(T::Boolean) }
+  def mark_explicit_mutable_receiver!(node, marker)
+    if node.is_a?(AST::MethodCall)
+      node.mark_explicit_mutable_receiver!(marker)
+      return true
+    end
+
+    wrapped = T.let(case node
+    when AST::BinaryOp
+      node.left if node.op == :OR_ELSE && node.right.is_a?(AST::OrElseRaise)
+    when AST::GetField, AST::GetIndex, AST::OptionalUnwrap
+      node.target
+    end, T.nilable(AST::Node))
+    return false if wrapped.nil?
+
+    mark_explicit_mutable_receiver!(wrapped, marker)
+  end
+  private :mark_explicit_mutable_receiver!
 
   sig { params(lhs: AST::Node).returns(AST::Node) }
   def parse_suffixes(lhs)

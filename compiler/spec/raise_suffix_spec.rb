@@ -31,6 +31,29 @@ RSpec.describe "postfix error propagation" do
     expect(zig).to include("(try load()).value")
   end
 
+  it "keeps & on a mutating method receiver beneath the raise suffix" do
+    source = <<~CLEAR
+      STRUCT Box { value: Int64 }
+      IMPLEMENTATION Box {
+        METHOD update(MUTABLE self) RETURNS !Void ->
+          self.value = 7_i64;
+        END
+      }
+      FN main() RETURNS Void ->
+        MUTABLE box = Box{ value: 1_i64 };
+        &box.update()!!;
+        ASSERT box.value == 7_i64;
+      END
+    CLEAR
+
+    program = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    main = T.must(program.statements.grep(AST::FunctionDef).find { |fn| fn.name == "main" })
+    raised_call = T.cast(main.body.find { |node| node.is_a?(AST::BinaryOp) }, AST::BinaryOp)
+    call = T.cast(raised_call.left, AST::MethodCall)
+    expect(call.explicit_mutable_receiver?).to be(true)
+    expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
+  end
+
   it "formats !!. without inserting separating whitespace" do
     formatted = Formatter.format(<<~CLEAR)
       FN load() RETURNS !Int64 -> RETURN 7; END
