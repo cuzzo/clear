@@ -172,7 +172,7 @@ fn cli_postgres_mysql_failures() {
             "--dialect",
             "postgres",
             "--database",
-            "postgres://127.0.0.1:9999/dummy",
+            "invalid",
         ])
         .status()
         .unwrap();
@@ -187,7 +187,7 @@ fn cli_postgres_mysql_failures() {
             "--dialect",
             "mysql",
             "--database",
-            "mysql://127.0.0.1:9999/dummy",
+            "invalid",
         ])
         .status()
         .unwrap();
@@ -202,7 +202,7 @@ fn cli_postgres_mysql_failures() {
             "--dialect",
             "postgres",
             "--database",
-            "postgres://127.0.0.1:9999/dummy",
+            "invalid",
         ])
         .status()
         .unwrap();
@@ -217,7 +217,7 @@ fn cli_postgres_mysql_failures() {
             "--dialect",
             "mysql",
             "--database",
-            "mysql://127.0.0.1:9999/dummy",
+            "invalid",
         ])
         .status()
         .unwrap();

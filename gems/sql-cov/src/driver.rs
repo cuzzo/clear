@@ -7,6 +7,9 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{ConnectOptions, MySql, MySqlPool, PgPool, Postgres, Row, Sqlite, SqlitePool};
 use std::str::FromStr;
+use std::time::Duration;
+
+const REMOTE_DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParameterValue {
@@ -65,7 +68,7 @@ pub async fn sqlite_pool(database_url: &str) -> Result<SqlitePool> {
 pub async fn postgres_pool(database_url: &str) -> Result<PgPool> {
     Ok(PgPoolOptions::new()
         .max_connections(1)
-        .acquire_timeout(std::time::Duration::from_secs(1))
+        .acquire_timeout(REMOTE_DATABASE_ACQUIRE_TIMEOUT)
         .connect(database_url)
         .await?)
 }
@@ -84,7 +87,7 @@ pub async fn postgres_pool(database_url: &str) -> Result<PgPool> {
 pub async fn mysql_pool(database_url: &str) -> Result<MySqlPool> {
     Ok(MySqlPoolOptions::new()
         .max_connections(1)
-        .acquire_timeout(std::time::Duration::from_secs(1))
+        .acquire_timeout(REMOTE_DATABASE_ACQUIRE_TIMEOUT)
         .connect(database_url)
         .await?)
 }
