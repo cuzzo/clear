@@ -3631,7 +3631,7 @@ class Type
 
   sig { returns(Type) }
   def success_type
-    return self unless error_union?
+    return Type.copy_type(self) unless error_union?
 
     error_union_payload_with_outer_capabilities
   end

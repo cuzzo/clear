@@ -160,7 +160,13 @@ module Annotator
           # a string literal); override on the cloned Type so internal Type
           # predicates (needs_cleanup?, finalize_storage) see :heap. The
           # storage_override is the authoritative signal for Locatable readers.
-          ti.mark_heap_allocated! if ti.is_a?(Type)
+          if ti.is_a?(Type)
+            ti.mark_heap_allocated!
+            base_ti = ti.optional? ? ti.wrapped_type : ti
+            if !ti.multiowned? && !ti.shared? && [:Type, :SymbolEntry, :Any].include?(base_ti&.resolved)
+              ti.apply_reference_ownership!(:multiowned)
+            end
+          end
           node.storage = :heap
           current_fn_ctx&.record_heap_use!
           current_fn_ctx&.record_alloc_use!
