@@ -24,8 +24,11 @@ const ebr_mod = @import("../lib/ebr.zig");
 const pl = @import("../lib/parking-lot.zig");
 const streams = @import("../lib/streams.zig");
 const fsm_mod = @import("fsm.zig");
+const control_plane = @import("control-plane.zig");
 const build_options = @import("build_options");
 const sim_atomic = @import("vopr-atomic.zig");
+
+var g_partitioned_remote_allocator: std.mem.Allocator = std.heap.c_allocator;
 
 // Minimal binding for data-structures.zig — the loom test only touches
 // Stream(T).Inner fields; the bound deps are unused on the closed/err
@@ -49,6 +52,9 @@ const DataStructures = @import("../lib/data-structures.zig").bind(struct {
     }
     pub fn partitionedMapDelayCtxDestroy() bool {
         return false;
+    }
+    pub fn partitionedMapRemoteAllocator() std.mem.Allocator {
+        return g_partitioned_remote_allocator;
     }
 });
 
@@ -101,6 +107,19 @@ var g_scheduler_primitive_wg: *fp.WaitGroup = undefined;
 var g_scheduler_primitive_sem: *fp.Semaphore = undefined;
 var g_scheduler_primitive_wg_woke: bool = false;
 var g_scheduler_primitive_sem_acquired: bool = false;
+const CONTROL_PLANE_FN_ADDR: usize = 0x1000;
+
+fn entryControlPlaneStandard() callconv(.c) void {
+    control_plane.recordOverflow(CONTROL_PLANE_FN_ADDR, .Standard);
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryControlPlaneLarge() callconv(.c) void {
+    control_plane.recordOverflow(CONTROL_PLANE_FN_ADDR, .Large);
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
 
 fn entrySplitStreamParkedSubscriber() callconv(.c) void {
     const next = g_split_park_subscriber.next() catch |err| {
@@ -536,6 +555,87 @@ pub fn testMutexAcquireExhaustive() !void {
         std.debug.print("\n{d} failures in {d} schedules\n", .{ failures, total_schedules });
         return error.LoomFailures;
     }
+}
+
+/// Two overflow recorders race to claim the same hash slot and publish
+/// different recommendations. Every schedule must retain the larger XL
+/// recommendation and count both observations. This specifically covers the
+/// claim-loser retry and the publish-vs-update race in control-plane.zig.
+pub fn testControlPlaneOverflowRace() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    const saved_config = control_plane.config;
+    defer control_plane.config = saved_config;
+    control_plane.config.on_overflow = .upsize;
+
+    const depth: usize = if (build_options.coverage) 5 else 8;
+    const total_schedules: usize = @as(usize, 1) << depth;
+    var schedule_buf: [depth]u8 = undefined;
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+    for (0..total_schedules) |sched_idx| {
+        for (0..depth) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit))) & 1);
+        }
+        h.resetExhaustive(&schedule_buf);
+        control_plane.resetRegistry();
+
+        try h.createThread(0, @intFromPtr(&entryControlPlaneStandard));
+        try h.createThread(1, @intFromPtr(&entryControlPlaneLarge));
+        h.run() catch {
+            failures += 1;
+            continue;
+        };
+
+        if (control_plane.getOverflowCount(CONTROL_PLANE_FN_ADDR) != 2 or
+            control_plane.recommendSize(CONTROL_PLANE_FN_ADDR, .Standard) != .Xl)
+        {
+            failures += 1;
+        }
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures != 0) return error.ControlPlaneLoomFailures;
+}
+
+/// Exercise the underflow recommendation atomics and the diagnostic overflow
+/// load in the same custom executable that exports SimAtomic. The threshold
+/// of one makes the downsize transition observable without a long loop.
+pub fn testControlPlanePolicyPaths() !void {
+    const saved_config = control_plane.config;
+    defer control_plane.config = saved_config;
+    control_plane.resetRegistry();
+
+    control_plane.config.on_underflow = .downsize;
+    control_plane.config.underflow_1tier_threshold = 1;
+    control_plane.recordCompletion(0x2000, .Large, 20 * 1024);
+    if (control_plane.recommendSize(0x2000, .Large) != .Standard)
+        return error.ControlPlaneDownsizeNotApplied;
+
+    control_plane.config.underflow_2tier_threshold = 1;
+    control_plane.recordCompletion(0x2001, .Large, 1024);
+    if (control_plane.recommendSize(0x2001, .Large) != .Micro)
+        return error.ControlPlaneTwoTierDownsizeNotApplied;
+
+    // The log policy reads overflow_count only after the first call creates
+    // the entry. Keep this to two calls so coverage does not flood test output.
+    control_plane.config.on_overflow = .log;
+    control_plane.recordOverflow(0x3000, .Standard);
+    control_plane.recordOverflow(0x3000, .Standard);
+    if (control_plane.getOverflowCount(0x3000) != 2)
+        return error.ControlPlaneOverflowCountWrong;
 }
 
 pub fn testMutexAcquirePrng() !void {
@@ -2883,6 +2983,13 @@ fn entryStreamNextStepCloseOwner() callconv(.c) void {
     while (true) fc.__fiber.?.yield();
 }
 
+fn entryStreamNextStepParkCloser() callconv(.c) void {
+    while (g_stream_inner.consumer_task == null) fc.__fiber.?.yield();
+    g_next_step_stream.close();
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
 /// Exercise the production Stream.nextStep metadata protocol. The direct
 /// full-ring cases cover both release branches after consuming a slot; the
 /// deterministic two-fiber schedule covers a close published after the fast
@@ -2969,6 +3076,61 @@ pub fn testStreamNextStepInterleavings() !void {
     if (!h.done[0] or !h.done[1]) return error.NextStepCloseRaceDidNotComplete;
     if (!g_next_step_observed_closed) return error.NextStepCloseRaceMissedClosed;
     if (g_stream_inner.lock.load(.acquire) != 0) return error.NextStepCloseRaceLeftLocked;
+}
+
+/// Drive the empty-stream park path through real Fiber contexts. The closer
+/// waits until nextStep publishes consumer_task, then close schedules that
+/// exact task. This covers the Blocked publication and metadata-lock release
+/// that a close-before-lock race does not reach.
+pub fn testStreamNextStepParkWake() !void {
+    const allocator = std.heap.c_allocator;
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer {
+        drainSchedState();
+        g_sched.deinit();
+        stack_pool.deinit();
+        ebr.deinit(allocator);
+    }
+
+    var schedule = [_]u8{ 0, 0, 0, 1, 1, 0, 0, 0 };
+    var h = LoomHarness.initExhaustive(allocator, &schedule);
+    defer h.deinit();
+    harness = &h;
+    h.resetExhaustive(&schedule);
+    g_stream_inner = .{
+        .sched = &g_sched,
+        .wg = fp.WaitGroup.init(&g_sched),
+    };
+    g_stream_inner.wg.add(1);
+    g_next_step_stream = .{ .inner = &g_stream_inner, .alloc = allocator };
+    g_next_step_observed_closed = false;
+    g_next_step_err = null;
+
+    try h.createThread(0, @intFromPtr(&entryStreamNextStepConsumer));
+    try h.createThread(1, @intFromPtr(&entryStreamNextStepParkCloser));
+    try h.run();
+
+    if (g_next_step_err) |err| return err;
+    if (!h.done[0] or !h.done[1]) return error.StreamParkWakeDidNotComplete;
+    if (!g_next_step_observed_closed) return error.StreamParkWakeMissedClosed;
+    if (g_stream_inner.consumer_task != null) return error.StreamParkWakeLeftConsumer;
+    if (g_stream_inner.lock.load(.acquire) != 0) return error.StreamParkWakeLeftLocked;
+}
+
+/// Cover the dequeue-side IN_QUEUE→IDLE publication without driving the full
+/// scheduler loop under SimAtomic (which would add non-production yields to
+/// every dispatcher atomic).
+pub fn testSchedulerMarksDequeuedTaskIdle() !void {
+    var task: Task = .{
+        .base = undefined,
+        .user_fn = @ptrCast(&s25DummyFn),
+    };
+    task.in_inbox.store(qs.IN_INBOX_IN_QUEUE, .release);
+    fp.Scheduler.markTaskDequeued(&task);
+    if (task.in_inbox.load(.acquire) != qs.IN_INBOX_IDLE)
+        return error.DequeuedTaskNotIdle;
 }
 
 fn entryStreamConsumer() callconv(.c) void {
@@ -5758,6 +5920,38 @@ pub fn testPartitionedMapPutAllocationFailureCompletes() !void {
         return err;
     }
     if (nmap.contains(9001)) return error.NumericPutFailureInsertedKey;
+
+    // The impossible-slice cases above fail while duplicating the value.
+    // Target the later getOrPut allocations explicitly so the context's
+    // error completion store is verified for both map implementations.
+    {
+        var failing = std.testing.FailingAllocator.init(allocator, .{ .fail_index = 0 });
+        g_partitioned_remote_allocator = failing.allocator();
+        defer g_partitioned_remote_allocator = std.heap.c_allocator;
+
+        const OomStringMap = DataStructures.PartitionedStringMap(i64, 4);
+        var oom_smap: OomStringMap = .{};
+        defer oom_smap.deinit(allocator, allocator);
+        if (oom_smap.put(allocator, allocator, "get-or-put-oom", 1)) |_| {
+            return error.StringGetOrPutUnexpectedlySucceeded;
+        } else |err| if (err != error.OutOfMemory) {
+            return err;
+        }
+    }
+    {
+        var failing = std.testing.FailingAllocator.init(allocator, .{ .fail_index = 0 });
+        g_partitioned_remote_allocator = failing.allocator();
+        defer g_partitioned_remote_allocator = std.heap.c_allocator;
+
+        const OomNumericMap = DataStructures.PartitionedNumericMap(i64, i64, 4);
+        var oom_nmap: OomNumericMap = .{};
+        defer oom_nmap.deinit(allocator, allocator);
+        if (oom_nmap.put(allocator, allocator, 42, 1)) |_| {
+            return error.NumericGetOrPutUnexpectedlySucceeded;
+        } else |err| if (err != error.OutOfMemory) {
+            return err;
+        }
+    }
 }
 
 pub fn testScanFsmLockWaitersTimeoutFire() !void {

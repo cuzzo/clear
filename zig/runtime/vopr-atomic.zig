@@ -71,6 +71,7 @@ pub var sim_swap_synthetic_fault_count: usize = 0;
 /// the first load returns tagged (entering the spin body), the
 /// second-or-later load returns untagged (exiting the spin).
 pub var inject_load_tagged_count_remaining: u32 = 0;
+pub var inject_load_tagged_skip_remaining: u32 = 0;
 pub var sim_load_synthetic_tag_count: usize = 0;
 
 pub var fault_prng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(0);
@@ -88,6 +89,7 @@ pub fn resetFault() void {
     inject_swap_busy_rate = 0;
     sim_swap_synthetic_fault_count = 0;
     inject_load_tagged_count_remaining = 0;
+    inject_load_tagged_skip_remaining = 0;
     sim_load_synthetic_tag_count = 0;
 }
 
@@ -179,6 +181,10 @@ pub fn SimAtomic(comptime T: type) type {
             // Tagged-load fault: first N integer loads return value|1
             // so MVCC's addrIsTagged spin body executes.
             if (comptime @typeInfo(T) == .int) {
+                if (inject_load_tagged_skip_remaining > 0) {
+                    inject_load_tagged_skip_remaining -= 1;
+                    return self.raw;
+                }
                 if (inject_load_tagged_count_remaining > 0) {
                     inject_load_tagged_count_remaining -= 1;
                     sim_load_synthetic_tag_count += 1;

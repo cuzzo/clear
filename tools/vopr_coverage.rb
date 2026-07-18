@@ -125,6 +125,19 @@ module VoprCoverage
     nil
   end
 
+  # Retry ranges are intentionally wider than a single loop because the
+  # interesting outcome is often handled immediately after the retry.  Do
+  # not turn punctuation-only scope boundaries into hazards: Zig/LLVM emits
+  # no line-table entry for them, so they can never acquire a kcov hit.
+  def executable_retry_line?(stripped)
+    code = stripped.strip
+    return false if code.empty?
+    return false if code.match?(/\A[{};,]+\z/)
+    return false if code.match?(/\A}\s*else\s*{\z/)
+
+    true
+  end
+
   def parse_cobertura(path)
     doc = REXML::Document.new(File.read(path))
     hits = Hash.new { |h, k| h[k] = {} }
@@ -160,7 +173,7 @@ module VoprCoverage
         next if !include_tests && File.basename(rel).match?(TEST_FILE_RE)
 
         in_exclude = false
-        in_retry = false
+        retry_depth = 0
         File.foreach(abs_path).with_index(1) do |line, no|
           if line.match?(EXCLUDE_BEGIN_RE)
             in_exclude = true
@@ -178,11 +191,15 @@ module VoprCoverage
           # under their own categories.
           if line.match?(RETRY_BEGIN_RE)
             sites << { file: rel, line: no, source: line.rstrip, category: :retry }
-            in_retry = true
+            retry_depth += 1
             next
           end
           if line.match?(RETRY_END_RE)
-            in_retry = false
+            if retry_depth.zero?
+              warn "warning: #{rel}:#{no}: VOPR-END-RETRY without matching VOPR-START-RETRY"
+            else
+              retry_depth -= 1
+            end
             next
           end
           # Single-line marker -- retry site is the line itself.
@@ -195,12 +212,12 @@ module VoprCoverage
           cat = categorize(stripped)
           if cat
             sites << { file: rel, line: no, source: line.rstrip, category: cat }
-          elsif in_retry && !stripped.strip.empty?
+          elsif retry_depth.positive? && executable_retry_line?(stripped)
             # Inside a VOPR-START-RETRY block: every executable line is
             # a retry-body site. Tracks whether the loop body ran (vs
-            # just the loop header). Scoring depends on kcov reporting
-            # a hit count for the line; non-instrumented lines (blank,
-            # brace-only, etc.) get filtered as LINE MISSING.
+            # just the loop header). Blank and punctuation-only lines are
+            # filtered here; executable sites absent from kcov's line table
+            # are reported separately as DWARF-hidden.
             sites << { file: rel, line: no, source: line.rstrip, category: :retry_body }
           end
         end
@@ -208,8 +225,8 @@ module VoprCoverage
         if in_exclude
           warn "warning: #{rel}: VOPR-EXCLUDE-BEGIN without matching VOPR-EXCLUDE-END"
         end
-        if in_retry
-          warn "warning: #{rel}: VOPR-START-RETRY without matching VOPR-END-RETRY"
+        if retry_depth.positive?
+          warn "warning: #{rel}: #{retry_depth} VOPR-START-RETRY marker(s) without matching VOPR-END-RETRY"
         end
       end
     end
@@ -234,8 +251,15 @@ module VoprCoverage
         following = keys.select { |k| k >= s[:line] }.min
         hit_count = fh[following] if following
       end
-      s.merge(hits: hit_count, file_loaded: file_loaded)
+      dwarf_hidden = hit_count.nil? && file_loaded
+      s.merge(hits: hit_count, dwarf_hidden: dwarf_hidden, file_loaded: file_loaded)
     end
+  end
+
+  def actionable_gap?(site)
+    return false if site[:dwarf_hidden]
+
+    site[:hits].nil? || site[:hits].zero?
   end
 
   CATEGORY_ORDER = %i[time random net_io fs_io ring_io retry retry_body].freeze
@@ -255,6 +279,8 @@ module VoprCoverage
 
     total_all = correlated.size
     covered_all = correlated.count { |s| s[:hits] && s[:hits] > 0 }
+    hidden_all = correlated.count { |s| s[:dwarf_hidden] }
+    observable_all = total_all - hidden_all
 
     unless summary_only
       CATEGORY_ORDER.each do |cat|
@@ -263,14 +289,15 @@ module VoprCoverage
         next if rows.empty?
 
         covered = rows.count { |s| s[:hits] && s[:hits] > 0 }
-        total = rows.size
-        puts "## #{CATEGORY_LABEL[cat]} (#{covered}/#{total})"
+        hidden = rows.count { |s| s[:dwarf_hidden] }
+        observable = rows.size - hidden
+        puts "## #{CATEGORY_LABEL[cat]} (#{covered}/#{observable} observable, #{hidden} DWARF-hidden)"
         to_show = all ? rows : rows.reject { |s| s[:hits] && s[:hits] > 0 }
         to_show.sort_by { |s| [s[:file], s[:line]] }.each do |s|
           tag = if s[:hits].nil? && !s[:file_loaded]
                   "FILE NOT LOADED"
                 elsif s[:hits].nil?
-                  "LINE MISSING"
+                  "DWARF-HIDDEN (ignored)"
                 elsif s[:hits].zero?
                   "0 hits"
                 else
@@ -288,12 +315,13 @@ module VoprCoverage
       rows = by_cat[cat] || []
       next if rows.empty?
       covered = rows.count { |s| s[:hits] && s[:hits] > 0 }
-      total = rows.size
-      pct = total.zero? ? 0.0 : (covered.to_f / total * 100)
-      puts format("  %-26s %3d/%-3d (%5.1f%%)", CATEGORY_LABEL[cat], covered, total, pct)
+      hidden = rows.count { |s| s[:dwarf_hidden] }
+      observable = rows.size - hidden
+      pct = observable.zero? ? 100.0 : (covered.to_f / observable * 100)
+      puts format("  %-26s %3d/%-3d (%5.1f%%), %3d DWARF-hidden", CATEGORY_LABEL[cat], covered, observable, pct, hidden)
     end
-    pct_all = total_all.zero? ? 0.0 : (covered_all.to_f / total_all * 100)
-    puts format("  %-26s %3d/%-3d (%5.1f%%)", "TOTAL", covered_all, total_all, pct_all)
+    pct_all = observable_all.zero? ? 100.0 : (covered_all.to_f / observable_all * 100)
+    puts format("  %-26s %3d/%-3d (%5.1f%%), %3d DWARF-hidden", "TOTAL", covered_all, observable_all, pct_all, hidden_all)
   end
 
   def run(argv)
@@ -344,7 +372,7 @@ module VoprCoverage
       only_category: opts[:only_category]
     )
 
-    uncovered = correlated.count { |s| s[:hits].nil? || s[:hits].zero? }
+    uncovered = correlated.count { |s| actionable_gap?(s) }
     exit(uncovered.zero? ? 0 : 1)
   end
 end

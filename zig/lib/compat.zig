@@ -148,16 +148,20 @@ const sim_clock_decl = blk: {
 
 pub fn milliTimestamp() i64 {
     if (sim_clock_decl != void) return sim_clock_decl.milliTimestamp();
+    // VOPR-EXCLUDE-BEGIN: native fallback is replaced by SimClock in VOPR
     var ts: std.c.timespec = undefined;
     if (std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts) != 0) return 0;
     return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
+    // VOPR-EXCLUDE-END
 }
 
 pub fn nanoTimestamp() u64 {
     if (sim_clock_decl != void) return sim_clock_decl.nanoTimestamp();
+    // VOPR-EXCLUDE-BEGIN: native fallback is replaced by SimClock in VOPR
     var ts: std.c.timespec = undefined;
     if (std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts) != 0) return 0;
     return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
+    // VOPR-EXCLUDE-END
 }
 
 /// Drop-in replacement for the removed std.time.Timer.
@@ -193,6 +197,7 @@ pub fn randomBytes(buf: []u8) !void {
         sim_random_decl.fill(buf);
         return;
     }
+    // VOPR-EXCLUDE-BEGIN: native fallback is replaced by SimRandom in VOPR
     var filled: usize = 0;
     while (filled < buf.len) {
         const rc = std.c.getrandom(buf[filled..].ptr, buf.len - filled, 0);
@@ -200,6 +205,7 @@ pub fn randomBytes(buf: []u8) !void {
         if (rc == 0) return error.Unexpected;
         filled += @intCast(rc);
     }
+    // VOPR-EXCLUDE-END
 }
 
 pub fn eventFd(initval: u32, flags: u32) !std.posix.fd_t {

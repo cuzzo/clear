@@ -1313,7 +1313,7 @@ pub const Scheduler = struct {
                 // submitResume until here prevents duplicate pushes
                 // via concurrent cross-thread resumes while the task
                 // sat in the queue.
-                task.in_inbox.store(qs.IN_INBOX_IDLE, .release);
+                markTaskDequeued(task);
 
                 // Set task identity for the control plane.
                 // If this task overflows its stack, __zig_alloc_segment
@@ -1439,6 +1439,13 @@ pub const Scheduler = struct {
                 break;
             }
         }
+    }
+
+    /// Publish that a task has left a scheduler queue. Kept as a focused
+    /// helper so Loom can exercise the duplicate-inbox state transition
+    /// without inserting SimAtomic yield points throughout run().
+    pub fn markTaskDequeued(task: *Task) void {
+        task.in_inbox.store(qs.IN_INBOX_IDLE, .release);
     }
 
     // Helper to wake a specific fiber.
@@ -2624,11 +2631,13 @@ pub const WaitGroup = struct {
         // either complete its check before us (saw counter>0, parked, will be
         // woken below) or after us (sees counter==0 only after we release
         // the lock; by that point all our writes to *self are done).
+        // VOPR-EXCLUDE-BEGIN: std.atomic spin contention belongs to Loom/hammer
         // VOPR-START-RETRY: WaitGroup.done spinlock acquire
         while (self.lock.swap(1, .acquire) == 1) {
             std.Thread.yield() catch {};
         }
         // VOPR-END-RETRY
+        // VOPR-EXCLUDE-END
 
         const prev = self.counter.fetchSub(1, .seq_cst);
         if (prev != 1) {
@@ -2669,11 +2678,13 @@ pub const WaitGroup = struct {
     pub fn registerFsmWaiter(self: *WaitGroup, fsm_task: *fsm_mod.FsmTask) bool {
         if (self.counter.load(.seq_cst) == 0) return false;
 
+        // VOPR-EXCLUDE-BEGIN: std.atomic spin contention belongs to Loom/hammer
         // VOPR-START-RETRY: WaitGroup.registerFsmWaiter spinlock acquire
         while (self.lock.swap(1, .acquire) == 1) {
             std.Thread.yield() catch {};
         }
         // VOPR-END-RETRY
+        // VOPR-EXCLUDE-END
 
         // Re-check under the lock — count may have hit 0 between the
         // load above and acquiring the lock.
@@ -2714,6 +2725,7 @@ pub const WaitGroup = struct {
             // Non-fiber caller (test code): busy-wait. Acquire the lock for
             // the final check so we synchronize-with done()'s release; this
             // makes it safe to free *self after we return.
+            // VOPR-EXCLUDE-BEGIN: real-thread progress is covered by the paired hammer test
             // VOPR-START-RETRY: WaitGroup.wait non-fiber busy-wait until counter==0
             while (true) {
                 while (self.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
@@ -2725,6 +2737,7 @@ pub const WaitGroup = struct {
                 std.Thread.yield() catch {};
             }
             // VOPR-END-RETRY
+            // VOPR-EXCLUDE-END
             // HAMMER-WAIT-LOOP-END: tag=waitgroup.wait-non-fiber
         }
 
@@ -2741,6 +2754,7 @@ pub const WaitGroup = struct {
         // waiting task under the lock, drop the lock, and yield. done()
         // schedules the waiter when the last decrement crosses 0.
         //
+        // VOPR-EXCLUDE-BEGIN: std.atomic spin/park contention belongs to Loom/hammer
         // VOPR-START-RETRY: WaitGroup.wait fiber park-then-recheck loop
         while (true) {
             // Always take the lock to check counter — synchronizes with done().
@@ -2763,6 +2777,7 @@ pub const WaitGroup = struct {
             task.status.store(.Ready, .release);
         }
         // VOPR-END-RETRY
+        // VOPR-EXCLUDE-END
         // HAMMER-WAIT-LOOP-END: tag=waitgroup.wait-fiber-park
     }
 };
@@ -2797,6 +2812,7 @@ pub const Semaphore = struct {
         // submitResume (cross-thread) or the local ready queue.
         //
         // std.debug.print("ACQUIRE: counter={d}\n", .{self.counter.load(.seq_cst)});
+        // VOPR-EXCLUDE-BEGIN: std.atomic CAS/park contention belongs to Loom/hammer
         // VOPR-START-RETRY: Semaphore.acquire CAS-loser + park-recheck loop
         while (true) {
             // Fast path: try CAS decrement
@@ -2831,16 +2847,19 @@ pub const Semaphore = struct {
             return;
         }
         // VOPR-END-RETRY
+        // VOPR-EXCLUDE-END
         // HAMMER-WAIT-LOOP-END: tag=semaphore.acquire-park
     }
 
     /// Release one slot. Wakes a blocked acquirer if present; otherwise increments counter.
     pub fn release(self: *Semaphore) void {
+        // VOPR-EXCLUDE-BEGIN: std.atomic spin contention belongs to Loom/hammer
         // VOPR-START-RETRY: Semaphore.release spinlock acquire
         while (self.lock.swap(1, .acquire) == 1) {
             std.Thread.yield() catch {};
         }
         // VOPR-END-RETRY
+        // VOPR-EXCLUDE-END
         if (self.waiting_task) |task| {
             // Grant slot directly to waiter (don't increment counter)
             self.waiting_task = null;

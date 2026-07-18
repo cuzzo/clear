@@ -390,10 +390,11 @@ pub fn main() !void {
     sched.run();
 
     // 9. Signal workers to shut down and join.
+    // LOOM-EXCLUDE-BEGIN: generated OS-thread bootstrap shutdown
     shutdown.store(true, .release);
+    // LOOM-EXCLUDE-END
     fp.global_registry.notifyAll(); // wake workers from epoll_wait
     for (0..num_workers) |i| {
         workers[i].join();
     }
 }
-

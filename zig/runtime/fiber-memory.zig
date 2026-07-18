@@ -26,6 +26,7 @@ pub const StackOrigin = struct {
     owner_index: u32,
 };
 
+// LOOM-EXCLUDE-BEGIN: compile-time-disabled debug diagnostics
 var origins_map: std.AutoHashMap(usize, StackOrigin) = undefined;
 var origins_lock: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
 var origins_initialized: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
@@ -45,6 +46,7 @@ fn ensureOriginsInit() void {
     origins_map = std.AutoHashMap(usize, StackOrigin).init(std.heap.c_allocator);
     origins_initialized.store(true, .release);
 }
+// LOOM-EXCLUDE-END
 
 pub fn recordStackOrigin(ptr: usize, origin: StackOrigin) void {
     if (!debug_stack_origins) return;

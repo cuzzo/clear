@@ -450,7 +450,7 @@ fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     let mut final_sites = Vec::new();
     let mut in_loom_exclude = false;
     let mut in_vopr_exclude = false;
-    let mut in_retry = false;
+    let mut retry_depth = 0usize;
 
     let mut line_states = Vec::new();
     for line in contents.lines() {
@@ -471,18 +471,18 @@ fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
         let mut retry_ended = false;
         let mut vopr_retry_direct = false;
         if line.contains("VOPR-START-RETRY") {
-            in_retry = true;
+            retry_depth += 1;
             retry_triggered = true;
         }
         if line.contains("VOPR-END-RETRY") {
-            in_retry = false;
+            retry_depth = retry_depth.saturating_sub(1);
             retry_ended = true;
         }
         if line.contains("VOPR-RETRY") {
             vopr_retry_direct = true;
         }
 
-        line_states.push((in_loom_exclude, in_vopr_exclude, in_retry, retry_triggered, retry_ended, vopr_retry_direct, line));
+        line_states.push((in_loom_exclude, in_vopr_exclude, retry_depth > 0, retry_triggered, retry_ended, vopr_retry_direct, line));
     }
 
     for site in sites {
@@ -500,12 +500,15 @@ fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
 
     for (idx, &(_loom_ex, vopr_ex, retry, start_retry, _, retry_direct, line)) in line_states.iter().enumerate() {
         let line_no = (idx + 1) as u32;
+        if line.contains("HAMMER-WAIT-LOOP-BEGIN") {
+            final_sites.push(site(path, line_no, line, "zig_wait_loop", "hammer"));
+        }
         if vopr_ex {
             continue;
         }
         if start_retry || retry_direct {
             final_sites.push(site(path, line_no, line, "zig_vopr_retry", "vopr"));
-        } else if retry && !line.trim().is_empty() && !line.contains("VOPR-") {
+        } else if retry && executable_zig_retry_line(line) && !line.contains("VOPR-") {
             let has_structural_vopr = final_sites.iter().any(|s| s.line == line_no && s.hazard_type.starts_with("zig_vopr_"));
             if !has_structural_vopr {
                 final_sites.push(site(path, line_no, line, "zig_vopr_retry_body", "vopr"));
@@ -514,6 +517,13 @@ fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     }
 
     final_sites
+}
+
+fn executable_zig_retry_line(line: &str) -> bool {
+    let code = line.split("//").next().unwrap_or("").trim();
+    !code.is_empty()
+        && !code.chars().all(|ch| matches!(ch, '{' | '}' | ';' | ','))
+        && code != "} else {"
 }
 
 fn scan_go_sites(path: &str, contents: &str) -> Vec<HazardSite> {
@@ -738,6 +748,28 @@ mod tests {
         assert_eq!(types.iter().filter(|t| *t == "zig_vopr_time").count(), 1);
         assert_eq!(types.iter().filter(|t| *t == "zig_vopr_retry").count(), 2);
         assert_eq!(types.iter().filter(|t| *t == "zig_vopr_retry_body").count(), 1);
+    }
+
+    #[test]
+    fn test_zig_nested_retry_and_hammer_hazards() {
+        let zig_code = r#"
+            // VOPR-START-RETRY
+            outer_before();
+            // VOPR-START-RETRY
+            inner();
+            // VOPR-END-RETRY
+            outer_after();
+            // VOPR-END-RETRY
+            // HAMMER-WAIT-LOOP-BEGIN: tag=queue.wait
+            while (blocked()) yield();
+            // HAMMER-WAIT-LOOP-END: tag=queue.wait
+            value.cmpxchgWeak(1, 2, .acq_rel, .acquire);
+        "#;
+
+        let sites = scan_zig_sites("test.zig", zig_code);
+        assert!(sites.iter().any(|s| s.hazard_type == "zig_vopr_retry_body" && s.source.contains("outer_after")));
+        assert!(sites.iter().any(|s| s.hazard_type == "zig_wait_loop" && s.required_evidence == "hammer"));
+        assert!(sites.iter().any(|s| s.hazard_type == "zig_loom_atomic" && s.source.contains("cmpxchgWeak")));
     }
 
     #[test]
