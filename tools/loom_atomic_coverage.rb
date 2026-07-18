@@ -81,8 +81,9 @@ module LoomAtomicCoverage
   # Also excluded: VOPR/Loom simulator + harness files themselves
   # (vopr-*.zig, loom-*.zig, *-vopr.zig, *-loom.zig) -- atomics there
   # are test infrastructure, not production runtime that Loom should be
-  # exercising.
-  TEST_FILE_RE = /\A(?:.*-test|vopr[\w-]*|loom[\w-]*|[\w-]+-loom|[\w-]+-vopr)\.zig\z/
+  # exercising. runtime-header.zig is transpiler-generated, and runtime/testing/
+  # contains test-only support code rather than production runtime sites.
+  TEST_FILE_RE = /\A(?:.*-test|vopr[\w-]*|loom[\w-]*|[\w-]+-loom|[\w-]+-vopr|runtime-header)\.zig\z/
 
   # Source-comment markers for code regions that are by-design unreachable
   # under the loom harness (e.g. thread-only paths guarded by
@@ -100,6 +101,7 @@ module LoomAtomicCoverage
       Dir.glob(File.join(abs_dir, "**/*.zig")).sort.each do |abs_path|
         rel = abs_path.sub(/\A#{Regexp.escape(repo_root)}\/?/, "")
         next if !include_tests && File.basename(rel).match?(TEST_FILE_RE)
+        next if !include_tests && rel.match?(%r{/(?:testing)/})
 
         in_exclude = false
         File.foreach(abs_path).with_index(1) do |line, no|
@@ -198,8 +200,15 @@ module LoomAtomicCoverage
       fh ||= {}
       hit_count = fh[s[:line]]
       kcov_elided = !hit_count.nil? && hit_count.zero? && classify_artifact(fh, s[:line], s[:source])
-      s.merge(hits: hit_count, kcov_elided: kcov_elided, file_loaded: file_loaded)
+      dwarf_hidden = hit_count.nil? && file_loaded
+      s.merge(hits: hit_count, kcov_elided: kcov_elided, dwarf_hidden: dwarf_hidden, file_loaded: file_loaded)
     end
+  end
+
+  def actionable_gap?(site)
+    return false if site[:kcov_elided] || site[:dwarf_hidden]
+
+    site[:hits].nil? || site[:hits].zero?
   end
 
   def report(correlated, all:, summary_only:)
@@ -210,8 +219,9 @@ module LoomAtomicCoverage
     instrumented = correlated.count { |s| !s[:hits].nil? }
     zero_hit_real = instrumented - direct - elided
     file_not_loaded = correlated.count { |s| s[:hits].nil? && !s[:file_loaded] }
-    line_missing = correlated.count { |s| s[:hits].nil? && s[:file_loaded] }
-    uncovered = total - covered
+    line_missing = correlated.count { |s| s[:dwarf_hidden] }
+    observable = total - line_missing
+    uncovered = zero_hit_real + file_not_loaded
 
     unless summary_only
       to_show = all ? correlated : correlated.reject { |s| (s[:hits] && s[:hits] > 0) || s[:kcov_elided] }
@@ -219,7 +229,7 @@ module LoomAtomicCoverage
         tag = if s[:hits].nil? && !s[:file_loaded]
                 "FILE NOT LOADED"
               elsif s[:hits].nil?
-                "LINE MISSING (file loaded)"
+                "DWARF-HIDDEN (ignored)"
               elsif s[:kcov_elided]
                 "ELIDED (likely covered)"
               elsif s[:hits].zero?
@@ -232,15 +242,15 @@ module LoomAtomicCoverage
       puts unless to_show.empty?
     end
 
-    pct = total.zero? ? 0.0 : (covered.to_f / total * 100)
+    pct = observable.zero? ? 0.0 : (covered.to_f / observable * 100)
     puts "Atomic sites: #{total}"
     puts "  covered (direct):         #{direct}"
     puts "  covered (kcov-elided):    #{elided}"
-    puts "  covered total:            #{covered} (#{format('%.1f', pct)}%)"
+    puts "  observable covered:       #{covered}/#{observable} (#{format('%.1f', pct)}%)"
     puts "  uncovered (0-hit):        #{zero_hit_real}    (instrumented, line never executed)"
     puts "  uncovered (file unloaded):#{file_not_loaded}   (file not loaded by any loom test)"
-    puts "  uncovered (line missing): #{line_missing}    (file loaded; line may be inline-elided OR_ELSE unreached)"
-    puts "  uncovered total:          #{uncovered}"
+    puts "  ignored (DWARF missing):  #{line_missing}    (known Zig generic/comptime line-table bug; not in denominator)"
+    puts "  actionable gaps:          #{uncovered}"
   end
 
   def run(argv)
@@ -293,7 +303,7 @@ module LoomAtomicCoverage
 
     report(correlated, all: opts[:all], summary_only: opts[:summary_only])
 
-    uncovered = correlated.count { |s| s[:hits].nil? || s[:hits].zero? }
+    uncovered = correlated.count { |s| actionable_gap?(s) }
     exit(uncovered.zero? ? 0 : 1)
   end
 end

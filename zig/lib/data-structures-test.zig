@@ -396,3 +396,11 @@ test {
     _ = @import("../runtime/soa-pool-test.zig");
     _ = @import("../runtime/stream-test.zig");
 }
+
+test "MapType correctly selects StringMap or NumericMapType" {
+    const SMap = CheatLib.MapType([]const u8, i64);
+    try std.testing.expect(SMap == CheatLib.StringMap(i64));
+
+    const NMap = CheatLib.MapType(i64, f64);
+    try std.testing.expect(NMap == CheatLib.NumericMapType(i64, f64));
+}

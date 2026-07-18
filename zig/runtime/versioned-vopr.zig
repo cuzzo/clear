@@ -582,6 +582,10 @@ pub fn testMvccUpdateMultiTaggedContentionRetry() !void {
     }
 
     sim_atomic.resetFault();
+    // Let the first cell install its tag, then make both permitted loads of
+    // the second cell appear tagged. That forces a partial-acquisition
+    // rollback (acquired=1) before the next outer attempt succeeds.
+    sim_atomic.inject_load_tagged_skip_remaining = 1;
     sim_atomic.inject_load_tagged_count_remaining = 2;
     const tagged_before = sim_atomic.sim_load_synthetic_tag_count;
 

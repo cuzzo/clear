@@ -7,10 +7,37 @@ const ebr = @import("../lib/ebr.zig");
 const Runtime = @import("runtime.zig").Runtime;
 const CheatHeader = @import("runtime-header.zig");
 const qs = @import("queues.zig");
+const ProfileSpinLock = @import("profile-lock.zig").SpinLock;
 
 const allocator = std.heap.c_allocator;
 
 fn noop(_: *anyopaque, _: ?*anyopaque) anyerror!void {}
+
+// HAMMER-COVERS: profile-lock.acquire
+test "Hammer: profile lock yields under real-thread contention" {
+    var lock: ProfileSpinLock = .{};
+    lock.lock();
+
+    var entered = std.atomic.Value(bool).init(false);
+    var finished = std.atomic.Value(bool).init(false);
+    const Contender = struct {
+        fn run(spin: *ProfileSpinLock, started: *std.atomic.Value(bool), done: *std.atomic.Value(bool)) void {
+            started.store(true, .release);
+            spin.lock();
+            done.store(true, .release);
+            spin.unlock();
+        }
+    };
+    const contender = try std.Thread.spawn(.{}, Contender.run, .{ &lock, &entered, &finished });
+    while (!entered.load(.acquire)) std.Thread.yield() catch {};
+    for (0..1_000) |_| {
+        try std.testing.expect(!finished.load(.acquire));
+        std.Thread.yield() catch {};
+    }
+    lock.unlock();
+    contender.join();
+    try std.testing.expect(finished.load(.acquire));
+}
 
 // HAMMER-COVERS: waitgroup.wait-non-fiber
 test "Hammer: WaitGroup non-fiber wait yields until done publishes completion" {

@@ -19,6 +19,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const fc = @import("fiber-core.zig");
 const StackSize = fc.StackSize;
+const root = @import("root");
+const Atomic = if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
 
 // ── Policy Configuration ─────────────────────────────────────────
 
@@ -88,16 +90,16 @@ const NO_RECOMMENDATION: u8 = 0xFF;
 
 const Entry = struct {
     /// Function pointer (0 = empty slot).
-    fn_addr: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+    fn_addr: Atomic(usize) = Atomic(usize).init(0),
     /// Recommended StackSize ordinal, or NO_RECOMMENDATION (0xFF) if unset.
-    recommended: std.atomic.Value(u8) = std.atomic.Value(u8).init(NO_RECOMMENDATION),
+    recommended: Atomic(u8) = Atomic(u8).init(NO_RECOMMENDATION),
     /// Number of overflows seen.
-    overflow_count: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    overflow_count: Atomic(u32) = Atomic(u32).init(0),
     /// Underflow counters: task used < 50% of tier (1-tier) or < 25% (2-tier).
-    underflow_1tier: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
-    underflow_2tier: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    underflow_1tier: Atomic(u32) = Atomic(u32).init(0),
+    underflow_2tier: Atomic(u32) = Atomic(u32).init(0),
     /// True when the recommendation was set by a downsize (not an upsize).
-    downsized: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    downsized: Atomic(bool) = Atomic(bool).init(false),
 };
 
 var registry: [REGISTRY_SIZE]Entry = [_]Entry{.{}} ** REGISTRY_SIZE;
@@ -162,7 +164,7 @@ pub fn recordOverflow(fn_addr: usize, current_size: StackSize) void {
     // Find or claim a slot via linear probing.
     const start = hashFn(fn_addr);
     var i: usize = 0;
-    while (i < REGISTRY_SIZE) : (i += 1) {
+    while (i < REGISTRY_SIZE) {
         const idx = (start + i) % REGISTRY_SIZE;
         const entry = &registry[idx];
 
@@ -200,11 +202,18 @@ pub fn recordOverflow(fn_addr: usize, current_size: StackSize) void {
             // Empty slot — try to claim it.
             if (entry.fn_addr.cmpxchgWeak(0, fn_addr, .release, .monotonic)) |_| {
                 // Lost the race.  Re-check this slot (might now match).
-                i -= 1;
                 continue;
             }
-            // Claimed.  Set initial recommendation.
-            entry.recommended.store(new_ord, .release);
+            // Claimed. Install the initial recommendation with CAS rather
+            // than a store: another recorder may observe fn_addr as soon as
+            // the release-CAS above publishes it and raise the recommendation
+            // before this fiber resumes. A store here would clobber that
+            // larger concurrent value.
+            while (true) {
+                const old = entry.recommended.load(.monotonic);
+                if (old != NO_RECOMMENDATION and old >= new_ord) break;
+                if (entry.recommended.cmpxchgWeak(old, new_ord, .release, .monotonic)) |_| continue else break;
+            }
             _ = entry.overflow_count.fetchAdd(1, .monotonic);
 
             if (config.on_overflow == .log) {
@@ -217,6 +226,7 @@ pub fn recordOverflow(fn_addr: usize, current_size: StackSize) void {
         }
 
         // Slot belongs to a different fn — continue probing.
+        i += 1;
     }
     // Registry full — silently drop.  256 distinct task classes is a lot.
 }
@@ -377,18 +387,18 @@ fn findEntry(fn_addr: usize) ?*Entry {
 fn findOrCreateEntry(fn_addr: usize) ?*Entry {
     const start = hashFn(fn_addr);
     var i: usize = 0;
-    while (i < REGISTRY_SIZE) : (i += 1) {
+    while (i < REGISTRY_SIZE) {
         const idx = (start + i) % REGISTRY_SIZE;
         const entry = &registry[idx];
         const existing = entry.fn_addr.load(.acquire);
         if (existing == fn_addr) return entry;
         if (existing == 0) {
             if (entry.fn_addr.cmpxchgWeak(0, fn_addr, .release, .monotonic)) |_| {
-                i -= 1; // Retry — someone else claimed it
-                continue;
+                continue; // Retry the same slot — someone else claimed it.
             }
             return entry;
         }
+        i += 1;
     }
     return null; // Registry full.
 }

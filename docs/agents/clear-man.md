@@ -4,6 +4,7 @@
 
 ```
 clear build <file.clear> [-o output] [--release|--safe]
+clear watch <file.clear> [-o output] [--no-incremental]
 clear run <file.clear> [-- args...]
 clear test <file.clear>
 clear c-ffi <header.h> <output.ffi.clear> --link <library>
@@ -31,10 +32,33 @@ clear build server.clear --safe       # with bounds/overflow checks
 The binary is placed in the same directory as the source file by default.
 Use `-o` to specify a different path.
 
+One-shot builds explicitly disable Zig incremental compilation. ReleaseFast
+builds also clear the source's private Zig caches before compiling, making
+them suitable for release and CI artifacts.
+
 **FFI auto-detection**: Any `.zig` files in the same directory as the
 source are automatically linked as FFI modules. For example, if
 `native_math.zig` exists alongside `main.clear`, it becomes available via
 `EXTERN FN ... FROM "native_math"`.
+
+### watch
+
+Keep a per-program Zig `Step.Compile` alive while editing CLEAR or runtime Zig
+sources. The generated root, build graph, and precompiled runtime assembly
+objects retain stable paths under `zig/.clear-cache/` so Zig can reuse its
+incremental state.
+
+```
+clear watch server.clear
+clear build server.clear --watch
+clear watch server.clear --no-incremental  # comparison/verification mode
+```
+
+Watch builds are Debug/self-hosted builds. Changes to the entry `.clear` file
+or its CLEAR dependencies are retranspiled into the stable generated root;
+changes to imported runtime `.zig` files are handled directly by Zig. Use
+`--no-incremental` to keep the same watcher workflow while forcing full Zig
+recompilation after every change.
 
 ### run
 

@@ -30,6 +30,8 @@ const Test = struct {
 };
 
 const tests = [_]Test{
+    .{ .name = "control-plane loom: concurrent slot claim preserves maximum recommendation",           .func = &ploom.testControlPlaneOverflowRace },
+    .{ .name = "control-plane loom: underflow and diagnostic policy atomic paths",                       .func = &ploom.testControlPlanePolicyPaths },
     .{ .name = "parking mutex loom: acquireVsRelease exhaustive 256 schedules",            .func = &ploom.testMutexAcquireExhaustive },
     .{ .name = "parking mutex loom: acquireVsRelease prng seeds",                          .func = &ploom.testMutexAcquirePrng },
     .{ .name = "parking mutex loom: 3-fiber race coverage 3^10 base-3 exhaustive (M4)",    .func = &ploom.testMutexThreeFiberRaces },
@@ -53,6 +55,7 @@ const tests = [_]Test{
     .{ .name = "parking fsm-rwlock loom: 1W+2R FSM 3^10 base-3 exhaustive (wake-on-undo guard)", .func = &ploom.testFsmRwlockOneWriterTwoReaders },
     .{ .name = "stream close-err-atomic: producer/consumer handshake on closed+err (4096 schedules)", .func = &ploom.testStreamCloseErrAtomicCoverage },
     .{ .name = "stream nextStep production interleavings: full-ring producer wake and locked close recheck", .func = &ploom.testStreamNextStepInterleavings },
+    .{ .name = "stream nextStep production park/wake: empty consumer blocks and close resumes",               .func = &ploom.testStreamNextStepParkWake },
     .{ .name = "split-stream err-set-atomic: producer/consumer handshake on err_set + non-atomic err (4096 schedules)", .func = &ploom.testSplitStreamErrSetAtomicCoverage },
     .{ .name = "stream publish-acquire-atomic: SplitStream chunk.len release/acquire vs values[] (4096 schedules)", .func = &ploom.testStreamChunkPublishAtomicCoverage },
     .{ .name = "split-stream production lifecycle: retain, publish, close, error, deinit", .func = &ploom.testSplitStreamProductionLifecycle },
@@ -102,6 +105,7 @@ const tests = [_]Test{
     .{ .name = "scheduler N1: io_uring submit fns park task (read/write/accept/connect/recv/send)",    .func = &ploom.testIoSubmitFns },
     .{ .name = "scheduler N1: SchedulerRegistry getLeastLoaded/notifyAll/deinit/count",                 .func = &ploom.testSchedulerRegistryFns },
     .{ .name = "scheduler N1: sleepTask links in (status.store(.Blocked) + sleeping_queue)",           .func = &ploom.testSleepTaskLinking },
+    .{ .name = "scheduler run loop: dequeue clears in_inbox before dispatch",                          .func = &ploom.testSchedulerMarksDequeuedTaskIdle },
 };
 
 pub fn main() !void {

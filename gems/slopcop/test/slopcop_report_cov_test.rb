@@ -687,10 +687,22 @@ class SlopcopReportCovTest < Minitest::Test
       
       LoomAtomicCoverage.stub :scan_atomic_sites, [site1] do
         VoprCoverage.stub :scan_sites, [site2] do
-          hazards = SlopCop::Constraints::ZigProvider.scan_hazards(repo: dir)
-          assert_equal 2, hazards.size
-          assert_equal "zig_loom_atomic", hazards[0][:hazard_type]
-          assert_equal "zig_vopr_time", hazards[1][:hazard_type]
+          loop = WaitLoopCoverage::Loop.new(
+            tag: "queue.wait",
+            file: "zig/runtime/c.zig",
+            begin_line: 3,
+            end_line: 8
+          )
+          WaitLoopCoverage.stub :scan_source_files, [] do
+            WaitLoopCoverage.stub :parse_loops, [[loop], []] do
+              hazards = SlopCop::Constraints::ZigProvider.scan_hazards(repo: dir)
+              assert_equal 3, hazards.size
+              assert_equal "zig_loom_atomic", hazards[0][:hazard_type]
+              assert_equal "zig_vopr_time", hazards[1][:hazard_type]
+              assert_equal "zig_wait_loop", hazards[2][:hazard_type]
+              assert_equal "hammer", hazards[2][:required_evidence]
+            end
+          end
         end
       end
     end

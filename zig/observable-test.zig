@@ -1951,3 +1951,69 @@ test "ObservableFind([]const u8) wrapper end-to-end: new + submit + finish + nex
     const got = (try s.next()) orelse return error.MissingValue;
     try testing.expectEqualStrings("wrapper-match", got);
 }
+
+test "StreamSetBounded propagates OOM from init" {
+    var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
+    try testing.expectError(
+        error.OutOfMemory,
+        obs.StreamSetBounded(i64, 4).init(failing.allocator()),
+    );
+}
+
+test "StreamSetBounded propagates OOM from materialize" {
+    var set = try obs.StreamSetBounded(i64, 4).init(testing.allocator);
+    defer set.deinit();
+    try testing.expect(set.submit(1));
+
+    var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
+    try testing.expectError(error.OutOfMemory, set.materialize(failing.allocator()));
+}
+
+test "StreamSet propagates OOM from init" {
+    var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
+    try testing.expectError(
+        error.OutOfMemory,
+        obs.StreamSetCfg(i64, .{}).init(failing.allocator()),
+    );
+}
+
+test "StreamSet preserves contents when growth allocation fails" {
+    var set = try obs.StreamSetCfg(i64, .{ .initial_capacity = 1 }).init(testing.allocator);
+    defer set.deinit();
+    try testing.expect(try set.submit(1));
+
+    const original_allocator = set.alloc;
+    var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
+    set.alloc = failing.allocator();
+    defer set.alloc = original_allocator;
+
+    try testing.expectError(error.OutOfMemory, set.submit(2));
+    try testing.expectEqual(@as(usize, 1), set.len());
+    var snapshot = set.view();
+    defer snapshot.release();
+    try testing.expectEqualSlices(i64, &.{1}, snapshot.slice());
+}
+
+test "StreamSet propagates OOM from materialize" {
+    var set = try obs.StreamSetCfg(i64, .{}).init(testing.allocator);
+    defer set.deinit();
+    try testing.expect(try set.submit(1));
+
+    var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
+    try testing.expectError(error.OutOfMemory, set.materialize(failing.allocator()));
+}
+
+test "Observable preserves its snapshot when set allocation fails" {
+    var observable = try obs.Observable(i64).init(testing.allocator, 0);
+    defer observable.deinit();
+
+    const original_allocator = observable.alloc;
+    var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
+    observable.alloc = failing.allocator();
+    defer observable.alloc = original_allocator;
+
+    try testing.expectError(error.OutOfMemory, observable.set(1));
+    var snapshot = observable.view();
+    defer snapshot.release();
+    try testing.expectEqual(@as(i64, 0), snapshot.value().*);
+}

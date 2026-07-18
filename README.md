@@ -156,6 +156,8 @@ bundle install                       # Install Ruby dependencies (one time)
 ./clear build foo.clear                # Produces ./foo binary
 ./clear build foo.clear -o bin/app     # Custom output path
 ./clear build foo.clear --safe         # With bounds/overflow checks (-O ReleaseSafe)
+./clear watch foo.clear                 # Persistent incremental Debug build
+./clear watch foo.clear --no-incremental # Persistent full-rebuild comparison mode
 
 # Run
 ./clear run foo.clear                  # Build + execute

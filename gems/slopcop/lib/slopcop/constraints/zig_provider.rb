@@ -79,7 +79,20 @@ module SlopCop
         vopr_sites = VoprCoverage.scan_sites(scope, repo).map do |site|
           hazard_site(site, "zig_vopr_#{site[:category]}", "vopr")
         end
-        (loom_sites + vopr_sites).sort_by { |site| [site[:path], site[:line], site[:hazard_type]] }
+        wait_files = WaitLoopCoverage.scan_source_files(scope, repo)
+        wait_loops, = WaitLoopCoverage.parse_loops(wait_files, repo)
+        wait_sites = wait_loops.map do |loop|
+          hazard_site(
+            {
+              file: loop.file,
+              line: loop.begin_line,
+              source: source_line(repo, loop.file, loop.begin_line)
+            },
+            "zig_wait_loop",
+            "hammer"
+          )
+        end
+        (loom_sites + vopr_sites + wait_sites).sort_by { |site| [site[:path], site[:line], site[:hazard_type]] }
       end
 
       def add_loom_finding(out, evidence, path, line, source)

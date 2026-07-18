@@ -2393,6 +2393,12 @@ pub fn bind(comptime deps: type) type {
             const Map = std.StringHashMapUnmanaged(V);
             // Thread-safe allocator for cold-path key/bucket allocations.
             const remote_alloc = std.heap.c_allocator;
+            fn remoteMapAlloc() std.mem.Allocator {
+                return if (@hasDecl(deps, "partitionedMapRemoteAllocator"))
+                    deps.partitionedMapRemoteAllocator()
+                else
+                    remote_alloc;
+            }
             const root = @import("root");
 
             const Shard = struct {
@@ -2506,7 +2512,7 @@ pub fn bind(comptime deps: type) type {
                         }
                     else
                         c.value;
-                    const gop = c.map.shards[c.shard].map.getOrPut(remote_alloc, c.key) catch {
+                    const gop = c.map.shards[c.shard].map.getOrPut(remoteMapAlloc(), c.key) catch {
                         remote_alloc.free(c.key);
                         if (comptime is_slice_value) remote_alloc.free(safe_val);
                         c.err = true;
@@ -2858,6 +2864,12 @@ pub fn bind(comptime deps: type) type {
             const Self = @This();
             const Map = NumericMapType(K, V);
             const remote_alloc = std.heap.c_allocator;
+            fn remoteMapAlloc() std.mem.Allocator {
+                return if (@hasDecl(deps, "partitionedMapRemoteAllocator"))
+                    deps.partitionedMapRemoteAllocator()
+                else
+                    remote_alloc;
+            }
             const root = @import("root");
 
             const Shard = struct {
@@ -2951,7 +2963,7 @@ pub fn bind(comptime deps: type) type {
                         }
                     else
                         c.value;
-                    const gop = c.map.shards[c.shard].map.getOrPut(remote_alloc, c.key) catch {
+                    const gop = c.map.shards[c.shard].map.getOrPut(remoteMapAlloc(), c.key) catch {
                         if (comptime is_slice_value) remote_alloc.free(safe_val);
                             c.err = true;
                             c.done.store(true, .release);

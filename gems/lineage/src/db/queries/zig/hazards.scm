@@ -5,7 +5,7 @@
 
 (
   (call_expression function: (field_expression member: (identifier) @method)) @hazard.zig_loom_atomic
-  (#match? @method "^(load|store|swap|fetchAdd|fetchSub|fetchOr|fetchAnd|fetchXor|fetchMin|fetchMax)$")
+  (#match? @method "^(load|store|swap|fetchAdd|fetchSub|fetchOr|fetchAnd|fetchXor|fetchMin|fetchMax|cmpxchgStrong|cmpxchgWeak|compareExchange|compareExchangeStrong|compareExchangeWeak|rmw)$")
 )
 
 (

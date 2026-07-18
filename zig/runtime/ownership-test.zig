@@ -699,3 +699,15 @@ test "Rc: deinit calls T.deinit with allocator param (ArrayListUnmanaged pattern
         try std.testing.expectEqual(@as(usize, 1), deinit_call_count);
     }
 }
+
+test "Rc: init fails on OOM" {
+    const allocator = std.testing.failing_allocator;
+    const rc = Rc(i32).init(allocator, 42);
+    try std.testing.expectError(error.OutOfMemory, rc);
+}
+
+test "Arc: init fails on OOM" {
+    const allocator = std.testing.failing_allocator;
+    const arc = Arc(i32).init(allocator, 42);
+    try std.testing.expectError(error.OutOfMemory, arc);
+}
