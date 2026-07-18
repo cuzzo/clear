@@ -154,14 +154,16 @@ module EffectTracker
   sig { params(caller_name: String, callee_name: String).returns(CallContext) }
   def effect_call_site_context_for(caller_name, callee_name)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    caller_context = effect_call_site_context[caller_name] ||= {}
+    effect_call_site_context[caller_name] ||= {}
+    caller_context = T.must(effect_call_site_context[caller_name])
     caller_context[callee_name] ||= { loop: false, cond: false }
   end
 
   sig { params(caller_name: String, callee_name: String).returns(T::Array[ArgFamilySets]) }
   def effect_call_site_arg_families_for(caller_name, callee_name)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    caller_families = effect_call_site_arg_families[caller_name] ||= {}
+    effect_call_site_arg_families[caller_name] ||= {}
+    caller_families = T.must(effect_call_site_arg_families[caller_name])
     caller_families[callee_name] ||= []
   end
 
@@ -346,7 +348,8 @@ module EffectAudit
     while changed
       changed = false
       function_call_graph.each do |fn_name, callees|
-        current = resolved[fn_name] ||= Set.new
+        resolved[fn_name] ||= Set.new
+        current = resolved[fn_name]
         callees.each do |callee|
           callee_effs = resolved[callee]
           next unless callee_effs
@@ -507,10 +510,7 @@ module EffectAudit
     ret_type = fsig&.return_type
     heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
     has_takes_heap = fn_node.params.any? { |p|
-      next unless p.takes
-      ti = p.type
-      is_pure_copy = ti.primitive? || ti.id_handle?
-      !is_pure_copy
+      p.takes && !(p.type.primitive? || p.type.id_handle?)
     }
     has_catch = function_has_catch_clauses?(fn_node)
     has_raise = function_raises_directly?(name)
@@ -691,8 +691,7 @@ module EffectAudit
         next if alloc_fault.key?(c)
         scope = lookup_scope_for(c)
         next unless scope
-        sig = scope.resolve_entry(c)&.type
-        sig = sig.is_a?(FunctionSignature) ? sig : nil
+        sig = FunctionSignature.unwrap(scope.resolve_entry(c)&.type)
         alloc_fault[c] = true if sig&.alloc_fault
       end
     end

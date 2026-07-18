@@ -29,9 +29,9 @@ module PreMirTypeCheck
   LEAVES = [
     Symbol, String, Numeric, TrueClass, FalseClass, NilClass, Lexer::Token, SymbolEntry, Scope,
     Schemas::EnumSchema, Schemas::InlineStructVariant, Schemas::ResourceSchema,
-    Schemas::StructSchema, Schemas::UnionSchema
+    Schemas::StructSchema, Schemas::UnionSchema, Set
   ].freeze
-  WalkNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, T::Hash[BasicObject, BasicObject], T::Set[BasicObject], Struct, T::Struct, Scope, Schemas::EnumSchema, Schemas::InlineStructVariant, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema, SymbolEntry, Lexer::Token, Symbol, String, Numeric, TrueClass, FalseClass, Type)) }
+  WalkNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, T::Hash[BasicObject, BasicObject], Struct, T::Struct, Scope, Schemas::EnumSchema, Schemas::InlineStructVariant, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema, SymbolEntry, Lexer::Token, Symbol, String, Numeric, TrueClass, FalseClass, Type, T::Set[T.untyped])) }
   Violation = T.type_alias { T::Hash[Symbol, String] }
 
 

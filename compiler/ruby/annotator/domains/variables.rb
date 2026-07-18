@@ -226,7 +226,7 @@ module Annotator
         register_container_borrow!(node)
         # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@boxed fields).
         if !node_type.implicitly_copyable? { |t| lookup_type_schema(t) }
-          current_fn_ctx&.record_heap_use!
+          current_fn_ctx&.mark_runtime_used!
         end
         accumulate_stack_bytes(storage, node)
         track_union_alias(node.name, value)

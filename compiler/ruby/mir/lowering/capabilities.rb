@@ -47,6 +47,8 @@ module MIRLoweringCapabilities
       TrueClass,
       FalseClass,
       Type,
+      Lexer::Token,
+      T::Set[T.untyped],
     ))
   end
   WithBindingNode = T.type_alias { T.any(String, MIR::Emittable, T::Array[MIR::Emittable]) }
@@ -821,7 +823,7 @@ module MIRLoweringCapabilities
     case node
     when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type, Lexer::Token, AST::FunctionDef
       false
-    when Array
+    when Array, Set
       node.any? { |item| ast_contains_return?(item) }
     when Hash
       node.values.any? { |item| ast_contains_return?(item) }

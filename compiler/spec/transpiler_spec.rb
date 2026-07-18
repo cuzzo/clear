@@ -850,7 +850,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       warnings = []
+      allow($stderr).to receive(:puts) { |msg| warnings << msg }
       allow(Kernel).to receive(:warn) { |msg| warnings << msg }
+      allow(Warning).to receive(:warn) { |msg| warnings << msg }
       transpile(src)
       expect(warnings.any? { |w| w.include?("MUTABLE 'x' is never reassigned") }).to be true
     end

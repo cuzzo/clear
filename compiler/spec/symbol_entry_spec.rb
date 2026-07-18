@@ -385,10 +385,9 @@ RSpec.describe SymbolEntry do
 
   describe "flow markers" do
     it "marks reads and declaration mutations on compatible AST nodes" do
-      reg = Struct.new(:var_used, :var_mutated, keyword_init: true).new(
-        var_used: false,
-        var_mutated: false
-      )
+      reg = AST::VarDecl.new(nil, "x", nil, nil)
+      reg.var_used = false
+      reg.var_mutated = false
       tracked = SymbolEntry.new(reg: reg, type: :Int64, mutable: true, storage: :stack)
 
       tracked.mark_read!

@@ -407,13 +407,19 @@ class SymbolEntry
   sig { void }
   def mark_read!
     @flow.read = true
-    @reg.var_used = true if @reg.respond_to?(:var_used=)
+    reg = @reg
+    if reg && reg.respond_to?(:var_used=)
+      T.unsafe(reg).var_used = true
+    end
   end
 
   sig { params(touch_declaration: T::Boolean).void }
   def mark_mutated!(touch_declaration: false)
     @flow.mutated = true
-    @reg.var_mutated = true if touch_declaration && @reg.respond_to?(:var_mutated=)
+    reg = @reg
+    if touch_declaration && reg && reg.respond_to?(:var_mutated=)
+      T.unsafe(reg).var_mutated = true
+    end
   end
 
   sig { void }

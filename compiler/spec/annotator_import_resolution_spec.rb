@@ -26,8 +26,15 @@ RSpec.describe "annotator import resolution boundaries" do
 
   def import_scope(source_scope, kind: :local, module_source_dir: Dir.pwd)
     source_dir = Dir.pwd
+    statements = []
+    source_scope.visible_entries.each do |name, entry|
+      statements << AST::FunctionDef.new(tok(name), name)
+    end
+    source_scope.visible_types.each do |name, entry|
+      statements << AST::StructDef.new(tok(name.to_s), name.to_s)
+    end
     mod = ModuleImporter::CompiledModule.new(
-      AST::Program.new(tok, []),
+      AST::Program.new(tok, statements),
       source_scope,
       "",
       module_source_dir,

@@ -25,6 +25,7 @@ AutoInferenceWalkNode = T.type_alias do
     FalseClass,
     Lexer::Token,
     Type,
+    T::Set[T.untyped],
   ))
 end
 AutoInferenceDeclBlock = T.type_alias { T.proc.params(decl: T.any(AST::BindExpr, AST::VarDecl)).void }
@@ -247,6 +248,8 @@ class AutoConstraintCollector
          Schemas::StructSchema, Schemas::UnionSchema
       # leaf
     when Array, Set
+      node.each { |c| walk(c, current_fn: current_fn) }
+    when Set
       node.each { |c| walk(c, current_fn: current_fn) }
     when Hash
       node.each_value { |v| walk(v, current_fn: current_fn) }
