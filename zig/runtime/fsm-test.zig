@@ -225,3 +225,75 @@ test "dispatchOnce: Yielded reuses task across many iterations" {
     try testing.expectEqual(@as(u32, 101), loops);
     try testing.expectEqual(@as(u64, 5050), s.sum);
 }
+
+test "FsmRunQueue: grow succeeds and retains items" {
+    const initial_capacity = @as(usize, 1) << fsm.FsmRunQueue.INITIAL_LOG_SIZE;
+    const State = struct {
+        fn doResume(_: *FsmTask) YieldReason {
+            return .{ .Done = {} };
+        }
+    };
+    var queue = try fsm.FsmRunQueue.initWithAllocator(testing.allocator);
+    defer queue.deinit();
+
+    var tasks: [initial_capacity * 2]FsmTask = undefined;
+    for (&tasks) |*task| task.* = FsmTask.init(&State.doResume);
+
+    for (&tasks) |*task| try queue.push(testing.allocator, task);
+
+    try testing.expectEqual(initial_capacity * 2, queue.len());
+    var i: usize = tasks.len;
+    while (i > 0) {
+        i -= 1;
+        const task = &tasks[i];
+        const popped = queue.pop();
+        try testing.expectEqual(task, popped);
+    }
+    try testing.expectEqual(@as(usize, 0), queue.len());
+    try testing.expect(queue.pop() == null);
+}
+
+test "FsmRunQueue: stealOne on empty returns null" {
+    var queue = try fsm.FsmRunQueue.initWithAllocator(testing.allocator);
+    defer queue.deinit();
+    try testing.expect(queue.stealOne() == null);
+}
+
+test "FsmRunQueue: tryStealFrom on empty returns 0" {
+    var queue1 = try fsm.FsmRunQueue.initWithAllocator(testing.allocator);
+    defer queue1.deinit();
+    var queue2 = try fsm.FsmRunQueue.initWithAllocator(testing.allocator);
+    defer queue2.deinit();
+    try testing.expectEqual(@as(usize, 0), queue1.tryStealFrom(&queue2, testing.allocator));
+}
+
+test "FsmRunQueue: tryStealFrom steals half the elements" {
+    const State = struct {
+        fn doResume(_: *FsmTask) YieldReason {
+            return .{ .Done = {} };
+        }
+    };
+    var queue1 = try fsm.FsmRunQueue.initWithAllocator(testing.allocator);
+    defer queue1.deinit();
+    var queue2 = try fsm.FsmRunQueue.initWithAllocator(testing.allocator);
+    defer queue2.deinit();
+
+    var tasks: [4]FsmTask = undefined;
+    for (&tasks) |*task| task.* = FsmTask.init(&State.doResume);
+
+    for (&tasks) |*task| try queue2.push(testing.allocator, task);
+    try testing.expectEqual(@as(usize, 4), queue2.len());
+
+    const stolen = queue1.tryStealFrom(&queue2, testing.allocator);
+    try testing.expectEqual(@as(usize, 2), stolen);
+    try testing.expectEqual(@as(usize, 2), queue1.len());
+    try testing.expectEqual(@as(usize, 2), queue2.len());
+
+    try testing.expectEqual(&tasks[1], queue1.pop());
+    try testing.expectEqual(&tasks[0], queue1.pop());
+    try testing.expect(queue1.pop() == null);
+
+    try testing.expectEqual(&tasks[3], queue2.pop());
+    try testing.expectEqual(&tasks[2], queue2.pop());
+    try testing.expect(queue2.pop() == null);
+}

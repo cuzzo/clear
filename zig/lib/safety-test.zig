@@ -53,8 +53,25 @@ test "DepthCounter allows entry after paired exit" {
 }
 
 test "depthGuard records a concrete stack depth" {
+    const previous = safety.__min_depth;
+    defer safety.__min_depth = previous;
+
     safety.__min_depth = std.math.maxInt(usize);
     safety.depthGuard();
 
     try std.testing.expect(safety.__min_depth != std.math.maxInt(usize));
+}
+
+test "depthGuard does not update if sp >= __min_depth" {
+    const previous = safety.__min_depth;
+    defer safety.__min_depth = previous;
+
+    safety.__min_depth = 0;
+    safety.depthGuard();
+    try std.testing.expectEqual(@as(usize, 0), safety.__min_depth);
+}
+
+test "GlobalReentrancyGuard initializes to unlocked" {
+    const Guard = safety.GlobalReentrancyGuard("test");
+    try std.testing.expectEqual(false, Guard.locked);
 }

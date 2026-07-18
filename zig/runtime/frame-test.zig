@@ -521,3 +521,42 @@ test "Runtime.saveLoopMark/restoreLoopMark: arena rewinds per iteration" {
     try std.testing.expectEqual(pre_loop_mark.block_index, post_loop_mark.block_index);
     try std.testing.expectEqual(pre_loop_mark.cursor, post_loop_mark.cursor);
 }
+
+test "CheatArena: isLargeObject check" {
+    var arena = CheatArena.init(std.testing.allocator, &[_]u8{});
+    defer arena.deinit();
+
+    const ptr_small = arena.alloc(10, 1, 0).?;
+    try std.testing.expect(!arena.isLargeObject(ptr_small));
+
+    const ptr_large = arena.alloc(300 * 1024, 1, 0).?;
+    try std.testing.expect(arena.isLargeObject(ptr_large));
+}
+
+test "CheatArena: static block usage" {
+    var static_buf: [1024]u8 = undefined;
+    var arena = CheatArena.init(std.testing.allocator, &static_buf);
+    defer arena.deinit();
+
+    const p1 = arena.alloc(500, 1, 0).?;
+    const p1_addr = @intFromPtr(p1);
+    const static_start = @intFromPtr(&static_buf);
+    try std.testing.expect(p1_addr >= static_start and p1_addr < static_start + static_buf.len);
+
+    _ = arena.alloc(2000, 1, 0).?; // forces new dynamic block
+
+    const mark = arena.getMark();
+    try std.testing.expect(mark.block_index > 0);
+
+    arena.rewind(mark);
+}
+
+test "CheatArena: peak bytes and current bytes" {
+    var arena = CheatArena.init(std.testing.allocator, &[_]u8{});
+    defer arena.deinit();
+
+    try std.testing.expect(arena.getPeakBytes() == 0);
+    _ = arena.alloc(100, 1, 0).?;
+    try std.testing.expect(arena.getPeakBytes() >= 100);
+    try std.testing.expect(arena.currentBytes() >= 100);
+}

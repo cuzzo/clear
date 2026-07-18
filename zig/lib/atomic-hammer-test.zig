@@ -276,3 +276,313 @@ test "AtomicInt64: writer monotonic; reader never sees a decrease" {
     try std.testing.expectEqual(@as(i64, 1_000_000), counter.load());
     try std.testing.expect(rr.n_reads > 0);
 }
+
+// Ordering tests to catch memory ordering weakening mutants under TSan
+
+const OrderCtxInt64_cmpxchgStrong = struct {
+    flag: *atomic.AtomicInt64,
+    payload: *usize,
+};
+fn writerInt64_cmpxchgStrong(ctx: OrderCtxInt64_cmpxchgStrong) void {
+    ctx.payload.* = 42;
+    while (ctx.flag.cmpxchgStrong(0, 1) != null) std.atomic.spinLoopHint();
+}
+fn readerInt64_cmpxchgStrong(ctx: OrderCtxInt64_cmpxchgStrong) void {
+    while (ctx.flag.load() < 1) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicInt64 ordering cmpxchgStrong" {
+    var flag = atomic.AtomicInt64.init(0);
+    var payload: usize = 0;
+    const ctx = OrderCtxInt64_cmpxchgStrong{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerInt64_cmpxchgStrong, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerInt64_cmpxchgStrong, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxInt64_cmpxchgWeak = struct {
+    flag: *atomic.AtomicInt64,
+    payload: *usize,
+};
+fn writerInt64_cmpxchgWeak(ctx: OrderCtxInt64_cmpxchgWeak) void {
+    ctx.payload.* = 42;
+    while (ctx.flag.cmpxchgWeak(0, 1) != null) std.atomic.spinLoopHint();
+}
+fn readerInt64_cmpxchgWeak(ctx: OrderCtxInt64_cmpxchgWeak) void {
+    while (ctx.flag.load() < 1) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicInt64 ordering cmpxchgWeak" {
+    var flag = atomic.AtomicInt64.init(0);
+    var payload: usize = 0;
+    const ctx = OrderCtxInt64_cmpxchgWeak{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerInt64_cmpxchgWeak, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerInt64_cmpxchgWeak, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxInt64_fetchMax = struct {
+    flag: *atomic.AtomicInt64,
+    payload: *usize,
+};
+fn writerInt64_fetchMax(ctx: OrderCtxInt64_fetchMax) void {
+    ctx.payload.* = 42;
+    ctx.flag.fetchMax(1);
+}
+fn readerInt64_fetchMax(ctx: OrderCtxInt64_fetchMax) void {
+    while (ctx.flag.load() < 1) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicInt64 ordering fetchMax" {
+    var flag = atomic.AtomicInt64.init(0);
+    var payload: usize = 0;
+    const ctx = OrderCtxInt64_fetchMax{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerInt64_fetchMax, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerInt64_fetchMax, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxInt64_fetchMin = struct {
+    flag: *atomic.AtomicInt64,
+    payload: *usize,
+};
+fn writerInt64_fetchMin(ctx: OrderCtxInt64_fetchMin) void {
+    ctx.payload.* = 42;
+    ctx.flag.fetchMin(-1);
+}
+fn readerInt64_fetchMin(ctx: OrderCtxInt64_fetchMin) void {
+    while (ctx.flag.load() > -1) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicInt64 ordering fetchMin" {
+    var flag = atomic.AtomicInt64.init(0);
+    var payload: usize = 0;
+    const ctx = OrderCtxInt64_fetchMin{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerInt64_fetchMin, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerInt64_fetchMin, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxInt64_exchange = struct {
+    flag: *atomic.AtomicInt64,
+    payload: *usize,
+};
+fn writerInt64_exchange(ctx: OrderCtxInt64_exchange) void {
+    ctx.payload.* = 42;
+    _ = ctx.flag.exchange(1);
+}
+fn readerInt64_exchange(ctx: OrderCtxInt64_exchange) void {
+    while (ctx.flag.load() < 1) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicInt64 ordering exchange" {
+    var flag = atomic.AtomicInt64.init(0);
+    var payload: usize = 0;
+    const ctx = OrderCtxInt64_exchange{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerInt64_exchange, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerInt64_exchange, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxFloat64_cmpxchgStrong = struct {
+    flag: *atomic.AtomicFloat64,
+    payload: *usize,
+};
+fn writerFloat64_cmpxchgStrong(ctx: OrderCtxFloat64_cmpxchgStrong) void {
+    ctx.payload.* = 42;
+    while (ctx.flag.cmpxchgStrong(0.0, 1.0) != null) std.atomic.spinLoopHint();
+}
+fn readerFloat64_cmpxchgStrong(ctx: OrderCtxFloat64_cmpxchgStrong) void {
+    while (ctx.flag.load() < 1.0) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicFloat64 ordering cmpxchgStrong" {
+    var flag = atomic.AtomicFloat64.init(0.0);
+    var payload: usize = 0;
+    const ctx = OrderCtxFloat64_cmpxchgStrong{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerFloat64_cmpxchgStrong, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerFloat64_cmpxchgStrong, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxFloat64_cmpxchgWeak = struct {
+    flag: *atomic.AtomicFloat64,
+    payload: *usize,
+};
+fn writerFloat64_cmpxchgWeak(ctx: OrderCtxFloat64_cmpxchgWeak) void {
+    ctx.payload.* = 42;
+    while (ctx.flag.cmpxchgWeak(0.0, 1.0) != null) std.atomic.spinLoopHint();
+}
+fn readerFloat64_cmpxchgWeak(ctx: OrderCtxFloat64_cmpxchgWeak) void {
+    while (ctx.flag.load() < 1.0) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicFloat64 ordering cmpxchgWeak" {
+    var flag = atomic.AtomicFloat64.init(0.0);
+    var payload: usize = 0;
+    const ctx = OrderCtxFloat64_cmpxchgWeak{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerFloat64_cmpxchgWeak, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerFloat64_cmpxchgWeak, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxFloat64_fetchMax = struct {
+    flag: *atomic.AtomicFloat64,
+    payload: *usize,
+};
+fn writerFloat64_fetchMax(ctx: OrderCtxFloat64_fetchMax) void {
+    ctx.payload.* = 42;
+    ctx.flag.fetchMax(1.0);
+}
+fn readerFloat64_fetchMax(ctx: OrderCtxFloat64_fetchMax) void {
+    while (ctx.flag.load() < 1.0) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicFloat64 ordering fetchMax" {
+    var flag = atomic.AtomicFloat64.init(0.0);
+    var payload: usize = 0;
+    const ctx = OrderCtxFloat64_fetchMax{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerFloat64_fetchMax, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerFloat64_fetchMax, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxFloat64_fetchMin = struct {
+    flag: *atomic.AtomicFloat64,
+    payload: *usize,
+};
+fn writerFloat64_fetchMin(ctx: OrderCtxFloat64_fetchMin) void {
+    ctx.payload.* = 42;
+    ctx.flag.fetchMin(-1.0);
+}
+fn readerFloat64_fetchMin(ctx: OrderCtxFloat64_fetchMin) void {
+    while (ctx.flag.load() > -1.0) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicFloat64 ordering fetchMin" {
+    var flag = atomic.AtomicFloat64.init(0.0);
+    var payload: usize = 0;
+    const ctx = OrderCtxFloat64_fetchMin{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerFloat64_fetchMin, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerFloat64_fetchMin, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxFloat64_exchange = struct {
+    flag: *atomic.AtomicFloat64,
+    payload: *usize,
+};
+fn writerFloat64_exchange(ctx: OrderCtxFloat64_exchange) void {
+    ctx.payload.* = 42;
+    _ = ctx.flag.exchange(1.0);
+}
+fn readerFloat64_exchange(ctx: OrderCtxFloat64_exchange) void {
+    while (ctx.flag.load() < 1.0) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicFloat64 ordering exchange" {
+    var flag = atomic.AtomicFloat64.init(0.0);
+    var payload: usize = 0;
+    const ctx = OrderCtxFloat64_exchange{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerFloat64_exchange, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerFloat64_exchange, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxFloat64_fetchAdd = struct {
+    flag: *atomic.AtomicFloat64,
+    payload: *usize,
+};
+fn writerFloat64_fetchAdd(ctx: OrderCtxFloat64_fetchAdd) void {
+    ctx.payload.* = 42;
+    _ = ctx.flag.fetchAdd(1.0);
+}
+fn readerFloat64_fetchAdd(ctx: OrderCtxFloat64_fetchAdd) void {
+    while (ctx.flag.load() < 1.0) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicFloat64 ordering fetchAdd" {
+    var flag = atomic.AtomicFloat64.init(0.0);
+    var payload: usize = 0;
+    const ctx = OrderCtxFloat64_fetchAdd{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerFloat64_fetchAdd, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerFloat64_fetchAdd, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxBool_cmpxchgStrong = struct {
+    flag: *atomic.AtomicBool,
+    payload: *usize,
+};
+fn writerBool_cmpxchgStrong(ctx: OrderCtxBool_cmpxchgStrong) void {
+    ctx.payload.* = 42;
+    while (ctx.flag.cmpxchgStrong(false, true) != null) std.atomic.spinLoopHint();
+}
+fn readerBool_cmpxchgStrong(ctx: OrderCtxBool_cmpxchgStrong) void {
+    while (ctx.flag.load() == false) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicBool ordering cmpxchgStrong" {
+    var flag = atomic.AtomicBool.init(false);
+    var payload: usize = 0;
+    const ctx = OrderCtxBool_cmpxchgStrong{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerBool_cmpxchgStrong, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerBool_cmpxchgStrong, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxBool_cmpxchgWeak = struct {
+    flag: *atomic.AtomicBool,
+    payload: *usize,
+};
+fn writerBool_cmpxchgWeak(ctx: OrderCtxBool_cmpxchgWeak) void {
+    ctx.payload.* = 42;
+    while (ctx.flag.cmpxchgWeak(false, true) != null) std.atomic.spinLoopHint();
+}
+fn readerBool_cmpxchgWeak(ctx: OrderCtxBool_cmpxchgWeak) void {
+    while (ctx.flag.load() == false) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicBool ordering cmpxchgWeak" {
+    var flag = atomic.AtomicBool.init(false);
+    var payload: usize = 0;
+    const ctx = OrderCtxBool_cmpxchgWeak{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerBool_cmpxchgWeak, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerBool_cmpxchgWeak, .{ctx});
+    w.join();
+    r.join();
+}
+
+const OrderCtxBool_exchange = struct {
+    flag: *atomic.AtomicBool,
+    payload: *usize,
+};
+fn writerBool_exchange(ctx: OrderCtxBool_exchange) void {
+    ctx.payload.* = 42;
+    _ = ctx.flag.exchange(true);
+}
+fn readerBool_exchange(ctx: OrderCtxBool_exchange) void {
+    while (ctx.flag.load() == false) std.atomic.spinLoopHint();
+    if (ctx.payload.* != 42) @panic("memory ordering violation!");
+}
+test "AtomicBool ordering exchange" {
+    var flag = atomic.AtomicBool.init(false);
+    var payload: usize = 0;
+    const ctx = OrderCtxBool_exchange{ .flag = &flag, .payload = &payload };
+    const r = try std.Thread.spawn(.{}, readerBool_exchange, .{ctx});
+    const w = try std.Thread.spawn(.{}, writerBool_exchange, .{ctx});
+    w.join();
+    r.join();
+}
