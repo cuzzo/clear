@@ -37,9 +37,6 @@ module EffectTracker
   AsyncValidationNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock, AST::DoBlock) }
   CallLikeNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall) }
   TightLoopNode = T.type_alias { T.any(AST::WhileLoop, AST::ForRange) }
-  TightScanNode = T.type_alias {
-    T.nilable(T.any(AST::Node, T::Array[AST::Node], Lexer::Token, Symbol, String, Integer, Float, TrueClass, FalseClass, Type))
-  }
 
   class EffectState < T::Struct
     prop :direct_effects, EffectSetMap, factory: -> { {} }
@@ -259,7 +256,6 @@ module EffectAudit
   AsyncValidationNode = T.type_alias { EffectTracker::AsyncValidationNode }
   CallLikeNode = T.type_alias { EffectTracker::CallLikeNode }
   TightLoopNode = T.type_alias { EffectTracker::TightLoopNode }
-  TightScanNode = T.type_alias { EffectTracker::TightScanNode }
 
   HEAP = EffectTracker::HEAP
   BLOCKING = EffectTracker::BLOCKING
@@ -1308,18 +1304,15 @@ module EffectTracker
   def validate_tight_body!(stmts, loop_node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fn_nodes = function_node_map
-    Array(stmts).each { |s| validate_tight_node!(s, loop_node, fn_nodes) }
+    AST.each_locatable(Array(stmts), descend_functions: false) do |node|
+      validate_tight_node!(node, loop_node, fn_nodes)
+    end
   end
 
-  sig { params(node: TightScanNode, loop_node: TightLoopNode, fn_nodes: T::Hash[String, AST::FunctionDef]).void }
+  sig { params(node: AST::Locatable, loop_node: TightLoopNode, fn_nodes: T::Hash[String, AST::FunctionDef]).void }
   def validate_tight_node!(node, loop_node, fn_nodes)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     case node
-    when Symbol, String, Integer, Float, TrueClass, FalseClass, Type, Lexer::Token
-    when Array
-      node.each { |n| validate_tight_node!(n, loop_node, fn_nodes) }
-    when AST::FunctionDef
-      # Don't descend into nested function definitions.
     when AST::FuncCall
       if node.respond_to?(:extern_call) && node.extern_call
         error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
@@ -1330,7 +1323,6 @@ module EffectTracker
       if fn&.reentrance_kind == :reentrant
         error!(loop_node, :TIGHT_CALLS_REENTRANT_FN, name: node.name)
       end
-      node.args.each { |a| validate_tight_node!(a, loop_node, fn_nodes) }
     when AST::MethodCall
       if node.respond_to?(:extern_call) && node.extern_call
         error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
@@ -1341,10 +1333,6 @@ module EffectTracker
       if fn&.reentrance_kind == :reentrant
         error!(loop_node, :TIGHT_CALLS_REENTRANT_FN, name: node.name)
       end
-      validate_tight_node!(T.cast(node.respond_to?(:object) ? node.object : nil, TightScanNode), loop_node, fn_nodes)
-      node.args.each { |a| validate_tight_node!(a, loop_node, fn_nodes) }
-    else
-      T.unsafe(node).each_pair { |_, v| validate_tight_node!(v, loop_node, fn_nodes) } if node.respond_to?(:each_pair)
     end
   end
 

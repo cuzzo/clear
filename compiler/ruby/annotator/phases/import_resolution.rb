@@ -51,6 +51,7 @@ module Annotator
         end
         nil
       end
+      private :visit_RequireNode
 
       sig { params(schema: Scope::ScopeTypeSchema).returns(Scope::ScopeTypeSchema) }
       def clone_imported_schema(schema)

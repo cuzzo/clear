@@ -24,6 +24,7 @@ module Annotator
         declarations.union_method_declarations.each { |node| validate_union_methods!(node) }
         synthetic_function_definitions.each { |node| register_function_signature(node) }
       end
+      private :register_program_signatures
 
       sig { params(node: AST::FunctionDef).returns(SymbolEntry) }
       def register_function_signature(node)
