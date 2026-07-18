@@ -96,7 +96,10 @@ class ClearParser
 
   sig { returns(AST::Node) }
   def parse_statement
-    @budget.nested { parse_statement_body }
+    @budget.enter!
+    statement = parse_statement_body
+    @budget.leave!
+    statement
   end
 
   sig { returns(AST::Node) }

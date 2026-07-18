@@ -373,7 +373,10 @@ class ClearParser
 
   sig { params(precedence: Integer).returns(AST::Node) }
   def parse_expression(precedence = 0)
-    @budget.nested { parse_expression_body(precedence) }
+    @budget.enter!
+    expression = parse_expression_body(precedence)
+    @budget.leave!
+    expression
   end
 
   sig { params(precedence: Integer).returns(AST::Node) }

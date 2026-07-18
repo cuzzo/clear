@@ -374,7 +374,9 @@ class Lexer
           start_offset: expr_offset,
           budget: @budget,
         )
-        sub_tokens = T.let(@budget.nested { sub_lexer.tokenize }, T::Array[Token])
+        @budget.enter!
+        sub_tokens = T.let(sub_lexer.tokenize, T::Array[Token])
+        @budget.leave!
         sub_tokens.pop
         @tokens.concat(sub_tokens)
 

@@ -57,16 +57,17 @@ class FrontendResourceBudget
     raise Exceeded.new(:tokens, @max_tokens) if count > @max_tokens
   end
 
-  sig { type_parameters(:Result).params(block: T.proc.returns(T.type_parameter(:Result))).returns(T.type_parameter(:Result)) }
-  def nested(&block)
+  sig { void }
+  def enter!
     @nesting += 1
     if @nesting > @max_nesting
       @nesting -= 1
       raise Exceeded.new(:nesting, @max_nesting)
     end
+  end
 
-    result = yield
+  sig { void }
+  def leave!
     @nesting -= 1
-    result
   end
 end

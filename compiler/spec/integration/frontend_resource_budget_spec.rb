@@ -20,8 +20,10 @@ RSpec.describe "frontend resource-budget integration" do
 
   it "restores nesting after each successful scope" do
     success_budget = FrontendResourceBudget.new(max_nesting: 1)
-    expect(success_budget.nested { :first }).to eq(:first)
-    expect(success_budget.nested { :second }).to eq(:second)
+    success_budget.enter!
+    success_budget.leave!
+    success_budget.enter!
+    success_budget.leave!
   end
 
   it "returns a stable ParserError for a token budget" do

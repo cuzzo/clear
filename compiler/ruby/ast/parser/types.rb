@@ -41,7 +41,9 @@ class ClearParser
 
   sig { params(migration_root: T::Boolean).returns(Type) }
   def parse_type_annotation(migration_root: true)
-    syntax = @budget.nested { parse_type_annotation_syntax(migration_root: migration_root) }
+    @budget.enter!
+    syntax = parse_type_annotation_syntax(migration_root: migration_root)
+    @budget.leave!
     TypeSyntaxLowering.lower(syntax)
   end
 
