@@ -141,6 +141,9 @@ module MIRLoweringLiterals
     elem_zig = plan.element_zig
     items_mir = node.items.map do |i|
       with_decl_alloc(list_alloc) do
+        if plan.fixed_stack_or_frame?(node) && i.is_a?(AST::Literal) && [:STRING, :SYMBOL].include?(i.type)
+          next lower(i)
+        end
         lowered_item = elem_type ? with_expected_type(elem_type) { lower(i) } : lower(i)
         placed_item = elem_type ? place_value_for_destination(lowered_item, i, list_alloc, elem_type) : lowered_item
         item_value = materialize_owned_sink_value(placed_item, i, list_alloc, elem_type)

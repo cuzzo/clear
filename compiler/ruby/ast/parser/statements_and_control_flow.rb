@@ -203,7 +203,7 @@ class ClearParser
     opt_type = nil
     if target.is_a?(AST::Identifier) && match?(:CHAR, ':')
       consume(:CHAR, ':')
-      opt_type = parse_type_annotation
+      opt_type = parse_inferred_wrapper_annotation || parse_type_annotation
     end
 
     # Compound assignment: x += expr  →  x = x + expr
@@ -252,6 +252,29 @@ class ClearParser
       AST::Assignment.new(target_token, target, value)
     end
     ParsedVarForm.new(node: node, assignment: true)
+  end
+
+  # Binding-only shorthand: `x:! = expr`, `x:? = expr`, `x:!? = expr`, and
+  # `x:~ = expr`
+  # retain/infer the wrapper around the RHS payload without spelling a
+  # redundant concrete type. It is intentionally not a general type spelling.
+  sig { returns(T.nilable(Type)) }
+  def parse_inferred_wrapper_annotation
+    return nil unless match?(:CHAR, '!') || match?(:CHAR, '?') || match?(:CHAR, '~')
+
+    start = current.value
+    next_token = peek_at(1)
+    suffix = if start == '!' && next_token&.type == :CHAR && T.must(next_token).value == '?'
+      "!?".freeze
+    else
+      start
+    end
+    required_count = suffix.length
+    terminal = peek_at(required_count)
+    return nil unless terminal&.type == :CHAR && T.must(terminal).value == '='
+
+    required_count.times { consume(:CHAR) }
+    Type.new("#{suffix}Auto")
   end
 
   sig { returns(AST::Node) }

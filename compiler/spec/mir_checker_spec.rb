@@ -15,6 +15,10 @@ require_relative '../ruby/mir/mir_checker' unless defined?(MIRChecker::FsmStruct
 RSpec.describe MIRChecker do
   let(:checker) { MIRChecker.new }
 
+  it "audits the emitted OR_ELSE bytecode rewrite node" do
+    expect(described_class::AUDITED_EMITTABLE_NODE_TYPES).to include(MIR::OrElseExitBcRewrite)
+  end
+
   def fn_def(name, body)
     MIR::FnDef.new(name, [], "void", body, :pub, false, nil)
   end

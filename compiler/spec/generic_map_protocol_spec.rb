@@ -58,7 +58,7 @@ RSpec.describe "the intrinsic generic Map protocol" do
   it "type-checks generic indexing and the stable Map method surface" do
     program = annotate(<<~CLEAR)
       FN exercise<M: Map>(MUTABLE map: M, key: M::Key, TAKES first: M::Value, TAKES second: M::Value) RETURNS !Int64 ->
-        before = map[key];
+        before:? = map[key];
         map[key] = first;
         &map.put(key, second);
         ASSERT map.contains?(key);

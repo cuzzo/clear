@@ -609,7 +609,7 @@ RSpec.describe SemanticAnnotator do
           UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
           FN test(MUTABLE list: []Value) RETURNS !Void ->
               &list.append(Value.Nil);
-              f = list[0];
+              f:? = list[0];
               RETURN;
           END
         CLEAR

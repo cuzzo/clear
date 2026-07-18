@@ -1,9 +1,23 @@
 # typed: strict
 require "sorbet-runtime"
+require "set"
 
 # ruby-to-clear: pub
 class ZigType
   extend T::Sig
+
+  RESERVED_IDENTIFIERS = T.let(Set.new(%w[
+    addrspace align allowzero and anyframe anytype asm async await break callconv
+    catch comptime const continue defer else enum errdefer error export extern false
+    fn for if inline linksection noalias noinline nosuspend null opaque or orelse
+    packed pub resume return struct suspend switch test threadlocal true try type
+    undefined union unreachable usingnamespace var volatile while
+  ]).freeze, T::Set[String])
+
+  sig { params(name: String).returns(T::Boolean) }
+  def self.reserved_identifier?(name)
+    RESERVED_IDENTIFIERS.include?(name) || primitive_numeric_identifier?(name)
+  end
 
   sig { returns(String) }
   attr_reader :source

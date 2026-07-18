@@ -209,7 +209,7 @@ module Annotator
 
       sig { params(node: AST::UnionDef).void }
       def validate_union_methods!(node)
-        requirements = T.cast(node.methods || [], T::Array[AST::UnionMethodRequirement])
+        requirements = T.cast(node.methods, T::Array[AST::UnionMethodRequirement])
         seen = T.let(Set.new, T::Set[String])
         requirements.each do |requirement|
           error!(requirement.token, :UNION_METHOD_DUPLICATE, union: node.name, method: requirement.name) if seen.include?(requirement.name)

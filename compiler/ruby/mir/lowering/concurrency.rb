@@ -583,7 +583,7 @@ module MIRLoweringConcurrency
     async_shape = T.cast(T.unsafe(node).async_result_shape, T.nilable(AsyncResultShape)) ||
                   AsyncResultShape.promise(tense_t.tense_type, shared: tense_t.shared_promise?)
     inner_t = Type.new(async_shape.payload_type)
-    inner_zig = inner_t.zig_type
+    inner_zig = inner_t.nested_zig_type
     BgTypePlan.new(
       async_shape: async_shape,
       inner_type: inner_t,
@@ -1055,7 +1055,7 @@ module MIRLoweringConcurrency
     is_inf = tense_t.inf_stream?
     stream_zig = if tense_t.dynamic_stream?
       element_t = T.must(tense_t.tense_type.element_type)
-      "CheatLib.Stream(#{element_t.zig_type})"
+      "CheatLib.Stream(#{element_t.nested_zig_type})"
     else
       tense_t.zig_type
     end

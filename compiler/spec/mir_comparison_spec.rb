@@ -432,7 +432,7 @@ RSpec.describe MIREmitter do
     it "lowers optional orelse correctly" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          items = [1, 2, 3];
+          items: []Int64 = [1, 2, 3];
           first = items[0] OR_ELSE 0;
           RETURN;
         END

@@ -64,7 +64,7 @@ RSpec.describe "TAKES auto-move" do
         FN second() RETURNS !Void ->
             values: []Int64 = [1, 2, 3];
             FOR p IN (0 ..< values.length()) DO
-                r = values[p];
+                r:? = values[p];
             END
             RETURN;
         END
@@ -107,7 +107,7 @@ RSpec.describe "TAKES auto-move" do
           RETURN 1.0;
       END
       FN main() RETURNS Float64 ->
-          ast = makeValue();
+          ast = TRY makeValue();
           RETURN consume(ast);
       END
     CLEAR

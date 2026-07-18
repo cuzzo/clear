@@ -246,4 +246,24 @@ class ClearParser
     )
     node
   end
+
+  # Preserve the complete receiver/callee span when a postfix operation grows
+  # an expression.  The token carried by a MethodCall is the method name, not
+  # the beginning of `receiver.method(...)`; diagnostics and source rewrites
+  # need the latter.
+  sig { params(node: AST::Node, first: AST::Locatable, last: Lexer::Token).returns(AST::Node) }
+  def stamp_source_range_from_node!(node, first, last)
+    range = first.source_range
+    end_offset = last.end_offset || ((last.start_offset || range.end_offset) + last.value.to_s.bytesize)
+    node.source_range = AST::SourceRange.new(
+      file: range.file || last.file,
+      start_offset: range.start_offset,
+      end_offset: end_offset,
+      start_line: range.start_line,
+      start_column: range.start_column,
+      end_line: last.end_line || last.line,
+      end_column: last.end_column || (last.column + last.value.to_s.length),
+    )
+    node
+  end
 end

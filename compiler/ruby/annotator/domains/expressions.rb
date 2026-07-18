@@ -5,6 +5,7 @@ module Annotator
   module Domains
     module Expressions
       extend T::Sig
+      include RecoverableResult
 
 
       sig { params(fn_node: AST::FunctionDef).returns(T::Array[String]) }
@@ -78,7 +79,7 @@ module Annotator
           sigil: sigil, n: node.n, variant_hint: variant_hint)
       end
 
-      sig { params(node: AST::UnaryOp).returns(T.any(Type, Symbol)) }
+      sig { params(node: AST::UnaryOp).returns(Type) }
       def visit_UnaryOp(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
@@ -98,13 +99,9 @@ module Annotator
           end
           stamp_type!(node, :Bool)
         when :IS_OK
-          operand_type = if node.right.respond_to?(:error_union_type) && T.unsafe(node.right).error_union_type
-            T.unsafe(node.right).error_union_type
-          else
-            node.right.full_type!(context: "IS_OK operand")
-          end
-          unless Type.new(operand_type).error_union?
-            error!(node, :IS_OK_REQUIRES_FALLIBLE, got: operand_type)
+          operand_type = recoverable_result_type(node.right, context: "IS_OK operand")
+          unless operand_type
+            error!(node, :IS_OK_REQUIRES_FALLIBLE, got: node.right.full_type!(context: "IS_OK operand"))
           end
           stamp_type!(node, :Bool)
         when :IS_READY
@@ -114,9 +111,26 @@ module Annotator
             error!(node, :IS_READY_REQUIRES_FUTURE, got: operand_type)
           end
           stamp_type!(node, :Bool)
+        when :TRY
+          declared = recoverable_result_type(node.right, context: "TRY operand")
+          raw_type = Type.new(node.right.full_type!(context: "TRY operand"))
+          if declared
+            success = declared.success_type
+            stamp_type!(node, success.optional? ? T.must(success.wrapped_type) : success)
+          elsif raw_type.optional?
+            stamp_type!(node, T.must(raw_type.wrapped_type))
+          else
+            error!(node, :UNWRAP_NON_OPTIONAL, got: raw_type)
+          end
+          # TRY changes the control-flow channel, not where the successful
+          # payload lives. Keep allocator/borrow provenance transparent so
+          # escape analysis and cleanup planning see the original value.
+          node.storage = node.right.storage
         else
           stamp_type!(node, node.right.full_type!(context: "unary right"))
         end
+
+        node.full_type!(context: "unary expression")
       end
 
       # ==========================================
@@ -437,6 +451,14 @@ module Annotator
         result = Type.new(T.must(unwrapped))
         result.merge_capabilities_from!(type, include_affine_ownership: true)
         stamp_type!(node, result)
+        # UNWRAP proves presence without copying or relocating the payload.
+        node.storage = node.target.storage
+        # `UNWRAP` removes the optional payload layer, not an outer failure
+        # channel. This lets `TRY UNWRAP value` compose as !?T -> T.
+        if recoverable_result_type(node.target, context: "optional unwrap target")
+          T.unsafe(node).error_union_type = Type.error_union_of(result)
+          node.can_fail = true if node.respond_to?(:can_fail=)
+        end
         # A nullable foreign pointer remains a borrow after the null check.
         # Unwrapping proves presence; it must not manufacture ownership or a
         # scope-exit cleanup for storage that is still owned by C.

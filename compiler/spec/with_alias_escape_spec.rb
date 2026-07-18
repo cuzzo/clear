@@ -50,7 +50,7 @@ RSpec.describe "WITH alias escape rules" do
     src = <<~CLEAR
       FN reclone() RETURNS ~Int64@shared ->
         p: ~Int64@shared = BG { 1; };
-        c = p @shared:locked;
+        c:~ = p @shared:locked;
         WITH EXCLUSIVE c AS y { RETURN CLONE y; }
       END
     CLEAR
@@ -74,6 +74,31 @@ RSpec.describe "WITH alias escape rules" do
       STRUCT Box { value: Int64 }
       FN copyOut(x: SHARED T) RETURNS !T ->
         WITH POLYMORPHIC x AS y { RETURN COPY y; }
+      END
+    CLEAR
+
+    expect { annotate(src) }.not_to raise_error
+  end
+
+  it "treats a field reached through a local WITH alias as LOCAL at a capability-constrained call" do
+    src = <<~CLEAR
+      STRUCT Budget { depth: Int64 }
+      STRUCT Holder { budget: Budget }
+
+      FN descend(MUTABLE self: Budget) RETURNS Void
+        REQUIRES self: LOCAL
+      ->
+        self.depth = self.depth + 1;
+        RETURN;
+      END
+
+      FN scan(MUTABLE self: Holder) RETURNS Void
+        REQUIRES self: LOCAL
+      ->
+        WITH POLYMORPHIC self AS view {
+          descend(&view.budget);
+        }
+        RETURN;
       END
     CLEAR
 

@@ -129,7 +129,7 @@ RSpec.describe "pipeline legacy matrix" do
     "min" => "out = items |> MIN _.value;",
     "max" => "out = items |> MAX _.value;",
     "average" => "out = items |> AVERAGE _.value;",
-    "find" => "out = items |> FIND _.id == 2_i64;",
+    "find" => "out:? = items |> FIND _.id == 2_i64;",
     "where" => "out = items |> WHERE _.value > 1.0;",
     "select" => "out = items |> SELECT _.value + 1.0;",
     "take_while" => "out = items |> TAKE_WHILE _.value < 3.0;",

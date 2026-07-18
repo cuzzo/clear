@@ -5,6 +5,7 @@ module Annotator
   module Domains
     module ControlFlow
       extend T::Sig
+      include RecoverableResult
 
       MatchSchema = T.type_alias { T.any(Schemas::EnumSchema, Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
       MatchPayload = T.type_alias { T.any(Type::FunctionType, Type, Symbol, String, Schemas::InlineStructVariant, NilClass) }
@@ -502,10 +503,11 @@ module Annotator
               else
                 visit(b.expr)
               end
-              ti = if b.predicate == :is_ok && b.expr.respond_to?(:error_union_type) && T.unsafe(b.expr).error_union_type
-                T.unsafe(b.expr).error_union_type
+              ti = if b.predicate == :is_ok
+                recoverable_result_type(b.expr, context: "IF predicate binding expression") ||
+                  Type.new(b.expr.full_type!(context: "IF predicate binding expression"))
               else
-                b.expr.full_type!(context: "IF predicate binding expression")
+                Type.new(b.expr.full_type!(context: "IF predicate binding expression"))
               end
               unwrapped = if b.predicate == :is_ok
                 unless ti.error_union?
@@ -558,7 +560,7 @@ module Annotator
               og_declare(b.name.to_s, nil, unwrapped)
               if container_source
                 ownership_graph[b.name.to_s]&.kind = :borrowed
-                ownership_graph.borrow(b.name.to_s, container_source, mutable: mutable_list_alias)
+                ownership_graph.borrow(b.name.to_s, container_source, mutable: mutable_list_alias == true)
               end
             end
             visit_stmts(node.then_branch)

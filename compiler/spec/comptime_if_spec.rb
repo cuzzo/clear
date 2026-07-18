@@ -85,7 +85,7 @@ RSpec.describe "COMPTIME IF type predicates" do
       annotate(<<~CLEAR)
         FN handle<T>(raw: T) RETURNS Void ->
           COMPTIME IF T IS_A {String}Any THEN
-            value = raw[:type];
+            value:? = raw[:type];
           END
         END
       CLEAR

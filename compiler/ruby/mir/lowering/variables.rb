@@ -269,10 +269,11 @@ module MIRLoweringVariables
     keyword_mutable = is_mutable && (actually_mutated || forced_var || by_ref_borrow)
 
     zig_type = transpile_type(node.full_type!)
-    needs_annotation = ZigTypeMapper::ZIG_PRIMITIVES.include?(zig_type) || ft.fn_type? ||
+    needs_annotation = ZigTypeMapper::ZIG_PRIMITIVES.include?(zig_type) || ft.fn_type? || ft.error_union? ||
                        (node.value.is_a?(AST::Literal) && node.value.type == :NIL) ||
                        (ft.string? && is_heap)  # ""/literal infers *const [0:0]u8 without annotation
-    annotation = needs_annotation ? Type.new(zig_type) : nil
+    annotation_zig = ft.error_union? && zig_type.start_with?("!") ? "anyerror#{zig_type}" : zig_type
+    annotation = needs_annotation ? Type.new(annotation_zig) : nil
 
     # Resolve init value - special handling for collection types.
     # Per-declaration storage (set by escape analysis) takes precedence over the
@@ -649,7 +650,7 @@ module MIRLoweringVariables
   sig { params(node: MIR::Node).returns(T::Boolean) }
   def capability_wrapped_mir?(node)
     return true if node.is_a?(MIR::CapWrap)
-    return capability_wrapped_mir?(node.expr) if node.is_a?(MIR::Cast) || node.is_a?(MIR::TryExpr)
+    return capability_wrapped_mir?(node.expr) if node.is_a?(MIR::Cast) || node.is_a?(MIR::TryExpr) || node.is_a?(MIR::TryOptional)
 
     false
   end
@@ -730,7 +731,7 @@ module MIRLoweringVariables
   sig { params(init: T.nilable(MIR::Node)).returns(T::Boolean) }
   def owned_return_call_init?(init)
     return owned_return_call_init?(init.expr) if init.is_a?(MIR::Cast)
-    return owned_return_call_init?(init.expr) if init.is_a?(MIR::TryExpr)
+    return owned_return_call_init?(init.expr) if init.is_a?(MIR::TryExpr) || init.is_a?(MIR::TryOptional)
     !!(init.is_a?(MIR::Call) && init.owned_return?)
   end
 

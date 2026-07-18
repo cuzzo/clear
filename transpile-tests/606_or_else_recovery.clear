@@ -1,0 +1,15 @@
+# OR_ELSE recovers optional and fallible values, evaluates the fallback only
+# when needed, and yields the shared payload type.
+
+FN main() RETURNS Void ->
+  MUTABLE values: {String}Int64 = {};
+  values["present"] = 4;
+  present = values["present"] OR_ELSE 99;
+  missing = values["missing"] OR_ELSE 99;
+  parsed = "not-a-number".toInt() OR_ELSE 17;
+
+  ASSERT present == 4, "optional present value bypasses fallback";
+  ASSERT missing == 99, "optional missing value uses fallback";
+  ASSERT parsed == 17, "fallible value uses fallback";
+  RETURN;
+END

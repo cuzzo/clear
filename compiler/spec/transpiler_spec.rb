@@ -58,7 +58,7 @@ RSpec.describe ZigTranspiler do
         END
 
         FN main() RETURNS Void ->
-          result = make();
+          result = TRY make();
           ASSERT result.count() == 0_i64;
           RETURN;
         END
@@ -164,13 +164,13 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           s = State{ message: "" } @shared:locked;
 
-          producer = BG {
+          producer:~ = BG {
             WITH EXCLUSIVE s AS inner {
               inner.message = "hello from producer";
             }
           };
 
-          consumer = BG {
+          consumer:~ = BG {
             NEXT producer;
             WITH s AS inner {
               print(inner.message);
@@ -195,17 +195,17 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           result = Payload{ data: "" } @shared:locked;
 
-          producer = BG {
+          producer:~ = BG {
             WITH EXCLUSIVE result AS r {
               r.data = "important result";
             }
           };
 
-          relay = BG {
+          relay:~ = BG {
             NEXT producer;
           };
 
-          consumer = BG {
+          consumer:~ = BG {
             NEXT relay;
             WITH result AS r {
               print("consumer saw: " $+ r.data);
@@ -222,8 +222,8 @@ RSpec.describe ZigTranspiler do
     it "rejects using a plain producer promise after it is moved into a consumer BG" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          producer = BG { 1_i64; };
-          consumer = BG { NEXT producer; };
+          producer:~ = BG { 1_i64; };
+          consumer:~ = BG { NEXT producer; };
           x = NEXT producer;
           NEXT consumer;
           RETURN;
@@ -341,7 +341,7 @@ RSpec.describe ZigTranspiler do
         RETURN m;
       END
       FN main() RETURNS Void ->
-        result = buildMap();
+        result = TRY buildMap();
         RETURN;
       END
     CLEAR
@@ -952,7 +952,7 @@ RSpec.describe ZigTranspiler do
             RETURN Pair{ items: vals, count: 2 };
         END
         FN main() RETURNS Void ->
-            p = build();
+            p = TRY build();
         END
       CLEAR
       zig = transpile(src)
@@ -969,7 +969,7 @@ RSpec.describe ZigTranspiler do
             RETURN Pair{ items: vals, count: 1 };
         END
         FN main() RETURNS Void ->
-            p = build();
+            p = TRY build();
         END
       CLEAR
       zig = transpile(src)
@@ -1004,7 +1004,7 @@ RSpec.describe ZigTranspiler do
           RETURN s;
         END
         FN main() RETURNS Void ->
-          r = f("a,b");
+          r = TRY f("a,b");
           RETURN;
         END
       CLEAR
@@ -1023,7 +1023,7 @@ RSpec.describe ZigTranspiler do
           RETURN Status.Ok;
         END
         FN main() RETURNS Void ->
-          r = check("a,b");
+          r = TRY check("a,b");
           RETURN;
         END
       CLEAR
@@ -1190,7 +1190,7 @@ RSpec.describe ZigTranspiler do
         UNION Value { Nil, Str: String }
         FN makeStr(s: String) RETURNS !Value -> RETURN Value{ Str: COPY s }; END
         FN main() RETURNS Void ->
-            MUTABLE result = makeStr("hello");
+            MUTABLE result = TRY makeStr("hello");
             result = makeStr("world");
             RETURN;
         END
@@ -1327,7 +1327,7 @@ RSpec.describe ZigTranspiler do
         FN makeValue() RETURNS !Value -> RETURN Value{ Str: COPY "hello" }; END
         FN wrapper() RETURNS !Value -> RETURN makeValue(); END
         FN main() RETURNS Void ->
-            v = wrapper();
+            v = TRY wrapper();
             RETURN;
         END
       CLEAR
@@ -1391,7 +1391,7 @@ RSpec.describe ZigTranspiler do
         END
         FN main() RETURNS Void ->
             sym = Value{ Symbol: COPY "hello" };
-            result = consume(sym);
+            result = TRY consume(sym);
             RETURN;
         END
       CLEAR
@@ -1798,7 +1798,7 @@ RSpec.describe ZigTranspiler do
             append(&vals, 1.0);
             RETURN vals;
         END
-        FN main() RETURNS Void -> x = build(); RETURN; END
+        FN main() RETURNS Void -> x = TRY build(); RETURN; END
       CLEAR
       zig = transpile(src)
       expect(zig).not_to include("promoteList")
@@ -1812,7 +1812,7 @@ RSpec.describe ZigTranspiler do
             m["x"] = 1_i64;
             RETURN m;
         END
-        FN main() RETURNS Void -> x = buildMap(); RETURN; END
+        FN main() RETURNS Void -> x = TRY buildMap(); RETURN; END
       CLEAR
       zig = transpile(src)
       expect(zig).not_to include("promoteList")
@@ -1890,10 +1890,10 @@ RSpec.describe ZigTranspiler do
         FN makeStr() RETURNS !String -> RETURN COPY "hi"; END
         FN transform(s: String) RETURNS !String -> RETURN COPY s; END
         FN caller() RETURNS !String ->
-            s = makeStr();
+            s = TRY makeStr();
             RETURN transform(s);
         END
-        FN main() RETURNS Void -> result = caller(); RETURN; END
+        FN main() RETURNS Void -> result = TRY caller(); RETURN; END
       CLEAR
       zig = transpile(src)
       expect(zig).to match(/dupeValue\(\[\]const u8, .+, rt\.heapAlloc\(\)\)/)
@@ -1941,7 +1941,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
             MUTABLE data: []Float64 = [];
             &data.append(10.0);
-            result = filterSum(data);
+            result = TRY filterSum(data);
             RETURN;
         END
       CLEAR
@@ -2267,7 +2267,7 @@ RSpec.describe ZigTranspiler do
           cnt  = us AS $u |> UNNEST $u.orders |> COUNT TRUE;
           any_ = us AS $u |> UNNEST $u.orders |> ANY _.price > 0.0;
           all_ = us AS $u |> UNNEST $u.orders |> ALL _.qty > 0;
-          found = us AS $u |> UNNEST $u.orders |> FIND _.qty == 1;
+          found:? = us AS $u |> UNNEST $u.orders |> FIND _.qty == 1;
           mn   = us AS $u |> UNNEST $u.orders |> MIN _.price;
           mx   = us AS $u |> UNNEST $u.orders |> MAX _.price;
           avg  = us AS $u |> UNNEST $u.orders |> AVERAGE _.price;

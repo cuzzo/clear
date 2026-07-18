@@ -2,7 +2,9 @@
 require "sorbet-runtime"
 
 require_relative "./ast"
+require_relative "./param"
 require_relative "./schemas"
+require_relative "./struct_field"
 require_relative "./type"
 require_relative "./lexer"
 require_relative "./parser_rules"
@@ -370,6 +372,8 @@ class ClearParser
     rule(:KEYWORD, 'JOIN', action: :parse_join_op),
     rule(:KEYWORD, 'SHARD', action: :parse_shard_op),
     rule(:KEYWORD, 'CONCURRENT', action: :parse_concurrent_op),
+    rule(:KEYWORD, 'TRY', action: :parse_try_expression),
+    rule(:KEYWORD, 'UNWRAP', action: :parse_unwrap_expression),
     rule(:CHAR, '(', action: :parse_group_expression),
   ].freeze, T::Array[ParserRule])
 
@@ -380,7 +384,6 @@ class ClearParser
     rule(:DOUBLE_COLON, '::', action: :parse_static_call_suffix),
     rule(:CHAR, '.', action: :parse_dot_suffix),
     rule(:CHAR, '(', action: :parse_func_call_suffix),
-    rule(:CHAR, '!!', action: :parse_raise_suffix),
     rule(:CHAR, '?', action: :parse_optional_unwrap_suffix),
     rule(:KEYWORD, 'EXISTS', action: :parse_exists_suffix),
     rule(:KEYWORD, 'IS_OK', action: :parse_is_ok_suffix),

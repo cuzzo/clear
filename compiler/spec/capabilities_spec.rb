@@ -2104,7 +2104,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     it "stamps error_kind and error_type from the matched stdlib entry" do
-      src = 'writeFile("p", "c") OR_ELSE 0;'
+      src = 'writeFile("p", "c") OR_ELSE PASS;'
       call = find_call(run(src), "writeFile")
       expect(call).not_to be_nil
       expect(call.error_kind).to eq(:Transient)
@@ -2115,7 +2115,7 @@ RSpec.describe SemanticAnnotator do
       entry.delete(:error_kind)
       entry.delete(:error_type)
       clear_stdlib_signature_cache!
-      src = 'writeFile("p", "c") OR_ELSE 0;'
+      src = 'writeFile("p", "c") OR_ELSE PASS;'
       call = find_call(run(src), "writeFile")
       expect(call).not_to be_nil
       expect(call.error_kind).to be_nil

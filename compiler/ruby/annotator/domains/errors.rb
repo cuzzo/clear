@@ -7,6 +7,7 @@ module Annotator
   module Domains
     module Errors
       extend T::Sig
+      include RecoverableResult
 
       # Resolve CATCH clauses after body typing. Explicit RAISE/OR_ELSE EXIT type
       # declarations are already seeded from DeclarationIndex, so CATCH Type
@@ -423,7 +424,10 @@ module Annotator
             error!(node, :RETURN_FROM_WITH_SCOPED,
               name: value.name)
           elsif value.is_a?(AST::GetField) && value.target.respond_to?(:symbol) && value.target.symbol&.non_escaping
-            error!(node, :RETURN_FIELD_FROM_WITH_SCOPED)
+            returned_type = value.full_type!(context: "WITH-scoped field return")
+            unless returned_type.implicitly_copyable? { |type| lookup_type_schema(type) }
+              error!(node, :RETURN_FIELD_FROM_WITH_SCOPED)
+            end
           elsif value.is_a?(AST::GetIndex) && value.target.respond_to?(:symbol) && value.target.symbol&.non_escaping
             returned_type = value.full_type!(context: "WITH-scoped indexed return")
             unless returned_type.implicitly_copyable? { |type| lookup_type_schema(type) }
@@ -488,8 +492,7 @@ module Annotator
           # this no longer leaks (#13) and does not need E1 broadening
           # (no 527 double-free). (`expected` is always a Type on master --
           # the FunctionSignature seam coerces nil -> Void.)
-          value_is_fallible =
-            (value.respond_to?(:error_union_type) && value.error_union_type) ||
+          value_is_fallible = !recoverable_result_type(value, context: "return value").nil? ||
             actual_full.error_union?
           coerce_target =
             if !value_is_fallible && expected.plain_return_payload_type
@@ -622,18 +625,23 @@ module Annotator
         visit(node.right)
 
 
-        # If the LHS is a fallible call, the auto-propagate strip moved the
-        # `!T` from `full_type` (which is now the success T) to
-        # `error_union_type`. OR_ELSE needs the original `!T` to decide
-        # whether to emit `catch fallback` (error union) or `orelse fallback`
-        # (optional). Prefer the saved union if present.
-        t_left_type = if node.left.respond_to?(:error_union_type) && node.left.error_union_type
-                        eu = node.left.error_union_type
-                        eu.is_a?(Type) ? eu : Type.new(eu)
-                      else
-                        node.left.full_type!(context: "OR_ELSE left")
-                      end
+        # Calls retain an explicit `error_union_type` after their success
+        # payload is stamped. Recoverability is a source-level fact, not the
+        # broad `can_fail` effect (which also includes allocations).
+        t_left_type = recoverable_result_type(node.left, context: "OR_ELSE left")
+        unless t_left_type
+          left_value_type = Type.new(node.left.full_type!(context: "OR_ELSE left"))
+          t_left_type = fault_recoverable_result?(node.left) ?
+            Type.error_union_of(left_value_type) : left_value_type
+        end
         t_right_type = node.right.full_type!(context: "OR_ELSE right")
+
+        # Validate before handling special recovery forms as well. Otherwise
+        # `definite() OR_ELSE RAISE` would silently bypass the ordinary
+        # fallback check merely because its right side returns early below.
+        unless t_left_type.error_union? || t_left_type.optional?
+          error!(node, :OR_ELSE_NEEDS_RECOVERABLE_LEFT, got: type_display(t_left_type))
+        end
 
         # Handle OR_ELSE EXIT "msg": set error context + propagate (same as OR_ELSE RAISE for types)
         if node.right.is_a?(AST::OrElseExit)
@@ -711,7 +719,7 @@ module Annotator
 
         # Handle optional types: ?T OR_ELSE default -> T
         if t_left_type.optional?
-          wrapped = t_left_type.wrapped_type
+          wrapped = T.must(t_left_type.wrapped_type)
           unless t_right_type.resolved == :NoReturn || wrapped.accepts?(t_right_type) || t_right_type.accepts?(wrapped)
             error!(node, :TYPE_MISMATCH_IN_OR, expected: wrapped.resolved, got: t_right_type.resolved)
           end
@@ -720,9 +728,10 @@ module Annotator
           return
         end
 
-        # Standard OR behavior.
-        stamp_type!(node, t_left_type)
-        nil
+        # OR_ELSE is recovery syntax, not a general branch or anonymous
+        # union constructor. A definite value has no error/absence path on
+        # which the fallback could run, regardless of the RHS type.
+        error!(node, :OR_ELSE_NEEDS_RECOVERABLE_LEFT, got: type_display(t_left_type))
       end
 
       # An empty collection fallback (`expr OR []` / `OR {}`) is visited

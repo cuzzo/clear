@@ -492,7 +492,7 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN v;
         END
         FN caller() RETURNS !Void ->
-          x = build();
+          x = TRY build();
           RETURN;
         END
         FN main() RETURNS Void -> RETURN; END
@@ -514,7 +514,7 @@ RSpec.describe "Allocation Strategy Invariants" do
         src = <<~CLEAR
           REQUIRE "lib.clear";
           FN caller() RETURNS !Void ->
-            x = build();
+            x = TRY build();
             RETURN;
           END
           FN main() RETURNS Void -> RETURN; END

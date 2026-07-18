@@ -65,7 +65,7 @@ module LexerHarnessSupport
 
     expr = clear_string_literal(parts.first)
     parts[1..].each do |part|
-      expr = "#{expr} + \"$\" + #{clear_string_literal(part)}"
+      expr = "#{expr} $+ \"$\" $+ #{clear_string_literal(part)}"
     end
     expr
   end

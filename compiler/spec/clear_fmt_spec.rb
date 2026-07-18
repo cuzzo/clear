@@ -1040,7 +1040,7 @@ RSpec.describe Formatter do
     it "wraps BG body when single statement is a FOR block" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          task = BG { @parallel ->
+          task:~ = BG { @parallel ->
             FOR i IN (0 ..< 10) DO
               MUTABLE a = i;
               MUTABLE b = i + 1;

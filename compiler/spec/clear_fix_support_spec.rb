@@ -31,16 +31,46 @@ RSpec.describe ClearFixSupport do
     expect(options.auto_only).to be(true)
     expect(options.loop_until_clean).to be(true)
     expect(options.loop_max).to eq(3)
+    expect(options.propagate_fallibility).to be(false)
     expect(options.only_set).to eq(Set[:lint, :ownership])
     expect(options.paths).to eq(["a.clear", "b.rb"])
 
     expect(described_class.parse_args(["--loop", "a.clear"]).loop_max).to eq(20)
+    expect(described_class.parse_args(["--propagate-fallible", "a.clear"]).propagate_fallibility).to be(true)
     expect { described_class.parse_args([]) }.to raise_error(described_class::UsageError, /Usage: clear fix/)
     expect { described_class.parse_args(["--unknown", "a.clear"]) }.to raise_error(described_class::UsageError, /Unknown flag/)
     expect { described_class.parse_args(["--loop", "--dry-run", "a.clear"]) }.to raise_error(
       described_class::UsageError,
       /mutually exclusive/
     )
+  end
+
+
+  it "optionally makes fallibility explicit through the caller chain" do
+    source = <<~CLEAR
+      FN parseValue(text: String) RETURNS Int64 ->
+        RETURN text.toInt();
+      END
+
+      FN addOne(text: String) RETURNS Int64 ->
+        RETURN parseValue(text) + 1_i64;
+      END
+    CLEAR
+    expected = <<~CLEAR
+      FN parseValue(text: String) RETURNS !Int64 ->
+        RETURN TRY (text.toInt());
+      END
+
+      FN addOne(text: String) RETURNS !Int64 ->
+        RETURN TRY (parseValue(text)) + 1_i64;
+      END
+    CLEAR
+
+    rewritten, edits, = described_class.apply_to_source(
+      source, take_first: true, propagate_fallibility: true
+    )
+    expect(edits).to eq(6)
+    expect(rewritten).to eq(expected)
   end
 
   it "reports no findings for clean source and supports category filtering" do
@@ -50,6 +80,34 @@ RSpec.describe ClearFixSupport do
     linty = "FN main() RETURNS Int64 ->\n  MUTABLE x = 42;\n  RETURN x;\nEND\n"
     expect(messages_for(linty, only: Set[:lint]).join("\n")).to include("MUTABLE 'x' is never reassigned")
     expect(messages_for(linty, only: Set[:ownership])).to be_empty
+  end
+
+  it "offers explicit asynchronous binding choices" do
+    future_source = <<~CLEAR
+      FN main() RETURNS Void ->
+        future = BG { 7; };
+        RETURN;
+      END
+    CLEAR
+    stream_source = <<~CLEAR
+      FN produce() RETURNS [~]Int64 ->
+        RETURN BG STREAM { YIELD 7; CLOSE; };
+      END
+      FN main() RETURNS Void ->
+        result = produce();
+        RETURN;
+      END
+    CLEAR
+
+    future_findings = described_class.preview_source(future_source)
+    expect(future_findings.map(&:message).join("\n")).to include("Cannot infer `future` from an asynchronous value.")
+    expect(future_findings.flat_map { |finding| finding.fixes.map(&:description) })
+      .to include("Consume the future with NEXT.", "Retain the future deliberately.")
+
+    stream_findings = described_class.preview_source(stream_source)
+    expect(stream_findings.map(&:message).join("\n")).to include("Cannot infer `result` from an asynchronous value.")
+    expect(stream_findings.flat_map { |finding| finding.fixes.map(&:description) })
+      .to include("Retain the stream deliberately.")
   end
 
   it "applies lint and ownership fixes to exact golden source" do
@@ -214,6 +272,13 @@ RSpec.describe ClearFixSupport do
       FN main() RETURNS Int64 -> RETURN greet(5); END
     CLEAR
     expect_rewrite(arrow_source, arrow_source.sub("=>", "->"))
+
+    concat_source = <<~CLEAR
+      FN main() RETURNS String ->
+        RETURN "left" + "right";
+      END
+    CLEAR
+    expect_rewrite(concat_source, concat_source.sub(" + ", " $+ "))
 
     safe_source = <<~CLEAR
       FN main() RETURNS Void ->

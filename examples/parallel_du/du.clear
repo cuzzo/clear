@@ -38,6 +38,6 @@ END
 
 FN main() RETURNS Void ->
   path = ".";
-  total = scanDir(path);
+  total = TRY scanDir(path);
   print("${total.toString()}\t${path}");
 END

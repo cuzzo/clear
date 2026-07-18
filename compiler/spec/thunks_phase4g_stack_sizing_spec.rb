@@ -92,7 +92,7 @@ RSpec.describe "Thunk Phase 4g -- stack sizing per reentrance kind" do
           EFFECTS REENTRANT:MAX_DEPTH(8) ->
           RETURN n + 1;
         END
-        FN main() RETURNS Void -> _ = bounded(0_i64); RETURN; END
+        FN main() RETURNS Void -> _ = TRY bounded(0_i64); RETURN; END
       CLEAR
       fn = fn_named(ast, "bounded")
       expect(fn.stack_tier).not_to eq(:unbounded)

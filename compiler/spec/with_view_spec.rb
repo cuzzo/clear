@@ -120,7 +120,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
                     ASSERT s == 6_i64, "found";
                 END
             }
-            _ = NEXT found;
+            _:? = NEXT found;
         END
       F
       expect { annotate(src) }.not_to raise_error

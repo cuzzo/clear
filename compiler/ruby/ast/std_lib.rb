@@ -25,7 +25,7 @@ STD_LIB = T.let({
     return: {type: STRING_TYPE, sync: :symbol},
     zig: "try {rt}.internSymbol({0})",
     bc: false,
-    can_fail: true,
+    allocates: true,
     needs_rt: true,
     borrows: :all,
   },
@@ -208,6 +208,9 @@ STD_LIB = T.let({
     { args: [STRING_TYPE], return: :Int64, zig: "try CheatLib.toInt({0})", bc: true, can_fail: true, borrows: :all,
       is_method: true,
     },
+    { args: [STRING_TYPE, :Int64], return: :Int64, zig: "try CheatLib.toIntBase({0}, {1})", bc: true, can_fail: true, borrows: :all,
+      is_method: true,
+    },
     { args: [:Float64], return: :Int64, zig: "@intFromFloat({0})", bc: true,
       is_method: true,
     },
@@ -216,9 +219,22 @@ STD_LIB = T.let({
     }
   ],
 
+  # Target-width-independent unsigned parsing. This is deliberately fallible,
+  # like String.toInt(), rather than inheriting Ruby's invalid-input-to-zero
+  # behavior. A radix must be explicit so decimal signed parsing remains the
+  # ordinary default.
+  "toUInt" => {
+    args: [STRING_TYPE, :Int64], return: :UInt64,
+    zig: "try CheatLib.toUIntBase({0}, {1})", bc: true, can_fail: true, borrows: :all,
+    is_method: true,
+  },
+
   # toString() (Overloaded)
   "toString" => [
     { args: [:Int64],   return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.intToString({alloc}, {0})", bc: true, allocates: true, alloc: :node_storage,
+      is_method: true,
+    },
+    { args: [:UInt64],  return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.uintToString({alloc}, {0})", bc: true, allocates: true, alloc: :node_storage,
       is_method: true,
     },
     { args: [:Float64], return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.intToString({alloc}, @as(i64, @intFromFloat({0})))", bc: true, allocates: true, alloc: :node_storage,
@@ -299,6 +315,19 @@ STD_LIB = T.let({
     args: [STRING_TYPE],
     return: :Int64,
     zig: "CheatLib.len({0})",
+    bc: true,
+    borrows: :all,
+    is_method: true,
+  },
+
+  # validUtf8?(string) → Bool — validate a byte-backed string at an
+  # external-input boundary. CLEAR source strings are UTF-8, but file and FFI
+  # boundaries can still supply arbitrary bytes; make that validation explicit
+  # instead of exposing Ruby-style mutable encoding tags.
+  "validUtf8?" => {
+    args: [STRING_TYPE],
+    return: :Bool,
+    zig: "std.unicode.utf8ValidateSlice({0})",
     bc: true,
     borrows: :all,
     is_method: true,

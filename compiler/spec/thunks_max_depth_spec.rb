@@ -70,7 +70,7 @@ RSpec.describe "Thunk Phase 4f.3 -- :MAX_DEPTH(N)" do
             EFFECTS REENTRANT:MAX_DEPTH(64) ->
             RETURN n + 1;
           END
-          FN main() RETURNS Void -> _ = f(0_i64); RETURN; END
+          FN main() RETURNS Void -> _ = TRY f(0_i64); RETURN; END
         CLEAR
       }.not_to raise_error
     end
@@ -93,7 +93,7 @@ RSpec.describe "Thunk Phase 4f.3 -- :MAX_DEPTH(N)" do
           EFFECTS REENTRANT:MAX_DEPTH(8) ->
           RETURN n + 1;
         END
-        FN main() RETURNS Void -> _ = f(0_i64); RETURN; END
+        FN main() RETURNS Void -> _ = TRY f(0_i64); RETURN; END
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "f" }
       expect(fn.reentrance_kind).to eq(:reentrant_max_depth)

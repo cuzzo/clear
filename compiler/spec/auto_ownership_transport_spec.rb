@@ -37,7 +37,7 @@ RSpec.describe "automatic ownership transport" do
         RETURN Container{ node: node, id: 1 };
       END
       FN main() RETURNS !Void ->
-        container = makeContainer(777);
+        container = TRY makeContainer(777);
         extracted = container.node;
         ASSERT extracted.value == 777;
         RETURN;

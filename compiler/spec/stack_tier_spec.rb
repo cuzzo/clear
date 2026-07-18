@@ -67,7 +67,7 @@ RSpec.describe "Stack Tier Recommendations" do
             RETURN p;
         END
         FN use() RETURNS !Float64 ->
-            p = make();
+            p = TRY make();
             RETURN p.x;
         END
       CLEAR
@@ -156,7 +156,7 @@ RSpec.describe "Stack Tier Recommendations" do
             RETURN p;
         END
         FN caller() RETURNS !Float64 ->
-            p = make();
+            p = TRY make();
             RETURN p.x;
         END
       CLEAR
@@ -212,7 +212,7 @@ RSpec.describe "Stack Tier Recommendations" do
             RETURN p;
         END
         FN use() RETURNS !Float64 ->
-            p = make();
+            p = TRY make();
             RETURN p.x;
         END
         FN main() RETURNS Void ->
@@ -231,7 +231,7 @@ RSpec.describe "Stack Tier Recommendations" do
             RETURN p;
         END
         FN use() RETURNS !Float64 ->
-            p = make();
+            p = TRY make();
             RETURN p.x;
         END
         FN main() RETURNS Void ->

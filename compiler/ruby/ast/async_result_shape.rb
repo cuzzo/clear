@@ -26,6 +26,6 @@ class AsyncResultShape < T::Struct
   sig { returns(String) }
   def handle_zig_type
     wrapper = shared_promise? ? "CheatLib.SharedPromise" : "CheatLib.Promise"
-    "#{wrapper}(#{payload_type.zig_type})"
+    "#{wrapper}(#{payload_type.nested_zig_type})"
   end
 end

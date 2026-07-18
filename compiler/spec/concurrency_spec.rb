@@ -1253,7 +1253,7 @@ RSpec.describe SemanticAnnotator do
       CLEAR
       out = transpile_fn(src)
       expect(out).to include("CheatLib.concurrentListSelect")
-      expect(out).to include("return try mayFail(__item)")
+      expect(out).to include("return mayFail(__item)")
     end
 
     # -------------------------------------------------------------------------
@@ -1364,7 +1364,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(code) }.to raise_error(/OR_ELSE PRUNE requires the expression to return an error union/)
+        expect { run(code) }.to raise_error(/OR_ELSE requires a fallible \(!T\) or optional \(\?T\) left operand/)
       end
 
       it "rejects OR_ELSE RAISE when expression is not error-returning" do
@@ -1378,7 +1378,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(code) }.to raise_error(/OR_ELSE RAISE requires the expression to return an error union/)
+        expect { run(code) }.to raise_error(/OR_ELSE requires a fallible \(!T\) or optional \(\?T\) left operand/)
       end
 
       it "accepts OR_ELSE PRUNE when expression returns !T" do
@@ -1407,7 +1407,7 @@ RSpec.describe SemanticAnnotator do
           RETURN x * 2.0;
         END
         FN main() RETURNS Void ->
-          h = BG { 5.0 AS n THEN double(n) };
+          h:~ = BG { 5.0 AS n THEN double(n) };
           v = NEXT h;
           RETURN;
         END
@@ -1427,7 +1427,7 @@ RSpec.describe SemanticAnnotator do
           RETURN x * 2.0;
         END
         FN main() RETURNS Void ->
-          h = BG { add_one(2.0) AS a THEN double(a) AS b THEN add_one(b) };
+          h:~ = BG { add_one(2.0) AS a THEN double(a) AS b THEN add_one(b) };
           v = NEXT h;
           RETURN;
         END
@@ -1444,7 +1444,7 @@ RSpec.describe SemanticAnnotator do
           RETURN x * 2.0;
         END
         FN main() RETURNS Void ->
-          h = BG { double(1.0) THEN double(2.0) };
+          h:~ = BG { double(1.0) THEN double(2.0) };
           v = NEXT h;
           RETURN;
         END
@@ -1461,7 +1461,7 @@ RSpec.describe SemanticAnnotator do
           RETURN a + b;
         END
         FN main() RETURNS Void ->
-          h = BG { 3.0 AS x THEN add(x, x) };
+          h:~ = BG { 3.0 AS x THEN add(x, x) };
           v = NEXT h;
           RETURN;
         END
@@ -1488,7 +1488,7 @@ RSpec.describe SemanticAnnotator do
           RETURN x * 2.0;
         END
         FN main() RETURNS Void ->
-          h = BG { double(1.0) AS r THEN double(r) };
+          h:~ = BG { double(1.0) AS r THEN double(r) };
           v = NEXT h;
           RETURN;
         END
@@ -1505,7 +1505,7 @@ RSpec.describe SemanticAnnotator do
           RETURN x * 2.0;
         END
         FN main() RETURNS Void ->
-          h = BG {
+          h:~ = BG {
             n = double(1.0);
             n AS x THEN double(x)
           };
@@ -1529,7 +1529,7 @@ RSpec.describe SemanticAnnotator do
           RETURN x + 1.0;
         END
         FN main() RETURNS Void ->
-          h = BG { might_fail(5.0) AS r THEN add_one(r) };
+          h:~ = BG { might_fail(5.0) AS r THEN add_one(r) };
           v = NEXT h;
         END
       CLEAR
@@ -1706,8 +1706,8 @@ RSpec.describe SemanticAnnotator do
         expect(Type.new(:"~Void").zig_type).to eq("CheatLib.Promise(void)")
       end
 
-      it "emits CheatLib.Promise(!f64) for ~!Float64" do
-        expect(Type.new(:"~!Float64").zig_type).to eq("CheatLib.Promise(!f64)")
+      it "emits a concrete error-set Promise payload for ~!Float64" do
+        expect(Type.new(:"~!Float64").zig_type).to eq("CheatLib.Promise(anyerror!f64)")
       end
     end
 
@@ -1914,7 +1914,7 @@ RSpec.describe SemanticAnnotator do
     it "emits defer socketClose for TCPClient captured by BG" do
       out = transpile_fn(<<~CLEAR)
         FN f(server: TCPServer) RETURNS !Void ->
-          client = accept(server);
+          client = TRY accept(server);
           p: ~Void = BG { tcpWrite(client, "hi"); };
           r: Void = NEXT p;
           RETURN;
@@ -1930,7 +1930,7 @@ RSpec.describe SemanticAnnotator do
     it "emits defer file.close() for File captured by BG" do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS !Void ->
-          file = File::open("data.txt");
+          file = TRY File::open("data.txt");
           p: ~Void = BG { fileWrite(file, "hello"); };
           r: Void = NEXT p;
           RETURN;
@@ -1943,7 +1943,7 @@ RSpec.describe SemanticAnnotator do
       expect {
         transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
-            conn = TCPClient::connect("127.0.0.1", 8080);
+            conn = TRY TCPClient::connect("127.0.0.1", 8080);
             p: ~Void = BG {
               MUTABLE i = 0;
               WHILE i < 2 DO
@@ -1961,7 +1961,7 @@ RSpec.describe SemanticAnnotator do
     it "unconditional BG capture eliminates outer defer entirely" do
       out = transpile_fn(<<~CLEAR)
         FN f(server: TCPServer) RETURNS !Void ->
-          client = accept(server);
+          client = TRY accept(server);
           p: ~Void = BG { tcpWrite(client, "hi"); };
           r: Void = NEXT p;
           RETURN;
@@ -1977,7 +1977,7 @@ RSpec.describe SemanticAnnotator do
         FN f(server: TCPServer) RETURNS !Void ->
           MUTABLE tasks: ~Void[]@list = [];
           WHILE TRUE DO
-            client = accept(server);
+            client = TRY accept(server);
             &tasks.append(BG { tcpWrite(client, "hi"); });
           END
           RETURN;

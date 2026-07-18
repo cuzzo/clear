@@ -517,6 +517,14 @@ class FunctionSignature
     intrinsic_contract.allocation.allocates
   end
 
+  # Signature can_fail is explicit source-visible behavior. Allocation-only
+  # effects are stamped on call nodes separately and must not turn every
+  # allocating expression into !T.
+  sig { returns(T::Boolean) }
+  def recoverable_result?
+    @facts.error_fallible == true || can_fail == true
+  end
+
   sig { returns(T::Boolean) }
   def mutates_receiver?
     intrinsic_contract.ownership.mutates_receiver

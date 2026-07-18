@@ -637,6 +637,24 @@ module AST
       node.is_a?(AST::FreezeNode) || node.is_a?(AST::CapabilityWrap)
   end
 
+  # TRY and UNWRAP change the control-flow/type channel around a value without
+  # copying, moving, or relocating its successful payload. Analyses concerned
+  # with allocator provenance or escape placement must therefore look through
+  # these wrappers.
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.recovery_wrapper?(node)
+    (node.is_a?(AST::UnaryOp) && node.op == :TRY) ||
+      node.is_a?(AST::OptionalUnwrap)
+  end
+
+  sig { params(node: AST::Node).returns(AST::Node) }
+  def self.recovery_payload(node)
+    return node.right if node.is_a?(AST::UnaryOp) && node.op == :TRY
+    return node.target if node.is_a?(AST::OptionalUnwrap)
+
+    node
+  end
+
   sig { params(node: ScalarLiteralCandidate).returns(T::Boolean) }
   def self.scalar_literal_value?(node)
     node.is_a?(String) || node.is_a?(Symbol) || node.is_a?(Numeric) ||
@@ -2604,6 +2622,7 @@ module AST
                                      # original `!T` is stashed here for OR_ELSE consumers
                                      # that need to know whether to emit `catch fallback`
                                      # (error union) or `orelse fallback` (optional).
+    attr_accessor :retain_error_channel # explicit `x:!` / `x:!?` binding keeps the call result wrapped
     sig { returns(T.nilable(Symbol)) }
     def protocol_operation
       @protocol_operation = T.let(@protocol_operation, T.nilable(Symbol))
@@ -2648,6 +2667,7 @@ module AST
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     attr_accessor :safe_nav_chain    # implicit continuation of an earlier ?. over non-optional members
     attr_accessor :error_union_type  # full !T requirement result before expression-level propagation unwraps it
+    attr_accessor :retain_error_channel
     sig { params(token: Lexer::Token).void }
     def mark_explicit_mutable_receiver!(token)
       @explicit_mutable_receiver_token = T.let(token, T.nilable(Lexer::Token))
@@ -2899,6 +2919,7 @@ module AST
     # ruby-to-clear: field-type target=Node
     extend T::Sig
     include Locatable
+    attr_accessor :error_union_type
     # ruby-to-clear: skip
     sig { returns(T.nilable(String)) }
     def name; target.respond_to?(:name) ? target.name : nil end
@@ -2995,7 +3016,7 @@ module AST
   # catch_clauses: [AST::CatchClause]; default_body: [ASTNode] or nil
   CatchBlock     = Struct.new(:token, :catch_clauses, :default_body) do
     # ruby-to-clear: field-type catch_clauses=CatchClause[]
-    # ruby-to-clear: field-type default_body=?Node[]
+    # ruby-to-clear: field-type default_body=?(Node[])
     include Locatable
   end
   # RECOVER(default): pipeline operator that replaces errors with a default value.
@@ -3293,11 +3314,11 @@ module AST
   #   nil                                          — unit variant (void payload)
   #   Type object                                  — single-type payload (existing)
   #   Schemas::InlineStructVariant                 — inline struct payload
-  # methods (optional): Array of UnionMethodRequirement records.
+  # methods: Array of UnionMethodRequirement records; empty when absent.
   #   — compile-time constraints verified after function registration.
   UnionDef         = Struct.new(:token, :name, :variants, :visibility, :type_params, :methods) do
     # ruby-to-clear: field-type type_params=String[]
-    # ruby-to-clear: field-type methods=?UnionMethodRequirement[]
+    # ruby-to-clear: field-type methods=UnionMethodRequirement[]
     extend T::Sig
     include Locatable
     # Array of type param name strings, e.g. ["T"]
@@ -3343,6 +3364,8 @@ module AST
     extend T::Sig
     include Locatable
     include ExplicitMutableArguments
+    attr_accessor :error_union_type
+    attr_accessor :retain_error_channel
 
     sig { returns(String) }
     def name = "#{type_name.name}::#{method_name}"

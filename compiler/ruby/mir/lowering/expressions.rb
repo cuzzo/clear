@@ -340,6 +340,19 @@ module MIRLoweringExpressions
       end
     when :IS_OK then MIR::FallibleOk.new(strip_try(right))
     when :IS_READY then MIR::FutureReady.new(right)
+    when :TRY
+      declared = if node.right.respond_to?(:error_union_type) && T.unsafe(node.right).error_union_type
+        error_type = T.unsafe(node.right).error_union_type
+        error_type.is_a?(Type) ? error_type : Type.new(error_type)
+      else
+        Type.from_node!(node.right, context: "TRY lowering operand")
+      end
+      if declared.error_union?
+        propagated = MIR::TryExpr.new(strip_try(right))
+        declared.error_union? && declared.success_type.optional? ? MIR::TryOptional.new(propagated) : propagated
+      else
+        MIR::TryOptional.new(right)
+      end
     when :SUB, "-" then MIR::UnaryOp.new("-", right)
     when :BITWISE_NOT, "~" then MIR::UnaryOp.new("~", right)
     else raise "MIRLowering: unknown unary op #{node.op}"
@@ -1027,6 +1040,12 @@ module MIRLoweringExpressions
     # a MIR::BlockExpr containing the scoped pending stmts. Hot path: zero
     # allocation. Fallback path: dupes (auto-COPY etc.) happen inside the
     # block, only when actually entered.
+    # A definite, type-compatible LHS is already the result. The annotator
+    # verified the unreachable fallback has the same type, so do not emit
+    # Zig's `orelse` (which only accepts optional/error-union operands).
+    left_type = Type.from_node!(node.left, context: "OR_ELSE definite left")
+    return left unless facts.left_is_error || left_type.optional?
+
     fallback_type = or_fallback_expected_type(node)
     right = lower_scoped do
       with_expected_type(fallback_type) do
@@ -1102,14 +1121,13 @@ module MIRLoweringExpressions
     # to honor that to keep emitting `catch fallback` (error union)
     # rather than `orelse fallback` (optional).
     has_error_union = node.left.respond_to?(:error_union_type) && node.left.error_union_type
-    can_fail = node.left.respond_to?(:can_fail) && node.left.can_fail
     effective_left = if has_error_union
                        Type.new(T.cast(node.left.error_union_type, Type::TypeInput))
                      else
                        left_type
                      end
     OrElseFacts.new(
-      left_is_error: left_type.error_union? || can_fail || !!has_error_union,
+      left_is_error: left_type.error_union? || !!has_error_union,
       left_success_optional: effective_left.error_union? && effective_left.success_type.optional?,
       line: node.token&.line || 0,
       target: lowering_target

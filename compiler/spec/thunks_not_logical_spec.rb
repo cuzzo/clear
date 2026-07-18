@@ -72,7 +72,7 @@ RSpec.describe "Thunk Phase 4f.2 -- :NOT_LOGICAL" do
             EFFECTS REENTRANT:NOT_LOGICAL ->
             RETURN n + 1;
           END
-          FN main() RETURNS Void -> _ = f(0_i64); RETURN; END
+          FN main() RETURNS Void -> _ = TRY f(0_i64); RETURN; END
         CLEAR
       }.not_to raise_error
     end
@@ -108,7 +108,7 @@ RSpec.describe "Thunk Phase 4f.2 -- :NOT_LOGICAL" do
           EFFECTS REENTRANT:NOT_LOGICAL ->
           RETURN n + 1;
         END
-        FN main() RETURNS Void -> _ = f(0_i64); RETURN; END
+        FN main() RETURNS Void -> _ = TRY f(0_i64); RETURN; END
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "f" }
       expect(fn.reentrance_kind).to eq(:reentrant_not_logical)

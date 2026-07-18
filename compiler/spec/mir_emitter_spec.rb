@@ -1133,7 +1133,7 @@ RSpec.describe MIREmitter do
       expect(e.emit(MIR::TryOrPanic.new(MIR::Call.new("fallible", [], false), "boom")))
         .to eq("fallible() catch @panic(\"boom\")")
       expect(e.emit(MIR::UnionPayloadGet.new(MIR::Ident.new("result"), :Ok)))
-        .to eq("(switch (result) { .Ok => |payload| payload, else => unreachable })")
+        .to eq("(switch (result) { .Ok => |__union_payload| __union_payload, else => unreachable })")
       expect(e.emit(MIR::UnionVariantGet.new(MIR::TryExpr.new(MIR::Call.new("load", [], false)), "Ok", nil)))
         .to eq("(try load()).Ok")
       expect(e.emit(MIR::HasField.new(MIR::Ident.new("item"), "value")))

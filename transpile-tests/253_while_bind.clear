@@ -64,7 +64,7 @@ FN test_resolve_terminates() RETURNS !Void ->
     ASSERT found == 77_i64, "resolved live node";
     ASSERT iters == 1_i64, "exactly one iteration";
 
-    dead_w = makeWeakNode();
+    dead_w = TRY makeWeakNode();
     MUTABLE dead_iters = 0_i64;
     WHILE RESOLVE dead_w EXISTS AS node DO
         dead_iters = dead_iters + 1;

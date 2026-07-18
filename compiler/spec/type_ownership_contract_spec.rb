@@ -99,6 +99,7 @@ RSpec.describe Type, "ownership and cleanup contracts" do
       expect(heap_string.needs_cleanup?(schema_lookup)).to eq(true)
       expect(Type.optional_of(:String).needs_cleanup?(schema_lookup)).to eq(true)
       expect(Type.new(:String, location: :borrow).needs_cleanup?(schema_lookup)).to eq(false)
+      expect(Type.new("String@symbol").recursive_cleanup_shape?(schema_lookup)).to eq(false)
       expect(Type.new(:"Int64[]", collection: :list).needs_cleanup?(schema_lookup)).to eq(true)
       expect(Type.new(:Box).needs_cleanup?(schema_lookup)).to eq(false)
       expect(Type.new(:Box).recursive_cleanup_shape?(schema_lookup)).to eq(true)

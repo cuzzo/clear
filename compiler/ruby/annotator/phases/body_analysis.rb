@@ -414,6 +414,8 @@ module Annotator
             summary.references_snapshot = true if node.name == "snapshot"
           when AST::Raise, AST::OrElseRaise, AST::BgBlock, AST::BgStreamBlock
             summary.raises_directly = true
+          when AST::UnaryOp
+            summary.raises_directly = true if node.op == :TRY
           when AST::WithBlock
             summary.raises_directly = true if with_block_raises
           when AST::NextExpr
@@ -428,7 +430,7 @@ module Annotator
               kind: :yield,
               node: node
             )
-          when AST::FuncCall
+          when AST::FuncCall, AST::MethodCall
             if frame.record_call_sites
               frame.next_call_site_ordinal += 1
               summary.call_site_facts << Semantic::CallSiteFact.new(
@@ -436,17 +438,26 @@ module Annotator
                 node: node,
                 callee_name: node.name,
                 args: node.args,
-                fn_var_call: node.fn_var_call == true,
+                fn_var_call: node.is_a?(AST::FuncCall) && node.fn_var_call == true,
                 propagates_failure: !frame.failure_absorbed
               )
             end
 
-            if node.fn_var_call
+            if node.is_a?(AST::FuncCall) && node.fn_var_call
               summary.has_fnptr_call = true
               summary.raises_directly = true if !frame.failure_absorbed && fn_var_call_error_fallible?(node)
-            else
+            elsif node.is_a?(AST::FuncCall)
               summary.callees.add(node.name)
               summary.propagating_callees.add(node.name) unless frame.failure_absorbed
+              summary.raises_directly = true if !frame.failure_absorbed && resolved_call_error_fallible?(node)
+            elsif !frame.failure_absorbed && resolved_call_error_fallible?(node)
+              # Intrinsic and inherent methods do not participate in the
+              # user-function call graph, but an unhandled `!T` from one is
+              # still a direct error source of this body.  Without this seed
+              # `text.toInt()` could silently escape a `RETURNS Int64`
+              # function, and neither the compiler nor `clear fix` could
+              # make its contract explicit.
+              summary.raises_directly = true
             end
           end
         end
@@ -465,6 +476,28 @@ module Annotator
         false
       end
       private :fn_var_call_error_fallible?
+
+      sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(T::Boolean) }
+      def resolved_call_error_fallible?(node)
+        return true if node.respond_to?(:error_union_type) && node.error_union_type
+
+        signature = FunctionSignature.unwrap(node.matched_signature)
+        return true if signature&.return_type&.error_union?
+
+        # Intrinsics model checked runtime operations with `can_fail` while
+        # keeping their success type as the expression type.  Allocation-only
+        # failures are deliberately a separate FAULT channel, but a
+        # non-allocating intrinsic such as String.toInt is a source-level
+        # error and must make the enclosing function fallible when it is not
+        # absorbed by OR_ELSE/CATCH.
+        intrinsic = node.matched_stdlib_def
+        return true if intrinsic&.recoverable_result?
+
+        node.full_type!(context: "fallible call analysis").error_union?
+      rescue StandardError
+        false
+      end
+      private :resolved_call_error_fallible?
 
       sig { params(node: AST::WithBlock).returns(T::Boolean) }
       def with_block_raises_directly?(node)

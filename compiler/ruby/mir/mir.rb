@@ -18,7 +18,7 @@
 # New nodes here use distinct names to coexist during migration.
 
 require "sorbet-runtime"
-require_relative "../annotator/helpers/intrinsic_registry"
+require_relative "../annotator/helpers/function_signature"
 require_relative "../ast/type"
 require_relative "../ast/ast"
 require_relative "../semantic/pass_state"
@@ -4539,6 +4539,25 @@ module MIR
     end
   end
 
+  # Propagating optional unwrap. Unlike OptionalUnwrap (`.?' / panic-on-none),
+  # TRY returns the absence through the enclosing function's error channel.
+  TryOptional = Struct.new(:expr) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([expr])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
+    sig { returns(T::Array[Emittable]) }
+    def owned_position_source_exprs = child_exprs
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.of(expr)
+    end
+    sig { returns(Emittable) }
+    def expr = self[:expr]
+  end
+
   # Optional resource handle produced by a mutable C ABI out parameter. This
   # has the same representation as OptionalUnwrap, but unlike an ordinary
   # optional projection it creates the ownership consumed by CLOSE cleanup.
@@ -4992,9 +5011,14 @@ module MIR
   # bc_emitter has a case-per-op dispatch. It evaluates args (via compile_expr)
   # in declared order, then emits the corresponding opcode sequence. The Zig
   # backend must never see this node.
-  InlineBc = Struct.new(:op, :args, :stdlib_def) do
+  InlineBc = Struct.new(:op, :args, :stdlib_def, :suppress_try) do
     include Expr
     extend T::Sig
+
+    sig { params(op: Symbol, args: T::Array[Emittable], stdlib_def: T.untyped, suppress_try: T::Boolean).void }
+    def initialize(op, args, stdlib_def, suppress_try = false)
+      super(op, args, stdlib_def, suppress_try)
+    end
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs(args)
@@ -5019,6 +5043,11 @@ module MIR
         alloc: heap_return ? :heap : nil,
         target_var: nil
       )
+    end
+
+    sig { returns(InlineBc) }
+    def without_try
+      InlineBc.new(op, args, stdlib_def, true)
     end
   end
 
@@ -5192,3 +5221,8 @@ module MIR
     T::Array[String],
   )
 end
+
+# IntrinsicRegistry loads std_lib, whose FSM declarations construct MIR nodes.
+# Load it only after every MIR node above has been defined; Type already loads
+# the FunctionSignature contract needed by MIR's typed fields.
+require_relative "../annotator/helpers/intrinsic_registry"

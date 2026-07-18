@@ -144,12 +144,14 @@ module FixCollector
   @findings = T.let([], T::Array[FixableFinding])
   @enabled = T.let(false, T::Boolean)
   @type_migrations_enabled = T.let(false, T::Boolean)
+  @fallibility_propagation_enabled = T.let(false, T::Boolean)
 
   sig { returns(T::Array[FixableFinding]) }
   def self.enable!
     @findings.clear
     @enabled = true
     @type_migrations_enabled = false
+    @fallibility_propagation_enabled = false
     @findings
   end
 
@@ -164,10 +166,21 @@ module FixCollector
   end
 
   sig { void }
+  def self.enable_fallibility_propagation!
+    @fallibility_propagation_enabled = true if @enabled
+  end
+
+  sig { returns(T::Boolean) }
+  def self.fallibility_propagation_enabled?
+    @enabled && @fallibility_propagation_enabled
+  end
+
+  sig { void }
   def self.disable!
     @findings.clear
     @enabled = false
     @type_migrations_enabled = false
+    @fallibility_propagation_enabled = false
   end
 
   sig { returns(T::Boolean) }

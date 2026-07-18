@@ -27,7 +27,7 @@ RSpec.describe CleanupClassifier do
             RETURN items;
         END
         FN main() RETURNS Void ->
-            list1 = makeList();
+            list1 = TRY makeList();
             ASSERT list1.length() == 1;
             RETURN;
         END
@@ -57,7 +57,7 @@ RSpec.describe CleanupClassifier do
             RETURN Value{ Text: COPY label };
         END
         FN main() RETURNS Void ->
-            v = makeValue("hi");
+            v = TRY makeValue("hi");
             RETURN;
         END
       CLEAR
@@ -116,7 +116,7 @@ RSpec.describe CleanupClassifier do
             RETURN "error";
         END
         FN main() RETURNS Void ->
-            r = process(User{ name: "Alice" });
+            r = TRY process(User{ name: "Alice" });
             ASSERT r == "Alice", "ok";
             RETURN;
         END

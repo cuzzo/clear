@@ -85,7 +85,7 @@ class ClearParser
     name = consume(:VAR_ID).text!
     type_annotation = T.let(nil, T.nilable(Type))
     if match!(:CHAR, ':')
-      type_annotation = parse_type_annotation
+      type_annotation = parse_inferred_wrapper_annotation || parse_type_annotation
     end
 
     if match!(:CHAR, '=')
@@ -559,9 +559,7 @@ class ClearParser
       match!(:CHAR, ',')
     end
     consume(:CHAR, '}')
-    methods = T.let(nil, T.nilable(T::Array[AST::UnionMethodRequirement]))
-    methods = method_reqs unless method_reqs.empty?
-    node = AST::UnionDef.new(tok, name, variants, visibility, generic_params.map(&:name), methods)
+    node = AST::UnionDef.new(tok, name, variants, visibility, generic_params.map(&:name), method_reqs)
     node.generic_params = generic_params
     node
   end

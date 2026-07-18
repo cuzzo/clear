@@ -335,13 +335,13 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("const Result = union(enum) {")
       end
 
-      it "excludes PRIVATE UNION from transpile_module output" do
+      it "retains PRIVATE UNION implementation declarations in transpile_module output" do
         out = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
           PRIVATE UNION Internal { A: Float64, B }
           FN main() RETURNS Void ->
           END
         CLEAR
-        expect(out).not_to include("const Internal = union(enum) {")
+        expect(out).to include("const Internal = union(enum) {")
       end
     end
 

@@ -1179,6 +1179,7 @@ class MIRLowering
     when AST::RangeLit          then lower_range_lit(node)
     when AST::OptionalUnwrap
       target = lower(node.target)
+      target = strip_try(target) if node.respond_to?(:error_union_type) && node.error_union_type
       owns_foreign_resource = node.target.is_a?(AST::Identifier) &&
         node.target.symbol&.foreign_out_owner == true
       owns_foreign_resource ? MIR::ForeignOwnedUnwrap.new(target) : MIR::OptionalUnwrap.new(target)
@@ -2922,7 +2923,9 @@ class MIRLowering
   private :protocol_base_name_for_lowering
 
   # Lower a module AST into MIR items for inlining via REQUIRE.
-  # Emits only public declarations (types + functions + re-exports).
+  # Emits every declaration needed to implement the module. Visibility is
+  # enforced by the imported semantic scope and by namespace placement; private
+  # helpers must remain available to public functions that call them.
   # No standard imports or runtime footer -- the importing file provides those.
   #
   # Returns { items: [MIR nodes], type_items: [MIR type nodes] }
@@ -2935,10 +2938,8 @@ class MIRLowering
     node.statements.each do |stmt|
       case stmt
       when AST::FunctionDef
-        next if stmt.visibility == :private
         append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lower(stmt))
       when AST::StructDef, AST::EnumDef, AST::UnionDef
-        next if stmt.visibility == :private
         append_lowered_items!(LoweredItemTarget.new(items: type_items, line: stmt.token.line), lower(stmt))
       when AST::RequireNode
         append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: nil), lower(stmt))
@@ -2961,7 +2962,7 @@ class MIRLowering
     cleaned = (name.end_with?('!') || name.end_with?('?')) ? name[0..-2] : name
     cleaned = Compiler::Entrypoint::ZIG_NAME if cleaned == Compiler::Entrypoint::NAME
     cleaned = T.must(cleaned)
-    ZigType.primitive_numeric_identifier?(cleaned) ? "@\"#{cleaned}\"" : cleaned
+    ZigType.reserved_identifier?(cleaned) ? "@\"#{cleaned}\"" : cleaned
   end
 
   # Stable Zig identifier for a hidden per-type @node store. Avoid text/regex
@@ -4244,7 +4245,7 @@ class MIRLowering
   sig { params(value: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
   def owned_sink_value?(value, ast_node)
     return owned_sink_value?(value.expr, ast_node) if value.is_a?(MIR::Cast)
-    return owned_sink_value?(value.expr, ast_node) if value.is_a?(MIR::TryExpr)
+    return owned_sink_value?(value.expr, ast_node) if value.is_a?(MIR::TryExpr) || value.is_a?(MIR::TryOptional)
     return true if ast_node.is_a?(AST::MoveNode) || ast_node.is_a?(AST::CopyNode) || ast_node.is_a?(AST::CloneNode)
     return true if mir_allocates?(value)
     return true if value.is_a?(MIR::Call) && value.owned_return?

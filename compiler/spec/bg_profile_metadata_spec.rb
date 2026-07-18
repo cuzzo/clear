@@ -8,7 +8,7 @@ RSpec.describe 'BG profile metadata' do
   it 'emits a stable metadata comment and local dispatch fields for plain BG' do
     zig = transpile(<<~CLEAR)
       FN main() RETURNS Void ->
-          f = BG {
+          f:~ = BG {
               1;
           };
           ASSERT (NEXT f) == 1, "result";
@@ -28,7 +28,7 @@ RSpec.describe 'BG profile metadata' do
   it 'marks @parallel BG sites as parallel in metadata and task config' do
     zig = transpile(<<~CLEAR)
       FN main() RETURNS Void ->
-          f = BG { @parallel ->
+          f:~ = BG { @parallel ->
               1;
           };
           ASSERT (NEXT f) == 1, "result";
@@ -43,7 +43,7 @@ RSpec.describe 'BG profile metadata' do
   it 'emits stackful BG profile metadata when @stack forces a fiber' do
     zig = transpile(<<~CLEAR)
       FN main() RETURNS Void ->
-          f = BG { @stack ->
+          f:~ = BG { @stack ->
               1;
           };
           ASSERT (NEXT f) == 1, "result";

@@ -663,7 +663,7 @@ module MIRLoweringControlFlow
   def for_each_owned_collection_source?(mir)
     T.bind(self, MIRLowering) rescue nil
 
-    return for_each_owned_collection_source?(mir.expr) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
+    return for_each_owned_collection_source?(mir.expr) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr) || mir.is_a?(MIR::TryOptional)
     return true if mir.is_a?(MIR::Call) && mir.owned_return?
     mir_allocates?(mir)
   end
@@ -671,7 +671,7 @@ module MIRLoweringControlFlow
   sig { params(mir: MIR::Node, type_info: Type).returns(Symbol) }
   def for_each_owned_collection_source_alloc(mir, type_info)
     T.bind(self, MIRLowering) rescue nil
-    return for_each_owned_collection_source_alloc(mir.expr, type_info) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
+    return for_each_owned_collection_source_alloc(mir.expr, type_info) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr) || mir.is_a?(MIR::TryOptional)
     return :heap if mir.is_a?(MIR::Call) && mir.owned_return?
     owned_alloc = mir_owned_alloc(mir)
     return owned_alloc if owned_alloc

@@ -56,6 +56,8 @@ class ClearParser
     when :parse_join_op then parse_join_op
     when :parse_shard_op then parse_shard_op
     when :parse_concurrent_op then parse_concurrent_op
+    when :parse_try_expression then parse_try_expression
+    when :parse_unwrap_expression then parse_unwrap_expression
     when :parse_group_expression then parse_group_expression
     else
       raise "Unknown primary parser action #{rule.action}"
@@ -159,7 +161,6 @@ class ClearParser
     when :parse_static_call_suffix then parse_static_call_suffix(lhs)
     when :parse_dot_suffix then parse_dot_suffix(lhs)
     when :parse_func_call_suffix then parse_func_call_suffix(lhs)
-    when :parse_raise_suffix then parse_raise_suffix(lhs)
     when :parse_optional_unwrap_suffix then parse_optional_unwrap_suffix(lhs)
     when :parse_exists_suffix then parse_exists_suffix(lhs)
     when :parse_is_ok_suffix then parse_is_ok_suffix(lhs)
@@ -273,7 +274,8 @@ class ClearParser
       if match?(:CHAR, '(')
         # Method Call
         _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-        AST::MethodCall.new(name_token, lhs, name, args)
+        call = AST::MethodCall.new(name_token, lhs, name, args)
+        stamp_source_range_from_node!(call, lhs, previous)
       else
         # Field Access
         AST::GetField.new(name_token, lhs, name)
@@ -284,13 +286,27 @@ class ClearParser
   sig { params(lhs: AST::Node).returns(AST::FuncCall) }
   def parse_func_call_suffix(lhs)
     start_token, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-    AST::FuncCall.new(start_token, lhs, args)
+    call = AST::FuncCall.new(start_token, lhs, args)
+    stamp_source_range_from_node!(call, lhs, previous)
+    call
   end
 
-  sig { params(lhs: AST::Node).returns(AST::BinaryOp) }
-  def parse_raise_suffix(lhs)
-    bang_token = consume(:CHAR, '!!')
-    AST::BinaryOp.new(bang_token, lhs, :OR_ELSE, AST::OrElseRaise.new(bang_token))
+  # TRY is a prefix propagation boundary. A reader sees the potential early
+  # return before the operand, just as they do with Zig's `try` and Swift's
+  # `try`.
+  sig { returns(AST::UnaryOp) }
+  def parse_try_expression
+    token = consume(:KEYWORD, 'TRY')
+    AST::UnaryOp.new(token, :TRY, parse_unary)
+  end
+
+  # UNWRAP makes an optional-to-definite conversion visible at the binding
+  # site. Unlike TRY, it deliberately uses the existing explicit optional
+  # unwrap semantics rather than adding an error channel to the function.
+  sig { returns(AST::OptionalUnwrap) }
+  def parse_unwrap_expression
+    token = consume(:KEYWORD, 'UNWRAP')
+    AST::OptionalUnwrap.new(token, parse_unary)
   end
 
   sig { params(lhs: AST::Node).returns(AST::OptionalUnwrap) }
@@ -647,10 +663,8 @@ class ClearParser
     parse_primary
   end
 
-  # `&` marks the mutating call even when a postfix result operator wraps it.
-  # For example, `&cache.put(key, value)!!` is `(&cache.put(...))!!`, not an
-  # attempt to address the result of `OR_ELSE RAISE`. Field/index/navigation
-  # suffixes remain transparent so `&loadAndMutate()!!.field` composes too.
+  # `&` marks the mutating call. Prefix TRY composes normally as
+  # `TRY &cache.put(...)`; it is not a postfix wrapper around the receiver.
   sig { params(node: AST::Node, marker: Lexer::Token).returns(T::Boolean) }
   def mark_explicit_mutable_receiver!(node, marker)
     if node.is_a?(AST::MethodCall)
@@ -659,8 +673,6 @@ class ClearParser
     end
 
     wrapped = T.let(case node
-    when AST::BinaryOp
-      node.left if node.op == :OR_ELSE && node.right.is_a?(AST::OrElseRaise)
     when AST::GetField, AST::GetIndex, AST::OptionalUnwrap
       node.target
     end, T.nilable(AST::Node))
@@ -696,6 +708,7 @@ class ClearParser
     if match?(:CHAR, '(')
       _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
       node = AST::FuncCall.new(var_token, name, args)
+      stamp_source_range!(node, var_token, previous)
     end
 
     return parse_suffixes(node)

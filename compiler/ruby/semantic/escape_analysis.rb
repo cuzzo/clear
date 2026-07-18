@@ -598,16 +598,22 @@ module EscapeAnalysis
   sig { params(node: DynamicValue).returns(DynamicValue) }
   private_class_method def self.unwrap_value(node)
     current = T.let(node, DynamicValue)
-    while current.is_a?(AST::Locatable) && AST.ownership_wrapper?(current)
-      wrapper = T.cast(current, T.any(
-        AST::MoveNode,
-        AST::CopyNode,
-        AST::CloneNode,
-        AST::ShareNode,
-        AST::FreezeNode,
-        AST::CapabilityWrap,
-      ))
-      current = wrapper.value
+    while current.is_a?(AST::Locatable)
+      if AST.recovery_wrapper?(current)
+        current = AST.recovery_payload(current)
+      elsif AST.ownership_wrapper?(current)
+        wrapper = T.cast(current, T.any(
+          AST::MoveNode,
+          AST::CopyNode,
+          AST::CloneNode,
+          AST::ShareNode,
+          AST::FreezeNode,
+          AST::CapabilityWrap,
+        ))
+        current = wrapper.value
+      else
+        break
+      end
     end
     current
   end

@@ -108,7 +108,7 @@ RSpec.describe "generic associated-key map storage" do
       IMPLEMENTATION Holder {
         METHOD identity(self, key: String) RETURNS String -> RETURN COPY key; END
         METHOD copied(self) RETURNS !?String ->
-          current = COPY self.key;
+          current:? = COPY self.key;
           IF current EXISTS AS key THEN RETURN self.identity(key); END
           RETURN NIL;
         END

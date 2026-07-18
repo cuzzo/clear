@@ -26,7 +26,7 @@ RSpec.describe "Move semantics for heap-owning types" do
             RETURN m;
         END
         FN main() RETURNS Void ->
-            MUTABLE m = makeMap();
+            MUTABLE m = TRY makeMap();
             MUTABLE items: []{String}Int64 = List[];
             &items.append(m);
             RETURN;
@@ -188,7 +188,7 @@ RSpec.describe "Move semantics for heap-owning types" do
             RETURN Value{ Items: items };
         END
         FN main() RETURNS Void ->
-            v1 = makeItems();
+            v1 = TRY makeItems();
             v2 = v1;
             RETURN;
         END

@@ -192,7 +192,17 @@ class MIREmitter
     when MIR::BlockExpr        then emit_block_expr(node)
     when MIR::ConcatStr        then emit_concat(node)
     when MIR::Cast             then emit_cast(node)
-    when MIR::TryExpr          then "try #{emit(node.expr)}"
+    when MIR::TryExpr
+      # `TRY UNWRAP !?T` must apply `try` to the error union before `.?' to
+      # its successful optional payload; `try call.?` asks Zig to unwrap the
+      # error union as though it were optional.
+      try_expr = node.expr
+      if try_expr.is_a?(MIR::OptionalUnwrap)
+        "(try #{emit(try_expr.expr)}).?"
+      else
+        "try #{emit(try_expr)}"
+      end
+    when MIR::TryOptional      then "(#{emit(node.expr)} orelse return error.TryOptional)"
     when MIR::TryCatch         then emit_try_catch(node)
     when MIR::BreakExpr        then emit_break_expr(node)
     when MIR::Orelse           then emit_orelse(node)
@@ -477,7 +487,7 @@ class MIREmitter
     raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry
     pattern = entry.required_intrinsic_template(IntrinsicTemplateKind::Zig)
     node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
-    pattern
+    node.suppress_try ? pattern.delete_prefix("try ") : pattern
   end
 
   # Emit Zig source for a sharded HashMap put. Picks the template based
@@ -2800,7 +2810,7 @@ class MIREmitter
   def emit_union_payload_get(node)
     subject = T.must(emit(node.subject))
     variant = node.variant.to_s
-    "(switch (#{subject}) { .#{variant} => |payload| payload, else => unreachable })"
+    "(switch (#{subject}) { .#{variant} => |__union_payload| __union_payload, else => unreachable })"
   end
 
   sig { params(node: MIR::AssertStmt).returns(String) }

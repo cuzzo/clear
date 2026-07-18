@@ -229,7 +229,7 @@ module FsmLowering
     result_owner = T.let(result_mir, MIR::Node)
     loop do
       case result_owner
-      when MIR::TryExpr, MIR::Cast
+      when MIR::TryExpr, MIR::TryOptional, MIR::Cast
         result_owner = result_owner.expr
       else
         break

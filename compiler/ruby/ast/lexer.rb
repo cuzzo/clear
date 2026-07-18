@@ -5,6 +5,8 @@ require 'strscan'
 require 'set'
 require_relative "frontend_resource_budget"
 
+TokenValue = T.type_alias { T.any(String, Integer, Float) }
+
 class Lexer
     extend T::Sig
 
@@ -68,15 +70,30 @@ class Lexer
     def byte_length
       return end_offset - start_offset if start_offset && end_offset
 
-      value.to_s.bytesize
+      payload = value
+      return payload.bytesize if payload.is_a?(String)
+      return payload.to_s.bytesize if payload.is_a?(Integer)
+      return payload.to_s.bytesize if payload.is_a?(Float)
+
+      0
     end
 
     private
 
     sig { params(accessor: String, expected_class: String).returns(String) }
     def payload_error(accessor, expected_class)
-      "#{type.inspect} token at #{line}:#{column} has no #{accessor} payload " \
-        "(expected #{expected_class}, got #{value.class})"
+      payload = value
+      actual_class = if payload.is_a?(String)
+        "String"
+      elsif payload.is_a?(Integer)
+        "Integer"
+      elsif payload.is_a?(Float)
+        "Float"
+      else
+        "NilClass"
+      end
+      ":#{type} token at #{line}:#{column} has no #{accessor} payload " \
+        "(expected #{expected_class}, got #{actual_class})"
     end
   end
 
@@ -86,7 +103,7 @@ class Lexer
       FN METHOD RETURN RETURNS USE
       IF THEN ELSE ELSE_IF END COMPTIME IS_A EXISTS IS_OK IS_READY
       WHILE DO FOR IN BG NEXT BREAK CONTINUE
-      CAST AS
+      CAST AS TRY UNWRAP
       STRUCT ENUM UNION PROTOCOL IMPLEMENTATION TRUE FALSE NIL Auto
       ASSERT RAISE CATCH EXIT DIE PASS PRUNE
       MOD AND OR OR_ELSE XOR BIT_AND BIT_OR
@@ -126,9 +143,7 @@ class Lexer
     @base_offset = T.let(start_offset, Integer)
     @file = T.let(file, T.nilable(String))
     @budget = T.let(budget || FrontendResourceBudget.new, FrontendResourceBudget)
-    begin
-      @budget.check_source!(source)
-    rescue FrontendResourceBudget::Exceeded => e
+    if (e = @budget.source_violation(source))
       raise Error, "Lexer Error: frontend #{e.kind} resource limit exceeded (limit #{e.limit})"
     end
     @tokens = T.let([], T::Array[Token])
@@ -156,7 +171,6 @@ class Lexer
       when @s.scan(/->/) then add(:ARROW, '->', start_col)
       when @s.scan(/\|>/) then add(:SMOOTH, '|>', start_col)
       when @s.scan(/OR_ELSE\b/) then add(:OR_ELSE, 'OR_ELSE', start_col)
-      when @s.scan(/!!/) then add(:CHAR, '!!', start_col)
       when @s.scan(/==/) then add(:CHAR, '==', start_col)
       when @s.scan(/>>/) then add(:CHAR, '>>', start_col)
       when @s.scan(/<</) then add(:CHAR, '<<', start_col)
@@ -209,32 +223,32 @@ class Lexer
       # `0xff_u32` is hex + suffix. The suffix-bearing regex runs before
       # the plain form so the suffix is captured when present.
       when @s.scan(/0x[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
-        val = strip_digit_separators(@s.matched, @s[1]).to_i(16)
-        add_prefixed_int(val, @s[1], start_col)
+        hex_value = strip_digit_separators(@s.matched, @s[1]).to_i(16)
+        add_prefixed_int(hex_value, @s[1], start_col)
 
       when @s.scan(/0x[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*/)
         add(:PREFIXED_INT, @s.matched.tr('_', '').to_i(16), start_col)
 
       when @s.scan(/0o[0-7]+(?:_[0-7]+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
-        val = strip_digit_separators(@s.matched, @s[1]).to_i(8)
-        add_prefixed_int(val, @s[1], start_col)
+        octal_value = strip_digit_separators(@s.matched, @s[1]).to_i(8)
+        add_prefixed_int(octal_value, @s[1], start_col)
 
       when @s.scan(/0o[0-7]+(?:_[0-7]+)*/)
         add(:PREFIXED_INT, @s.matched.tr('_', '').to_i(8), start_col)
 
       when @s.scan(/0b[0-1]+(?:_[0-1]+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
-        val = strip_digit_separators(@s.matched, @s[1]).to_i(2)
-        add_prefixed_int(val, @s[1], start_col)
+        binary_value = strip_digit_separators(@s.matched, @s[1]).to_i(2)
+        add_prefixed_int(binary_value, @s[1], start_col)
 
       when @s.scan(/0b[0-1]+(?:_[0-1]+)*/)
         add(:PREFIXED_INT, @s.matched.tr('_', '').to_i(2), start_col)
 
       when @s.scan(/\d+(?:_\d+)*\.\d+(?:_\d+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
-        val = strip_digit_separators(@s.matched, @s[1]).to_f
+        float_value = strip_digit_separators(@s.matched, @s[1]).to_f
         suffix = @s[1]
         case suffix
-        when 'f32' then add(:FLOAT32, val, start_col)
-        when 'f64' then add(:NUMBER, val, start_col)
+        when 'f32' then add(:FLOAT32, float_value, start_col)
+        when 'f64' then add(:NUMBER, float_value, start_col)
         else raise Error, "Lexer Error: Unknown float suffix '_#{suffix}' at line #{@line}:#{@column}"
         end
 
@@ -360,7 +374,7 @@ class Lexer
           start_offset: expr_offset,
           budget: @budget,
         )
-        sub_tokens = @budget.nested { sub_lexer.tokenize }
+        sub_tokens = T.let(@budget.nested { sub_lexer.tokenize }, T::Array[Token])
         sub_tokens.pop
         @tokens.concat(sub_tokens)
 
@@ -457,7 +471,7 @@ class Lexer
     raise Error, "Lexer Error: Unclosed interpolation %{...}"
   end
 
-  sig { params(type: Symbol, val: T.any(Float, Integer, String), col: Integer).returns(Integer) }
+  sig { params(type: Symbol, val: TokenValue, col: Integer).returns(Integer) }
   def add(type, val, col)
     start_line = @line
     start_offset = current_offset - @s.matched.bytesize
@@ -476,7 +490,7 @@ class Lexer
   sig do
     params(
       type: Symbol,
-      value: T.untyped,
+      value: T.nilable(TokenValue),
       line: Integer,
       column: Integer,
       start_offset: Integer,
@@ -515,23 +529,13 @@ class Lexer
     body.tr('_', '')
   end
 
-  INT_SUFFIX_RANGES = T.let({
-    'u8'  => 0..255,
-    'i8'  => -128..127,
-    'i16' => -32_768..32_767,
-    'u16' => 0..65_535,
-    'i32' => -2_147_483_648..2_147_483_647,
-    'u32' => 0..4_294_967_295,
-    'i64' => -9_223_372_036_854_775_808..9_223_372_036_854_775_807,
-    'u64' => 0..((2**64) - 1),
-  }.freeze, T::Hash[String, T::Range[Integer]])
-
   sig { params(val: Integer, suffix: String, start_col: Integer).returns(T.nilable(Integer)) }
   def add_prefixed_int(val, suffix, start_col)
-    range = INT_SUFFIX_RANGES[suffix]
-    raise Error, "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}" unless range || suffix == 'f32' || suffix == 'f64'
-    if range && !range.include?(val)
-      raise Error, "Lexer Error: Literal #{@s.matched} overflows #{suffix} (range #{range})"
+    unless numeric_suffix?(suffix)
+      raise Error, "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}"
+    end
+    if integer_suffix?(suffix) && !integer_suffix_contains?(suffix, val)
+      raise Error, "Lexer Error: Literal #{@s.matched} overflows #{suffix} (range #{integer_suffix_range_text(suffix)})"
     end
     case suffix
     when 'i64' then add(:INT64,   val,        start_col)
@@ -544,6 +548,46 @@ class Lexer
     when 'u64' then add(:UINT64,  val,        start_col)
     when 'f32' then add(:FLOAT32, val.to_f,   start_col)
     when 'f64' then add(:NUMBER,  val.to_f,   start_col)
+    end
+  end
+
+  sig { params(suffix: String).returns(T::Boolean) }
+  def numeric_suffix?(suffix)
+    integer_suffix?(suffix) || suffix == 'f32' || suffix == 'f64'
+  end
+
+  sig { params(suffix: String).returns(T::Boolean) }
+  def integer_suffix?(suffix)
+    %w[u8 i8 i16 u16 i32 u32 i64 u64].include?(suffix)
+  end
+
+  sig { params(suffix: String, value: Integer).returns(T::Boolean) }
+  def integer_suffix_contains?(suffix, value)
+    case suffix
+    when 'u8' then value >= 0 && value <= 255
+    when 'i8' then value >= -128 && value <= 127
+    when 'i16' then value >= -32_768 && value <= 32_767
+    when 'u16' then value >= 0 && value <= 65_535
+    when 'i32' then value >= -2_147_483_648 && value <= 2_147_483_647
+    when 'u32' then value >= 0 && value <= 4_294_967_295
+    when 'i64' then value >= -9_223_372_036_854_775_808 && value <= 9_223_372_036_854_775_807
+    when 'u64' then value >= 0 && value.bit_length <= 64
+    else false
+    end
+  end
+
+  sig { params(suffix: String).returns(String) }
+  def integer_suffix_range_text(suffix)
+    case suffix
+    when 'u8' then '0..255'
+    when 'i8' then '-128..127'
+    when 'i16' then '-32768..32767'
+    when 'u16' then '0..65535'
+    when 'i32' then '-2147483648..2147483647'
+    when 'u32' then '0..4294967295'
+    when 'i64' then '-9223372036854775808..9223372036854775807'
+    when 'u64' then '0..18446744073709551615'
+    else ''
     end
   end
 

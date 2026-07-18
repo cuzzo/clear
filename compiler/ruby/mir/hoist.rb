@@ -119,7 +119,7 @@ module Hoist
     when AST::ForRange, AST::ForEach, AST::WithBlock, AST::BgBlock, AST::BgStreamBlock
       [stmt.body]
     when AST::WhileLoop, AST::WhileBindLoop    then [stmt.do_branch]
-    when AST::IfStatement                     then [stmt.then_branch, stmt.else_branch].compact
+    when AST::IfStatement, AST::IfBind        then [stmt.then_branch, stmt.else_branch].compact
     when AST::MatchStatement                  then stmt.cases.map(&:body) + [stmt.default_case].compact
     when AST::DoBlock                         then stmt.branches.map(&:body)
     else []
@@ -274,6 +274,8 @@ module Hoist
     case node
     when AST::IfStatement, AST::WhileLoop, AST::WhileBindLoop
       [node.condition]
+    when AST::IfBind
+      node.bindings.map(&:expr)
     when AST::ForRange                     then [node.start_expr, node.end_expr]
     when AST::ForEach                      then [node.collection]
     when AST::MatchStatement               then [node.expr]
@@ -726,7 +728,7 @@ module MIRHoistLowering
       Type.new(mir.zig_base.to_s, ownership: :shared, location: :heap)
     when MIR::RcRetain, MIR::RcDowngrade, MIR::FreezeExpr
       Type.new(mir.zig_base.to_s, ownership: :multiowned, location: :heap)
-    when MIR::Cast, MIR::TryExpr
+    when MIR::Cast, MIR::TryExpr, MIR::TryOptional
       mir_alloc_mark_type_info(mir.expr, nil, context: context)
     when MIR::Call, MIR::MethodCall, MIR::TailCall
       raise "#{context}: allocating #{mir.class} has no callable return type"
@@ -1295,7 +1297,7 @@ module MIRHoistLowering
       cleanup_entry_for_owned_result(ast_node, alloc: alloc) || CleanupEntry.build(:rc, alloc: alloc, has_moved_guard: false)
     when MIR::FreezeExpr
       CleanupEntry.build(:frozen, alloc: :heap, has_moved_guard: false, fixed_alloc: true)
-    when MIR::Cast, MIR::TryExpr
+    when MIR::Cast, MIR::TryExpr, MIR::TryOptional
       hoist_cleanup_entry(mir.expr, ast_node)
     when MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr,
          MIR::Pipeline,

@@ -75,7 +75,11 @@ module Semantic
 
   class CallSiteFact < T::Struct
     const :id, CallSiteId
-    const :node, AST::FuncCall
+    # A fallible call can be either a free function or a receiver method.
+    # Keeping the original call node is important for source fixes: the
+    # fallibility pass must be able to wrap exactly the expression the user
+    # wrote, regardless of its dispatch form.
+    const :node, T.any(AST::FuncCall, AST::MethodCall)
     const :callee_name, String
     const :args, T::Array[AST::Node]
     const :fn_var_call, T::Boolean

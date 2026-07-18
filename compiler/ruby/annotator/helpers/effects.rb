@@ -795,13 +795,17 @@ module EffectAudit
       # a zero-length `!` insert at that column produces `RETURNS !T`.
       tok = fn_node.respond_to?(:return_type_token) ? fn_node.return_type_token : nil
       if tok
+        edits = [Edit.new(
+          span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
+          replacement: '!',
+        )]
+        edits.concat(fallibility_call_site_edits(name)) if FixCollector.fallibility_propagation_enabled?
+        description_key = FixCollector.fallibility_propagation_enabled? ?
+          :PROPAGATE_ERROR_UNION_TO_CALLERS : :ADD_ERROR_UNION_TO_RETURN
         fixes = [Fix.new(
-          description: fix_description(:ADD_ERROR_UNION_TO_RETURN),
+          description: fix_description(description_key),
           confidence: :auto,
-          edits: [Edit.new(
-            span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
-            replacement: '!',
-          )],
+          edits: edits,
         )]
         fixable!(fn_node, code: :FALLIBLE_RETURN_NEEDS_ERROR_UNION,
                  fn: name, hint: hint, return_type: return_type,
@@ -811,6 +815,48 @@ module EffectAudit
                fn: name, hint: hint, return_type: return_type)
       end
     end
+  end
+
+  sig { params(name: String).returns(T::Array[Edit]) }
+  def fallibility_call_site_edits(name)
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
+    summary = function_body_summaries[name]
+    return [] unless summary
+
+    summary.call_site_facts.each_with_object([]) do |fact, edits|
+      next unless fact.propagates_failure
+      next unless fallible_call_site_fact?(fact)
+
+      range = fact.node.source_range
+      next if range.start_line <= 0 || range.end_line <= 0
+
+      edits << Edit.new(
+        span: Span.new(file: range.file, line: range.start_line,
+          col: range.start_column, length: 0),
+        replacement: 'TRY (',
+      )
+      edits << Edit.new(
+        span: Span.new(file: range.file, line: range.end_line,
+          col: range.end_column, length: 0),
+        replacement: ')',
+      )
+    end
+  end
+
+  sig { params(fact: Semantic::CallSiteFact).returns(T::Boolean) }
+  def fallible_call_site_fact?(fact)
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
+    node = fact.node
+    return true if node.respond_to?(:error_union_type) && node.error_union_type
+
+    signature = FunctionSignature.unwrap(node.matched_signature)
+    return true if signature&.return_type&.error_union?
+
+    intrinsic = node.matched_stdlib_def
+    return true if intrinsic&.recoverable_result?
+
+    callee = semantic_function_nodes[fact.callee_name]
+    callee&.error_fallible == true
   end
 
   # Set to true to flip the fallible-signature check from a NO-OP into
@@ -1377,6 +1423,8 @@ module EffectAudit
   private :effect_direct_effects_for
   private :effect_state
   private :enforce_fallible_returns!
+  private :fallibility_call_site_edits
+  private :fallible_call_site_fact?
   private :enumerate_fsm_suspend_points!
   private :fallibility_hint_for
   private :finalize_async_execution_shapes!

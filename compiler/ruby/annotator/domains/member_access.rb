@@ -650,7 +650,13 @@ module Annotator
         # 2. Infer base type from the first element.
         #    If all items are string-like (Byte[N] or String), widen to String so mixed
         #    string lengths ("a", "bb", "ccc") don't produce a type error.
-        if node.items.all? { |i| Type.new(T.must(i.resolved_type)).string? }
+        string_item_types = node.items.map { |item| item.full_type!(context: "list literal string element") }
+        all_strings = string_item_types.all?(&:string?)
+        string_element_sync = if all_strings
+          syncs = string_item_types.map(&:sync).uniq
+          syncs.first if syncs.length == 1
+        end
+        if all_strings
           base_type = :String
         else
           base_type = T.must(T.must(node.items.first).resolved_type)
@@ -664,9 +670,12 @@ module Annotator
         end
 
         if node.storage == :stack
-          stamp_type!(node, Type.new(:"#{base_type}[#{node.items.size}]"))
+          inferred = Type.new(:"#{base_type}[#{node.items.size}]")
+          inferred.elem_sync = string_element_sync if string_element_sync
+          stamp_type!(node, inferred)
         else
           t = Type.new(:"#{base_type}[]", location: :heap)
+          t.elem_sync = string_element_sync if string_element_sync
           t.mark_frame_allocated!  # makeList uses frameAlloc for backing
           stamp_type!(node, t)
         end

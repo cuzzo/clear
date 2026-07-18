@@ -39,7 +39,7 @@ MUTABLE users = List[];
 &users.append("Alice");
 &users.append("Bob");
 n = users.length();       # 2
-name = users[0];           # "Alice"
+name:? = users[0];         # ?String (explicitly retained optional)
 ```
 
 **When to use**: Size is unknown or grows over time. Elements accessed by index. The general-purpose dynamic array — equivalent to `Vec<T>` in Rust or `[]T` in Go.
@@ -149,7 +149,7 @@ migration and fixes to `{String}V`.
 MUTABLE scores: {String}Int64 = {};
 scores["alice"] = 100_i64;
 scores["bob"] = 200_i64;
-val = scores["alice"];                    # 100
+val:? = scores["alice"];                  # ?Int64 (explicitly retained optional)
 &scores.delete("bob");
 scores.contains?("alice");                 # TRUE
 scores.count();                           # 1

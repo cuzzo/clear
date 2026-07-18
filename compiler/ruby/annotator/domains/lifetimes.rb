@@ -1138,7 +1138,7 @@ module Annotator
         return unless ti
 
         # Check if value comes from a stdlib function with explicit metadata
-        val = node.value
+        val = cleanup_source_value(node.value)
         if val && (val.is_a?(AST::FuncCall) || val.is_a?(AST::MethodCall))
           matched_def = val.matched_stdlib_def
           if matched_def
@@ -1168,6 +1168,19 @@ module Annotator
         ti.apply_cleanup_placement!(value_type: val_ti, alloc: alloc)
         alloc
       end
+
+      # Explicit recovery wrappers change control flow, not the ownership or
+      # allocator provenance of the successful payload. Cleanup planning must
+      # inspect the value-producing expression beneath TRY/UNWRAP; otherwise a
+      # heap-returning call is silently reclassified as frame-owned merely
+      # because propagation was made explicit.
+      sig { params(node: T.nilable(AST::Node)).returns(T.nilable(AST::Node)) }
+      def cleanup_source_value(node)
+        current = node
+        current = AST.recovery_payload(current) while current && AST.recovery_wrapper?(current)
+        current
+      end
+      private :cleanup_source_value
 
       sig { params(name: String, node: T.nilable(AST::Node), type_info: Type::TypeInput).returns(T.nilable(T::Set[String])) }
       def og_declare(name, node, type_info)

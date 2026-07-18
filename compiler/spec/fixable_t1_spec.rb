@@ -64,7 +64,7 @@ RSpec.describe "Tier 1 fixable findings" do
       <<~CLEAR
         FN doSomething() RETURNS Int64 -> RETURN 42; END
         FN main() RETURNS Int64 ->
-          fut = BG { @canSmash -> _ = doSomething(); };
+          fut:~ = BG { @canSmash -> _ = doSomething(); };
           RETURN NEXT fut;
         END
       CLEAR

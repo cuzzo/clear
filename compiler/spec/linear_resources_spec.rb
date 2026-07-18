@@ -19,6 +19,10 @@ RSpec.describe SemanticAnnotator do
     run(source).statements.last.resolved_type
   end
 
+  def recovery_payload(node)
+    AST.recovery_wrapper?(node) ? AST.recovery_payload(node) : node
+  end
+
   let(:ast) { run(code) }
   let(:result) { ast.statements.last.resolved_type }
 
@@ -75,24 +79,24 @@ RSpec.describe SemanticAnnotator do
     # ------------------------------------------------------------------
     describe "Annotator: StaticCall type resolution" do
       it "File::open resolves to type :File" do
-        src = 'FN f() RETURNS !Void -> f = File::open("data.txt"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> f = TRY File::open("data.txt"); RETURN; END'
         ast = run(src)
         fn  = ast.statements.first
         # The bind/decl's value node is the StaticCall
-        call = fn.body.first.value
+        call = recovery_payload(fn.body.first.value)
         expect(call.resolved_type).to eq(:File)
       end
 
       it "annotates a File variable as a resource in scope" do
         # We exercise the full annotator; no error means resource path ran
-        expect { run('FN f() RETURNS !Void -> f = File::open("t"); RETURN; END') }.not_to raise_error
+        expect { run('FN f() RETURNS !Void -> f = TRY File::open("t"); RETURN; END') }.not_to raise_error
       end
 
       it "File::open arg is passed the full_type :File" do
-        src = 'FN f() RETURNS !Void -> f = File::open("path"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> f = TRY File::open("path"); RETURN; END'
         ast = run(src)
         fn  = ast.statements.first
-        call = fn.body.first.value
+        call = recovery_payload(fn.body.first.value)
         expect(call.full_type.resolved).to eq(:File)
       end
     end
@@ -117,12 +121,12 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "raises on wrong argument count" do
-        src = 'FN f() RETURNS !Void -> f = File::open("a", "b"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> f = TRY File::open("a", "b"); RETURN; END'
         expect { run(src) }.to raise_error(SourceError, /expects 1 argument/)
       end
 
       it "raises on wrong argument type" do
-        src = 'FN f() RETURNS !Void -> f = File::open(42); RETURN; END'
+        src = 'FN f() RETURNS !Void -> f = TRY File::open(42); RETURN; END'
         expect { run(src) }.to raise_error(SourceError, /expected String, got Int64/)
       end
     end
@@ -132,20 +136,20 @@ RSpec.describe SemanticAnnotator do
     # ------------------------------------------------------------------
     describe "Transpiler: StaticCall code generation" do
       it "emits CheatLib.fileOpen for File::open" do
-        src = 'FN f() RETURNS !Void -> f = File::open("data.txt"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> f = TRY File::open("data.txt"); RETURN; END'
         out = transpile_fn(src)
         expect(out).to include('CheatLib.fileOpen("data.txt")')
       end
 
       it "emits plain defer f.close() when resource is never moved" do
-        src = 'FN f() RETURNS !Void -> f = File::open("data.txt"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> f = TRY File::open("data.txt"); RETURN; END'
         out = transpile_fn(src)
         expect(out).to include("defer f.close();")
         expect(out).not_to include("f_moved")
       end
 
       it "emits guarded defer when resource is maybe-moved" do
-        src = 'FN f(x: Number) RETURNS !File -> f = File::open("data.txt"); IF x > 0 THEN RETURN f; END RETURN File::open("b.txt"); END'
+        src = 'FN f(x: Number) RETURNS !File -> f = TRY File::open("data.txt"); IF x > 0 THEN RETURN f; END RETURN File::open("b.txt"); END'
         out = transpile_fn(src)
         expect(out).to include("f_moved")
         expect(out).to include("defer if (!f_moved) f.close();")
@@ -162,7 +166,7 @@ RSpec.describe SemanticAnnotator do
     describe "Resource move tracking" do
       it "marks the resource as :moved when reassigned" do
         # After 'g = f', f should be :moved so the outer scope does not double-close
-        src = 'FN f() RETURNS !Void -> a = File::open("t"); b = a; RETURN; END'
+        src = 'FN f() RETURNS !Void -> a = TRY File::open("t"); b = a; RETURN; END'
         # Should not raise (resource move is legal)
         expect { run(src) }.not_to raise_error
       end
@@ -195,25 +199,25 @@ RSpec.describe SemanticAnnotator do
     # ------------------------------------------------------------------
     describe "Annotator: TCPServer::listen" do
       it "resolves TCPServer::listen(port) to type :TCPServer" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(8080); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(8080); RETURN; END'
         ast = run(src)
-        call = ast.statements.first.body.first.value
+        call = recovery_payload(ast.statements.first.body.first.value)
         expect(call.resolved_type).to eq(:TCPServer)
       end
 
       it "annotates TCPServer variable as a resource in scope" do
         expect {
-          run('FN f() RETURNS !Void -> s = TCPServer::listen(8080); RETURN; END')
+          run('FN f() RETURNS !Void -> s = TRY TCPServer::listen(8080); RETURN; END')
         }.not_to raise_error
       end
 
       it "raises on wrong argument type (String instead of Int64)" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen("8080"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen("8080"); RETURN; END'
         expect { run(src) }.to raise_error(SourceError, /expected Int64, got/)
       end
 
       it "raises on wrong argument count" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(80, 90); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(80, 90); RETURN; END'
         expect { run(src) }.to raise_error(SourceError, /expects 1 argument/)
       end
 
@@ -228,16 +232,16 @@ RSpec.describe SemanticAnnotator do
     # ------------------------------------------------------------------
     describe "Annotator: accept intrinsic" do
       it "accept(server) resolves to type :TCPClient" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(8080); c = accept(s); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(8080); c = TRY accept(s); RETURN; END'
         ast = run(src)
         fn = ast.statements.first
-        accept_call = fn.body[1].value  # second statement
+        accept_call = recovery_payload(fn.body[1].value)  # second statement
         expect(accept_call.resolved_type).to eq(:TCPClient)
       end
 
       it "annotates the accepted client as a resource (gets defer close)" do
         expect {
-          run('FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); RETURN; END')
+          run('FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); RETURN; END')
         }.not_to raise_error
       end
 
@@ -249,18 +253,18 @@ RSpec.describe SemanticAnnotator do
 
     describe "Annotator: tcpRead intrinsic" do
       it "tcpRead(client) resolves to String" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); data = tcpRead(c); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); data = tcpRead(c); RETURN; END'
         ast = run(src)
         fn = ast.statements.first
         # data is the third statement
         data_bind = fn.body[2]
-        expect(data_bind.value.resolved_type).to eq(:String)
+        expect(recovery_payload(data_bind.value).resolved_type).to eq(:String)
       end
     end
 
     describe "Annotator: tcpWrite intrinsic" do
       it "tcpWrite(client, string) resolves to Void" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); tcpWrite(c, "hello"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); tcpWrite(c, "hello"); RETURN; END'
         ast = run(src)
         fn = ast.statements.first
         write_call = fn.body[2]
@@ -273,39 +277,39 @@ RSpec.describe SemanticAnnotator do
     # ------------------------------------------------------------------
     describe "Transpiler: TCPServer code generation" do
       it "emits CheatLib.socketListen for TCPServer::listen" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(8080); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(8080); RETURN; END'
         out = transpile_fn(src)
         expect(out).to include('CheatLib.socketListen(@intCast(8080))')
       end
 
       it "emits plain defer CheatLib.socketClose when server is never moved" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(8080); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(8080); RETURN; END'
         out = transpile_fn(src)
         expect(out).to include("defer CheatLib.socketClose(s);")
         expect(out).not_to include("s_moved")
       end
 
       it "emits CheatLib.socketAccept for accept()" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); RETURN; END'
         out = transpile_fn(src)
         expect(out).to include('CheatLib.socketAccept(s)')
       end
 
       it "emits plain defer CheatLib.socketClose when client is never moved" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); RETURN; END'
         out = transpile_fn(src)
         expect(out).to include("defer CheatLib.socketClose(c);")
         expect(out).not_to include("c_moved")
       end
 
       it "emits CheatLib.socketRead for tcpRead()" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); d = tcpRead(c); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); d = tcpRead(c); RETURN; END'
         out = transpile_fn(src)
         expect(out).to include('CheatLib.socketRead(')
       end
 
       it "binds tcpRead's owned frame result without an immediate duplicate" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); d = tcpRead(c); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); d = tcpRead(c); RETURN; END'
         out = transpile_fn(src)
 
         expect(out).to include('const d: []const u8 = try CheatLib.socketRead(rt.frameAlloc(), c);')
@@ -313,7 +317,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "emits CheatLib.socketWriteVoid for tcpWrite()" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); tcpWrite(c, "hi"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); tcpWrite(c, "hi"); RETURN; END'
         out = transpile_fn(src)
         # The string literal may be wrapped in @as([]const u8, ...) — check the function name and first arg
         expect(out).to include('CheatLib.socketWriteVoid(c,')
@@ -327,7 +331,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "does not emit _moved flag when TCPServer is never moved" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); RETURN; END'
         out = transpile_fn(src)
         expect(out).not_to include("s_moved")
       end
@@ -338,12 +342,12 @@ RSpec.describe SemanticAnnotator do
     # ------------------------------------------------------------------
     describe "Resource move tracking" do
       it "allows moving a TCPServer to another variable" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); s2 = s; RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); s2 = s; RETURN; END'
         expect { run(src) }.not_to raise_error
       end
 
       it "allows moving a TCPClient to another variable" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); c2 = c; RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); c2 = c; RETURN; END'
         expect { run(src) }.not_to raise_error
       end
     end
@@ -356,72 +360,72 @@ RSpec.describe SemanticAnnotator do
     describe "Use-after-move errors for resource types" do
       # File::open
       it "raises on use-after-move of File::open resource" do
-        src = 'FN f() RETURNS !Void -> a = File::open("x"); b = a; fileWrite(a, "bad"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> a = TRY File::open("x"); b = a; fileWrite(a, "bad"); RETURN; END'
         expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `a`/)
       end
 
       it "raises on double-move of File::open resource" do
-        src = 'FN f() RETURNS !Void -> a = File::open("x"); b = a; c = a; RETURN; END'
+        src = 'FN f() RETURNS !Void -> a = TRY File::open("x"); b = a; c = a; RETURN; END'
         expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `a`/)
       end
 
       # File::create
       it "raises on use-after-move of File::create resource" do
-        src = 'FN f() RETURNS !Void -> a = File::create("x"); b = a; fileWrite(a, "bad"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> a = TRY File::create("x"); b = a; fileWrite(a, "bad"); RETURN; END'
         expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `a`/)
       end
 
       # TCPServer
       it "raises on use-after-move of TCPServer resource" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); s2 = s; c = accept(s); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); s2 = s; c = TRY accept(s); RETURN; END'
         expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `s`/)
       end
 
       it "raises on double-move of TCPServer resource" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); s2 = s; s3 = s; RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); s2 = s; s3 = s; RETURN; END'
         expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `s`/)
       end
 
       # TCPClient
       it "raises on use-after-move of TCPClient resource" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); c2 = c; d = tcpRead(c); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); c2 = c; d = tcpRead(c); RETURN; END'
         expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `c`/)
       end
 
       it "raises on use-after-move when writing to moved TCPClient" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); c2 = c; tcpWrite(c, "bad"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); c2 = c; tcpWrite(c, "bad"); RETURN; END'
         expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `c`/)
       end
 
       # TCPClient::connect
       it "raises on use-after-move of TCPClient::connect resource" do
-        src = 'FN f() RETURNS !Void -> c = TCPClient::connect("127.0.0.1", 8080); c2 = c; tcpWrite(c, "bad"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> c = TRY TCPClient::connect("127.0.0.1", 8080); c2 = c; tcpWrite(c, "bad"); RETURN; END'
         expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `c`/)
       end
 
       # Normal use — should NOT raise
       it "does not raise when using File before any move" do
-        src = 'FN f() RETURNS !Void -> a = File::open("x"); fileWrite(a, "ok"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> a = TRY File::open("x"); fileWrite(a, "ok"); RETURN; END'
         expect { run(src) }.not_to raise_error
       end
 
       it "does not raise when using TCPServer before any move" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); RETURN; END'
         expect { run(src) }.not_to raise_error
       end
 
       it "does not raise when using TCPClient before any move" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); d = tcpRead(c); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); d = tcpRead(c); RETURN; END'
         expect { run(src) }.not_to raise_error
       end
 
       it "does not raise when using TCPClient::connect before any move" do
-        src = 'FN f() RETURNS !Void -> c = TCPClient::connect("127.0.0.1", 8080); tcpWrite(c, "hi"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> c = TRY TCPClient::connect("127.0.0.1", 8080); tcpWrite(c, "hi"); RETURN; END'
         expect { run(src) }.not_to raise_error
       end
 
       it "does not raise when using File::create before any move" do
-        src = 'FN f() RETURNS !Void -> a = File::create("x"); fileWrite(a, "ok"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> a = TRY File::create("x"); fileWrite(a, "ok"); RETURN; END'
         expect { run(src) }.not_to raise_error
       end
     end
@@ -450,13 +454,13 @@ RSpec.describe SemanticAnnotator do
 
       it "RESOLVE on @link compiles" do
         src = 'STRUCT N { v: Int64 }
-              FN f() RETURNS !Void -> x = N{ v: 1 } @shared; w = LINK x; r = RESOLVE w; RETURN; END'
+              FN f() RETURNS !Void -> x = N{ v: 1 } @shared; w = LINK x; r:? = RESOLVE w; RETURN; END'
         expect { run(src) }.not_to raise_error
       end
 
       it "RESOLVE on non-link raises error" do
         src = 'STRUCT N { v: Int64 }
-              FN f() RETURNS !Void -> x = N{ v: 1 } @shared; r = RESOLVE x; RETURN; END'
+              FN f() RETURNS !Void -> x = N{ v: 1 } @shared; r:? = RESOLVE x; RETURN; END'
         expect { run(src) }.to raise_error(/RESOLVE can only be applied to @link/)
       end
 
@@ -476,14 +480,14 @@ RSpec.describe SemanticAnnotator do
 
       it "emits weakRcUpgrade for @multiowned RESOLVE" do
         src = 'STRUCT N { v: Int64 }
-              FN f() RETURNS !Void -> x = N{ v: 1 } @multiowned; w = LINK x; r = RESOLVE w; RETURN; END'
+              FN f() RETURNS !Void -> x = N{ v: 1 } @multiowned; w = LINK x; r:? = RESOLVE w; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("CheatLib.weakRcUpgrade(N, w)")
       end
 
       it "emits weakArcUpgrade for @shared RESOLVE" do
         src = 'STRUCT N { v: Int64 }
-              FN f() RETURNS !Void -> x = N{ v: 1 } @shared; w = LINK x; r = RESOLVE w; RETURN; END'
+              FN f() RETURNS !Void -> x = N{ v: 1 } @shared; w = LINK x; r:? = RESOLVE w; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("CheatLib.weakArcUpgrade(N, w)")
       end
@@ -509,14 +513,14 @@ RSpec.describe SemanticAnnotator do
 
       it "routes optional RESOLVE result cleanup through CheatLib.cleanup" do
         src = 'STRUCT N { v: Int64 }
-              FN f() RETURNS !Void -> x = N{ v: 1 } @multiowned; w = LINK x; r = RESOLVE w; RETURN; END'
+              FN f() RETURNS !Void -> x = N{ v: 1 } @multiowned; w = LINK x; r:? = RESOLVE w; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
         expect(out).to match(/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&r\)/)
       end
 
       it "@link type annotation preserves link_source" do
         src = 'STRUCT N { v: Int64 }
-              FN f() RETURNS !Void -> x = N{ v: 1 } @multiowned; w: N@link = LINK x; r = RESOLVE w; RETURN; END'
+              FN f() RETURNS !Void -> x = N{ v: 1 } @multiowned; w: N@link = LINK x; r:? = RESOLVE w; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("CheatLib.weakRcUpgrade(N, w)")
       end
@@ -561,7 +565,7 @@ RSpec.describe SemanticAnnotator do
 
       it "RESOLVE result has optional type, not @link" do
         src = 'STRUCT N { v: Int64 }
-              FN f() RETURNS !Void -> x = N{ v: 1 } @multiowned; w = LINK x; r = RESOLVE w; ASSERT r != NIL, "ok"; RETURN; END'
+              FN f() RETURNS !Void -> x = N{ v: 1 } @multiowned; w = LINK x; r:? = RESOLVE w; ASSERT r != NIL, "ok"; RETURN; END'
         expect { run(src) }.not_to raise_error
       end
 
@@ -629,7 +633,7 @@ RSpec.describe SemanticAnnotator do
     # ------------------------------------------------------------------
     describe "Phase 4 — File::create" do
       it "resolves File::create return type as File" do
-        src = 'FN f() RETURNS !Void -> f = File::create("out.txt"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> f = TRY File::create("out.txt"); RETURN; END'
         tree = run(src)
         fn_node = tree.statements.first
         bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "f" }
@@ -637,20 +641,20 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "emits try CheatLib.fileCreate for File::create" do
-        src = 'FN f() RETURNS !Void -> f = File::create("out.txt"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> f = TRY File::create("out.txt"); RETURN; END'
         out = transpile_fn(src)
         expect(out).to include('CheatLib.fileCreate(')
       end
 
       it "emits plain defer f.close() when File::create is never moved" do
-        src = 'FN f() RETURNS !Void -> f = File::create("out.txt"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> f = TRY File::create("out.txt"); RETURN; END'
         out = transpile_fn(src)
         expect(out).to include("defer f.close();")
         expect(out).not_to include("f_moved")
       end
 
       it "raises on File::create with wrong arg count" do
-        src = 'FN f() RETURNS !Void -> f = File::create("a.txt", "b.txt"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> f = TRY File::create("a.txt", "b.txt"); RETURN; END'
         expect { run(src) }.to raise_error(/expects 1 argument|argument.*got 2/i)
       end
 
@@ -662,7 +666,7 @@ RSpec.describe SemanticAnnotator do
 
     describe "Phase 4 — fileWrite intrinsic" do
       it "resolves fileWrite return type as Void" do
-        src = 'FN f() RETURNS !Void -> ff = File::create("o.txt"); fileWrite(ff, "hello"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> ff = TRY File::create("o.txt"); fileWrite(ff, "hello"); RETURN; END'
         tree = run(src)
         fn_node = tree.statements.first
         call = fn_node.body.find { |n| n.is_a?(AST::FuncCall) && n.name == "fileWrite" }
@@ -670,7 +674,7 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "emits try CheatLib.fileWrite for fileWrite()" do
-        src = 'FN f() RETURNS !Void -> ff = File::create("o.txt"); fileWrite(ff, "hello"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> ff = TRY File::create("o.txt"); fileWrite(ff, "hello"); RETURN; END'
         out = transpile_fn(src)
         expect(out).to include('CheatLib.fileWrite(ff,')
       end
@@ -681,19 +685,19 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "raises on fileWrite with non-String second argument" do
-        src = 'FN f() RETURNS !Void -> ff = File::create("o.txt"); fileWrite(ff, 42); RETURN; END'
+        src = 'FN f() RETURNS !Void -> ff = TRY File::create("o.txt"); fileWrite(ff, 42); RETURN; END'
         expect { run(src) }.to raise_error(/No overload for 'fileWrite'|fileWrite/)
       end
 
       it "raises on fileWrite with wrong arg count" do
-        src = 'FN f() RETURNS !Void -> ff = File::create("o.txt"); fileWrite(ff); RETURN; END'
+        src = 'FN f() RETURNS !Void -> ff = TRY File::create("o.txt"); fileWrite(ff); RETURN; END'
         expect { run(src) }.to raise_error(/No overload for 'fileWrite'|fileWrite/)
       end
     end
 
     describe "Phase 4 — TCPClient::connect" do
       it "resolves TCPClient::connect return type as TCPClient" do
-        src = 'FN f() RETURNS !Void -> c = TCPClient::connect("127.0.0.1", 8080); RETURN; END'
+        src = 'FN f() RETURNS !Void -> c = TRY TCPClient::connect("127.0.0.1", 8080); RETURN; END'
         tree = run(src)
         fn_node = tree.statements.first
         bind = fn_node.body.find { |n| n.is_a?(AST::BindExpr) && n.name == "c" }
@@ -701,20 +705,20 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "emits try CheatLib.socketConnect for TCPClient::connect" do
-        src = 'FN f() RETURNS !Void -> c = TCPClient::connect("127.0.0.1", 8080); RETURN; END'
+        src = 'FN f() RETURNS !Void -> c = TRY TCPClient::connect("127.0.0.1", 8080); RETURN; END'
         out = transpile_fn(src)
         expect(out).to include('CheatLib.socketConnect(')
       end
 
       it "emits plain defer CheatLib.socketClose when TCPClient::connect is never moved" do
-        src = 'FN f() RETURNS !Void -> c = TCPClient::connect("127.0.0.1", 8080); RETURN; END'
+        src = 'FN f() RETURNS !Void -> c = TRY TCPClient::connect("127.0.0.1", 8080); RETURN; END'
         out = transpile_fn(src)
         expect(out).to include("defer CheatLib.socketClose(c);")
         expect(out).not_to include("c_moved")
       end
 
       it "raises on TCPClient::connect with wrong arg count" do
-        src = 'FN f() RETURNS !Void -> c = TCPClient::connect("127.0.0.1"); RETURN; END'
+        src = 'FN f() RETURNS !Void -> c = TRY TCPClient::connect("127.0.0.1"); RETURN; END'
         expect { run(src) }.to raise_error(/expects 2 argument|argument.*got 1/i)
       end
 
@@ -726,7 +730,7 @@ RSpec.describe SemanticAnnotator do
       it "can send after TCPClient::connect — codegen includes tcpWrite" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            c = TCPClient::connect("127.0.0.1", 8080);
+            c = TRY TCPClient::connect("127.0.0.1", 8080);
             tcpWrite(c, "hello");
             RETURN;
           END
@@ -748,12 +752,12 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "raises on tcpWrite with non-String second argument" do
-        src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); tcpWrite(c, 42); RETURN; END'
+        src = 'FN f() RETURNS !Void -> s = TRY TCPServer::listen(0); c = TRY accept(s); tcpWrite(c, 42); RETURN; END'
         expect { run(src) }.to raise_error(/No overload for 'tcpWrite'|tcpWrite/)
       end
 
       it "raises on accept with non-TCPServer argument" do
-        src = 'FN f() RETURNS !Void -> x = accept(42); RETURN; END'
+        src = 'FN f() RETURNS !Void -> x = TRY accept(42); RETURN; END'
         expect { run(src) }.to raise_error(/No overload for 'accept'|accept/)
       end
     end

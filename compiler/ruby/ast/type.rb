@@ -4282,6 +4282,10 @@ class Type
     seen_set << key
 
     return false if borrowed_reference?
+    # Symbols are interned, process-lifetime string data. They have String's
+    # representation, but never own the backing bytes and therefore must not
+    # make an enclosing collection recursively cleanup-bearing.
+    return false if symbol?
     if optional?
       optional_inner = T.let(wrapped_type, T.nilable(Type))
       return false unless optional_inner
@@ -5212,11 +5216,11 @@ class Type
       return "*CheatLib.obs.#{observable_wrapper_zig(tense_type)}"
     end
     if promise_list?
-      elem_zig = T.must(tense_type.element_type).zig_type(is_param: is_param, is_field: is_field)
+      elem_zig = T.must(tense_type.element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       return "std.ArrayListUnmanaged(CheatLib.Promise(#{elem_zig}))"
     end
     if bounded_stream?
-      elem_zig = T.must(stream_element_type).zig_type(is_param: is_param, is_field: is_field)
+      elem_zig = T.must(stream_element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.BoundedStream(#{elem_zig}, #{stream_capacity})"
     end
     if dynamic_stream?
@@ -5225,26 +5229,26 @@ class Type
              when :Int64 then "CheatLib.IntRange"
              when :Float64 then "CheatLib.Range"
              else
-              "CheatLib.Stream(#{inner_t.zig_type(is_param: is_param, is_field: is_field)})"
+              "CheatLib.Stream(#{inner_t.nested_zig_type(is_param: is_param, is_field: is_field)})"
              end
     end
     if shared_promise?
-      return "CheatLib.SharedPromise(#{tense_type.zig_type(is_param: is_param, is_field: is_field)})"
+      return "CheatLib.SharedPromise(#{tense_type.nested_zig_type(is_param: is_param, is_field: is_field)})"
     end
     if split_open_stream?
-      elem_zig = T.must(open_stream_element_type).zig_type(is_param: is_param, is_field: is_field)
+      elem_zig = T.must(open_stream_element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.SplitStream(#{elem_zig})"
     end
     if open_stream?
-      elem_zig = T.must(open_stream_element_type).zig_type(is_param: is_param, is_field: is_field)
+      elem_zig = T.must(open_stream_element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.Stream(#{elem_zig})"
     end
     if inf_stream?
-      elem_zig = T.must(inf_stream_element_type).zig_type(is_param: is_param, is_field: is_field)
+      elem_zig = T.must(inf_stream_element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.InfStream(#{elem_zig})"
     end
 
-    "CheatLib.Promise(#{tense_type.zig_type(is_param: is_param, is_field: is_field)})"
+    "CheatLib.Promise(#{tense_type.nested_zig_type(is_param: is_param, is_field: is_field)})"
   end
 
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(T.nilable(String)) }
@@ -5428,7 +5432,7 @@ class Type
         return "*const fn(#{param_types_zig.join(', ')}) callconv(.c) #{ret_zig}"
       end
       all_params = ["*Runtime"] + param_types_zig
-      ret_str = ZigType.new(ret_zig).anyerror_return_type
+      ret_str = ZigType.new(ret_zig).concrete_fallible_return_type
       return "*const fn(#{all_params.join(', ')}) #{ret_str}"
     end
 

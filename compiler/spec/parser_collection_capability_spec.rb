@@ -1,6 +1,7 @@
 require "rspec"
 require_relative "../ruby/ast/lexer" unless defined?(Lexer)
 require_relative "../ruby/ast/parser" unless defined?(ClearParser)
+require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 
 RSpec.describe "ClearParser collection capability chains" do
   def parse_expr(source)
@@ -47,6 +48,96 @@ RSpec.describe "ClearParser collection capability chains" do
 
     parser = ClearParser.new(Lexer.new("").tokenize, "")
     expect(parser.send(:type_annotation_source, optional_collection)).to eq("?(Counter[]@list)")
+  end
+
+  it "preserves String@symbol element representation when inferring a symbol list literal" do
+    source = <<~CLEAR
+      FN containsKeyword(value: String@symbol) RETURNS Bool ->
+        keywords: []String@symbol = [:alpha, :beta, :gamma];
+        RETURN keywords.contains?(value);
+      END
+    CLEAR
+
+    expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
+  end
+
+  it "does not attach cleanup temporaries to top-level symbol collections" do
+    source = <<~CLEAR
+      keywords: []String@symbol = [:alpha, :beta, :gamma];
+
+      FN containsKeyword(value: String@symbol) RETURNS Bool ->
+        RETURN keywords.contains?(value);
+      END
+    CLEAR
+
+    expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
+  end
+
+  it "uses static storage for keyword-shaped literal symbols" do
+    source = <<~CLEAR
+      keywords: [3]String@symbol = [:alpha, symbol("OR_ELSE"), :gamma];
+
+      FN containsKeyword(value: String@symbol) RETURNS Bool ->
+        RETURN keywords.contains?(value);
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new.transpile(source)
+    expect(zig).to include('const __clear_symbol_')
+    expect(zig).not_to include('internSymbol("OR_ELSE")')
+  end
+
+  it "keeps fixed string literal arrays in static storage" do
+    source = <<~CLEAR
+      suffixes: [3]String = ["u8", "i64", "u64"];
+      FN known(value: String) RETURNS Bool ->
+        RETURN suffixes.contains?(value);
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new.transpile(source)
+    declaration = zig.lines.find { |line| line.include?("suffixes =") }
+    expect(declaration).to include('[3][]const u8{ "u8", "i64", "u64" }')
+    expect(declaration).not_to include("dupe")
+  end
+
+  it "keeps owned hoists inside IF EXISTS binding scope" do
+    source = <<~CLEAR
+      FN collect(maybe: ?String) RETURNS ![]String ->
+        MUTABLE values: []String = [];
+        IF maybe EXISTS AS value THEN
+          &values.append(COPY value);
+        END
+        RETURN values;
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new.transpile(source)
+    branch = zig.index("if (maybe) |value|")
+    copy = zig.index("const __tmp_", branch || 0)
+    expect(branch).not_to be_nil
+    expect(copy).not_to be_nil
+    expect(copy).to be > branch
+  end
+
+  it "quotes Zig-reserved CLEAR parameter names consistently" do
+    source = <<~CLEAR
+      FN identity(type: Int64) RETURNS Int64 ->
+        RETURN type;
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new.transpile(source)
+    expect(zig).to include('fn identity(@"type": i64) i64')
+    expect(zig).to include('return @"type";')
+  end
+
+  it "unwraps grouped optional composite types reconstructed from generic arguments" do
+    tuple = Type.new(:"Tuple<Bool,?(HashMap<String,Any>)>")
+    optional_map = tuple.generic_args.fetch(1)
+
+    expect(optional_map).to be_optional
+    expect(T.must(optional_map.wrapped_type)).to be_map
   end
 
   it "parses direct constructor modifier tokens before colon chains" do

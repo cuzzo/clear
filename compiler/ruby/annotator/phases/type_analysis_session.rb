@@ -23,6 +23,7 @@ require_relative "signature_registration"
 require_relative "type_registration"
 require_relative "whole_program_semantics"
 require_relative "../function_registry"
+require_relative "../helpers/recoverable_result"
 require_relative "../domains/control_flow"
 require_relative "../domains/variables"
 require_relative "../domains/destructuring"
@@ -74,6 +75,7 @@ class Annotator::Phases::TypeAnalysisSession
   include GenericAnalysis
   include EffectTracker
   include EffectQueries
+  include RecoverableResult
   include ReentranceBridge
   include ReentranceQueries
   include CapabilityHelper

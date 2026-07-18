@@ -84,7 +84,7 @@ RSpec.describe "Provenance annotation" do
             RETURN Holder{ items: vals, label: "test" };
         END
         FN main() RETURNS Void ->
-            h = build();
+            h = TRY build();
             RETURN;
         END
       CLEAR
@@ -108,7 +108,7 @@ RSpec.describe "Provenance annotation" do
         CATCH Transient
             RETURN "caught";
         END
-        FN main() RETURNS Void -> s = handle("x"); RETURN; END
+        FN main() RETURNS Void -> s = TRY handle("x"); RETURN; END
       CLEAR
       binding = find_binding(ast, "main", "s")
       expect(binding.symbol.storage).to eq(:heap)

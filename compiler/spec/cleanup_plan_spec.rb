@@ -1072,7 +1072,7 @@ RSpec.describe CleanupClassifier do
               RETURN items;
           END
           FN main() RETURNS Void ->
-              list1 = makeList();
+              list1 = TRY makeList();
               ASSERT list1.length() == 1;
               RETURN;
           END
@@ -1098,7 +1098,7 @@ RSpec.describe CleanupClassifier do
               RETURN makeList();
           END
           FN main() RETURNS Void ->
-              result = wrapper();
+              result = TRY wrapper();
               RETURN;
           END
         CLEAR
@@ -1120,7 +1120,7 @@ RSpec.describe CleanupClassifier do
               RETURN Value{ Items: items };
           END
           FN main() RETURNS Void ->
-              v = makeValue();
+              v = TRY makeValue();
               RETURN;
           END
         CLEAR
@@ -1300,7 +1300,7 @@ RSpec.describe CleanupClassifier do
             RETURN "recovered";
         END
         FN main() RETURNS Void ->
-            r = handleWithCatch("ok");
+            r = TRY handleWithCatch("ok");
             RETURN;
         END
       CLEAR
@@ -1436,7 +1436,7 @@ RSpec.describe CleanupClassifier do
             RETURN Data.Nested{ label: "outer", inner: inner };
         END
         FN main() RETURNS Void ->
-            d = makeNested();
+            d = TRY makeNested();
             d2 = COPY d;
             PARTIAL MATCH TAKES d2 START
                 Data.Nested AS n -> print(n.label);,

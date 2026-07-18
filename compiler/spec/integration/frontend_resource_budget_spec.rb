@@ -18,6 +18,12 @@ RSpec.describe "frontend resource-budget integration" do
       .to raise_error(ParserError, /Frontend nesting resource limit exceeded \(limit 24\)/)
   end
 
+  it "restores nesting after each successful scope" do
+    success_budget = FrontendResourceBudget.new(max_nesting: 1)
+    expect(success_budget.nested { :first }).to eq(:first)
+    expect(success_budget.nested { :second }).to eq(:second)
+  end
+
   it "returns a stable ParserError for a token budget" do
     budget = FrontendResourceBudget.new(max_tokens: 8)
     expect { parse("a = 1_i64; b = 2_i64;", budget: budget) }

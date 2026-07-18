@@ -38,7 +38,18 @@ class FrontendResourceBudget
 
   sig { params(source: String).void }
   def check_source!(source)
-    raise Exceeded.new(:source_bytes, @max_source_bytes) if source.bytesize > @max_source_bytes
+    violation = source_violation(source)
+    raise violation if violation
+  end
+
+  # Resource checks are also exposed as data so frontend boundaries can map a
+  # shared-budget violation into their own stable diagnostic type without
+  # catching and introspecting an exception.
+  sig { params(source: String).returns(T.nilable(Exceeded)) }
+  def source_violation(source)
+    return Exceeded.new(:source_bytes, @max_source_bytes) if source.bytesize > @max_source_bytes
+
+    nil
   end
 
   sig { params(count: Integer).void }
@@ -49,10 +60,13 @@ class FrontendResourceBudget
   sig { type_parameters(:Result).params(block: T.proc.returns(T.type_parameter(:Result))).returns(T.type_parameter(:Result)) }
   def nested(&block)
     @nesting += 1
-    raise Exceeded.new(:nesting, @max_nesting) if @nesting > @max_nesting
+    if @nesting > @max_nesting
+      @nesting -= 1
+      raise Exceeded.new(:nesting, @max_nesting)
+    end
 
-    yield
-  ensure
+    result = yield
     @nesting -= 1
+    result
   end
 end

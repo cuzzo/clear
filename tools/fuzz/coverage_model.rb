@@ -268,6 +268,9 @@ module FuzzCoverageModel
       failure_proves: 'Mutable collection params retain allocator and mutation visibility across forwarding calls.',
       high_risk: true
     ),
+    next_tense_matrix: profile(
+      failure_proves: 'NEXT unwraps future and stream tense layers across declared fallible/optional permutations without changing the remaining lifecycle.'
+    ),
     nested_loop_escape: profile(
       failure_proves: 'Nested loop-local collection escapes force safe promotion for outer-container storage.',
       high_risk: true

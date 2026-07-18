@@ -302,9 +302,9 @@ module WithMatchCheck
   VERSIONED_SYNCS = T.let(%i[versioned].to_set.freeze, T::Set[Symbol])
   ATOMIC_SYNCS    = T.let(%i[atomic].to_set.freeze, T::Set[Symbol])
 
-  sig { params(arg: AST::Node).returns(T.nilable(Symbol)) }
+  sig { params(arg: T.untyped).returns(T.nilable(Symbol)) }
   def self.family_of_arg(arg)
-    sym = arg.symbol
+    sym = capability_argument_symbol(arg)
     return nil unless sym
     sync = sym.sync
     return :LOCKED    if sync && LOCKED_SYNCS.include?(sync)
@@ -321,6 +321,23 @@ module WithMatchCheck
     return :LOCAL if sym.plain_local_family?
     nil
   end
+
+  sig { params(arg: T.untyped).returns(T.untyped) }
+  def self.capability_argument_symbol(arg)
+    current = T.let(arg, T.untyped)
+    while current
+      symbol = current.symbol
+      return symbol if symbol
+
+      current = if current.is_a?(AST::GetField) || current.is_a?(AST::GetIndex)
+        current.target
+      elsif current.respond_to?(:value) && current.value.is_a?(AST::Locatable)
+        current.value
+      end
+    end
+    nil
+  end
+  private_class_method :capability_argument_symbol
 
   # SNAPSHOTTED is the umbrella family for VERSIONED and ATOMIC; LOCKED admits
   # :LOCKED at the family level. Other families are exact-match.
@@ -343,9 +360,9 @@ module WithMatchCheck
   # downstream readers (effect resolution, mir lowering) see concrete
   # families uniformly.
   # Returns an empty Set when the arg has no sync attribute (no contention).
-  sig { params(arg: AST::Node).returns(T::Set[Symbol]) }
+  sig { params(arg: T.untyped).returns(T::Set[Symbol]) }
   def self.family_of_arg_set(arg)
-    sym = arg.symbol
+    sym = capability_argument_symbol(arg)
     return Set.new unless sym
     families = sym.sync_families
     if families && families.size > 1

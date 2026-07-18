@@ -181,7 +181,7 @@ class Formatter::FormatLexer
       when @s.peek(1) == '"'
         raw = consume_string
         push(:STRING, raw, sl, sc)
-      when m = @s.scan(/->|\|>|!!|==|!=|>=|<=|>>|<<|&&|\|\||\*\*|\$\+|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
+      when m = @s.scan(/->|\|>|==|!=|>=|<=|>>|<<|&&|\|\||\*\*|\$\+|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
         push(:OP, m, sl, sc)
       when m = @s.scan(/[=+\-*\/<>&|!.,;(){}\[\]:?~%]/)
         push(:SYM, m, sl, sc)
@@ -3035,10 +3035,6 @@ class Formatter::Emitter
     return false if b.type == :SYM && b.raw == '.'
     return false if a.type == :OP  && a.raw == '::'
     return false if b.type == :OP  && b.raw == '::'
-
-    # Error propagation is postfix and may be followed by another postfix:
-    # `load()!!` and `load()!!.field`.
-    return false if b.type == :OP && b.raw == '!!'
 
     # Optional unwrap is postfix: `value?`, `call()?`, `items[0]?`.
     if b.type == :SYM && b.raw == '?'

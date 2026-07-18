@@ -25,6 +25,8 @@ RSpec.describe "ThunkTransform module wiring" do
       expect(ZigType.float_identifier?("f64")).to eq(true)
       expect(ZigType.integer_identifier?("usize")).to eq(false)
       expect(ZigType.primitive_numeric_identifier?("Int64")).to eq(false)
+      expect(ZigType.reserved_identifier?("type")).to eq(true)
+      expect(ZigType.reserved_identifier?("ordinary_name")).to eq(false)
     end
   end
 

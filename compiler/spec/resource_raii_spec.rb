@@ -12,7 +12,7 @@ RSpec.describe "Resource RAII Transpilation" do
   it "emits plain defer f.close() when File::open is never moved" do
     src = <<~CLEAR
       FN test() RETURNS !Void ->
-        f = File::open("test.txt");
+        f = TRY File::open("test.txt");
         RETURN;
       END
     CLEAR
@@ -25,7 +25,7 @@ RSpec.describe "Resource RAII Transpilation" do
   it "DOES NOT emit defer close() when returning a resource (regression)" do
     src = <<~CLEAR
       FN getFile() RETURNS !File ->
-        f = File::open("test.txt");
+        f = TRY File::open("test.txt");
         RETURN f;
       END
     CLEAR
@@ -39,7 +39,7 @@ RSpec.describe "Resource RAII Transpilation" do
   it "eliminates f cleanup when always moved to g (regression)" do
     src = <<~CLEAR
       FN moveFile() RETURNS !Void ->
-        f = File::open("test.txt");
+        f = TRY File::open("test.txt");
         g = f;
         RETURN;
       END
@@ -54,7 +54,7 @@ RSpec.describe "Resource RAII Transpilation" do
   it "eliminates f cleanup when always GIVEn (regression)" do
     src = <<~CLEAR
       FN giveFile() RETURNS !Void ->
-        f = File::open("test.txt");
+        f = TRY File::open("test.txt");
         GIVE f;
         RETURN;
       END

@@ -103,6 +103,19 @@ RSpec.describe "predicate library — numeric" do
       expect { transpile(src) }.not_to raise_error
     end
 
+    it "compiles explicit UTF-8 validation at byte-input boundaries" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          source = "valid UTF-8";
+          ASSERT source.validUtf8?();
+          RETURN;
+        END
+      CLEAR
+
+      zig = transpile(src)
+      expect(zig).to include("std.unicode.utf8ValidateSlice")
+    end
+
     it "emits std.mem.startsWith / endsWith for the predicates" do
       src = <<~CLEAR
         FN main() RETURNS Void ->

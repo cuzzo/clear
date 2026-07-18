@@ -534,10 +534,13 @@ RSpec.describe Lexer do
     end
 
 
-    it "tokenizes !! as one postfix error-propagation operator" do
-      tokens = Lexer.new("risky()!!.value").tokenize
-      expect(tokens.map(&:value)).to include("!!")
-      expect(tokens.find { |token| token.value == "!!" }.type).to eq(:CHAR)
+    it "tokenizes TRY as a propagation keyword, not a postfix operator" do
+      tokens = Lexer.new("TRY risky()").tokenize
+      expect(tokens[0].value).to eq("TRY")
+      expect(tokens[0].type).to eq(:KEYWORD)
+
+      legacy = Lexer.new("risky()!!").tokenize
+      expect(legacy.map(&:value)).not_to include("!!")
     end
   end
   end
