@@ -1757,7 +1757,7 @@ pub const CheatLib = struct {
         const stderr_fd = std.posix.STDERR_FILENO;
 
         // Check if stdin is a tty; if not, fall back to basic readLine
-        if (!std.posix.isatty(stdin_fd)) {
+        if (std.posix.system.isatty(stdin_fd) == 0) {
             return readLine(allocator);
         }
 

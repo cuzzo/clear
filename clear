@@ -215,6 +215,7 @@ def run_project_build_zig!(source, output:, opt_level:, mode:, run_args: [], use
   cmd = [
     ZIG,
     'build',
+    '-fno-incremental',
     step,
     "-Dclear-source=#{File.expand_path(source)}",
     "-Dclear-output=#{File.expand_path(output)}",
@@ -250,7 +251,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false, zig_coverage: false, zig_coverage_suite: 'clear-cli', zig_coverage_name: nil, zig_coverage_run_dir: nil, ownership_mode: :default)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false, zig_coverage: false, zig_coverage_suite: 'clear-cli', zig_coverage_name: nil, zig_coverage_run_dir: nil, ownership_mode: :default, prepare_only: false)
   invocation_cwd = Dir.pwd
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
@@ -259,6 +260,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   # Output binary path
   output ||= File.join(source_dir, base_name)
+  output = File.expand_path(output)
   signature = ClearBuildSupport.build_signature(
     config: BUILD_SUPPORT_CONFIG,
     source: source,
@@ -278,21 +280,23 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   )
 
   # Skip rebuild if output is newer than source AND compiler files.
-  begin
-    up_to_date = ClearBuildSupport.build_up_to_date?(
-      source: source,
-      output: output,
-      signature: signature,
-      config: BUILD_SUPPORT_CONFIG,
-      force: force,
-      module_mode: module_mode,
-      profile: profile
-    )
-  rescue ClearBuildSupport::BuildError => e
-    error e.message
+  unless prepare_only
+    begin
+      up_to_date = ClearBuildSupport.build_up_to_date?(
+        source: source,
+        output: output,
+        signature: signature,
+        config: BUILD_SUPPORT_CONFIG,
+        force: force,
+        module_mode: module_mode,
+        profile: profile
+      )
+    rescue ClearBuildSupport::BuildError => e
+      error e.message
+    end
   end
 
-  if up_to_date
+  if !prepare_only && up_to_date
     $stderr.puts "\e[90mup-to-date: #{output}\e[0m"
     return :up_to_date
   end
@@ -377,9 +381,6 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # the file path so EXTERN against the runtime works without needing a
   # multi-package build.zig.
   zig_code = zig_code.gsub('@import("cheat_runtime")', '@import("runtime/runtime-header.zig")')
-  ClearBuildSupport.write_if_changed(tmp_zig, zig_code)
-  cleanup_paths << tmp_zig if coverage_module_mode
-
   # Auto-detect FFI modules: scan the entry and local REQUIRE graph for
   # EXTERN ... FROM "module" declarations. Required helper files can own native
   # declarations even when the entry file only has REQUIRE lines.
@@ -412,7 +413,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     if coverage_module_mode && preexisting && File.read(dst_mod) != File.read(src_mod)
       error "Coverage build cannot place FFI module #{m}.zig in #{build_dir}: file already exists"
     end
-    FileUtils.cp(src_mod, dst_mod)
+    ClearBuildSupport.write_if_changed(dst_mod, File.binread(src_mod))
     cleanup_paths << dst_mod if coverage_module_mode && !preexisting
   end
 
@@ -457,6 +458,12 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     pkg_name
   end
 
+  # Publish the root last. A persistent Zig watcher may react to every rename;
+  # writing dependencies first guarantees that it never observes a new root
+  # paired with stale generated package or FFI modules.
+  ClearBuildSupport.write_if_changed(tmp_zig, zig_code)
+  cleanup_paths << tmp_zig if coverage_module_mode
+
   # Build Zig command from the temp build dir. Keep the runtime/lib layout,
   # but rely on ordinary file imports instead of Zig named modules.
 
@@ -490,13 +497,39 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     error "Invalid CLEAR_EXTRA_LINK_LIBS entry: #{lib}" unless lib.match?(/\A[A-Za-z0-9_.+\-]+\z/)
     cmd_parts << "-l#{lib}"
   end
-  cmd_parts.concat(c_ffi_link_flags(c_libraries, build_dir, cleanup_paths))
+  c_link_flags = c_ffi_link_flags(c_libraries, build_dir, cleanup_paths)
+  cmd_parts.concat(c_link_flags)
+
+  if prepare_only
+    return {
+      source: source,
+      output: output,
+      build_dir: build_dir,
+      root_name: tmp_name,
+      signature: signature,
+      dependency_paths: (ffi_dependency_paths + ffi_modules.map(&:last)).uniq,
+      extra_link_libs: extra_link_libs,
+      c_link_flags: c_link_flags
+    }
+  end
+
+  # One-shot builds (including tests and CI) deliberately stay off Zig's
+  # experimental incremental path. Only the persistent watch command opts in.
+  cmd_parts << '-fno-incremental'
 
   unless module_mode
     bin_name = "#{File.basename(output)}-#{$$}"
     cmd_parts += ['-O', opt_level] + extra_flags
     cmd_parts += ['-fno-strip'] if profile
     cmd_parts += ['--name', bin_name]
+  end
+
+  # Release/CI artifacts must never inherit experimental incremental state.
+  # These caches are private to this source file, so clearing them cannot
+  # disturb another program's build.
+  if !module_mode && opt_level == 'ReleaseFast'
+    FileUtils.rm_rf(cache_dir)
+    FileUtils.rm_rf(global_cache_dir)
   end
 
   if coverage_module_mode
@@ -553,12 +586,209 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   compile_output
 end
 
+# Zig 0.16 recompiles assembly inputs as part of every incremental update and
+# can emit duplicate symbols when both runtime .S files are attached directly
+# to a persistent Step.Compile. Build them once as stable object-file inputs.
+def compile_watch_object(source, object, build_dir)
+  stamp = "#{object}.sha256"
+  digest = Digest::SHA256.hexdigest(File.binread(source) + "\0#{ZIG}")
+  return false if File.exist?(object) && File.exist?(stamp) && File.read(stamp).strip == digest
+
+  temporary = "#{object}.next.#{$$}"
+  cache_dir = File.join(build_dir, '.asm-zig-cache')
+  global_cache_dir = File.join(build_dir, '.asm-global-zig-cache')
+  FileUtils.rm_f(temporary)
+  output, status = Open3.capture2e(
+    ZIG, 'build-obj', source,
+    "-femit-bin=#{temporary}",
+    '--cache-dir', cache_dir,
+    '--global-cache-dir', global_cache_dir,
+    '-fno-incremental'
+  )
+  unless status.success?
+    FileUtils.rm_f(temporary)
+    $stderr.puts output
+    error "Failed to compile runtime assembly: #{source}"
+  end
+  File.rename(temporary, object)
+  ClearBuildSupport.write_if_changed(stamp, "#{digest}\n")
+  true
+end
+
+def write_watch_build_zig(context)
+  library_dirs = []
+  rpaths = []
+  libraries = context[:extra_link_libs].dup
+  flags = context[:c_link_flags]
+  i = 0
+  while i < flags.length
+    flag = flags[i]
+    if flag.start_with?('-L')
+      library_dirs << flag.delete_prefix('-L')
+    elsif flag == '-rpath'
+      i += 1
+      error '-rpath requires a directory' unless flags[i]
+      rpaths << flags[i]
+    elsif flag.start_with?('-l')
+      libraries << flag.delete_prefix('-l')
+    else
+      error "Unsupported incremental link flag: #{flag}"
+    end
+    i += 1
+  end
+
+  build_lines = [
+    'const std = @import("std");',
+    '',
+    'pub fn build(b: *std.Build) void {',
+    '    const target = b.standardTargetOptions(.{});',
+    '    const optimize = b.standardOptimizeOption(.{});',
+    '    const root = b.createModule(.{',
+    "        .root_source_file = b.path(#{context[:root_name].to_json}),",
+    '        .target = target,',
+    '        .optimize = optimize,',
+    '    });',
+    '    root.link_libc = true;',
+    '    root.addObjectFile(b.path("runtime-switch.o"));',
+    '    root.addObjectFile(b.path("runtime-onRoot.o"));'
+  ]
+  library_dirs.uniq.each do |dir|
+    build_lines << "    root.addLibraryPath(.{ .cwd_relative = #{File.expand_path(dir).to_json} });"
+  end
+  rpaths.uniq.each do |dir|
+    build_lines << "    root.addRPath(.{ .cwd_relative = #{File.expand_path(dir).to_json} });"
+  end
+  libraries.uniq.each do |library|
+    error "Invalid incremental link library: #{library}" unless library.match?(/\A[A-Za-z0-9_.+\-]+\z/)
+    build_lines << "    root.linkSystemLibrary(#{library.to_json}, .{});"
+  end
+  build_lines.concat([
+    '    const exe = b.addExecutable(.{',
+    '        .name = "clear-program",',
+    '        .root_module = root,',
+    '        .use_llvm = false,',
+    '        .use_lld = false,',
+    '    });',
+    '    b.installArtifact(exe);',
+    '}',
+    ''
+  ])
+  ClearBuildSupport.write_if_changed(File.join(context[:build_dir], 'build.zig'), build_lines.join("\n"))
+end
+
+def watch_file_state(paths)
+  paths.to_h do |path|
+    stat = File.stat(path)
+    [path, [stat.mtime.to_f, stat.size]]
+  rescue Errno::ENOENT
+    [path, nil]
+  end
+end
+
+def copy_watch_artifact(artifact, output, signature)
+  FileUtils.mkdir_p(File.dirname(output))
+  temporary = "#{output}.clear-watch.#{$$}"
+  begin
+    FileUtils.cp(artifact, temporary, preserve: true)
+    File.rename(temporary, output)
+  ensure
+    FileUtils.rm_f(temporary)
+  end
+  ClearBuildSupport.write_build_signature(output, signature)
+end
+
+def do_watch_build(source, output:, incremental:, default_stack:, use_c_allocator:, use_debug_allocator:, bypass_transpile_cache:, ownership_mode:)
+  source = File.expand_path(source)
+  context_options = {
+    output: output,
+    opt_level: 'Debug',
+    extra_flags: ['-fno-llvm', '-fno-lld'],
+    default_stack: default_stack,
+    force: true,
+    use_c_allocator: use_c_allocator,
+    use_debug_allocator: use_debug_allocator,
+    bypass_transpile_cache: bypass_transpile_cache,
+    ownership_mode: ownership_mode,
+    prepare_only: true
+  }
+  context = do_build(source, **context_options)
+  build_dir = context[:build_dir]
+  switch_object = File.join(build_dir, 'runtime-switch.o')
+  onroot_object = File.join(build_dir, 'runtime-onRoot.o')
+  compile_watch_object(RUNTIME_FILES[0], switch_object, build_dir)
+  compile_watch_object(RUNTIME_FILES[1], onroot_object, build_dir)
+  write_watch_build_zig(context)
+
+  artifact = File.join(build_dir, 'zig-out', 'bin', 'clear-program')
+  FileUtils.rm_f(artifact)
+  command = [ZIG, 'build', '--watch', incremental ? '-fincremental' : '-fno-incremental', '-Doptimize=Debug', '--summary', 'all']
+  $stderr.puts "\e[90mwatching: #{source} -> #{context[:output]}\e[0m"
+  $stderr.puts "\e[90mzig: #{command.join(' ')}\e[0m"
+  pid = Process.spawn(*command, chdir: build_dir, pgroup: true)
+  interrupted = false
+  old_int = Signal.trap('INT') { interrupted = true }
+  old_term = Signal.trap('TERM') { interrupted = true }
+  dependencies = watch_file_state(context[:dependency_paths])
+  assembly = watch_file_state(RUNTIME_FILES)
+  artifact_state = nil
+  status = nil
+
+  begin
+    until interrupted
+      if Process.waitpid(pid, Process::WNOHANG)
+        status = $?
+        break
+      end
+
+      new_dependencies = watch_file_state(context[:dependency_paths])
+      if new_dependencies != dependencies
+        context = do_build(source, **context_options)
+        write_watch_build_zig(context)
+        dependencies = watch_file_state(context[:dependency_paths])
+      end
+
+      new_assembly = watch_file_state(RUNTIME_FILES)
+      if new_assembly != assembly
+        compile_watch_object(RUNTIME_FILES[0], switch_object, build_dir)
+        compile_watch_object(RUNTIME_FILES[1], onroot_object, build_dir)
+        assembly = new_assembly
+      end
+
+      if File.exist?(artifact)
+        stat = File.stat(artifact)
+        current_artifact_state = [stat.mtime.to_f, stat.size, stat.ino]
+        if current_artifact_state != artifact_state
+          copy_watch_artifact(artifact, context[:output], context[:signature])
+          artifact_state = current_artifact_state
+          $stderr.puts "\e[32mupdated: #{context[:output]}\e[0m"
+        end
+      end
+      sleep 0.05
+    end
+  ensure
+    Signal.trap('INT', old_int)
+    Signal.trap('TERM', old_term)
+    unless status
+      begin
+        Process.kill('TERM', -pid)
+      rescue Errno::ESRCH
+      end
+      begin
+        Process.wait(pid)
+      rescue Errno::ECHILD
+      end
+    end
+  end
+  error "Zig watch process exited with status #{status.exitstatus}" if status && !status.success?
+end
+
 # -------------------------------------------------------------------------
 # Commands
 # -------------------------------------------------------------------------
 case ARGV[0]
-when 'build'
+when 'build', 'watch'
   args = ARGV[1..] || []
+  watch_mode = ARGV[0] == 'watch'
 
   # --fix / --fix=auto: on build failure, invoke `clear fix` on the
   # source then retry once. Implemented via subprocess so the build's
@@ -579,6 +809,7 @@ when 'build'
   use_debug_allocator = false
   bypass_transpile_cache = false
   ownership_mode = :default
+  incremental = true
 
   # Parse build flags
   remaining = []
@@ -610,6 +841,12 @@ when 'build'
       i += 1
     when '--force'
       @force_build = true
+      i += 1
+    when '--watch'
+      watch_mode = true
+      i += 1
+    when '--no-incremental'
+      incremental = false
       i += 1
     when '--no-cache'
       @force_build = true
@@ -663,13 +900,29 @@ when 'build'
   end
 
   source = remaining.first
-  error "Usage: clear build <file.clear> [-o output] [--release|--safe] [--stack-check] [--force]" unless source
+  error "Usage: clear build <file.clear> [-o output] [--watch] [--no-incremental] [--release|--safe] [--stack-check] [--force]" unless source
 
   # Auto-detect stack check: off for debug (20MB binaries make objdump slow), on for release/safe.
   stack_check = (opt_level != 'Debug') if stack_check.nil?
 
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
   output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.clear'))
+  if watch_mode
+    error '--watch requires a Debug build (omit --optimized/--safe)' unless opt_level == 'Debug'
+    error '--watch does not support --debug-llvm, --tsan, or --asan' unless extra_flags == ['-fno-llvm', '-fno-lld']
+    do_watch_build(
+      source,
+      output: output_path,
+      incremental: incremental,
+      default_stack: default_stack,
+      use_c_allocator: use_c_allocator,
+      use_debug_allocator: use_debug_allocator,
+      bypass_transpile_cache: bypass_transpile_cache,
+      ownership_mode: ownership_mode
+    )
+    exit 0
+  end
+
   if find_project_build_zig(source)
     run_project_build_zig!(
       source,
@@ -1694,6 +1947,7 @@ when 'help', '--help', '-h', nil
 
     Usage:
       clear build <file.clear> [-o output] [--optimized|--safe|--debug]
+      clear watch <file.clear> [-o output] [--no-incremental]
       clear run <file.clear> [-- args...]
       clear test <file.clear>          Test a single file
       clear test <directory>         Test all .clear files in directory
@@ -1720,6 +1974,7 @@ when 'help', '--help', '-h', nil
 
     Commands:
       build    Transpile and compile a CLEAR program to a native binary
+      watch    Keep one Debug Step.Compile alive and rebuild on CLEAR/Zig changes
       run      Build and execute a CLEAR program
       test     Build and run tests (uses test harness with leak detection)
       profile  Build with allocation tracking, run with perf (if available)
@@ -1733,6 +1988,8 @@ when 'help', '--help', '-h', nil
       --debug       Same as default (explicit)
       --optimized   Full LLVM optimization (-O ReleaseFast, ~22s)
       --safe        LLVM + safety checks (-O ReleaseSafe, ~28s)
+      --watch       Persistent per-program Debug build with Zig incremental enabled
+      --no-incremental  Keep watch mode, but disable Zig incremental compilation
 
     Environment:
       CLEAR_THREADS  Number of scheduler threads (0 = auto, 1 = single)

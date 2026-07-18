@@ -6,7 +6,7 @@
 #   clear completions fish > ~/.config/fish/completions/clear.fish
 #
 # Per-subcommand completion semantics:
-#   build / run / fmt / fix / profile / explain  -> *.clear files (+ dirs)
+#   build / watch / run / fmt / fix / profile / explain -> *.clear files (+ dirs)
 #   c-ffi                                         -> header/output paths
 #   test                                          -> *.clear files OR directories
 #   doctor                                        -> *.profile/ directories
@@ -18,6 +18,7 @@ module Completions
 
   SUBCOMMANDS = {
     'build'       => 'Build a .clear file to a native binary',
+    'watch'       => 'Incrementally rebuild one .clear program',
     'run'         => 'Build and run a .clear file',
     'test'        => 'Run tests in a .clear file or directory',
     'benchmark'   => 'Run a CLEAR benchmark',
@@ -65,7 +66,7 @@ module Completions
         fi
 
         case "$cmd" in
-          build|run|fmt|format|fix|profile|explain)
+          build|watch|run|fmt|format|fix|profile|explain)
             COMPREPLY=( $(compgen -f -X '!*.clear' -- "$cur") $(compgen -d -- "$cur") )
             compopt -o filenames 2>/dev/null
             ;;
@@ -120,7 +121,7 @@ module Completions
         fi
 
         case "${words[2]}" in
-          build|run|fmt|format|fix|profile|explain|test|benchmark)
+          build|watch|run|fmt|format|fix|profile|explain|test|benchmark)
             _files -g '*.clear'
             ;;
           c-ffi)
@@ -154,7 +155,7 @@ module Completions
       #{sub_complete}
 
       # File arguments per subcommand
-      complete -c clear -n '__fish_seen_subcommand_from build run fmt format fix profile explain test benchmark' \\
+      complete -c clear -n '__fish_seen_subcommand_from build watch run fmt format fix profile explain test benchmark' \\
         -F -k -a "(__fish_complete_path '*.clear')"
 
       complete -c clear -n '__fish_seen_subcommand_from c-ffi' -F

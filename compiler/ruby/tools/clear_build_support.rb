@@ -45,7 +45,13 @@ module ClearBuildSupport
     FileUtils.mkdir_p(File.dirname(path))
     return false if File.exist?(path) && File.read(path) == content
 
-    File.write(path, content)
+    temporary = "#{path}.tmp.#{$$}.#{Thread.current.object_id}"
+    begin
+      File.binwrite(temporary, content)
+      File.rename(temporary, path)
+    ensure
+      FileUtils.rm_f(temporary)
+    end
     true
   end
 

@@ -69,6 +69,8 @@ RSpec.describe ClearBuildSupport do
       expect(described_class.write_if_changed(path, "one")).to be(true)
       expect(described_class.write_if_changed(path, "one")).to be(false)
       expect(described_class.write_if_changed(path, "two")).to be(true)
+      expect(File.binread(path)).to eq("two")
+      expect(Dir.glob("#{path}.tmp.*")).to be_empty
 
       target_one = write(File.join(dir, "target-one"), "one")
       target_two = write(File.join(dir, "target-two"), "two")

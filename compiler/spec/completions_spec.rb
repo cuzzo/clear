@@ -89,7 +89,7 @@ RSpec.describe Completions do
     end
 
     it 'gates file completion on subcommand context' do
-      expect(script).to include("__fish_seen_subcommand_from build run fmt format fix profile explain test benchmark")
+      expect(script).to include("__fish_seen_subcommand_from build watch run fmt format fix profile explain test benchmark")
       expect(script).to include("__fish_seen_subcommand_from doctor")
       expect(script).to include("__fish_seen_subcommand_from c-ffi")
     end
