@@ -29,6 +29,37 @@ module SemanticFull
     Topology.new(id: :"#{scope}_#{carrier}", scope: scope, carrier: carrier).freeze
   end.freeze
 
+  # Declarative manifest for the advanced depth campaign.  It keeps the
+  # expensive 10-seed depth-5/6 work out of ordinary PR template loading while
+  # making the complete required run inspectable and shardable.
+  AdvancedCampaignConfig = Struct.new(:depth, :seed, :target_per_family, keyword_init: true) do
+    def id = "depth#{depth}-seed#{seed}-#{target_per_family}perfamily"
+  end
+
+  module AdvancedCampaign
+    DEPTH4 = AdvancedCampaignConfig.new(depth: 4, seed: 1, target_per_family: TARGET_PER_FAMILY).freeze
+    DEEP = (1..10).flat_map do |seed|
+      [5, 6].map { |depth| AdvancedCampaignConfig.new(depth: depth, seed: seed, target_per_family: TARGET_PER_FAMILY).freeze }
+    end.freeze
+    ALL = ([DEPTH4] + DEEP).freeze
+
+    module_function
+
+    def report
+      {
+        depth4: DEPTH4.id,
+        deep_campaigns: DEEP.length,
+        deep_seeds: DEEP.map(&:seed).uniq,
+        target_per_family: TARGET_PER_FAMILY,
+        cases_per_deep_campaign: TARGET_PER_FAMILY * SemanticEquivalence::VALUES.goals.length,
+      }
+    end
+
+    def build(config, parser_path:)
+      Suite.new(parser_path: parser_path, depth: config.depth, seed: config.seed, target_per_family: config.target_per_family)
+    end
+  end
+
   class Suite
     attr_reader :expression_suite, :all_cases, :cases, :seed, :target_per_family
 

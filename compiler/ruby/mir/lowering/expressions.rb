@@ -1121,6 +1121,15 @@ module MIRLoweringExpressions
     # to honor that to keep emitting `catch fallback` (error union)
     # rather than `orelse fallback` (optional).
     has_error_union = node.left.respond_to?(:error_union_type) && node.left.error_union_type
+    can_fail = node.left.respond_to?(:can_fail) && node.left.can_fail
+    # Allocation FAULT is surface-exempt (the declared return type stays T),
+    # but its lowered call is still an error union. Consult the matched
+    # signature so `allocatingCall() OR_ELSE fallback` lowers through `catch`
+    # rather than Zig optional `orelse`.
+    if node.left.is_a?(AST::FuncCall) || node.left.is_a?(AST::MethodCall)
+      signature = matched_call_signature(node.left)
+      can_fail ||= signature&.alloc_fault == true || signature&.can_fail == true
+    end
     effective_left = if has_error_union
                        Type.new(T.cast(node.left.error_union_type, Type::TypeInput))
                      else
@@ -1786,7 +1795,7 @@ module MIRLoweringExpressions
           aggregate_dynamic_slice_field_value(lower(field_node), expected_ft, true, field_sink_alloc, field_node)
         elsif rc_retain_needed?(field_node)
           hoist_alloc(make_rc_retain(T.cast(field_node, AST::Identifier)), field_node, err_cleanup: true)
-        elsif field_node.is_a?(AST::CopyNode) && expected_ft&.collection?
+        elsif field_node.is_a?(AST::CopyNode) && expected_ft&.collection? && !expected_ft.any_rc?
           hoist_alloc(MIR::DeepCopy.new(lower(field_node.value), expected_ft.zig_type, nil, :full_value, field_sink_alloc),
             field_node, err_cleanup: true)
         else

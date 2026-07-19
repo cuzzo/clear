@@ -5485,7 +5485,14 @@ class Type
       base_zig = T.must(element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       "CheatLib.SoaList(#{base_zig})"
     else
-      bare_data_type.zig_type(is_param: is_param, is_field: is_field)
+      # A managed dynamic-array field stores an Rc/Arc around the owning
+      # ArrayList header, not a borrowed slice.  Field spelling normally uses
+      # `[]T`, but applying that rule inside a capability wrapper produces
+      # `Rc([]T)` while the initializer correctly creates `Rc(ArrayList(T))`.
+      # Function parameters cannot carry capability annotations, so this only
+      # changes the managed aggregate payload representation.
+      payload_is_field = is_field && !(direct_indexable_collection? && dynamic?)
+      bare_data_type.zig_type(is_param: is_param, is_field: payload_is_field)
     end
 
     inner_zig = "CheatLib.Locked(#{inner_zig})" if locked?

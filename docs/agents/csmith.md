@@ -1107,13 +1107,15 @@ compiler branches not reached by the existing fuzz suite. The prototype was
 accepted for its stated narrow scope. The work described as future expansion
 here was subsequently performed; the authoritative completion result follows.
 
-## Full-system completion result (2026-07-19)
+## Historical completion claim (2026-07-19; superseded)
 
-The accepted prototype was expanded through the bounded full-system target.
-This is not an unrestricted reverse grammar: it is the complete system planned
-for semantically valid, oracle-bearing generation in this document. Arbitrary
-concurrency, effects, generic declarations, and invalid-program diagnostics
-remain explicit fuzz matrices because they do not have a safe total evaluator.
+This section records an earlier completion claim and its measurements. It is
+not the current acceptance status: later executable admission work found that
+advanced capability transport, runtime-forced scheduling, allocation faults,
+and generic constraint cross-products were not fully covered. The current
+status and executable release requirements are in “Advanced-oracle
+implementation” below; do not use the counts in this historical section to
+claim zero gaps.
 
 ### Final executable model
 
@@ -1259,3 +1261,217 @@ There are no known gaps within this bounded semantic system. Extending it to
 arbitrary grammar-derived programs with unconstrained concurrency, generics,
 effects, or negative diagnostics would be a different project and must add an
 independent legality/oracle model before those constructs can be enabled.
+
+## Next expansion plan: oracle-bearing advanced-language generation
+
+This is the quality plan for the language surfaces intentionally left outside
+the completed bounded system. The goal is not to turn every existing explicit
+matrix into random source generation. A surface may enter semantic generation
+only after it has both (1) a legality model that refuses invalid trees before
+emission and (2) an independent, deterministic oracle for its observable
+behavior. Until then its existing explicit matrix remains the requirement
+owner.
+
+### Scope, oracle, and completion gates
+
+| Workstream | What to generate | Independent oracle | Quality gate before admission |
+| --- | --- | --- | --- |
+| Capability cross-products | Every legality-approved managed value family × capability/access mode × ownership operation × storage carrier | Expected value plus ownership/refcount/liveness outcome; MIR allocator and transfer facts | 100% of approved pairwise combinations; every high-risk three-way combination (capability × COPY/GIVE/TAKES × nested carrier); at least 100 cases per enabled family; zero leaks/MIR failures |
+| Deeper/larger whole programs | Depth 4–6 expressions; 2–6 declarations; nested aggregate, branch, loop, call, return, and ownership paths | Existing typed value evaluator extended to an ordered observation trace: return value, assertions, owned-result disposition, and cleanup outcome | Exhaustive derivation coverage through depth 4; 10 deterministic seed campaigns of 1,000 cases at depths 5–6; every failure shrinks to a standalone source witness; bounded CI tier finishes within 10 minutes |
+| Concurrency | Two fibers initially, then up to four; shared/local capability values; spawn, join, channel/stream handoff, cancellation, and bounded producer/consumer shapes | Deterministic scheduler plus normalized event trace. Exhaustively enumerate schedules for two actors with at most six yield points; use partial-order reduction above that bound | Every generated program has a declared allowed trace set; all reduced schedules are explored; no race is accepted merely because one schedule passed; leak, deadlock, and timeout are distinct failures |
+| Effects/fallibility | Whitelisted deterministic effects, state updates, fallible calls, `OR_ELSE`, cleanup, and rollback/commit paths | Small reference state machine returning `(value/error, state, event trace)`; generated CLEAR must match all three | Full transition and error-edge coverage for each effect model; fault-injection run for every allocation/effect boundary; no effectful form is admitted without a model transition table |
+| Generics | Constrained generic functions, associated types, collection/capability substitutions, monomorphization, and generic returns | Independent substitution/constraint checker plus the instantiated concrete-program oracle | Cover every declared constraint and associated-type projection; pairwise type-argument coverage plus all ownership-bearing substitutions; accept/reject parity for generated positive and negative cases |
+| Diagnostics | Intentionally invalid programs around the above surfaces | Expected diagnostic code, primary span class, and recovery/termination property—not message text | Each invalid production has a deterministic code/span oracle; no negative case is counted as passing solely because compilation failed |
+
+“Legality-approved” is an executable registry, not prose: each tuple records
+its required capabilities, permitted storage/access modes, valid operations,
+oracle kind, and the explicit matrix that owns it before semantic admission.
+The generator must report both the enabled and rejected tuple counts so omitted
+combinations cannot become invisible.
+
+### Delivery order
+
+1. Build the shared machinery first: legality registry, observation-trace
+   format, deterministic seed/shard manifest, reducer support, and a result
+   classifier that separates compiler rejection, wrong trace, leak, deadlock,
+   timeout, and MIR failure.
+2. Expand capability cross-products and depth 4 whole programs. These reuse
+   the existing evaluator and should establish the generator/oracle contract
+   before adding nondeterminism.
+3. Add deterministic effects/fallibility state machines, including allocation
+   fault injection and rollback/error paths.
+4. Add generics by generating a concrete instantiation alongside each generic
+   program; compare legality and runtime observation after substitution.
+5. Add concurrency last, with exhaustive bounded schedule exploration before
+   any randomized schedule campaign. Increase actor/yield bounds only after
+   partial-order reduction is validated against exhaustive smaller bounds.
+6. Add generated negative diagnostics only after positive semantics are stable;
+   diagnostics use their own code/span oracle and never share the positive
+   runtime pass criterion.
+
+### Campaign and release criteria
+
+Each workstream has a small PR gate, a nightly exhaustive/bounded gate, and a
+weekly seed-expansion gate. A workstream is complete only when all of the
+following are true:
+
+- its legality registry has no unexplained excluded combination;
+- every generated case has stable seed, provenance, and same-class shrinking;
+- the full campaign is repeatable on two consecutive clean runs with zero
+  leaks, deadlocks, timeouts, MIR failures, and unexpected passes;
+- every discovered defect becomes an enabled raw witness in `SemanticGaps`;
+- mutation testing shows either new stable kills or a documented coverage
+  plateau, and no mutant result is accepted when baseline/spec selection or
+  timeout behavior differs; and
+- the existing explicit matrix remains in place until generated coverage has
+  equal or stronger requirement-level coverage and a reviewed migration plan.
+
+### Genuine remaining gap
+
+The remaining gap is therefore specific: there is not yet an independent,
+bounded legality-and-semantic oracle for advanced capability cross-products,
+larger programs, concurrency, effects, generics, or generated diagnostics.
+Those surfaces are tested elsewhere today, but not yet by the same generated
+equivalence framework. This plan makes their admission measurable rather than
+claiming coverage from random syntax alone.
+
+## Advanced-oracle implementation (2026-07-19)
+
+The implementation is in progress in `tools/fuzz/semantic_advanced.rb` and
+`semantic_advanced_matrix`.  `SemanticAdvanced::Registry` is the executable
+admission record: every entry has a stable identity, owning renderer,
+legality expectation, provenance, and normalized trace (`return` with ordered
+events or `reject`).  It currently contains 421 entries:
+
+| Workstream | Entries | Oracle/admission rule |
+| --- | ---: | --- |
+| Capability | 43 | capability/access trace plus ownership-cleanup path |
+| Depth 4–6 | 18 | contextually typed depth provenance, asserted value, cleanup |
+| Concurrency | 245 | existing boundary/transfer cases plus all 20 two-actor, six-yield schedule witnesses |
+| Effects/fallibility | 68 | signature legality plus an independent commit/rollback state machine |
+| Generics | 35 | protocol/capability cases plus concrete generic identity monomorphizations |
+| Diagnostics | 12 | structured registered code and primary token span, not merely compilation failure |
+
+The normal concurrency PR lane is a deterministic 24-case round-robin subset
+that retains both execution-boundary and transfer families because asynchronous
+tests are isolated for leak/deadlock attribution.  Set
+`SEMANTIC_ADVANCED_CONCURRENCY_LIMIT=0` for the complete 225-case nightly
+admission campaign.  The full registry stays visible in the report regardless
+of that execution limit; no combination is silently removed.
+
+`FuzzGenerator` now carries `diagnostic_code_required`, and `tools/fuzz/run.rb`
+fails a negative cell when its declared code is absent. `SourceError` preserves
+the diagnostic code and prints it in CLI output; `SemanticAdvanced` then probes
+the compiler frontend directly to check the exact code and a non-EOF primary
+token span. This replaced a false “any rejection is enough” criterion and
+exposed a stale expected code for the generic Map wrong-key witness
+(`TYPE_MISMATCH_ASSIGN` -> `GENERIC_MAP_KEY_MISMATCH`), which is fixed and
+retained in the advanced gap ledger.
+
+Focused execution is clean for the recorded lanes: capability 43/43,
+signature effects 60/60, generated effect state machines 8/8, generic protocol
+cases 28/28, generated monomorphizations 7/7, structured diagnostics 12/12,
+and generated-schedule concurrency smoke 2/2. The full retained whole-program
+campaign is clean: depth 4 seed 1 and depths 5/6 seeds 1–10, 147,000 programs
+in total.
+The normal concurrency PR lane
+is a deterministic 24-case round-robin subset; set
+`SEMANTIC_ADVANCED_CONCURRENCY_LIMIT=0` for the full 245-case nightly lane.
+
+The planned executable advanced quality gates are complete. The full
+100-per-approved-pair capability runtime campaign is clean: 1,700/1,700
+generated cases, with zero runtime failures,
+leaks, MIR errors, or unexpected passes. Allocation-fault execution is now an
+active deterministic oracle: generated list-growth recovery cases run with
+`CLEAR_OOM_AFTER=20` and assert both `OR_ELSE PASS` rollback and
+`OR_ELSE <value>` fallback. The advanced ledger records four fixed witnesses
+and one expected outstanding language gap.
+`SELECT` does not yet preserve tenseness. This is an explicitly expected,
+external future gap owned by the ongoing litedb implementation work, so it is
+retained as an expected witness rather than counted as a compiler regression.
+`generic_identity_owned_return` is now fixed and active
+for String, list, map, and tuple substitutions: generic returns materialize
+owned payloads with the runtime allocator, and generic map/list calls preserve
+their value ABI. The managed `COPY`/`GIVE` plain-`TAKES` witness is also fixed:
+lowering materializes an owned payload for the callee and retains normal
+source-handle cleanup. `allocation_fault_or_else_value` is fixed: hidden
+allocation FAULT now selects error `catch` lowering rather than optional
+`orelse`. The historical `SemanticGaps` ledger is not evidence of
+advanced-system completion and must not be used to claim zero outstanding
+compiler gaps.
+
+### Deep whole-program campaign manifest
+
+`SemanticFull::AdvancedCampaign` is now the executable depth manifest. It has
+one depth-4 configuration and twenty deep configurations: seeds 1 through 10
+at each of depths 5 and 6. Every deep configuration requests 1,000 cases for
+each of seven value families (7,000 programs total). The generator now uses a
+deterministic bounded Cartesian walk rather than materializing the exponential
+product before applying its per-goal cap; depth-4/5/6 typed derivations build
+in bounded time while retaining seed variation.
+
+The following retained runtime checks are clean:
+
+```text
+depth 4, seed 1; depths 5 and 6, seeds 1–10: 147,000 programs
+each configuration: 7 families x 1,000; COPY 1,000; GIVE/TAKES 1,000
+all: 0 runtime failures, leaks, MIR errors, or unexpected passes
+```
+
+Run a configuration through the ordinary full matrix with:
+
+```text
+SEMANTIC_FULL_DEPTH=5 SEMANTIC_FULL_SEED=1 \
+SEMANTIC_FULL_FAMILY_TARGET=1000 SEMANTIC_FULL_LIMIT=0 \
+bundle exec ruby tools/fuzz/run.rb --matrix --templates semantic_full_matrix ...
+```
+
+The full retained depth campaign is complete. Root-cache exhaustion observed
+during an earlier parallel attempt was environmental; serial isolated-cache
+reruns supplied the retained semantic evidence above.
+
+### Capability expansion campaign
+
+`SemanticCapabilityExpansion::Suite` crosses every legality-approved
+value/capability pair with independently derived typed payload expressions.
+At depth 4 and target 100 it builds 1,700 distinct cases: 100 for each of the
+17 approved pairs (Int64 100; String/List/Map/Tuple 200 each; Struct 800).
+This meets the count requirement more strictly than 100 per enabled family and
+retains the capability's declared direct/exclusive/snapshot access oracle.
+
+The full campaign is opt-in so ordinary template loading does not build 1,700
+sources:
+
+```text
+SEMANTIC_CAPABILITY_EXPANSION=1 \
+SEMANTIC_CAPABILITY_EXPANSION_DEPTH=4 \
+SEMANTIC_CAPABILITY_EXPANSION_TARGET=100 \
+SEMANTIC_CAPABILITY_EXPANSION_SEED=1 \
+bundle exec ruby tools/fuzz/run.rb --matrix \
+  --templates semantic_capability_expansion_matrix ...
+```
+
+`SEMANTIC_CAPABILITY_EXPANSION_SHARD=I/N` shards by stable case fingerprint.
+An 85-case representative run (five independently derived payloads per pair)
+is clean. `TransportSuite` now generates the high-risk direct and nested-field
+COPY/GIVE/TAKES carriers for all ten direct managed value/capability pairs
+(20 cases). Its first full run exposed and fixed two lowering defects: a
+frame-owned aggregate containing a retained managed child was assigned an
+incoherent allocator, and a managed map field was structurally deep-copied
+instead of retained. It then exposed and fixed
+`managed_copy_give_takes_plain_parameter`, including the dynamic-list wrapper
+shape needed in a managed struct field. The complete 20-case lane is now green
+(20/20; no leak, MIR error, or unexpected pass). Locked/snapshot carriers and
+larger nested-storage topologies remain future expansion work.
+
+### Bounded schedule execution
+
+The schedule model enumerates all 20 interleavings of two actors with three
+yield points each and checks the normalized six-step counter trace. Each
+interleaving has a generated CLEAR program with independently locked state
+transitions and an asserted final value. The full 20-case generated-schedule
+run is clean: 20/20, with zero runtime failures, leaks, MIR errors, or
+unexpected passes. The model supplies exhaustive interleaving semantics; the
+runtime programs supply the scheduler/lowering/leak check. A runtime hook that
+forces a particular scheduler interleaving remains a future strengthening, but
+is not required to admit the current commutative locked-counter model.

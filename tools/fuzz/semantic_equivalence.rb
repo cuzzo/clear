@@ -274,9 +274,10 @@ module SemanticEquivalence
   end
 
   class Generator
-    def initialize(grammar, max_per_goal: 1_500)
+    def initialize(grammar, max_per_goal: 1_500, seed: 1)
       @grammar = grammar
       @max_per_goal = max_per_goal
+      @seed = Integer(seed)
       @memo = {}
     end
 
@@ -329,8 +330,32 @@ module SemanticEquivalence
       end
     end
 
+    # Do not materialise an exponential Cartesian product just to discard most
+    # of it at the per-goal cap.  The selected index walk is deterministic,
+    # covers distinct pairs, and changes with the campaign seed; it keeps
+    # depth-4+ generation semantic rather than replacing it with hand-written
+    # wrapper repetition.
     def product(choices)
-      choices.reduce([[]]) { |rows, options| rows.flat_map { |row| options.map { |option| row + [option] } } }
+      choices.reduce([[]]) { |rows, options| bounded_product(rows, options) }
+    end
+
+    def bounded_product(rows, options)
+      total = rows.length * options.length
+      return rows.flat_map { |row| options.map { |option| row + [option] } } if total <= @max_per_goal
+
+      width = options.length
+      start = Digest::SHA256.hexdigest("#{@seed}:#{rows.length}:#{options.length}").to_i(16) % total
+      step = coprime_step(total, start)
+      Array.new(@max_per_goal) do |offset|
+        index = (start + offset * step) % total
+        rows[index / width] + [options[index % width]]
+      end
+    end
+
+    def coprime_step(total, start)
+      step = (start % (total - 1)) + 1
+      step += 1 until step.gcd(total) == 1
+      step
     end
 
     def merge_setups(local, inherited)
@@ -580,7 +605,7 @@ module SemanticEquivalence
         consumer_ids: @consumers.map(&:id),
         production_refs: @grammar.productions.map(&:parser_ref).uniq
       )
-      generator = Generator.new(@grammar)
+      generator = Generator.new(@grammar, seed: @seed)
       @fragments = VALUES.goals.flat_map { |goal| generator.derive(goal, max_depth: max_depth) }
       @blocked_obligations = []
       @all_cases = build_cases.freeze

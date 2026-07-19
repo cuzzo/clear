@@ -332,9 +332,12 @@ def run_negative_builds(entries, out_dir, default_workers)
         path = entry[:path]
         bin = File.join(out_dir, ".neg-#{i}")
         out, status = Open3.capture2e(clear, 'build', path, '-o', bin, '--no-stack-check')
+        code_mismatch = entry[:diagnostic_code_required] &&
+                        !out.match?(/\b#{Regexp.escape(entry.fetch(:error_code).to_s)}\b/)
         mutex.synchronize do
-          if status.success?
-            unexpected_pass << [path, out]
+          if status.success? || code_mismatch
+            detail = code_mismatch ? "#{out}\n[fuzz] expected diagnostic code #{entry[:error_code]}" : out
+            unexpected_pass << [path, detail]
           else
             pass << path
           end
@@ -406,12 +409,20 @@ def run_compile_only_negative_coverage(entries, default_workers)
   results = parallel_compile_entries(entries, workers, 'coverage-negative')
   rejected = results.count { |_entry, error| error }
   emitted = results.length - rejected
-  pass = results.map { |entry, _error| entry[:path] }
+  mismatched = results.filter_map do |entry, error|
+    next unless entry[:diagnostic_code_required] && error
+    next if error.match?(/\b#{Regexp.escape(entry.fetch(:error_code).to_s)}\b/)
+
+    [entry[:path], "#{error}\n[fuzz] expected diagnostic code #{entry[:error_code]}"]
+  end
+  pass = results.filter_map do |entry, error|
+    entry[:path] unless mismatched.any? { |path, _| path == entry[:path] }
+  end
 
   elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
   puts "[fuzz] coverage compile negatives: #{entries.size} cells with #{workers} workers in #{format('%.2f', elapsed)}s " \
        "(#{rejected} rejected by Ruby compile/lower, #{emitted} emitted for downstream gates)"
-  [pass, []]
+  [pass, mismatched]
 end
 
 def coverage_run(emitted, out_dir, default_workers)

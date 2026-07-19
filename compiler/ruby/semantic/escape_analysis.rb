@@ -487,9 +487,36 @@ module EscapeAnalysis
       next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::DestructureTarget) ||
                   (node.is_a?(AST::BindExpr) && node.mode == :decl)
       ti = node.full_type!(context: "recursive aggregate owner")
-      next unless aggregate_owner_requires_heap?(ti, schema_lookup)
+      # A value-shaped aggregate can still contain a retained managed handle.
+      # The handle's allocator is necessarily heap (RcRetain/ArcRetain), so a
+      # frame aggregate would later try to own a heap child.  Promote the
+      # aggregate owner before lowering so every owned field has one coherent
+      # allocator.  This is deliberately source-driven: a plain value struct
+      # remains frame-backed unless one of its fields refers to a heap owner.
+      next unless aggregate_owner_requires_heap?(ti, schema_lookup) ||
+                  aggregate_contains_heap_owned_value?(node.value)
       mark_symbol_heap!(sym)
     end
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  private_class_method def self.aggregate_contains_heap_owned_value?(node)
+    return false unless node
+    return false unless node.is_a?(AST::StructLit) || node.is_a?(AST::UnionVariantLit) ||
+                        node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit)
+
+    pending = T.let([node], T::Array[AST::Node])
+    until pending.empty?
+      current = pending.pop
+      next unless current
+
+      if current.is_a?(AST::Identifier) && current.symbol&.heap_storage?
+        return true
+      end
+
+      AST.each_child_node(current) { |child| pending << child }
+    end
+    false
   end
 
   sig { params(ti: T.nilable(Type), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
