@@ -18,6 +18,7 @@ require_relative "control_flow"
 require_relative "../semantic/pass_state"
 require_relative "placement"
 require_relative "../semantic/lifecycle_plan"
+require_relative "function_mir_plan"
 require_relative "program_mir_facts"
 
 class MIRPass
@@ -39,32 +40,6 @@ class MIRPass
     end
   end
 
-  class OwnershipPreparationPlan < T::Struct
-    extend T::Sig
-
-    const :function, AST::FunctionDef
-    const :cleanup_facts, CleanupClassifier::FrozenCleanupFacts
-    const :can_fail_fns, T::Set[String]
-
-    sig { returns(T::Hash[String, CleanupEntry]) }
-    def bindings
-      cleanup_facts.bindings
-    end
-
-    sig { returns(T::Boolean) }
-    def cleanup_bindings?
-      !cleanup_facts.empty?
-    end
-  end
-
-  # cleanup_bindings: { fn_name => { var_name => entry_hash } }
-  # Exposed for specs that test classification directly.
-  sig { returns(T::Hash[String, T::Hash[String, CleanupEntry]]) }
-  attr_reader :cleanup_bindings
-
-  sig { returns(T::Hash[String, CleanupClassifier::CleanupClassificationPlan]) }
-  attr_reader :cleanup_plans
-
   sig { returns(EscapeAnalysis::EscapePlacementFacts) }
   attr_reader :escape_placement_facts
 
@@ -78,19 +53,10 @@ class MIRPass
     @lifecycle_registry = T.let(lifecycle_registry, T.nilable(Semantic::LifecycleRegistry))
     @body_summaries = T.let(body_summaries, T::Hash[String, Annotator::Phases::FunctionBodySummary])
     @hoist_bindings = T.let(hoist_bindings || {}, HoistBindings)
-    @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
-    @cleanup_plans = T.let({}, T::Hash[String, CleanupClassifier::CleanupClassificationPlan])
+    @function_plans = T.let({}, FunctionMIRPlanningResult::PlanMap)
     @escape_placement_facts = T.let(EscapeAnalysis::EscapePlacementFacts.new, EscapeAnalysis::EscapePlacementFacts)
     @program_facts = T.let(ProgramMIRFacts.empty, ProgramMIRFacts)
-    @can_fail_fns = T.let(self.class.fallible_function_names(fn_nodes), T::Set[String])
     @current_transform_fn = T.let(nil, T.nilable(AST::FunctionDef))
-  end
-
-  sig { params(fn_nodes: FnNodes).returns(T::Set[String]) }
-  def self.fallible_function_names(fn_nodes)
-    fn_nodes.each_with_object(Set.new) do |(name, fn), names|
-      names << name if fn.can_fail
-    end
   end
 
   sig { params(facts: CleanupClassifier::FrozenCleanupFacts, name: T.any(String, Symbol, CleanupClassifier::PlaceId)).returns(CleanupEntry) }
@@ -115,9 +81,15 @@ class MIRPass
 
     # Escape analysis writes final SymbolEntry#storage and now also returns the
     # typed placement table explaining which phase forced each heap placement.
-    escape_result = EscapeAnalysis.apply_with_facts!(@fn_nodes, @schema_lookup, @body_summaries, @hoist_bindings)
-    @escape_placement_facts = escape_result.placements
-    BgCaptureClassifier.classify_all!(@fn_nodes, schema_lookup: @schema_lookup)
+    planning = FunctionMIRPlanner.plan_all!(
+      fn_nodes: @fn_nodes,
+      schema_lookup: @schema_lookup,
+      lifecycle_registry: @lifecycle_registry,
+      body_summaries: @body_summaries,
+      hoist_bindings: @hoist_bindings,
+    )
+    @function_plans = planning.plans
+    @escape_placement_facts = planning.escape_placements
     pass_state.mark!(:escape_analyzed)
 
     # SYNC propagation ran inside EscapeAnalysis.apply! above (single-pass
@@ -127,18 +99,7 @@ class MIRPass
     # lowering and cleanup only read that fact.
 
     # Phase 2.5: classify cleanup bindings (uses finalized provenance from Phase 2).
-    @fn_nodes.each do |name, fn|
-      cleanup_plan = CleanupClassifier.classify_plan(
-        fn,
-        schema_lookup: @schema_lookup,
-        lifecycle_registry: @lifecycle_registry,
-      )
-      @cleanup_plans[name] = cleanup_plan
-      @cleanup_bindings[name] = cleanup_plan.bindings
-    end
     pass_state.mark!(:cleanup_classified)
-
-    LoopFrameAnalysis.analyze!(@fn_nodes, @schema_lookup, @lifecycle_registry)
     pass_state.mark!(:loop_frame_analyzed)
 
     # needs_rt finalization must run after placement and cleanup
@@ -146,8 +107,7 @@ class MIRPass
     # function actually needs an allocator for a heap/frame binding or cleanup.
     # Propagate to callers so runtime threading is decided once from final data.
     @program_facts = ProgramMIRFinalizer.finalize(
-      fn_nodes: @fn_nodes,
-      cleanup_plans: @cleanup_plans,
+      function_plans: @function_plans,
       body_summaries: @body_summaries,
       schema_lookup: @schema_lookup,
     )
@@ -156,7 +116,7 @@ class MIRPass
     # Phase 3: insert MIR nodes + stamp AST.
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
-      transform_function!(stmt)
+      transform_function!(@function_plans.fetch(stmt.name.to_s))
     end
 
     # Synthetic test-body wrappers live in @fn_nodes but never appear
@@ -166,7 +126,7 @@ class MIRPass
     @fn_nodes.each do |name, fn|
       next unless name.is_a?(String) && name.start_with?("__test_body_")
       next unless fn&.body
-      transform_function!(fn)
+      transform_function!(@function_plans.fetch(name))
     end
 
     # MIR escape analysis can discover heap-return provenance after the
@@ -183,9 +143,8 @@ class MIRPass
 
   private
 
-  sig { params(fn: AST::FunctionDef).void }
-  def transform_function!(fn)
-    plan = ownership_preparation_plan(fn)
+  sig { params(plan: FunctionMIRPlan).void }
+  def transform_function!(plan)
     cleanup_facts = plan.cleanup_facts
     function = plan.function
     CleanupClassifier.stamp_field_pre_cleanups!(
@@ -194,13 +153,13 @@ class MIRPass
       schema_lookup: @schema_lookup,
       lifecycle_registry: @lifecycle_registry,
     )
-    return unless plan.cleanup_bindings?
+    return unless plan.cleanup?
 
     bc_errors = BorrowChecker.check(function, schema_lookup: @schema_lookup)
     raise "[Borrow Error] #{bc_errors.first}" unless bc_errors.empty?
 
     pre_mark_bg_resource_captures!(function, cleanup_facts)
-    dataflow = OwnershipDataflow.analyze(function, can_fail_fns: plan.can_fail_fns, schema_lookup: @schema_lookup)
+    dataflow = OwnershipDataflow.analyze(function, can_fail_fns: plan.can_fail_functions, schema_lookup: @schema_lookup)
     dataflow.cleanup_decisions!(function, cleanup_facts)
     mark_returned_cleanup_bindings!(function, cleanup_facts)
     function.cleanup_bindings = cleanup_facts.bindings
@@ -209,18 +168,6 @@ class MIRPass
     @current_transform_fn = nil
     stamp_moved_guard_info!(function, cleanup_facts)
     nil
-  end
-
-  sig { params(fn: AST::FunctionDef).returns(OwnershipPreparationPlan) }
-  def ownership_preparation_plan(fn)
-    name = fn.name.to_s
-    cleanup_facts = @cleanup_plans[name]&.facts ||
-      CleanupClassifier::FrozenCleanupFacts.from_bindings(@cleanup_bindings[name] || {})
-    OwnershipPreparationPlan.new(
-      function: fn,
-      cleanup_facts: cleanup_facts,
-      can_fail_fns: @can_fail_fns,
-    )
   end
 
   # Pre-mark bindings that are captured by BG blocks as needing moved guards.

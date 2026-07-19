@@ -144,6 +144,18 @@ RSpec.describe "architecture invariants: semantic lifecycle authority" do
     expect(method_body("compiler/ruby/semantic/lifecycle_plan.rb", "fetch_binding")).not_to include("object_id")
   end
 
+  it "gives MIR planning one authoritative per-function product" do
+    pass = source("compiler/ruby/mir/mir_pass.rb")
+    plan = source("compiler/ruby/mir/function_mir_plan.rb")
+
+    expect(pass).to include("@function_plans")
+    expect(pass).not_to include("@cleanup_plans")
+    expect(pass).not_to include("@cleanup_bindings")
+    expect(pass).not_to include("ownership_preparation_plan")
+    expect(plan).to include("class FunctionMIRPlan")
+    expect(plan).to include("class FunctionMIRPlanner")
+  end
+
   it "makes COPY and owned-sink materialization consume LifecyclePlan instead of type cleanup predicates" do
     copy = method_body("compiler/ruby/mir/lowering/expressions.rb", "lower_copy")
     sink = method_body("compiler/ruby/mir/mir_lowering.rb", "owned_sink_plan")
@@ -306,13 +318,18 @@ RSpec.describe "architecture invariants: MIR pass order" do
 
   it "runs MIR placement before cleanup classification, loop analysis, and lowering stamps" do
     expect_order(
+      "compiler/ruby/mir/function_mir_plan.rb",
+      "EscapeAnalysis.apply_with_facts!",
+      "BgCaptureClassifier.classify_all!",
+      "CleanupClassifier.classify_plan",
+      "LoopFrameAnalysis.analyze!",
+    )
+    expect_order(
       "compiler/ruby/mir/mir_pass.rb",
       "pass_state.require!(:premir_type_checked",
-      "EscapeAnalysis.apply_with_facts!",
+      "FunctionMIRPlanner.plan_all!",
       "pass_state.mark!(:escape_analyzed)",
-      "CleanupClassifier.classify",
       "pass_state.mark!(:cleanup_classified)",
-      "LoopFrameAnalysis.analyze!",
       "pass_state.mark!(:loop_frame_analyzed)",
       "ProgramMIRFinalizer.finalize",
       "pass_state.mark!(:needs_rt_finalized)",

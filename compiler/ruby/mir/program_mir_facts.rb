@@ -11,6 +11,7 @@ require_relative "../annotator/helpers/function_signature"
 require_relative "../annotator/phases/body_analysis"
 require_relative "../compiler/entrypoint"
 require_relative "cleanup_classifier"
+require_relative "function_mir_plan"
 
 class FunctionMIRFacts < T::Struct
   extend T::Sig
@@ -58,25 +59,25 @@ class ProgramMIRFinalizer
   extend T::Sig
 
   FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
-  Plans = T.type_alias { T::Hash[String, CleanupClassifier::CleanupClassificationPlan] }
+  Plans = T.type_alias { T::Hash[String, FunctionMIRPlan] }
   BodySummaries = T.type_alias { T::Hash[String, Annotator::Phases::FunctionBodySummary] }
 
   sig do
     params(
-      fn_nodes: FnNodes,
-      cleanup_plans: Plans,
+      function_plans: Plans,
       body_summaries: BodySummaries,
       schema_lookup: Type::SchemaLookup,
     ).returns(ProgramMIRFacts)
   end
-  def self.finalize(fn_nodes:, cleanup_plans:, body_summaries:, schema_lookup:)
-    needs_runtime = local_runtime_requirements(fn_nodes, cleanup_plans, schema_lookup)
+  def self.finalize(function_plans:, body_summaries:, schema_lookup:)
+    fn_nodes = function_plans.transform_values(&:function)
+    needs_runtime = local_runtime_requirements(function_plans, schema_lookup)
     propagate_runtime_requirements!(needs_runtime, body_summaries)
 
     functions = T.let({}, ProgramMIRFacts::FunctionMap)
     fn_nodes.sort.each do |name, function|
       function.needs_rt = needs_runtime.fetch(name, false)
-      cleanup = cleanup_plans[name]&.facts
+      cleanup = function_plans.fetch(name).cleanup_facts
       functions[name] = function_facts(name, function.needs_rt == true, cleanup)
     end
     ProgramMIRFacts.new(functions: functions)
@@ -89,18 +90,18 @@ class ProgramMIRFinalizer
 
     sig do
       params(
-        fn_nodes: FnNodes,
-        cleanup_plans: Plans,
+        function_plans: Plans,
         schema_lookup: Type::SchemaLookup,
       ).returns(T::Hash[String, T::Boolean])
     end
-    def local_runtime_requirements(fn_nodes, cleanup_plans, schema_lookup)
+    def local_runtime_requirements(function_plans, schema_lookup)
       result = T.let({}, T::Hash[String, T::Boolean])
-      fn_nodes.each do |name, function|
+      fn_nodes = function_plans.transform_values(&:function)
+      function_plans.each do |name, plan|
+        function = plan.function
         next unless function.body
 
-        cleanup = cleanup_plans[name]&.facts
-        result[name] = function_needs_runtime?(function, cleanup, fn_nodes, schema_lookup)
+        result[name] = function_needs_runtime?(function, plan.cleanup_facts, fn_nodes, schema_lookup)
       end
       result
     end
