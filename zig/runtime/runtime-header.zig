@@ -4157,6 +4157,7 @@ pub const CheatLib = struct {
             // Destination-directed copies can promote a concrete child value
             // into an optional (for example, COPY "key" into ?String).  The
             // source is therefore not necessarily optional even though T is.
+            if (comptime @TypeOf(value) == @TypeOf(null)) return null;
             if (comptime @typeInfo(@TypeOf(value)) == .optional) {
                 return if (value) |payload| try dupeValue(ChildT, payload, alloc) else null;
             }

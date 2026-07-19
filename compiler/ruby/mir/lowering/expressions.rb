@@ -1165,7 +1165,7 @@ module MIRLoweringExpressions
       (node.left.is_a?(AST::BinaryOp) && node.left.smooth?) ||
       (pipeline_host.respond_to?(:pipeline_context_active?) && pipeline_host.pipeline_context_active?)
     fault_recoverable = !pipeline_manages_recovery && !left_type.future? && !left_type.stream? &&
-      node.left.respond_to?(:can_fail) && T.unsafe(node.left).can_fail == true
+      can_fail == true
     OrElseFacts.new(
       left_is_error: left_type.error_union? || !!has_error_union || fault_recoverable,
       left_success_optional: effective_left.error_union? && effective_left.success_type.optional?,

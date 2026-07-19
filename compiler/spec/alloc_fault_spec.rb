@@ -85,4 +85,21 @@ RSpec.describe "alloc_fault (allocation FAULT axis)" do
     # there and must not propagate.
     expect(fn(ast, "viaAbsorbed").alloc_fault).to eq(false)
   end
+
+  it "lowers allocation-fault recovery through catch for a discard binding" do
+    zig = ZigTranspiler.new.transpile(<<~CLEAR)
+      FN grow(n: Int64) RETURNS Int64 ->
+        MUTABLE xs: Int64[] = [];
+        MUTABLE i = 0_i64;
+        WHILE i < n DO &xs.append(i); i += 1_i64; END
+        RETURN xs.length();
+      END
+      FN main() RETURNS Void ->
+        _ = grow(100000_i64) OR_ELSE PASS;
+        RETURN;
+      END
+    CLEAR
+
+    expect(zig).to match(/grow\(rt, 100000\) catch undefined/)
+  end
 end
