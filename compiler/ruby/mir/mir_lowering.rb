@@ -1049,6 +1049,8 @@ class MIRLowering
     return mir unless mir.is_a?(MIR::Ident)
 
     name = mir.name.to_s
+    return mir if function_state.current_reassignment_target == name
+
     entry = function_state.bindings[name] || CleanupEntry::NONE
     plan = entry.lifecycle_plan
     return mir unless entry.present? && plan&.needs_drop?
@@ -3150,6 +3152,19 @@ class MIRLowering
     blk.call
   ensure
     function_state.current_decl_alloc = prev
+  end
+
+  sig do
+    type_parameters(:U)
+      .params(name: String, blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def with_reassignment_target(name, &blk)
+    previous = function_state.current_reassignment_target
+    function_state.current_reassignment_target = name
+    blk.call
+  ensure
+    function_state.current_reassignment_target = previous
   end
 
   sig do

@@ -74,7 +74,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN parse(lines: []String, pos: Int64) RETURNS ![]String ->
           MUTABLE header: []String = [];
-          header = UNWRAP (UNWRAP lines[pos]).split(" ");
+          header = (UNWRAP lines[pos]).split(" ");
           RETURN header;
         END
       CLEAR

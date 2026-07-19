@@ -805,9 +805,11 @@ module MIRLoweringVariables
       # frame-to-heap copy path without reconstructing a type from Zig text.
       source_type = Type.from_node!(node.value, context: "reassignment value type")
       target_type = assign_alloc ? Type.new(source_type, location: assign_alloc) : source_type
-      value = with_decl_alloc(assign_alloc) do
-        lowered = lower(node.value)
-        place_value_for_destination(lowered, node.value, assign_alloc, target_type)
+      value = with_reassignment_target(target_name) do
+        with_decl_alloc(assign_alloc) do
+          lowered = lower(node.value)
+          place_value_for_destination(lowered, node.value, assign_alloc, target_type)
+        end
       end
       # Some synthetic/branch-local BindExpr reassignments do not retain a
       # name-keyed cleanup entry. The lowered owning value still carries its

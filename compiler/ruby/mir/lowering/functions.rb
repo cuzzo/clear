@@ -182,6 +182,7 @@ module MIRLoweringFunctions
     prop :current_decl_alloc, T.nilable(Symbol), default: nil
     prop :current_expected_type, T.nilable(Type), default: nil
     prop :current_sink_type, T.nilable(Type), default: nil
+    prop :current_reassignment_target, T.nilable(String), default: nil
     prop :current_bindings, CleanupBindingMap, factory: -> { {} }
     prop :current_binding_types, BindingTypeMap, factory: -> { {} }
     prop :fn_alloc_marked_names, BoolNameMap, factory: -> { {} }

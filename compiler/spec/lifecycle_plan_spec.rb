@@ -164,6 +164,25 @@ RSpec.describe Semantic::LifecyclePlan do
     expect(zig).to match(/fallback_moved = true;\n\s*break :__owned_branch_transfer_\d+ fallback;/)
   end
 
+  it "does not transfer an owned fallback back into the same reassigned slot" do
+    source = <<~CLEAR
+      FN maybeList(flag: Bool) RETURNS ![]Int64 ->
+        IF flag THEN RETURN [8]; END
+        RAISE "missing";
+      END
+
+      FN main() RETURNS Void ->
+        MUTABLE values: []Int64 = [];
+        &values.append(4);
+        values = maybeList(FALSE) OR_ELSE values;
+        ASSERT values.length() == 1;
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new.transpile(source)
+    expect(zig).to include("const __new_values_opt:")
+    expect(zig).not_to match(/__owned_branch_transfer_\d+ values/)
+  end
 
   it "does not synthesize reassignment cleanup for optional interned symbols" do
     source = <<~CLEAR
