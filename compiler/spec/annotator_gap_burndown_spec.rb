@@ -312,6 +312,28 @@ RSpec.describe "annotator branch gap burndown" do
         ann.send(:record_function_body_summary!, summary)
       end
     end
+    republish_audit_facts(ann) if ann.is_a?(Annotator::Phases::CapabilityAuditSession)
+  end
+
+  def republish_audit_facts(ann)
+    context = ann.instance_variable_get(:@context)
+    previous = context.typed_program
+    summaries = previous.resolution.function_registry.body_summaries
+    typed_program = Annotator::Phases::TypedProgramFacts.new(
+      resolution: previous.resolution,
+      body_summaries: summaries,
+      typed_node_count: previous.typed_node_count,
+      unresolved_node_count: previous.unresolved_node_count,
+      ownership_graph: previous.ownership_graph,
+      lifecycle_registry: previous.lifecycle_registry
+    )
+    ann.instance_variable_set(:@context, Annotator::Phases::CapabilityAuditSession::Context.new(
+      typed_program: typed_program,
+      inputs: context.inputs,
+      source_code: context.source_code,
+      language_mode: context.language_mode,
+      strict_test: context.strict_test
+    ))
   end
 
   def empty_body_summary

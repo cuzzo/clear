@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "sorbet-runtime"
+require "set"
 
 require_relative "../../ast/fixable_error"
 require_relative "../../ast/scope"
@@ -102,16 +103,27 @@ module Annotator
       def function_body_summaries = @context.typed_program.body_summaries
 
       sig { returns(T::Hash[String, T::Set[String]]) }
-      def function_call_graph = semantic_function_registry.call_graph
+      def function_call_graph
+        local_function_facts.transform_values { |function| function.callees.to_set }
+      end
 
       sig { returns(T::Hash[String, T::Set[String]]) }
-      def function_propagating_callees = semantic_function_registry.propagating_callees
+      def function_propagating_callees
+        local_function_facts.transform_values { |function| function.propagating_callees.to_set }
+      end
 
       sig { params(name: String).returns(T::Boolean) }
-      def function_has_fnptr_call?(name) = semantic_function_registry.fnptr_call?(name)
+      def function_has_fnptr_call?(name)
+        local_function_facts[name]&.has_function_pointer_call == true
+      end
 
       sig { params(name: String).returns(T::Boolean) }
-      def function_raises_directly?(name) = semantic_function_registry.raises_directly?(name)
+      def function_raises_directly?(name)
+        local_function_facts[name]&.raises_directly == true
+      end
+
+      sig { returns(Annotator::Phases::TypedProgramFacts::LocalFacts) }
+      def local_function_facts = @context.typed_program.local_function_facts
 
       sig { params(node: AST::FunctionDef).returns(T::Boolean) }
       def function_has_pre_clauses?(node) = node.pre_clauses.is_a?(Array) && node.pre_clauses.any?

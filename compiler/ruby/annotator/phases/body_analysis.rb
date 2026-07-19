@@ -127,6 +127,40 @@ module Annotator
       const :suspend_points, T::Array[Semantic::SuspendPointFact], factory: -> { [] }
     end
 
+    # AST-independent product of one typed body traversal. Source-oriented
+    # facts remain in FunctionBodySummary for diagnostics during the migration;
+    # graph propagation, invalidation, and worker scheduling use this record.
+    class LocalFunctionFacts < T::Struct
+      extend T::Sig
+
+      const :name, String
+      const :definition_id, Integer
+      const :body_id, Integer
+      const :callees, T::Array[String]
+      const :propagating_callees, T::Array[String]
+      const :has_function_pointer_call, T::Boolean
+      const :raises_directly, T::Boolean
+      const :local_count, Integer
+      const :call_site_count, Integer
+      const :suspend_kinds, T::Array[String]
+
+      sig { params(summary: FunctionBodySummary).returns(LocalFunctionFacts) }
+      def self.from_summary(summary)
+        new(
+          name: summary.name,
+          definition_id: summary.definition_id.value,
+          body_id: summary.body_id.value,
+          callees: summary.callees.to_a.sort.freeze,
+          propagating_callees: summary.propagating_callees.to_a.sort.freeze,
+          has_function_pointer_call: summary.has_fnptr_call,
+          raises_directly: summary.raises_directly,
+          local_count: summary.local_facts.length,
+          call_site_count: summary.call_site_facts.length,
+          suspend_kinds: summary.suspend_points.map { |point| point.kind.to_s }.sort.freeze
+        ).freeze
+      end
+    end
+
     module BodyAnalysis
       extend T::Sig
 
@@ -145,7 +179,7 @@ module Annotator
       sig { returns(T::Hash[String, T::Set[String]]) }
       def function_call_graph
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
-        semantic_function_registry.call_graph
+        function_body_summaries.transform_values(&:callees)
       end
 
       sig { returns(T::Array[BodyFactFrame]) }

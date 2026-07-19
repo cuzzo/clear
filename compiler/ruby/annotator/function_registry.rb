@@ -58,24 +58,5 @@ module Annotator
       summary
     end
 
-    sig { returns(T::Hash[String, T::Set[String]]) }
-    def call_graph
-      body_summaries.transform_values(&:callees)
-    end
-
-    sig { returns(T::Hash[String, T::Set[String]]) }
-    def propagating_callees
-      body_summaries.transform_values(&:propagating_callees)
-    end
-
-    sig { params(name: String).returns(T::Boolean) }
-    def fnptr_call?(name)
-      body_summaries[name]&.has_fnptr_call == true
-    end
-
-    sig { params(name: String).returns(T::Boolean) }
-    def raises_directly?(name)
-      body_summaries[name]&.raises_directly == true
-    end
   end
 end

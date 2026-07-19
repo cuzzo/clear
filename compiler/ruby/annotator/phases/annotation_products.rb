@@ -102,11 +102,14 @@ module Annotator
       extend T::Sig
 
       BodySummaries = T.type_alias { T::Hash[String, FunctionBodySummary] }
+      LocalFacts = T.type_alias { T::Hash[String, LocalFunctionFacts] }
 
       sig { returns(ResolutionFacts) }
       attr_reader :resolution
       sig { returns(BodySummaries) }
       attr_reader :body_summaries
+      sig { returns(LocalFacts) }
+      attr_reader :local_function_facts
       sig { returns(Integer) }
       attr_reader :typed_node_count
       sig { returns(Integer) }
@@ -123,14 +126,17 @@ module Annotator
           typed_node_count: Integer,
           unresolved_node_count: Integer,
           ownership_graph: OwnershipGraph,
-          lifecycle_registry: Semantic::LifecycleRegistry
+          lifecycle_registry: Semantic::LifecycleRegistry,
+          local_function_facts: T.nilable(LocalFacts)
         ).void
       end
-      def initialize(resolution:, body_summaries:, typed_node_count:, unresolved_node_count:, ownership_graph:, lifecycle_registry: Semantic::LifecycleRegistry.empty)
+      def initialize(resolution:, body_summaries:, typed_node_count:, unresolved_node_count:, ownership_graph:, lifecycle_registry: Semantic::LifecycleRegistry.empty, local_function_facts: nil)
         raise "typed program cannot publish unresolved nodes" unless unresolved_node_count.zero?
 
         @resolution = T.let(resolution, ResolutionFacts)
         @body_summaries = T.let(body_summaries.dup.freeze, BodySummaries)
+        facts = local_function_facts || body_summaries.transform_values { |summary| LocalFunctionFacts.from_summary(summary) }
+        @local_function_facts = T.let(facts.sort.to_h.freeze, LocalFacts)
         @typed_node_count = T.let(typed_node_count, Integer)
         @unresolved_node_count = T.let(unresolved_node_count, Integer)
         @ownership_graph = T.let(ownership_graph, OwnershipGraph)

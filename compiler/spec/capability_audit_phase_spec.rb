@@ -35,6 +35,27 @@ RSpec.describe Annotator::Phases::CapabilityAuditPhase do
     expect(report).to be_success
   end
 
+  it "uses published local graph facts instead of mutable registry graph queries" do
+    source = <<~CLEAR
+      FN leaf() RETURNS Int64 -> RETURN 1; END
+      FN main() RETURNS Int64 -> RETURN leaf(); END
+    CLEAR
+    program = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    resolution = Annotator::Phases::ResolutionPhase.run(
+      program: program, importer: nil, source_dir: Dir.pwd, source_code: source
+    )
+    handoff = Annotator::Phases::TypeAnalysisPhase.run(
+      resolution: resolution,
+      session: Annotator::Phases::TypeAnalysisSession.new(source_code: source)
+    )
+    allow(resolution.function_registry).to receive(:call_graph).and_raise("mutable graph queried")
+    allow(resolution.function_registry).to receive(:propagating_callees).and_raise("mutable graph queried")
+
+    expect {
+      described_class.run(typed_program: handoff.typed_program, request: handoff.audit_request)
+    }.not_to raise_error
+  end
+
   it "fails closed when an audit executor returns with deferred validations" do
     source = ""
     program = ClearParser.new(Lexer.new(source).tokenize, source).parse
