@@ -160,7 +160,7 @@ RSpec.describe SemanticAnnotator do
             RETURN optional_resolver;
           END
           FN main(optional_resolver: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Void ->
-            maybe_resolver = identity(optional_resolver);
+            maybe_resolver:? = identity(optional_resolver);
             resolver: FN(String@symbol) -> ?TypeSchemaLookupResult = maybe_resolver?;
           END
         CLEAR
@@ -453,6 +453,28 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
     }
+
+    it "hoists a fallible owned final expression within a lambda body" do
+      source = <<~CLEAR
+        FN tokens() RETURNS ![]String ->
+          RETURN ["token"];
+        END
+
+        FN nested(block: FN() -> ![]String) RETURNS ![]String
+          REQUIRES block: NON_REENTRANT ->
+          RETURN block();
+        END
+
+        FN scan() RETURNS ![]String ->
+          RETURN nested(%() -> {
+            result = TRY tokens();
+            result
+          });
+        END
+      CLEAR
+
+      expect { transpile(source) }.not_to raise_error
+    end
 
     # -------------------------------------------------------------------------
     # Annotator: named function used as a value

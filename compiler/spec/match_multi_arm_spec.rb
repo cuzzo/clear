@@ -26,6 +26,22 @@ RSpec.describe "MATCH multi-pattern arm" do
     SemanticAnnotator.new.annotate!(parse(src))
   end
 
+  it "owns a mutable string slot before MATCH arm reassignment and return" do
+    zig = ZigTranspiler.new.transpile(<<~CLEAR)
+      FN classify(s: String) RETURNS String ->
+        MUTABLE out: String = "initial";
+        PARTIAL MATCH s START
+          "a", "b" -> out = "known";,
+          DEFAULT -> out = "other";
+        END
+        RETURN out;
+      END
+    CLEAR
+
+    expect(zig).to match(/var out: \[\]const u8 = .*\.dupe\(u8, "initial"\)/)
+    expect(zig).to include("CheatLib.cleanup(@TypeOf(out)")
+  end
+
   def find_match(ast)
     found = nil
     walk = lambda do |n|
@@ -277,6 +293,22 @@ RSpec.describe "MATCH multi-pattern arm" do
           RETURN out;
         END
       CLEAR
+      expect { annotate(src) }.not_to raise_error
+    end
+
+    it "allows expression MATCH to produce an optional scalar union" do
+      src = <<~CLEAR
+        UNION Dimension { Number: Int64, Name: String@symbol }
+        FN parseDimension(source: String) RETURNS ?Dimension ->
+          result: ?Dimension = PARTIAL MATCH source START
+            "none" -> NIL,
+            "name" -> :LIST,
+            DEFAULT -> 1_i64
+          END;
+          RETURN result;
+        END
+      CLEAR
+
       expect { annotate(src) }.not_to raise_error
     end
   end

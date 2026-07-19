@@ -322,16 +322,15 @@ RSpec.describe "String@symbol" do
 
     it "does not classify runtime symbol hoists as cleanup-bearing" do
       importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
-      ast = CompilerFrontend.compile(<<~CLEAR, importer: importer, source_dir: Dir.pwd).ast
+      result = CompilerFrontend.compile(<<~CLEAR, importer: importer, source_dir: Dir.pwd)
         FN coerce(tag: String) RETURNS String@symbol ->
           RETURN symbol(tag);
         END
       CLEAR
 
-      decl = ast.statements.first.body.find { |node| node.is_a?(AST::VarDecl) && node.name.to_s.start_with?("__hoist_") }
-      expect(decl).not_to be_nil
-      expect(decl.full_type.symbol?).to be true
-      expect(decl.mir_binding_entry.needs_cleanup?).to be false
+      symbol_plan = result.lifecycle_registry.fetch(Type.new("String@symbol"))
+      expect(symbol_plan.needs_drop?).to be false
+      expect(symbol_plan.copy_strategy).to eq(:bit_copy)
     end
 
     it "accepts symbol literals in String@symbol union payloads" do

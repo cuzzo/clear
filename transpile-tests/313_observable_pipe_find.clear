@@ -15,7 +15,7 @@ FN main() RETURNS Void ->
     };
 
     running: ~?Int64@observable = gen |> FIND _ > 42_i64;
-    final = NEXT running;
+    final:? = NEXT running;
 
     ASSERT final != NIL, "FIND should produce a value";
     ASSERT final == 43_i64, "first int > 42 is 43";

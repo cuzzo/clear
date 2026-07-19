@@ -24,6 +24,72 @@ const StringListValue = union(enum) {
     Items: std.ArrayListUnmanaged([]const u8),
 };
 
+var foreign_close_count: usize = 0;
+
+const ForeignResource = struct {
+    id: usize,
+
+    pub fn deinit(self: *@This()) void {
+        _ = self.id;
+        foreign_close_count += 1;
+    }
+};
+
+// Models the deinit method emitted from CLEAR field semantics. In particular,
+// `marker` has String@symbol representation but is borrowed process-lifetime
+// storage and must never be passed to the generic slice cleanup arm.
+const SemanticOwner = struct {
+    marker: []const u8,
+    resource: ?ForeignResource,
+
+    pub fn __clear_drop(self: *@This(), alloc: std.mem.Allocator) void {
+        _ = alloc;
+        if (self.resource) |*resource| resource.deinit();
+    }
+};
+
+const SemanticUnion = union(enum) {
+    Resource: ForeignResource,
+    Symbol: []const u8,
+
+    pub fn __clear_drop(self: *@This(), alloc: std.mem.Allocator) void {
+        _ = alloc;
+        switch (self.*) {
+            .Resource => |*resource| resource.deinit(),
+            .Symbol => {},
+        }
+    }
+};
+
+test "cleanup: foreign resources close exactly once through wrappers" {
+    const alloc = std.testing.allocator;
+    foreign_close_count = 0;
+
+    var optional: ?ForeignResource = .{ .id = 1 };
+    CheatLib.cleanup(@TypeOf(optional), alloc, &optional);
+
+    var list = std.ArrayListUnmanaged(ForeignResource).empty;
+    try list.append(alloc, .{ .id = 2 });
+    try list.append(alloc, .{ .id = 3 });
+    CheatLib.cleanup(@TypeOf(list), alloc, &list);
+
+    var owner = SemanticOwner{ .marker = "static-symbol", .resource = .{ .id = 4 } };
+    CheatLib.cleanup(@TypeOf(owner), alloc, &owner);
+
+    var symbol_union = SemanticUnion{ .Symbol = "also-static" };
+    CheatLib.cleanup(@TypeOf(symbol_union), alloc, &symbol_union);
+    var resource_union = SemanticUnion{ .Resource = .{ .id = 5 } };
+    CheatLib.cleanup(@TypeOf(resource_union), alloc, &resource_union);
+
+    var first = try CheatLib.rcCreate(ForeignResource, alloc, .{ .id = 6 });
+    var second = CheatLib.rcRetain(ForeignResource, first);
+    CheatLib.cleanup(@TypeOf(first), alloc, &first);
+    try std.testing.expectEqual(@as(usize, 5), foreign_close_count);
+    CheatLib.cleanup(@TypeOf(second), alloc, &second);
+
+    try std.testing.expectEqual(@as(usize, 6), foreign_close_count);
+}
+
 // `ebr` is taken as a pointer parameter so the caller owns its
 // lifetime (the EbrContext is stored by-pointer inside Runtime via
 // ThreadLocalEbr.context). The previous version returned the

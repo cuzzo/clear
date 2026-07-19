@@ -26,16 +26,17 @@ require_relative "../ffi/c_header_importer"
 class CompilerFrontend
     extend T::Sig
 
-  Result = Struct.new(
-    :ast,             # AST::Program with MIR nodes inserted by MIRPass
-    :annotator,       # SemanticAnnotator (for ownership graph, schema lookup)
-    :fn_nodes,        # { name => AST::FunctionDef }
-    :fn_sigs,         # { name => FunctionSignature }
-    :struct_schemas,  # { :Name => fields }
-    :enum_schemas,    # { :Name => variants }
-    :union_schemas,   # { :Name => variants }
-    :moved_guard_info # { name => guard_info }
-  )
+  class Result < T::Struct
+    const :ast, AST::Program
+    const :annotator, ::SemanticAnnotator
+    const :lifecycle_registry, Semantic::LifecycleRegistry
+    const :fn_nodes, T::Hash[String, AST::FunctionDef]
+    const :fn_sigs, T::Hash[String, FunctionSignature]
+    const :struct_schemas, T::Hash[Symbol, Schemas::StructSchema]
+    const :enum_schemas, T::Hash[Symbol, MIRLoweringSchemas::EnumVariants]
+    const :union_schemas, T::Hash[Symbol, Schemas::UnionSchema]
+    const :moved_guard_info, MIRLoweringInput::MovedGuardInfo
+  end
 
   # Run the full front-end pipeline on CLEAR source code.
   #
@@ -83,9 +84,11 @@ class CompilerFrontend
     # (annotator failed to stamp it), surfaced before MIR consumes it.
     PreMirTypeCheck.verify!(ast)
 
+    lifecycle_registry = T.must(annotator.annotation_products.typed_program).lifecycle_registry
     mir_pass = MIRPass.new(
       fn_nodes: fn_nodes,
       schema_lookup: schema_lookup,
+      lifecycle_registry: lifecycle_registry,
       body_summaries: T.must(annotator.semantic_index).body_summaries,
       hoist_bindings: hoist_result.bindings_by_function
     )
@@ -124,7 +127,17 @@ class CompilerFrontend
     moved_guard_info = T.let({}, MIRLoweringInput::MovedGuardInfo)
     fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
 
-    Result.new(ast, annotator, fn_nodes, fn_sigs, struct_schemas, enum_schemas, union_schemas, moved_guard_info)
+    Result.new(
+      ast: ast,
+      annotator: annotator,
+      lifecycle_registry: lifecycle_registry,
+      fn_nodes: fn_nodes,
+      fn_sigs: fn_sigs,
+      struct_schemas: struct_schemas,
+      enum_schemas: enum_schemas,
+      union_schemas: union_schemas,
+      moved_guard_info: moved_guard_info,
+    )
   end
 
   # Walk every TEST THAT body in the program and register a synthetic

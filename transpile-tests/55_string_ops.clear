@@ -27,6 +27,20 @@ FN main() RETURNS Void ->
     ASSERT bad == -1.0, "toNumber OR_ELSE default";
     i = toInt(42.9);
     ASSERT i == 42_i64, "toInt truncates";
+    hex = "7fff".toInt(16_i64) OR_ELSE -1_i64;
+    ASSERT hex == 32767_i64, "toInt parses an explicit radix";
+    prefixedHex = "0x7fff".toInt(16_i64) OR_ELSE -1_i64;
+    ASSERT prefixedHex == 32767_i64, "toInt accepts a matching conventional prefix";
+    prefixedOctal = "0o17".toInt(8_i64) OR_ELSE -1_i64;
+    ASSERT prefixedOctal == 15_i64, "toInt accepts an octal prefix";
+    prefixedBinary = "0b101".toUInt(2_i64) OR_ELSE 0_u64;
+    ASSERT prefixedBinary == 5_u64, "toUInt accepts a binary prefix";
+    binary = toInt("101010", 2_i64) OR_ELSE -1_i64;
+    ASSERT binary == 42_i64, "function-form radix parsing remains available";
+    badRadix = "10".toInt(1_i64) OR_ELSE -1_i64;
+    ASSERT badRadix == -1_i64, "invalid radix is fallible";
+    maxUInt = "ffffffffffffffff".toUInt(16_i64) OR_ELSE 0_u64;
+    ASSERT maxUInt == 18446744073709551615_u64, "toUInt covers the full UInt64 domain";
 
     RETURN;
 END

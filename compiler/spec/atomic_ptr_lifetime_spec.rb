@@ -33,7 +33,7 @@ RSpec.describe "AtomicPtr lifetime (M3.12)" do
           STRUCT Cfg { v: Int64 }
           FN make_handle() RETURNS ~Void ->
             cfg = Cfg{ v: 0 } @boxed:atomic;
-            bg = BG {
+            bg:~ = BG {
               WITH SNAPSHOT cfg AS c {
                 _ = c.v;
               }
@@ -51,7 +51,7 @@ RSpec.describe "AtomicPtr lifetime (M3.12)" do
         annotate(<<~CLEAR)
           FN make_handle() RETURNS ~Void ->
             MUTABLE counter: Int64 = 0 @shared:atomic;
-            bg = BG { v = counter; print(v.toString()); };
+            bg:~ = BG { v = counter; print(v.toString()); };
             RETURN bg;
           END
         CLEAR
@@ -64,7 +64,7 @@ RSpec.describe "AtomicPtr lifetime (M3.12)" do
           FN spawn_bumper(counter: Int64) RETURNS counter:~Void
             REQUIRES counter: ATOMIC
           ->
-            bg = BG { v = counter; print(v.toString()); };
+            bg:~ = BG { v = counter; print(v.toString()); };
             RETURN bg;
           END
         CLEAR

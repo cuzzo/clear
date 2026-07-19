@@ -594,9 +594,9 @@ RSpec.describe ClearParser do
         params: [Type::FunctionTypeParam.new(type: Type.new(:Int64))],
         return_type: Type.new(:Bool)
       )
-      expect(TypeShape.new(raw: fn_type).resolved).to eq(:Any)
-      expect(TypeShape.new(raw: fn_type).fn_type?).to be(true)
-      expect(TypeShape.new(raw: "Float64").resolved).to eq(:Float64)
+      expect(TypeShape.from_raw(raw: fn_type).resolved).to eq(:Any)
+      expect(TypeShape.from_raw(raw: fn_type).fn_type?).to be(true)
+      expect(TypeShape.from_raw(raw: "Float64").resolved).to eq(:Float64)
     end
 
     it "covers binary-op numeric and unknown-operator branches" do

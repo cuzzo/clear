@@ -1950,7 +1950,7 @@ FN loadBytecodeOps(path: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Int64[
     parts = split(raw, ",");
     MUTABLE ops: []Int64 = List[];
     FOR pi IN (0_i64 ..< parts.length()) DO
-        part = trim(parts[pi]);
+        part = trim(UNWRAP parts[pi]);
         IF part.length() > 0 THEN
             n = toNumber(part) OR_ELSE 0.0;
             intN = toInt(n);

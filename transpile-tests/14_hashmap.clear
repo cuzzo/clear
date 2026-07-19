@@ -7,7 +7,7 @@ FN main() RETURNS Void ->
   # Manual Loop
   MUTABLE i = 0_i64;
   WHILE i < words.length() DO
-    w = words[i];
+    w = UNWRAP words[i];
     current = counts[w] OR_ELSE 0_i64;
     counts[w] = current + 1_i64;
     i = i + 1_i64;

@@ -205,6 +205,42 @@ test "dupeValue retains Rc Arc through optional struct union and list shapes" {
     CheatLib.cleanup(Holder, allocator, &holder);
 }
 
+test "dupeValue deeply copies structs with compiler-generated semantic cleanup" {
+    const allocator = std.testing.allocator;
+    const Value = union(enum) { text: []const u8, number: i64 };
+    const Token = struct {
+        value: ?Value,
+        file: ?[]const u8,
+
+        pub fn __clear_drop(self: *@This(), allocator_arg: std.mem.Allocator) void {
+            CheatLib.cleanup(?Value, allocator_arg, &self.value);
+            CheatLib.cleanup(?[]const u8, allocator_arg, &self.file);
+        }
+
+        pub fn __clear_clone(self: @This(), allocator_arg: std.mem.Allocator) !@This() {
+            return .{
+                .value = try CheatLib.dupeValue(?Value, self.value, allocator_arg),
+                .file = try CheatLib.dupeValue(?[]const u8, self.file, allocator_arg),
+            };
+        }
+    };
+
+    var original = Token{
+        .value = .{ .text = try allocator.dupe(u8, "payload") },
+        .file = try allocator.dupe(u8, "source.clear"),
+    };
+    var copied = try CheatLib.dupeValue(Token, original, allocator);
+
+    const original_text = switch (original.value.?) { .text => |text| text, else => unreachable };
+    const copied_text = switch (copied.value.?) { .text => |text| text, else => unreachable };
+    try std.testing.expectEqualStrings(original_text, copied_text);
+    try std.testing.expect(original_text.ptr != copied_text.ptr);
+    try std.testing.expect(original.file.?.ptr != copied.file.?.ptr);
+
+    CheatLib.cleanup(Token, allocator, &original);
+    CheatLib.cleanup(Token, allocator, &copied);
+}
+
 var global_ebr_ctx: ebr.EbrContext = .{};
 var global_stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);

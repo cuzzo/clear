@@ -143,6 +143,9 @@ class PipelineRangeLowerer
     sig { abstract.params(node: AST::Node).returns(MIR::Node) }
     def range_visit_mir(node); end
 
+    sig { abstract.params(node: AST::Node, alloc: Symbol).returns(MIR::Node) }
+    def range_visit_mir_with_decl_alloc(node, alloc); end
+
     sig { abstract.params(node: AST::Node, placeholder: T.nilable(String), acc: T.nilable(String)).returns(MIR::Node) }
     def range_visit_mir_with_context(node, placeholder:, acc: nil); end
 
@@ -182,6 +185,7 @@ class PipelineRangeLowerer
     sig do
       params(
         visit_mir: T.proc.params(node: AST::Node).returns(MIR::Node),
+        visit_mir_with_decl_alloc: T.proc.params(node: AST::Node, alloc: Symbol).returns(MIR::Node),
         visit_mir_with_context: T.proc.params(node: AST::Node, placeholder: T.nilable(String), acc: T.nilable(String)).returns(MIR::Node),
         visit_pipeline_body_mir: T.proc.params(body_stmts: T::Array[AST::Node], placeholder: String).returns(T::Array[MIR::Emittable]),
         ast_stmts_use_placeholder: T.proc.params(body_stmts: T::Array[AST::Node]).returns(T::Boolean),
@@ -194,11 +198,13 @@ class PipelineRangeLowerer
         task_config_variant: T.proc.returns(String),
       ).void
     end
-    def initialize(visit_mir:, visit_mir_with_context:, visit_pipeline_body_mir:,
+    def initialize(visit_mir:, visit_mir_with_decl_alloc:, visit_mir_with_context:, visit_pipeline_body_mir:,
                    ast_stmts_use_placeholder:, bc_target:, next_label:,
                    transpile_type:, schema_lookup:, runtime_name:, next_observable_id:,
                    task_config_variant:)
       @visit_mir = T.let(visit_mir, T.proc.params(node: AST::Node).returns(MIR::Node))
+      @visit_mir_with_decl_alloc = T.let(visit_mir_with_decl_alloc,
+        T.proc.params(node: AST::Node, alloc: Symbol).returns(MIR::Node))
       @visit_mir_with_context = T.let(visit_mir_with_context,
         T.proc.params(node: AST::Node, placeholder: T.nilable(String), acc: T.nilable(String)).returns(MIR::Node))
       @visit_pipeline_body_mir = T.let(visit_pipeline_body_mir,
@@ -217,6 +223,11 @@ class PipelineRangeLowerer
     sig { override.params(node: AST::Node).returns(MIR::Node) }
     def range_visit_mir(node)
       @visit_mir.call(node)
+    end
+
+    sig { override.params(node: AST::Node, alloc: Symbol).returns(MIR::Node) }
+    def range_visit_mir_with_decl_alloc(node, alloc)
+      @visit_mir_with_decl_alloc.call(node, alloc)
     end
 
     sig { override.params(node: AST::Node, placeholder: T.nilable(String), acc: T.nilable(String)).returns(MIR::Node) }
@@ -284,8 +295,10 @@ class PipelineRangeLowerer
 
   sig { params(node: AST::Node).returns(T.nilable(PipelineRangeChain)) }
   def unwrap_range_chain(node)
-    return PipelineRangeChain.new(source: node, stages: []) if finite_stream_source_node?(node)
-    return nil unless node.is_a?(AST::BinaryOp) && node.smooth?
+    unless node.is_a?(AST::BinaryOp) && node.smooth?
+      return PipelineRangeChain.new(source: node, stages: []) if finite_stream_source_node?(node)
+      return nil
+    end
 
     stages = T.let([], T::Array[AST::Node])
     cursor = T.let(node, AST::Node)
@@ -303,8 +316,15 @@ class PipelineRangeLowerer
     PipelineRangeChain.new(source: cursor, stages: stages)
   end
 
-  sig { params(source_node: AST::Node, stages: T::Array[AST::Node], on_skip: T.nilable(PipelineRangeSkipHook)).returns(PipelineLazyRangePrefix) }
-  def build_lazy_range_prefix(source_node, stages, on_skip: nil)
+  sig do
+    params(
+      source_node: AST::Node,
+      stages: T::Array[AST::Node],
+      on_skip: T.nilable(PipelineRangeSkipHook),
+      source_alloc: T.nilable(Symbol),
+    ).returns(PipelineLazyRangePrefix)
+  end
+  def build_lazy_range_prefix(source_node, stages, on_skip: nil, source_alloc: nil)
     source_ti = source_node.full_type!
     elem_t = source_ti.runtime_stream_storage_element_type || range_literal_element_type(source_node)
     elem_zig = elem_t.zig_type
@@ -374,8 +394,14 @@ class PipelineRangeLowerer
       (source_ti.dynamic_stream? || source_ti.open_stream? ||
        source_ti.bounded_stream? || source_ti.inf_stream?)
     source_name = is_var_stream ? source_node.name.to_s : "__range_src"
-    range_let = is_var_stream ? nil :
-      MIR::Let.new("__range_src", @host.range_visit_mir(source_node), true, nil, "_ = &__range_src;")
+    range_let = unless is_var_stream
+      source_mir = if source_alloc
+        @host.range_visit_mir_with_decl_alloc(source_node, source_alloc)
+      else
+        @host.range_visit_mir(source_node)
+      end
+      MIR::Let.new("__range_src", source_mir, true, nil, "_ = &__range_src;")
+    end
 
     next_method = (source_ti.bounded_stream? || source_ti.inf_stream?) ? "nextOrNull" : "next"
 
@@ -468,7 +494,11 @@ class PipelineRangeLowerer
 
   sig { params(range_lit: AST::Node, stages: T::Array[AST::Node], fold_op: PipelineDefaultObservableFoldOp, smooth_node: AST::BinaryOp).returns(MIR::BlockExpr) }
   def lower_range_fold(range_lit, stages, fold_op, smooth_node)
-    prefix = build_lazy_range_prefix(range_lit, stages)
+    prefix = build_lazy_range_prefix(
+      range_lit,
+      stages,
+      source_alloc: smooth_node.observable_dest ? :heap : nil,
+    )
     label = @host.range_next_label
 
     if smooth_node.observable_dest
@@ -492,7 +522,11 @@ class PipelineRangeLowerer
 
   sig { params(range_lit: AST::Node, stages: T::Array[AST::Node], reduce_op: AST::ReduceOp, smooth_node: T.nilable(AST::BinaryOp)).returns(MIR::BlockExpr) }
   def lower_range_reduce(range_lit, stages, reduce_op, smooth_node = nil)
-    prefix = build_lazy_range_prefix(range_lit, stages)
+    prefix = build_lazy_range_prefix(
+      range_lit,
+      stages,
+      source_alloc: smooth_node&.observable_dest ? :heap : nil,
+    )
     item_var = prefix.item_var
 
     if smooth_node&.observable_dest

@@ -47,7 +47,7 @@ FN eval(TAKES ast: Value) RETURNS !Value EFFECTS REENTRANT ->
         Value.Str AS s -> RETURN Value{ Str: COPY s };,
         Value.List AS listItems ->
             ownedItems: Value[] = GIVE listItems;
-            result = evalList(ownedItems);
+            result = TRY evalList(ownedItems);
             PARTIAL MATCH result START
                 Value.Tco AS tco ->
                     RETURN eval(COPY tco.tcoAst);,
@@ -63,9 +63,9 @@ FN evalList(TAKES items: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     formName = getSymName(items[0]);
 
     IF formName == "raise" THEN
-        msg = eval(COPY items[1]);
+        msg = TRY eval(COPY items[1]);
         IF isError?(msg) THEN RETURN msg; END
-        kind = eval(COPY items[2]);
+        kind = TRY eval(COPY items[2]);
         IF isError?(kind) THEN RETURN kind; END
         RETURN Value.Error{ errMsg: getStr(msg), errKind: getStr(kind) };
 
@@ -108,8 +108,8 @@ FN main() RETURNS Void ->
     &tryForm.append(Value{ List: catchForm });
 
     ast = Value{ List: tryForm };
-    result = eval(COPY ast);
-    str = prStr(result, FALSE);
+    result = TRY eval(COPY ast);
+    str = TRY prStr(result, FALSE);
     ASSERT str == "ok", "try/catch returns ok";
 
     print("175: tco try/catch PASSED");

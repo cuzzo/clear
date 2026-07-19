@@ -115,6 +115,22 @@ RSpec.describe "P3 effect inference + correctness checks" do
       CHT
       expect { annotate(src) }.not_to raise_error
     end
+
+    it "accepts suspension inside a lock-free LOCAL polymorphic view" do
+      src = <<~CHT
+        STRUCT Counter { value: Int64 }
+        FN inspectLocal(MUTABLE c: Counter) RETURNS !Void
+          REQUIRES c: LOCAL
+        ->
+          WITH POLYMORPHIC c AS x {
+            BG { print(1); }
+          }
+          RETURN;
+        END
+      CHT
+
+      expect { annotate(src) }.not_to raise_error
+    end
   end
 
   # ── P3.4: naked nested-WITH on different bindings ───────────────────────

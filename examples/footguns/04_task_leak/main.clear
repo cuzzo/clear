@@ -19,7 +19,7 @@ FN handle_request(id: Int64) RETURNS !Void ->
   # BG returns a promise. The promise MUST be awaited (NEXT).
   # Dropping it without NEXT is a compile error:
   #   "BG promise 'p' is never awaited — possible task leak"
-  p = BG {fetch_result();};
+  p:~ = BG {fetch_result();};
   result = NEXT p;
   # structured: scope waits here until fiber done
   print("request " $+ id.toString() $+ ": " $+ result);

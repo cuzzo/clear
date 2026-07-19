@@ -127,6 +127,7 @@ module LexerCompat
       source = File.join(dir, 'lexer_compat.clear')
       binary = File.join(dir, 'lexer_compat')
       File.write(source, clear_harness_source(cases))
+      FileUtils.cp(source, File.join(options[:out_dir], 'lexer_compat.clear')) if options[:keep]
 
       build_args = [
         LexerHarnessSupport::CLEAR, 'build', source,
@@ -140,7 +141,6 @@ module LexerCompat
       parsed = parse_clear_output(stdout)
 
       if options[:keep]
-        FileUtils.cp(source, File.join(options[:out_dir], 'lexer_compat.clear'))
         FileUtils.cp(binary, File.join(options[:out_dir], 'lexer_compat'))
       end
 
@@ -167,19 +167,19 @@ module LexerCompat
         WHILE i < value.length() DO
           ch = value.charAt(i);
           IF ch == "\\\\" THEN
-            out = out + "\\\\\\\\";
+            out = out $+ "\\\\\\\\";
           ELSE_IF ch == "\\n" THEN
-            out = out + "\\\\n";
+            out = out $+ "\\\\n";
           ELSE_IF ch == "\\r" THEN
-            out = out + "\\\\r";
+            out = out $+ "\\\\r";
           ELSE_IF ch == "\\t" THEN
-            out = out + "\\\\t";
+            out = out $+ "\\\\t";
           ELSE_IF ch == "\\0" THEN
-            out = out + "\\\\0";
+            out = out $+ "\\\\0";
           ELSE_IF ch == "|" THEN
-            out = out + "\\\\p";
+            out = out $+ "\\\\p";
           ELSE
-            out = out + ch;
+            out = out $+ ch;
           END
           i += 1;
         END
@@ -236,27 +236,27 @@ module LexerCompat
         END
 
         IF scaled == 0 THEN
-          RETURN prefix + whole.toString() + ".0";
+          RETURN prefix $+ whole.toString() $+ ".0";
         END
 
         MUTABLE frac_text = scaled.toString();
         WHILE frac_text.length() < 6 DO
-          frac_text = "0" + frac_text;
+          frac_text = "0" $+ frac_text;
         END
-        RETURN prefix + whole.toString() + "." + trimTrailingZeros(frac_text);
+        RETURN prefix $+ whole.toString() $+ "." $+ trimTrailingZeros(frac_text);
       END
 
       PRIVATE FN dumpToken(token: Token) RETURNS Void ->
         print(
-          "TOKEN|" + token.type + "|" + tokenValueKind(token) + "|" +
-          token.line.toString() + "|" + token.column.toString() + "|" +
+          "TOKEN|" $+ token.type $+ "|" $+ tokenValueKind(token) $+ "|" $+
+          token.line.toString() $+ "|" $+ token.column.toString() $+ "|" $+
           tokenValueText(token)
         );
         RETURN;
       END
 
       PRIVATE FN dumpCase(source: String@raw, index: Int64, name: String) RETURNS !Void ->
-        print("CASE|" + index.toString() + "|" + escapeCompat(name) + "|ok|");
+        print("CASE|" $+ index.toString() $+ "|" $+ escapeCompat(name) $+ "|ok|");
         tokens = tokenizeSource(source) OR_ELSE RAISE;
         MUTABLE i = 0;
         WHILE i < tokens.length() DO

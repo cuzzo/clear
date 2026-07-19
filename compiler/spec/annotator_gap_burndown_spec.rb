@@ -1235,7 +1235,7 @@ RSpec.describe "annotator branch gap burndown" do
       <<~CHT,
         FN make() RETURNS ~String -> RETURN BG { COPY "abc"; }; END
         FN main() RETURNS Void ->
-          h = make();
+          h:~ = make();
           s: String = NEXT h;
           ASSERT s.length() == 3_i64, "shared promise next";
           RETURN;

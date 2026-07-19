@@ -114,7 +114,21 @@ module FsmLowering
         result_alloc = escaping_value_alloc(expr_t)
         raw_last_mir = with_decl_alloc(result_alloc) { lower(last_step.expr) }
         last_mir = T.let(raw_last_mir.is_a?(MIR::Emittable) ? raw_last_mir : nil, T.nilable(MIR::Node))
-        last_mir = place_value_for_destination(last_mir, last_step.expr, result_alloc, expr_t) if last_mir
+        # The tail expression's annotated type describes the source. A rodata
+        # String is borrowed there, but the promise result slot is an owning
+        # cross-fiber destination. Give placement the destination contract so
+        # it emits the ordinary lifecycle-approved heap copy before transfer.
+        result_destination_type = if expr_t.string? && expr_t.rodata?
+          Type.new(:String, location: result_alloc)
+        else
+          expr_t
+        end
+        last_mir = place_value_for_destination(
+          last_mir,
+          last_step.expr,
+          result_alloc,
+          result_destination_type,
+        ) if last_mir
         last_mir = hoist_alloc(last_mir, last_step.expr, err_cleanup: true) if last_mir && mir_allocates?(last_mir)
         last_pending = flush_pending
         result_mir.concat(last_pending)
@@ -145,7 +159,11 @@ module FsmLowering
           # allocator, no dupe.
           result_value = coerce_fsm_result_value(strip_try(last_mir), expr_t)
           result_set = MIR::Set.new(target, result_value, false)
-          transfer_facts = fsm_result_transfer_facts(last_mir, last_step.expr)
+          transfer_facts = fsm_result_transfer_facts(
+            last_mir,
+            last_step.expr,
+            result_destination_type,
+          )
           capture_state.last_fsm_result_transfer_facts.concat(transfer_facts)
           guard_fsm_result_cleanup!(result_mir, transfer_facts)
           transfer_names = transfer_facts.map(&:name).uniq
@@ -215,11 +233,17 @@ module FsmLowering
 
   sig { params(result_mir: MIR::Node, ast_node: AST::Node).returns(T::Array[MIR::Stmt]) }
   def fsm_result_transfer_marks(result_mir, ast_node)
-    fsm_result_transfer_facts(result_mir, ast_node).flat_map(&:marks)
+    fsm_result_transfer_facts(result_mir, ast_node, nil).flat_map(&:marks)
   end
 
-  sig { params(result_mir: MIR::Node, ast_node: AST::Node).returns(T::Array[MIR::FsmResultTransferFact]) }
-  def fsm_result_transfer_facts(result_mir, ast_node)
+  sig do
+    params(
+      result_mir: MIR::Node,
+      ast_node: AST::Node,
+      destination_type: T.nilable(Type),
+    ).returns(T::Array[MIR::FsmResultTransferFact])
+  end
+  def fsm_result_transfer_facts(result_mir, ast_node, destination_type = nil)
     T.bind(self, MIRLowering) rescue nil
 
     rename_map = fsm_fn_name_rename_map
@@ -229,13 +253,13 @@ module FsmLowering
     result_owner = T.let(result_mir, MIR::Node)
     loop do
       case result_owner
-      when MIR::TryExpr, MIR::Cast
+      when MIR::TryExpr, MIR::TryOptional, MIR::Cast
         result_owner = result_owner.expr
       else
         break
       end
     end
-    result_type = Type.from_node!(ast_node, context: "FSM result owner")
+    result_type = destination_type || Type.from_node!(ast_node, context: "FSM result owner")
     if result_owner.is_a?(MIR::Ident) && ownership_tracked_transfer_type?(result_type)
       owner_name = result_owner.name.to_s
       owner_name = rename_map.fetch(owner_name, owner_name)

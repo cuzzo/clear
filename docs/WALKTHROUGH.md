@@ -450,6 +450,13 @@ alive = entities |> WHERE _.health > 0;
 total = scores |> SUM _.value;
 names = users |> SELECT _.name;
 
+# SELECT effects are explicit per output element.
+loaded: []!User = users |> SELECT:! loadUser(_);
+found: []?User = users |> SELECT:? findUser(_);
+
+# WHERE requires a definite synchronous Bool.
+active = users |> WHERE isActive(_) OR_ELSE FALSE;
+
 # 2. Side effects & Function Piping
 entities |> EACH { _.x += _.vx; };
 result = data |> process |> validate |> format;

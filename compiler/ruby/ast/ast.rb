@@ -448,7 +448,10 @@ module AST
         next
       end
       if node.is_a?(Hash)
-        node.each_value { |child| stack << child }
+        node.to_a.reverse_each do |key, value|
+          stack << value
+          stack << key
+        end
         next
       end
       yield node if node.is_a?(Locatable)
@@ -506,10 +509,24 @@ module AST
   def self.container_borrow?(node)
     return false unless node
     return true if node.respond_to?(:container_borrow) && T.unsafe(node).container_borrow == true
-    return container_borrow?(node.target) if node.is_a?(AST::OptionalUnwrap)
-    return false unless node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_ELSE)
+    operand = borrow_transparent_operand(node)
+    return false unless operand
 
-    container_borrow?(node.left)
+    container_borrow?(operand)
+  end
+
+  # Return the operand whose ownership is preserved by a syntax wrapper.
+  # These nodes may change control flow or remove a tense, but they never
+  # manufacture an owned value. Keeping the rule here prevents annotation,
+  # cleanup classification, and lowering from independently guessing which
+  # wrappers preserve borrow provenance.
+  sig { params(node: AST::Node).returns(T.nilable(AST::Node)) }
+  def self.borrow_transparent_operand(node)
+    return node.target if node.is_a?(AST::OptionalUnwrap)
+    return node.right if node.is_a?(AST::UnaryOp) && node.op == :TRY
+    return node.left if node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_ELSE)
+
+    nil
   end
 
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
@@ -635,6 +652,24 @@ module AST
     node.is_a?(AST::MoveNode) || node.is_a?(AST::CopyNode) ||
       node.is_a?(AST::CloneNode) || node.is_a?(AST::ShareNode) ||
       node.is_a?(AST::FreezeNode) || node.is_a?(AST::CapabilityWrap)
+  end
+
+  # TRY and UNWRAP change the control-flow/type channel around a value without
+  # copying, moving, or relocating its successful payload. Analyses concerned
+  # with allocator provenance or escape placement must therefore look through
+  # these wrappers.
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.recovery_wrapper?(node)
+    (node.is_a?(AST::UnaryOp) && node.op == :TRY) ||
+      node.is_a?(AST::OptionalUnwrap)
+  end
+
+  sig { params(node: AST::Node).returns(AST::Node) }
+  def self.recovery_payload(node)
+    return node.right if node.is_a?(AST::UnaryOp) && node.op == :TRY
+    return node.target if node.is_a?(AST::OptionalUnwrap)
+
+    node
   end
 
   sig { params(node: ScalarLiteralCandidate).returns(T::Boolean) }
@@ -1297,15 +1332,12 @@ module AST
     #
     sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
     def coerce!(declared_type)
-      # Function metadata and node-local capabilities cannot be reduced to a
-      # flat `resolved` symbol without loss. Ordinary inferred values retain
-      # the historical root-capability projection below.
+      # An inferred value already owns the authoritative semantic Type.
+      # Flattening it to `resolved` loses collection topology, nested element
+      # capabilities, and function metadata, forcing later phases to
+      # reconstruct an incomplete type from a legacy symbol.
       if @type_object && (declared_type.nil? || declared_type == :Any)
-        inferred_type = @type_object
-        if inferred_type.fn_type? || (inferred_type.optional? && inferred_type.wrapped_type&.fn_type?) ||
-            TypeExpressionTree.nested_capabilities?(inferred_type.shape.expression)
-          return [inferred_type, nil]
-        end
+        return [@type_object, nil]
       end
 
       inferred = @type_object&.resolved
@@ -1628,7 +1660,10 @@ module AST
       if value.is_a?(Array)
         value.each { |child| yield child if child.is_a?(Locatable) }
       elsif value.is_a?(Hash)
-        value.each_value { |child| yield child if child.is_a?(Locatable) }
+        value.each do |key, child|
+          yield key if key.is_a?(Locatable)
+          yield child if child.is_a?(Locatable)
+        end
       elsif value.is_a?(Locatable)
         yield value
       end
@@ -2130,6 +2165,7 @@ module AST
 	    include StatementVoidType
 	    attr_accessor :auto_lock  # AutoLockPlan set by annotator for inline @locked/@writeLocked guards.
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: Symbol (:heap or :frame) -- the allocator to free the OLD value with before the field overwrite. nil = no pre-cleanup needed.
+    attr_accessor :field_lifecycle_plan # immutable Semantic::LifecyclePlan authorizing field replacement cleanup.
     # Preserves the source compound operator so atomic targets can lower to
     # fetch_<op> instead of load/modify/store.
     # Stamped by the annotator for @shared:atomic targets so MIR lowering emits
@@ -2218,6 +2254,7 @@ module AST
     end
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
     attr_accessor :or_fallback_dupe  # true when OR_ELSE fallback struct needs string-field heap dupe
+    attr_accessor :error_union_type # recoverable result preserved through pipeline composition
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
     # outer scope. The lowering's `descend` helper consults this and wraps
     # the field's emission in MIR::BlockExpr when the field actually emitted
@@ -2475,6 +2512,10 @@ module AST
   IfBind       = Struct.new(:token, :bindings, :then_branch, :else_branch) do
     extend T::Sig
     include Locatable
+    include HasBodies
+
+    sig { returns(T::Array[RawBody]) }
+    def child_bodies = [then_branch, else_branch].compact
 
     sig { params(args: InitArgs).void }
     def initialize(*args)
@@ -2604,6 +2645,7 @@ module AST
                                      # original `!T` is stashed here for OR_ELSE consumers
                                      # that need to know whether to emit `catch fallback`
                                      # (error union) or `orelse fallback` (optional).
+    attr_accessor :retain_error_channel # explicit `x:!` / `x:!?` binding keeps the call result wrapped
     sig { returns(T.nilable(Symbol)) }
     def protocol_operation
       @protocol_operation = T.let(@protocol_operation, T.nilable(Symbol))
@@ -2648,6 +2690,7 @@ module AST
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     attr_accessor :safe_nav_chain    # implicit continuation of an earlier ?. over non-optional members
     attr_accessor :error_union_type  # full !T requirement result before expression-level propagation unwraps it
+    attr_accessor :retain_error_channel
     sig { params(token: Lexer::Token).void }
     def mark_explicit_mutable_receiver!(token)
       @explicit_mutable_receiver_token = T.let(token, T.nilable(Lexer::Token))
@@ -2834,7 +2877,10 @@ module AST
   # WithBlock#lock_error_clause. Policy validation lives in the annotator.
   SyncPolicyDecl = Struct.new(:token, :handlers) { include Locatable }
 
-  SelectOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  # effect_mode is nil, :fallible, :optional, or :fallible_optional. It records
+  # the explicit SELECT:!/SELECT:?/SELECT:!? contract rather than re-deriving the
+  # programmer's intent from the selected expression later in the pipeline.
+  SelectOp     = Struct.new(:token, :expression, :effect_mode) { include Locatable; include HasExpression }
   WhereOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   IndexOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable; include HasExpression }
@@ -2899,9 +2945,19 @@ module AST
     # ruby-to-clear: field-type target=Node
     extend T::Sig
     include Locatable
+    attr_accessor :error_union_type
     # ruby-to-clear: skip
     sig { returns(T.nilable(String)) }
     def name; target.respond_to?(:name) ? target.name : nil end
+
+    # The postfix `?` spelling is also the marker used to continue a safe
+    # navigation chain. Prefix `UNWRAP` is a definite-value operation and
+    # must not silently turn a following field, index, or method access back
+    # into an optional result.
+    sig { returns(T::Boolean) }
+    def safe_navigation?
+      token.type == :CHAR && token.value == '?'
+    end
   end
   # Explicit call-site mutation marker. It never denotes a first-class
   # reference: call annotation consumes it and records the marker on the
@@ -2995,7 +3051,7 @@ module AST
   # catch_clauses: [AST::CatchClause]; default_body: [ASTNode] or nil
   CatchBlock     = Struct.new(:token, :catch_clauses, :default_body) do
     # ruby-to-clear: field-type catch_clauses=CatchClause[]
-    # ruby-to-clear: field-type default_body=?Node[]
+    # ruby-to-clear: field-type default_body=?(Node[])
     include Locatable
   end
   # RECOVER(default): pipeline operator that replaces errors with a default value.
@@ -3169,11 +3225,13 @@ module AST
   # Or method:    EXTERN FN TypeName<T>.method(params) RETURNS type FROM "module"
   # Declares a native Zig/C function importable via @import("module").
   ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects,
-                                :owner_type, :owner_type_params, :fn_type_params, :extern_source) do
+                                :owner_type, :owner_type_params, :fn_type_params, :extern_source,
+                                :return_lifetime) do
     # ruby-to-clear: field-type return_type=?Type
     # ruby-to-clear: field-type owner_type=?String
     # ruby-to-clear: field-type owner_type_params=String[]@symbol
     # ruby-to-clear: field-type fn_type_params=String[]@symbol
+    # ruby-to-clear: field-type return_lifetime=Any
     extend T::Sig
     include Locatable
     # [:T, :U] for TypeName<T, U>.method
@@ -3293,11 +3351,11 @@ module AST
   #   nil                                          — unit variant (void payload)
   #   Type object                                  — single-type payload (existing)
   #   Schemas::InlineStructVariant                 — inline struct payload
-  # methods (optional): Array of UnionMethodRequirement records.
+  # methods: Array of UnionMethodRequirement records; empty when absent.
   #   — compile-time constraints verified after function registration.
   UnionDef         = Struct.new(:token, :name, :variants, :visibility, :type_params, :methods) do
     # ruby-to-clear: field-type type_params=String[]
-    # ruby-to-clear: field-type methods=?UnionMethodRequirement[]
+    # ruby-to-clear: field-type methods=UnionMethodRequirement[]
     extend T::Sig
     include Locatable
     # Array of type param name strings, e.g. ["T"]
@@ -3343,6 +3401,8 @@ module AST
     extend T::Sig
     include Locatable
     include ExplicitMutableArguments
+    attr_accessor :error_union_type
+    attr_accessor :retain_error_channel
 
     sig { returns(String) }
     def name = "#{type_name.name}::#{method_name}"
@@ -3674,6 +3734,9 @@ module AST
     extend T::Sig
     sig { returns(AST::Node) }
     def expression; self[:expression]; end
+
+    sig { returns(T.nilable(Symbol)) }
+    def effect_mode; self[:effect_mode]; end
   end
   class WhereOp
     extend T::Sig
@@ -3947,7 +4010,7 @@ module MIR
   # the OLD value of the binding needs cleanup before the overwrite.
   # Replaces a `{ alloc:, zig_type: }` hash; the struct is the single
   # consumer-facing contract.
-  ReassignPlan = Struct.new(:alloc, :zig_type, keyword_init: true) do
+  ReassignPlan = Struct.new(:alloc, :zig_type, :lifecycle_plan, keyword_init: true) do
     extend T::Sig
 
     sig { returns(Symbol) }
@@ -3958,6 +4021,11 @@ module MIR
     sig { returns(String) }
     def zig_type!
       zig_type
+    end
+
+    sig { returns(T.untyped) }
+    def lifecycle_plan
+      self[:lifecycle_plan]
     end
   end
 

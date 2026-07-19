@@ -26,7 +26,7 @@ FN main() RETURNS Void ->
     MUTABLE list: []Val = List[];
     &list.append(Val{ Str: "hello" });
     ast = Val{ List: list };
-    result = eval(COPY ast);
+    result = TRY eval(COPY ast);
     PARTIAL MATCH result START
         Val.Str AS s -> ASSERT s == "hello", "give in func arg";,
         DEFAULT -> ASSERT FALSE, "should be Str";

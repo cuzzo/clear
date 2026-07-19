@@ -29,8 +29,8 @@ module Annotator
         end
         nil
       end
-          private :setup_builtins
-
-end
+      private :initialize_builtin_environment!
+      private :setup_builtins
+    end
   end
 end

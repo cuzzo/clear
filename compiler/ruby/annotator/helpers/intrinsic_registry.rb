@@ -9,6 +9,7 @@ require_relative "function_return"
 require_relative "intrinsic_arg_spec"
 require_relative "intrinsic_emit"
 require_relative "../../ast/type"
+require_relative "../../ast/std_lib"
 
 module IntrinsicRegistry
   extend T::Sig
@@ -44,7 +45,7 @@ module IntrinsicRegistry
   MAP_METHOD_ALIASES_VALUE = T.let({}, T::Hash[String, String])
 
   # Keys consumed at the FunctionSignature level (not IntrinsicEmit).
-  FS_KEYS = %i[args arity validate return return_type can_fail needs_rt].freeze
+  FS_KEYS = %i[args arity validate return return_type can_fail error_fallible needs_rt].freeze
 
   EMIT_BOOL = %i[bc is_method suspends narrows_collection
                  narrows_receiver_collection mutates_receiver allocates
@@ -217,7 +218,7 @@ module IntrinsicRegistry
     coerce_int_array(value)
   end
 
-  sig { params(value: IntegerValue).returns(Integer) }
+  sig { params(value: T.untyped).returns(Integer) }
   def self.coerce_integer(value)
     return value if value.is_a?(Integer)
     return T.unsafe(value).to_i if value.is_a?(String)
@@ -230,7 +231,7 @@ module IntrinsicRegistry
     Kernel.raise "IntrinsicRegistry: unmapped registry key #{key}"
   end
 
-  sig { params(value: SymbolInput).returns(Symbol) }
+  sig { params(value: T.untyped).returns(Symbol) }
   def self.coerce_symbol(value)
     return value if value.is_a?(Symbol)
     return T.unsafe(value).to_sym if value.is_a?(String)
@@ -339,6 +340,10 @@ module IntrinsicRegistry
   def self.to_return_def(v)
     return FunctionReturn.fixed(Type.new(:Void)) if v.nil?
     return FunctionReturn.fixed(v) if v.is_a?(Type)
+    if v.is_a?(Proc)
+      Kernel.raise "IntrinsicRegistry: Proc return descriptor is not allowed; " \
+                   "use a declarative directive (r_* variant or infer_* host method)"
+    end
     if v.is_a?(Hash)
       raw_type = v[:type]
       if raw_type
@@ -350,10 +355,6 @@ module IntrinsicRegistry
       end
 
       return FunctionReturn.fixed(Type.new(:Any))
-    end
-    if v.is_a?(Proc)
-      Kernel.raise "IntrinsicRegistry: Proc return descriptor is not allowed; " \
-                   "use a declarative directive (r_* variant or infer_* host method)"
     end
     if v.is_a?(Symbol)
       kind = RETURN_VARIANTS[v]
@@ -382,6 +383,7 @@ module IntrinsicRegistry
       arg_spec: T.cast(h[:args], IntrinsicArgSpec::RawArgSpec),
       arity: T.cast(h[:arity], T.nilable(Integer)),
       can_fail: T.cast(h[:can_fail], T.nilable(T::Boolean)),
+      error_fallible: T.cast(h[:error_fallible], T.nilable(T::Boolean)),
       needs_rt: T.cast(h[:needs_rt], T.nilable(T::Boolean)),
       emit: build_emit(h, registries)
     )
@@ -511,7 +513,7 @@ module IntrinsicRegistry
   # FunctionSignature through unchanged, and maps nil -> nil. Every
   # `*.stdlib_def = X` / `matched_stdlib_def = X` site routes through
   # this so the carried value is always a FunctionSignature.
-  sig { params(x: T.nilable(T.any(FunctionSignature, RawEntry)), name: RegistryKey).returns(T.nilable(FunctionSignature)) }
+  sig { params(x: T.untyped, name: RegistryKey).returns(T.nilable(FunctionSignature)) }
   def self.fs(x, name = "_inline")
     return nil if x.nil?
     return x if x.is_a?(FunctionSignature)

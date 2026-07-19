@@ -34,9 +34,9 @@ FN main() RETURNS Void ->
     # Reduced from 500 to 50 so debug-mode frame cleanup stays fast.
     WHILE i < 50 DO
         # Simulate readFile: large frame allocation
-        content = buildLargePayload(i MOD 100 + 1);
+        content = TRY buildLargePayload(i MOD 100 + 1);
         # Simulate parseJsonArraySum: more frame allocation
-        sum = parseData(content);
+        sum = TRY parseData(content);
         # Accumulate response (inner loop collapsed: resp grows then rewinds)
         resp = ":" $+ sum.toString() $+ "\r\n";
         i += 1;

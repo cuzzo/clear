@@ -9,6 +9,7 @@ require_relative "../ast/symbol_entry"
 require_relative "../annotator/helpers/function_signature"
 require_relative "../semantic/local_binding_facts"
 require_relative "../semantic/ownership_identity"
+require_relative "../semantic/lifecycle_plan"
 
 # =========================================================================
 # Pass C (caller side): Cleanup Classification
@@ -44,7 +45,16 @@ module CleanupClassifier
     T.proc.params(name: String, expr: AST::Node, anchor: T.any(AST::Node, AST::Binding)).void
   end
   CleanupExtraValue = T.type_alias do
-    T.nilable(T.any(String, Symbol, T::Boolean, Type, Schemas::ResourceClosePlan))
+    T.nilable(
+      T.any(
+        String,
+        Symbol,
+        T::Boolean,
+        Type,
+        Schemas::ResourceClosePlan,
+        T::Array[T::Hash[Symbol, T.untyped]],
+      ),
+    )
   end
 
   class BindingCleanupFacts < T::Struct
@@ -199,28 +209,28 @@ module CleanupClassifier
     classify_plan(fn_node, schema_lookup: schema_lookup).bindings
   end
 
-  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc).returns(CleanupClassificationPlan) }
-  def self.classify_plan(fn_node, schema_lookup:)
+  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry)).returns(CleanupClassificationPlan) }
+  def self.classify_plan(fn_node, schema_lookup:, lifecycle_registry: nil)
     return CleanupClassificationPlan.from_bindings(fn_node.name.to_s, {}) unless fn_node.body
 
     bindings = T.let({}, T::Hash[String, CleanupEntry])
     entries_by_place = T.let({}, T::Hash[PlaceId, CleanupEntry])
 
     # 1. Walk all VarDecl/BindExpr in the function body.
-    walk_bindings(fn_node.body, schema_lookup, bindings, entries_by_place)
+    walk_bindings(fn_node.body, schema_lookup, lifecycle_registry, bindings, entries_by_place)
 
     # 2. TAKES parameters from fn_node.params.
-    walk_takes_params(fn_node, schema_lookup, bindings)
+    walk_takes_params(fn_node, schema_lookup, lifecycle_registry, bindings)
 
     # 2b. Any binding consumed by GIVE/TAKES/NEXT/COLLECT-style analysis
     # needs a moved guard so lowering can suppress exactly that cleanup.
     walk_moved_source_guards(fn_node.body, bindings)
 
     # 3. MATCH AS bindings (non-Copy payloads need cleanup with _moved guard).
-    walk_match_as_bindings(fn_node.body, schema_lookup, bindings)
+    walk_match_as_bindings(fn_node.body, schema_lookup, lifecycle_registry, bindings)
 
     # 4. WHILE-bind / IF-bind captures from ownership-transferring call results.
-    walk_capture_bindings(fn_node.body, schema_lookup, bindings)
+    walk_capture_bindings(fn_node.body, schema_lookup, lifecycle_registry, bindings)
 
     stamp_cleanup_scopes!(fn_node.body, bindings)
 
@@ -270,6 +280,7 @@ module CleanupClassifier
     return if node.is_a?(AST::BindExpr) && node.mode == :assign
     entry = node.respond_to?(:mir_binding_entry) ? node.mir_binding_entry : nil
     return unless entry
+    return if entry.none?
     scope = if entry.heap?
               :heap
             elsif loop_depth.positive?
@@ -325,6 +336,12 @@ module CleanupClassifier
 
   sig { params(entry_obj: CleanupEntry, value: AST::Node).void }
   private_class_method def self.promote_entry_to_heap_cleanup!(entry_obj, value)
+    lifecycle = entry_obj.lifecycle_plan
+    # Loop extension changes placement, not ownership. A heap-placed bit-copy
+    # slot (for example String@symbol) must remain no-drop; only the
+    # annotation-owned lifecycle contract may authorize cleanup promotion.
+    return if lifecycle && !lifecycle.needs_drop?
+
     ti = Type.from_node!(value, context: "cleanup lifetime promotion")
     entry_obj.promote_to_cleanup!(kind: ti.string? ? :heap_string : :uniform, alloc: :heap, has_moved_guard: true)
   end
@@ -364,31 +381,44 @@ module CleanupClassifier
 
   # Walk field assignments that need pre-cleanup (free old value before overwrite).
   # Stamps Assignment.field_pre_cleanup with the allocator Symbol (:heap or :frame).
-  sig { params(body: T::Array[AST::Node], facts: FrozenCleanupFacts, schema_lookup: T.nilable(Proc)).void }
-  def self.stamp_field_pre_cleanups!(body, facts, schema_lookup: nil)
-    AST.walk_body(body) do |stmt|
+  sig { params(body: T::Array[AST::Node], facts: FrozenCleanupFacts, schema_lookup: T.nilable(Proc), lifecycle_registry: T.nilable(Semantic::LifecycleRegistry)).void }
+  def self.stamp_field_pre_cleanups!(body, facts, schema_lookup: nil, lifecycle_registry: nil)
+    # Field writes may live inside BG/DO blocks used as expressions (for
+    # example the value of a binding or a call argument). `walk_body` follows
+    # statement bodies only, so it silently skipped those writes and allowed
+    # an owning field to be overwritten without dropping its old value. The
+    # structural expression walker covers both statement- and expression-
+    # positioned boundaries while still refusing to enter nested functions.
+    AST.each_locatable(body, descend_functions: false) do |stmt|
       next unless stmt.is_a?(AST::Assignment)
       next unless stmt.name.is_a?(AST::GetField)
       target_node = stmt.name.target
 
       field_ti = Type.from_node!(stmt.name, context: "field pre-cleanup")
-      field_needs_cleanup =
-        field_ti.needs_cleanup?(T.unsafe(schema_lookup)) ||
-        field_ti.recursive_cleanup_shape?(T.unsafe(schema_lookup))
+      lifecycle = lifecycle_registry&.fetch(field_ti)
+      stmt.field_lifecycle_plan = lifecycle if lifecycle
 
-      # Auto-lock string fields: locked/always_mutable structs heap-dupe
-      # string fields, so overwriting needs explicit free of the old value.
-      if !field_needs_cleanup && stmt.auto_lock && cleanup_owned_string_type?(field_ti)
+      # Auto-lock string fields are always heap-owned after initialization.
+      # This representation fact authorizes replacement cleanup even when a
+      # conservative/custom type predicate does not classify the source value
+      # itself as cleanup-bearing.
+      if stmt.auto_lock && cleanup_owned_string_type?(field_ti)
         stmt.field_pre_cleanup = :heap
         next
       end
 
       heap_field_alloc = heap_owned_field_pre_cleanup_alloc(field_ti, target_node, facts)
-      if !field_needs_cleanup && heap_field_alloc
+      if heap_field_alloc
         stmt.field_pre_cleanup = heap_field_alloc
         next
       end
 
+      field_needs_cleanup = if lifecycle
+        lifecycle.needs_drop?
+      else
+        field_ti.needs_cleanup?(T.unsafe(schema_lookup)) ||
+          field_ti.recursive_cleanup_shape?(T.unsafe(schema_lookup))
+      end
       next unless field_needs_cleanup
 
       stmt.field_pre_cleanup = field_owner_cleanup_alloc(target_node, facts)
@@ -411,56 +441,59 @@ module CleanupClassifier
 
   # ── Walk VarDecl / BindExpr ──────────────────────────────────────
 
-  sig { params(body: T::Array[AstBodyNode], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).returns(T::Array[CleanupEntry]) }
-  private_class_method def self.walk_bindings(body, schema_lookup, bindings, entries_by_place)
-    classify_cleanup_binding_body(body, schema_lookup, bindings, entries_by_place)
+  sig { params(body: T::Array[AstBodyNode], schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry), bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).returns(T::Array[CleanupEntry]) }
+  private_class_method def self.walk_bindings(body, schema_lookup, lifecycle_registry, bindings, entries_by_place)
+    classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, bindings, entries_by_place)
     bindings.values
   end
 
-  sig { params(body: T::Array[AstBodyNode], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).void }
-  private_class_method def self.classify_cleanup_binding_body(body, schema_lookup, bindings, entries_by_place)
+  sig { params(body: T::Array[AstBodyNode], schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry), bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).void }
+  private_class_method def self.classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, bindings, entries_by_place)
     body.each do |node|
-      classify_cleanup_binding_node(node, schema_lookup, bindings, entries_by_place) if node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
-      classify_inline_bg_binding_body(node, schema_lookup, bindings, entries_by_place)
+      classify_cleanup_binding_node(node, schema_lookup, lifecycle_registry, bindings, entries_by_place) if node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+      classify_inline_bg_binding_body(node, schema_lookup, lifecycle_registry, bindings, entries_by_place)
       AST.child_bodies(node).each do |child_body|
-        classify_cleanup_binding_body(child_body, schema_lookup, bindings, entries_by_place)
+        classify_cleanup_binding_body(child_body, schema_lookup, lifecycle_registry, bindings, entries_by_place)
       end
     end
   end
 
-  sig { params(node: AstBodyNode, schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).void }
-  private_class_method def self.classify_inline_bg_binding_body(node, schema_lookup, bindings, entries_by_place)
+  sig { params(node: AstBodyNode, schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry), bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).void }
+  private_class_method def self.classify_inline_bg_binding_body(node, schema_lookup, lifecycle_registry, bindings, entries_by_place)
     AST.expression_children(node).each do |child|
       next unless child.is_a?(AST::Locatable)
 
       if child.is_a?(AST::BgBlock) || child.is_a?(AST::BgStreamBlock)
         body = child.body
-        classify_cleanup_binding_body(body, schema_lookup, bindings, entries_by_place) if body
+        classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, bindings, entries_by_place) if body
         next
       end
 
-      classify_inline_bg_binding_body(child, schema_lookup, bindings, entries_by_place)
+      classify_inline_bg_binding_body(child, schema_lookup, lifecycle_registry, bindings, entries_by_place)
     end
   end
 
-  sig { params(node: BindingNode, schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).void }
-  private_class_method def self.classify_cleanup_binding_node(node, schema_lookup, bindings, entries_by_place)
+  sig { params(node: BindingNode, schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry), bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).void }
+  private_class_method def self.classify_cleanup_binding_node(node, schema_lookup, lifecycle_registry, bindings, entries_by_place)
     return if node.is_a?(AST::BindExpr) && node.mode == :assign
 
     var_name = node.name.is_a?(String) ? node.name : node.name.to_s
     if binding_container_borrow?(node)
       bindings.delete(var_name)
       entries_by_place.delete(place_for_binding_node(var_name, node))
-      node.mir_binding_entry = nil if node.respond_to?(:mir_binding_entry=)
+      node.mir_binding_entry = CleanupEntry::NONE if node.respond_to?(:mir_binding_entry=)
       return
     end
     value = node.value
     value_node = T.let(value.is_a?(AST::Locatable) ? value : nil, T.nilable(AST::Node))
     moved_alloc = moved_payload_alloc(value_node, bindings)
-    cleanup = classify_binding(node.full_type!, node, schema_lookup)
-    cleanup ||= transferred_payload_entry(node.full_type!, schema_lookup) if moved_alloc
+    cleanup = classify_binding(node.full_type!, node, schema_lookup, lifecycle_registry)
+    cleanup ||= transferred_payload_entry(node.full_type!, schema_lookup, lifecycle_registry) if moved_alloc
+    if cleanup && lifecycle_registry && cleanup.lifecycle_plan.nil?
+      cleanup.set_lifecycle_plan!(lifecycle_registry.fetch_binding(node, node.full_type!))
+    end
     unless cleanup
-      if node.respond_to?(:symbol) && node.symbol&.heap_storage? &&
+      if lifecycle_registry.nil? && node.respond_to?(:symbol) && node.symbol&.heap_storage? &&
          !optional_empty_initializer?(value)
         ti = node.full_type!
         cleanup = entry(:uniform, alloc: :heap) if ti.needs_explicit_cleanup?(:heap, T.unsafe(schema_lookup))
@@ -471,11 +504,21 @@ module CleanupClassifier
     else
       cleanup = no_cleanup_alloc_entry(node.full_type!, schema_lookup)
     end
-    # Stamp on node for identity-based lookup in lower_var_decl (avoids
-    # same-name collisions when two vars share a name in different scopes).
-    node.mir_binding_entry = cleanup if cleanup
-    bindings[var_name] = cleanup if cleanup
-    entries_by_place[place_for_binding_node(var_name, node)] = cleanup if cleanup
+    if cleanup && lifecycle_registry && cleanup.lifecycle_plan.nil?
+      cleanup.set_lifecycle_plan!(lifecycle_registry.fetch_binding(node, node.full_type!))
+    end
+    # Stamp every declaration, including the explicit NONE result. Leaving a
+    # no-cleanup declaration as nil makes lowering fall back to the legacy
+    # name-keyed view, where a cleanup-bearing sibling with the same display
+    # name can contaminate this declaration.
+    node.mir_binding_entry = cleanup || CleanupEntry::NONE if node.respond_to?(:mir_binding_entry=)
+    if cleanup
+      bindings[var_name] = cleanup
+      entries_by_place[place_for_binding_node(var_name, node)] = cleanup
+    else
+      bindings.delete(var_name)
+      entries_by_place.delete(place_for_binding_node(var_name, node))
+    end
   end
 
   sig { params(full_type: T.untyped, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
@@ -519,9 +562,9 @@ module CleanupClassifier
     AST.wrapped_children(node).each { |child| collect_payload_binding_names(child, names) if child.is_a?(AST::Locatable) }
   end
 
-  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.transferred_payload_entry(ti, schema_lookup)
-    takes_param_base_entry(ti, schema_lookup)
+  sig { params(ti: Type, schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry)).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.transferred_payload_entry(ti, schema_lookup, lifecycle_registry)
+    takes_param_base_entry(ti, schema_lookup, lifecycle_registry)
   end
 
   # ── Walk TAKES parameters ───────────────────────────────────────
@@ -542,14 +585,16 @@ module CleanupClassifier
   #   3. via_pointer: true        — needs_pointer_passing? types (HashMap,
   #                                  Pool) arrive at the callee already as
   #                                  *T; cleanup must NOT re-apply &.
-  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).void }
-  private_class_method def self.walk_takes_params(fn_node, schema_lookup, bindings)
+  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry), bindings: T::Hash[String, CleanupEntry]).void }
+  private_class_method def self.walk_takes_params(fn_node, schema_lookup, lifecycle_registry, bindings)
     fn_node.params.select { |p| p.takes }.each do |p|
       ti = p.type
       name = p.name.to_s
 
-      base = takes_param_base_entry(ti, schema_lookup)
+      base = takes_param_base_entry(ti, schema_lookup, lifecycle_registry)
       next unless base
+
+      base.set_lifecycle_plan!(lifecycle_registry.fetch(ti)) if lifecycle_registry
 
       base.mark_moved_guard!
       base.set_alloc!(:heap)
@@ -562,12 +607,14 @@ module CleanupClassifier
   # Build the base cleanup entry for a TAKES param of type ti. Defers to the
   # same per-kind helpers locals use (classify_collection, etc.) so adding a
   # new collection kind requires updating ONE dispatch site, not two.
-  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.takes_param_base_entry(ti, schema_lookup)
+  sig { params(ti: Type, schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry)).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.takes_param_base_entry(ti, schema_lookup, lifecycle_registry = nil)
+    lifecycle = lifecycle_registry&.fetch(ti)
+    return nil if lifecycle && !lifecycle.needs_drop?
     schema = schema_lookup.call(ti.resolved) rescue nil
 
     # Schema-driven kinds: resource (close_plan) and union (heap variants).
-    if Schemas.resource?(schema)
+    if Schemas.resource?(schema) && !ti.any_rc?
       return entry(:resource, resource_close_plan: schema.close_plan)
     end
     if Schemas.union?(schema)
@@ -602,13 +649,21 @@ module CleanupClassifier
     structural_product = classify_structural_product(ti, schema_lookup)
     return structural_product if structural_product
 
+    # Annotation owns the total semantic copy/drop decision. The shape-specific
+    # arms above only select optimized cleanup recipes; they must not be able to
+    # turn an annotation-owned aggregate into "no cleanup" by omission.
+    if lifecycle_registry
+      plan = lifecycle_registry.fetch(ti)
+      return entry(:uniform, has_moved_guard: true).set_lifecycle_plan!(plan) if plan.needs_drop?
+    end
+
     nil
   end
 
   # ── Walk MATCH AS bindings ──────────────────────────────────────
 
-  sig { params(body: T::Array[AST::Node], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).void }
-  private_class_method def self.walk_match_as_bindings(body, schema_lookup, bindings)
+  sig { params(body: T::Array[AST::Node], schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry), bindings: T::Hash[String, CleanupEntry]).void }
+  private_class_method def self.walk_match_as_bindings(body, schema_lookup, lifecycle_registry, bindings)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::MatchStatement)
       next unless node.takes
@@ -635,6 +690,11 @@ module CleanupClassifier
         e = match_as_entry_for(variant_type, union_lookup, variant_name)
         expr = node.expr
         next unless expr.is_a?(AST::Identifier)
+
+        if e && lifecycle_registry
+          variant_plan_type = variant_type.is_a?(Type) ? variant_type : source_ti
+          e.set_lifecycle_plan!(lifecycle_registry.fetch(variant_plan_type))
+        end
 
         src_entry = bindings[expr.name.to_s]
         e.set_alloc!(src_entry.alloc) if e && src_entry
@@ -674,8 +734,8 @@ module CleanupClassifier
   # expression whose successful capture creates a new owner. Plain
   # variable/field optional access is a borrow and remains the source owner's
   # cleanup responsibility.
-  sig { params(body: T::Array[AST::Node], schema_lookup: Proc, bindings: T::Hash[String, CleanupEntry]).void }
-  private_class_method def self.walk_capture_bindings(body, schema_lookup, bindings)
+  sig { params(body: T::Array[AST::Node], schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry), bindings: T::Hash[String, CleanupEntry]).void }
+  private_class_method def self.walk_capture_bindings(body, schema_lookup, lifecycle_registry, bindings)
     each_capture_binding(body) do |name, expr, anchor_node|
       next unless AST.capture_expr_owns_result?(expr)
       expr_ti = AST.capture_expr_source_type(expr)
@@ -688,9 +748,11 @@ module CleanupClassifier
       end
       next unless inner_ti
       classification_node = anchor_node.is_a?(AST::Binding) ? anchor_node.expr : anchor_node
-      e = classify_binding(inner_ti, classification_node, schema_lookup)
-      e ||= entry(:heap_string, has_moved_guard: true) if cleanup_owned_string_type?(inner_ti)
-      e ||= entry(:uniform) if inner_ti.needs_explicit_cleanup?(:heap, T.unsafe(schema_lookup))
+      e = classify_binding(inner_ti, classification_node, schema_lookup, lifecycle_registry)
+      if lifecycle_registry.nil?
+        e ||= entry(:heap_string, has_moved_guard: true) if cleanup_owned_string_type?(inner_ti)
+        e ||= entry(:uniform) if inner_ti.needs_explicit_cleanup?(:heap, T.unsafe(schema_lookup))
+      end
       next unless e
       capture_alloc = capture_expr_owned_alloc(expr, schema_lookup)
       e.set_alloc!(capture_alloc) if capture_alloc
@@ -815,8 +877,8 @@ module CleanupClassifier
   # non_copy_union) inline here; complex ones (collection, optional,
   # heap_storage, struct_cleanup_fields, rc_or_link, heap_struct_plain,
   # array_struct_strings) stay as separate methods due to their size.
-  sig { params(ti: Type, node: AST::Node, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
-  private_class_method def self.classify_binding(ti, node, schema_lookup)
+  sig { params(ti: Type, node: AST::Node, schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry)).returns(T.nilable(CleanupEntry)) }
+  private_class_method def self.classify_binding(ti, node, schema_lookup, lifecycle_registry = nil)
     # @node bindings are Copy handles. Their payload cleanup belongs to the
     # Runtime-registered NodeStore, never to the lexical handle binding.
     return nil if ti.node_reference?
@@ -830,10 +892,16 @@ module CleanupClassifier
       end
     end
 
+    # Binding lifecycle may intentionally differ from the surface type. A
+    # reassigned String initialized from @rodata becomes an owning mutable
+    # slot, even though the standalone @rodata String plan has no drop.
+    lifecycle = lifecycle_registry&.fetch_binding(node, ti)
+    return nil if lifecycle && !lifecycle.needs_drop?
+
     entry = nil
     schema = schema_lookup.call(ti.resolved) rescue nil
 
-    if Schemas.resource?(schema)
+    if Schemas.resource?(schema) && !ti.any_rc?
       entry = entry(:resource, resource_close_plan: schema.close_plan)
     end
 
@@ -869,15 +937,29 @@ module CleanupClassifier
     entry ||= classify_struct_cleanup_fields(ti, node, schema_lookup)
     entry ||= classify_structural_product(ti, schema_lookup)
     entry ||= classify_non_copy_union(ti, schema_lookup)
-    finalize_alloc_from_storage!(entry, node, ti, schema_lookup)
+    entry ||= entry(:uniform, has_moved_guard: true) if lifecycle&.needs_drop?
+    finalized = finalize_alloc_from_storage!(entry, node, ti, schema_lookup)
+    finalized&.set_lifecycle_plan!(lifecycle) if lifecycle
+    finalized
   end
 
   sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
   private_class_method def self.classify_structural_product(ti, schema_lookup)
     return nil unless ti.tuple?
-    return nil unless ti.recursive_cleanup_shape?(T.unsafe(schema_lookup))
+    fields = T.let([], T::Array[T::Hash[Symbol, T.untyped]])
+    ti.generic_args.each_with_index do |field_type, index|
+      next if field_type.symbol? || field_type.borrowed_reference?
 
-    entry(:uniform, has_moved_guard: true)
+      close = field_type.resolve_resource_close(T.unsafe(schema_lookup))
+      if close.is_resource && close.close_plan
+        fields << { index: index, close_plan: close.close_plan }
+      elsif field_type.recursive_cleanup_shape?(T.unsafe(schema_lookup))
+        fields << { index: index }
+      end
+    end
+    return nil if fields.empty?
+
+    entry(:tuple, has_moved_guard: true, tuple_cleanup_fields: fields)
   end
 
   sig { params(node: AST::Node).returns(BindingCleanupFacts) }

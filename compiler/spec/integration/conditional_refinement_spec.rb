@@ -97,6 +97,61 @@ RSpec.describe "frontend conditional-refinement integration" do
     end
   end
 
+  it "narrows an optional on the short-circuit right edge of OR" do
+    source = <<~CLEAR
+      FN marker_is_absent_or_zero(marker: ?Int64) RETURNS Bool ->
+        RETURN marker == NIL OR marker.zero?();
+      END
+    CLEAR
+
+    expect { frontend(source) }.not_to raise_error
+  end
+
+  it "narrows optional comparisons through nested short-circuit conditions" do
+    source = <<~CLEAR
+      FN marker_is_usable(text: String, marker: ?Int64) RETURNS Bool ->
+        RETURN !(text.contains?("<") OR marker == NIL OR marker.zero?());
+      END
+
+      FN positive(marker: ?Int64) RETURNS Bool ->
+        RETURN marker != NIL AND marker > 0_i64;
+      END
+    CLEAR
+
+    expect { frontend(source) }.not_to raise_error
+  end
+
+  it "carries non-nil facts into conditional branches" do
+    source = <<~CLEAR
+      FN add_present(left: ?Int64, right: ?Int64) RETURNS Int64 ->
+        IF left != NIL AND right != NIL THEN
+          RETURN left + right;
+        END
+        RETURN 0_i64;
+      END
+
+      FN zero_or_value(value: ?Int64) RETURNS Int64 ->
+        IF value == NIL THEN
+          RETURN 0_i64;
+        ELSE
+          RETURN value;
+        END
+      END
+    CLEAR
+
+    expect { frontend(source) }.not_to raise_error
+  end
+
+  it "joins a concrete and optional IF-expression branch as optional" do
+    source = <<~CLEAR
+      FN choose(enabled: Bool, fallback: ?Int64) RETURNS ?Int64 ->
+        RETURN IF enabled THEN 1_i64 ELSE fallback END;
+      END
+    CLEAR
+
+    expect { frontend(source) }.not_to raise_error
+  end
+
   it "rejects a capture nested inside a grouped OR atom" do
     expect { frontend(main_with("enabled AND (maybe EXISTS AS value OR enabled)")) }
       .to raise_error(ParserError, /not definite beneath `OR`/)

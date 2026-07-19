@@ -199,7 +199,36 @@ pub const CheatLib = struct {
             fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
                 cleanup(R, alloc_, ptr);
             }
-        }.cleanupResult, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
+        }.cleanupResult, false, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
+    }
+
+    pub fn concurrentBoundedSelectPreservingErrors(
+        comptime T: type,
+        comptime R: type,
+        comptime N: usize,
+        comptime mapFn: fn (*Runtime, ?*anyopaque, T) R,
+        alloc: std.mem.Allocator,
+        rt: *Runtime,
+        items: anytype,
+        workers: usize,
+        batch: usize,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !std.ArrayListUnmanaged(R) {
+        return streams.concurrentBoundedSelect(fp.WaitGroup, T, R, N, mapFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, struct {
+            fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
+                cleanup(R, alloc_, ptr);
+            }
+        }.cleanupResult, true, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentBoundedWhere(
@@ -283,7 +312,37 @@ pub const CheatLib = struct {
             fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
                 cleanup(R, alloc_, ptr);
             }
-        }.cleanupResult, is_inf, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx);
+        }.cleanupResult, is_inf, false, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx);
+    }
+
+    pub fn concurrentStreamSelectPreservingErrors(
+        comptime T: type,
+        comptime R: type,
+        comptime mapFn: fn (*Runtime, ?*anyopaque, T) R,
+        comptime is_inf: bool,
+        alloc: std.mem.Allocator,
+        rt: *Runtime,
+        src: anytype,
+        workers: usize,
+        capacity: usize,
+        batch: usize,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !std.ArrayListUnmanaged(R) {
+        return streams.concurrentStreamSelect(fp.WaitGroup, BoundedChannel(T), T, R, mapFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, struct {
+            fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
+                cleanup(R, alloc_, ptr);
+            }
+        }.cleanupResult, is_inf, true, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentStreamWhere(
@@ -368,7 +427,35 @@ pub const CheatLib = struct {
             fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
                 cleanup(R, alloc_, ptr);
             }
-        }.cleanupResult, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
+        }.cleanupResult, false, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
+    }
+
+    pub fn concurrentListSelectPreservingErrors(
+        comptime T: type,
+        comptime R: type,
+        comptime mapFn: fn (*Runtime, ?*anyopaque, T) R,
+        alloc: std.mem.Allocator,
+        rt: *Runtime,
+        items: []const T,
+        workers: usize,
+        batch: usize,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !std.ArrayListUnmanaged(R) {
+        return streams.concurrentListSelect(fp.WaitGroup, T, R, mapFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, struct {
+            fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
+                cleanup(R, alloc_, ptr);
+            }
+        }.cleanupResult, true, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentListWhere(
@@ -829,6 +916,19 @@ pub const CheatLib = struct {
     // Falls back to byte count on invalid UTF-8.
     pub fn codepointCount(str: []const u8) i64 {
         return @intCast(std.unicode.utf8CountCodepoints(str) catch str.len);
+    }
+
+    pub fn codepointToString(alloc: std.mem.Allocator, codepoint: i64) ![]const u8 {
+        if (codepoint < 0 or codepoint > 0x10ffff or
+            (codepoint >= 0xd800 and codepoint <= 0xdfff))
+        {
+            return error.InvalidUnicodeCodepoint;
+        }
+
+        var encoded: [4]u8 = undefined;
+        const encoded_len = std.unicode.utf8Encode(@intCast(codepoint), &encoded) catch
+            return error.InvalidUnicodeCodepoint;
+        return try alloc.dupe(u8, encoded[0..encoded_len]);
     }
 
     // O(1) byte-level access. Returns the i-th byte as i64 (matches CLEAR's
@@ -2160,6 +2260,38 @@ pub const CheatLib = struct {
         return std.fmt.parseInt(i64, s, 10);
     }
 
+    /// Parse a signed integer using an explicit radix. CLEAR rejects invalid
+    /// radices and malformed/overflowing input through its normal fallible-call
+    /// path instead of silently returning a sentinel value.
+    pub fn toIntBase(s: []const u8, radix: i64) !i64 {
+        if (radix < 2 or radix > 36) return error.InvalidRadix;
+        return std.fmt.parseInt(i64, s, parseRadix(s, radix));
+    }
+
+    /// Parse the full UInt64 domain using an explicit radix.
+    pub fn toUIntBase(s: []const u8, radix: i64) !u64 {
+        if (radix < 2 or radix > 36) return error.InvalidRadix;
+        return std.fmt.parseInt(u64, s, parseRadix(s, radix));
+    }
+
+    /// Zig's parser accepts conventional numeric prefixes when the radix is
+    /// inferred with zero. Ruby's `to_i(base)` also accepts a matching prefix,
+    /// so preserve that behavior at the CLEAR boundary while still rejecting a
+    /// prefix that contradicts the explicitly requested radix.
+    fn parseRadix(s: []const u8, radix: i64) u8 {
+        const unsigned = if (s.len > 0 and (s[0] == '+' or s[0] == '-')) s[1..] else s;
+        if (unsigned.len >= 2 and unsigned[0] == '0') {
+            const has_matching_prefix = switch (unsigned[1]) {
+                'x', 'X' => radix == 16,
+                'o', 'O' => radix == 8,
+                'b', 'B' => radix == 2,
+                else => false,
+            };
+            if (has_matching_prefix) return 0;
+        }
+        return @intCast(radix);
+    }
+
     // -----------------------------------------------------------------
     // Clock & Timing
     // -----------------------------------------------------------------
@@ -2456,6 +2588,34 @@ pub const CheatLib = struct {
                 slen += 1;
             }
             // Reverse in-place
+            var lo: usize = 0;
+            var hi: usize = slen - 1;
+            while (lo < hi) {
+                const tmp = buf[lo];
+                buf[lo] = buf[hi];
+                buf[hi] = tmp;
+                lo += 1;
+                hi -= 1;
+            }
+        }
+        const result = try allocator.alloc(u8, slen);
+        @memcpy(result, buf[0..slen]);
+        return result;
+    }
+
+    pub fn uintToString(allocator: std.mem.Allocator, value: u64) ![]const u8 {
+        Runtime.profileAlloc(21);
+        var buf: [20]u8 = undefined;
+        var slen: usize = 0;
+        var v = value;
+        if (v == 0) {
+            buf[0] = '0';
+            slen = 1;
+        } else {
+            while (v > 0) : (slen += 1) {
+                buf[slen] = @intCast('0' + (v % 10));
+                v /= 10;
+            }
             var lo: usize = 0;
             var hi: usize = slen - 1;
             while (lo < hi) {
@@ -3529,6 +3689,17 @@ pub const CheatLib = struct {
             return;
         }
 
+        // Compiler-generated CLEAR aggregates carry their semantic drop glue
+        // on the type. This must precede representation-driven reflection:
+        // String, String@symbol, and borrowed String all lower to []const u8,
+        // but only the semantic contract knows which fields own bytes.
+        if (comptime (@typeInfo(T) == .@"struct" or @typeInfo(T) == .@"union") and
+            @hasDecl(T, "__clear_drop"))
+        {
+            ptr.__clear_drop(alloc);
+            return;
+        }
+
         // Optionals: clean the payload when present.
         if (comptime @typeInfo(T) == .optional) {
             const ChildT = @typeInfo(T).optional.child;
@@ -3883,6 +4054,16 @@ pub const CheatLib = struct {
         }
         if (T == []u8) {
             return if (value.len > 0) try alloc.dupe(u8, value) else value;
+        }
+
+        // Copy and drop are one compiler-generated semantic contract. A type
+        // with drop glue but no clone glue is linear; reaching this path means
+        // annotation/lowering failed to reject an illegal COPY.
+        if (comptime (info == .@"struct" or info == .@"union") and @hasDecl(T, "__clear_drop")) {
+            if (comptime !@hasDecl(T, "__clear_clone")) {
+                @compileError("attempted to duplicate a linear CLEAR value");
+            }
+            return try value.__clear_clone(alloc);
         }
 
         if (comptime refInnerType(T) != null) {
@@ -4243,6 +4424,7 @@ pub const CheatLib = struct {
         if (ft_info == .pointer and ft_info.pointer.size == .one) return true;
         if (ft_info == .pointer and ft_info.pointer.size == .slice) return true;
         if (ft_info == .array) return needsCleanup(ft_info.array.child);
+        if ((ft_info == .@"struct" or ft_info == .@"union") and @hasDecl(FT, "__clear_drop")) return true;
         // Types with deinit manage their own lifecycle — don't recurse into fields.
         if (ft_info == .@"struct" and @hasDecl(FT, "deinit")) return true;
         if (ft_info == .@"struct") {

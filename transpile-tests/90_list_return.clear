@@ -49,7 +49,7 @@ END
 
 FN main() RETURNS Void ->
   # Caller receives a heap-promoted list; deinit uses heapAlloc (no leak).
-  result = buildList();
+  result = TRY buildList();
   ASSERT length(result) == 3_i64, "returned list has 3 elements";
   ASSERT result[0] == 1.0, "element 0 is correct";
   ASSERT result[1] == 2.0, "element 1 is correct";

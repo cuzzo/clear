@@ -115,6 +115,61 @@ RSpec.describe LoopFrameAnalysis do
       expect(loop.mark_per_iter).to be true
     end
 
+    it "rewinds an iteration-local String reassigned from COPY inside MATCH" do
+      src = <<~CLEAR
+        UNION Value { Nil, Str: String }
+        FN main() RETURNS Void ->
+          MUTABLE values: []Value = List[];
+          &values.append(Value{ Str: "a" });
+          MUTABLE i = 0_i64;
+          WHILE i < values.length() DO
+            MUTABLE key = "";
+            PARTIAL MATCH values[i] OR_ELSE Value.Nil START
+              Value.Str AS source -> key = COPY source;,
+              DEFAULT -> PASS;
+            END
+            IF key == "never" THEN PASS; END
+            i += 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+
+      ast = run_mir(src)
+      loop = main_fn(ast).body.find { |statement| statement.is_a?(AST::WhileLoop) }
+      expect(loop.mark_per_iter).to be true
+
+      zig = transpile(src)
+      expect(zig).to include("saveLoopMark")
+      expect(zig).to include("restoreLoopMark")
+    end
+
+    it "analyzes nested loops contained by IF optional binding" do
+      ast = run_mir(<<~CLEAR)
+        FN main() RETURNS Void ->
+          maybe: ?String = "present";
+          MUTABLE outer = 0_i64;
+          WHILE outer < 1_i64 DO
+            IF maybe EXISTS AS value THEN
+              MUTABLE inner = 0_i64;
+              WHILE inner < 2_i64 DO
+                parts = value.split("e");
+                IF parts.length() < 0_i64 THEN PASS; END
+                inner += 1_i64;
+              END
+            END
+            outer += 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      loops = []
+      AST.each_locatable(main_fn(ast).body) { |node| loops << node if node.is_a?(AST::WhileLoop) }
+
+      expect(loops.length).to eq(2)
+      expect(loops.last.mark_per_iter).to be true
+    end
+
     it "WhileLoop: local HashMap owns heap allocator and does not need a loop frame mark" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->

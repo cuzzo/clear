@@ -125,7 +125,8 @@ def hot_main(value, bind_form, decl)
   case bind_form
   when :bare
     mret = decl == :err ? "!Void" : "Void"
-    "FN main() RETURNS #{mret} ->\n    r = mk();\n    #{hot_len_assert(value, 'r')}\n    RETURN;\nEND"
+    call = decl == :err ? "TRY mk()" : "mk()"
+    "FN main() RETURNS #{mret} ->\n    r = #{call};\n    #{hot_len_assert(value, 'r')}\n    RETURN;\nEND"
   when :or_raise
     "FN main() RETURNS !Void ->\n    r = mk() OR_ELSE RAISE;\n    #{hot_len_assert(value, 'r')}\n    RETURN;\nEND"
   when :or_fallback
@@ -133,7 +134,8 @@ def hot_main(value, bind_form, decl)
     "FN main() RETURNS #{mret} ->\n    r = mk() OR_ELSE #{fb};\n    RETURN;\nEND"
   when :discard
     mret = decl == :err ? "!Void" : "Void"
-    "FN main() RETURNS #{mret} ->\n    _ = mk();\n    RETURN;\nEND"
+    call = decl == :err ? "TRY mk()" : "mk()"
+    "FN main() RETURNS #{mret} ->\n    _ = #{call};\n    RETURN;\nEND"
   when :discard_or_raise
     "FN main() RETURNS !Void ->\n    _ = mk() OR_ELSE RAISE;\n    RETURN;\nEND"
   when :onward

@@ -230,6 +230,8 @@ module ThunkTransform
         MIR::Cast.new(bind_frame_refs(mir.expr, context), mir.target_type, mir.method)
       when MIR::TryExpr
         MIR::TryExpr.new(bind_frame_refs(mir.expr, context))
+      when MIR::TryOptional
+        MIR::TryOptional.new(bind_frame_refs(mir.expr, context))
       when MIR::TryCatch
         MIR::TryCatch.new(
           bind_frame_refs(mir.expr, context),

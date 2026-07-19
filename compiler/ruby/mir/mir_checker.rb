@@ -119,6 +119,7 @@ class MIRChecker
     MIR::OwnedStore, MIR::OwnedTransfer, MIR::Panic, MIR::Pipeline,
     MIR::PolymorphicFlowSignal, MIR::PolymorphicMutate, MIR::PolymorphicMutateFlow, MIR::PubConst,
     MIR::ReassignMark, MIR::ReassignWithCleanup,
+    MIR::ResourceClose,
     MIR::ReturnMark, MIR::ReturnStmt, MIR::ScopeBlock, MIR::Set,
     MIR::ShardConcurrentEach, MIR::ShardedMapPut, MIR::SnapshotMultiTxn, MIR::SnapshotRead,
     MIR::SnapshotTransaction, MIR::Sort, MIR::SortedLockAcquire, MIR::StreamSpawn, MIR::StreamYield,
@@ -126,6 +127,44 @@ class MIRChecker
     MIR::TestPreamble,
     MIR::ThunkTrampoline, MIR::TransferMark, MIR::TypeAlias,
     MIR::UnionMatchStmt, MIR::UnionTypeDef, MIR::WhileStmt, MIR::WithMatchDispatch,
+  ].freeze, T::Array[T::Class[T.anything]])
+
+  AUDITED_EMITTABLE_NODE_TYPES = T.let([
+    MIR::AddressOf, MIR::AllocMark, MIR::AllocSlice, MIR::AllocatorRef, MIR::ArrayDefaultInit,
+    MIR::ArrayInit, MIR::AssertRaisesCheck, MIR::AssertStmt, MIR::BatchWindowFlush,
+    MIR::BatchWindowPush, MIR::BgBlock, MIR::BinOp, MIR::BlockExpr, MIR::BreakExpr,
+    MIR::BreakStmt, MIR::Call, MIR::CapWrap, MIR::CapabilityLockAddress,
+    MIR::CapabilityLockTarget, MIR::CapabilityUnwrap, MIR::Cast, MIR::CatchWrapper,
+    MIR::Cleanup, MIR::Comment, MIR::Comptime, MIR::ConcatStr, MIR::Conditional,
+    MIR::ConstCast, MIR::ContainerInit, MIR::ContinueStmt, MIR::DebugOnly, MIR::DeepCopy,
+    MIR::DefaultStreamCapacity, MIR::DeferStmt, MIR::Deref, MIR::DestroyPtr,
+    MIR::DestructureSet, MIR::DestructureTarget, MIR::DiscardOwned, MIR::DoBlock,
+    MIR::DupeSlice, MIR::EnumDef, MIR::EnumOrdinal, MIR::ErrCleanup, MIR::ErrDeferStmt,
+    MIR::ExprStmt, MIR::FallibleLockBinding, MIR::FieldCleanupMark, MIR::FieldDef,
+    MIR::FieldGet, MIR::FnDef, MIR::FnRef, MIR::ForStmt, MIR::FrameRestore,
+    MIR::FrameSave, MIR::FreeSlice, MIR::FreezeExpr, MIR::FsmB1Body, MIR::FsmGenericBody,
+    MIR::FsmIoBody, MIR::FsmStructure, MIR::HasField, MIR::HeapCreate, MIR::Ident,
+    MIR::IfBindStmt, MIR::IfChain, MIR::IfOptional, MIR::IfStmt, MIR::Import,
+    MIR::IndexGet, MIR::IndexInsert, MIR::InlineBc, MIR::ItemsAccess, MIR::IterRange,
+    MIR::LambdaExpr, MIR::Let, MIR::ListItems, MIR::ListLength, MIR::Lit,
+    MIR::LockAcquire, MIR::MakeList, MIR::MethodCall, MIR::ModuleNamespace,
+    MIR::MoveMark, MIR::NextPromiseList, MIR::Noop, MIR::OptionalUnwrap,
+    MIR::OrElseExitBcRewrite, MIR::Orelse, MIR::OwnedBorrow, MIR::OwnedCreate,
+    MIR::OwnedDestroy, MIR::OwnedReturn, MIR::OwnedSlice, MIR::OwnedStore,
+    MIR::OwnedTransfer, MIR::Panic, MIR::Param, MIR::Pipeline, MIR::PointerCast,
+    MIR::PolymorphicFlowSignal, MIR::PolymorphicMutate, MIR::PolymorphicMutateFlow,
+    MIR::PubConst, MIR::RangeLit, MIR::RcDowngrade, MIR::RcRelease, MIR::RcRetain,
+    MIR::ReassignMark, MIR::ReassignWithCleanup, MIR::ReturnMark, MIR::ReturnStmt,
+    MIR::ResourceClose, MIR::RuntimeCall, MIR::ScopeBlock, MIR::Set, MIR::ShardedMapGet,
+    MIR::ShardedMapPut, MIR::SharePromote, MIR::SliceExpr, MIR::SnapshotMultiTxn,
+    MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SoaFieldAccess, MIR::Sort,
+    MIR::SortedLockAcquire, MIR::StreamSpawn, MIR::StreamYield, MIR::StructDef,
+    MIR::StructInit, MIR::Suppress, MIR::SwitchStmt, MIR::SymbolLit, MIR::TailCall,
+    MIR::TestDef, MIR::TestPreamble, MIR::TransferMark, MIR::TryCatch, MIR::TryExpr,
+    MIR::TryOrPanic, MIR::TryOptional, MIR::TupleLiteral, MIR::TypeAlias, MIR::TypeEq, MIR::TypeOf,
+    MIR::TypeSentinel, MIR::UnaryOp, MIR::Undef, MIR::UnionMatchStmt,
+    MIR::UnionPayloadGet, MIR::UnionTypeDef, MIR::UnionVariantGet, T.unsafe(MIR::VoidLiteral),
+    MIR::WeakUpgrade, MIR::WhileStmt, MIR::WithMatchDispatch,
   ].freeze, T::Array[T::Class[T.anything]])
 
   LINEAR_FRAME_ESCAPING_TRANSFER_TARGETS = T.let(
@@ -1243,17 +1282,27 @@ class MIRChecker
   def check_program!(program, strict: false)
     MIRPassState.require!(program, :mir_lowered, consumer: "MIRChecker")
     all_errors = T.let(ownership_registry_errors, T::Array[String])
-    program.items.each do |item|
-      if item.is_a?(MIR::FnDef)
-        all_errors.concat(check_fn!(item, strict: strict))
-      elsif item.is_a?(MIR::ModuleNamespace)
-        (item.items || []).each do |child|
-          all_errors.concat(check_fn!(child, strict: strict)) if child.is_a?(MIR::FnDef)
-        end
-      end
+    program_functions(program.items).each do |fn_def|
+      all_errors.concat(check_fn!(fn_def, strict: strict))
     end
     MIRPassState.for!(program).mark!(:mir_checked) if all_errors.empty?
     all_errors
+  end
+
+  sig { params(items: T::Array[MIR::Emittable]).returns(T::Array[MIR::FnDef]) }
+  def program_functions(items)
+    functions = T.let([], T::Array[MIR::FnDef])
+    items.each do |item|
+      case item
+      when MIR::FnDef
+        functions << item
+      when MIR::StructDef
+        (item.methods || []).each { |method| functions << method if method.is_a?(MIR::FnDef) }
+      when MIR::ModuleNamespace
+        functions.concat(program_functions(item.items || []))
+      end
+    end
+    functions
   end
 
   sig { returns(T::Array[String]) }
@@ -1294,6 +1343,13 @@ class MIRChecker
   sig { params(init: T.nilable(MIR::Node)).returns(T::Boolean) }
   def owned_return_init?(init)
     return true if init.is_a?(MIR::Call) && init.owned_return?
+    if init.is_a?(MIR::ExternTrampoline)
+      return true if init.alloc_kind
+
+      return_type = init.return_type.success_type || init.return_type
+      schema = @schema_lookup&.call(return_type.resolved)
+      return true if Schemas.resource?(schema)
+    end
 
     if init.is_a?(MIR::InlineBc) || init.is_a?(MIR::RegistryCall)
       return false unless stdlib_owned_return?(init)
@@ -1331,13 +1387,16 @@ class MIRChecker
   sig { params(body: T::Array[MIR::Node]).void }
   def verify_cleanup_sources_in_scope!(body)
     lets = T.let({}, T::Hash[String, MIR::Let])
+    materialized_owners = T.let(Set.new, T::Set[String])
     body.each do |node|
       next unless node.is_a?(MIR::Emittable)
 
       lets[node.name.to_s] = node if node.is_a?(MIR::Let)
+      materialized_owners.add(node.name.to_s) if node.is_a?(MIR::OwnedCreate)
       if node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
         let = lets[node.name.to_s]
-        if let && !cleanup_source_owns_value?(let, node)
+        if let && !materialized_owners.include?(node.name.to_s) &&
+            !cleanup_source_owns_value?(let, node)
           @errors << error(:OWNERSHIP_CLEANUP_FOR_BORROW, node.name,
             "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; " \
             "MIRChecker cannot prove this binding owns memory")
@@ -1398,6 +1457,11 @@ class MIRChecker
   def cleanup_source_owns_value?(node, cleanup)
     init = ownership_source_expr(node.init)
     return true if cleanup.cleanup_entry.match_as?
+    # An empty optional is a valid owned-slot state: cleanup is a no-op while
+    # it is null, and a later ReassignWithCleanup may install an owned payload.
+    # Rejecting its lifecycle here forces lowering either to leak that payload
+    # or to fabricate ownership for the NIL initializer.
+    return true if init.is_a?(MIR::Lit) && init.value.to_s == "null"
     return true if allocating_expr?(init)
     return true if value_constructor_expr?(init)
     return true if init.is_a?(MIR::ForeignOwnedUnwrap)
@@ -1443,7 +1507,8 @@ class MIRChecker
   def ownership_source_expr(node)
     current = T.let(node, MIR::Node)
     while current.respond_to?(:expr) &&
-        (current.is_a?(MIR::Cast) || current.is_a?(MIR::TryExpr))
+        (current.is_a?(MIR::Cast) || current.is_a?(MIR::TryExpr) ||
+         current.is_a?(MIR::TryOptional) || current.is_a?(MIR::OptionalUnwrap))
       current = T.cast(T.unsafe(current).expr, MIR::Node)
     end
     current
@@ -2757,8 +2822,10 @@ class MIRChecker
         has_restore = body_has_loop_restore?(stmt.body)
         if !stmt.tight && !has_restore
           if body_has_iteration_frame_alloc?(stmt.body)
+            allocations = iteration_frame_alloc_summary(stmt.body)
             @errors << error(:FRAME_NO_REWIND, @fn_name,
-              "loop body has iteration-scoped frame allocations but no restoreLoopMark defer")
+              "loop body has iteration-scoped frame allocations but no restoreLoopMark defer" \
+              " (allocations: #{allocations})")
           end
         elsif has_restore
           if body_has_non_iteration_frame_alloc?(stmt.body)
@@ -2802,6 +2869,19 @@ class MIRChecker
   sig { params(stmts: T.nilable(MIR::NodeRoot)).returns(T::Boolean) }
   def body_has_non_iteration_frame_alloc?(stmts)
     body_has_frame_alloc_scope?(stmts) { |scope| scope != :iteration }
+  end
+
+  sig { params(stmts: T.nilable(MIR::NodeRoot)).returns(String) }
+  def iteration_frame_alloc_summary(stmts)
+    allocations = T.let([], T::Array[String])
+    each_loop_local_node(stmts) do |node|
+      next unless node.is_a?(MIR::AllocMark)
+      next unless MIR::Placement.frame?(node.alloc) && node.scope == :iteration
+
+      line = node.respond_to?(:source_line) ? T.unsafe(node).source_line : nil
+      allocations << (line ? "#{node.name}@#{line}" : node.name.to_s)
+    end
+    allocations.uniq.join(", ")
   end
 
   # Does this statement list contain frame allocations matching a scope

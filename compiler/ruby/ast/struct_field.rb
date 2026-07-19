@@ -8,9 +8,9 @@ module AST
   StructField = Struct.new(:type, :default, :borrowed, keyword_init: true) do
     extend T::Sig
 
-    sig { returns(T.untyped) }
+    sig { returns(Type) }
     def type
-      self[:type]
+      T.cast(self[:type], Type)
     end
 
     sig { returns(T.untyped) }

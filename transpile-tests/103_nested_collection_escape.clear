@@ -25,12 +25,12 @@ END
 
 FN main() RETURNS Void ->
     # Test 1: List in struct survives function return
-    h1 = buildListDirect();
+    h1 = TRY buildListDirect();
     ASSERT h1.items.length() == 3;
     ASSERT h1.label == "direct";
 
     # Test 2: HashMap in struct survives function return
-    MUTABLE h2 = buildMapDirect();
+    MUTABLE h2 = TRY buildMapDirect();
     v2 = h2.data["x"] OR_ELSE 0_i64;
     ASSERT v2 == 100;
     v2y = h2.data["y"] OR_ELSE 0_i64;

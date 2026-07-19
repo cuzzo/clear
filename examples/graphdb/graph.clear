@@ -53,14 +53,14 @@ END
 
 # Get the label of a node by ID.
 FN getLabel(nodes: {String}Node, id: String) RETURNS !String ->
-  node = nodes[id] OR_ELSE Node{ label: "", edges: [] };
-  RETURN node.label;
+  IF nodes[id] EXISTS AS node THEN RETURN COPY node.label; END
+  RETURN "";
 END
 
 # Check if a node exists.
 FN hasNode(nodes: {String}Node, id: String) RETURNS !Bool ->
-  node = nodes[id] OR_ELSE Node{ label: "", edges: [] };
-  RETURN node.label != "";
+  IF nodes[id] EXISTS AS node THEN RETURN node.label != ""; END
+  RETURN FALSE;
 END
 
 # BFS shortest path from source to target. Returns list of node IDs.
@@ -204,15 +204,15 @@ FN main() RETURNS Void ->
   ASSERT getLabel(nodes, "c") == "Carol", "node c is Carol";
 
   # Check neighbors of Alice
-  aliceNeighbors = neighbors(nodes, "a");
+  aliceNeighbors = TRY neighbors(nodes, "a");
   ASSERT aliceNeighbors.length() == 2, "Alice has 2 neighbors";
 
   # Check neighbors of Bob
-  bobNeighbors = neighbors(nodes, "b");
+  bobNeighbors = TRY neighbors(nodes, "b");
   ASSERT bobNeighbors.length() == 1, "Bob has 1 neighbor";
 
   # Check neighbors of Carol (none)
-  carolNeighbors = neighbors(nodes, "c");
+  carolNeighbors = TRY neighbors(nodes, "c");
   ASSERT carolNeighbors.empty?(), "Carol has 0 neighbors";
 
   # Shortest path tests
@@ -253,9 +253,9 @@ FN main() RETURNS Void ->
   MUTABLE cNodes: {String}@sharded(4):writeLocked Node = {};
 
   # Concurrent node creation: 3 BG fibers each add a node
-  p1 = BG {addNode(&cNodes, "x", "Xena");};
-  p2 = BG {addNode(&cNodes, "y", "Yara");};
-  p3 = BG {addNode(&cNodes, "z", "Zane");};
+  p1:~ = BG {addNode(&cNodes, "x", "Xena");};
+  p2:~ = BG {addNode(&cNodes, "y", "Yara");};
+  p3:~ = BG {addNode(&cNodes, "z", "Zane");};
   NEXT p1;
   NEXT p2;
   NEXT p3;
@@ -265,18 +265,18 @@ FN main() RETURNS Void ->
   ASSERT getLabel(cNodes, "z") == "Zane", "concurrent: z is Zane";
 
   # Concurrent edge creation
-  p4 = BG {addEdge(&cNodes, "x", "y", 1.0);};
-  p5 = BG {addEdge(&cNodes, "x", "z", 2.0);};
-  p6 = BG {addEdge(&cNodes, "y", "z", 3.0);};
+  p4:~ = BG {addEdge(&cNodes, "x", "y", 1.0);};
+  p5:~ = BG {addEdge(&cNodes, "x", "z", 2.0);};
+  p6:~ = BG {addEdge(&cNodes, "y", "z", 3.0);};
   NEXT p4;
   NEXT p5;
   NEXT p6;
 
   # Verify edges
-  xNeighbors = neighbors(cNodes, "x");
+  xNeighbors = TRY neighbors(cNodes, "x");
   ASSERT xNeighbors.length() == 2, "concurrent: x has 2 neighbors";
 
-  yNeighbors = neighbors(cNodes, "y");
+  yNeighbors = TRY neighbors(cNodes, "y");
   ASSERT yNeighbors.length() == 1, "concurrent: y has 1 neighbor";
 
   # Concurrent read while structure is stable

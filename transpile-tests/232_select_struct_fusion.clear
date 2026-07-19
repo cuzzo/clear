@@ -17,8 +17,8 @@ FN main() RETURNS Void ->
     # WHERE before SELECT: filter on raw iterator, then project
     a = raws |> WHERE _.score > 75.0 |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 };
     ASSERT a.length() == 2, "2 items pass score > 75";
-    ASSERT a[0].key == 1, "first id is 1";
-    ASSERT a[1].normalized == 2.0, "second normalized is 200/100";
+    ASSERT a[0]?.key == 1, "first id is 1";
+    ASSERT a[1]?.normalized == 2.0, "second normalized is 200/100";
 
     # SELECT then SUM: project to struct, sum a field
     b = raws |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 } |> SUM _.normalized;

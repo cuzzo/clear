@@ -3,8 +3,8 @@ REQUIRE "gui.clear";
 
 FN parseCell(line: String) RETURNS !Cell ->
   parts = line.split(",");
-  x = (parts[0].toNumber() OR_ELSE 0.0).toInt();
-  y = (parts[1].toNumber() OR_ELSE 0.0).toInt();
+  x = ((UNWRAP parts[0]).toNumber() OR_ELSE 0.0).toInt();
+  y = ((UNWRAP parts[1]).toNumber() OR_ELSE 0.0).toInt();
   RETURN Cell{ x: x, y: y };
 END
 
@@ -14,9 +14,9 @@ FN readGrid(path: String) RETURNS ![]Cell ->
   MUTABLE cells: []Cell = [];
   MUTABLE i = 0;
   WHILE i < lines.length() DO
-    line = lines[i].trim();
+    line = (UNWRAP lines[i]).trim();
     IF line.any?() THEN
-      &cells.append(parseCell(line));
+      &cells.append(TRY parseCell(line));
     END
     i += 1;
   END
@@ -24,11 +24,11 @@ FN readGrid(path: String) RETURNS ![]Cell ->
 END
 
 FN runLife(path: String, generations: Int64) RETURNS !Void ->
-  MUTABLE cells = readGrid(path);
+  MUTABLE cells = TRY readGrid(path);
   MUTABLE generation = 0;
   WHILE generation < generations AND cells.any?() DO
-    render(cells);
-    cells = advance(cells);
+    TRY render(cells);
+    cells = TRY advance(cells);
     generation += 1;
   END
 END
@@ -44,11 +44,11 @@ FN defaultGlider() RETURNS ![]Cell ->
 END
 
 FN main() RETURNS Void ->
-  MUTABLE cells = defaultGlider();
+  MUTABLE cells = TRY defaultGlider();
   MUTABLE generation = 0;
   WHILE generation < 4 AND cells.any?() DO
     render(cells);
-    cells = advance(cells);
+    cells = TRY advance(cells);
     generation += 1;
   END
 END

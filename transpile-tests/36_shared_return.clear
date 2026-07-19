@@ -11,7 +11,7 @@ END
 # Test: data created inside a function is still accessible after the function returns.
 # Proves that the Arc prevents premature deallocation of the inner heap Node.
 FN main() RETURNS Void ->
-    n = makeNode(7);
+    n = TRY makeNode(7);
     ASSERT n.id == 7, "id should be 7 after function return";
 
     # A second caller-side clone to prove refcount management works end-to-end.

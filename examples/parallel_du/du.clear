@@ -30,7 +30,7 @@ FN scanDir(path: String)
     |> SELECT "${substr(_, 0, 2)}${path}/${substr(_, 2, _.length() - 2)}";
 
   children = entries
-    |> CONCURRENT SELECT entrySize(_)
+    |> CONCURRENT SELECT entrySize(_) OR_ELSE RAISE
     |> REDUCE(0) acc + _;
 
   RETURN path.fileSize() + children;
@@ -38,6 +38,6 @@ END
 
 FN main() RETURNS Void ->
   path = ".";
-  total = scanDir(path);
+  total = TRY scanDir(path);
   print("${total.toString()}\t${path}");
 END

@@ -126,7 +126,7 @@ module FuzzCoverageModel
       failure_proves: 'CleanupClassifier recognizes ownership-bearing struct, union, option, capability, and pipeline shapes.'
     ),
     cleanup_control_matrix: profile(
-      failure_proves: 'Cleanup-bearing values are cleaned or transferred through branch, loop, match, catch, return, GIVE, and discard paths.',
+      failure_proves: 'Every owning semantic constructor (string/list/map/struct/union/optional/tuple/generic/nested composition) is crossed with branch, normal/break/continue loops, match, error exit, return, TAKES/GIVE, COPY, replacement, and discard under the debug allocator.',
       high_risk: true
     ),
     collection_iteration_storage_matrix: profile(
@@ -242,6 +242,10 @@ module FuzzCoverageModel
     loop_local_method_temp: profile(
       failure_proves: 'Method-call temporaries inside loops keep per-iteration frame scope facts.'
     ),
+    loop_rewind_matrix: profile(
+      failure_proves: 'Every loop form discovers destination-driven COPY and frame temporaries through both branch sides, nested-loop scope, abrupt exits, zero iterations, and TIGHT-loop policy.',
+      high_risk: true
+    ),
     lowering_boundary_matrix: profile(
       failure_proves: 'MIR lowering boundaries preserve call contracts, WITH variants, BG/DO/NEXT, and pipeline ownership.',
       high_risk: true
@@ -267,6 +271,9 @@ module FuzzCoverageModel
     mutable_collection_param: profile(
       failure_proves: 'Mutable collection params retain allocator and mutation visibility across forwarding calls.',
       high_risk: true
+    ),
+    next_tense_matrix: profile(
+      failure_proves: 'NEXT unwraps future and stream tense layers across declared fallible/optional permutations without changing the remaining lifecycle.'
     ),
     nested_loop_escape: profile(
       failure_proves: 'Nested loop-local collection escapes force safe promotion for outer-container storage.',

@@ -1,6 +1,6 @@
 # Test: \xHH hex byte and \u{HHHH} unicode codepoint escape sequences
 
-FN main() RETURNS Void ->
+FN main() RETURNS !Void ->
     # \xHH produces a single byte
     ASSERT "\x41" == "A", "\\x41 is A";
     ASSERT "\x42" == "B", "\\x42 is B";
@@ -20,6 +20,9 @@ FN main() RETURNS Void ->
     greeting = "caf\u{00E9}";
     ASSERT greeting.length() == 5, "cafe is 5 bytes";
     ASSERT greeting.codepointCount() == 4, "cafe is 4 codepoints";
+
+    rocket = TRY codepointToString(0x1F680);
+    ASSERT rocket == "🚀", "codepointToString encodes a Unicode scalar";
 
     # Mixed escapes in one string
     mixed = "\x48\x69\u{0021}";

@@ -21,12 +21,14 @@ require "mir_lowering"
 options = {
   output: nil,
   module_mode: true,
+  function: nil,
 }
 
 OptionParser.new do |opts|
   opts.banner = "Usage: ruby tools/dump_mir_tree.rb [options] path/to/file.clear"
   opts.on("-o", "--output PATH", "Write JSON to PATH") { |path| options[:output] = path }
   opts.on("--program", "Dump lower_program instead of lower_module") { options[:module_mode] = false }
+  opts.on("--function NAME", "Dump only one lowered function") { |name| options[:function] = name }
 end.parse!
 
 source_path = ARGV.fetch(0) do
@@ -54,6 +56,12 @@ class MirTreeDumper
 
   def dump(value, path = "$")
     case value
+    when MIRLowering::LoweredModuleItems
+      {
+        "kind" => "lowered_module_items",
+        "items" => dump(value.items, "#{path}.items"),
+        "type_items" => dump(value.type_items, "#{path}.type_items"),
+      }
     when Array
       {
         "kind" => "array",
@@ -106,7 +114,13 @@ class MirTreeDumper
     @seen[oid] = record
     @nodes << record
 
-    fields = node.respond_to?(:each_pair) ? node.each_pair.to_h : {}
+    fields = if node.is_a?(MIR::Program)
+      { items: node.items }
+    elsif node.respond_to?(:each_pair)
+      node.each_pair.to_h
+    else
+      {}
+    end
     fields.each do |key, value|
       child_path = "#{path}.#{key}"
       dumped = dump(value, child_path)
@@ -173,6 +187,8 @@ lowering = MIRLowering.new(input: MIRLoweringInput.new(
   struct_schemas: frontend.struct_schemas,
   enum_schemas: frontend.enum_schemas,
   union_schemas: frontend.union_schemas,
+  schema_lookup: ->(name) { frontend.annotator.lookup_type_schema(name) },
+  lifecycle_registry: frontend.lifecycle_registry,
   fn_sigs: frontend.fn_sigs,
   moved_guard_info: frontend.moved_guard_info,
   importer: importer,
@@ -187,6 +203,17 @@ times["lower"] = Benchmark.realtime do
     else
       lowering.lower_program(frontend.ast)
     end
+end
+
+if options[:function]
+  items = if mir_root.is_a?(MIR::Program) || mir_root.is_a?(MIRLowering::LoweredModuleItems)
+    mir_root.items
+  else
+    []
+  end
+  fn = items.find { |item| item.is_a?(MIR::FnDef) && item.name.to_s == options[:function] }
+  abort "lowered function not found: #{options[:function]}" unless fn
+  mir_root = fn
 end
 
 dumper = MirTreeDumper.new

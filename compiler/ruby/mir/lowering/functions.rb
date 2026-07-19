@@ -182,6 +182,7 @@ module MIRLoweringFunctions
     prop :current_decl_alloc, T.nilable(Symbol), default: nil
     prop :current_expected_type, T.nilable(Type), default: nil
     prop :current_sink_type, T.nilable(Type), default: nil
+    prop :current_reassignment_target, T.nilable(String), default: nil
     prop :current_bindings, CleanupBindingMap, factory: -> { {} }
     prop :current_binding_types, BindingTypeMap, factory: -> { {} }
     prop :fn_alloc_marked_names, BoolNameMap, factory: -> { {} }
@@ -649,7 +650,7 @@ module MIRLoweringFunctions
     FunctionParamFact.new(
       param: param,
       name: param.name.to_s,
-      mir_name: mutable_scalar ? "_m_#{param.name}" : param.name.to_s,
+      mir_name: mutable_scalar ? "_m_#{param.name}" : zig_safe_name(param.name.to_s),
       zig_type: zig_type,
       mutable_scalar: mutable_scalar,
       collection_param: collection_param,
@@ -1225,7 +1226,7 @@ module MIRLoweringFunctions
     case arg
     when MIR::Ident
       [arg.name.to_s]
-    when MIR::OwnedSlice, MIR::Cast, MIR::TryExpr, MIR::AddressOf, MIR::Deref
+    when MIR::OwnedSlice, MIR::Cast, MIR::TryExpr, MIR::TryOptional, MIR::AddressOf, MIR::Deref
       ownership_consumed_arg_names(arg.expr)
     else
       mir_ident_names(arg)
@@ -1382,7 +1383,13 @@ module MIRLoweringFunctions
         with_expected_type(facts.callee_param_type) { lower(facts.ast_arg) }
       end
     end
-    arg = hoist_alloc(raw_arg, facts.ast_arg, err_cleanup: facts.takes, mutable: facts.copy_to_owning)
+    arg = hoist_alloc(
+      raw_arg,
+      facts.ast_arg,
+      err_cleanup: facts.takes,
+      mutable: facts.copy_to_owning,
+      ownership_materialization_alloc: facts.takes ? facts.arg_alloc : nil,
+    )
     boundary_arg = cross_boundary_arg(
       arg,
       facts.ast_arg,
@@ -1412,7 +1419,11 @@ module MIRLoweringFunctions
     call = MIR::Call.new(callee, args, can_fail, owned_return, contract)
     call.never_success = call_never_returns_success?(node)
     if node.respond_to?(:full_type!)
-      call.result_type = Type.from_node!(node, context: "call result")
+      retained_error = if node.respond_to?(:retain_error_channel) && T.unsafe(node).retain_error_channel == true &&
+                          node.respond_to?(:error_union_type)
+        T.unsafe(node).error_union_type
+      end
+      call.result_type = retained_error ? Type.new(retained_error) : Type.from_node!(node, context: "call result")
     end
     attach_explicit_move_consumption!(call, ast_args, mir_args, "call explicit move")
     return call unless node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
@@ -1530,6 +1541,7 @@ module MIRLoweringFunctions
     # Resolve rt/fail from fn_sigs
     needs_rt = callee_needs_rt?(node.name)
     can_fail = callee_can_fail?(node.name)
+    can_fail = false if node.respond_to?(:retain_error_channel) && T.unsafe(node).retain_error_channel
 
     # Generic type args
     type_args = if node.respond_to?(:generic_type_args) && node.generic_type_args&.any?
@@ -1585,7 +1597,7 @@ module MIRLoweringFunctions
 
     # Intrinsic pattern: already resolved by annotator
     if node.zig_pattern
-      return lower_safe_nav_method_call(node) if node.object.is_a?(AST::OptionalUnwrap) ||
+      return lower_safe_nav_method_call(node) if (node.object.is_a?(AST::OptionalUnwrap) && node.object.safe_navigation?) ||
         (node.object.respond_to?(:safe_nav_chain) && node.object.safe_nav_chain == true)
       return lower_intrinsic(node)
     end
@@ -1607,6 +1619,7 @@ module MIRLoweringFunctions
     mod_prefix = mod_alias ? "#{mod_alias.gsub('.', '_')}." : ""
     needs_rt = callee_needs_rt?(node.name)
     can_fail = callee_can_fail?(node.name)
+    can_fail = false if node.respond_to?(:retain_error_channel) && T.unsafe(node).retain_error_channel
 
     type_args = if node.respond_to?(:generic_type_args) && node.generic_type_args&.any?
       node.generic_type_args.map { |t| MIR::Ident.new(generic_type_arg_zig(t)) }
@@ -1920,6 +1933,16 @@ module MIRLoweringFunctions
   sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(MIR::Node) }
   def lower_intrinsic(node)
     T.bind(self, MIRLowering) rescue nil
+    # A literal is already immutable, process-lifetime data and therefore is
+    # a complete String@symbol value without a runtime interner lookup. This
+    # also keeps keyword-shaped symbols usable in compile-time/global tables.
+    if node.is_a?(AST::FuncCall) && node.name.to_s == "symbol" && node.args.length == 1
+      literal = node.args.first
+      if literal.is_a?(AST::Literal) && literal.type == :STRING
+        return MIR::SymbolLit.new(literal.value.to_s)
+      end
+    end
+
     # Symbol-based intrinsics are complex special builtins
     if node.zig_pattern.is_a?(Symbol)
       case node.zig_pattern
@@ -1961,14 +1984,20 @@ module MIRLoweringFunctions
         # *const T auto-derefs for method calls in Zig — no _root deref needed
       end
       lowered_args = node.args.each_with_index.map do |a, ai|
-        takes = ownership_facts.takes?(ai + 1)
-        takes && pre_resolved_alloc ? with_decl_alloc(pre_resolved_alloc) { lower(a) } : lower(a)
+        fact = stdlib_facts.args[ai + 1]
+        with_sink_type(fact&.sink_type) do
+          takes = ownership_facts.takes?(ai + 1)
+          takes && pre_resolved_alloc ? with_decl_alloc(pre_resolved_alloc) { lower(a) } : lower(a)
+        end
       end
       [obj_mir] + lowered_args
     else
       node.args.each_with_index.map do |a, ai|
-        takes = ownership_facts.takes?(ai)
-        takes && pre_resolved_alloc ? with_decl_alloc(pre_resolved_alloc) { lower(a) } : lower(a)
+        fact = stdlib_facts.args[ai]
+        with_sink_type(fact&.sink_type) do
+          takes = ownership_facts.takes?(ai)
+          takes && pre_resolved_alloc ? with_decl_alloc(pre_resolved_alloc) { lower(a) } : lower(a)
+        end
       end
     end
 
@@ -2110,7 +2139,12 @@ module MIRLoweringFunctions
     end
 
     materialized_args = materialized_args.each_with_index.map do |arg_mir, index|
-      hoist_alloc(arg_mir, stdlib_facts.ast_arg(index), err_cleanup: ownership_facts.takes?(index))
+      hoist_alloc(
+        arg_mir,
+        stdlib_facts.ast_arg(index),
+        err_cleanup: ownership_facts.takes?(index),
+        ownership_materialization_alloc: ownership_facts.takes?(index) ? sink_alloc : nil,
+      )
     end if stdlib_facts.args.any?
 
     consumed_names = ownership_facts.takes_any? ? [] : ownership_facts.consumed_names.dup
@@ -2124,6 +2158,7 @@ module MIRLoweringFunctions
           stdlib_facts.ast_arg(index),
           "stdlib argument #{index}",
           sink_alloc,
+          sink_type: stdlib_facts.args[index]&.sink_type,
         )
         consumed_operands.concat(operands)
         operands.each do |operand|
@@ -2226,7 +2261,13 @@ module MIRLoweringFunctions
     mod_alias = nil if source&.abi == :c
     mod_prefix = mod_alias ? "#{mod_alias.gsub('.', '_')}." : ""
     callee_name = source&.symbol || node.name
-    MIR::Call.new("#{mod_prefix}#{callee_name}", args, false, false, callable_contract_for(sig, node.args))
+    MIR::Call.new(
+      "#{mod_prefix}#{callee_name}",
+      args,
+      false,
+      call_owned_return?(node),
+      callable_contract_for(sig, node.args),
+    )
   end
 
   sig { params(node: AST::MethodCall).returns(MIR::MethodCall) }
@@ -2417,7 +2458,17 @@ module MIRLoweringFunctions
     prefix_nodes = body_nodes[0...-1] || []
     body_mir.concat(lower_body(prefix_nodes))
     return_expr = T.must(body_nodes.last)
-    body_mir << MIR::ReturnStmt.new(lower(return_expr))
+    lambda_return = AST::ReturnNode.new(return_expr.respond_to?(:token) ? T.unsafe(return_expr).token : nil, return_expr)
+    body_mir.concat(hoist_unhoisted_return_allocs(
+      [MIR::ReturnStmt.new(lower(return_expr))],
+      [lambda_return],
+    ))
+    # Lambda bodies are nested functions, not ordinary expression children of
+    # the enclosing routine. Run the same allocation normalization and
+    # ownership finalization that a top-level function body receives so an
+    # owned/fallible final expression is hoisted inside the lambda rather than
+    # leaking an unhoisted BlockExpr or TryExpr into its ReturnStmt.
+    body_mir = append_ownership_transfers_for_mir_body(body_mir)
 
     fn_def = MIR::FnDef.new(fn_name, params_mir, ret_str, body_mir, nil, false, nil)
     captures = node.captures&.map { |c|

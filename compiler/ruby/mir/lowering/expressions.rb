@@ -340,6 +340,18 @@ module MIRLoweringExpressions
       end
     when :IS_OK then MIR::FallibleOk.new(strip_try(right))
     when :IS_READY then MIR::FutureReady.new(right)
+    when :TRY
+      declared = if node.right.respond_to?(:error_union_type) && T.unsafe(node.right).error_union_type
+        error_type = T.unsafe(node.right).error_union_type
+        error_type.is_a?(Type) ? error_type : Type.new(error_type)
+      else
+        Type.from_node!(node.right, context: "TRY lowering operand")
+      end
+      if declared.error_union?
+        MIR::TryExpr.new(strip_try(right))
+      else
+        MIR::TryOptional.new(right)
+      end
     when :SUB, "-" then MIR::UnaryOp.new("-", right)
     when :BITWISE_NOT, "~" then MIR::UnaryOp.new("~", right)
     else raise "MIRLowering: unknown unary op #{node.op}"
@@ -1027,6 +1039,12 @@ module MIRLoweringExpressions
     # a MIR::BlockExpr containing the scoped pending stmts. Hot path: zero
     # allocation. Fallback path: dupes (auto-COPY etc.) happen inside the
     # block, only when actually entered.
+    # A definite, type-compatible LHS is already the result. The annotator
+    # verified the unreachable fallback has the same type, so do not emit
+    # Zig's `orelse` (which only accepts optional/error-union operands).
+    left_type = Type.from_node!(node.left, context: "OR_ELSE definite left")
+    return left unless facts.left_is_error || left_type.optional?
+
     fallback_type = or_fallback_expected_type(node)
     right = lower_scoped do
       with_expected_type(fallback_type) do
@@ -1076,6 +1094,7 @@ module MIRLoweringExpressions
   def materialize_or_fallback_value(value, ast_node)
     T.bind(self, MIRLowering) rescue nil
     return hoist_alloc(value, ast_node, err_cleanup: false) if mir_allocates?(value)
+    return value if unit_union_variant_constructor?(ast_node)
     return value unless or_fallback_access_path?(ast_node)
 
     return value unless ast_node.is_a?(AST::Locatable)
@@ -1102,14 +1121,24 @@ module MIRLoweringExpressions
     # to honor that to keep emitting `catch fallback` (error union)
     # rather than `orelse fallback` (optional).
     has_error_union = node.left.respond_to?(:error_union_type) && node.left.error_union_type
-    can_fail = node.left.respond_to?(:can_fail) && node.left.can_fail
     effective_left = if has_error_union
                        Type.new(T.cast(node.left.error_union_type, Type::TypeInput))
                      else
                        left_type
                      end
+    # Annotation permits OR_ELSE to recover both a source-visible !T and an
+    # implementation fault from a checked allocating intrinsic. Allocation
+    # faults deliberately do not change the CLEAR expression's ordinary type,
+    # but they still travel through Zig's error channel. Lowering must consume
+    # that channel here instead of leaving the intrinsic's implicit `try` in
+    # place and silently propagating past the fallback.
+    pipeline_manages_recovery =
+      (node.left.is_a?(AST::BinaryOp) && node.left.smooth?) ||
+      (pipeline_host.respond_to?(:pipeline_context_active?) && pipeline_host.pipeline_context_active?)
+    fault_recoverable = !pipeline_manages_recovery && !left_type.future? && !left_type.stream? &&
+      node.left.respond_to?(:can_fail) && T.unsafe(node.left).can_fail == true
     OrElseFacts.new(
-      left_is_error: left_type.error_union? || can_fail || !!has_error_union,
+      left_is_error: left_type.error_union? || !!has_error_union || fault_recoverable,
       left_success_optional: effective_left.error_union? && effective_left.success_type.optional?,
       line: node.token&.line || 0,
       target: lowering_target
@@ -1136,8 +1165,9 @@ module MIRLoweringExpressions
     # Safe field access on any ?T: expr?.field
     # Always generate safe navigation so nil propagates instead of panicking.
     implicit_safe_nav = target_node.respond_to?(:safe_nav_chain) && target_node.safe_nav_chain == true
-    if target_node.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
-      inner_ast = target_node.is_a?(AST::OptionalUnwrap) ? target_node.target : target_node
+    explicit_safe_nav = target_node.is_a?(AST::OptionalUnwrap) && target_node.safe_navigation?
+    if explicit_safe_nav || implicit_safe_nav
+      inner_ast = explicit_safe_nav ? target_node.target : target_node
       inner_mir = T.cast(lower(inner_ast), MIR::Node)
       inner_type = Type.from_node!(inner_ast, context: "optional @node field target")
       if inner_type.node_reference?
@@ -1403,8 +1433,9 @@ module MIRLoweringExpressions
     target_node = node.target
     target_ast = T.cast(target_node, AST::Node)
     implicit_safe_nav = target_node.respond_to?(:safe_nav_chain) && target_node.safe_nav_chain == true
-    optional = target_node.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
-    source_ast = target_node.is_a?(AST::OptionalUnwrap) ? target_node.target : target_node
+    explicit_safe_nav = target_node.is_a?(AST::OptionalUnwrap) && target_node.safe_navigation?
+    optional = explicit_safe_nav || implicit_safe_nav
+    source_ast = explicit_safe_nav ? target_node.target : target_node
     optional_source = optional ? T.cast(lower(source_ast), MIR::Node) : nil
     target = optional ? MIR::Ident.new("_r") : T.cast(lower(target_node), MIR::Node)
     target_type = Type.from_node!(target_node, context: "index target")
@@ -1750,7 +1781,8 @@ module MIRLoweringExpressions
       expected_ft = field_type_input ? (field_type_input.is_a?(Type) ? field_type_input : Type.new(field_type_input)) : nil
       val = with_decl_alloc(field_sink_alloc) do
         with_expected_type(expected_ft) do
-        if borrowed_field
+          with_sink_type(expected_ft) do
+            if borrowed_field
           aggregate_dynamic_slice_field_value(lower(field_node), expected_ft, true, field_sink_alloc, field_node)
         elsif rc_retain_needed?(field_node)
           hoist_alloc(make_rc_retain(T.cast(field_node, AST::Identifier)), field_node, err_cleanup: true)
@@ -1770,7 +1802,8 @@ module MIRLoweringExpressions
           else
             lowered
           end
-        end
+            end
+          end
         end
       end
       # @boxed field: hoist HeapCreate to a named temp so it is a Let-init,
@@ -1859,9 +1892,11 @@ module MIRLoweringExpressions
       move_mark_field!(v)
       val = with_decl_alloc(field_sink_alloc) do
         with_expected_type(expected_ft) do
-        materialized = materialize_owned_sink_value(lower(v), v, field_sink_alloc, ft)
-        materialized = aggregate_dynamic_slice_field_value(materialized, expected_ft, false, field_sink_alloc, v)
-        hoist_alloc(materialized, v, err_cleanup: true)
+          with_sink_type(expected_ft) do
+            materialized = materialize_owned_sink_value(lower(v), v, field_sink_alloc, ft)
+            materialized = aggregate_dynamic_slice_field_value(materialized, expected_ft, false, field_sink_alloc, v)
+            hoist_alloc(materialized, v, err_cleanup: true)
+          end
         end
       end
       # @boxed is signalled by the annotator's needs_heap_create stamp
@@ -2253,7 +2288,14 @@ module MIRLoweringExpressions
     function_state.current_expected_type = T.let(function_state.current_expected_type, T.nilable(Type))
     source = lower(node.value)
     source = hoist_alloc(source, node.value) if mir_allocates?(source)
+    # A payload-free union constructor (for example `Value.Nil`) is already a
+    # fresh value and contains no storage to duplicate. Auto-COPY may wrap it
+    # when it appears as an owned fallback; lowering that wrapper as a full
+    # union clone manufactures a heap allocation with no consumer.
+    return source if unit_union_variant_constructor?(node.value)
+
     ti = copy_source_type_info(node.value)
+    lifecycle = lifecycle_registry.fetch(ti)
     sink_type = function_state.current_sink_type || function_state.current_expected_type
     dst_ti = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : ti
     # Copy placement is destination-driven. Auto-COPY sites may stamp alloc
@@ -2261,12 +2303,13 @@ module MIRLoweringExpressions
     # with_decl_alloc. Only a context-free explicit COPY defaults to heap.
     alloc = function_state.current_decl_alloc || node.alloc || :heap
 
-    if ti.id_handle?
-      # Id<T> is an integer handle owned by its Pool, never an owning copy of
-      # T. Generic specialization must not turn COPY of the handle into a deep
-      # copy merely because its type argument may require cleanup.
+    case lifecycle.copy_strategy
+    when :bit_copy
       MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
-    elsif ti.optional? && ti.wrapped_type&.any_rc?
+    when :forbidden
+      raise "annotation admitted COPY of linear type #{lifecycle.type_key}"
+    when :retain
+      if ti.optional? && ti.wrapped_type&.any_rc?
       wrapped = T.must(ti.wrapped_type)
       capture = "__copy_rc_#{lowering_counters.next_tmp_id}"
       func = wrapped.shared? ? "arcRetain" : "rcRetain"
@@ -2274,37 +2317,46 @@ module MIRLoweringExpressions
       copied = MIR::IfOptional.new(source, capture, retained, MIR::Lit.new("null"))
       copied.result_type = Type.new(ti)
       copied
-    elsif ti.any_rc?
-      func = ti.shared? ? "arcRetain" : "rcRetain"
-      MIR::RcRetain.new(source, rc_payload_zig_type(ti), func)
-    elsif ti.optional? && (ti.needs_cleanup?(T.unsafe(mir_schema_lookup)) ||
-                           ti.wrapped_type&.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) ||
-                           ti.specialization_may_need_cleanup?)
-      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
-    elsif ti.string?
-      MIR::DeepCopy.new(source, "[]const u8", nil, :full_value, alloc)
-    elsif ti.direct_indexable_collection? && dst_ti.direct_indexable_collection? && !dst_ti.string?
-      copy_zig = copy_source_zig_type(node.value, ti, dst_ti)
-      MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc)
-    elsif ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup))
-      MIR::DeepCopy.new(source, bare_zig_type(ti), nil, :full_value, alloc)
-    elsif ti.specialization_may_need_cleanup?
-      # Associated types are concrete after Zig specialization, not while the
-      # Ruby frontend checks the generic body. Preserve COPY semantically and
-      # let dupeValue's comptime cleanup predicate choose deep-copy vs value
-      # copy for the selected M::Value.
-      MIR::DeepCopy.new(source, ti.zig_type, nil, :full_value, alloc)
+      else
+        func = ti.shared? ? "arcRetain" : "rcRetain"
+        MIR::RcRetain.new(source, rc_payload_zig_type(ti), func)
+      end
+    when :deep_clone, :generic
+      # COPY duplicates the value that exists at its own expression boundary.
+      # An enclosing TRY/UNWRAP consumes the fallible/optional wrapper later;
+      # using that payload destination here asks dupeValue to clone T from ?T
+      # (or !T), which is both type-incorrect and loses wrapper semantics.
+      copy_ti = (ti.optional? || ti.error_union?) ? ti : dst_ti
+      copy_zig = if lifecycle.copy_strategy == :generic
+        # Generic/projection values already have their concrete Zig type at
+        # comptime. Re-rendering the unresolved CLEAR shape here can leak
+        # names such as M::Value into generated Zig and duplicates the type
+        # resolver's work. Let dupeValue specialize from the value itself.
+        nil
+      elsif ti.optional? || ti.error_union?
+        bare_zig_type(ti)
+      elsif ti.string?
+        "[]const u8"
+      elsif ti.direct_indexable_collection? && dst_ti.direct_indexable_collection? && !dst_ti.string?
+        copy_source_zig_type(node.value, ti, dst_ti)
+      elsif ti.borrowed_reference? || ti.ownership == :borrow
+        # Borrowing is represented as an implementation pointer, not as part
+        # of the copied value's logical type. COPY owns the pointee.
+        bare_zig_type(dst_ti)
+      else
+        # COPY preserves the logical value representation. A pointer emitted
+        # for an ordinary borrowed aggregate is handled by emit_deep_copy's
+        # value-shaped source branch, but a pointer that is itself the CLEAR
+        # value (`@boxed`, bare sync wrappers such as `@versioned`, etc.) must
+        # remain a pointer. Stripping it here silently changed COPY's result
+        # type and only failed once a suspension boundary hoisted the value
+        # into a correctly typed field.
+        transpile_type(dst_ti)
+      end
+      MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc,
+        MIR::DeepCopy.copy_shape_for_zig_type(copy_zig), copy_ti)
     else
-      copy_zig = if dst_ti.collection? && !dst_ti.string?
-                   dst_ti.zig_type
-                 elsif union_schemas.key?(ti.resolved)
-                   transpile_type(ti.resolved.to_s)
-                 elsif ti.any_sync? || ti.collection_value? || ti.collection? ||
-                       (ti.struct? && ti.needs_promotion?(T.unsafe(mir_schema_lookup)))
-                   ti.zig_type
-                 end
-      copy_zig ? MIR::DeepCopy.new(source, copy_zig, nil, :full_value, alloc) :
-                 MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
+      raise "unknown lifecycle copy strategy #{lifecycle.copy_strategy.inspect} for #{lifecycle.type_key}"
     end
   end
 
@@ -2341,6 +2393,10 @@ module MIRLoweringExpressions
   def lower_clone(node)
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(node.value, context: "CLONE value")
+    lifecycle = lifecycle_registry.fetch(ti)
+    unless lifecycle.copy_strategy == :retain
+      raise "annotation admitted CLONE without retain lifecycle for #{lifecycle.type_key}"
+    end
     if ti.optional? && ti.wrapped_type&.any_rc?
       wrapped = T.must(ti.wrapped_type)
       capture = "__clone_rc_#{lowering_counters.next_tmp_id}"

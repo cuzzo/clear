@@ -4,8 +4,16 @@
 # templates own a few allocator kinds deeply; this one owns the cross-product
 # of cleanup-bearing value shape and control-flow position.
 
-CCM_SHAPES = %i[string list hash struct union optional nested].freeze
-CCM_FLOWS = %i[branch loop match catch return move give discard].freeze
+# This is the bounded exhaustive semantic-lifecycle matrix. Every owning type
+# constructor supported by the frontend appears here, and every constructor is
+# crossed with every control-flow/ownership transition below. Random fuzzing
+# supplements this table; it must never be the only reason a cell is exercised.
+CCM_SHAPES = %i[
+  string list hash struct union optional tuple generic nested nested_union
+].freeze
+CCM_FLOWS = %i[
+  branch loop loop_break loop_continue match catch return move give copy reassign discard
+].freeze
 
 CCM_CELLS = CCM_SHAPES.flat_map do |shape|
   CCM_FLOWS.map { |flow| { shape: shape, flow: flow } }
@@ -25,8 +33,20 @@ def ccm_spec(shape)
     ["UNION Val { Empty, Text: String }\n", "Val", 'Val{ Text: COPY "abc" }', "1_i64", "1_i64"]
   when :optional
     ["", "?String", 'COPY "abc"', "1_i64", "1_i64"]
+  when :tuple
+    ["", "Tuple<String, Int64>", 'Tuple{COPY "abc", 2_i64}', "x._0.length()", "3_i64"]
+  when :generic
+    ["STRUCT Box<T> { value: T }\n", "Box<String>", 'Box<String>{ value: COPY "abc" }', "x.value.length()", "3_i64"]
   when :nested
     ["STRUCT Inner { label: String }\nSTRUCT Box { items: Inner[]@list }\n", "Box", "makeBox() OR_ELSE RAISE", "(x.items[0_i64]?.label OR_ELSE \"\").length()", "3_i64"]
+  when :nested_union
+    [
+      "UNION Choice { Empty, Text: String }\nSTRUCT Envelope { choice: ?Choice }\n",
+      "Envelope",
+      'Envelope{ choice: Choice{ Text: COPY "abc" } }',
+      "1_i64",
+      "1_i64",
+    ]
   end
 end
 
@@ -96,16 +116,27 @@ FuzzGenerator.register(:cleanup_control_matrix, cells: CCM_CELLS) do |p|
           RETURN;
       END
     CHT
-  when :loop
+  when :loop, :loop_break, :loop_continue
+    control = case p[:flow]
+    when :loop_break then "IF i == 2_i64 THEN BREAK; END"
+    when :loop_continue then "IF i == 1_i64 THEN CONTINUE; END"
+    else ""
+    end
+    expected_total = case p[:flow]
+    when :loop_break then expected.sub('_i64', '').to_i
+    when :loop_continue then expected.sub('_i64', '').to_i
+    else expected.sub('_i64', '').to_i * 2
+    end
     <<~CHT
       #{prelude}#{helpers}
       FN main() RETURNS !Void ->
           MUTABLE total: Int64 = 0_i64;
           FOR i IN (1_i64 ..= 2_i64) DO
               x: #{ty} = #{expr};
+              #{control}
               total = total + #{observe};
           END
-          ASSERT total == #{expected.sub('_i64', '').to_i * 2}_i64, "cleanup loop";
+          ASSERT total == #{expected_total}_i64, "cleanup #{p[:flow]}";
           RETURN;
       END
     CHT
@@ -193,6 +224,27 @@ FuzzGenerator.register(:cleanup_control_matrix, cells: CCM_CELLS) do |p|
           x: #{ty} = #{expr};
           result: Int64 = consume(GIVE x);
           ASSERT result == #{expected}, "cleanup give";
+          RETURN;
+      END
+    CHT
+  when :copy
+    copied_observe = observe.gsub(/\bx\b/, "copied")
+    <<~CHT
+      #{prelude}#{helpers}
+      FN main() RETURNS !Void ->
+          x: #{ty} = #{expr};
+          copied: #{ty} = COPY x;
+          ASSERT #{copied_observe} == #{expected}, "cleanup deep copy";
+          RETURN;
+      END
+    CHT
+  when :reassign
+    <<~CHT
+      #{prelude}#{helpers}
+      FN main() RETURNS !Void ->
+          MUTABLE x: #{ty} = #{expr};
+          x = #{expr};
+          ASSERT #{observe} == #{expected}, "cleanup replacement";
           RETURN;
       END
     CHT

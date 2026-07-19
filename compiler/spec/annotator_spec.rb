@@ -1952,7 +1952,7 @@ RSpec.describe SemanticAnnotator do
               &items.append(Value.Nil);
               RETURN Value{ List: items };
           END
-          FN main() RETURNS Void -> v = makeList(); RETURN; END
+          FN main() RETURNS Void -> v = TRY makeList(); RETURN; END
         CLEAR
         annotated = run_mir(src)
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeList" }
@@ -2094,7 +2094,7 @@ RSpec.describe SemanticAnnotator do
             p2 = Point{ x: 3, y: 4 };
 
             # User methods remain chainable. Free functions stay explicit.
-            res = to_list(p1.add(p2).get_x());
+            res = TRY to_list(p1.add(p2).get_x());
           FLUX
         }
 
@@ -2355,7 +2355,7 @@ RSpec.describe SemanticAnnotator do
 
     context "Polymorphic Conversion (toInt)" do
       context "when parsing a String" do
-        let(:code) { 'i = "123".toInt();' }
+        let(:code) { 'i = TRY "123".toInt();' }
         it "resolves to Int64" do
           expect(result).to eq(:Int64)
         end
@@ -2382,7 +2382,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "Polymorphic Conversion (toFloat)" do
-      let(:code) { 'f = "12.5".toFloat();' }
+      let(:code) { 'f = TRY "12.5".toFloat();' }
       it "resolves to Float64" do
         expect(result).to eq(:Float64)
       end
@@ -2704,7 +2704,7 @@ RSpec.describe SemanticAnnotator do
   # ---------------------------------------------------------------------------
   describe "Range literals" do
     context "exclusive range (1..<10)" do
-      let(:code) { "r = (1..<10);" }
+      let(:code) { "r:~ = (1..<10);" }
 
       it "resolves to a finite Int64 stream" do
         expect(result).to eq(:"~Int64[]")
@@ -2716,7 +2716,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "inclusive range (1..<=10)" do
-      let(:code) { "r = (1..<=10);" }
+      let(:code) { "r:~ = (1..<=10);" }
 
       it "resolves to a finite Int64 stream" do
         expect(result).to eq(:"~Int64[]")
@@ -2730,7 +2730,7 @@ RSpec.describe SemanticAnnotator do
     context "field access on range (.start and .end)" do
       let(:code) {
         <<~FLUX
-          r = (2..<8);
+          r:~ = (2..<8);
           s = r.start;
           e = r.end;
         FLUX
@@ -2742,7 +2742,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "range with Int64 bounds (stays Int64)" do
-      let(:code) { "r = (0_i64..<5_i64);" }
+      let(:code) { "r:~ = (0_i64..<5_i64);" }
 
       it "resolves to a finite Int64 stream without error" do
         expect { ast }.not_to raise_error
@@ -2757,7 +2757,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "range with mixed Int64/Float64 bounds" do
-      let(:code) { "r = (0_i64..<5.0);" }
+      let(:code) { "r:~ = (0_i64..<5.0);" }
 
       it "coerces Int64 start to Float64" do
         range_node = ast.statements.last.value
@@ -2766,7 +2766,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "range with arithmetic bounds" do
-      let(:code) { "r = ((1 + 2)..<(3 * 4));" }
+      let(:code) { "r:~ = ((1 + 2)..<(3 * 4));" }
 
       it "resolves to a finite Int64 stream without error" do
         expect { ast }.not_to raise_error
@@ -3846,13 +3846,13 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("const Status = enum {")
       end
 
-      it "excludes PRIVATE ENUM from transpile_module output" do
+      it "retains PRIVATE ENUM implementation declarations in transpile_module output" do
         out = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
           PRIVATE ENUM Internal { A, B }
           FN main() RETURNS Void ->
           END
         CLEAR
-        expect(out).not_to include("const Internal = enum {")
+        expect(out).to include("const Internal = enum {")
       end
     end
   end

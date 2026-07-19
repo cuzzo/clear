@@ -275,8 +275,8 @@ RSpec.describe "Effect Tracking" do
     it "is recorded for TCP read" do
       effs = effects_of(<<~CLEAR)
         FN main() RETURNS Void ->
-          server = TCPServer::listen(8080);
-          client = accept(server);
+          server = TRY TCPServer::listen(8080);
+          client = TRY accept(server);
           data = tcpRead(client);
           RETURN;
         END
@@ -400,7 +400,7 @@ RSpec.describe "Effect Tracking" do
         END
 
         FN main() RETURNS Void ->
-          x = load();
+          x = TRY load();
           RETURN;
         END
       CLEAR
@@ -417,7 +417,7 @@ RSpec.describe "Effect Tracking" do
 
         FN main() RETURNS Void ->
           FOR i IN (0 ..< 3) DO
-            x = load();
+            x = TRY load();
           END
           RETURN;
         END
@@ -434,7 +434,7 @@ RSpec.describe "Effect Tracking" do
         FN main() RETURNS Void ->
           MUTABLE gate = 1;
           IF gate > 0 THEN
-            x = load();
+            x = TRY load();
           END
           RETURN;
         END
@@ -491,7 +491,7 @@ RSpec.describe "Effect Tracking" do
 
         FN middle() RETURNS !Void ->
           FOR i IN (0 ..< 3) DO
-            x = inner();
+            x = TRY inner();
           END
           RETURN;
         END
@@ -515,7 +515,7 @@ RSpec.describe "Effect Tracking" do
         END
 
         FN main() RETURNS Void ->
-          x = wrap();
+          x = TRY wrap();
           RETURN;
         END
       CLEAR

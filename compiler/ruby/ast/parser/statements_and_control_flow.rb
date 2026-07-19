@@ -96,7 +96,10 @@ class ClearParser
 
   sig { returns(AST::Node) }
   def parse_statement
-    @budget.nested { parse_statement_body }
+    @budget.enter!
+    statement = parse_statement_body
+    @budget.leave!
+    statement
   end
 
   sig { returns(AST::Node) }
@@ -203,7 +206,7 @@ class ClearParser
     opt_type = nil
     if target.is_a?(AST::Identifier) && match?(:CHAR, ':')
       consume(:CHAR, ':')
-      opt_type = parse_type_annotation
+      opt_type = parse_inferred_wrapper_annotation || parse_type_annotation
     end
 
     # Compound assignment: x += expr  →  x = x + expr
@@ -252,6 +255,29 @@ class ClearParser
       AST::Assignment.new(target_token, target, value)
     end
     ParsedVarForm.new(node: node, assignment: true)
+  end
+
+  # Binding-only shorthand: `x:! = expr`, `x:? = expr`, `x:!? = expr`, and
+  # `x:~ = expr`
+  # retain/infer the wrapper around the RHS payload without spelling a
+  # redundant concrete type. It is intentionally not a general type spelling.
+  sig { returns(T.nilable(Type)) }
+  def parse_inferred_wrapper_annotation
+    return nil unless match?(:CHAR, '!') || match?(:CHAR, '?') || match?(:CHAR, '~')
+
+    start = current.value
+    next_token = peek_at(1)
+    suffix = if start == '!' && next_token&.type == :CHAR && T.must(next_token).value == '?'
+      "!?".freeze
+    else
+      start
+    end
+    required_count = suffix.length
+    terminal = peek_at(required_count)
+    return nil unless terminal&.type == :CHAR && T.must(terminal).value == '='
+
+    required_count.times { consume(:CHAR) }
+    Type.new("#{suffix}Auto")
   end
 
   sig { returns(AST::Node) }
@@ -419,6 +445,10 @@ class ClearParser
   def brace_literal_is_hash?
     return false unless match?(:CHAR, '{')
     return true if match_at?(1, :CHAR, '}')
+    first = peek_at(1)
+    if first&.type == :KEYWORD && VALUE_BLOCK_STATEMENT_KEYWORDS.include?(T.must(first).value)
+      return false
+    end
 
     depth = 0
     offset = 0
@@ -517,15 +547,10 @@ class ClearParser
     var_name = consume(:VAR_ID).text!
     consume(:KEYWORD, 'IN')
 
-    # Ranges need parens for precedence; collections don't.
-    expr = if match?(:CHAR, '(')
-      consume(:CHAR, '(')
-      parsed = parse_expression
-      consume(:CHAR, ')')
-      parsed
-    else
-      parse_expression
-    end
+    # Grouping is an ordinary primary expression. Let the shared expression
+    # parser consume it so suffixes such as `(source).values()` remain part of
+    # the iterable instead of being mistaken for tokens after the FOR source.
+    expr = parse_expression
 
     # Shorthand: FOR var IN range -> single_statement;
     if match?(:ARROW, '->')

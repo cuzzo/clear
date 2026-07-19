@@ -49,7 +49,7 @@ FN findKeyIndex(keys: []Int64, key: Int64) RETURNS Int64 ->
   RETURN i;
 END
 
-FN scanWithFilter(keys: []Int64, filter: FN (Int64) -> Bool) RETURNS !Int64 ->
+FN scanWithFilter(keys: []Int64, filter: FN (Int64) -> Bool) RETURNS !Int64 REQUIRES filter: NON_REENTRANT ->
   MUTABLE count = 0;
   MUTABLE i = 0;
   WHILE i < keys.length() DO
@@ -119,7 +119,7 @@ FN main() RETURNS !Void ->
   &allKeys.append(40);
 
   # Lambda filter
-  evenCount = scanWithFilter(allKeys, %(k: Int64) -> k MOD 2 == 0);
+  evenCount = TRY scanWithFilter(allKeys, %(k: Int64) -> k MOD 2 == 0);
   ASSERT evenCount == 3, "lambda: 3 even (10,20,40)";
 
   # REDUCE pipeline
@@ -178,7 +178,7 @@ FN main() RETURNS !Void ->
   # ================================================================
 
   # @multiowned: Rc-wrapped struct with list fields
-  rs = makeResultSet(3);
+  rs = TRY makeResultSet(3);
   ASSERT rs.count == 3, "multiowned: 3 items";
   # Rc clone: both rs and rs2 share the same ResultSet
   rs2 = rs;

@@ -155,9 +155,10 @@ RSpec.describe "annotator receiver state boundaries" do
 
     expect(ann.send(:phase_traversal_state).pipeline_accessed_fields).to be_nil
 
-    ann.send(:with_soa_tracking, node, :Unknown) do
+    unknown_type = Type.new(:Unknown)
+    ann.send(:with_soa_tracking, node, unknown_type) do
       T.must(ann.send(:phase_traversal_state).pipeline_accessed_fields).add("id")
-      expect { ann.send(:check_soa_opportunity!, node, :Unknown) }.not_to raise_error
+      expect { ann.send(:check_soa_opportunity!, node, unknown_type) }.not_to raise_error
     end
   end
 end

@@ -56,8 +56,8 @@ FN main() RETURNS Void ->
     &ast.append(Value{ Number: 2.0 });
     &ast.append(Value{ Number: 3.0 });
 
-    result = evalList(ast);
-    s = prStr(result);
+    result = TRY evalList(ast);
+    s = TRY prStr(result);
     print(s);
     ASSERT s == "(1 2 3)", "list 1 2 3";
 

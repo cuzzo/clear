@@ -69,5 +69,8 @@ RSpec.describe "capability-polymorphic generic Maps" do
     expect(zig).to include("values: *CheatLib.PolymorphicInner(M)")
     expect(zig).to include("CheatLib.mapProtocolPut(values")
     expect(zig).to include("heapAlloc()")
+    expect(zig).to include("&value_moved")
+    expect(zig).to match(/__captures\[\d+\]\.\* = true;/)
+    expect(zig).not_to match(/^value_moved = true;$/)
   end
 end

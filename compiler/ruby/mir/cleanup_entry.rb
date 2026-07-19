@@ -3,6 +3,7 @@
 
 require "sorbet-runtime"
 require_relative "../ast/schemas"
+require_relative "../semantic/lifecycle_plan"
 require_relative "placement"
 
 # CleanupEntry -- one binding's cleanup recipe, produced by
@@ -182,6 +183,20 @@ class CleanupEntry < Hash
 
   sig { returns(T.nilable(Schemas::ResourceClosePlan)) }
   def resource_close_plan = self[:resource_close_plan]
+
+  sig { returns(T.nilable(Semantic::LifecyclePlan)) }
+  def lifecycle_plan = T.cast(self[:lifecycle_plan], T.nilable(Semantic::LifecyclePlan))
+
+  sig { params(plan: Semantic::LifecyclePlan).returns(CleanupEntry) }
+  def set_lifecycle_plan!(plan)
+    self[:lifecycle_plan] = plan
+    self
+  end
+
+  sig { returns(T::Array[T::Hash[Symbol, T.untyped]]) }
+  def tuple_cleanup_fields
+    T.cast(self[:tuple_cleanup_fields] || [], T::Array[T::Hash[Symbol, T.untyped]])
+  end
 
   # The non-nil sentinel for "this binding needs no cleanup".
   # Replaces the old `nil` returned by an absent cleanup_bindings lookup.

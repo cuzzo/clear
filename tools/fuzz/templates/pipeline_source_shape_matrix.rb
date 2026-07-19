@@ -13,7 +13,6 @@ PIPELINE_SOURCE_CELLS = []
     next if source == :bounded_promises && op != :where_reduce
     next if source == :split_inline && !%i[count].include?(op)
     cell = { source: source, op: op }
-    cell[:expected] = :compile_error if op == :select_sum && source == :bg_stream_bound
     PIPELINE_SOURCE_CELLS << cell
   end
 end
@@ -136,8 +135,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
       <<~CHT
         FN main() RETURNS Void ->
           s: ~?Int64[] = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
-          running: ~Int64@observable = s |> SELECT _ * 2_i64 |> SUM _;
-          total = NEXT running;
+          total = s |> SELECT _ * 2_i64 |> SUM _;
           ASSERT total == 20_i64, "pipeline select sum";
           RETURN;
         END
@@ -146,6 +144,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
       decl =
         case p[:source]
         when :range_inline, :list_inline then ""
+        when :list_bound then "s: Int64[] = [1_i64, 2_i64, 3_i64, 4_i64];"
         else "s: ~Int64[] = 1_i64 ..< 5_i64;"
         end
       source_expr =
@@ -154,10 +153,11 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
         when :list_inline then "[1_i64, 2_i64, 3_i64, 4_i64]"
         else "s"
         end
+      total_expr = "#{source_expr} |> SELECT _ * 2_i64 |> SUM _"
       <<~CHT
         FN main() RETURNS Void ->
           #{decl}
-          total = #{source_expr} |> SELECT _ * 2_i64 |> SUM _;
+          total = #{total_expr};
           ASSERT total == 20_i64, "pipeline select sum";
           RETURN;
         END
@@ -192,7 +192,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
       FN main() RETURNS Void ->
         s: ~?Int64[] = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
         running: ~?Int64@observable = s |> FIND _ > 2_i64;
-        found = NEXT running;
+        found:? = NEXT running;
         ASSERT found != NIL, "pipeline find present";
         ASSERT found == 3_i64, "pipeline find value";
         RETURN;

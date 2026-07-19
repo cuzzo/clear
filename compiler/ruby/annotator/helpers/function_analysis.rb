@@ -505,13 +505,15 @@ module FunctionAnalysis
         substituted = substitute_type_params(signature, subst)
         verify_function_signature!(node, substituted, args)
         T.unsafe(node).matched_signature = substituted if node.respond_to?(:matched_signature=)
-        stamp_resolved_call_result!(node, substituted.return_type)
+        stamp_resolved_call_result!(node, substituted.return_type,
+          recoverable: substituted.recoverable_result?)
       else
         verify_function_signature!(node, signature, args)
         T.unsafe(node).matched_signature = signature if node.respond_to?(:matched_signature=)
         # Copy the return type so per-call-site mutations (provenance, cleanup_alloc)
         # don't corrupt the function signature's shared Type object.
-        stamp_resolved_call_result!(node, signature.return_type)
+        stamp_resolved_call_result!(node, signature.return_type,
+          recoverable: signature.recoverable_result?)
       end
 
 
@@ -542,16 +544,17 @@ module FunctionAnalysis
   # retaining its declared !T for OR_ELSE and lowering. All resolved call
   # families use this boundary so generic and protocol dispatch cannot expose
   # a different expression type from ordinary calls.
-  sig { params(node: CallNode, return_type: Type).void }
-  def stamp_resolved_call_result!(node, return_type)
+  sig { params(node: CallNode, return_type: Type, recoverable: T::Boolean).void }
+  def stamp_resolved_call_result!(node, return_type, recoverable: false)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
     resolved = Type.new(return_type)
     stamp_type!(node, resolved)
-    return unless resolved.error_union?
+    return unless resolved.error_union? || recoverable
 
-    T.unsafe(node).error_union_type = resolved if node.respond_to?(:error_union_type=)
+    error_union = resolved.error_union? ? resolved : Type.error_union_of(resolved)
+    T.unsafe(node).error_union_type = error_union if node.respond_to?(:error_union_type=)
     T.unsafe(node).can_fail = true if node.respond_to?(:can_fail=)
-    stamp_type!(node, resolved.success_type)
+    stamp_type!(node, error_union.success_type)
   end
 
   sig { params(signature: FunctionSignature, args: CallArgList).void }
@@ -1484,6 +1487,9 @@ module FunctionAnalysis
   sig { params(node: AST::Node).returns(T::Boolean) }
   def return_is_borrow?(node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    if node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
+      return call_returns_borrowed_view?(node)
+    end
     if node.is_a?(AST::Identifier)
       return false unless ownership_graph[node.name]&.kind == :borrowed
       # Parameters (reg=nil) and MATCH bindings (reg=nil) are safe to return —
@@ -1507,7 +1513,9 @@ module FunctionAnalysis
     return path_a[0...len] == path_b[0...len]
   end
 
-  # Finds the first intrinsic overload that matches the given arguments.
+  # Finds the most specific intrinsic overload that matches the given arguments.
+  # Exact type matches outrank safe numeric autocasts, independent of registry
+  # order (for example UInt64.toString must not select the Int64 overload).
   # Returns nil if no overload matches.
   # Maps `:reject_when` symbol values to a predicate over a CLEAR Type.
   # Add new entries here when std_lib.rb introduces a new "this overload
@@ -1530,16 +1538,32 @@ module FunctionAnalysis
   sig { params(definitions: T::Array[FunctionSignature], args: CallArgList).returns(T.nilable(FunctionSignature)) }
   def find_matching_intrinsic(definitions, args)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    definitions.find do |config|
-      next true if config.intrinsic_varargs?
-
+    matched = T.let(nil, T.nilable(FunctionSignature))
+    matched_score = T.let(-1, Integer)
+    varargs_fallback = T.let(nil, T.nilable(FunctionSignature))
+    definitions.each do |config|
+      if config.intrinsic_varargs?
+        varargs_fallback ||= config
+        next
+      end
       specs = config.intrinsic_arg_specs
-      next false if args.size != specs.size
+      next if args.size != specs.size
 
-      args.each_with_index.all? do |arg, i|
+      all_match = args.each_with_index.all? do |arg, i|
         intrinsic_arg_matches?(T.must(specs[i]), arg)
       end
+      next unless all_match
+
+      score = args.each_with_index.count do |arg, i|
+        spec = T.must(specs[i])
+        !spec.unconstrained_any? && arg.resolved_type == spec.type
+      end
+      next unless score > matched_score
+
+      matched = config
+      matched_score = score
     end
+    matched || varargs_fallback
   end
 
   sig { params(spec: IntrinsicArgSpec, arg: AST::Locatable).returns(T::Boolean) }

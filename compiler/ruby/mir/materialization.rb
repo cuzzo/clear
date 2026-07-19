@@ -7,6 +7,28 @@ require_relative "placement"
 require_relative "../ast/type"
 
 module MIR
+  # Annotation has already decided whether a semantic type owns a lifecycle.
+  # Hoisting consumes that immutable decision and only supplies the concrete
+  # storage allocator for this value. It must not reclassify the type from MIR
+  # shape after nested owned children have been normalized to identifiers.
+  class OwnedCompositeMaterialization < T::Struct
+    extend T::Sig
+
+    const :type_info, Type
+    const :lifecycle_plan, Semantic::LifecyclePlan
+    const :alloc, Symbol
+
+    sig { returns(CleanupEntry) }
+    def cleanup_entry
+      CleanupEntry.build(
+        :uniform,
+        alloc: alloc,
+        has_moved_guard: false,
+        zig_type: type_info.zig_type,
+      ).set_lifecycle_plan!(lifecycle_plan)
+    end
+  end
+
   class MaterializationPacket < T::Struct
     extend T::Sig
 

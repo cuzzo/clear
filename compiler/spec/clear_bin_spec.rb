@@ -105,6 +105,39 @@ RSpec.describe "./clear build", :integration do
       FileUtils.rm_rf(dir)
     end
 
+    it "builds transitive package imports" do
+      dir = Dir.mktmpdir
+      leaf_dir = File.join(dir, "packages", "leaf", "src")
+      middle_dir = File.join(dir, "packages", "middle", "src")
+      FileUtils.mkdir_p(leaf_dir)
+      FileUtils.mkdir_p(middle_dir)
+      File.write(File.join(leaf_dir, "lib.clear"), <<~CLEAR)
+        PUB FN answer() RETURNS Int64 ->
+          RETURN 42;
+        END
+      CLEAR
+      File.write(File.join(middle_dir, "lib.clear"), <<~CLEAR)
+        REQUIRE "pkg:leaf" AS leaf_package;
+        PUB FN answer_from_middle() RETURNS Int64 ->
+          RETURN answer();
+        END
+      CLEAR
+      File.write(File.join(dir, "main.clear"), <<~CLEAR)
+        REQUIRE "pkg:middle" AS middle_package;
+        FN main() RETURNS Void ->
+          ASSERT answer_from_middle() == 42;
+          print("PASS");
+          RETURN;
+        END
+      CLEAR
+
+      output, ok = clear_run(File.join(dir, "main.clear"))
+      expect(ok).to eq(true), "Expected nested package build+run to succeed, got: #{output}"
+      expect(output).to include("PASS")
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+
   end
 
   context "incremental builds" do

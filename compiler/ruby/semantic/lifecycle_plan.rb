@@ -1,0 +1,261 @@
+# typed: strict
+# frozen_string_literal: true
+
+require "sorbet-runtime"
+
+require_relative "../ast/ast"
+require_relative "../ast/schemas"
+require_relative "../ast/symbol_entry"
+require_relative "../ast/type"
+
+module Semantic
+  # A semantic type's paired destruction and duplication contract. Copy and
+  # drop deliberately live in the same value object: an owning type may never
+  # acquire cleanup without the compiler simultaneously deciding whether a
+  # duplicate is a bit-copy, retain, deep clone, or forbidden.
+  class LifecyclePlan < T::Struct
+    extend T::Sig
+
+    const :type_key, String
+    const :drop_strategy, Symbol
+    const :copy_strategy, Symbol
+    const :resource_close_plan, T.nilable(Schemas::ResourceClosePlan), default: nil
+
+    sig { returns(T::Boolean) }
+    def needs_drop?
+      drop_strategy != :none
+    end
+
+    sig { returns(T::Boolean) }
+    def copyable?
+      copy_strategy != :forbidden
+    end
+  end
+
+  # The only semantic-to-lifecycle classifier. Consumers receive an immutable
+  # LifecyclePlan; they must not reconstruct copy/drop behavior independently
+  # from Zig shapes or from the presence of an emitted cleanup method.
+  class LifecyclePlanner
+    extend T::Sig
+
+    sig { params(type_info: Type, schema_lookup: Type::SchemaLookup).returns(LifecyclePlan) }
+    def self.plan(type_info, schema_lookup)
+      type_key = type_info.lifecycle_type_key
+
+      if type_info.symbol? || type_info.id_handle? || type_info.c_array_view?
+        return LifecyclePlan.new(type_key: type_key, drop_strategy: :none, copy_strategy: :bit_copy)
+      end
+
+      if type_info.borrowed_reference? || type_info.rodata?
+        copy = if type_info.contains_linear_resource?(schema_lookup)
+          :forbidden
+        elsif type_info.any_rc?
+          :retain
+        elsif type_info.string? || type_info.recursive_cleanup_shape?(schema_lookup)
+          :deep_clone
+        else
+          :bit_copy
+        end
+        return LifecyclePlan.new(type_key: type_key, drop_strategy: :none, copy_strategy: copy)
+      end
+
+      # Ownership wrappers define the outer lifecycle contract even when the
+      # wrapped payload is a closeable resource. The last release runs the
+      # statically generated payload destructor exactly once.
+      if type_info.any_rc?
+        return LifecyclePlan.new(type_key: type_key, drop_strategy: :release, copy_strategy: :retain)
+      end
+      if type_info.split_open_stream?
+        return LifecyclePlan.new(type_key: type_key, drop_strategy: :semantic, copy_strategy: :retain)
+      end
+
+      close = type_info.resolve_resource_close(schema_lookup)
+      if close.is_resource
+        return LifecyclePlan.new(
+          type_key: type_key,
+          drop_strategy: :resource_close,
+          copy_strategy: :forbidden,
+          resource_close_plan: T.cast(close.close_plan, T.nilable(Schemas::ResourceClosePlan)),
+        )
+      end
+
+      if type_info.contains_linear_resource?(schema_lookup)
+        return LifecyclePlan.new(type_key: type_key, drop_strategy: :semantic, copy_strategy: :forbidden)
+      end
+
+      if type_info.any_sync? || type_info.frozen? || type_info.link?
+        return LifecyclePlan.new(type_key: type_key, drop_strategy: :semantic, copy_strategy: :deep_clone)
+      end
+
+      if generic_parameter?(type_info, schema_lookup)
+        return LifecyclePlan.new(type_key: type_key, drop_strategy: :generic, copy_strategy: :generic)
+      end
+
+      if type_info.string? || type_info.recursive_cleanup_shape?(schema_lookup)
+        return LifecyclePlan.new(type_key: type_key, drop_strategy: :semantic, copy_strategy: :deep_clone)
+      end
+
+      LifecyclePlan.new(type_key: type_key, drop_strategy: :none, copy_strategy: :bit_copy)
+    end
+
+    sig { params(type_info: Type, node: AST::Node, schema_lookup: Type::SchemaLookup).returns(LifecyclePlan) }
+    def self.plan_binding(type_info, node, schema_lookup)
+      base = plan(type_info, schema_lookup)
+      return base unless mutable_owned_string_binding?(type_info, node)
+
+      LifecyclePlan.new(
+        type_key: "#{type_info.lifecycle_type_key}|binding=mutable-owned",
+        drop_strategy: :semantic,
+        copy_strategy: :deep_clone,
+      )
+    end
+
+    sig { params(type_info: Type, schema_lookup: Type::SchemaLookup).returns(T::Boolean) }
+  def self.generic_parameter?(type_info, schema_lookup)
+      return true if type_info.projection?
+
+      if type_info.generic_instance?
+        return type_info.generic_args.any? { |argument| generic_parameter?(argument, schema_lookup) }
+      end
+
+      wrapped = type_info.wrapped_type
+      return generic_parameter?(wrapped, schema_lookup) if wrapped
+
+      name = type_info.resolved.to_s
+      name.match?(/\A[A-Z]\z/) && schema_lookup.call(type_info.resolved).nil?
+    end
+    private_class_method :generic_parameter?
+
+    sig { params(type_info: Type, node: AST::Node).returns(T::Boolean) }
+    def self.mutable_owned_string_binding?(type_info, node)
+      return false unless type_info.string?
+      return false unless T.unsafe(node).respond_to?(:var_mutated) && T.unsafe(node).var_mutated == true
+      return false if AST.container_borrow?(node)
+
+      symbol = T.unsafe(node).respond_to?(:symbol) ? T.unsafe(node).symbol : nil
+      !symbol&.borrow_provenance?
+    end
+    private_class_method :mutable_owned_string_binding?
+  end
+
+  # Frozen annotation product indexed by canonical semantic type identity.
+  # Missing entries fail closed; MIR is not permitted to silently derive a
+  # replacement lifecycle contract after annotation.
+  class LifecycleRegistry
+    extend T::Sig
+
+    PlanMap = T.type_alias { T::Hash[String, LifecyclePlan] }
+    BindingPlanMap = T.type_alias { T::Hash[Integer, LifecyclePlan] }
+
+    sig { returns(LifecycleRegistry) }
+    def self.empty
+      new({}, {})
+    end
+
+    sig { params(program: AST::Program, schema_lookup: Type::SchemaLookup).returns(LifecycleRegistry) }
+    def self.build(program, schema_lookup)
+      types = T.let({}, T::Hash[String, Type])
+
+      AST.each_locatable(program, descend_functions: true) do |node|
+        add_type!(types, node.full_type!(context: "lifecycle inventory")) if node.typed?
+      end
+      add_declaration_types!(types, program)
+
+      plans = T.let({}, PlanMap)
+      types.each do |key, type_info|
+        plans[key] = LifecyclePlanner.plan(type_info, schema_lookup)
+      end
+      binding_plans = T.let({}, BindingPlanMap)
+      AST.each_locatable(program, descend_functions: true) do |node|
+        next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+        next unless node.typed?
+
+        binding_plans[node.object_id] = LifecyclePlanner.plan_binding(
+          node.full_type!(context: "binding lifecycle inventory"),
+          node,
+          schema_lookup,
+        )
+      end
+      new(plans, binding_plans)
+    end
+
+    sig { params(plans: PlanMap, binding_plans: BindingPlanMap).void }
+    def initialize(plans, binding_plans)
+      @plans = T.let(plans.dup.freeze, PlanMap)
+      @binding_plans = T.let(binding_plans.dup.freeze, BindingPlanMap)
+      freeze
+    end
+
+    sig { params(type_info: Type).returns(LifecyclePlan) }
+    def fetch(type_info)
+      key = type_info.lifecycle_type_key
+      @plans.fetch(key) do
+        raise "missing annotation lifecycle plan for #{key}"
+      end
+    end
+
+    sig { params(node: AST::Node, type_info: Type).returns(LifecyclePlan) }
+    def fetch_binding(node, type_info)
+      @binding_plans.fetch(node.object_id) { fetch(type_info) }
+    end
+
+    sig { returns(Integer) }
+    def size
+      @plans.size
+    end
+
+    class << self
+      private
+
+      extend T::Sig
+
+      sig { params(types: T::Hash[String, Type], type_info: Type).void }
+      def add_type!(types, type_info)
+        key = type_info.lifecycle_type_key
+        return if types.key?(key)
+
+        types[key] = type_info
+        # Inventory the parsed structure itself so intermediate tense wrappers
+        # are never skipped. In particular, the cleanup binding synthesized
+        # for `!?T` has type `?T`, which is neither `wrapped_type` nor
+        # `payload_type` of the outer value when discovered through the old
+        # projection-only list below.
+        TypeExpressionTree.direct_children(type_info.shape.expression).each do |expression|
+          add_type!(types, Type.from_child_expression(expression))
+        end
+
+        # Keep semantic projections as well: they intentionally propagate
+        # outer capability/placement contracts in cases where the raw syntax
+        # child does not.
+        type_info.generic_args.each { |argument| add_type!(types, argument) }
+        wrapped = type_info.wrapped_type
+        add_type!(types, wrapped) if wrapped
+        element = type_info.element_type
+        add_type!(types, element) if element
+        add_type!(types, type_info.key_type) if type_info.map?
+        add_type!(types, type_info.value_type) if type_info.map?
+      end
+
+      sig { params(types: T::Hash[String, Type], program: AST::Program).void }
+      def add_declaration_types!(types, program)
+        program.statements.each do |statement|
+          case statement
+          when AST::StructDef, AST::ExternStructDecl
+            statement.field_decls.each_value { |field| add_type!(types, field.type) }
+          when AST::UnionDef
+            statement.variants.each_value do |variant|
+              if variant.is_a?(Schemas::InlineStructVariant)
+                variant.fields.each_value { |field| add_type!(types, Type.from_input(field)) }
+              elsif variant
+                add_type!(types, Type.from_variant_input(variant))
+              end
+            end
+          when AST::FunctionDef
+            statement.params.each { |param| add_type!(types, param.type) }
+            add_type!(types, Type.new(statement.return_type)) if statement.return_type
+          end
+        end
+      end
+    end
+  end
+end

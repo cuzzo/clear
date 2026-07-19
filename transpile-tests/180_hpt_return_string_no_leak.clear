@@ -21,12 +21,12 @@ END
 FN wrapAndGet(input: String) RETURNS !String ->
     # Named binding: v's cleanup is a regular defer (freed at scope exit).
     # getStr returns a COPY'd string independent of v, so no UAF.
-    v = makeValue(input);
+    v = TRY makeValue(input);
     RETURN getStr(v);
 END
 
 FN main() RETURNS Void ->
-    result = wrapAndGet("hello");
+    result = TRY wrapAndGet("hello");
     ASSERT result == "hello", "returned string matches";
     print("180: hpt return string no leak PASSED");
 END

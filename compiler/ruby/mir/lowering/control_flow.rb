@@ -186,7 +186,17 @@ module MIRLoweringControlFlow
     capture_markers = T.let([], T::Array[MIR::Stmt])
     mir_bindings = node.bindings.map do |b|
       expr, pending = lower_head do
-        if mutable_struct_list_bind?(b.expr)
+        if plain_map_union_bind?(b.expr)
+          index = T.cast(b.expr, AST::GetIndex)
+          expr_target = lower(index.target)
+          MIR::MethodCall.new(
+            expr_target,
+            "getPtr",
+            [lower(index.index)],
+            false,
+            MIR::CallableContract.no_ownership(1),
+          )
+        elsif mutable_struct_list_bind?(b.expr)
           index = T.cast(b.expr, AST::GetIndex)
           target = lower(index.target)
           # Collection parameters are pointer-shaped in the Zig ABI already.
@@ -238,6 +248,28 @@ module MIRLoweringControlFlow
     inner = result.optional? ? T.must(result.wrapped_type) : result
     (receiver.list_collection? && inner.struct? && !inner.collection? && !inner.node_reference? &&
       !inner.link? && !inner.any_rc?) == true
+  end
+
+  # A union capture is matched by tag inside the IF body. MIR deliberately
+  # models borrowed union captures as pointers so MATCH can inspect the
+  # collection slot without copying an ownership-bearing payload. Plain Zig
+  # hash maps expose that shape through getPtr(); ordinary indexed lowering
+  # uses get(), which returns a value and contradicts the pointer-alias fact.
+  #
+  # Shared/sharded maps must keep their lock-scoped get path: a pointer into
+  # those maps cannot safely escape the operation that holds the lock.
+  sig { params(expr: AST::Node).returns(T::Boolean) }
+  def plain_map_union_bind?(expr)
+    T.bind(self, MIRLowering) rescue nil
+    return false unless expr.is_a?(AST::GetIndex)
+
+    receiver = expr.target.full_type!(context: "IF map union binding receiver")
+    return false unless receiver.map? && !receiver.sharded? && !receiver.any_rc? && !receiver.any_sync?
+
+    result = expr.full_type!(context: "IF map union binding result")
+    inner = result.optional? ? T.must(result.wrapped_type) : result
+    union_name = inner.generic_instance? ? inner.generic_base : inner.resolved
+    union_schemas.key?(union_name)
   end
 
   sig { params(target: AST::Node).returns(T::Boolean) }
@@ -298,7 +330,7 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     if expr.is_a?(AST::GetIndex)
       receiver = Type.from_node!(expr.target, context: "IF binding runtime shape")
-      return receiver.pool? || mutable_struct_list_bind?(expr)
+      return receiver.pool? || mutable_struct_list_bind?(expr) || plain_map_union_bind?(expr)
     end
 
     expr.is_a?(AST::MethodCall) && expr.pool_method == :get
@@ -390,7 +422,11 @@ module MIRLoweringControlFlow
     body = b.is_a?(Array) ? lower_body(b) : []
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
 
-    tight = node.tight
+    # Parser-produced loops normally carry false, but concurrency lowering
+    # can synthesize WhileLoop nodes without the optional annotation.  MIR
+    # requires a Boolean and an absent annotation has ordinary (yieldable)
+    # loop semantics.
+    tight = node.tight == true
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: tight)
 
     # Yield check at end of loop body (skip when last stmt is unconditional exit)
@@ -419,7 +455,10 @@ module MIRLoweringControlFlow
     end
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
 
-    tight = node.tight
+    # See lower_while: synthetic `WHILE NEXT stream EXISTS AS item` loops
+    # leave this optional AST field nil.  Treat only an explicit true as a
+    # tight-loop request.
+    tight = node.tight == true
     body = prepend_loop_mark(body, mark_per_iter: node.mark_per_iter, tight: tight)
 
     if !tight && current_function_has_rt? && !loop_body_exits?(body)
@@ -663,7 +702,7 @@ module MIRLoweringControlFlow
   def for_each_owned_collection_source?(mir)
     T.bind(self, MIRLowering) rescue nil
 
-    return for_each_owned_collection_source?(mir.expr) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
+    return for_each_owned_collection_source?(mir.expr) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr) || mir.is_a?(MIR::TryOptional)
     return true if mir.is_a?(MIR::Call) && mir.owned_return?
     mir_allocates?(mir)
   end
@@ -671,7 +710,7 @@ module MIRLoweringControlFlow
   sig { params(mir: MIR::Node, type_info: Type).returns(Symbol) }
   def for_each_owned_collection_source_alloc(mir, type_info)
     T.bind(self, MIRLowering) rescue nil
-    return for_each_owned_collection_source_alloc(mir.expr, type_info) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr)
+    return for_each_owned_collection_source_alloc(mir.expr, type_info) if mir.is_a?(MIR::Cast) || mir.is_a?(MIR::TryExpr) || mir.is_a?(MIR::TryOptional)
     return :heap if mir.is_a?(MIR::Call) && mir.owned_return?
     owned_alloc = mir_owned_alloc(mir)
     return owned_alloc if owned_alloc
@@ -1349,10 +1388,21 @@ module MIRLoweringControlFlow
   def returned_owned_binding?(name)
     T.bind(self, MIRLowering) rescue nil
     entry = function_state.bindings[name]
-    return false if entry && !entry.needs_cleanup?
+    # Dataflow suppresses cleanup when every path transfers the binding (for
+    # example, a local returned from the function). That is a control-flow
+    # decision, not evidence that the type stopped owning storage. Preserve
+    # the return transfer whenever annotation's lifecycle contract says the
+    # value needs destruction in an ordinary, non-transferred position.
+    if entry && !entry.needs_cleanup?
+      return false unless entry.lifecycle_plan&.needs_drop?
+    end
 
+    # Binding lifecycle is the annotation product for this exact slot. Its
+    # mutable/transfer semantics can intentionally differ from the expression
+    # type (for example a mutable String initialized by a rodata literal).
+    # Consult the generic type plan only when no binding-specific plan exists.
     ti = function_state.binding_types[name]
-    return false if ti && !ownership_tracked_transfer_type?(ti)
+    return false if !entry&.lifecycle_plan && ti && !ownership_tracked_transfer_type?(ti)
 
     return true if owned_binding_visible?(name)
 

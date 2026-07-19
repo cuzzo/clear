@@ -117,7 +117,7 @@ RSpec.describe "IF/MATCH as expressions" do
       ast = annotate_if_expr_src(<<~CLEAR)
         STRUCT Settings { enabled: Bool }
         FN configure(MUTABLE settings: Settings, override: ?Bool) RETURNS Void ->
-          settings.enabled = IF override == NIL THEN FALSE ELSE override? END;
+          settings.enabled = IF override == NIL THEN FALSE ELSE override END;
           RETURN;
         END
       CLEAR
@@ -195,7 +195,7 @@ RSpec.describe "IF/MATCH as expressions" do
     it "promotes IF expressions used as binary operands" do
       ast = annotate_if_expr_src(<<~CLEAR)
         FN matches(value: ?Int64) RETURNS Bool ->
-          RETURN (IF value != NIL THEN value? ELSE NIL END) == 42;
+          RETURN (IF value != NIL THEN value ELSE NIL END) == 42;
         END
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "matches" }
@@ -310,6 +310,28 @@ RSpec.describe "IF/MATCH as expressions" do
           END
         CLEAR
       }.to raise_error(StandardError, /incompatible types/)
+    end
+
+    it "coerces MATCH payload branches to an explicitly declared union result" do
+      ast = annotate_if_expr_src(<<~CLEAR)
+        STRUCT Named { value: Int64 }
+        STRUCT Text { value: String }
+        UNION Value { Named: Named, Text: Text }
+
+        FN choose(input: Value) RETURNS Value ->
+          result: Value = MATCH input START
+            Value.Named AS named -> named,
+            Value.Text AS text -> text
+          END;
+          RETURN result;
+        END
+      CLEAR
+
+      fn = ast.statements.find { |stmt| stmt.is_a?(AST::FunctionDef) }
+      declaration = T.must(fn).body.find { |stmt| stmt.respond_to?(:name) && stmt.name == "result" }
+      match = T.must(declaration).value
+      expect(match).to be_a(AST::MatchStatement)
+      expect(match.full_type!.resolved).to eq(:Value)
     end
 
     it "errors when MATCH expression is missing DEFAULT (non-exhaustive)" do

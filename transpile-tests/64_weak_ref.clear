@@ -7,7 +7,7 @@ FN test_multiowned() RETURNS !Void ->
     x = Node{ value: 42 } @multiowned;
     w = LINK x;
 
-    resolved = RESOLVE w;
+    resolved:? = RESOLVE w;
     ASSERT resolved != NIL, "weak ref should resolve while strong ref exists";
 
     RETURN;
@@ -18,7 +18,7 @@ FN test_shared() RETURNS !Void ->
     x = Node{ value: 10 } @shared;
     w = LINK x;
 
-    resolved = RESOLVE w;
+    resolved:? = RESOLVE w;
     ASSERT resolved != NIL, "shared weak ref should resolve while strong ref exists";
 
     RETURN;
@@ -33,7 +33,7 @@ FN test_link_in_struct() RETURNS !Void ->
     n = Node{ value: 99 } @multiowned;
     e = Edge{ target: LINK n };
 
-    resolved = RESOLVE e.target;
+    resolved:? = RESOLVE e.target;
     ASSERT resolved != NIL, "weak ref in struct field should resolve";
 
     RETURN;
@@ -45,8 +45,8 @@ FN test_multiple_links() RETURNS !Void ->
     w1 = LINK n;
     w2 = LINK n;
 
-    r1 = RESOLVE w1;
-    r2 = RESOLVE w2;
+    r1:? = RESOLVE w1;
+    r2:? = RESOLVE w2;
     ASSERT r1 != NIL, "first weak ref should resolve";
     ASSERT r2 != NIL, "second weak ref should resolve";
 
@@ -63,13 +63,13 @@ FN test_safe_field_access() RETURNS !Void ->
     # Strong ref alive: resolved?.field returns the field value
     n = Node{ value: 42 } @multiowned;
     w = LINK n;
-    resolved = RESOLVE w;
+    resolved:? = RESOLVE w;
     val = resolved?.value OR_ELSE -1_i64;
     ASSERT val == 42_i64, "field access on live ref";
 
     # Dropped: fallback triggers
-    dead_w = makeDeadWeakNode();
-    dead_r = RESOLVE dead_w;
+    dead_w = TRY makeDeadWeakNode();
+    dead_r:? = RESOLVE dead_w;
     dead_val = dead_r?.value OR_ELSE -1_i64;
     ASSERT dead_val == -1_i64, "field access on dropped ref";
 

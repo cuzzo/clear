@@ -50,6 +50,7 @@ RSpec.describe "nested-@list-field append inherits root container allocator" do
       struct_schemas: fe.struct_schemas,
       enum_schemas: fe.enum_schemas,
       union_schemas: fe.union_schemas,
+      lifecycle_registry: fe.lifecycle_registry,
       fn_sigs: fe.fn_sigs,
       moved_guard_info: fe.moved_guard_info,
       importer: importer,

@@ -72,7 +72,7 @@ RSpec.describe "fold-terminal observable inference (Phase 2.2)" do
                 MUTABLE i: Int64 = 1;
                 WHILE i <= 4 DO YIELD i; i = i + 1; END
             };
-            uniq = gen |> DISTINCT _;
+            uniq:~ = gen |> DISTINCT _;
         END
       F
       expect(last_pipe_node(annotate(src)).observable_terminal).to be true

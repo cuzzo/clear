@@ -143,8 +143,8 @@ FuzzGenerator.register(:access_gate, cells: ACCESS_GATE_CELLS) do |p|
           }
       END
 
-      FN main() RETURNS Void ->
-          c2 = extract();
+      FN main() RETURNS !Void ->
+          c2 = TRY extract();
           #{access_gate_field_assert(p[:payload], 'c2.value')}
           RETURN;
       END

@@ -1,0 +1,23 @@
+# Regression: an indexed store must materialize an owned OR_ELSE result before
+# the destination consumes it.
+UNION Value {
+  Nil,
+  Str: String,
+  List: []Value
+}
+
+FN main() RETURNS Void ->
+  MUTABLE target: []Value = [];
+  &target.append(Value.Nil);
+
+  MUTABLE source: []Value = [];
+  &source.append(Value{ Str: COPY "stored" });
+
+  target[0] = source[0] OR_ELSE Value.Nil;
+
+  PARTIAL MATCH target[0] OR_ELSE Value.Nil START
+    Value.Str AS value -> ASSERT value == "stored", "fallback result should be stored";,
+    DEFAULT -> ASSERT FALSE, "stored fallback result should keep its payload";
+  END
+  RETURN;
+END

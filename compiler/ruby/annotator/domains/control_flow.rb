@@ -5,6 +5,7 @@ module Annotator
   module Domains
     module ControlFlow
       extend T::Sig
+      include RecoverableResult
 
       MatchSchema = T.type_alias { T.any(Schemas::EnumSchema, Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
       MatchPayload = T.type_alias { T.any(Type::FunctionType, Type, Symbol, String, Schemas::InlineStructVariant, NilClass) }
@@ -137,19 +138,26 @@ module Annotator
           with_if_is_a_condition(node.condition) { visit(node.condition) }
         end
 
+        then_value_refinements = short_circuit_non_nil_refinements(node.condition, truthy: true)
+        else_value_refinements = short_circuit_non_nil_refinements(node.condition, truthy: false)
+
         branch_logic = [
           proc {
             with_conditional_context do
-              declare_is_a_binding!(node.condition)
-              with_comptime_is_a_then_refinement(node.condition) do
-                visit_stmts(node.then_branch)
+              with_value_type_refinements(then_value_refinements) do
+                declare_is_a_binding!(node.condition)
+                with_comptime_is_a_then_refinement(node.condition) do
+                  visit_stmts(node.then_branch)
+                end
               end
             end
             finalize_scope(node, branch: :then)
             node.then_drops
           },
           proc {
-            with_conditional_context { visit_stmts(node.else_branch) }
+            with_conditional_context do
+              with_value_type_refinements(else_value_refinements) { visit_stmts(node.else_branch) }
+            end
             finalize_scope(node, branch: :else)
             node.else_drops
           }
@@ -502,10 +510,11 @@ module Annotator
               else
                 visit(b.expr)
               end
-              ti = if b.predicate == :is_ok && b.expr.respond_to?(:error_union_type) && T.unsafe(b.expr).error_union_type
-                T.unsafe(b.expr).error_union_type
+              ti = if b.predicate == :is_ok
+                recoverable_result_type(b.expr, context: "IF predicate binding expression") ||
+                  Type.new(b.expr.full_type!(context: "IF predicate binding expression"))
               else
-                b.expr.full_type!(context: "IF predicate binding expression")
+                Type.new(b.expr.full_type!(context: "IF predicate binding expression"))
               end
               unwrapped = if b.predicate == :is_ok
                 unless ti.error_union?
@@ -558,7 +567,7 @@ module Annotator
               og_declare(b.name.to_s, nil, unwrapped)
               if container_source
                 ownership_graph[b.name.to_s]&.kind = :borrowed
-                ownership_graph.borrow(b.name.to_s, container_source, mutable: mutable_list_alias)
+                ownership_graph.borrow(b.name.to_s, container_source, mutable: mutable_list_alias == true)
               end
             end
             visit_stmts(node.then_branch)

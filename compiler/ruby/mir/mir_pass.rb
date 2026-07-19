@@ -17,6 +17,7 @@ require_relative "../compiler/entrypoint"
 require_relative "control_flow"
 require_relative "../semantic/pass_state"
 require_relative "placement"
+require_relative "../semantic/lifecycle_plan"
 
 class MIRPass
     extend T::Sig
@@ -66,10 +67,11 @@ class MIRPass
   sig { returns(EscapeAnalysis::EscapePlacementFacts) }
   attr_reader :escape_placement_facts
 
-  sig { params(fn_nodes: FnNodes, schema_lookup: Type::SchemaLookup, body_summaries: T::Hash[String, Annotator::Phases::FunctionBodySummary], hoist_bindings: T.nilable(HoistBindings)).void }
-  def initialize(fn_nodes:, schema_lookup:, body_summaries: {}, hoist_bindings: nil)
+  sig { params(fn_nodes: FnNodes, schema_lookup: Type::SchemaLookup, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry), body_summaries: T::Hash[String, Annotator::Phases::FunctionBodySummary], hoist_bindings: T.nilable(HoistBindings)).void }
+  def initialize(fn_nodes:, schema_lookup:, lifecycle_registry: nil, body_summaries: {}, hoist_bindings: nil)
     @fn_nodes = T.let(fn_nodes, FnNodes)
     @schema_lookup = schema_lookup
+    @lifecycle_registry = T.let(lifecycle_registry, T.nilable(Semantic::LifecycleRegistry))
     @body_summaries = T.let(body_summaries, T::Hash[String, Annotator::Phases::FunctionBodySummary])
     @hoist_bindings = T.let(hoist_bindings || {}, HoistBindings)
     @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
@@ -121,13 +123,17 @@ class MIRPass
 
     # Phase 2.5: classify cleanup bindings (uses finalized provenance from Phase 2).
     @fn_nodes.each do |name, fn|
-      cleanup_plan = CleanupClassifier.classify_plan(fn, schema_lookup: @schema_lookup)
+      cleanup_plan = CleanupClassifier.classify_plan(
+        fn,
+        schema_lookup: @schema_lookup,
+        lifecycle_registry: @lifecycle_registry,
+      )
       @cleanup_plans[name] = cleanup_plan
       @cleanup_bindings[name] = cleanup_plan.bindings
     end
     pass_state.mark!(:cleanup_classified)
 
-    LoopFrameAnalysis.analyze!(@fn_nodes, @schema_lookup)
+    LoopFrameAnalysis.analyze!(@fn_nodes, @schema_lookup, @lifecycle_registry)
     pass_state.mark!(:loop_frame_analyzed)
 
     # needs_rt finalization must run after placement and cleanup
@@ -291,7 +297,7 @@ class MIRPass
   sig { params(node: T.any(AST::CopyNode, AST::CloneNode)).returns(T::Boolean) }
   def copy_node_lowers_through_runtime?(node)
     ti = Type.from_node!(node, context: "COPY runtime requirement").success_type
-    return false if ti.primitive? || ti.id_handle?
+    return false if ti.primitive? || ti.symbol? || ti.id_handle?
 
     ti.string? ||
       ti.heap_ptr? ||
@@ -391,10 +397,16 @@ class MIRPass
   sig { params(fn: AST::FunctionDef).void }
   def transform_function!(fn)
     plan = ownership_preparation_plan(fn)
-    return unless plan.cleanup_bindings?
-
     cleanup_facts = plan.cleanup_facts
     function = plan.function
+    CleanupClassifier.stamp_field_pre_cleanups!(
+      function.body,
+      cleanup_facts,
+      schema_lookup: @schema_lookup,
+      lifecycle_registry: @lifecycle_registry,
+    )
+    return unless plan.cleanup_bindings?
+
     bc_errors = BorrowChecker.check(function, schema_lookup: @schema_lookup)
     raise "[Borrow Error] #{bc_errors.first}" unless bc_errors.empty?
 
@@ -403,8 +415,6 @@ class MIRPass
     dataflow.cleanup_decisions!(function, cleanup_facts)
     mark_returned_cleanup_bindings!(function, cleanup_facts)
     function.cleanup_bindings = cleanup_facts.bindings
-    CleanupClassifier.stamp_field_pre_cleanups!(function.body, cleanup_facts, schema_lookup: @schema_lookup)
-
     @current_transform_fn = function
     function.body = transform_body(function.body, WalkCtx.new(cleanup_facts: cleanup_facts))
     @current_transform_fn = nil
@@ -690,6 +700,17 @@ class MIRPass
 
     entry = cleanup_entry_for_binding_node(stmt, facts)
     return unless entry.present? && entry.kind != :resource
+    lifecycle = entry.lifecycle_plan
+    if lifecycle.nil? && @lifecycle_registry
+      declaration = stmt.symbol&.reg
+      lifecycle = @lifecycle_registry.fetch_binding(declaration || stmt, stmt.full_type!)
+      entry.set_lifecycle_plan!(lifecycle)
+    end
+    # Allocator provenance is not a destruction contract. Escape analysis may
+    # place a bit-copy/no-drop slot on the heap (notably loop-carried
+    # String@symbol values), but only the annotation-owned LifecyclePlan may
+    # authorize destruction of the overwritten value.
+    return if lifecycle && !lifecycle.needs_drop?
     # A heap-owned binding reassigned in a loop must free the OLD value
     # before storing the new one -- even if the binding is ultimately
     # moved out (only the final value is moved; the intermediates would
@@ -698,7 +719,11 @@ class MIRPass
 
     ti = stmt.full_type!
     zig_type = (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s)
-    stmt.reassign_cleanup = MIR::ReassignPlan.new(alloc: entry.alloc, zig_type: zig_type)
+    stmt.reassign_cleanup = MIR::ReassignPlan.new(
+      alloc: entry.alloc,
+      zig_type: zig_type,
+      lifecycle_plan: lifecycle,
+    )
   end
 
   sig { params(node: AST::Node, facts: CleanupClassifier::FrozenCleanupFacts).returns(CleanupEntry) }

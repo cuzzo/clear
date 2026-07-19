@@ -12,6 +12,12 @@ class TypeZigRenderer
 
   sig { params(type: Type, is_param: T::Boolean, is_field: T::Boolean, nested: T::Boolean).returns(String) }
   def self.render(type, is_param: false, is_field: false, nested: false)
+    # Zig needs an explicit error set before an optional payload. Its shorthand
+    # accepts `!i64`, but not `!?i64`; the latter must be `anyerror!?i64`.
+    if type.error_union? && type.success_type.optional?
+      payload = type.error_union_payload_with_outer_capabilities
+      return "anyerror!#{render(payload, is_param: is_param, is_field: is_field, nested: true)}"
+    end
     if nested && type.error_union?
       payload = type.error_union_payload_with_outer_capabilities
       return "anyerror!#{render(payload, is_param: is_param, is_field: is_field, nested: true)}"

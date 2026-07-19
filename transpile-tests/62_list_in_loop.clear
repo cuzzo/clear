@@ -11,7 +11,7 @@ END
 FN doWork() RETURNS !Void ->
     MUTABLE i: Int64 = 1;
     WHILE i <= 10 DO
-        result = buildList(i * 5_i64);
+        result = TRY buildList(i * 5_i64);
         writeFile("testdata/write_test_output.txt", result);
         i += 1;
     END

@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
     }
 
     # BG fiber captures @shared:locked and mutates
-    p = BG {
+    p:~ = BG {
         WITH EXCLUSIVE c AS inner {
             inner.value = inner.value + 1;
         }

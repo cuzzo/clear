@@ -7,6 +7,7 @@ require_relative "../../backends/mir_emitter"
 require_relative "../lower/pipeline/pipeline_host"
 require_relative "../../ast/ast"
 require_relative "../../ast/symbol_entry"
+require_relative "../../semantic/lifecycle_plan"
 require_relative "../../compiler/module_importer"
 require_relative "../lowering/counters"
 require_relative "../lowering/schema_registry"
@@ -22,6 +23,8 @@ class MIRLoweringInput < T::Struct
   const :struct_schemas, T::Hash[Symbol, Schemas::StructSchema], factory: -> { {} }
   const :enum_schemas, T::Hash[Symbol, MIRLoweringSchemas::EnumVariants], factory: -> { {} }
   const :union_schemas, T::Hash[Symbol, Schemas::UnionSchema], factory: -> { {} }
+  const :schema_lookup, T.nilable(MIRLoweringSchemas::SchemaLookup), default: nil
+  const :lifecycle_registry, Semantic::LifecycleRegistry, factory: -> { Semantic::LifecycleRegistry.empty }
   const :fn_sigs, FnSigMap, factory: -> { {} }
   const :moved_guard_info, MovedGuardInfo, factory: -> { {} }
   const :importer, T.nilable(ModuleImporter), default: nil

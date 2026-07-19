@@ -17,7 +17,7 @@ RSpec.describe "AtomicEscapeSuggester (M2.9 static escape diagnosis)" do
       fs = findings(<<~CLEAR)
         FN spawnBumper() RETURNS ~Void ->
           counter: Int64 = 0 @shared:atomic;
-          bg = BG { v = counter; print(v.toString()); };
+          bg:~ = BG { v = counter; print(v.toString()); };
           RETURN bg;
         END
       CLEAR
@@ -30,7 +30,7 @@ RSpec.describe "AtomicEscapeSuggester (M2.9 static escape diagnosis)" do
       fs = findings(<<~CLEAR)
         FN spawn() RETURNS ~Void ->
           c: Int64 = 0 @shared:atomic;
-          handle = BG { x = c; print(x.toString()); };
+          handle:~ = BG { x = c; print(x.toString()); };
           RETURN handle;
         END
       CLEAR
@@ -42,7 +42,7 @@ RSpec.describe "AtomicEscapeSuggester (M2.9 static escape diagnosis)" do
       fs = findings(<<~CLEAR)
         FN spawn() RETURNS ~Void ->
           c: Int64 = 0 @shared:atomic;
-          bg = BG { v = c; print(v.toString()); };
+          bg:~ = BG { v = c; print(v.toString()); };
           RETURN bg;
         END
       CLEAR

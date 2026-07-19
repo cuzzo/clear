@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
   # @shared:locked = Arc<Mutex<Counter>>. Mutation requires WITH EXCLUSIVE.
   c = Counter{ value: 0 } @shared:locked;
 
-  p1 = BG {
+  p1:~ = BG {
     FOR i IN (0 ..< 1_000_000) DO
       WITH EXCLUSIVE c AS inner {
         inner.value = inner.value + 1;
@@ -24,7 +24,7 @@ FN main() RETURNS Void ->
     END
   };
 
-  p2 = BG {
+  p2:~ = BG {
     FOR i IN (0 ..< 1_000_000) DO
       WITH EXCLUSIVE c AS inner {
         inner.value = inner.value + 1;

@@ -69,7 +69,8 @@ module Annotator
         node.protocol_name = protocol.name
         node.protocol_operation = requirement.name.to_sym
         node.protocol_receiver_index = receiver_index
-        stamp_resolved_call_result!(node, signature.return_type)
+        stamp_resolved_call_result!(node, signature.return_type,
+          recoverable: signature.recoverable_result?)
         record_effect(EffectTracker::REENTRANT) if signature.reentrant
         current_fn_ctx&.mark_runtime_used!
         true
@@ -247,7 +248,8 @@ module Annotator
         node.matched_signature = signature
         node.protocol_name = protocol.name
         node.protocol_operation = requirement.name.to_sym
-        stamp_resolved_call_result!(node, signature.return_type)
+        stamp_resolved_call_result!(node, signature.return_type,
+          recoverable: signature.recoverable_result?)
         record_effect(EffectTracker::REENTRANT) if signature.reentrant
         current_fn_ctx&.mark_runtime_used!
         record_predicate_call_site!(node)
@@ -447,6 +449,9 @@ module Annotator
         node.stdlib_allocates = method_allocates
         node.mutates_receiver = method_def.mutates_receiver?
         node.can_fail = node.can_fail || method_def.can_fail
+        if method_def.recoverable_result? && node.respond_to?(:error_union_type=)
+          node.error_union_type = Type.error_union_of(Type.new(node.full_type!(context: "static intrinsic result")))
+        end
         node.error_kind = method_def.intrinsic_error_kind
         node.error_type = method_def.intrinsic_error_type
         current_fn_ctx&.record_alloc_use! if method_allocates || method_def.can_fail
@@ -509,6 +514,13 @@ module Annotator
         node.stdlib_allocates = matched_allocates
         node.mutates_receiver = matched_def.mutates_receiver?
         node.can_fail = node.can_fail || matched_def.can_fail || matched_allocates
+        # Intrinsics expose their success payload as their ordinary type so
+        # calls compose naturally. Preserve only *source-visible* failure as
+        # a recoverable `!T` channel. `can_fail` also includes allocation
+        # effects and must not make arbitrary expressions recoverable.
+        if matched_def.recoverable_result? && node.respond_to?(:error_union_type=)
+          node.error_union_type = Type.error_union_of(Type.new(node.full_type!(context: "intrinsic result")))
+        end
         node.error_kind = matched_def.intrinsic_error_kind if matched_def.intrinsic_error_kind
         node.error_type = matched_def.intrinsic_error_type if matched_def.intrinsic_error_type
         current_fn_ctx&.record_alloc_use! if matched_allocates || matched_def.can_fail || matched_def.needs_rt
@@ -636,7 +648,7 @@ module Annotator
         end
 
         visit_IntrinsicFunc(node, ufcs_args, matched_def: matched_def)
-        navigation = node.object.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+        navigation = node.object.is_a?(AST::OptionalUnwrap) && node.object.safe_navigation? || implicit_safe_nav
         if navigation
           result = node.full_type!(context: "safe-navigation intrinsic method result")
           unless result.optional?

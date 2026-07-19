@@ -157,6 +157,8 @@ module FuzzSurfaceRegistry
       :bg_lifetime_enforcement,
       :collection_mutation_visible_to_mir,
       :non_copy_requires_explicit_move_or_copy,
+      :copy_preserves_independent_owner,
+      :replacement_drops_previous_owner,
     ],
   }.freeze
 
@@ -622,7 +624,11 @@ module FuzzSurfaceRegistry
       ],
       escape_sources: [:or_expression, :loop_local],
       escape_sinks: [:return_value, :takes_arg, :give_arg],
-      mir_ownership_contracts: [:cleanup_on_all_paths, :error_path_allocator_identity, :move_suppresses_cleanup],
+      mir_ownership_contracts: [
+        :cleanup_on_all_paths, :error_path_allocator_identity,
+        :move_suppresses_cleanup, :copy_preserves_independent_owner,
+        :replacement_drops_previous_owner,
+      ],
     },
 
     lowering_boundary_matrix: {

@@ -511,16 +511,21 @@ class PipelineRewriter
       [if_stmt]
     when AST::SelectOp
       expr = replace_placeholder(stage.expression, current_val)
+      selected_type = select_stage_value_type(stage)
       # Bind SELECT result to a temp so it is never inlined into an expression
       # position. Zig forbids StructType{...}.field in arithmetic/boolean contexts.
       sel_var = next_var("__sel")
       sel_decl = AST::VarDecl.new(stage.token, sel_var, nil, expr, false)
-      AST.stamp_synthetic_type!(sel_decl, stage.expression.full_type!, context: "synthetic AST type")
-      sel_decl.storage   = :stack
+      AST.stamp_synthetic_type!(sel_decl, selected_type, context: "synthetic AST type")
+      # A future handle owns a heap-backed fiber context even though the handle
+      # itself is a small value. Preserve that placement so lowering transfers
+      # the fresh handle into a promise list instead of cloning it through the
+      # frame arena.
+      sel_decl.storage   = selected_type.future? ? :heap : :stack
       sel_decl.slot_size = 0
       sel_decl.var_used = true
       sel_ident = AST::Identifier.new(stage.token, sel_var)
-      AST.stamp_synthetic_type!(sel_ident, stage.expression.full_type!, context: "synthetic AST type")
+      AST.stamp_synthetic_type!(sel_ident, selected_type, context: "synthetic AST type")
       rest = build_recursive_body(T.must(remaining), terminal, sel_ident, res_var, token, stage_inits, res_type)
       [sel_decl] + rest
     when AST::TapOp
@@ -589,6 +594,17 @@ class PipelineRewriter
     else
       build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
     end
+  end
+
+  sig { params(stage: AST::SelectOp).returns(Type) }
+  def select_stage_value_type(stage)
+    expression = stage.expression
+    if (stage.effect_mode == :fallible || stage.effect_mode == :fallible_optional) &&
+       expression.respond_to?(:error_union_type) && T.unsafe(expression).error_union_type
+      return Type.new(T.unsafe(expression).error_union_type)
+    end
+
+    expression.full_type!(context: "SELECT stage value")
   end
 
   sig { params(terminal: T.nilable(AST::Node), current_val: AST::Identifier, res_var: String, token: Lexer::Token, res_type: T.nilable(Type)).returns(AST::RawBody) }
@@ -697,7 +713,15 @@ class PipelineRewriter
       [insert_call]
     else
       # Produces a list.
-      value = AST::CopyNode.new(token, current_val.dup)
+      current_type = current_val.full_type!(context: "pipeline selected value")
+      value = if current_type.future?
+        # Promise handles are affine. A SELECT over an asynchronous callback
+        # builds a promise list by transferring each fresh handle; copying the
+        # handle would duplicate cleanup ownership for the same fiber context.
+        AST::MoveNode.new(token, current_val.dup)
+      else
+        AST::CopyNode.new(token, current_val.dup)
+      end
       AST.stamp_synthetic_type!(value, current_val.full_type!, context: "synthetic AST type")
       call = synthetic_append_call(token, res_ident, value)
       [call]

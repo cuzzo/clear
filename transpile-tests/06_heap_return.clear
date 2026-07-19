@@ -6,8 +6,7 @@ FN makeUser() RETURNS !User @boxed ->
 END
 
 FN main() RETURNS Void ->
-    us2 = makeUser();
+    us2 = TRY makeUser();
     # u2 should be freed here
     RETURN;
 END
-

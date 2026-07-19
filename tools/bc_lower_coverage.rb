@@ -170,6 +170,8 @@ files.each_with_index do |path, index|
       struct_schemas:   fe.struct_schemas,
       enum_schemas:     fe.enum_schemas,
       union_schemas:    fe.union_schemas,
+      schema_lookup:    ->(name) { fe.annotator.lookup_type_schema(name) },
+      lifecycle_registry: fe.lifecycle_registry,
       fn_sigs:          fe.fn_sigs,
       moved_guard_info: fe.moved_guard_info,
       importer:         imp,

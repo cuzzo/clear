@@ -29,9 +29,9 @@ module PreMirTypeCheck
   LEAVES = [
     Symbol, String, Numeric, TrueClass, FalseClass, NilClass, Lexer::Token, SymbolEntry, Scope,
     Schemas::EnumSchema, Schemas::InlineStructVariant, Schemas::ResourceSchema,
-    Schemas::StructSchema, Schemas::UnionSchema
+    Schemas::StructSchema, Schemas::UnionSchema, Set
   ].freeze
-  WalkNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, T::Hash[BasicObject, BasicObject], T::Set[BasicObject], Struct, T::Struct, Scope, Schemas::EnumSchema, Schemas::InlineStructVariant, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema, SymbolEntry, Lexer::Token, Symbol, String, Numeric, TrueClass, FalseClass, Type)) }
+  WalkNode = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody, T::Hash[BasicObject, BasicObject], Struct, T::Struct, Scope, Schemas::EnumSchema, Schemas::InlineStructVariant, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema, SymbolEntry, Lexer::Token, Symbol, String, Numeric, TrueClass, FalseClass, Type, T::Set[T.untyped])) }
   Violation = T.type_alias { T::Hash[Symbol, String] }
 
 
@@ -94,7 +94,7 @@ module PreMirTypeCheck
       node.each_value { |v| walk(v, violations, seen) }
     elsif node.respond_to?(:each_pair) # Struct AST node
       T.unsafe(node).each_pair do |member, value|
-        next if node.is_a?(AST::FunctionDef) && member == :return_lifetime
+        next if (node.is_a?(AST::FunctionDef) || node.is_a?(AST::ExternFnDecl)) && member == :return_lifetime
         walk(value, violations, seen)
       end
     end

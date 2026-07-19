@@ -27,7 +27,7 @@ FN buildList() RETURNS !Val ->
 END
 
 FN main() RETURNS Void ->
-    result = buildList();
+    result = TRY buildList();
     PARTIAL MATCH result START
         Val.List AS elems ->
             PARTIAL MATCH elems[0] START

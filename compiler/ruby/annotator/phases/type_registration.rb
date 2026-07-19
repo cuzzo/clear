@@ -27,6 +27,7 @@ module Annotator
           register_type_declaration(node)
         end
       end
+      private :register_type_declarations
 
       sig { params(node: AST::ProtocolDef).void }
       def register_protocol_declaration(node)

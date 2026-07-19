@@ -29,7 +29,7 @@ FN main() RETURNS !Void ->
 
     # Holder: takes a's lock for ~200ms (longer than the 100ms debug
     # lock_timeout_ms), then increments and releases.
-    holder = BG {
+    holder:~ = BG {
         WITH EXCLUSIVE a AS x {
             napFor(200);
             x.value = x.value + 100;
@@ -39,7 +39,7 @@ FN main() RETURNS !Void ->
     # Waiter: starts after holder has the lock, then attempts the
     # multi-lock. The first acquire of `a` will time out; RETRY(10)
     # gives plenty of attempts to reacquire after the holder releases.
-    waiter = BG {
+    waiter:~ = BG {
         napFor(20);
         WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
             x.value = x.value + 1;

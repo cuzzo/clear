@@ -59,6 +59,11 @@ module ConcurrencyChecks
   sig { params(fn: AST::FunctionDef, with_blocks: T::Array[AST::WithBlock], with_scope_nodes: WithScopeNodes, fn_nodes: FnNodes, error_handler: ErrorHandler).void }
   def self.check_hold_across_yield!(fn, with_blocks, with_scope_nodes, fn_nodes, error_handler)
     each_with_scope(with_blocks, with_scope_nodes) do |with_block, scope|
+      # WITH is also CLEAR's capability-polymorphic/local view boundary. A
+      # LOCAL, BORROWED, or RESTRICT view acquires no lock, so suspending in
+      # that scope cannot be a hold-lock-across-yield violation.
+      next if lock_holding_names(with_block).empty?
+
       scope.each do |node|
         offender_token = nil
         reason = nil

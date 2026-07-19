@@ -18,7 +18,7 @@ FN generateReadings(n: Int64, seed: Int64) RETURNS ![]Float64 ->
 END
 
 FN main() RETURNS Void ->
-  readings = generateReadings(1000, 42);
+  readings = TRY generateReadings(1000, 42);
   ASSERT readings.length() == 1000, "generated 1000 readings";
 
   # -------------------------------------------------------
@@ -63,7 +63,7 @@ FN main() RETURNS Void ->
   # -------------------------------------------------------
   # Test 5: CONCURRENT SELECT — parallel transform
   # -------------------------------------------------------
-  small = generateReadings(100, 7);
+  small = TRY generateReadings(100, 7);
   doubled = small |> CONCURRENT(workers: 4) SELECT _ * 2.0;
   ASSERT doubled.length() == 100, "CONCURRENT SELECT preserves length";
 

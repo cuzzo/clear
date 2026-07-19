@@ -30,7 +30,7 @@ class ClearParser
     when :parse_next_expr then parse_next_expr
     when :parse_sigil_construct then parse_sigil_construct
     when :parse_require_expression then AST::Require.new(consume(:KEYWORD, 'REQUIRE'), consume(:STRING).text!)
-    when :parse_select_op then AST::SelectOp.new(consume(:KEYWORD, 'SELECT'), parse_expression(1))
+    when :parse_select_op then parse_select_op
     when :parse_where_op then AST::WhereOp.new(consume(:KEYWORD, 'WHERE'), parse_expression(1))
     when :parse_index_op then AST::IndexOp.new(consume(:KEYWORD, 'INDEX'), parse_expression(1))
     when :parse_reduce_op then parse_reduce_op
@@ -56,11 +56,59 @@ class ClearParser
     when :parse_join_op then parse_join_op
     when :parse_shard_op then parse_shard_op
     when :parse_concurrent_op then parse_concurrent_op
+    when :parse_try_expression then parse_try_expression
+    when :parse_unwrap_expression then parse_unwrap_expression
     when :parse_group_expression then parse_group_expression
     else
       raise "Unknown primary parser action #{rule.action}"
     end
     T.must(result)
+  end
+
+  sig { returns(AST::SelectOp) }
+  def parse_select_op
+    token = consume(:KEYWORD, 'SELECT')
+    reject_legacy_select_effect_spelling!
+    effect_mode = parse_select_effect_mode
+    AST::SelectOp.new(token, parse_expression(1), effect_mode)
+  end
+
+  sig { void }
+  def reject_legacy_select_effect_spelling!
+    return unless match?(:CHAR, '!') || match?(:CHAR, '?')
+
+    marker = current.value
+    marker += '?' if marker == '!' && peek.type == :CHAR && peek.value == '?'
+    fix = Fix.new(
+      description: fix_description(:INSERT_SELECT_EFFECT_COLON, selector: "SELECT:#{marker}"),
+      confidence: :auto,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: current.line, col: current.column, length: 0),
+        replacement: ':',
+      )],
+    )
+    fixable!(current, code: :SELECT_EFFECT_COLON_REQUIRED,
+      selector: "SELECT:#{marker}", category: :syntax, level: :error,
+      fixes: [fix], raise_in_collector: true)
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def parse_select_effect_mode
+    return nil unless match?(:CHAR, ':')
+    modifier = peek
+    return nil unless modifier.type == :CHAR && (modifier.value == '!' || modifier.value == '?')
+
+    consume(:CHAR, ':')
+    if match?(:CHAR, '!')
+      consume(:CHAR, '!')
+      if match?(:CHAR, '?')
+        consume(:CHAR, '?')
+        return :fallible_optional
+      end
+      return :fallible
+    end
+    consume(:CHAR, '?')
+    :optional
   end
 
   sig { returns(AST::Cast) }
@@ -159,7 +207,6 @@ class ClearParser
     when :parse_static_call_suffix then parse_static_call_suffix(lhs)
     when :parse_dot_suffix then parse_dot_suffix(lhs)
     when :parse_func_call_suffix then parse_func_call_suffix(lhs)
-    when :parse_raise_suffix then parse_raise_suffix(lhs)
     when :parse_optional_unwrap_suffix then parse_optional_unwrap_suffix(lhs)
     when :parse_exists_suffix then parse_exists_suffix(lhs)
     when :parse_is_ok_suffix then parse_is_ok_suffix(lhs)
@@ -273,7 +320,8 @@ class ClearParser
       if match?(:CHAR, '(')
         # Method Call
         _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-        AST::MethodCall.new(name_token, lhs, name, args)
+        call = AST::MethodCall.new(name_token, lhs, name, args)
+        stamp_source_range_from_node!(call, lhs, previous)
       else
         # Field Access
         AST::GetField.new(name_token, lhs, name)
@@ -284,13 +332,27 @@ class ClearParser
   sig { params(lhs: AST::Node).returns(AST::FuncCall) }
   def parse_func_call_suffix(lhs)
     start_token, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-    AST::FuncCall.new(start_token, lhs, args)
+    call = AST::FuncCall.new(start_token, lhs, args)
+    stamp_source_range_from_node!(call, lhs, previous)
+    call
   end
 
-  sig { params(lhs: AST::Node).returns(AST::BinaryOp) }
-  def parse_raise_suffix(lhs)
-    bang_token = consume(:CHAR, '!!')
-    AST::BinaryOp.new(bang_token, lhs, :OR_ELSE, AST::OrElseRaise.new(bang_token))
+  # TRY is a prefix propagation boundary. A reader sees the potential early
+  # return before the operand, just as they do with Zig's `try` and Swift's
+  # `try`.
+  sig { returns(AST::UnaryOp) }
+  def parse_try_expression
+    token = consume(:KEYWORD, 'TRY')
+    AST::UnaryOp.new(token, :TRY, parse_unary)
+  end
+
+  # UNWRAP makes an optional-to-definite conversion visible at the binding
+  # site. Unlike TRY, it deliberately uses the existing explicit optional
+  # unwrap semantics rather than adding an error channel to the function.
+  sig { returns(AST::OptionalUnwrap) }
+  def parse_unwrap_expression
+    token = consume(:KEYWORD, 'UNWRAP')
+    AST::OptionalUnwrap.new(token, parse_unary)
   end
 
   sig { params(lhs: AST::Node).returns(AST::OptionalUnwrap) }
@@ -357,7 +419,10 @@ class ClearParser
 
   sig { params(precedence: Integer).returns(AST::Node) }
   def parse_expression(precedence = 0)
-    @budget.nested { parse_expression_body(precedence) }
+    @budget.enter!
+    expression = parse_expression_body(precedence)
+    @budget.leave!
+    expression
   end
 
   sig { params(precedence: Integer).returns(AST::Node) }
@@ -647,10 +712,8 @@ class ClearParser
     parse_primary
   end
 
-  # `&` marks the mutating call even when a postfix result operator wraps it.
-  # For example, `&cache.put(key, value)!!` is `(&cache.put(...))!!`, not an
-  # attempt to address the result of `OR_ELSE RAISE`. Field/index/navigation
-  # suffixes remain transparent so `&loadAndMutate()!!.field` composes too.
+  # `&` marks the mutating call. Prefix TRY composes normally as
+  # `TRY &cache.put(...)`; it is not a postfix wrapper around the receiver.
   sig { params(node: AST::Node, marker: Lexer::Token).returns(T::Boolean) }
   def mark_explicit_mutable_receiver!(node, marker)
     if node.is_a?(AST::MethodCall)
@@ -659,8 +722,6 @@ class ClearParser
     end
 
     wrapped = T.let(case node
-    when AST::BinaryOp
-      node.left if node.op == :OR_ELSE && node.right.is_a?(AST::OrElseRaise)
     when AST::GetField, AST::GetIndex, AST::OptionalUnwrap
       node.target
     end, T.nilable(AST::Node))
@@ -696,6 +757,7 @@ class ClearParser
     if match?(:CHAR, '(')
       _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
       node = AST::FuncCall.new(var_token, name, args)
+      stamp_source_range!(node, var_token, previous)
     end
 
     return parse_suffixes(node)
@@ -968,9 +1030,7 @@ class ClearParser
   sig { params(parent_token: Lexer::Token).returns(ConcurrentPipelineOp) }
   def parse_concurrent_inner_op(parent_token)
     if match?(:KEYWORD, 'SELECT')
-      consume(:KEYWORD, 'SELECT')
-      expr = parse_expression(1)  # stop before |> for chaining
-      AST::SelectOp.new(previous, expr)
+      parse_select_op
     elsif match?(:KEYWORD, 'WHERE')
       consume(:KEYWORD, 'WHERE')
       expr = parse_expression(1)
@@ -1002,12 +1062,18 @@ class ClearParser
     end
   end
 
-  # Parses `EACH { stmts... }` — side-effect block over a collection.
-  # `_` is the implicit item binding inside the body.
+  # Parses `EACH { stmts... }` or `EACH callback` — side-effect iteration
+  # over a collection. `_` is the implicit item binding inside the body.
   sig { returns(AST::EachOp) }
   def parse_each_op
     token = consume(:KEYWORD, 'EACH')
-    body = parse_brace_block
+    body = if match?(:CHAR, '{')
+      parse_brace_block
+    else
+      callback = parse_expression(1)
+      [AST::FuncCall.new(token, callback.respond_to?(:name) ? T.unsafe(callback).name : callback.to_s,
+        [AST::Identifier.new(token, "_")])]
+    end
     AST::EachOp.new(token, body)
   end
 

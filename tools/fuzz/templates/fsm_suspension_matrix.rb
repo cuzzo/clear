@@ -252,7 +252,7 @@ FuzzGenerator.register(:fsm_suspension_matrix, cells: FSM_SUSPENSION_CELLS) do |
   when :owned_list_suspend
     <<~CHT
       FN main() RETURNS Void ->
-        outer = BG {
+        outer:~ = BG {
           sleep(1);
           MUTABLE xs: Int64[]@list = [];
           &xs.append(#{n}_i64);

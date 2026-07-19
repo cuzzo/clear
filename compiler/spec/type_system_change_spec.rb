@@ -28,6 +28,7 @@ RSpec.describe "type-system change contracts" do
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
+      lifecycle_registry: result.lifecycle_registry,
       fn_sigs: result.fn_sigs,
       moved_guard_info: result.moved_guard_info,
       importer: importer,
@@ -134,26 +135,26 @@ RSpec.describe "type-system change contracts" do
     expect {
       annotate(<<~CLEAR)
         promise: ~Int64 = BG { 10_i64; };
-        stream = BG STREAM { YIELD promise; };
+        stream:~ = BG STREAM { YIELD promise; };
       CLEAR
     }.to raise_error(CompilerError, /requires an explicit item contract.*YIELDS ~Int64/m)
 
     expect {
       annotate(<<~CLEAR)
         promise: ~Int64 = BG { 10_i64; };
-        stream = BG STREAM YIELDS ~Int64 { YIELD promise; };
+        stream:~ = BG STREAM YIELDS ~Int64 { YIELD promise; };
       CLEAR
     }.not_to raise_error
 
     expect {
-      annotate("stream = BG STREAM { YIELD 10_i64; YIELD NIL; };")
+      annotate("stream:~ = BG STREAM { YIELD 10_i64; YIELD NIL; };")
     }.not_to raise_error
   end
 
   it "requires YIELDS for a named union even when all variants share its type" do
     source = <<~CLEAR
       UNION NumberOrText { Number: Int64, Text: String }
-      stream = BG STREAM {
+      stream:~ = BG STREAM {
         YIELD NumberOrText{ Number: 10_i64 };
         YIELD NumberOrText{ Text: "OK" };
       };
@@ -169,7 +170,7 @@ RSpec.describe "type-system change contracts" do
   it "offers an exact clear-fix insertion when a YIELDS contract is knowable" do
     source = <<~CLEAR
       promise: ~Int64 = BG { 10_i64; };
-      stream = BG STREAM { YIELD promise; };
+      stream:~ = BG STREAM { YIELD promise; };
     CLEAR
     findings = ClearFixSupport.collect_findings(source, source_dir: Dir.pwd)
     finding = findings.find { |item| item.message.include?("YIELDS ~Int64") }
@@ -196,7 +197,7 @@ RSpec.describe "type-system change contracts" do
 
   it "keeps yielded NIL distinct from finite stream completion" do
     ast = annotate(<<~CLEAR)
-      stream = BG STREAM { YIELD 10_i64; YIELD NIL; };
+      stream:~ = BG STREAM { YIELD 10_i64; YIELD NIL; };
       step = NEXT stream;
     CLEAR
     stream = ast.statements.fetch(0).value
@@ -210,9 +211,9 @@ RSpec.describe "type-system change contracts" do
 
   it "uses EXISTS AS to bind a StreamStep item without unwrapping its optional payload" do
     zig = transpile(<<~CLEAR)
-      stream = BG STREAM { YIELD 10_i64; YIELD NIL; };
+      stream:~ = BG STREAM { YIELD 10_i64; YIELD NIL; };
       IF NEXT stream EXISTS AS item THEN
-        seen = item;
+        seen:? = item;
       END
     CLEAR
 
@@ -266,7 +267,7 @@ RSpec.describe "type-system change contracts" do
 
   it "lowers explicit CLOSE and relies on idempotent deferred close for fallthrough" do
     zig = transpile(<<~CLEAR)
-      stream = BG STREAM { YIELD 1_i64; CLOSE; };
+      stream:~ = BG STREAM { YIELD 1_i64; CLOSE; };
       step = NEXT stream;
     CLEAR
 
@@ -345,7 +346,7 @@ RSpec.describe "type-system change contracts" do
   end
 
   it "lowers finite CLOSE to the bytecode stream exit label" do
-    mir = lower("stream = BG STREAM { YIELD 1_i64; CLOSE; };", target: :bc)
+    mir = lower("stream:~ = BG STREAM { YIELD 1_i64; CLOSE; };", target: :bc)
 
     expect(contains_mir?(mir, MIR::BreakStmt)).to be(true)
   end
@@ -562,10 +563,10 @@ RSpec.describe "type-system change contracts" do
       annotate(<<~CLEAR)
         MUTABLE by_symbol: {Symbol}Int64 = {};
         &by_symbol.put("answer", 42_i64);
-        symbol_value = by_symbol["answer"];
+        symbol_value:? = by_symbol["answer"];
           MUTABLE by_number: {Int64}String = {};
           &by_number.put(42_i64, "answer");
-        numeric_value = by_number[42_i64];
+        numeric_value:? = by_number[42_i64];
       CLEAR
     }.not_to raise_error
   end
@@ -847,6 +848,15 @@ RSpec.describe "type-system change contracts" do
       .to raise_error(ParserError, /maximum is 3/)
     expect { parse("value: []@list Int64 = DEFAULT;") }
       .to raise_error(ParserError, /topology in the Inline Pivot layer sigil/)
+  end
+
+  it "applies the capability-site budget to access paths, not sibling generic arguments" do
+    sibling_caps = "Tuple<String@symbol, String@symbol, String@symbol, String@symbol>"
+    expect { parse("value: #{sibling_caps} = DEFAULT;") }.not_to raise_error
+
+    nested_caps = "[]@local {Symbol}@versioned []@shared {Int64}@locked String"
+    expect { parse("value: #{nested_caps} = DEFAULT;") }
+      .to raise_error(ParserError, /maximum is 3/)
   end
 
   it "does not migrate an ambiguous capability attached to a tense wrapper" do

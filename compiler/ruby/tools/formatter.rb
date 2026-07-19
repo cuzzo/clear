@@ -181,7 +181,7 @@ class Formatter::FormatLexer
       when @s.peek(1) == '"'
         raw = consume_string
         push(:STRING, raw, sl, sc)
-      when m = @s.scan(/->|\|>|!!|==|!=|>=|<=|>>|<<|&&|\|\||\*\*|\$\+|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
+      when m = @s.scan(/->|\|>|==|!=|>=|<=|>>|<<|&&|\|\||\*\*|\$\+|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
         push(:OP, m, sl, sc)
       when m = @s.scan(/[=+\-*\/<>&|!.,;(){}\[\]:?~%]/)
         push(:SYM, m, sl, sc)
@@ -3036,10 +3036,6 @@ class Formatter::Emitter
     return false if a.type == :OP  && a.raw == '::'
     return false if b.type == :OP  && b.raw == '::'
 
-    # Error propagation is postfix and may be followed by another postfix:
-    # `load()!!` and `load()!!.field`.
-    return false if b.type == :OP && b.raw == '!!'
-
     # Optional unwrap is postfix: `value?`, `call()?`, `items[0]?`.
     if b.type == :SYM && b.raw == '?'
       return false if [:VAR_ID, :TYPE_ID, :NUM, :STRING].include?(a.type)
@@ -3119,6 +3115,13 @@ class Formatter::Emitter
       return false
     end
 
+    # Inferred-binding tense annotations are intentionally type-less:
+    # `value:?`, `value:!`, `value:!?`, and `value:~`. Keep the sigil flank
+    # attached to the annotation colon just like an ordinary named type.
+    if a.type == :SYM && a.raw == ':' && b.type == :SYM && %w[! ? % ~].include?(b.raw)
+      return false
+    end
+
     # Tense sigils (`!` `?` `%` `~`) attach to following type / sigil.
     if a.type == :SYM && %w[! ? % ~].include?(a.raw)
       if b.type == :TYPE_ID
@@ -3128,10 +3131,6 @@ class Formatter::Emitter
         return false
       end
       if b.type == :SYM && ['[', '{'].include?(b.raw)
-        return false
-      end
-      # Unary use at expression start: attach.
-      if unary_context?(line, b_idx - 1)
         return false
       end
     end

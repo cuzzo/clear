@@ -224,7 +224,13 @@ class OwnershipTransportFacts
       later_read = @reads.any? do |event|
         event.ordinal > transfer.ordinal && event.binding_id == transfer.source_id
       end
-      TransferDecision.new(transfer: transfer, materialize: later_read)
+      # Function parameters are borrows unless declared TAKES. They can never
+      # be transferred into an owned field/container, even when this is their
+      # final read. Generic parameters make this especially important: the
+      # concrete specialization may require cleanup even though annotation
+      # cannot see that representation yet.
+      borrowed_parameter = @parameter_ids.include?(transfer.source_id) && transfer.source.symbol&.takes != true
+      TransferDecision.new(transfer: transfer, materialize: later_read || borrowed_parameter)
     end
   end
 

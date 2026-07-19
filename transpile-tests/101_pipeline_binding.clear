@@ -74,13 +74,13 @@ FN main() RETURNS Void ->
     ASSERT avg_price == 15.0, "average order price is 15.0";
 
     # FIND: first order with price > 12.0 (alice's 20.0 comes before bob's 15.0)
-    found = users AS $u
+    found:? = users AS $u
         |> UNNEST $u.orders
         |> FIND _.price > 12.0;
     ASSERT found != NIL, "should find an expensive order";
 
     # FIND returns NIL when no element matches
-    not_found = users AS $u
+    not_found:? = users AS $u
         |> UNNEST $u.orders
         |> FIND _.price > 100.0;
     ASSERT not_found == NIL, "nothing over 100.0";

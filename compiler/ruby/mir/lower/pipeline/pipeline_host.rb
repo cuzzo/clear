@@ -253,6 +253,10 @@ class PipelineHost
   def build_range_lowerer_host
     PipelineRangeLowerer::RuntimeHost.new(
       visit_mir: ->(node) { visit_mir(node) },
+      visit_mir_with_decl_alloc: ->(node, alloc) {
+        substituted = substitute_placeholders(node)
+        @lowering_bridge.lower_node_with_decl_alloc(substituted, alloc)
+      },
       visit_mir_with_context: ->(node, placeholder, acc) {
         with_pipeline_context(placeholder: placeholder, acc: acc) { visit_mir(node) }
       },
@@ -475,6 +479,15 @@ class PipelineHost
   end
 
   public
+
+  # Recovery inside a pipeline callback is owned by the operator lowerer: it
+  # decides whether a worker returns, prunes, or propagates an error to the
+  # runtime helper. Generic expression lowering only needs this boundary bit;
+  # the mutable pipeline context itself remains private to this host.
+  sig { returns(T::Boolean) }
+  def pipeline_context_active?
+    current_context.active?
+  end
 
   # Compute the Zig variable name for a CLEAR named pipeline binding.
   # "$u" -> "__pipe_u", "$order" -> "__pipe_order"
@@ -1032,9 +1045,21 @@ class PipelineHost
   # Build the LazyRange init + stage prefix shared by lower_each_range and lower_range_fold.
   # `item_used` tracks whether the initial capture (`__each_item`) is referenced
   # by any stage -- used by callers to decide between |__each_item| and |_| in Zig.
-  sig { params(source_node: AST::Node, stages: T::Array[AST::Node], on_skip: T.nilable(PipelineRangeSkipHook)).returns(PipelineHost::LazyRangePrefix) }
-  def build_lazy_range_prefix(source_node, stages, on_skip: nil)
-    @range_lowerer.build_lazy_range_prefix(source_node, stages, on_skip: on_skip)
+  sig do
+    params(
+      source_node: AST::Node,
+      stages: T::Array[AST::Node],
+      on_skip: T.nilable(PipelineRangeSkipHook),
+      source_alloc: T.nilable(Symbol),
+    ).returns(PipelineHost::LazyRangePrefix)
+  end
+  def build_lazy_range_prefix(source_node, stages, on_skip: nil, source_alloc: nil)
+    @range_lowerer.build_lazy_range_prefix(
+      source_node,
+      stages,
+      on_skip: on_skip,
+      source_alloc: source_alloc,
+    )
   end
 
   # Emit a fused while loop for a finite stream source with zero or more fusible stages.

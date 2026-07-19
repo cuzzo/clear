@@ -27,6 +27,7 @@ module ClearFixSupport
     const :take_first, T::Boolean
     const :auto_only, T::Boolean
     const :only_set, T.nilable(T::Set[Symbol])
+    const :propagate_fallibility, T::Boolean
     const :loop_until_clean, T::Boolean
     const :loop_max, Integer
     const :paths, T::Array[String]
@@ -69,6 +70,7 @@ module ClearFixSupport
     take_first = T.let(false, T::Boolean)
     auto_only = T.let(false, T::Boolean)
     only_set = T.let(nil, T.nilable(T::Set[Symbol]))
+    propagate_fallibility = T.let(false, T::Boolean)
     loop_until_clean = T.let(false, T::Boolean)
     loop_max = T.let(20, Integer)
     paths = T.let([], T::Array[String])
@@ -81,6 +83,8 @@ module ClearFixSupport
         take_first = true
       when "--auto"
         auto_only = true
+      when "--propagate-fallible"
+        propagate_fallibility = true
       when "--loop"
         loop_until_clean = true
         take_first = true
@@ -97,7 +101,7 @@ module ClearFixSupport
       end
     end
 
-    raise UsageError, "Usage: clear fix [--dry-run|--yes|--auto|--loop[=N]|--only=cat1,cat2] <file.clear|file.rb|file.md>..." if paths.empty?
+    raise UsageError, "Usage: clear fix [--dry-run|--yes|--auto|--loop[=N]|--propagate-fallible|--only=cat1,cat2] <file.clear|file.rb|file.md>..." if paths.empty?
     raise UsageError, "--loop and --dry-run are mutually exclusive" if loop_until_clean && dry_run
 
     Options.new(
@@ -105,6 +109,7 @@ module ClearFixSupport
       take_first: take_first,
       auto_only: auto_only,
       only_set: only_set,
+      propagate_fallibility: propagate_fallibility,
       loop_until_clean: loop_until_clean,
       loop_max: loop_max,
       paths: paths
@@ -141,10 +146,11 @@ module ClearFixSupport
     RunResult.new(passes: iter, edits_applied: total)
   end
 
-  sig { params(source: String, source_dir: String).returns(T::Array[FixableFinding]) }
-  def self.collect_findings(source, source_dir: Dir.pwd)
+  sig { params(source: String, source_dir: String, propagate_fallibility: T::Boolean).returns(T::Array[FixableFinding]) }
+  def self.collect_findings(source, source_dir: Dir.pwd, propagate_fallibility: false)
     FixCollector.enable!
     FixCollector.enable_type_migrations!
+    FixCollector.enable_fallibility_propagation! if propagate_fallibility
     begin
       SyntaxTypoScanner.scan!(source)
       PredicateRewriter.lint!(source)
@@ -177,6 +183,7 @@ module ClearFixSupport
           ensure
             FixCollector.enable!
             FixCollector.enable_type_migrations!
+            FixCollector.enable_fallibility_propagation! if propagate_fallibility
             source_findings.each { |finding| FixCollector.push(finding) }
           end
           tokens = Lexer.new(source).tokenize
@@ -397,9 +404,10 @@ module ClearFixSupport
     token_integer(finding, :column)
   end
 
-  sig { params(source: String, only_set: T.nilable(T::Set[Symbol]), take_first: T::Boolean).returns([String, Integer, T::Array[FixableFinding]]) }
-  def self.apply_to_source(source, only_set: nil, take_first: false)
-    findings = filter_findings(collect_findings(source), only_set)
+  sig { params(source: String, only_set: T.nilable(T::Set[Symbol]), take_first: T::Boolean, propagate_fallibility: T::Boolean).returns([String, Integer, T::Array[FixableFinding]]) }
+  def self.apply_to_source(source, only_set: nil, take_first: false, propagate_fallibility: false)
+    findings = filter_findings(collect_findings(source,
+      propagate_fallibility: propagate_fallibility), only_set)
     edits = T.let([], T::Array[Edit])
     findings.each do |finding|
       fix = chosen_fix(finding, take_first: take_first)
@@ -409,9 +417,10 @@ module ClearFixSupport
     [apply_edits(source, ordered), ordered.length, findings]
   end
 
-  sig { params(source: String, only_set: T.nilable(T::Set[Symbol])).returns(T::Array[FixableFinding]) }
-  def self.preview_source(source, only_set: nil)
-    filter_findings(collect_findings(source), only_set)
+  sig { params(source: String, only_set: T.nilable(T::Set[Symbol]), propagate_fallibility: T::Boolean).returns(T::Array[FixableFinding]) }
+  def self.preview_source(source, only_set: nil, propagate_fallibility: false)
+    filter_findings(collect_findings(source,
+      propagate_fallibility: propagate_fallibility), only_set)
   end
 
   sig { params(options: Options, out: OutputStream, err: OutputStream, input: InputStream).returns(Integer) }
@@ -422,7 +431,8 @@ module ClearFixSupport
       raise FileMissingError, "No such file: #{path}" unless File.file?(path)
 
       source = File.read(path)
-      findings = findings_for_path(path, source, out: out, only_set: options.only_set)
+      findings = findings_for_path(path, source, out: out, only_set: options.only_set,
+        propagate_fallibility: options.propagate_fallibility)
       findings = filter_findings(findings, options.only_set)
 
       if findings.empty?
@@ -467,13 +477,14 @@ module ClearFixSupport
   end
   private_class_method :run_one_pass
 
-  sig { params(path: String, source: String, out: OutputStream, only_set: T.nilable(T::Set[Symbol])).returns(T::Array[FixableFinding]) }
-  def self.findings_for_path(path, source, out:, only_set:)
+  sig { params(path: String, source: String, out: OutputStream, only_set: T.nilable(T::Set[Symbol]), propagate_fallibility: T::Boolean).returns(T::Array[FixableFinding]) }
+  def self.findings_for_path(path, source, out:, only_set:, propagate_fallibility: false)
     migrations_only = only_set == Set[:type_migration]
     unless path.end_with?(".rb", ".md", ".markdown")
       return collect_type_migrations(source) if migrations_only
 
-      return collect_findings(source, source_dir: File.dirname(File.expand_path(path)))
+      return collect_findings(source, source_dir: File.dirname(File.expand_path(path)),
+        propagate_fallibility: propagate_fallibility)
     end
 
     heredocs = if path.end_with?(".rb")
@@ -488,7 +499,11 @@ module ClearFixSupport
 
     findings = T.let([], T::Array[FixableFinding])
     heredocs.each do |heredoc|
-      collected = migrations_only ? collect_type_migrations(heredoc.content) : collect_findings(heredoc.content)
+      collected = if migrations_only
+        collect_type_migrations(heredoc.content)
+      else
+        collect_findings(heredoc.content, propagate_fallibility: propagate_fallibility)
+      end
       collected.each do |finding|
         findings << translate_finding_for_heredoc(finding, heredoc, path)
       end

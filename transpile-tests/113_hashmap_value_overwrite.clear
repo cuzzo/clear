@@ -20,11 +20,11 @@ FN main() RETURNS Void ->
     ASSERT v == 2, "overwrite should work";
 
     # Test with promoted list returns
-    list1 = makeList(10_i64);
+    list1 = TRY makeList(10_i64);
     ASSERT list1.length() == 2, "list1 should have 2 items";
     ASSERT list1[0] == 10, "first item should be 10";
 
-    list2 = makeList(20_i64);
+    list2 = TRY makeList(20_i64);
     ASSERT list2[0] == 20, "first item should be 20";
 
     RETURN;

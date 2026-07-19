@@ -244,7 +244,7 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]User = [];
             id = &pool.insert(User{ name: "alice" });
-            result = pool.get(id);
+            result:? = pool.get(id);
             RETURN;
           END
         CLEAR
@@ -259,7 +259,7 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]User = [];
             id = &pool.insert(User{ name: "alice" });
-            result = pool.get(id);
+            result:? = pool.get(id);
             RETURN;
           END
         CLEAR
@@ -355,7 +355,7 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]User = [];
             id = &pool.insert(User{ name: "alice" });
-            result = pool.get(id);
+            result:? = pool.get(id);
             &pool.remove(id);
             RETURN;
           END
@@ -610,7 +610,7 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS !Void ->
             MUTABLE s: [Set]Int64 = [];
             &s.insert(1);
-            val = s[1];
+            val:? = s[1];
             RETURN;
           END
         CLEAR

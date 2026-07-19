@@ -25,6 +25,13 @@ module Annotator
       const :violations, T::Array[SnapshotTxnViolation], factory: -> { [] }
     end
 
+    class DeferredRecoveryValidation < T::Struct
+      const :node, AST::BinaryOp
+      const :left, AST::FuncCall
+      const :callee_name, String
+      const :value_type, Type
+    end
+
     # Facts gathered while typing but consumed only by capability auditing.
     # This immutable schema is owned by the phase boundary, not by either
     # executor on its two sides.
@@ -34,6 +41,9 @@ module Annotator
       prop :current_predicate_context, T.nilable(CapabilityHelper::PredicateContext), default: nil
       prop :deferred_with_validations,
         T::Array[DeferredWithValidation],
+        factory: -> { [] }
+      prop :deferred_recovery_validations,
+        T::Array[DeferredRecoveryValidation],
         factory: -> { [] }
       prop :predicate_call_sites, T::Array[CapabilityHelper::PredicateCallSite], factory: -> { [] }
       prop :async_body_facts, T::Array[AsyncBodyFact], factory: -> { [] }

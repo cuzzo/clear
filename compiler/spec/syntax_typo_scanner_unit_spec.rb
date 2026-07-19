@@ -81,8 +81,8 @@ RSpec.describe SyntaxTypoScanner do
       expect(findings.map { |finding| finding.fixes.first.edits.first.span.col }).to eq([10, 39])
     end
 
-    it "does not confuse fallible types, negation, !=, or the new raise suffix" do
-      findings = scan("FN f(x: !Int64) RETURNS !Bool -> ok = !false; x != 1; f(x)!!; END")
+    it "does not confuse fallible types, negation, or !=" do
+      findings = scan("FN f(x: !Int64) RETURNS !Bool -> ok = !false; x != 1; END")
       expect(findings).to be_empty
     end
 

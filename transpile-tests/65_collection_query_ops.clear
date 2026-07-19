@@ -4,7 +4,7 @@
 STRUCT Item { value: Float64, active: Bool }
 
 FN main() RETURNS Void ->
-    nums: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
+    nums: []Float64 = [1.0, 2.0, 3.0, 4.0, 5.0];
 
     # COUNT: how many elements are greater than 3?
     big_count: Int64 = nums |> COUNT _ > 3.0;
@@ -35,15 +35,15 @@ FN main() RETURNS Void ->
     ASSERT all_gt3 == FALSE, "ALL > 3 should be false";
 
     # FIND: first element > 3 (should find 4.0)
-    found = nums |> FIND _ > 3.0;
+    found:? = nums |> FIND _ > 3.0;
     ASSERT found != NIL, "FIND > 3 should find something";
 
     # FIND: no match returns NIL
-    not_found = nums |> FIND _ > 100.0;
+    not_found:? = nums |> FIND _ > 100.0;
     ASSERT not_found == NIL, "FIND > 100 should return NIL";
 
     # Chained: WHERE then COUNT
-    evens: Float64[] = [2.0, 4.0, 6.0, 8.0];
+    evens: []Float64 = [2.0, 4.0, 6.0, 8.0];
     big_evens: Int64 = evens |> COUNT _ > 4.0;
     ASSERT big_evens == 2, "COUNT of evens > 4 should be 2";
 

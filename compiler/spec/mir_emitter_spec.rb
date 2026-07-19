@@ -336,6 +336,21 @@ RSpec.describe MIREmitter do
     expect(zig).to include("pub fn fetch(rt: *Runtime) ![]const u8")
   end
 
+  it "uses a synthesized function's Runtime parameter for allocator cleanup" do
+    cleanup = CleanupEntry.from(kind: :uniform, alloc: :heap, has_moved_guard: false)
+    node = MIR::FnDef.new(
+      "apply",
+      [MIR::Param.new("__rt", "*Runtime")],
+      "void",
+      [MIR::ErrCleanup.new("owned", cleanup)],
+      nil, true, nil
+    )
+
+    zig = e.emit(node)
+    expect(zig).to include("__rt.heapAlloc(), &owned")
+    expect(zig).not_to match(/(?<!_)rt\.heapAlloc\(\), &owned/)
+  end
+
   it "emits comptime params" do
     node = MIR::FnDef.new(
       "make",
@@ -898,7 +913,7 @@ RSpec.describe MIREmitter do
     it "emits passthrough for value types as a comptime-evaluated inline expression" do
       node = MIR::DeepCopy.new(MIR::Ident.new("n"), nil, nil, :passthrough, nil)
       expect(node.copy_shape).to eq(:inferred)
-      expect(e.emit(node)).to eq("(if (@typeInfo(@TypeOf(n)) == .pointer) n.* else n)")
+      expect(e.emit(node)).to eq("(if (comptime @typeInfo(@TypeOf(n)) == .pointer and @typeInfo(@TypeOf(n)).pointer.size == .one) n.* else n)")
     end
 
     it "emits pointer-shaped full copies from the explicit MIR shape" do
@@ -1133,7 +1148,7 @@ RSpec.describe MIREmitter do
       expect(e.emit(MIR::TryOrPanic.new(MIR::Call.new("fallible", [], false), "boom")))
         .to eq("fallible() catch @panic(\"boom\")")
       expect(e.emit(MIR::UnionPayloadGet.new(MIR::Ident.new("result"), :Ok)))
-        .to eq("(switch (result) { .Ok => |payload| payload, else => unreachable })")
+        .to eq("(switch (result) { .Ok => |__union_payload| __union_payload, else => unreachable })")
       expect(e.emit(MIR::UnionVariantGet.new(MIR::TryExpr.new(MIR::Call.new("load", [], false)), "Ok", nil)))
         .to eq("(try load()).Ok")
       expect(e.emit(MIR::HasField.new(MIR::Ident.new("item"), "value")))

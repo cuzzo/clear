@@ -1,0 +1,25 @@
+# Explicit wrapper bindings make error and optional handling visible while
+# retaining a direct spelling for deliberate wrapper transport.
+
+FN maybe(value: Int64) RETURNS ?Int64 ->
+  RETURN value;
+END
+
+FN fallibleMaybe(value: Int64) RETURNS !?Int64 ->
+  RETURN value;
+END
+
+FN main() RETURNS !Void ->
+  retained:!? = fallibleMaybe(7);
+  fromRetained:? = TRY retained;
+  unwrapped = TRY UNWRAP fallibleMaybe(8);
+  optional:? = TRY fallibleMaybe(9);
+  widened:! = UNWRAP maybe(10);
+  fromWidened = TRY widened;
+
+  ASSERT(UNWRAP fromRetained) == 7, "retain !?";
+  ASSERT unwrapped == 8, "try unwrap !?";
+  ASSERT optional EXISTS, "try !? retains ?";
+  ASSERT fromWidened == 10, "unwrap ? retains !";
+  RETURN;
+END

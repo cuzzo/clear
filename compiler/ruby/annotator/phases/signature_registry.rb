@@ -37,6 +37,7 @@ module Annotator
         FunctionSignature.new(
           params: node.params.map { |param| extern_param(param) },
           return_type: node.annotation_return_type,
+          return_lifetime: extern_lifetime_paths(node),
           visibility: :pub,
           extern: true,
           module_alias: node.from_module,
@@ -48,6 +49,18 @@ module Annotator
           owner_type_params: owner_type_params(node)
         )
       end
+
+      sig { params(node: AST::ExternFnDecl).returns(T::Array[FunctionSignature::LifetimeSource]) }
+      def self.extern_lifetime_paths(node)
+        lifetime = node.return_lifetime
+        return [] if lifetime.nil?
+        return [:wildcard] if lifetime == :wildcard
+
+        T.cast(lifetime, T::Array[AST::Node]).filter_map do |source|
+          source.respond_to?(:name) ? T.unsafe(source).name.to_s : nil
+        end
+      end
+      private_class_method :extern_lifetime_paths
 
       sig { params(param: AST::Param).returns(AST::Param) }
       def self.function_param(param)

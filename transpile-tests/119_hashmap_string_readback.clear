@@ -15,7 +15,7 @@ FN main() RETURNS Void ->
     MUTABLE map: {String}Value = {};
     map["t0"] = Value{ Str: COPY "hello" };
 
-    result = readStrDirect(&map);
+    result = TRY readStrDirect(&map);
     print(result);
     ASSERT result == "hello", "direct fn";
 

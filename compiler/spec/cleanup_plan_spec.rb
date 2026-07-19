@@ -725,7 +725,7 @@ RSpec.describe CleanupClassifier do
       bad_type.define_singleton_method(:to_s) { raise "bad type" }
       expect(CleanupClassifier.send(:no_cleanup_alloc_entry, bad_type, schema_lookup_for)).to be_nil
 
-      moved_string = CleanupClassifier.send(:transferred_payload_entry, Type.new(:String), schema_lookup_for)
+      moved_string = CleanupClassifier.send(:transferred_payload_entry, Type.new(:String), schema_lookup_for, nil)
       expect(moved_string[:kind]).to eq(:heap_string)
 
       resource_schema = Schemas::ResourceSchema.new(close_plan: Schemas::ResourceClosePlan.method("close"))
@@ -776,11 +776,15 @@ RSpec.describe CleanupClassifier do
       box_schema = Schemas::StructSchema.new(fields: {
         "handle" => AST::StructField.new(type: Type.new(:Handle)),
       })
-      composed = Type.new(:Box).resolve_resource_close(schema_lookup_for(Box: box_schema, Handle: resource_schema))
-      expect(composed.is_resource).to eq(true)
-      action = composed.close_plan&.actions&.first
-      expect(action&.name).to eq("closeHandle")
-      expect(action&.field_path).to eq(["handle"])
+      lookup = schema_lookup_for(Box: box_schema, Handle: resource_schema)
+      box_type = Type.new(:Box)
+      composed = box_type.resolve_resource_close(lookup)
+      expect(composed.is_resource).to eq(false)
+      expect(box_type.contains_linear_resource?(lookup)).to eq(true)
+      box_lifecycle = Semantic::LifecyclePlanner.plan(box_type, lookup)
+      expect(box_lifecycle.drop_strategy).to eq(:semantic)
+      expect(box_lifecycle.copy_strategy).to eq(:forbidden)
+      expect(box_lifecycle.resource_close_plan).to be_nil
 
       resource_decl = var_decl(
         name: "handle",
@@ -830,7 +834,7 @@ RSpec.describe CleanupClassifier do
         "ast" => CleanupEntry.build(:uniform, alloc: :frame, has_moved_guard: true),
       }
 
-      CleanupClassifier.send(:walk_match_as_bindings, [match], schema_lookup_for(Value: schema), bindings)
+      CleanupClassifier.send(:walk_match_as_bindings, [match], schema_lookup_for(Value: schema), nil, bindings)
       expect(bindings["items"][:kind]).to eq(:uniform)
       expect(bindings["items"][:match_as]).to eq(true)
       expect(bindings["items"][:alloc]).to eq(:frame)
@@ -850,7 +854,7 @@ RSpec.describe CleanupClassifier do
       )
       bindings = {}
 
-      CleanupClassifier.send(:walk_capture_bindings, [if_bind], schema_lookup_for, bindings)
+      CleanupClassifier.send(:walk_capture_bindings, [if_bind], schema_lookup_for, nil, bindings)
       expect(bindings["items"][:alloc]).to eq(:heap)
       expect(bindings["items"][:elem_zig_type]).to eq(Type.new(:String).zig_type)
 
@@ -1072,7 +1076,7 @@ RSpec.describe CleanupClassifier do
               RETURN items;
           END
           FN main() RETURNS Void ->
-              list1 = makeList();
+              list1 = TRY makeList();
               ASSERT list1.length() == 1;
               RETURN;
           END
@@ -1098,7 +1102,7 @@ RSpec.describe CleanupClassifier do
               RETURN makeList();
           END
           FN main() RETURNS Void ->
-              result = wrapper();
+              result = TRY wrapper();
               RETURN;
           END
         CLEAR
@@ -1120,7 +1124,7 @@ RSpec.describe CleanupClassifier do
               RETURN Value{ Items: items };
           END
           FN main() RETURNS Void ->
-              v = makeValue();
+              v = TRY makeValue();
               RETURN;
           END
         CLEAR
@@ -1300,7 +1304,7 @@ RSpec.describe CleanupClassifier do
             RETURN "recovered";
         END
         FN main() RETURNS Void ->
-            r = handleWithCatch("ok");
+            r = TRY handleWithCatch("ok");
             RETURN;
         END
       CLEAR
@@ -1436,7 +1440,7 @@ RSpec.describe CleanupClassifier do
             RETURN Data.Nested{ label: "outer", inner: inner };
         END
         FN main() RETURNS Void ->
-            d = makeNested();
+            d = TRY makeNested();
             d2 = COPY d;
             PARTIAL MATCH TAKES d2 START
                 Data.Nested AS n -> print(n.label);,

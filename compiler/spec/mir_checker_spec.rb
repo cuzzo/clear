@@ -15,6 +15,10 @@ require_relative '../ruby/mir/mir_checker' unless defined?(MIRChecker::FsmStruct
 RSpec.describe MIRChecker do
   let(:checker) { MIRChecker.new }
 
+  it "audits the emitted OR_ELSE bytecode rewrite node" do
+    expect(described_class::AUDITED_EMITTABLE_NODE_TYPES).to include(MIR::OrElseExitBcRewrite)
+  end
+
   def fn_def(name, body)
     MIR::FnDef.new(name, [], "void", body, :pub, false, nil)
   end
@@ -133,6 +137,25 @@ RSpec.describe MIRChecker do
       ]
 
       errors = checker.check_fn!(fn_def("owned_copy_cleanup", body))
+      expect(errors.none? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") }).to be true
+    end
+
+    it "allows cleanup when lowering explicitly materialized the owner" do
+      type = Type.new(:Value)
+      body = [
+        alloc_mark("tmp", :heap, type),
+        MIR::OwnedCreate.new("tmp", :heap, type, "tmp"),
+        MIR::Let.new(
+          "tmp",
+          MIR::IndexGet.new(MIR::Ident.new("items"), MIR::Lit.new("0")),
+          false,
+          nil,
+          nil,
+        ),
+        MIR::Cleanup.new("tmp", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
+      ]
+
+      errors = checker.check_fn!(fn_def("materialized_cleanup", body))
       expect(errors.none? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") }).to be true
     end
 
@@ -792,7 +815,7 @@ RSpec.describe MIRChecker do
         MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil),
       ]
       errors = checker.check_fn!(fn_def("loop_no_restore", body))
-      expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
+      expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") && e.include?("allocations: tmp") }).to be true
     end
 
     it "passes for loop with restoreLoopMark defer (structural check)" do

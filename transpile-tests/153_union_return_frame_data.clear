@@ -13,7 +13,7 @@ FN makeStr(a: String, b: String) RETURNS !Val ->
 END
 
 FN main() RETURNS Void ->
-    v = makeStr("hel", "lo");
+    v = TRY makeStr("hel", "lo");
     PARTIAL MATCH v START
         Val.Str AS s -> ASSERT s == "hello", "union return with frame string";,
         DEFAULT -> ASSERT FALSE, "should be Str";

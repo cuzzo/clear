@@ -45,12 +45,12 @@ FN main() RETURNS Void ->
   n = 5_000_000;
 
   t0 = timestampMs();
-  listSum = benchList(n);
+  listSum = TRY benchList(n);
   listMs = timestampMs() - t0;
   listRssKb = currentMemoryKb();
 
   t1 = timestampMs();
-  poolSum = benchPool(n);
+  poolSum = TRY benchPool(n);
   poolMs = timestampMs() - t1;
   poolRssKb = currentMemoryKb();
 

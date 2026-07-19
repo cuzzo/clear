@@ -23,6 +23,17 @@ module Annotator
         )
       end
 
+      sig { params(node: AST::BinaryOp, left: AST::FuncCall, callee_name: String, value_type: Type).void }
+      def record_deferred_recovery_validation!(node, left, callee_name, value_type)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        deferred_recovery_validations << DeferredRecoveryValidation.new(
+          node: node,
+          left: left,
+          callee_name: callee_name,
+          value_type: value_type,
+        )
+      end
+
     end
 
     module DeferredCapabilityAudit
@@ -32,10 +43,29 @@ module Annotator
       def run_deferred_validations!
         T.bind(self, Annotator::Phases::CapabilityAuditSession)
 
+        flush_deferred_recovery_validations!
         flush_deferred_with_validations!
         finalize_capability_audit!
       end
       private :run_deferred_validations!
+
+      sig { void }
+      def flush_deferred_recovery_validations!
+        T.bind(self, Annotator::Phases::CapabilityAuditSession)
+
+        deferred_recovery_validations.each do |validation|
+          callee = function_node_for(validation.callee_name)
+          unless callee&.can_fail == true
+            error!(validation.node, :OR_ELSE_NEEDS_RECOVERABLE_LEFT,
+              got: Type.surface_name_type(validation.value_type))
+          end
+
+          validation.left.can_fail = true
+          validation.left.error_union_type = Type.error_union_of(validation.value_type)
+        end
+        deferred_recovery_validations.clear
+      end
+      private :flush_deferred_recovery_validations!
 
       # Replay deferred WITH-on-param checks after caller-sync propagation has
       # had a chance to populate entry.sync.

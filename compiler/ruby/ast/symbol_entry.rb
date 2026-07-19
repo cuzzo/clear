@@ -407,13 +407,41 @@ class SymbolEntry
   sig { void }
   def mark_read!
     @flow.read = true
-    @reg.var_used = true if @reg.respond_to?(:var_used=)
+    reg = @reg
+    if reg
+      case reg
+      when AST::VarDecl
+        reg.var_used = true
+      when AST::Assignment
+        reg.var_used = true
+      when AST::DestructureTarget
+        reg.var_used = true
+      when AST::DestructuringAssignment
+        reg.var_used = true
+      when AST::BindExpr
+        reg.var_used = true
+      end
+    end
   end
 
   sig { params(touch_declaration: T::Boolean).void }
   def mark_mutated!(touch_declaration: false)
     @flow.mutated = true
-    @reg.var_mutated = true if touch_declaration && @reg.respond_to?(:var_mutated=)
+    reg = @reg
+    if touch_declaration && reg
+      case reg
+      when AST::VarDecl
+        reg.var_mutated = true
+      when AST::Assignment
+        reg.var_mutated = true
+      when AST::DestructureTarget
+        reg.var_mutated = true
+      when AST::DestructuringAssignment
+        reg.var_mutated = true
+      when AST::BindExpr
+        reg.var_mutated = true
+      end
+    end
   end
 
   sig { void }

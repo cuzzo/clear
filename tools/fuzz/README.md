@@ -158,6 +158,7 @@ expected hard error is absent.
 | `execution_boundary`        | 81              | What can / can't cross BG / DO / BG STREAM × @parallel / @pinned |
 | `promise_handle_capture`    | 9               | Plain `~T` promise handles moved into BG consumers and rejected on outer reuse |
 | `loop_cleanup`              | 40              | INV-2 / INV-6: alloc-cleanup pairing under loop disruptors (break, continue, return, raise) |
+| `loop_rewind_matrix`        | 162             | All four loop forms crossed with then/else IF, then/else IF-bind, arm/default MATCH, nested-MATCH, and WITH allocation discovery for COPY, concat, and substring reassignment; nested-loop mark independence, break/continue/return/raise exits, zero-iteration loops, TIGHT lifetime policy, and scalar bit-COPY negatives. |
 | `error_cleanup`             | 24              | INV-9: alloc-cleanup pairing on error paths (OR PASS / RAISE / DEFAULT) |
 | `branch_cleanup`            | 48              | INV-2: alloc-cleanup pairing across IF/ELSE branches with optional early-return |
 | `or_positional`             | 60              | `expr OR <action>` in every syntactic position × action × inner outcome |
@@ -166,7 +167,7 @@ expected hard error is absent.
 | `bind_capture_cleanup`      | 32              | Owned bind cleanup plus borrowed/owned Rc/Arc bindings across list, map, pool, optional field/local, calls, COPY, CLONE, SHARE, multi-bind, pop, and map-value materialization. |
 | `rc_generic_collection_matrix` | 62           | Full ownership-sensitive generic list/pool/set/map and sharded materialization operation × Rc/Arc capability cross-product. |
 | `rc_generic_value_matrix` | 12                | Recursive struct/union/optional/list/map COPY and materialization shapes × Rc/Arc capability cross-product. |
-| `cleanup_classifier_shapes` | 20              | Cleanup-classifier shape coverage for struct/union/option/capability/pipeline payloads. |
+| `cleanup_classifier_shapes` | 22              | Cleanup-classifier shape coverage for struct/union/option/capability/pipeline payloads, including borrow-preserving `TRY` indexing and explicit `COPY`. |
 | `cross_fiber_consumer`      | 21              | BG STREAM / observable producer values consumed across fiber boundaries. |
 | `loop_local_cleanup_alloc`  | 16              | Loop-local allocation forms that must be cleaned or promoted consistently, including direct `String[]@list` locals. |
 | `match_payload_cleanup`     | 8               | MATCH payload cleanup for owned payload variants/options. |
@@ -177,7 +178,7 @@ expected hard error is absent.
 | `diagnostic_policy_matrix`  | 16              | Policy-heavy front-end diagnostics for reentrancy, hold-lock-across-yield, lock ordering, handlers, and ownership/fixable rejection paths. |
 | `pipeline_source_shape_matrix` | 44           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and observable terminals. |
 | `pipeline_gap_matrix`        | 8            | Focused pipeline operator gaps: TAKE_WHILE, SKIP, WINDOW(time), UNNEST bindings, and CONCURRENT terminals. |
-| `pipeline_value_block_matrix` | 7            | Source-level value blocks in SELECT, WHERE, ORDER_BY, and lambda positions, including missing-result and bad-predicate rejection cells. |
+| `pipeline_value_block_matrix` | 24           | Source-level value blocks plus SELECT:!/:? effect contracts, async selectors, strict WHERE predicates, and concurrent variants. |
 | `call_ownership_contract_matrix` | 73         | Normal calls, TAKES bare/COPY/GIVE, owned/fallible returns, receiver mutation, BG calls, and pipeline call contracts across string/list/struct/union/nested owned shapes. |
 | `collection_iteration_storage_matrix` | 43    | Collection iteration/storage across arrays, lists, sets, maps, pools, nested and SOA containers. |
 | `mir_checker_negative_matrix` | 47            | Generated malformed-MIR cells for fail-closed ownership verification: double release/finalizer, implicit move, UAF after transfer, unverifiable joins, aggregate allocator mismatch, return allocator invariants, MIR call contracts, InlineZig/RawZig allocator contracts, invalid allocator facts, missing cleanup finalizers, borrowed capture cleanup, structural Rc/Arc copies, unhoisted allocs, COPY_CLEANUP, and INDIRECT_DOUBLE_BOX. |
@@ -189,13 +190,14 @@ expected hard error is absent.
 | `cast_lowering_matrix`      | 30              | Annotation-driven MIR cast/coercion lowering across var, return, call, list, and branch contexts. |
 | `hoist_edge_matrix`          | 43              | Nested allocating expressions in return, local, field, list, call, branch, OR fallback, loop, match, collection literal, and nested aggregate contexts. |
 | `access_path_expression_matrix` | 35          | Field/index/optional/map/nested access paths through local, return, call, branch, and loop contexts. |
-| `collection_sink_escape_matrix` | 18          | Owned string/struct/union values stored into list/set/map/pool and collection-literal sinks. |
-| `cleanup_control_matrix`     | 56           | Cleanup-bearing value shapes crossed with branch, loop, match, catch, return, move, GIVE, and discard. |
+| `collection_sink_escape_matrix` | 19          | Owned string/struct/union values stored into list/set/map/pool and collection-literal sinks. |
+| `cleanup_control_matrix`     | 120          | Bounded-exhaustive lifecycle matrix: ten owning semantic constructors crossed with twelve control-flow/copy/move/replacement exits under the debug allocator. |
 | `lowering_boundary_matrix`   | 28           | MIR lowering boundary coverage for call contracts, WITH variants, BG/DO/NEXT, and pipeline terminals. |
 | `test_framework_matrix`      | 6            | TEST/WHEN/TEST THAT grammar through hooks, LET bindings, stubs, pending tests, benchmark, smash, and profile forms. |
 | `extern_boundary_matrix`     | 6            | Negative extern declaration/call boundaries for free functions, trampolines, extern methods/resources, generic comptime calls, and tight-loop rejection. |
-| `curated_gap_corpus`         | 486          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
+| `curated_gap_corpus`         | 490          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
 | `tense_predicate_matrix`     | 11           | Postfix tense predicates, stacked refinement, readiness polling, and ambiguous optional-Boolean rejection. |
+| `next_tense_matrix`          | 9            | NEXT across future/stream values and their fallible/optional tense permutations, including invalid redundant and missing unwraps. |
 
 ### `stream_into_boundary` matrix
 

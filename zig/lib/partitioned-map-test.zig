@@ -2847,6 +2847,32 @@ test "PartitionedNumericMap: shardIndexWithHash is deterministic" {
     try std.testing.expect(filled > 1);
 }
 
+test "PartitionedStringMap: putDirect takes ownership of slice values" {
+    initWorkerGlobals();
+    defer deinitWorkerGlobals();
+
+    var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    defer fp.scheduler_running = false;
+
+    const StringMap = CheatLib.PartitionedStringMap([]const u8, 2);
+    var map: StringMap = .{};
+    defer map.deinit(alloc, alloc);
+    map.ensureOwnership();
+
+    const key = "key";
+    const shard = StringMap.shardIndexWithHash(key).shard;
+    const first = try alloc.dupe(u8, "first");
+    try map.putDirect(shard, alloc, key, first);
+    try std.testing.expectEqualStrings("first", map.getDirect(shard, key).?);
+
+    const replacement = try alloc.dupe(u8, "replacement");
+    try map.putDirect(shard, alloc, key, replacement);
+    try std.testing.expectEqualStrings("replacement", map.getDirect(shard, key).?);
+}
+
 test "PartitionedNumericMap: count and values" {
     var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
     defer sched.deinit();

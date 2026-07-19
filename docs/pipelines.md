@@ -205,6 +205,31 @@ ASSERT summaries[1].normalized == 2.0, "score normalized";
 
 The result type is inferred from the expression - `[]Summary` above, not `[]Raw`.
 
+SELECT never hides unresolved element effects. A selector that returns `!T`,
+`?T`, or `!?T` must declare that the output list retains the effect:
+
+```ruby clear
+fallible: []!User = ids |> SELECT:! loadUser(_);
+optional: []?User = ids |> SELECT:? findUser(_);
+both: []!?User = ids |> SELECT:!? maybeLoadUser(_);
+
+# Consuming the effect inside the expression produces an ordinary list.
+definite: []User = ids |> SELECT loadUser(_) OR_ELSE defaultUser();
+```
+
+An asynchronous selector needs no SELECT suffix when its eventual value is
+definite. It produces a promise list, which must be retained explicitly or
+awaited:
+
+```ruby clear
+pending:~ = ids |> SELECT loadUserLater(_);
+users: []User = NEXT pending;
+```
+
+WHERE is stricter: its predicate must be a definite, synchronous `Bool`.
+Resolve `!Bool` or `?Bool` with `TRY`, `UNWRAP`, or `OR_ELSE` inside the WHERE
+expression. WHERE never implicitly awaits or materializes a predicate.
+
 **Pipeline fusion with SELECT T{}:** SELECT composes with WHERE and aggregates in a single fused loop - no intermediate list allocation:
 
 ```ruby clear

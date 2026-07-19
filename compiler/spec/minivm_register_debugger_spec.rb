@@ -63,7 +63,7 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
         FN main() RETURNS !Void ->
             x = 10_i64;
             y = 20_i64;
-            z = add(x, y);
+            z = TRY add(x, y);
             print(z.toString());
             RETURN;
         END
@@ -86,7 +86,7 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
         END
 
         FN main() RETURNS !Void ->
-            z = add(10_i64, 20_i64);
+            z = TRY add(10_i64, 20_i64);
             print(z.toString());
             RETURN;
         END
@@ -111,7 +111,7 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
         END
 
         FN main() RETURNS !Void ->
-            z = add(10_i64, 20_i64);
+            z = TRY add(10_i64, 20_i64);
             print(z.toString());
             RETURN;
         END
@@ -183,7 +183,7 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
         FN main() RETURNS !Void ->
             x: Int64 = 10_i64;
             y: Int64 = 20_i64;
-            z = add(x, y);
+            z = TRY add(x, y);
             print(z.toString());
             RETURN;
         END
@@ -215,12 +215,12 @@ RSpec.describe "MiniVM register debugger REPL", :integration do
 
         FN outer(n: Int64) RETURNS !Int64 ->
             m: Int64 = n + 1_i64;
-            RETURN inner(m);
+            RETURN TRY inner(m);
         END
 
         FN main() RETURNS !Void ->
             top: Int64 = 5_i64;
-            result = outer(top);
+            result = TRY outer(top);
             print(result.toString());
             RETURN;
         END

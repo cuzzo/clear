@@ -266,19 +266,19 @@ module ParserCompat
         WHILE i < value.length() DO
           ch = value.charAt(i);
           IF ch == "\\\\" THEN
-            out = out + "\\\\\\\\";
+            out = out $+ "\\\\\\\\";
           ELSE_IF ch == "\\n" THEN
-            out = out + "\\\\n";
+            out = out $+ "\\\\n";
           ELSE_IF ch == "\\r" THEN
-            out = out + "\\\\r";
+            out = out $+ "\\\\r";
           ELSE_IF ch == "\\t" THEN
-            out = out + "\\\\t";
+            out = out $+ "\\\\t";
           ELSE_IF ch == "\\0" THEN
-            out = out + "\\\\0";
+            out = out $+ "\\\\0";
           ELSE_IF ch == "|" THEN
-            out = out + "\\\\p";
+            out = out $+ "\\\\p";
           ELSE
-            out = out + ch;
+            out = out $+ ch;
           END
           i += 1;
         END
@@ -286,7 +286,7 @@ module ParserCompat
       END
 
       PRIVATE FN lengthEncoded(tag: String, value: String) RETURNS String ->
-        RETURN tag + value.length().toString() + ":" + value;
+        RETURN tag $+ value.length().toString() $+ ":" $+ value;
       END
 
       PRIVATE FN trimTrailingZeros(value: String) RETURNS String ->
@@ -315,31 +315,31 @@ module ParserCompat
           scaled -= 1_000_000;
         END
         IF scaled == 0 THEN
-          RETURN prefix + whole.toString() + ".0";
+          RETURN prefix $+ whole.toString() $+ ".0";
         END
         MUTABLE frac_text = scaled.toString();
         WHILE frac_text.length() < 6 DO
-          frac_text = "0" + frac_text;
+          frac_text = "0" $+ frac_text;
         END
-        RETURN prefix + whole.toString() + "." + trimTrailingZeros(frac_text);
+        RETURN prefix $+ whole.toString() $+ "." $+ trimTrailingZeros(frac_text);
       END
 
       PRIVATE FN encodeTokenValue(value: TokenValue) RETURNS String ->
         RETURN MATCH value START
           TokenValue.Nil -> "N",
           TokenValue.Str AS item -> lengthEncoded("S", item),
-          TokenValue.Int AS item -> "I" + item.toString() + ";",
-          TokenValue.UInt AS item -> "I" + item.toString() + ";",
-          TokenValue.Float AS item -> "F" + floatValueText(item) + ";",
+          TokenValue.Int AS item -> "I" $+ item.toString() $+ ";",
+          TokenValue.UInt AS item -> "I" $+ item.toString() $+ ";",
+          TokenValue.Float AS item -> "F" $+ floatValueText(item) $+ ";",
         END;
       END
 
       PRIVATE FN encodeToken(token: Token) RETURNS String ->
-        RETURN "O5:Token4[" +
-          lengthEncoded("S", "column") + "I" + token.column.toString() + ";" +
-          lengthEncoded("S", "line") + "I" + token.line.toString() + ";" +
-          lengthEncoded("S", "type") + lengthEncoded("Y", token.type) +
-          lengthEncoded("S", "value") + encodeTokenValue(token.value) +
+        RETURN "O5:Token4[" $+
+          lengthEncoded("S", "column") $+ "I" $+ token.column.toString() $+ ";" $+
+          lengthEncoded("S", "line") $+ "I" $+ token.line.toString() $+ ";" $+
+          lengthEncoded("S", "type") $+ lengthEncoded("Y", token.type) $+
+          lengthEncoded("S", "value") $+ encodeTokenValue(token.value) $+
           "]";
       END
 
@@ -355,37 +355,37 @@ module ParserCompat
         ELSE_IF value IS_A Bool AS bool_value THEN
           RETURN IF bool_value THEN "B1" ELSE "B0" END;
         ELSE_IF value IS_A Int64 AS int_value THEN
-          RETURN "I" + int_value.toString() + ";";
+          RETURN "I" $+ int_value.toString() $+ ";";
         ELSE_IF value IS_A UInt64 AS uint_value THEN
-          RETURN "I" + uint_value.toString() + ";";
+          RETURN "I" $+ uint_value.toString() $+ ";";
         ELSE_IF value IS_A Float64 AS float_value THEN
-          RETURN "F" + floatValueText(float_value) + ";";
+          RETURN "F" $+ floatValueText(float_value) $+ ";";
         ELSE_IF value IS_A Any[] AS items THEN
-          MUTABLE encoded = "A" + items.length().toString() + "[";
+          MUTABLE encoded = "A" $+ items.length().toString() $+ "[";
           MUTABLE i = 0;
           WHILE i < items.length() DO
-            encoded = encoded + encodeCompat(items[i]);
+            encoded = encoded $+ encodeCompat(items[i]);
             i += 1;
           END
-          RETURN encoded + "]";
+          RETURN encoded $+ "]";
         ELSE_IF value IS_A HashMap<Any> AS values THEN
           MUTABLE pairs: String[] = [];
           values.keys() |> EACH {
-            pairs.append(encodeCompat(_) + encodeCompat(values[_]));
+            pairs.append(encodeCompat(_) $+ encodeCompat(values[_]));
           };
           pairs = pairs.sort();
-          RETURN "H" + pairs.length().toString() + "[" + pairs.join("") + "]";
+          RETURN "H" $+ pairs.length().toString() $+ "[" $+ pairs.join("") $+ "]";
         ELSE_IF value IS_A Struct AS object THEN
           MUTABLE members = object.class().members().sort();
-          MUTABLE encoded = "O" + object.class().name().length().toString() + ":" +
-            object.class().name() + members.length().toString() + "[";
+          MUTABLE encoded = "O" $+ object.class().name().length().toString() $+ ":" $+
+            object.class().name() $+ members.length().toString() $+ "[";
           MUTABLE i = 0;
           WHILE i < members.length() DO
             member = members[i];
-            encoded = encoded + lengthEncoded("S", member) + encodeCompat(object[member]);
+            encoded = encoded $+ lengthEncoded("S", member) $+ encodeCompat(object[member]);
             i += 1;
           END
-          RETURN encoded + "]";
+          RETURN encoded $+ "]";
         END
         panic("unsupported parser compatibility value");
       END
@@ -397,8 +397,8 @@ module ParserCompat
         IF program == NIL THEN
           panic("parser returned NIL");
         END
-        print("CASE|" + index.toString() + "|" + escapeCompat(name) + "|ok|");
-        print("AST|" + escapeCompat(encodeCompat(program?)));
+        print("CASE|" $+ index.toString() $+ "|" $+ escapeCompat(name) $+ "|ok|");
+        print("AST|" $+ escapeCompat(encodeCompat(program?)));
         print("ENDCASE");
         RETURN;
       END

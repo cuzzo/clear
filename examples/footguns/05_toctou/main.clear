@@ -33,7 +33,7 @@ FN main() RETURNS Void ->
   # This is the natural way to write it in CLEAR; the block structure
   # makes the atomic scope explicit.
 
-  p1 = BG {
+  p1:~ = BG {
     WITH EXCLUSIVE acct AS a {
       IF a.balance >= 80 THEN
         a.balance = a.balance - 80;
@@ -44,7 +44,7 @@ FN main() RETURNS Void ->
     }
   };
 
-  p2 = BG {
+  p2:~ = BG {
     WITH EXCLUSIVE acct AS a {
       IF a.balance >= 80 THEN
         a.balance = a.balance - 80;

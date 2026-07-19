@@ -34,6 +34,25 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "symbol intrinsic" do
+    it "treats interning failure as an allocation fault, not a source error union" do
+      zig = transpile(<<~CLEAR)
+        FN intern(text: String) RETURNS String@symbol ->
+          RETURN symbol(text);
+        END
+
+        FN main() RETURNS Void ->
+          value = intern("name");
+          print(value);
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("try rt.internSymbol(text)")
+      expect(zig).to include("fn intern(")
+    end
+  end
+
   describe "fallible intrinsic spelling" do
     it "exposes line input without the retired bang suffix" do
       zig = transpile(<<~CLEAR)
@@ -51,6 +70,35 @@ RSpec.describe ZigTranspiler do
   end
 
   describe "collection ownership regressions" do
+    it "preserves owned allocation through an optional unwrap reassignment" do
+      src = <<~CLEAR
+        FN parse(lines: []String, pos: Int64) RETURNS ![]String ->
+          MUTABLE header: []String = [];
+          header = (UNWRAP lines[pos]).split(" ");
+          RETURN header;
+        END
+      CLEAR
+
+      expect { transpile(src) }.not_to raise_error
+    end
+
+    it "copies a named frame owner into a heap destination before reassignment" do
+      src = <<~CLEAR
+        FN select(data: String) RETURNS !String ->
+          MUTABLE result = "";
+          MUTABLE pos = 0;
+          WHILE pos < 1 DO
+            value = data.substr(pos, 1);
+            result = value;
+            pos += 1;
+          END
+          RETURN result;
+        END
+      CLEAR
+
+      expect { transpile(src) }.not_to raise_error
+    end
+
     it "contextually types an empty hash literal from its declared return type" do
       zig = transpile(<<~CLEAR)
         FN make() RETURNS !HashMap<Int64> ->
@@ -58,7 +106,7 @@ RSpec.describe ZigTranspiler do
         END
 
         FN main() RETURNS Void ->
-          result = make();
+          result = TRY make();
           ASSERT result.count() == 0_i64;
           RETURN;
         END
@@ -164,13 +212,13 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           s = State{ message: "" } @shared:locked;
 
-          producer = BG {
+          producer:~ = BG {
             WITH EXCLUSIVE s AS inner {
               inner.message = "hello from producer";
             }
           };
 
-          consumer = BG {
+          consumer:~ = BG {
             NEXT producer;
             WITH s AS inner {
               print(inner.message);
@@ -195,17 +243,17 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           result = Payload{ data: "" } @shared:locked;
 
-          producer = BG {
+          producer:~ = BG {
             WITH EXCLUSIVE result AS r {
               r.data = "important result";
             }
           };
 
-          relay = BG {
+          relay:~ = BG {
             NEXT producer;
           };
 
-          consumer = BG {
+          consumer:~ = BG {
             NEXT relay;
             WITH result AS r {
               print("consumer saw: " $+ r.data);
@@ -222,8 +270,8 @@ RSpec.describe ZigTranspiler do
     it "rejects using a plain producer promise after it is moved into a consumer BG" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          producer = BG { 1_i64; };
-          consumer = BG { NEXT producer; };
+          producer:~ = BG { 1_i64; };
+          consumer:~ = BG { NEXT producer; };
           x = NEXT producer;
           NEXT consumer;
           RETURN;
@@ -341,7 +389,7 @@ RSpec.describe ZigTranspiler do
         RETURN m;
       END
       FN main() RETURNS Void ->
-        result = buildMap();
+        result = TRY buildMap();
         RETURN;
       END
     CLEAR
@@ -537,8 +585,9 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("try ctx.__shard_map.*.putDirect(ctx.shard")
-      expect(zig).to include(%(putDirect(ctx.shard, __rt.heapAlloc(), __sh1_key, "value")))
-      expect(zig).not_to match(/dupe\(u8, (?:@as\(\[\]const u8, )?"value"/)
+      expect(zig).to match(/dupe\(u8, (?:@as\(\[\]const u8, )?"value"/)
+      expect(zig).to include("putDirect(ctx.shard, __rt.heapAlloc(), __sh1_key, __tmp_")
+      expect(zig).to match(/__tmp_\d+_moved = true;/)
     end
 
     it "keeps borrowed SHARD string map reads borrowed through OR_ELSE fallback" do
@@ -850,7 +899,9 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       warnings = []
+      allow($stderr).to receive(:puts) { |msg| warnings << msg }
       allow(Kernel).to receive(:warn) { |msg| warnings << msg }
+      allow(Warning).to receive(:warn) { |msg| warnings << msg }
       transpile(src)
       expect(warnings.any? { |w| w.include?("MUTABLE 'x' is never reassigned") }).to be true
     end
@@ -952,7 +1003,7 @@ RSpec.describe ZigTranspiler do
             RETURN Pair{ items: vals, count: 2 };
         END
         FN main() RETURNS Void ->
-            p = build();
+            p = TRY build();
         END
       CLEAR
       zig = transpile(src)
@@ -969,7 +1020,7 @@ RSpec.describe ZigTranspiler do
             RETURN Pair{ items: vals, count: 1 };
         END
         FN main() RETURNS Void ->
-            p = build();
+            p = TRY build();
         END
       CLEAR
       zig = transpile(src)
@@ -1004,7 +1055,7 @@ RSpec.describe ZigTranspiler do
           RETURN s;
         END
         FN main() RETURNS Void ->
-          r = f("a,b");
+          r = TRY f("a,b");
           RETURN;
         END
       CLEAR
@@ -1023,7 +1074,7 @@ RSpec.describe ZigTranspiler do
           RETURN Status.Ok;
         END
         FN main() RETURNS Void ->
-          r = check("a,b");
+          r = TRY check("a,b");
           RETURN;
         END
       CLEAR
@@ -1189,9 +1240,9 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         UNION Value { Nil, Str: String }
         FN makeStr(s: String) RETURNS !Value -> RETURN Value{ Str: COPY s }; END
-        FN main() RETURNS Void ->
-            MUTABLE result = makeStr("hello");
-            result = makeStr("world");
+        FN main() RETURNS !Void ->
+            MUTABLE result: Value = TRY makeStr("hello");
+            result = TRY makeStr("world");
             RETURN;
         END
       CLEAR
@@ -1278,7 +1329,7 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
 
-      expect(zig).to include("pub fn dupe(self: @This(), alloc: std.mem.Allocator) !@This()")
+      expect(zig).to include("pub fn __clear_clone(self: @This(), alloc: std.mem.Allocator) !@This()")
       expect(zig).to include("try CheatLib.dupeValue(@TypeOf(self.errMsg), self.errMsg, alloc)")
       expect(zig).to include("errdefer CheatLib.cleanup(@TypeOf(__dupe_errMsg), alloc, &__dupe_errMsg)")
       expect(zig).to include("result.errKind = __dupe_errKind")
@@ -1327,7 +1378,7 @@ RSpec.describe ZigTranspiler do
         FN makeValue() RETURNS !Value -> RETURN Value{ Str: COPY "hello" }; END
         FN wrapper() RETURNS !Value -> RETURN makeValue(); END
         FN main() RETURNS Void ->
-            v = wrapper();
+            v = TRY wrapper();
             RETURN;
         END
       CLEAR
@@ -1391,7 +1442,7 @@ RSpec.describe ZigTranspiler do
         END
         FN main() RETURNS Void ->
             sym = Value{ Symbol: COPY "hello" };
-            result = consume(sym);
+            result = TRY consume(sym);
             RETURN;
         END
       CLEAR
@@ -1482,7 +1533,8 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       # COPY already dupes - should not double-dupe
-      lines = zig.scan(/dupeValue\(/).length
+      main_body = zig[/fn clearMain\(rt: \*Runtime\).*?(?=\/\/ -{20,})/m]
+      lines = T.must(main_body).scan(/dupeValue\(/).length
       expect(lines).to eq(1)
     end
 
@@ -1798,7 +1850,7 @@ RSpec.describe ZigTranspiler do
             append(&vals, 1.0);
             RETURN vals;
         END
-        FN main() RETURNS Void -> x = build(); RETURN; END
+        FN main() RETURNS Void -> x = TRY build(); RETURN; END
       CLEAR
       zig = transpile(src)
       expect(zig).not_to include("promoteList")
@@ -1812,7 +1864,7 @@ RSpec.describe ZigTranspiler do
             m["x"] = 1_i64;
             RETURN m;
         END
-        FN main() RETURNS Void -> x = buildMap(); RETURN; END
+        FN main() RETURNS Void -> x = TRY buildMap(); RETURN; END
       CLEAR
       zig = transpile(src)
       expect(zig).not_to include("promoteList")
@@ -1890,10 +1942,10 @@ RSpec.describe ZigTranspiler do
         FN makeStr() RETURNS !String -> RETURN COPY "hi"; END
         FN transform(s: String) RETURNS !String -> RETURN COPY s; END
         FN caller() RETURNS !String ->
-            s = makeStr();
+            s = TRY makeStr();
             RETURN transform(s);
         END
-        FN main() RETURNS Void -> result = caller(); RETURN; END
+        FN main() RETURNS Void -> result = TRY caller(); RETURN; END
       CLEAR
       zig = transpile(src)
       expect(zig).to match(/dupeValue\(\[\]const u8, .+, rt\.heapAlloc\(\)\)/)
@@ -1941,7 +1993,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
             MUTABLE data: []Float64 = [];
             &data.append(10.0);
-            result = filterSum(data);
+            result = TRY filterSum(data);
             RETURN;
         END
       CLEAR
@@ -2142,9 +2194,12 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # Post-collapse: @soa routes through CheatLib.cleanup ("struct with
-      # deinit" comptime arm dispatches to ptr.deinit(alloc) internally).
-      expect(zig).to include("CheatLib.cleanup(@TypeOf(soa), rt.frameAlloc(), &soa)")
+      # Primitive SOA storage is frame-owned. Restoring the arena mark releases
+      # the backing allocation in one operation; an explicit deinit would be
+      # redundant and cannot release any element-owned state here.
+      expect(zig).to include("const frame_mark = rt.saveFrameMark()")
+      expect(zig).to include("defer rt.restoreFrameMark(frame_mark)")
+      expect(zig).not_to include("CheatLib.cleanup(@TypeOf(soa)")
     end
   end
 
@@ -2267,7 +2322,7 @@ RSpec.describe ZigTranspiler do
           cnt  = us AS $u |> UNNEST $u.orders |> COUNT TRUE;
           any_ = us AS $u |> UNNEST $u.orders |> ANY _.price > 0.0;
           all_ = us AS $u |> UNNEST $u.orders |> ALL _.qty > 0;
-          found = us AS $u |> UNNEST $u.orders |> FIND _.qty == 1;
+          found:? = us AS $u |> UNNEST $u.orders |> FIND _.qty == 1;
           mn   = us AS $u |> UNNEST $u.orders |> MIN _.price;
           mx   = us AS $u |> UNNEST $u.orders |> MAX _.price;
           avg  = us AS $u |> UNNEST $u.orders |> AVERAGE _.price;

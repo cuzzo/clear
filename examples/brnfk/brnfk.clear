@@ -201,9 +201,9 @@ FN runOwnedByteInputWithLimits(
     maxSteps: Int64
 )
 RETURNS ![]Int64 ->
-  code = commands(program);
-  jumps = makeJumpTable(code);
-  MUTABLE tape = makeTape(tapeSize);
+  code = TRY commands(program);
+  jumps = TRY makeJumpTable(code);
+  MUTABLE tape = TRY makeTape(tapeSize);
   MUTABLE pointer = 0;
   MUTABLE ip = 0;
   MUTABLE inputPos = 0;

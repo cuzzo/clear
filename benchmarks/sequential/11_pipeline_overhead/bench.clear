@@ -103,7 +103,7 @@ END
 FN main() RETURNS Void ->
   n = 10_000_000;
   iters = 20;
-  data = buildData(n);
+  data = TRY buildData(n);
 
   # ---- Test 1: SUM only (run multiple iters to accumulate measurable time) ----
   warmS1 = sumLoop(data);
@@ -125,7 +125,7 @@ FN main() RETURNS Void ->
 
   # ---- Test 2: WHERE + SELECT + SUM ----
   warmF1 = fusedLoop(data);
-  warmF2 = chainedPipeline(data);
+  warmF2 = TRY chainedPipeline(data);
   ASSERT warmF1 == warmF2, "fused results must match";
 
   t2 = timestampMs();
@@ -140,7 +140,7 @@ FN main() RETURNS Void ->
 
   # ---- Test 3: Long chain (4-stage) ----
   warmL1 = longFusedLoop(data);
-  warmL2 = longChainedPipeline(data);
+  warmL2 = TRY longChainedPipeline(data);
   ASSERT warmL1 == warmL2, "long chain results must match";
 
   t4 = timestampMs();

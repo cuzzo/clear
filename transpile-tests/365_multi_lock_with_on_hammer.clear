@@ -26,7 +26,7 @@ FN main() RETURNS !Void ->
     #     under contention without bloating CI time.
     iters = 25_i64;
 
-    f1 = BG {
+    f1:~ = BG {
         MUTABLE i: Int64 = 0;
         WHILE i < iters DO
             WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
@@ -36,7 +36,7 @@ FN main() RETURNS !Void ->
             i = i + 1;
         END
     };
-    f2 = BG {
+    f2:~ = BG {
         MUTABLE i: Int64 = 0;
         WHILE i < iters DO
             WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
@@ -46,7 +46,7 @@ FN main() RETURNS !Void ->
             i = i + 1;
         END
     };
-    f3 = BG {
+    f3:~ = BG {
         MUTABLE i: Int64 = 0;
         WHILE i < iters DO
             WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
@@ -56,7 +56,7 @@ FN main() RETURNS !Void ->
             i = i + 1;
         END
     };
-    f4 = BG {
+    f4:~ = BG {
         MUTABLE i: Int64 = 0;
         WHILE i < iters DO
             WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {

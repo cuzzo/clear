@@ -150,7 +150,7 @@ FN debugPrintList(sourcePath: String, line: Int64, column: Int64) RETURNS !Void 
         # `lines` is 0-indexed but CLEAR source lines are 1-based.
         idx = li - 1_i64;
         IF idx >= 0_i64 AND idx < lines.length() THEN
-            print(marker $+ " " $+ liStr $+ "  " $+ lines[idx]);
+            print(marker $+ " " $+ liStr $+ "  " $+ (lines[idx] OR_ELSE ""));
             # Caret line below the active source line, if a non-zero
             # column was supplied. The caret offset matches the column
             # (1-based); we pad the prefix to match the line-number
@@ -493,7 +493,7 @@ FN registerDebugPause(
     MUTABLE viewIp: Int64 = ip;
     MUTABLE viewLine: Int64 = line;
     MUTABLE viewColumn: Int64 = column;
-    MUTABLE varSnapshot = snapshotRegisterVars(
+    MUTABLE varSnapshot = TRY snapshotRegisterVars(
         varNames, viewIp, viewLine, iregs, fregs, sregs, iBase, fBase
     );
     # Time-travel scrub cursor: index into `traceEvents` for the
@@ -507,7 +507,7 @@ FN registerDebugPause(
     MUTABLE polling = TRUE;
     TIGHT WHILE polling DO
         print("(rdb) ");
-        cmd = readLine();
+        cmd = TRY readLine();
         trimmed = trim(cmd);
         # EOF (closed stdin or empty input on a closed pipe) is treated
         # as `:c` so non-interactive callers (test drivers, batch
@@ -558,7 +558,7 @@ FN registerDebugPause(
                     END
                     probe = probe + 1_i64;
                 END
-                varSnapshot = snapshotRegisterVars(
+                varSnapshot = TRY snapshotRegisterVars(
                     varNames, viewIp, viewLine, iregs, fregs, sregs, fIBase, fFBase
                 );
                 print("#" $+ (currentFrame.toString() OR_ELSE "?") $+ "  ip=" $+ (viewIp.toString() OR_ELSE "?") $+ " (line " $+ (viewLine.toString() OR_ELSE "?") $+ ")");
@@ -586,7 +586,7 @@ FN registerDebugPause(
                     END
                     probe = probe + 1_i64;
                 END
-                varSnapshot = snapshotRegisterVars(
+                varSnapshot = TRY snapshotRegisterVars(
                     varNames, viewIp, viewLine, iregs, fregs, sregs, fIBase, fFBase
                 );
                 print("#" $+ (currentFrame.toString() OR_ELSE "?") $+ "  ip=" $+ (viewIp.toString() OR_ELSE "?") $+ " (line " $+ (viewLine.toString() OR_ELSE "?") $+ ")");
@@ -616,7 +616,7 @@ FN registerDebugPause(
                     END
                     probe = probe + 1_i64;
                 END
-                varSnapshot = snapshotRegisterVars(
+                varSnapshot = TRY snapshotRegisterVars(
                     varNames, viewIp, viewLine, iregs, fregs, sregs, fIBase, fFBase
                 );
                 print("#" $+ (currentFrame.toString() OR_ELSE "?") $+ "  ip=" $+ (viewIp.toString() OR_ELSE "?") $+ " (line " $+ (viewLine.toString() OR_ELSE "?") $+ ")");
@@ -712,7 +712,7 @@ FN registerDebugPause(
                     slotStr = target.slot.toString() OR_ELSE "?";
                     print("reversed step " $+ stepStr $+ " (" $+ kindStr $+ " #" $+ slotStr $+ ")");
                     # Snapshot the now-restored register state for `:p`/`:info`.
-                    varSnapshot = snapshotRegisterVars(
+                    varSnapshot = TRY snapshotRegisterVars(
                         varNames, viewIp, viewLine, iregs, fregs, sregs, iBase, fBase
                     );
                 END
@@ -747,7 +747,7 @@ FN registerDebugPause(
                 END
                 slotStr = target.slot.toString() OR_ELSE "?";
                 print("re-applied step " $+ stepStr $+ " (" $+ kindStr $+ " #" $+ slotStr $+ ")");
-                varSnapshot = snapshotRegisterVars(
+                varSnapshot = TRY snapshotRegisterVars(
                     varNames, viewIp, viewLine, iregs, fregs, sregs, iBase, fBase
                 );
             END

@@ -25,7 +25,7 @@ END
 
 FN main() RETURNS Void ->
     c = Counter{ value: 10 } @shared:locked;
-    r = spawnBumper(c);
+    r = TRY spawnBumper(c);
     ASSERT r == 42, "BG fiber returns its value";
     WITH c AS inner {
         ASSERT inner.value == 11, "BG fiber mutated the locked counter";

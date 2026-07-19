@@ -27,13 +27,13 @@ CATCH Input
 END
 
 FN main() RETURNS Void ->
-    r1 = processBoth(User{ name: "Alice" }, Order{ amount: 10.0 });
+    r1 = TRY processBoth(User{ name: "Alice" }, Order{ amount: 10.0 });
     ASSERT r1 == "Alice", "both valid";
 
-    r2 = processBoth(User{ name: "" }, Order{ amount: 10.0 });
+    r2 = TRY processBoth(User{ name: "" }, Order{ amount: 10.0 });
     ASSERT r2 == "error", "user invalid";
 
-    r3 = processBoth(User{ name: "Alice" }, Order{ amount: -1.0 });
+    r3 = TRY processBoth(User{ name: "Alice" }, Order{ amount: -1.0 });
     ASSERT r3 == "error", "order invalid";
 
     RETURN;

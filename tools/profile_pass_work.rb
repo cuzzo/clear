@@ -740,6 +740,7 @@ module PassWorkProfilerTool
       mir_pass = MIRPass.new(
         fn_nodes: fn_nodes,
         schema_lookup: schema_lookup,
+        lifecycle_registry: T.must(annotator.annotation_products.typed_program).lifecycle_registry,
         body_summaries: T.must(annotator.semantic_index).body_summaries
       )
       @profiler.measure("mir.pass", ast_root: ast) { mir_pass.transform!(ast) }
@@ -777,6 +778,8 @@ module PassWorkProfilerTool
         struct_schemas: struct_schemas,
         enum_schemas: enum_schemas,
         union_schemas: union_schemas,
+        schema_lookup: schema_lookup,
+        lifecycle_registry: T.must(annotator.annotation_products.typed_program).lifecycle_registry,
         fn_sigs: fn_sigs,
         moved_guard_info: moved_guard_info,
         importer: importer,

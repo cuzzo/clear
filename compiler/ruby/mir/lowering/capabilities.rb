@@ -47,6 +47,8 @@ module MIRLoweringCapabilities
       TrueClass,
       FalseClass,
       Type,
+      Lexer::Token,
+      T::Set[T.untyped],
     ))
   end
   WithBindingNode = T.type_alias { T.any(String, MIR::Emittable, T::Array[MIR::Emittable]) }
@@ -405,6 +407,11 @@ module MIRLoweringCapabilities
       MIR::CapabilityUnwrap.new(source_mir)
 	    elsif borrowed_const_param_alias?(context, is_param)
 	      MIR::Deref.new(source_mir)
+	    elsif context.resolved_type&.non_string_array?
+	      # A BORROWED linear collection exposes a slice view, not the
+	      # ArrayList storage owner. ItemsAccess also handles fixed arrays and
+	      # existing slices without introducing a copy.
+	      MIR::ItemsAccess.new(source_mir, true)
 	    else
 	      source_mir
 	    end
@@ -821,7 +828,7 @@ module MIRLoweringCapabilities
     case node
     when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type, Lexer::Token, AST::FunctionDef
       false
-    when Array
+    when Array, Set
       node.any? { |item| ast_contains_return?(item) }
     when Hash
       node.values.any? { |item| ast_contains_return?(item) }

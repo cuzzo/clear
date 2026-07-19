@@ -34,7 +34,7 @@ RSpec.describe "register-VM @shared:locked scalar store cell" do
     begin
       fe = CompilerFrontend.compile(src, importer: imp, source_dir: Dir.pwd)
       low = MIRLowering.new(input: MIRLoweringInput.new(struct_schemas: fe.struct_schemas, enum_schemas: fe.enum_schemas,
-                            union_schemas: fe.union_schemas, fn_sigs: fe.fn_sigs,
+                            union_schemas: fe.union_schemas, lifecycle_registry: fe.lifecycle_registry, fn_sigs: fe.fn_sigs,
                             moved_guard_info: fe.moved_guard_info, importer: imp,
                             source_dir: Dir.pwd, target: :bc))
       prog = low.lower_program(fe.ast)

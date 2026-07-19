@@ -174,14 +174,20 @@ pub fn SplitStream(
 
         fn lockInner(inner: *Inner) void {
             while (true) {
-                inner.mutex.lock() catch |err| switch (err) { error.LockTimeout => continue, else => unreachable };
+                inner.mutex.lock() catch |err| switch (err) {
+                    error.LockTimeout => continue,
+                    else => unreachable,
+                };
                 return;
             }
         }
 
         fn lockSharedInner(inner: *Inner) void {
             while (true) {
-                inner.mutex.lockShared() catch |err| switch (err) { error.LockTimeout => continue, else => unreachable };
+                inner.mutex.lockShared() catch |err| switch (err) {
+                    error.LockTimeout => continue,
+                    else => unreachable,
+                };
                 return;
             }
         }
@@ -686,6 +692,7 @@ pub fn concurrentBoundedSelect(
     comptime localSpawnFn: anytype,
     comptime parallelSpawnFn: anytype,
     comptime cleanupResultFn: anytype,
+    comptime preserve_map_errors: bool,
     alloc: std.mem.Allocator,
     rt: anytype,
     items: anytype,
@@ -734,10 +741,13 @@ pub fn concurrentBoundedSelect(
                 const end = @min(start + ctx.batch_size, N);
                 for (start..end) |idx| {
                     const item = try ctx.items[idx].next();
-                    const mapped = mapFn(worker_rt, ctx.user_ctx, item) catch |err| {
-                        _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
-                        continue;
-                    };
+                    const mapped: R = if (preserve_map_errors)
+                        mapFn(worker_rt, ctx.user_ctx, item)
+                    else
+                        mapFn(worker_rt, ctx.user_ctx, item) catch |err| {
+                            _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                            continue;
+                        };
                     ctx.slots[idx] = mapped;
                 }
                 worker_rt.checkYield();
@@ -1144,6 +1154,7 @@ pub fn concurrentStreamSelect(
     comptime parallelSpawnFn: anytype,
     comptime cleanupResultFn: anytype,
     comptime is_inf: bool,
+    comptime preserve_map_errors: bool,
     alloc: std.mem.Allocator,
     rt: anytype,
     src: anytype,
@@ -1202,10 +1213,13 @@ pub fn concurrentStreamSelect(
                 var item = first;
                 var n: usize = 0;
                 while (true) : (n += 1) {
-                    const mapped = mapFn(worker_rt, ctx.user_ctx, item) catch |e| {
-                        _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);
-                        break;
-                    };
+                    const mapped: R = if (preserve_map_errors)
+                        mapFn(worker_rt, ctx.user_ctx, item)
+                    else
+                        mapFn(worker_rt, ctx.user_ctx, item) catch |e| {
+                            _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);
+                            break;
+                        };
                     try ctx.local.append(ctx.alloc, mapped);
                     if (n + 1 >= ctx.batch_size) break;
                     item = (try ctx.chan.pop()) orelse break;
@@ -1520,6 +1534,7 @@ pub fn concurrentListSelect(
     comptime localSpawnFn: anytype,
     comptime parallelSpawnFn: anytype,
     comptime cleanupResultFn: anytype,
+    comptime preserve_map_errors: bool,
     alloc: std.mem.Allocator,
     rt: anytype,
     items: []const T,
@@ -1565,10 +1580,13 @@ pub fn concurrentListSelect(
                 const end = @min(start + ctx.batch_size, ctx.items.len);
                 for (start..end) |idx| {
                     const item = ctx.items[idx];
-                    const mapped = mapFn(worker_rt, ctx.user_ctx, item) catch |err| {
-                        _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
-                        continue;
-                    };
+                    const mapped: R = if (preserve_map_errors)
+                        mapFn(worker_rt, ctx.user_ctx, item)
+                    else
+                        mapFn(worker_rt, ctx.user_ctx, item) catch |err| {
+                            _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                            continue;
+                        };
                     ctx.slots[idx] = mapped;
                 }
                 worker_rt.checkYield();

@@ -76,7 +76,7 @@ module Annotator
           # Registry-driven: type and ownership from INDEX_OPS
           result_type = IntrinsicRegistry.to_return_def(op[:return_type])
                                         .resolve(target_type_info, [])
-          navigation = node.target.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+          navigation = node.target.is_a?(AST::OptionalUnwrap) && node.target.safe_navigation? || implicit_safe_nav
           if navigation && !result_type.optional?
             result_type = Type.optional_of(result_type)
             node.safe_nav_chain = true
@@ -154,7 +154,7 @@ module Annotator
               index: position, count: T.must(target_type.fixed_position_count), type: Type.surface_name(target_type))
           end
           field_type = T.must(position_type)
-          navigation = node.target.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+          navigation = node.target.is_a?(AST::OptionalUnwrap) && node.target.safe_navigation? || implicit_safe_nav
           field_type = Type.optional_of(field_type) if navigation && !field_type.optional?
           node.tuple_position = position
           node.safe_nav_chain = true if implicit_safe_nav
@@ -243,7 +243,7 @@ module Annotator
             field_type.strip_layout!
           end
         end
-        navigation = node.target.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+        navigation = node.target.is_a?(AST::OptionalUnwrap) && node.target.safe_navigation? || implicit_safe_nav
         if navigation && !field_type.optional?
           field_type = Type.optional_of(field_type)
           node.safe_nav_chain = true
@@ -594,7 +594,8 @@ module Annotator
             expected_item = T.must(tuple_types[index])
             actual_item = item.full_type!(context: "tuple literal element")
             next if expected_item.accepts?(actual_item)
-            if unique_union_payload_variant(expected_item, actual_item)
+            union_schema = lookup_type_schema(expected_item.value_payload_type.resolved)
+            if UnionPayloadCompatibility.unique_variant(expected_item, actual_item, union_schema)
               item.coerced_type = expected_item
               next
             end
@@ -650,7 +651,13 @@ module Annotator
         # 2. Infer base type from the first element.
         #    If all items are string-like (Byte[N] or String), widen to String so mixed
         #    string lengths ("a", "bb", "ccc") don't produce a type error.
-        if node.items.all? { |i| Type.new(T.must(i.resolved_type)).string? }
+        string_item_types = node.items.map { |item| item.full_type!(context: "list literal string element") }
+        all_strings = string_item_types.all?(&:string?)
+        string_element_sync = if all_strings
+          syncs = string_item_types.map(&:sync).uniq
+          syncs.first if syncs.length == 1
+        end
+        if all_strings
           base_type = :String
         else
           base_type = T.must(T.must(node.items.first).resolved_type)
@@ -664,9 +671,12 @@ module Annotator
         end
 
         if node.storage == :stack
-          stamp_type!(node, Type.new(:"#{base_type}[#{node.items.size}]"))
+          inferred = Type.new(:"#{base_type}[#{node.items.size}]")
+          inferred.elem_sync = string_element_sync if string_element_sync
+          stamp_type!(node, inferred)
         else
           t = Type.new(:"#{base_type}[]", location: :heap)
+          t.elem_sync = string_element_sync if string_element_sync
           t.mark_frame_allocated!  # makeList uses frameAlloc for backing
           stamp_type!(node, t)
         end

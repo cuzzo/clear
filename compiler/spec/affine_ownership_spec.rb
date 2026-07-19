@@ -202,6 +202,97 @@ RSpec.describe SemanticAnnotator do
             expect { ast }.not_to raise_error
           end
         end
+
+        context "copying a linear resource" do
+          let(:code) { <<~FLUX
+              EXTERN STRUCT Handle {} CLOSE "deinit" FROM "handle_fixture";
+
+              FN test(handle: Handle) ->
+                copy = COPY handle;
+              END
+            FLUX
+          }
+
+          it "rejects duplicating the CLOSE handle" do
+            expect { ast }.to raise_error(CompilerError, /Cannot COPY non-copyable type 'Handle'/)
+          end
+        end
+
+        context "copying a struct that transitively owns a linear resource" do
+          let(:code) { <<~FLUX
+              EXTERN STRUCT Handle {} CLOSE "deinit" FROM "handle_fixture";
+              STRUCT Owner { handle: Handle }
+
+              FN test(owner: Owner) ->
+                copy = COPY owner;
+              END
+            FLUX
+          }
+
+          it "rejects duplicating the nested CLOSE handle" do
+            expect { ast }.to raise_error(CompilerError, /Cannot COPY non-copyable type 'Owner'/)
+          end
+        end
+
+        context "copying a collection of linear resources" do
+          let(:code) { <<~FLUX
+              EXTERN STRUCT Handle {} CLOSE "deinit" FROM "handle_fixture";
+
+              FN test(handles: []Handle) ->
+                copy = COPY handles;
+              END
+            FLUX
+          }
+
+          it "rejects duplicating every CLOSE handle in the collection" do
+            expect { ast }.to raise_error(CompilerError, /Cannot COPY non-copyable type/)
+          end
+        end
+
+        context "copying a wrapped linear resource" do
+          wrapped_resource_programs = {
+            optional: <<~CLEAR,
+              EXTERN STRUCT Handle {} CLOSE "deinit" FROM "handle_fixture";
+              FN test(handle: ?Handle) -> copy = COPY handle; END
+            CLEAR
+            fallible: <<~CLEAR,
+              EXTERN STRUCT Handle {} CLOSE "deinit" FROM "handle_fixture";
+              FN test(handle: !Handle) -> copy = COPY handle; END
+            CLEAR
+            tuple: <<~CLEAR,
+              EXTERN STRUCT Handle {} CLOSE "deinit" FROM "handle_fixture";
+              FN test(handle: Tuple<Handle, Int64>) -> copy = COPY handle; END
+            CLEAR
+            map: <<~CLEAR,
+              EXTERN STRUCT Handle {} CLOSE "deinit" FROM "handle_fixture";
+              FN test(handle: {String}Handle) -> copy = COPY handle; END
+            CLEAR
+            union: <<~CLEAR,
+              EXTERN STRUCT Handle {} CLOSE "deinit" FROM "handle_fixture";
+              UNION Result { Resource: Handle, Count: Int64 }
+              FN test(handle: Result) -> copy = COPY handle; END
+            CLEAR
+            generic: <<~CLEAR,
+              EXTERN STRUCT Handle {} CLOSE "deinit" FROM "handle_fixture";
+              STRUCT Box<T> { value: T }
+              FN test(handle: Box<Handle>) -> copy = COPY handle; END
+            CLEAR
+            multiowned: <<~CLEAR,
+              EXTERN STRUCT Handle {} CLOSE "deinit" FROM "handle_fixture";
+              EXTERN FN makeHandle() RETURNS Handle FROM "handle_fixture";
+              FN test() ->
+                handle: Handle@multiowned = makeHandle() @multiowned;
+                copy = COPY handle;
+              END
+            CLEAR
+          }
+
+          wrapped_resource_programs.each do |shape, source|
+            it "rejects COPY through #{shape}" do
+              expect { run(source) }.to raise_error(CompilerError, /Cannot COPY non-copyable type/)
+            end
+          end
+        end
       end
     end
 
@@ -609,7 +700,7 @@ RSpec.describe SemanticAnnotator do
           UNION Value { Nil, Num: Float64, Lambda { body: Value @boxed, id: Int64 } }
           FN test(MUTABLE list: []Value) RETURNS !Void ->
               &list.append(Value.Nil);
-              f = list[0];
+              f:? = list[0];
               RETURN;
           END
         CLEAR

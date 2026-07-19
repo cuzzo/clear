@@ -6,7 +6,7 @@ FN makeLockedNode(n: Node) RETURNS !Node @locked ->
 END
 
 FN main() RETURNS Void ->
-    ln = makeLockedNode(Node{ v: 99 });
+    ln = TRY makeLockedNode(Node{ v: 99 });
 
     WITH EXCLUSIVE ln AS inner {
         ASSERT inner.v == 99, "inner.v should be 99";

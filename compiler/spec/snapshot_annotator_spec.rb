@@ -190,11 +190,22 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
       expect { run(bad) }.to raise_error(/.+/)
     end
 
-    it "rejects RETURN of any field via the alias (chain rooted at non_escaping is non_escaping)" do
-      bad = setup + <<~CLEAR
+    it "allows RETURN of an implicitly copyable field via the alias" do
+      good = setup + <<~CLEAR
         FN read_v() RETURNS Int64 ->
           c = C{ v: 42 } @versioned;
           WITH SNAPSHOT c AS view { RETURN view.v; }
+        END
+      CLEAR
+      expect { run(good) }.not_to raise_error
+    end
+
+    it "rejects RETURN of a borrow-bearing field via the alias" do
+      bad = <<~CLEAR
+        STRUCT Label { value: String }
+        FN read_label() RETURNS String ->
+          label = Label{ value: "borrowed" } @versioned;
+          WITH SNAPSHOT label AS view { RETURN view.value; }
         END
       CLEAR
       expect { run(bad) }.to raise_error(/Cannot RETURN a field of a WITH-scoped binding/i)

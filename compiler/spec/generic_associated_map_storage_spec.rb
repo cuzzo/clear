@@ -34,6 +34,8 @@ RSpec.describe "generic associated-key map storage" do
     expect(zig).to include("CheatLib.mapProtocolGet(&self.entries")
     expect(zig).to include("const __tmp_1 = CheatLib.StringMap([]const u8){ .alloc = rt.heapAlloc() };")
     expect(zig).to include("Index(CheatLib.StringMap([]const u8)){ .entries = __tmp_1 }")
+    expect(zig).to include("dupeValue(@TypeOf(__copy_src)")
+    expect(zig).not_to include("HashMap<M::")
     expect(zig).not_to include("entries: CheatLib.MapType(CheatLib.MapFacts(M).Key, CheatLib.MapFacts(M).Value) =")
   end
 
@@ -108,7 +110,7 @@ RSpec.describe "generic associated-key map storage" do
       IMPLEMENTATION Holder {
         METHOD identity(self, key: String) RETURNS String -> RETURN COPY key; END
         METHOD copied(self) RETURNS !?String ->
-          current = COPY self.key;
+          current:? = COPY self.key;
           IF current EXISTS AS key THEN RETURN self.identity(key); END
           RETURN NIL;
         END

@@ -17,7 +17,7 @@ END
 
 FN main() RETURNS Void ->
     # Test 1: expression return (BinaryOp on frame string)
-    g = greet("John", "Doe");
+    g = TRY greet("John", "Doe");
     MUTABLE i: Int64 = 0;
     WHILE i < 5 DO
         junk = "XXXXXXXXXX" $+ i.toString();
@@ -26,7 +26,7 @@ FN main() RETURNS Void ->
     ASSERT g == "Hello John Doe", "expression return string survives frame rewind";
 
     # Test 2: multi-operand expression return with toString
-    p = formatNum("count", 42);
+    p = TRY formatNum("count", 42);
     MUTABLE j: Int64 = 0;
     WHILE j < 5 DO
         junk2 = "YYYYYYYYYY" $+ j.toString();

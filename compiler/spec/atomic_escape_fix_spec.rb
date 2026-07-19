@@ -40,7 +40,7 @@ RSpec.describe "Atomic-escape fixable finding (M2.8)" do
       <<~CLEAR
         FN spawn() RETURNS ~Void ->
           counter: Int64 = 0 @shared:atomic;
-          bg = BG { v = counter; print(v.toString()); };
+          bg:~ = BG { v = counter; print(v.toString()); };
           RETURN bg;
         END
       CLEAR
@@ -99,7 +99,7 @@ RSpec.describe "Atomic-escape fixable finding (M2.8)" do
       multi_decl_src = <<~CLEAR
         FN spawn() RETURNS ~Void ->
           a: Int64 = 0_i64 @shared:atomic; counter: Int64 = 0_i64 @shared:atomic;
-          bg = BG { v = counter; print(v.toString()); };
+          bg:~ = BG { v = counter; print(v.toString()); };
           RETURN bg;
         END
       CLEAR
@@ -126,7 +126,7 @@ RSpec.describe "Atomic-escape fixable finding (M2.8)" do
       src = <<~CLEAR
         STRUCT C { v: Int64 }
         FN spawn(MUTABLE c: C) RETURNS ~Void ->
-          bg = BG { x = c.v; print(x.toString()); };
+          bg:~ = BG { x = c.v; print(x.toString()); };
           RETURN bg;
         END
       CLEAR

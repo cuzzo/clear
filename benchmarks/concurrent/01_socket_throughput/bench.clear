@@ -28,9 +28,9 @@
 #   `client` (reader fd) is owned by main; its defer fires on RETURN.
 
 FN main() RETURNS Void ->
-  server = TCPServer::listen(14_537);
-  conn = TCPClient::connect("127.0.0.1", 14_537);
-  client = server.accept();
+  server = TRY TCPServer::listen(14_537);
+  conn = TRY TCPClient::connect("127.0.0.1", 14_537);
+  client = TRY server.accept();
 
   # Writer fiber: sends 100 000 × 256-byte messages.
   # `conn` is an i32, captured by value into the BG closure.

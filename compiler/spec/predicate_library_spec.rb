@@ -103,6 +103,19 @@ RSpec.describe "predicate library — numeric" do
       expect { transpile(src) }.not_to raise_error
     end
 
+    it "compiles explicit UTF-8 validation at byte-input boundaries" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          source = "valid UTF-8";
+          ASSERT source.validUtf8?();
+          RETURN;
+        END
+      CLEAR
+
+      zig = transpile(src)
+      expect(zig).to include("std.unicode.utf8ValidateSlice")
+    end
+
     it "emits std.mem.startsWith / endsWith for the predicates" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
@@ -115,6 +128,39 @@ RSpec.describe "predicate library — numeric" do
       out = transpile(src)
       expect(out).to match(/std\.mem\.startsWith\(u8, /)
       expect(out).to match(/std\.mem\.endsWith\(u8, /)
+    end
+
+    it "emits zero-copy String.deletePrefix with the receiver lifetime" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          prefixed = "@shared";
+          stripped = prefixed.deletePrefix("@");
+          ASSERT stripped == "shared";
+          unchanged = prefixed.deletePrefix("missing");
+          ASSERT unchanged == prefixed;
+          RETURN;
+        END
+      CLEAR
+
+      out = transpile(src)
+      expect(out).to match(/std\.mem\.startsWith\(u8, /)
+      expect(out).to include('["@".len..]')
+    end
+
+    it "types split results as bounds-safe dynamic lists" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          parts = "a@b".split("@");
+          first = parts[0] OR_ELSE "";
+          missing = parts[20] OR_ELSE "fallback";
+          ASSERT first == "a";
+          ASSERT missing == "fallback";
+          RETURN;
+        END
+      CLEAR
+
+      out = transpile(src)
+      expect(out).to include("CheatLib.getAtOpt")
     end
 
     it "compiles xs.first() / xs.last() on Int64[]" do

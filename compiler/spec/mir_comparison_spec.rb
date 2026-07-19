@@ -29,6 +29,7 @@ RSpec.describe MIREmitter do
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
+      lifecycle_registry: result.lifecycle_registry,
       fn_sigs: result.fn_sigs
     ))
     emitter = MIREmitter.new
@@ -136,6 +137,7 @@ RSpec.describe MIREmitter do
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
+      lifecycle_registry: result.lifecycle_registry,
       fn_sigs: result.fn_sigs
     ))
     emitter = MIREmitter.new
@@ -299,6 +301,7 @@ RSpec.describe MIREmitter do
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
+      lifecycle_registry: result.lifecycle_registry,
       fn_sigs: result.fn_sigs
     ))
     emitter = MIREmitter.new
@@ -409,7 +412,10 @@ RSpec.describe MIREmitter do
       CLEAR
 
       result = compile_mir_frontend(src)
-      lowering = MIRLowering.new(input: MIRLoweringInput.new(fn_sigs: result.fn_sigs))
+      lowering = MIRLowering.new(input: MIRLoweringInput.new(
+        fn_sigs: result.fn_sigs,
+        lifecycle_registry: result.lifecycle_registry,
+      ))
       emitter = MIREmitter.new
 
       program = lowering.lower(result.ast)
@@ -432,7 +438,7 @@ RSpec.describe MIREmitter do
     it "lowers optional orelse correctly" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          items = [1, 2, 3];
+          items: []Int64 = [1, 2, 3];
           first = items[0] OR_ELSE 0;
           RETURN;
         END

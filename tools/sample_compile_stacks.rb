@@ -47,6 +47,7 @@ require "mir/mir_pass"
 require "mir_lowering"
 require "mir_checker"
 require "backends/mir_emitter"
+require_relative "annotation_phase_profiler"
 
 T::Private::Methods.run_all_sig_blocks if !options[:checked] && defined?(T::Private::Methods)
 
@@ -150,6 +151,8 @@ ModuleImporter.prepend(ImporterTimingProbe)
 main_thread = Thread.current
 sampler = StackSampler.new(main_thread, interval: options[:interval])
 timings = {}
+AnnotationPhaseProfiler.install!(listener: sampler)
+AnnotationPhaseProfiler.reset!(listener: sampler)
 sampler.start
 
 frontend = nil
@@ -158,10 +161,13 @@ items = nil
 
 begin
   importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
-  tokens = timed_phase("lex", sampler, timings) { Lexer.new(source).tokenize }
-  ast = timed_phase("parse", sampler, timings) { ClearParser.new(tokens, source).parse }
+  source = CHeaderImporter.expand(source, source_dir: source_dir)
+  budget = FrontendResourceBudget.new
+  tokens = timed_phase("lex", sampler, timings) { Lexer.new(source, budget: budget).tokenize }
+  ast = timed_phase("parse", sampler, timings) { ClearParser.new(tokens, source, budget: budget).parse }
   annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: false, source_code: source)
   timed_phase("annotate", sampler, timings) { annotator.annotate!(ast) }
+  lifecycle_registry = annotator.annotation_products.typed_program.lifecycle_registry
   timed_phase("pipeline_rewrite", sampler, timings) do
     PipelineRewriter.new(annotator).rewrite!(ast)
     MIRPassState.for!(ast).mark!(:pipeline_rewritten)
@@ -171,7 +177,7 @@ begin
     MIRPassState.for!(ast).mark!(:string_concat_rewritten)
   end
   schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-  timed_phase("hoist", sampler, timings) { Hoist.apply!(ast, schema_lookup: schema_lookup) }
+  hoist_result = timed_phase("hoist", sampler, timings) { Hoist.apply!(ast, schema_lookup: schema_lookup) }
   fn_nodes = {}
   ast.statements.each { |stmt| fn_nodes[stmt.name] = stmt if stmt.is_a?(AST::FunctionDef) }
   timed_phase("synthesize_tests", sampler, timings) { CompilerFrontend.synthesize_test_body_wrappers!(ast, fn_nodes) }
@@ -180,7 +186,9 @@ begin
     MIRPass.new(
       fn_nodes: fn_nodes,
       schema_lookup: schema_lookup,
-      body_summaries: annotator.semantic_index.body_summaries
+      lifecycle_registry: lifecycle_registry,
+      body_summaries: annotator.semantic_index.body_summaries,
+      hoist_bindings: hoist_result.bindings_by_function
     ).transform!(ast)
   end
 
@@ -194,7 +202,7 @@ begin
     when AST::UnionDef
       union_schemas[stmt.name.to_sym] = Schemas::UnionSchema.new(
         variants: stmt.variants,
-        type_params: stmt.type_params&.any? ? stmt.type_params.map(&:to_sym) : nil,
+        type_params: stmt.type_params.map(&:to_sym),
         visibility: stmt.visibility || :package,
       )
     end
@@ -203,20 +211,32 @@ begin
   ast.statements.each do |stmt|
     fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt) if stmt.is_a?(AST::FunctionDef)
   end
-  annotator.scope_stack.first.visible_entries.each do |name, entry|
+  annotator.semantic_root_scope.visible_entries.each do |name, entry|
     next if fn_sigs.key?(name)
     sig = entry.fn_signature
     fn_sigs[name] = sig if sig && sig.module_alias
   end
   moved_guard_info = {}
   fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
-  frontend = CompilerFrontend::Result.new(ast, annotator, fn_nodes, fn_sigs, struct_schemas, enum_schemas, union_schemas, moved_guard_info)
+  frontend = CompilerFrontend::Result.new(
+    ast: ast,
+    annotator: annotator,
+    lifecycle_registry: lifecycle_registry,
+    fn_nodes: fn_nodes,
+    fn_sigs: fn_sigs,
+    struct_schemas: struct_schemas,
+    enum_schemas: enum_schemas,
+    union_schemas: union_schemas,
+    moved_guard_info: moved_guard_info,
+  )
 
   unless options[:mode] == "frontend-only"
     lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: frontend.struct_schemas,
       enum_schemas: frontend.enum_schemas,
       union_schemas: frontend.union_schemas,
+      schema_lookup: schema_lookup,
+      lifecycle_registry: frontend.lifecycle_registry,
       fn_sigs: frontend.fn_sigs,
       moved_guard_info: frontend.moved_guard_info,
       importer: importer,
@@ -252,11 +272,13 @@ report = {
   checked: options[:checked],
   interval: options[:interval],
   timings: timings,
+  annotation_phases: AnnotationPhaseProfiler.serializable_records,
   importer: IMPORTER_STATS.map { |key, val| { key: key, calls: val[:calls], seconds: val[:seconds] } }.sort_by { |row| [-row[:seconds], row[:key]] },
   phases: {},
 }
 
-timings.keys.each do |phase|
+sample_phase_names = (timings.keys + AnnotationPhaseProfiler::PHASES.keys.map { |name| "annotate.#{name}" }).uniq
+sample_phase_names.each do |phase|
   samples = sampler.samples_by_phase[phase].to_i
   report[:phases][phase] = {
     samples: samples,
@@ -271,11 +293,12 @@ File.write(options[:output], JSON.pretty_generate(report))
 puts "checked=#{options[:checked]} interval=#{options[:interval]} output=#{options[:output]}"
 puts timings.map { |name, data| "#{name}=#{format("%.6f", data[:seconds])}" }.join(" ")
 puts "total=#{format("%.6f", timings.values.sum { |data| data[:seconds] })}"
+AnnotationPhaseProfiler.report(annotation_total: timings.dig("annotate", :seconds))
 puts "== importer =="
 report[:importer].first(options[:top]).each do |row|
   puts "%10.6f %5d %s" % [row[:seconds], row[:calls], row[:key]]
 end
-timings.keys.each do |phase|
+sample_phase_names.each do |phase|
   samples = report[:phases][phase][:samples]
   puts "== #{phase} samples=#{samples} =="
   report[:phases][phase][:top_frames].first(15).each do |row|

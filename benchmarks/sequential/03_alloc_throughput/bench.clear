@@ -47,12 +47,12 @@ FN main() RETURNS Void ->
   n = 10_000;
 
   # Warmup
-  warmR = benchRegular(100);
-  warmT = benchTight(100);
+  warmR = TRY benchRegular(100);
+  warmT = TRY benchTight(100);
 
   # Primary measurement: TIGHT WHILE (apples-to-apples vs C malloc + Rust Vec)
   t0 = timestampMs();
-  totalT = benchTight(n);
+  totalT = TRY benchTight(n);
   tightMs = timestampMs() - t0;
 
   # Declare the primary result for runner.rb
@@ -60,7 +60,7 @@ FN main() RETURNS Void ->
 
   # Regular FOR loops (CLEAR overhead reference, not cross-language comparison)
   t1 = timestampMs();
-  totalR = benchRegular(n);
+  totalR = TRY benchRegular(n);
   regularMs = timestampMs() - t1;
 
   ASSERT totalT == totalR, "results must match";

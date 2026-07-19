@@ -19,14 +19,14 @@ FN main() RETURNS Void ->
     c = Counter{ value: 0 } @shared:locked;
     timed_out = Counter{ value: 0 } @shared:locked;
 
-    holder = BG {
+    holder:~ = BG {
         WITH EXCLUSIVE c AS inner {
             napFor(300);
             inner.value = 1;
         }
     };
 
-    waiter = BG {
+    waiter:~ = BG {
         napFor(20);
         WITH EXCLUSIVE c AS inner {
             inner.value = 999;

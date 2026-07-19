@@ -154,7 +154,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     IF id == 25 THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
     # String
     IF id == 26 THEN
-        MUTABLE out = getStr(evaled[1]);
+        MUTABLE out = TRY getStr(evaled[1]);
         FOR si IN (2_i64 ..< evaled.length()) DO
             out = out $+ getStr(evaled[si]);
         END
@@ -162,13 +162,13 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     END
     IF id == 27 THEN RETURN Value{ Number: toFloat(getStr(evaled[1]).length()) }; END
     IF id == 28 THEN
-        s = getStr(evaled[1]);
+        s = TRY getStr(evaled[1]);
         start = toInt(getNum(evaled[2]));
         end_ = toInt(getNum(evaled[3]));
         RETURN Value{ Str: substr(s, start, end_ - start) };
     END
     IF id == 29 THEN
-        s = getStr(evaled[1]);
+        s = TRY getStr(evaled[1]);
         idx = toInt(getNum(evaled[2]));
         RETURN Value{ Str: charAt(s, idx) };
     END
@@ -190,16 +190,16 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     # String stdlib: 38=startsWith?, 39=split, 40=indexOf, 41=contains?, 42=trim, 43=charAt, 44=substr
     IF id == 38 THEN
         # startsWith?(str, prefix)
-        s = getStr(evaled[1]);
-        prefix = getStr(evaled[2]);
+        s = TRY getStr(evaled[1]);
+        prefix = TRY getStr(evaled[2]);
         IF prefix.length() == 0 THEN RETURN Value.TrueVal; END
         IF s.length() < prefix.length() THEN RETURN Value.FalseVal; END
         RETURN boolVal(substr(s, 0, prefix.length()) == prefix);
     END
     IF id == 39 THEN
         # split(str, delim) -> List of strings
-        s = getStr(evaled[1]);
-        delim = getStr(evaled[2]);
+        s = TRY getStr(evaled[1]);
+        delim = TRY getStr(evaled[2]);
         MUTABLE parts: []Value = List[];
         MUTABLE start: Int64 = 0;
         MUTABLE si: Int64 = 0;
@@ -221,8 +221,8 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         # indexOf(str, needle) -> ?Int64: index when found, Nil when not.
         # CLEAR's indexOf returns an optional; consumers use IF ... AS bind
         # or `OR_ELSE -1` fallback. Returning -1 inline broke the Nil-check path.
-        s = getStr(evaled[1]);
-        needle = getStr(evaled[2]);
+        s = TRY getStr(evaled[1]);
+        needle = TRY getStr(evaled[2]);
         MUTABLE idx: Int64 = 0;
         WHILE idx <= s.length() - needle.length() DO
             IF substr(s, idx, needle.length()) == needle THEN
@@ -246,8 +246,8 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
                 END
                 RETURN Value.FalseVal;,
             DEFAULT ->
-                s = getStr(evaled[1]);
-                needle = getStr(evaled[2]);
+                s = TRY getStr(evaled[1]);
+                needle = TRY getStr(evaled[2]);
                 IF needle.length() == 0 THEN RETURN Value.TrueVal; END
                 MUTABLE ci: Int64 = 0;
                 WHILE ci + needle.length() <= s.length() DO
@@ -259,7 +259,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     END
     IF id == 42 THEN
         # trim: strip leading/trailing whitespace
-        s = getStr(evaled[1]);
+        s = TRY getStr(evaled[1]);
         MUTABLE trimStart: Int64 = 0;
         WHILE trimStart < s.length() AND (charAt(s, trimStart) == " " OR charAt(s, trimStart) == "\n" OR charAt(s, trimStart) == "\t" OR charAt(s, trimStart) == "\r") DO
             trimStart += 1;
@@ -272,8 +272,8 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     END
     IF id == 48 THEN
         # endsWith?(str, suffix)
-        s = getStr(evaled[1]);
-        suffix = getStr(evaled[2]);
+        s = TRY getStr(evaled[1]);
+        suffix = TRY getStr(evaled[2]);
         IF suffix.length() == 0 THEN RETURN Value.TrueVal; END
         IF s.length() < suffix.length() THEN RETURN Value.FalseVal; END
         RETURN boolVal(substr(s, s.length() - suffix.length(), suffix.length()) == suffix);
@@ -281,7 +281,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     IF id == 49 THEN
         # join(list, separator) -> string
         MUTABLE joined = "";
-        sep = getStr(evaled[2]);
+        sep = TRY getStr(evaled[2]);
         PARTIAL MATCH evaled[1] START
             Value.List AS joinItems ->
                 FOR ji IN (0_i64 ..< joinItems.length()) DO
@@ -325,11 +325,11 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     # fileReadAll / fileWrite can extract it later. The auto-injected
     # close from MIR::Cleanup (kind=:resource) is a no-op on Str.
     IF id == 112 THEN
-        path = getStr(evaled[1]);
+        path = TRY getStr(evaled[1]);
         RETURN Value{ Str: COPY path };
     END
     IF id == 113 THEN
-        path = getStr(evaled[1]);
+        path = TRY getStr(evaled[1]);
         # Truncate-on-create: write empty content so the file exists
         # and is empty, matching File::create semantics. fileWrite
         # (114) re-truncates each call too, but pre-truncating means
@@ -338,7 +338,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         RETURN Value{ Str: COPY path };
     END
     IF id == 114 THEN
-        path = getStr(evaled[1]);
+        path = TRY getStr(evaled[1]);
         content = readFile(path) OR_ELSE "";
         IF content == "" THEN
             RETURN Value.Error{ errMsg: "fileReadAll failed", errKind: "NotFound", errType: "" };
@@ -346,14 +346,14 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         RETURN Value{ Str: COPY content };
     END
     IF id == 115 THEN
-        path = getStr(evaled[1]);
-        content = getStr(evaled[2]);
+        path = TRY getStr(evaled[1]);
+        content = TRY getStr(evaled[2]);
         writeFile(path, content);
         RETURN Value.Nil;
     END
     # File I/O: 45=readFile, 46=writeFile, 47=shell
     IF id == 45 THEN
-        path = getStr(evaled[1]);
+        path = TRY getStr(evaled[1]);
         content = readFile(path) OR_ELSE "";
         IF content == "" THEN
             # readFile failed (file not found, perm denied, etc). Return a
@@ -364,13 +364,13 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
         RETURN Value{ Str: COPY content };
     END
     IF id == 46 THEN
-        path = getStr(evaled[1]);
-        content = getStr(evaled[2]);
+        path = TRY getStr(evaled[1]);
+        content = TRY getStr(evaled[2]);
         writeFile(path, content);
         RETURN Value.Nil;
     END
     IF id == 47 THEN
-        cmd = getStr(evaled[1]);
+        cmd = TRY getStr(evaled[1]);
         output = shell(cmd);
         RETURN Value{ Str: COPY output };
     END
@@ -381,7 +381,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     END
     IF id == 43 THEN
         # substr(str, start, len) - CLEAR-style
-        s = getStr(evaled[1]);
+        s = TRY getStr(evaled[1]);
         start = toInt(getNum(evaled[2]));
         MUTABLE len: Int64 = toInt(getNum(evaled[3]));
         IF start + len > s.length() THEN len = s.length() - start; END
@@ -438,26 +438,26 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
 
     # String methods: 57=codepointCount, 58=bytes, 59=replace, 60=toUpper, 61=toLower
     IF id == 57 THEN
-        s = getStr(evaled[1]);
+        s = TRY getStr(evaled[1]);
         RETURN Value{ Int64Val: codepointCount(s) };
     END
     IF id == 58 THEN
-        s = getStr(evaled[1]);
+        s = TRY getStr(evaled[1]);
         RETURN Value{ Int64Val: s.length() };
     END
     IF id == 59 THEN
         # replace(str, old, new)
-        s = getStr(evaled[1]);
-        old = getStr(evaled[2]);
-        new = getStr(evaled[3]);
+        s = TRY getStr(evaled[1]);
+        old = TRY getStr(evaled[2]);
+        new = TRY getStr(evaled[3]);
         RETURN Value{ Str: replace(s, old, new) };
     END
     IF id == 60 THEN
-        s = getStr(evaled[1]);
+        s = TRY getStr(evaled[1]);
         RETURN Value{ Str: upcase(s) };
     END
     IF id == 61 THEN
-        s = getStr(evaled[1]);
+        s = TRY getStr(evaled[1]);
         RETURN Value{ Str: downcase(s) };
     END
     IF id == 62 THEN
@@ -543,7 +543,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     END
     IF id == 65 THEN
         # parse-i64: parse decimal string directly to Int64 (avoids float64 precision loss)
-        s = getStr(evaled[1]);
+        s = TRY getStr(evaled[1]);
         parsed = toInt(s) OR_ELSE 0;
         RETURN Value{ Int64Val: parsed };
     END
@@ -553,32 +553,32 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     # without reimplementing them in Scheme primitives.
     IF id == 100 THEN
         # downcase(s)
-        s = getStr(evaled[1]);
+        s = TRY getStr(evaled[1]);
         RETURN Value{ Str: COPY s.downcase() };
     END
     IF id == 101 THEN
         # upcase(s)
-        s = getStr(evaled[1]);
+        s = TRY getStr(evaled[1]);
         RETURN Value{ Str: COPY s.upcase() };
     END
     IF id == 102 THEN
         # replace(s, from, to)
-        s = getStr(evaled[1]);
-        fromS = getStr(evaled[2]);
-        toS = getStr(evaled[3]);
+        s = TRY getStr(evaled[1]);
+        fromS = TRY getStr(evaled[2]);
+        toS = TRY getStr(evaled[3]);
         RETURN Value{ Str: COPY s.replace(fromS, toS) };
     END
     IF id == 103 THEN
         # parseFloat(s) -> ?Float64 (returns Nil on parse failure)
-        s = getStr(evaled[1]);
-        parsed = s.toNumber();
+        s = TRY getStr(evaled[1]);
+        parsed:? = s.toNumber();
         IF parsed EXISTS AS f THEN RETURN Value{ Number: f }; END
         RETURN Value.Nil;
     END
     IF id == 104 THEN
         # countOccurrences(haystack, needle)
-        haystack = getStr(evaled[1]);
-        needle = getStr(evaled[2]);
+        haystack = TRY getStr(evaled[1]);
+        needle = TRY getStr(evaled[2]);
         MUTABLE cnt: Int64 = 0;
         MUTABLE pos: Int64 = 0;
         nlen = needle.length();
@@ -598,7 +598,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS !Value EFFECTS REENTRANT ->
     END
     IF id == 105 THEN
         # fileSize(path) -> Int64 (bytes) or -1 on error
-        path = getStr(evaled[1]);
+        path = TRY getStr(evaled[1]);
         # Use readFile + length as a portable fallback; real fstat isn't
         # exposed to the VM layer yet.
         contents = readFile(path);
@@ -893,7 +893,7 @@ FN handleCatch(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>
                 catchEnvId: Id<Env> = &p.insert(Env{ vars: {} });
                 IF p[catchEnvId] EXISTS AS catchEnv THEN
                     catchEnv.vars["__p"] = Value{ EnvRef: envId };
-                    errBindName = getSymName(catchItems[1]);
+                    errBindName = TRY getSymName(catchItems[1]);
                     catchEnv.vars[errBindName] = Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind, errType: "" };
                 END
                 catchEnvIdHolder = catchEnvId;
@@ -976,7 +976,7 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
   EFFECTS REENTRANT
 ->
     IF items.length() == 0 THEN RETURN Value.Nil; END
-    formName = getSymName(items[0]);
+    formName = TRY getSymName(items[0]);
 
     # Pipeline operations: special forms that call lambdas
     IF formName == "list-where" THEN
@@ -1663,7 +1663,7 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
 
     # Sandboxed I/O: check __sandbox flag before file/shell ops
     ELSE_IF formName == "sandboxed-read" THEN
-        sandbox = envGet(envId, "__sandbox", &pool);
+        sandbox = TRY envGet(envId, "__sandbox", &pool);
         IF isTruthy?(sandbox) THEN
             RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission", errType: "" };
         END
@@ -1673,7 +1673,7 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
         RETURN Value{ Str: COPY content };
 
     ELSE_IF formName == "sandboxed-write" THEN
-        sandbox = envGet(envId, "__sandbox", &pool);
+        sandbox = TRY envGet(envId, "__sandbox", &pool);
         IF isTruthy?(sandbox) THEN
             RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission", errType: "" };
         END
@@ -1685,7 +1685,7 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
         RETURN Value.Nil;
 
     ELSE_IF formName == "sandboxed-shell" THEN
-        sandbox = envGet(envId, "__sandbox", &pool);
+        sandbox = TRY envGet(envId, "__sandbox", &pool);
         IF isTruthy?(sandbox) THEN
             RETURN Value.Error{ errMsg: "shell not permitted (run with --allow-io)", errKind: "Permission", errType: "" };
         END
@@ -1788,8 +1788,8 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
         kind = (eval(COPY items[2], envId, &pool) OR_ELSE RAISE);
         IF isError?(kind) THEN RETURN kind; END
         # Include source line in error message if tracked
-        srcLine = envGet(envId, "__source_line", &pool);
-        MUTABLE errMsg: String = getStr(msg);
+        srcLine = TRY envGet(envId, "__source_line", &pool);
+        MUTABLE errMsg: String = TRY getStr(msg);
         IF getNum(srcLine) > 0.0 THEN
             lineNum = toInt(getNum(srcLine));
             errMsg = errMsg $+ " (line " $+ lineNum.toString() $+ ")";
@@ -1807,14 +1807,14 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
         RETURN tryResult;
 
     ELSE_IF formName == "def!" OR formName == "define" THEN
-        defName = getSymName(items[1]);
+        defName = TRY getSymName(items[1]);
         val = (eval(COPY items[2], envId, &pool) OR_ELSE RAISE);
         IF isError?(val) THEN RETURN val; END
         WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS env THEN env.vars[defName] = COPY val; END }
         RETURN val;
 
     ELSE_IF formName == "set!" THEN
-        setName = getSymName(items[1]);
+        setName = TRY getSymName(items[1]);
         setVal = (eval(COPY items[2], envId, &pool) OR_ELSE RAISE);
         IF isError?(setVal) THEN RETURN setVal; END
         envSet(envId, setName, setVal, &pool) OR_ELSE RAISE;
@@ -1822,13 +1822,13 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
 
     ELSE_IF formName == "vector-set!" THEN
         # (vector-set! var idx val) - copy-modify-store: get vector, rebuild with new slot, store back
-        vecName = getSymName(items[1]);
+        vecName = TRY getSymName(items[1]);
         idxVal = (eval(COPY items[2], envId, &pool) OR_ELSE RAISE);
         IF isError?(idxVal) THEN RETURN idxVal; END
         newElem = (eval(COPY items[3], envId, &pool) OR_ELSE RAISE);
         IF isError?(newElem) THEN RETURN newElem; END
         idx = getInt(idxVal);
-        MUTABLE existingVec = envGet(envId, vecName, &pool);
+        MUTABLE existingVec = TRY envGet(envId, vecName, &pool);
         MUTABLE newVec: []Value = List[];
         PARTIAL MATCH existingVec START
             Value.Vector AS oldVec ->
@@ -1846,9 +1846,9 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
 
     ELSE_IF formName == "list-remove-at!" THEN
         # list-remove-at! varname idx: removes element at idx, returns removed element
-        lraName = getSymName(items[1]);
+        lraName = TRY getSymName(items[1]);
         lraIdx = getInt((eval(COPY items[2], envId, &pool) OR_ELSE RAISE));
-        lraCurrent = envGet(envId, lraName, &pool);
+        lraCurrent = TRY envGet(envId, lraName, &pool);
         PARTIAL MATCH lraCurrent START
             Value.List AS lraElems ->
                 IF lraIdx < 0 OR lraIdx >= lraElems.length() THEN RETURN Value.Nil; END
@@ -1882,8 +1882,8 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
 
     ELSE_IF formName == "stream-next!" THEN
         # (stream-next! var) - advance stream: return head, update var to tail
-        snName = getSymName(items[1]);
-        snCurrent = envGet(envId, snName, &pool);
+        snName = TRY getSymName(items[1]);
+        snCurrent = TRY envGet(envId, snName, &pool);
         PARTIAL MATCH snCurrent START
             Value.List AS snElems ->
                 IF snElems.length() == 0 THEN RETURN Value.Nil; END
@@ -1913,7 +1913,7 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
                         FOR bi IN (0_i64 ..< binds.length()) DO
                             PARTIAL MATCH binds[bi] START
                                 Value.List AS pair ->
-                                    bName = getSymName(pair[0]);
+                                    bName = TRY getSymName(pair[0]);
                                     bVal = (eval(COPY pair[1], letId, &pool) OR_ELSE RAISE);
                                     IF isError?(bVal) THEN RETURN bVal; END
                                     WITH POLYMORPHIC EXCLUSIVE pool AS p {
@@ -1925,7 +1925,7 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
                     ELSE
                         MUTABLE bi: Int64 = 0;
                         WHILE bi < binds.length() DO
-                            bName = getSymName(binds[bi]);
+                            bName = TRY getSymName(binds[bi]);
                             bVal = (eval(COPY binds[bi + 1], letId, &pool) OR_ELSE RAISE);
                             IF isError?(bVal) THEN RETURN bVal; END
                             WITH POLYMORPHIC EXCLUSIVE pool AS p {
@@ -1991,7 +1991,7 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
         f = evaled[0] OR_ELSE Value.Nil;
 
         # Debug: check breakpoints + step mode
-        calledName = getSymName(items[0]);
+        calledName = TRY getSymName(items[0]);
         IF calledName.length() > 0 THEN
             # Build call description
             MUTABLE callDesc = calledName $+ "(";
@@ -2002,7 +2002,7 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
             callDesc = callDesc $+ ")";
 
             # Check if we should break: explicit breakpoint OR_ELSE step mode
-            bpKey = envGet(envId, "__bp_" $+ calledName, &pool);
+            bpKey = TRY envGet(envId, "__bp_" $+ calledName, &pool);
             stepMode = getNum(envGet(envId, "__dbg_step", &pool));
             curDepth = getNum(envGet(envId, "__dbg_depth", &pool));
             targetDepth = getNum(envGet(envId, "__dbg_target_depth", &pool));
@@ -2017,7 +2017,7 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
 
             IF shouldBreak THEN
                 # Push call stack
-                oldStack = getStr(envGet(envId, "__dbg_stack", &pool));
+                oldStack = TRY getStr(envGet(envId, "__dbg_stack", &pool));
                 WITH POLYMORPHIC EXCLUSIVE pool AS p {
                     IF p[envId] EXISTS AS dbgEnv THEN
                         IF oldStack.length() > 0 THEN
@@ -2032,7 +2032,7 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
 
                 # Handle inspect requests from debugger
                 WHILE action == 4 DO
-                    inspAst = envGet(envId, "__dbg_inspect", &pool);
+                    inspAst = TRY envGet(envId, "__dbg_inspect", &pool);
                     inspResult = (eval(COPY inspAst, envId, &pool) OR_ELSE RAISE);
                     action = debugPause(callDesc, envId, prStr(inspResult, TRUE), &pool) OR_ELSE RAISE;
                 END
@@ -2061,7 +2061,7 @@ FN evalList(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env
                         IF p[callIdNew] EXISTS AS callEnv THEN
                             callEnv.vars["__p"] = Value{ EnvRef: lam.envId };
                             FOR pi IN (0_i64 ..< lam.params.length()) DO
-                                pname = getSymName(lam.params[pi] OR_ELSE Value.Nil);
+                                pname = TRY getSymName(lam.params[pi]);
                                 callEnv.vars[pname] = evaled[pi + 1] OR_ELSE Value.Nil;
                             END
                         END
@@ -2260,7 +2260,7 @@ FN loadBytecodeOps(path: String, MUTABLE pool: [Pool(50000)]Env) RETURNS !Int64[
     parts = split(raw, ",");
     MUTABLE ops: []Int64 = List[];
     FOR pi IN (0_i64 ..< parts.length()) DO
-        part = trim(parts[pi]);
+        part = trim(UNWRAP parts[pi]);
         IF part.length() > 0 THEN
             n = toNumber(part) OR_ELSE 0.0;
             intN = toInt(n);
@@ -2377,7 +2377,7 @@ FN compile(ast: Value, envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !
     MUTABLE consts: []Value = List[];
 
     IF isSymbol?(ast) THEN
-        symName = getSymName(ast);
+        symName = TRY getSymName(ast);
         # Check if this symbol has a slot assignment
         MUTABLE slotLookup = Value{ Number: 0.0 - 1.0 };
         WITH POLYMORPHIC EXCLUSIVE pool AS p { IF p[envId] EXISTS AS slotEnv THEN slotLookup = slotEnv.vars["__slot_" $+ symName] OR_ELSE Value{ Number: 0.0 - 1.0 }; END }
@@ -2396,7 +2396,7 @@ FN compile(ast: Value, envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !
     ELSE
         PARTIAL MATCH ast START Value.List AS items ->
         IF items.length() > 0 THEN
-            formName = getSymName(items[0]);
+            formName = TRY getSymName(items[0]);
 
             IF formName == "quote" THEN
                 cidx = consts.length(); &consts.append(COPY items[1]);
@@ -2430,7 +2430,7 @@ FN compile(ast: Value, envId: Id<Env>, MUTABLE pool: [Pool(50000)]Env) RETURNS !
                 ev1 = (eval(COPY items[2], envId, &pool) OR_ELSE RAISE);
                 c1 = consts.length(); &consts.append(ev1);
                 &ops.append(Value{ Number: 0.0 }); &ops.append(Value{ Number: toFloat(c1) });
-                defName = getSymName(items[1]);
+                defName = TRY getSymName(items[1]);
                 MUTABLE nextSlot: Int64 = 0;
                 WITH POLYMORPHIC EXCLUSIVE pool AS p {
                     IF p[envId] EXISTS AS defSlotEnv THEN
@@ -2611,7 +2611,7 @@ FN exec(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000
                 sp += 1;,
             1 ->  # LOAD_NAME
                 idx = ops[ip]; ip += 1;
-                pv = envGet(curEnv, getSymName(consts[idx]), &pool);
+                pv = TRY envGet(curEnv, getSymName(consts[idx]), &pool);
                 IF sp >= stack.length() THEN &stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             2 ->  # STORE_NAME
@@ -2746,7 +2746,7 @@ FN exec(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000
                                 IF p[bcCallIdNew] EXISTS AS bcCallEnv THEN
                                     bcCallEnv.vars["__p"] = Value{ EnvRef: lam.envId };
                                     FOR pi IN (0_i64 ..< argc) DO
-                                        pname = getSymName(lam.params[pi]);
+                                        pname = TRY getSymName(lam.params[pi]);
                                         bcCallEnv.vars[pname] = COPY (stack[sp - argc + pi] OR_ELSE Value.Nil);
                                     END
                                 END
@@ -2853,8 +2853,8 @@ FN exec(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000
             35 -> # JUMP_BACK
                 ip = ops[ip];,
             36 -> # CONCAT
-                s1 = prStr((stack[sp - 2] OR_ELSE Value.Nil), FALSE);
-                s2 = prStr((stack[sp - 1] OR_ELSE Value.Nil), FALSE);
+                s1 = TRY prStr((stack[sp - 2] OR_ELSE Value.Nil), FALSE);
+                s2 = TRY prStr((stack[sp - 1] OR_ELSE Value.Nil), FALSE);
                 pv = Value{ Str: COPY (s1 $+ s2) };
                 sp -= 2;
                 IF sp >= stack.length() THEN &stack.append(pv); ELSE stack[sp] = pv; END
@@ -2862,7 +2862,7 @@ FN exec(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000
             37 -> # DEFINE_FN
                 sexprIdx = ops[ip]; ip += 1;
                 nameIdx = ops[ip]; ip += 1;
-                sexprStr = getStr(consts[sexprIdx]);
+                sexprStr = TRY getStr(consts[sexprIdx]);
                 MUTABLE defPenv: {String}Value = {};
                 pv = runTest(sexprStr, curEnv, &pool, &defPenv) OR_ELSE RAISE;,
             38 -> # LOAD_SLOT_I64 [slot] (slots -> istack)
@@ -2943,7 +2943,7 @@ FN exec(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000
                 WHILE dbgRunning DO
                     MUTABLE dbgPrompt = "dbg> ";
                     writeFile("/dev/stderr", dbgPrompt);
-                    MUTABLE dbgCmd = readLine();
+                    MUTABLE dbgCmd = TRY readLine();
                     IF eql?(dbgCmd, ":c") OR eql?(dbgCmd, ":continue") THEN
                         dbgRunning = FALSE;
                     ELSE_IF eql?(dbgCmd, ":stack") OR eql?(dbgCmd, ":s") THEN
@@ -3155,7 +3155,7 @@ FN exec(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000
                 sp -= 1; setInsRef = COPY (stack[sp] OR_ELSE Value.Nil);
                 PARTIAL MATCH setInsRef START
                     Value.MapRef AS setId ->
-                        setKey = prStr(setInsVal, TRUE);
+                        setKey = TRY prStr(setInsVal, TRUE);
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
                             IF p[setId] EXISTS AS setEnv THEN
                                 setEnv.vars[setKey] = setInsVal;
@@ -3171,7 +3171,7 @@ FN exec(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000
                 sp -= 1; setChkRef = COPY (stack[sp] OR_ELSE Value.Nil);
                 PARTIAL MATCH setChkRef START
                     Value.MapRef AS setId ->
-                        setChkKey = prStr(setChkVal, TRUE);
+                        setChkKey = TRY prStr(setChkVal, TRUE);
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
                             IF p[setId] EXISTS AS setEnv THEN
                                 pv = boolVal(setEnv.vars.contains?(setChkKey));
@@ -3186,7 +3186,7 @@ FN exec(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000
                 sp -= 1; setRmRef = COPY (stack[sp] OR_ELSE Value.Nil);
                 PARTIAL MATCH setRmRef START
                     Value.MapRef AS setId ->
-                        setRmKey = prStr(setRmVal, TRUE);
+                        setRmKey = TRY prStr(setRmVal, TRUE);
                         WITH POLYMORPHIC EXCLUSIVE pool AS p {
                             IF p[setId] EXISTS AS setEnv THEN
                                 &setEnv.vars.delete(setRmKey);
@@ -3426,9 +3426,9 @@ FN exec(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000
                 sp += 1;,
             88 -> # RAISE_ERR (pop msg, kind, type; push Value.Error{...})
                 # Stack order: ..., type, kind, msg  (msg is top)
-                sp -= 1; raiseMsg = getStr(COPY (stack[sp] OR_ELSE Value.Nil));
-                sp -= 1; raiseKind = getStr(COPY (stack[sp] OR_ELSE Value.Nil));
-                sp -= 1; raiseType = getStr(COPY (stack[sp] OR_ELSE Value.Nil));
+                sp -= 1; raiseMsg = TRY getStr(COPY (stack[sp] OR_ELSE Value.Nil));
+                sp -= 1; raiseKind = TRY getStr(COPY (stack[sp] OR_ELSE Value.Nil));
+                sp -= 1; raiseType = TRY getStr(COPY (stack[sp] OR_ELSE Value.Nil));
                 pv = Value.Error{ errMsg: COPY raiseMsg, errKind: COPY raiseKind, errType: COPY raiseType };
                 IF sp >= stack.length() THEN &stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
@@ -3460,7 +3460,7 @@ FN exec(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000
                 sp += 1;,
             110 -> # ERR_SET_KIND (top: error, just below: new_kind str). Pops kind,
                    # mutates error.errKind, leaves error on top. For OR_ELSE EXIT.
-                sp -= 1; eskKind = getStr(COPY (stack[sp] OR_ELSE Value.Nil));
+                sp -= 1; eskKind = TRY getStr(COPY (stack[sp] OR_ELSE Value.Nil));
                 eskRef = COPY (stack[sp - 1] OR_ELSE Value.Nil);
                 PARTIAL MATCH eskRef START
                     Value.Error AS eske ->
@@ -3472,7 +3472,7 @@ FN exec(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000
                     DEFAULT -> PASS;
                 END,
             111 -> # ERR_SET_TYPE (pop new_type, mutate error.errType under it)
-                sp -= 1; estType = getStr(COPY (stack[sp] OR_ELSE Value.Nil));
+                sp -= 1; estType = TRY getStr(COPY (stack[sp] OR_ELSE Value.Nil));
                 estRef = COPY (stack[sp - 1] OR_ELSE Value.Nil);
                 PARTIAL MATCH estRef START
                     Value.Error AS este ->
@@ -3484,7 +3484,7 @@ FN exec(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: [Pool(50000
                     DEFAULT -> PASS;
                 END,
             112 -> # ERR_SET_MSG (pop new_msg, mutate error.errMsg under it)
-                sp -= 1; esmMsg = getStr(COPY (stack[sp] OR_ELSE Value.Nil));
+                sp -= 1; esmMsg = TRY getStr(COPY (stack[sp] OR_ELSE Value.Nil));
                 esmRef = COPY (stack[sp - 1] OR_ELSE Value.Nil);
                 PARTIAL MATCH esmRef START
                     Value.Error AS esme ->

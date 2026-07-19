@@ -11,7 +11,7 @@ END
 FN main() RETURNS Void ->
     # Call many times: if parts/strings leak, heap grows O(n_calls)
     FOR k IN (1_i64 ..= 1000) DO
-        result = buildCsv(50);
+        result = TRY buildCsv(50);
         ASSERT result.length() > 0;
     END
 

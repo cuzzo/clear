@@ -95,6 +95,12 @@ module DiagnosticRegistry
       cause: "The parser expected one shape (expression, statement, type, ...) and found a token that doesn't fit. Often comes from a missing keyword, a missed terminator, or a malformed expression.",
       fix_hint: "Read the line where the unexpected token sits and the line above it. The grammar rule the parser was trying to match is usually obvious from context (in a function call, struct literal, type annotation, ...).",
     },
+    SELECT_EFFECT_COLON_REQUIRED: {
+      severity: :error, category: :syntax,
+      template: "SELECT effect annotations require a colon; use `%{selector}`.",
+      summary: "SELECT uses the same `:!`, `:?`, and `:!?` explicit-tense spelling as inferred bindings.",
+      fix_hint: "Insert `:` between SELECT and its effect marker.",
+    },
     INVALID_ASSIGNMENT: {
       severity: :error, category: :syntax,
       template: "Invalid assignment target. You can only SET variables, fields, or indices.",
@@ -1414,8 +1420,20 @@ module DiagnosticRegistry
     # got-type goes in a third arg (empty when the type is unavailable).
     WHERE_NEEDS_BOOL: {
       severity: :error, category: :type,
-      template: "WHERE clause must evaluate to Bool",
-      summary:  "WHERE filter expression's type must be Bool.",
+      template: "WHERE clause must evaluate to a definite synchronous Bool, got %{got}",
+      summary:  "WHERE filter expressions cannot leave optional, fallible, or asynchronous predicate effects unresolved.",
+      fix_hint: "Resolve !Bool with TRY or OR_ELSE, resolve ?Bool with UNWRAP or OR_ELSE, and NEXT asynchronous work before it reaches WHERE.",
+    },
+    SELECT_EFFECT_ANNOTATION_REQUIRED: {
+      severity: :error, category: :type,
+      template: "SELECT expression returns %{got}. Preserve that effect explicitly with `%{selector}`, or consume it inside the SELECT expression.",
+      summary: "SELECT must not silently propagate fallible or optional element results.",
+      fix_hint: "Use SELECT:!, SELECT:?, or SELECT:!? to retain element effects; use TRY, UNWRAP, or OR_ELSE inside SELECT to consume them.",
+    },
+    SELECT_EFFECT_ANNOTATION_MISMATCH: {
+      severity: :error, category: :type,
+      template: "SELECT:%{declared} does not match selector result %{got}; use `%{expected}`.",
+      summary: "A SELECT effect annotation must exactly describe the unconsumed selector result.",
     },
     PIPE_CLAUSE_NEEDS_BOOL: {
       severity: :error, category: :type,
@@ -2136,6 +2154,27 @@ module DiagnosticRegistry
       summary: "Auto inference resolved a binding type annotation.",
       fix_hint: "Replace `Auto` with the inferred type if you want the source to be explicit.",
     },
+    INFERRED_FALLIBLE_BINDING: {
+      severity: :error, category: :type,
+      template: "Cannot infer `%{name}` from a fallible value.",
+      summary: "Inferred bindings must not silently discard a `!T` error channel.",
+      cause: "A fallible call was assigned to an unannotated binding. That makes it too easy to treat a failure as an ordinary value and lose the point at which the error must be handled.",
+      fix_hint: "Use `TRY expr` to propagate and bind `T`, or write `name:! = expr` to retain the fallible value deliberately.",
+    },
+    INFERRED_OPTIONAL_BINDING: {
+      severity: :error, category: :type,
+      template: "Cannot infer `%{name}` from an optional value.",
+      summary: "Inferred bindings must not silently retain a `?T` optional wrapper.",
+      cause: "An optional result was assigned directly to an unannotated binding. The source should make whether absence is propagated, force-unwrapped, retained, or safely navigated explicit.",
+      fix_hint: "Use `UNWRAP expr` to bind `T`, write `name:? = expr` to retain the optional value, or use `?.` navigation when the resulting optional is intentional.",
+    },
+    INFERRED_ASYNC_BINDING: {
+      severity: :error, category: :type,
+      template: "Cannot infer `%{name}` from an asynchronous value. Use `%{expected_action}` to consume it, or write `%{name}:~ = expr` to retain the handle.",
+      summary: "A future or stream must be consumed or retained explicitly.",
+      cause: "An asynchronous value was assigned to an unannotated binding. That makes it unclear whether the next operation should consume it or pass the asynchronous handle onward.",
+      fix_hint: "Use `%{expected_action}` to consume the result, or write `name:~ = expr` to retain the asynchronous handle deliberately.",
+    },
     AUTO_AMBIGUOUS_TYPE: {
       severity: :error, category: :type,
       template: "%{detail}",
@@ -2163,6 +2202,13 @@ module DiagnosticRegistry
       summary:  "Right-hand side of `OR_ELSE` must match the optional/error-union's payload type.",
       cause: "`expr OR_ELSE fallback` substitutes the fallback when `expr` is NIL (optional case) or an error (error-union case). The fallback's type must match the payload type because both branches feed into the same downstream binding — without type alignment, the binding would have no determinable type.",
       fix_hint: "Either change the fallback to produce a value of the expected payload type (e.g. `OR_ELSE 0` when the payload is `Int64`), CAST it explicitly (`OR_ELSE CAST(x AS PayloadT)`), or rewrite the LHS to widen its payload to a common type with the fallback.",
+    },
+    OR_ELSE_NEEDS_RECOVERABLE_LEFT: {
+      severity: :error, category: :type,
+      template: "Syntax Error: OR_ELSE requires a fallible (!T) or optional (?T) left operand, got %{got}",
+      summary: "OR_ELSE can only recover an error or absence.",
+      cause: "A definite value has no failure or absence branch, so its OR_ELSE fallback is unreachable.",
+      fix_hint: "Remove OR_ELSE, make the left expression return !T or ?T, or use IF/MATCH when both branches represent real values.",
     },
     UNWRAP_NON_OPTIONAL: {
       severity: :error, category: :type,
@@ -2303,9 +2349,8 @@ module DiagnosticRegistry
       severity: :error, category: :ownership,
       template: "Cannot COPY non-copyable type '%{type}'",
       summary:  "Some types (e.g., closed streams, raw fds) deliberately have no COPY semantics.",
-      cause: "Reserved for resource types — `File`, `TCPClient`, `TCPServer`, raw fds, closed streams — that intentionally cannot be deep-copied. Today `visit_CopyNode` happily generates Zig code for any type, which produces broken behaviour for resources. Wiring this code requires extending `Type#copyable?` (or an equivalent registry on resource schemas) so the visitor can reject the truly non-copyable cases.",
+      cause: "The value is, or transitively contains, a linear resource with a CLOSE contract. Duplicating the handle would make two owners close the same underlying resource.",
       fix_hint: "Use `CLONE` for shared / refcounted handles. For linear resources, transfer ownership via `GIVE` or pass through a borrow.",
-      pending: true,
     },
     CLONE_WITH_SCOPED: {
       severity: :error, category: :escape,
@@ -3522,15 +3567,23 @@ module DiagnosticRegistry
   }.freeze, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
 
   FIX_DESCRIPTIONS = T.let({
+    INSERT_SELECT_EFFECT_COLON: "Change the legacy SELECT effect spelling to %{selector}.",
+    INSERT_SELECT_EFFECT_ANNOTATION: "Change SELECT to %{selector} so the selected element effect is explicit.",
     ADD_DECL_CAPABILITY_GENERIC: "Add `%{sigil}` to '%{name}' at its declaration (line %{line}).",
     ADD_EFFECTS_REENTRANT: "Add `EFFECTS REENTRANT` so the runtime knows to schedule this fn on a service stack.",
     ADD_STREAM_YIELDS_CONTRACT: "Add `YIELDS %{type}` so the stream's future or union item type is explicit.",
     ADD_ERROR_UNION_TO_RETURN: "Add `!` to the return type to declare the error union (Zig-style fallible signature).",
+    PROPAGATE_ERROR_UNION_TO_CALLERS: "Declare the error union and make propagating call sites explicit.",
+    CONSUME_FUTURE_WITH_NEXT: "Consume the future with NEXT.",
+    CONSUME_STREAM_WITH_COLLECT: "Consume the stream with COLLECT.",
+    MAKE_VALUE_RECOVERY_EXPLICIT: "Make the unwrap/propagation explicit.",
     ADD_NON_REENTRANT_REQUIRES: "Add %{requires} (rejects reentrant callbacks).",
     ADD_WITH_GUARD_ALIASES: "Add `AS <alias>` to each binding so the GUARD predicate can read the unwrapped value.",
     INSERT_MUTABLE_ARGUMENT_MARKER: "Pass '%{name}' as '&%{name}' for MUTABLE parameter '%{param}'.",
     REMOVE_MUTABLE_ARGUMENT_MARKER: "Remove `&` because parameter '%{param}' is not MUTABLE.",
     REMOVE_MUTATION_NAME_SUFFIX: "Remove the retired `!` mutation suffix from this identifier.",
+    RETAIN_ASYNC_WRAPPER: "Retain the %{kind} deliberately.",
+    RETAIN_VALUE_WRAPPER: "Retain the %{kind} wrapper deliberately.",
     CHANGE_BINDING_CAPABILITY_FOR_MOVE: "Change '%{name}' to `%{cap}` at its declaration (%{reason}).",
     CHANGE_DECL_CAPABILITY_GENERIC: "Change `%{old_sigil}` to `%{new_sigil}` on '%{name}' (line %{line}).",
     CHOOSE_RECURSIVE_LAYOUT: "%{description} on %{edge} using `%{capability}`.",

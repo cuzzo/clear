@@ -127,7 +127,7 @@ module SyntaxTypoScanner
   # The retired mutation convention attached `!` to an identifier. This is
   # deliberately lexical and language-agnostic within CLEAR source: a bang is
   # a legacy suffix iff an identifier character precedes it and it is not the
-  # first half of != or !!. Strings and comments have already been skipped by
+  # first half of !=. Strings and comments have already been skipped by
   # the scanner state machine above.
   sig { params(source: String, index: Integer).returns(T::Boolean) }
   def self.legacy_mutation_suffix?(source, index)
@@ -135,7 +135,7 @@ module SyntaxTypoScanner
     return false unless source[index - 1] =~ /[A-Za-z0-9_]/
 
     following = source[index + 1]
-    following != '=' && following != '!'
+    following != '='
   end
 
   sig { params(line: Integer, col: Integer).void }

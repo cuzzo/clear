@@ -151,7 +151,7 @@ FuzzGenerator.register(:lifetimed_return, cells: LIFETIMED_RETURN_CELLS) do |p|
       END
 
       FN main() RETURNS Void ->
-          bg = spawn();
+          bg:~ = spawn();
           #{p[:consumer] == :bg ? 'r: Int64 = NEXT bg;' : 'a: Int64 = NEXT bg;'}
           RETURN;
       END

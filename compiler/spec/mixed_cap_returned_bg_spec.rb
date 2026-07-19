@@ -76,7 +76,7 @@ RSpec.describe "Mixed-cap REQUIRES + RETURNS x:T (M2.7)" do
           FN spawn(counter: Int64) RETURNS counter:~Void
             REQUIRES counter: ATOMIC
           ->
-            bg = BG { v = counter; print(v.toString()); };
+            bg:~ = BG { v = counter; print(v.toString()); };
             RETURN bg;
           END
         CLEAR
@@ -90,7 +90,7 @@ RSpec.describe "Mixed-cap REQUIRES + RETURNS x:T (M2.7)" do
           FN spawn(c: C) RETURNS c:~Void
             REQUIRES c: LOCKED
           ->
-            bg = BG { WITH EXCLUSIVE c AS inner { x = inner.v; print(x.toString()); } };
+            bg:~ = BG { WITH EXCLUSIVE c AS inner { x = inner.v; print(x.toString()); } };
             RETURN bg;
           END
         CLEAR
@@ -142,7 +142,7 @@ RSpec.describe "Mixed-cap REQUIRES + RETURNS x:T (M2.7)" do
           FN spawn(a: Int64, b: Int64) RETURNS (a, b):~Void
             REQUIRES a: ATOMIC, b: ATOMIC
           ->
-            bg = BG { x = a; y = b; print(x.toString()); print(y.toString()); };
+            bg:~ = BG { x = a; y = b; print(x.toString()); print(y.toString()); };
             RETURN bg;
           END
         CLEAR

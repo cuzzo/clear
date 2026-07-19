@@ -75,7 +75,7 @@ module Annotator
       def self.ignored_node_ids(program)
         ignored = T.let(Set.new, T::Set[Integer])
         program.statements.each do |statement|
-          next unless statement.is_a?(AST::FunctionDef)
+          next unless statement.is_a?(AST::FunctionDef) || statement.is_a?(AST::ExternFnDecl)
 
           add_lifetime_metadata_node_ids!(ignored, statement.return_lifetime)
         end

@@ -14,19 +14,22 @@ RSpec.describe Lexer::Token do
     end
 
     it "returns textual payloads only for textual token kinds" do
-      Lexer::Token::TEXT_TYPES.each do |type|
+      %i[
+        ARROW CHAR COMPOUND_ASSIGN DOUBLE_COLON ELLIPSIS KEYWORD LEGACY_LOGICAL
+        OR_ELSE PERCENT RANGE RANGE_EXCL RANGE_INCL SMOOTH STRING TYPE_ID VAR_ID
+      ].each do |type|
         expect(described_class.new(type, "body", 2, 4).text!).to eq("body")
       end
     end
 
     it "returns integer payloads only for integer token kinds" do
-      Lexer::Token::INTEGER_TYPES.each do |type|
+      %i[BYTE INT8 INT16 INT32 INT64 PREFIXED_INT UINT16 UINT32 UINT64].each do |type|
         expect(described_class.new(type, 42, 2, 4).integer!).to eq(42)
       end
     end
 
     it "returns float payloads only for float token kinds" do
-      Lexer::Token::FLOAT_TYPES.each do |type|
+      %i[FLOAT32 NUMBER].each do |type|
         expect(described_class.new(type, 1.5, 2, 4).float!).to eq(1.5)
       end
     end

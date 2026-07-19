@@ -161,15 +161,15 @@ class MIR::Let
 end
 
 class BinaryOpResult
-  sig { returns(Type) }
+  sig { returns(T.nilable(Type)) }
   def type; end
-  sig { returns(String) }
+  sig { returns(T.nilable(String)) }
   def error; end
-  sig { returns(Symbol) }
+  sig { returns(T.nilable(Symbol)) }
   def left_coercion; end
-  sig { returns(Symbol) }
+  sig { returns(T.nilable(Symbol)) }
   def right_coercion; end
-  sig { returns(Symbol) }
+  sig { returns(T.nilable(Symbol)) }
   def storage; end
 end
 
@@ -1100,10 +1100,12 @@ class AST::WhileLoop
 end
 
 class CompilerFrontend::Result
-  sig { returns(Annotator::Phases::TypeAnalysisSession) }
+  sig { returns(SemanticAnnotator) }
   def annotator; end
   sig { returns(AST::Program) }
   def ast; end
+  sig { returns(Semantic::LifecycleRegistry) }
+  def lifecycle_registry; end
 end
 
 class AST::MatchStatement

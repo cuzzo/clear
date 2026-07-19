@@ -819,8 +819,9 @@ module Annotator
         if last_type_str.start_with?('!')
           last_type = Type.new(T.must(last_type_str[1..]).to_sym)
         end
-        T.unsafe(node).async_result_shape = AsyncResultShape.promise(last_type)
-        stamp_type!(node, Type.new(:"~#{last_type}"))
+        payload_type = owned_async_payload_type(last_type)
+        T.unsafe(node).async_result_shape = AsyncResultShape.promise(payload_type)
+        stamp_type!(node, Type.new(:"~#{payload_type}"))
 
         # @arena implies @pinned — thread-local arena memory can't be stolen.
         if node.arena_mode
@@ -1013,10 +1014,21 @@ module Annotator
         type_info.ownership_bearing?(->(name) { lookup_type_schema(name) })
       end
 
+      sig { params(type_info: Type).returns(Type) }
+      def owned_async_payload_type(type_info)
+        # Literal strings are annotated as rodata byte arrays at their source,
+        # but a BG result outlives that fiber and is owned by the promise
+        # consumer. Publish the boundary type, not the source provenance.
+        return Type.new(:String, location: :heap) if type_info.string? && type_info.rodata?
+
+        type_info
+      end
+
       private :mark_with_runtime_requirements!,
         :validate_no_multi_object_atomic!,
         :validate_lock_error_clause!
       private :async_next_result_requires_heap?
+      private :owned_async_payload_type
   private :cap_admits_atomic?
   private :field_name_for_msg
   private :resolve_error_selectors!

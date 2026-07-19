@@ -3,6 +3,8 @@ require "sorbet-runtime"
 require_relative "../../ast/type"
 require_relative "function_signature"
 require_relative "function_return"
+require_relative "../../ast/param"
+
 
 class FunctionSignature
   extend T::Sig

@@ -49,6 +49,38 @@ module AllocHelper
     ti = node.full_type!
     ti.resolve_resource_close(->(name) { lookup_type_schema(name) })
   end
+  sig { params(node: AllocDeclarationNode).returns(T::Boolean) }
+  def declaration_allocates?(node)
+    return false unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+
+    expression_allocates?(node.value)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def expression_allocates?(node)
+    case node
+    when nil then false
+    when AST::FuncCall, AST::MethodCall then false
+    when AST::Identifier, AST::GetField, AST::GetIndex then false
+    when AST::Literal then false
+    when AST::OrElsePass, AST::OrElseRaise, AST::OrElseExit, AST::ThrowNode, AST::ReturnNode then false
+    when AST::BinaryOp
+      if node.op == :OR_RESCUE
+        expression_allocates?(node.left) || expression_allocates?(node.right)
+      else
+        true
+      end
+    when AST::Cast
+      expression_allocates?(node.value)
+    when AST::MoveNode, AST::CopyNode, AST::CloneNode, AST::ShareNode, AST::LinkNode, AST::ResolveNode, AST::CapabilityWrap
+      expression_allocates?(node.value)
+    else
+      true
+    end
+  end
+
   private :downgrade_frame_to_stack
+  private :declaration_allocates?
+  private :expression_allocates?
 
 end

@@ -5,6 +5,7 @@ module Annotator
   module Domains
     module Variables
       extend T::Sig
+      include RecoverableResult
 
       sig { params(node: AST::VarDecl).void }
       def visit_VarDecl(node)
@@ -85,6 +86,9 @@ module Annotator
         validate_type_annotation!(node, declared_type) if declared_type
         validate_rank_initializer!(node, declared_type) if declared_type
         validate_stream_type!(node)
+
+        materialize_inferred_wrapper_annotation!(node)
+        reject_implicit_wrapper_binding!(node)
 
         promote_pipe_to_observable_dest!(node)
 
@@ -222,12 +226,163 @@ module Annotator
         register_container_borrow!(node)
         # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@boxed fields).
         if !node_type.implicitly_copyable? { |t| lookup_type_schema(t) }
-          current_fn_ctx&.record_heap_use!
+          current_fn_ctx&.mark_runtime_used!
         end
         accumulate_stack_bytes(storage, node)
         track_union_alias(node.name, value)
         record_capability_binding(node.name, node, final_type, storage)
         nil
+      end
+
+      sig { params(node: DeclarationNode).void }
+      def materialize_inferred_wrapper_annotation!(node)
+        declared = node.type
+        return unless declared
+
+        wants_future = declared.future? && declared.tense_type.resolved == :Auto
+        wants_error = declared.error_union? && declared.success_type.resolved == :Auto
+        wants_optional = declared.optional? && T.must(declared.wrapped_type).resolved == :Auto
+        wants_error_optional = declared.error_union? && declared.success_type.optional? &&
+          T.must(declared.success_type.wrapped_type).resolved == :Auto
+        return unless wants_future || wants_error || wants_optional || wants_error_optional
+
+        value_type = Type.new(node.value.full_type!(context: "inferred wrapper binding"))
+        error_type = recoverable_result_type(node.value, context: "inferred wrapper binding")
+        payload = if value_type.error_union?
+          value_type.success_type
+        elsif error_type&.error_union?
+          error_type.success_type
+        else
+          value_type
+        end
+
+        node.type = if wants_future
+          # `name:~` is a promise/stream-retention assertion, not a way to
+          # re-label a synchronous pipeline result as asynchronous.
+          value_type.future? ? value_type : declared
+        elsif wants_error_optional
+          if value_type.error_union? && value_type.success_type.optional?
+            value_type
+          elsif error_type&.error_union? && payload.optional?
+            error_type
+          else
+            Type.error_union_of(Type.optional_of(payload))
+          end
+        elsif wants_error
+          value_type.error_union? ? value_type : (error_type&.error_union? ? error_type : Type.error_union_of(payload))
+        else
+          payload.optional? ? payload : Type.optional_of(payload)
+        end
+        if wants_error || wants_error_optional
+          node.value.retain_error_channel = true if node.value.respond_to?(:retain_error_channel=)
+        end
+      end
+
+      sig { params(node: DeclarationNode).void }
+      def reject_implicit_wrapper_binding!(node)
+        return if node.type
+
+        value = node.value
+        error_type = recoverable_result_type(value, context: "inferred wrapper binding")
+        error_success_type = error_type&.error_union? ? error_type.success_type : nil
+        value_type = Type.new(value.full_type!(context: "inferred wrapper binding"))
+        asynchronous = value_type.future? || value_type.stream? ||
+          error_success_type&.future? || error_success_type&.stream?
+        if asynchronous
+          emit_inferred_async_binding!(node, value_type, error_type)
+          return
+        end
+        fallible = !error_type.nil?
+        if fallible
+          emit_inferred_wrapper_binding!(node, :INFERRED_FALLIBLE_BINDING, "TRY ", "!")
+          return
+        end
+
+        return unless value_type.optional?
+        return if value.respond_to?(:safe_nav_chain) && value.safe_nav_chain == true
+
+        emit_inferred_wrapper_binding!(node, :INFERRED_OPTIONAL_BINDING, "UNWRAP ", "?")
+      end
+
+      sig { params(node: DeclarationNode, value_type: Type, error_type: T.nilable(Type)).void }
+      def emit_inferred_async_binding!(node, value_type, error_type)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        async_type = error_type&.error_union? ? error_type.success_type : value_type
+        stream = async_type.stream?
+        action = stream ? "COLLECT" : "NEXT"
+        wrapper = "~"
+        value_token = node.value.token
+        fixes = T.let([], T::Array[Fix])
+        unless stream
+          fixes << Fix.new(
+            description: fix_description(:CONSUME_FUTURE_WITH_NEXT), confidence: :auto,
+            edits: [Edit.new(
+              span: Span.new(file: nil, line: value_token.line, col: value_token.column, length: 0),
+              replacement: "NEXT ",
+            )],
+          )
+        else
+          value_range = node.value.source_range
+          fixes << Fix.new(
+            description: fix_description(:CONSUME_STREAM_WITH_COLLECT), confidence: :auto,
+            edits: [Edit.new(
+              span: Span.new(file: value_range.file, line: value_range.end_line,
+                col: value_range.end_column, length: 0),
+              replacement: " |> COLLECT",
+            )],
+          )
+        end
+        if node.is_a?(AST::BindExpr)
+          fixes << Fix.new(
+            description: fix_description(:RETAIN_ASYNC_WRAPPER,
+              kind: stream ? "stream" : "future"), confidence: :auto,
+            edits: [Edit.new(
+              span: Span.new(file: nil, line: node.token.line,
+                col: node.token.column + node.name.length, length: 0),
+              replacement: ":#{wrapper}",
+            )],
+          )
+        end
+        fixable!(node, code: :INFERRED_ASYNC_BINDING, name: node.name,
+          expected_action: action, category: :type, level: :error,
+          fixes: fixes, raise_in_collector: true)
+      end
+
+      sig { params(node: DeclarationNode, code: Symbol, prefix: String, wrapper: String).void }
+      def emit_inferred_wrapper_binding!(node, code, prefix, wrapper)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        value_range = node.value.source_range
+        wraps_expression = node.value.is_a?(AST::BinaryOp)
+        fixes = [Fix.new(
+          description: fix_description(:MAKE_VALUE_RECOVERY_EXPLICIT), confidence: :auto,
+          edits: [
+            Edit.new(
+              span: Span.new(file: nil, line: value_range.start_line,
+                col: value_range.start_column, length: 0),
+              replacement: wraps_expression ? "#{prefix}(" : prefix,
+            ),
+            *(wraps_expression ? [Edit.new(
+              span: Span.new(file: nil, line: value_range.end_line,
+                col: value_range.end_column, length: 0),
+              replacement: ")",
+            )] : []),
+          ],
+        )]
+        if node.is_a?(AST::BindExpr)
+          fixes << Fix.new(
+            description: fix_description(:RETAIN_VALUE_WRAPPER,
+              kind: wrapper == '!' ? "fallible" : "optional"), confidence: :auto,
+            edits: [Edit.new(
+              span: Span.new(file: nil, line: node.token.line,
+                col: node.token.column + node.name.length, length: 0),
+              replacement: ":#{wrapper}",
+            )],
+          )
+        end
+        fixable!(node, code: code, name: node.name, category: :type, level: :error,
+          fixes: fixes, raise_in_collector: true)
       end
 
       sig { params(node: DeclarationNode, declared_type: Type).void }
@@ -657,9 +812,13 @@ module Annotator
         scope.check_validity!(node.name)
 
         # 2. Resolve Type
-        raw_type = scope.resolve_full_type(node.name)
-        raw_type = refined_comptime_type_param_type(raw_type)
         entry = scope.resolve_entry(node.name)
+        raw_type = if entry
+          @traversal_state.value_type_refinements[entry.binding_id] || scope.resolve_full_type(node.name)
+        else
+          scope.resolve_full_type(node.name)
+        end
+        raw_type = refined_comptime_type_param_type(raw_type)
         if raw_type.fn_type? && entry&.storage == :static
           # Named function used as a value — preserve its function type and tag
           # it so MIR lowering emits a function reference.
@@ -1075,7 +1234,8 @@ module Annotator
         value = assignment_value_type(node, value_type)
         return if target.any? || value.any? || value.untyped?
         return if target.resolved == :NIL # Allow narrowing from initial NIL
-        if unique_union_payload_variant(target, value)
+        union_schema = lookup_type_schema(target.value_payload_type.resolved)
+        if UnionPayloadCompatibility.unique_variant(target, value, union_schema)
           node.value.coerced_type = target
           return
         end

@@ -112,7 +112,7 @@ RSpec.describe "Recursion co-op yield + :TIGHT opt-out" do
           EFFECTS REENTRANT:MAX_DEPTH(64) ->
           RETURN n + 1;
         END
-        FN main() RETURNS Void -> _ = f(0_i64); RETURN; END
+        FN main() RETURNS Void -> _ = TRY f(0_i64); RETURN; END
       CLEAR
       fn = fn_named(ast, "f")
       expect(fn.tight_reentrance).to be true
@@ -125,7 +125,7 @@ RSpec.describe "Recursion co-op yield + :TIGHT opt-out" do
           EFFECTS REENTRANT:MAX_DEPTH(8192) ->
           RETURN n + 1;
         END
-        FN main() RETURNS Void -> _ = f(0_i64); RETURN; END
+        FN main() RETURNS Void -> _ = TRY f(0_i64); RETURN; END
       CLEAR
       fn = fn_named(ast, "f")
       expect(fn.tight_reentrance).to be false

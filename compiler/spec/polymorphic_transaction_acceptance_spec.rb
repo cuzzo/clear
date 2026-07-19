@@ -64,7 +64,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterLocked{ value: 0 } @shared:locked;
-          _ = tick_Locked(&c);
+          _ = tick_Locked(&c) OR_ELSE RAISE;
           RETURN;
         END
       CLEAR
@@ -92,7 +92,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterWriteLocked{ value: 0 } @shared:writeLocked;
-          _ = tick_WriteLocked(&c);
+          _ = tick_WriteLocked(&c) OR_ELSE RAISE;
           RETURN;
         END
       CLEAR
@@ -116,7 +116,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterVersioned{ value: 0 } @shared:versioned;
-          _ = tick_Versioned(&c);
+          _ = tick_Versioned(&c) OR_ELSE RAISE;
           RETURN;
         END
       CLEAR
@@ -144,7 +144,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterAtomic{ value: 0 } @boxed:atomic;
-          _ = tick_Atomic(&c);
+          _ = tick_Atomic(&c) OR_ELSE RAISE;
           RETURN;
         END
       CLEAR
@@ -181,7 +181,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c1 = CounterSnapshotted{ value: 0 } @versioned;
-          _ = tick_Snapshotted(&c1);
+          _ = tick_Snapshotted(&c1) OR_ELSE RAISE;
           RETURN;
         END
       CLEAR
@@ -209,7 +209,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterLocal{ value: 0 } @local;
-          _ = tick_Local(&c);
+          _ = tick_Local(&c) OR_ELSE RAISE;
           RETURN;
         END
       CLEAR
@@ -232,7 +232,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterMulti{ value: 0 } @multiowned;
-          _ = tick_Multi(&c);
+          _ = tick_Multi(&c) OR_ELSE RAISE;
           RETURN;
         END
       CLEAR
@@ -252,7 +252,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterReadMulti{ value: 0 } @multiowned;
-          _ = tick_ReadMulti(&c);
+          _ = tick_ReadMulti(&c) OR_ELSE RAISE;
           RETURN;
         END
       CLEAR
@@ -270,7 +270,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       ) + <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE c = CounterPlain{ value: 0 };
-          _ = tick_Plain(&c);
+          _ = tick_Plain(&c) OR_ELSE RAISE;
           RETURN;
         END
       CLEAR

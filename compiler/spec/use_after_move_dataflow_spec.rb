@@ -173,7 +173,7 @@ RSpec.describe UseAfterMoveChecker do
           RETURN items;
         END
         FN main() RETURNS Void ->
-          r = makeList();
+          r = TRY makeList();
           RETURN;
         END
       CLEAR

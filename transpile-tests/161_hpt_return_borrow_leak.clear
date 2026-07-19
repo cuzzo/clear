@@ -29,13 +29,13 @@ END
 # Named binding ensures makeLambda()'s cleanup is a regular defer, not errdefer.
 # getStr copies the extracted string, so it survives when v is freed.
 FN safeReturn() RETURNS !String ->
-    v = makeLambda();
+    v = TRY makeLambda();
     RETURN extractStr(v);
 END
 
 FN main() RETURNS Void ->
-    s = safeReturn();
-    s2 = safeReturn();
-    s3 = safeReturn();
+    s = TRY safeReturn();
+    s2 = TRY safeReturn();
+    s3 = TRY safeReturn();
     print("PASS");
 END

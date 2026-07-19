@@ -5,12 +5,22 @@ FN load(value: Int64) RETURNS !Result ->
 END
 
 FN forwarded(value: Int64) RETURNS !Int64 ->
-  RETURN load(value)!!.value;
+  box = TRY load(value);
+  RETURN box.value;
 END
 
-FN main() RETURNS Void ->
-  direct = load(7)!!.value;
-  nested = forwarded(9)!!;
-  ASSERT direct == 7, "!!. unwraps a fallible value before field access";
-  ASSERT nested == 9, "!! propagates errors like OR_ELSE RAISE";
+FN firstOf(values: []Int64) RETURNS !Int64 ->
+  RETURN TRY values[0];
+END
+
+FN main() RETURNS !Void ->
+  direct_box = TRY load(7);
+  direct = direct_box.value;
+  nested = TRY forwarded(9);
+  MUTABLE values: []Int64 = [];
+  &values.push(direct);
+  first = TRY firstOf(values);
+  ASSERT direct == 7, "TRY unwraps a fallible value before field access";
+  ASSERT nested == 9, "TRY propagates a fallible value";
+  ASSERT first == 7, "TRY propagates optional indexed access";
 END

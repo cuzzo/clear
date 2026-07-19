@@ -46,7 +46,7 @@ FuzzGenerator.register(:rc_generic_value_matrix, cells: RC_GENERIC_VALUE_CELLS) 
     prelude += "UNION Choice { Empty, Item: RefItem#{cap} }\n"
     <<~CLEAR
       source: ?Choice = Choice{ Item: RefItem{ value: 7_i64 } #{cap} };
-          copied = COPY source;
+          copied: ?Choice = COPY source;
           IF copied EXISTS AS choice THEN
               PARTIAL MATCH choice START
                   Choice.Item AS item -> ASSERT item.value == 7_i64;,

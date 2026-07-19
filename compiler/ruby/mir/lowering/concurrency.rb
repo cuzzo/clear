@@ -583,7 +583,7 @@ module MIRLoweringConcurrency
     async_shape = T.cast(T.unsafe(node).async_result_shape, T.nilable(AsyncResultShape)) ||
                   AsyncResultShape.promise(tense_t.tense_type, shared: tense_t.shared_promise?)
     inner_t = Type.new(async_shape.payload_type)
-    inner_zig = inner_t.zig_type
+    inner_zig = inner_t.nested_zig_type
     BgTypePlan.new(
       async_shape: async_shape,
       inner_type: inner_t,
@@ -1055,7 +1055,7 @@ module MIRLoweringConcurrency
     is_inf = tense_t.inf_stream?
     stream_zig = if tense_t.dynamic_stream?
       element_t = T.must(tense_t.tense_type.element_type)
-      "CheatLib.Stream(#{element_t.zig_type})"
+      "CheatLib.Stream(#{element_t.nested_zig_type})"
     else
       tense_t.zig_type
     end
@@ -1213,8 +1213,23 @@ module MIRLoweringConcurrency
     # anonymous YIELD operands; escape analysis marks it heap because it
     # escapes the fiber). The stream owns it; the consumer frees it. No
     # dupe -- one allocation, placed by escape analysis.
-    push = MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true,
-      MIR::CallableContract.no_ownership(1))
+    base_contract = MIR::CallableContract.no_ownership(1)
+    push_contract = if transfer_marks.empty? || !lowered.is_a?(MIR::Ident)
+      base_contract
+    else
+      operand = MIR::OwnershipOperandFact.owned_binding(
+        lowered.name.to_s,
+        Type.from_node!(node.expr, context: "YIELD ownership transfer"),
+        "stream YIELD push",
+        :heap,
+      )
+      MIR::CallableContract.new(
+        base_contract.signature,
+        MIR::OwnershipContract.consume_operands([operand]),
+        1,
+      )
+    end
+    push = MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true, push_contract)
     # YIELD transfers ownership to the stream at the push boundary. InfStream
     # owns and cleans the value even if push returns StreamClosed, so the local
     # error cleanup must be disarmed before the fallible call.

@@ -37,9 +37,6 @@ module EffectTracker
   AsyncValidationNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock, AST::DoBlock) }
   CallLikeNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall) }
   TightLoopNode = T.type_alias { T.any(AST::WhileLoop, AST::ForRange) }
-  TightScanNode = T.type_alias {
-    T.nilable(T.any(AST::Node, T::Array[AST::Node], Lexer::Token, Symbol, String, Integer, Float, TrueClass, FalseClass, Type))
-  }
 
   class EffectState < T::Struct
     prop :direct_effects, EffectSetMap, factory: -> { {} }
@@ -154,14 +151,16 @@ module EffectTracker
   sig { params(caller_name: String, callee_name: String).returns(CallContext) }
   def effect_call_site_context_for(caller_name, callee_name)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    caller_context = effect_call_site_context[caller_name] ||= {}
+    effect_call_site_context[caller_name] ||= {}
+    caller_context = T.must(effect_call_site_context[caller_name])
     caller_context[callee_name] ||= { loop: false, cond: false }
   end
 
   sig { params(caller_name: String, callee_name: String).returns(T::Array[ArgFamilySets]) }
   def effect_call_site_arg_families_for(caller_name, callee_name)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    caller_families = effect_call_site_arg_families[caller_name] ||= {}
+    effect_call_site_arg_families[caller_name] ||= {}
+    caller_families = T.must(effect_call_site_arg_families[caller_name])
     caller_families[callee_name] ||= []
   end
 
@@ -257,7 +256,6 @@ module EffectAudit
   AsyncValidationNode = T.type_alias { EffectTracker::AsyncValidationNode }
   CallLikeNode = T.type_alias { EffectTracker::CallLikeNode }
   TightLoopNode = T.type_alias { EffectTracker::TightLoopNode }
-  TightScanNode = T.type_alias { EffectTracker::TightScanNode }
 
   HEAP = EffectTracker::HEAP
   BLOCKING = EffectTracker::BLOCKING
@@ -346,7 +344,8 @@ module EffectAudit
     while changed
       changed = false
       function_call_graph.each do |fn_name, callees|
-        current = resolved[fn_name] ||= Set.new
+        resolved[fn_name] ||= Set.new
+        current = resolved[fn_name]
         callees.each do |callee|
           callee_effs = resolved[callee]
           next unless callee_effs
@@ -507,10 +506,7 @@ module EffectAudit
     ret_type = fsig&.return_type
     heap_return = ret_type.is_a?(Type) && (ret_type.heap? || ret_type.dynamic?)
     has_takes_heap = fn_node.params.any? { |p|
-      next unless p.takes
-      ti = p.type
-      is_pure_copy = ti.primitive? || ti.id_handle?
-      !is_pure_copy
+      p.takes && !(p.type.primitive? || p.type.id_handle?)
     }
     has_catch = function_has_catch_clauses?(fn_node)
     has_raise = function_raises_directly?(name)
@@ -691,8 +687,7 @@ module EffectAudit
         next if alloc_fault.key?(c)
         scope = lookup_scope_for(c)
         next unless scope
-        sig = scope.resolve_entry(c)&.type
-        sig = sig.is_a?(FunctionSignature) ? sig : nil
+        sig = FunctionSignature.unwrap(scope.resolve_entry(c)&.type)
         alloc_fault[c] = true if sig&.alloc_fault
       end
     end
@@ -795,13 +790,17 @@ module EffectAudit
       # a zero-length `!` insert at that column produces `RETURNS !T`.
       tok = fn_node.respond_to?(:return_type_token) ? fn_node.return_type_token : nil
       if tok
+        edits = [Edit.new(
+          span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
+          replacement: '!',
+        )]
+        edits.concat(fallibility_call_site_edits(name)) if FixCollector.fallibility_propagation_enabled?
+        description_key = FixCollector.fallibility_propagation_enabled? ?
+          :PROPAGATE_ERROR_UNION_TO_CALLERS : :ADD_ERROR_UNION_TO_RETURN
         fixes = [Fix.new(
-          description: fix_description(:ADD_ERROR_UNION_TO_RETURN),
+          description: fix_description(description_key),
           confidence: :auto,
-          edits: [Edit.new(
-            span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
-            replacement: '!',
-          )],
+          edits: edits,
         )]
         fixable!(fn_node, code: :FALLIBLE_RETURN_NEEDS_ERROR_UNION,
                  fn: name, hint: hint, return_type: return_type,
@@ -811,6 +810,48 @@ module EffectAudit
                fn: name, hint: hint, return_type: return_type)
       end
     end
+  end
+
+  sig { params(name: String).returns(T::Array[Edit]) }
+  def fallibility_call_site_edits(name)
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
+    summary = function_body_summaries[name]
+    return [] unless summary
+
+    summary.call_site_facts.each_with_object([]) do |fact, edits|
+      next unless fact.propagates_failure
+      next unless fallible_call_site_fact?(fact)
+
+      range = fact.node.source_range
+      next if range.start_line <= 0 || range.end_line <= 0
+
+      edits << Edit.new(
+        span: Span.new(file: range.file, line: range.start_line,
+          col: range.start_column, length: 0),
+        replacement: 'TRY (',
+      )
+      edits << Edit.new(
+        span: Span.new(file: range.file, line: range.end_line,
+          col: range.end_column, length: 0),
+        replacement: ')',
+      )
+    end
+  end
+
+  sig { params(fact: Semantic::CallSiteFact).returns(T::Boolean) }
+  def fallible_call_site_fact?(fact)
+    T.bind(self, Annotator::Phases::CapabilityAuditSession)
+    node = fact.node
+    return true if node.respond_to?(:error_union_type) && node.error_union_type
+
+    signature = FunctionSignature.unwrap(node.matched_signature)
+    return true if signature&.return_type&.error_union?
+
+    intrinsic = node.matched_stdlib_def
+    return true if intrinsic&.recoverable_result?
+
+    callee = semantic_function_nodes[fact.callee_name]
+    callee&.error_fallible == true
   end
 
   # Set to true to flip the fallible-signature check from a NO-OP into
@@ -1263,18 +1304,15 @@ module EffectTracker
   def validate_tight_body!(stmts, loop_node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fn_nodes = function_node_map
-    Array(stmts).each { |s| validate_tight_node!(s, loop_node, fn_nodes) }
+    AST.each_locatable(Array(stmts), descend_functions: false) do |node|
+      validate_tight_node!(node, loop_node, fn_nodes)
+    end
   end
 
-  sig { params(node: TightScanNode, loop_node: TightLoopNode, fn_nodes: T::Hash[String, AST::FunctionDef]).void }
+  sig { params(node: AST::Locatable, loop_node: TightLoopNode, fn_nodes: T::Hash[String, AST::FunctionDef]).void }
   def validate_tight_node!(node, loop_node, fn_nodes)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     case node
-    when Symbol, String, Integer, Float, TrueClass, FalseClass, Type, Lexer::Token
-    when Array
-      node.each { |n| validate_tight_node!(n, loop_node, fn_nodes) }
-    when AST::FunctionDef
-      # Don't descend into nested function definitions.
     when AST::FuncCall
       if node.respond_to?(:extern_call) && node.extern_call
         error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
@@ -1285,7 +1323,6 @@ module EffectTracker
       if fn&.reentrance_kind == :reentrant
         error!(loop_node, :TIGHT_CALLS_REENTRANT_FN, name: node.name)
       end
-      node.args.each { |a| validate_tight_node!(a, loop_node, fn_nodes) }
     when AST::MethodCall
       if node.respond_to?(:extern_call) && node.extern_call
         error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
@@ -1296,10 +1333,6 @@ module EffectTracker
       if fn&.reentrance_kind == :reentrant
         error!(loop_node, :TIGHT_CALLS_REENTRANT_FN, name: node.name)
       end
-      validate_tight_node!(T.cast(node.respond_to?(:object) ? node.object : nil, TightScanNode), loop_node, fn_nodes)
-      node.args.each { |a| validate_tight_node!(a, loop_node, fn_nodes) }
-    else
-      T.unsafe(node).each_pair { |_, v| validate_tight_node!(v, loop_node, fn_nodes) } if node.respond_to?(:each_pair)
     end
   end
 
@@ -1377,6 +1410,8 @@ module EffectAudit
   private :effect_direct_effects_for
   private :effect_state
   private :enforce_fallible_returns!
+  private :fallibility_call_site_edits
+  private :fallible_call_site_fact?
   private :enumerate_fsm_suspend_points!
   private :fallibility_hint_for
   private :finalize_async_execution_shapes!

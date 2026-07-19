@@ -13,7 +13,7 @@ FN make_lst() RETURNS ![]Int64 ->
 END
 
 FN main() RETURNS Void ->
-    lst = make_lst();
+    lst = TRY make_lst();
     n: Int64 = sum(GIVE lst);
     ASSERT n == 60_i64, "iterating a TAKES @list param via FOR-each";
 END

@@ -1762,7 +1762,7 @@ RSpec.describe "error emission coverage" do
         run(<<~CLEAR)
           FN slow() RETURNS Int64 -> RETURN 42; END
           FN main() RETURNS Void ->
-              fut = BG { slow(); };
+              fut:~ = BG { slow(); };
           END
         CLEAR
       }.to raise_error(CompilerError, /Promise 'fut' must be consumed/)
@@ -1772,7 +1772,7 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         FN slow() RETURNS Int64 -> RETURN 42; END
         FN main() RETURNS Void ->
-            fut = BG { slow(); };
+            fut:~ = BG { slow(); };
             print((NEXT fut).toString());
         END
       CLEAR
@@ -2573,7 +2573,7 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         FN intFn() RETURNS Int64 -> RETURN 1; END
         FN main() RETURNS Void ->
-            fut = BG { intFn(); };
+            fut:~ = BG { intFn(); };
             n = NEXT fut;
             print(n.toString());
         END
@@ -4814,7 +4814,7 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; };
-            _ = s;
+            _:~ = s;
         END
       CLEAR
     end
@@ -4844,7 +4844,7 @@ RSpec.describe "error emission coverage" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; };
-            _ = s;
+            _:~ = s;
         END
       CLEAR
     end

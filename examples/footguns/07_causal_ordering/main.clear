@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
   result = Payload{ data: "" } @shared:locked;
 
   # Producer: writes data under the lock.
-  producer = BG {
+  producer:~ = BG {
     WITH EXCLUSIVE result AS r {
       r.data = "important result";
       # Mutex release here is a full barrier on all architectures.
@@ -41,14 +41,14 @@ FN main() RETURNS Void ->
   # NEXT producer ensures all of producer's writes are visible before
   # this fiber proceeds. The happens-before chain is preserved because
   # NEXT is a synchronization point, not a plain channel forward.
-  relay = BG {
+  relay:~ = BG {
     NEXT producer;
     # Nothing to forward: the data lives in 'result'. Consumer
     # will see it because WITH EXCLUSIVE issues a mutex acquire.
   };
 
   # Consumer: waits for relay, then reads data.
-  consumer = BG {
+  consumer:~ = BG {
     NEXT relay;
     WITH result AS r {
       # Mutex acquire here is a full barrier. Guaranteed to see

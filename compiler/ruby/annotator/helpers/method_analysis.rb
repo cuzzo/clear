@@ -24,7 +24,7 @@ module MethodAnalysis
     return false unless config
     handled = resolve_typed_method(node, obj_type, config[:registry], config[:tag],
                                    config[:label].call(obj_type))
-    navigation = node.object.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+    navigation = node.object.is_a?(AST::OptionalUnwrap) && node.object.safe_navigation? || implicit_safe_nav
     if handled && navigation
       result = node.full_type!(context: "safe-navigation method result")
       unless result.optional?

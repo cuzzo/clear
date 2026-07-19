@@ -58,7 +58,7 @@ RSpec.describe "the intrinsic generic Map protocol" do
   it "type-checks generic indexing and the stable Map method surface" do
     program = annotate(<<~CLEAR)
       FN exercise<M: Map>(MUTABLE map: M, key: M::Key, TAKES first: M::Value, TAKES second: M::Value) RETURNS !Int64 ->
-        before = map[key];
+        before:? = map[key];
         map[key] = first;
         &map.put(key, second);
         ASSERT map.contains?(key);
@@ -105,7 +105,8 @@ RSpec.describe "the intrinsic generic Map protocol" do
         map[key] = COPY value;
       END
     CLEAR
-    expect(zig).to include("CheatLib.dupeValue(CheatLib.MapFacts(M).Value")
+    expect(zig).to include("CheatLib.dupeValue(@TypeOf(__copy_src)")
+    expect(zig).not_to include("CheatLib.dupeValue(CheatLib.MapFacts(M).Value")
     expect(zig).to include("CheatLib.mapProtocolPut(map")
     expect(zig).to match(/__(?:tmp|hoist)_1_moved = true/)
   end

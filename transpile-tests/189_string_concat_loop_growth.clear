@@ -18,11 +18,11 @@ FN main() RETURNS Void ->
     # 5000 iterations of string concat in a loop.
     # Without frame rewind per iteration, this would use ~5000 * 5000 bytes
     # of frame arena per call. With rewind, it stays bounded.
-    result = buildResponse(5000);
+    result = TRY buildResponse(5000);
     ASSERT result.length() > 0, "should have built a response";
 
     # Call again to verify frame arena was reclaimed from first call.
-    result2 = buildResponse(5000);
+    result2 = TRY buildResponse(5000);
     ASSERT result2.length() > 0, "second call should also work";
 
     print("PASS: string concat loop bounded");

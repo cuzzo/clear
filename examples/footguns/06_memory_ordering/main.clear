@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
   # construction. There is no ordering annotation to get wrong.
   s = State{ message: "" } @shared:locked;
 
-  producer = BG {
+  producer:~ = BG {
     WITH EXCLUSIVE s AS inner {
       inner.message = "hello from producer";
       # Mutex release here emits a full barrier. The consumer is
@@ -29,7 +29,7 @@ FN main() RETURNS Void ->
     }
   };
 
-  consumer = BG {
+  consumer:~ = BG {
     NEXT producer;
     # wait for producer to finish
     WITH s AS inner {

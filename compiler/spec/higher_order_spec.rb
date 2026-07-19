@@ -44,6 +44,19 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "Projection preserving element capabilities" do
+      let(:code) do
+        <<~CLEAR
+          words: String[] = ["alpha", "beta"];
+          symbols = words |> SELECT symbol(_);
+        CLEAR
+      end
+
+      it "preserves @symbol on the projected list element" do
+        expect(result.element_type&.sync).to eq(:symbol)
+      end
+    end
+
     context "Chained Pipe: string |> split |> SELECT" do
       let(:code) {
         <<~FLUX
@@ -108,6 +121,162 @@ RSpec.describe SemanticAnnotator do
       it "raises a semantic error" do
         expect { run(code) }.to raise_error(/Cannot SELECT from non-list type/)
       end
+    end
+
+    context "effect-preserving SELECT suffixes" do
+      let(:effect_functions) do
+        <<~CLEAR
+          FN fallible(x: Int64) RETURNS !Int64 -> RETURN x; END
+          FN optional(x: Int64) RETURNS ?Int64 -> RETURN x; END
+          FN fallibleOptional(x: Int64) RETURNS !?Int64 -> RETURN x; END
+        CLEAR
+      end
+
+      it "requires SELECT:!, SELECT:?, and SELECT:!? for unresolved item effects" do
+        {
+          "fallible(_)" => /SELECT:!.*consume it inside the SELECT expression/,
+          "optional(_)" => /SELECT:\?.*consume it inside the SELECT expression/,
+          "fallibleOptional(_)" => /SELECT:!\?.*consume it inside the SELECT expression/,
+        }.each do |selector, message|
+          source = effect_functions + <<~CLEAR
+            FN main() RETURNS !Void ->
+              values: []Int64 = [1, 2];
+              selected = values |> SELECT #{selector};
+              RETURN;
+            END
+          CLEAR
+          expect { run(source) }.to raise_error(CompilerError, message)
+        end
+      end
+
+      it "autofixes a missing SELECT effect annotation with the colon spelling" do
+        source = effect_functions + <<~CLEAR
+          FN main() RETURNS !Void ->
+            values: []Int64 = [1, 2];
+            selected = values |> SELECT fallible(_);
+            RETURN;
+          END
+        CLEAR
+
+        FixCollector.enable!
+        expect { run(source) }.to raise_error(CompilerError, /SELECT:!/)
+        finding = FixCollector.drain.find { |item| item.message.include?("SELECT:!") }
+        expect(finding&.fixes&.first&.edits&.first&.replacement).to eq(":!")
+      ensure
+        FixCollector.disable!
+      end
+
+      it "preserves the declared item effects in the selected list" do
+        tree = run(effect_functions + <<~CLEAR)
+          FN main() RETURNS !Void ->
+            values: []Int64 = [1, 2];
+            fallibles = values |> SELECT:! fallible(_);
+            optionals = values |> SELECT:? optional(_);
+            both = values |> SELECT:!? fallibleOptional(_);
+            RETURN;
+          END
+        CLEAR
+        fn = tree.statements.find { |node| node.is_a?(AST::FunctionDef) && node.name == "main" }
+        bindings = fn.body.grep(AST::BindExpr).to_h { |binding| [binding.name, binding.full_type] }
+        expect(bindings.fetch("fallibles").element_type&.error_union?).to be true
+        expect(bindings.fetch("optionals").element_type&.optional?).to be true
+        both_element = bindings.fetch("both").element_type
+        expect(both_element&.error_union?).to be true
+        expect(both_element&.success_type&.optional?).to be true
+      end
+
+      it "rejects a suffix that does not exactly match the selector effect" do
+        source = effect_functions + <<~CLEAR
+          FN main() RETURNS !Void ->
+            values: []Int64 = [1, 2];
+            selected = values |> SELECT:! optional(_);
+            RETURN;
+          END
+        CLEAR
+        expect { run(source) }.to raise_error(CompilerError, /SELECT:! does not match.*use `SELECT:\?`/)
+      end
+
+      it "rejects the legacy SELECT! spelling" do
+        source = effect_functions + <<~CLEAR
+          FN main() RETURNS !Void ->
+            values: []Int64 = [1, 2];
+            selected = values |> SELECT! fallible(_);
+            RETURN;
+          END
+        CLEAR
+        FixCollector.enable!
+        expect { run(source) }.to raise_error(ParserError, /require a colon; use `SELECT:!`/)
+        finding = FixCollector.drain.find { |item| item.message.include?("SELECT:!") }
+        expect(finding&.fixes&.first&.edits&.first&.replacement).to eq(":")
+      ensure
+        FixCollector.disable!
+      end
+
+      it "keeps symbol literals unambiguous after SELECT" do
+        expect {
+          run(<<~CLEAR)
+            FN main() RETURNS !Void ->
+              values: []Int64 = [1, 2];
+              selected = values |> SELECT :constant;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "allows TRY, UNWRAP, and OR_ELSE to consume effects inside SELECT" do
+        expect {
+          run(effect_functions + <<~CLEAR)
+            FN main() RETURNS !Void ->
+              values: []Int64 = [1, 2];
+              definite1 = values |> SELECT TRY fallible(_);
+              definite2 = values |> SELECT UNWRAP optional(_);
+              definite3 = values |> SELECT fallible(_) OR_ELSE 0;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+    end
+  end
+
+  describe "WHERE predicate effects" do
+    let(:predicate_functions) do
+      <<~CLEAR
+        FN falliblePredicate(x: Int64) RETURNS !Bool -> RETURN x > 0; END
+        FN optionalPredicate(x: Int64) RETURNS ?Bool -> RETURN x > 0; END
+        FN fallibleOptionalPredicate(x: Int64) RETURNS !?Bool -> RETURN x > 0; END
+        FN asyncPredicate(x: Int64) RETURNS ~Bool -> RETURN BG { x > 0; }; END
+      CLEAR
+    end
+
+    it "rejects fallible, optional, combined, and asynchronous Bool predicates" do
+      %w[falliblePredicate optionalPredicate fallibleOptionalPredicate asyncPredicate].each do |name|
+        source = predicate_functions + <<~CLEAR
+          FN main() RETURNS !Void ->
+            values: []Int64 = [1, 2];
+            selected = values |> WHERE #{name}(_);
+            RETURN;
+          END
+        CLEAR
+        expect { run(source) }.to raise_error(
+          CompilerError, /WHERE clause must evaluate to a definite synchronous Bool/
+        )
+      end
+    end
+
+    it "allows predicate effects that are explicitly consumed before WHERE sees them" do
+      expect {
+        run(predicate_functions + <<~CLEAR)
+          FN main() RETURNS !Void ->
+            values: []Int64 = [1, 2];
+            first = values |> WHERE TRY falliblePredicate(_);
+            second = values |> WHERE optionalPredicate(_) OR_ELSE FALSE;
+            third = values |> WHERE UNWRAP optionalPredicate(_);
+            RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
     end
   end
 
@@ -292,11 +461,11 @@ RSpec.describe SemanticAnnotator do
     context "LIMIT with structs" do
       let(:code) {
         <<~FLUX
-          STRUCT Item { value: Int64 }
+          STRUCT Item { name: String, value: Int64 }
           items = [
-            Item{ value: 10_i64 },
-            Item{ value: 20_i64 },
-            Item{ value: 30_i64 }
+            Item{ name: "a", value: 10_i64 },
+            Item{ name: "b", value: 20_i64 },
+            Item{ name: "c", value: 30_i64 }
           ];
           limited = items |> LIMIT 2;
         FLUX
@@ -304,6 +473,12 @@ RSpec.describe SemanticAnnotator do
 
       it "returns the same list type" do
         expect(result).to eq(:"Item[]")
+      end
+
+      it "copies each element using the collection element sink type" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to match(/dupeValue\(Item, __copy_src/)
+        expect(zig).not_to match(/dupeValue\(std\.ArrayListUnmanaged\(Item\), __copy_src/)
       end
     end
 
@@ -404,8 +579,9 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "returns the same list type" do
-        expect(result).to eq(:"Int64[]")
+      it "returns the canonical Set type" do
+        expect(result.collection).to eq(:set)
+        expect(result.element_type).to eq(:Int64)
       end
     end
 
@@ -422,8 +598,9 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "returns Set type of the key field" do
-        expect(result).to eq(:"Int64[]")
+      it "returns the canonical Set type of the key field" do
+        expect(result.collection).to eq(:set)
+        expect(result.element_type).to eq(:Int64)
       end
     end
 
@@ -527,7 +704,7 @@ RSpec.describe SemanticAnnotator do
             FN f() RETURNS !Void ->
               MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
               id = &sp.insert(Score{ value: 1.0 });
-              result = sp.get(id);
+              result:? = sp.get(id);
               &sp.remove(id);
               n = sp.length();
               RETURN;
@@ -542,7 +719,7 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS !Void ->
             MUTABLE sp: [Pool(100)]@sharded(4) Score = [];
             id = &sp.insert(Score{ value: 1.0 });
-            result = sp.get(id);
+            result:? = sp.get(id);
             &sp.remove(id);
             n = sp.length();
             RETURN;
@@ -1599,7 +1776,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0, 3.0];
-            result = nums |> FIND _ > 2.0;
+            result:? = nums |> FIND _ > 2.0;
             RETURN;
           END
         CLEAR
@@ -1613,7 +1790,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Item { x: Float64 }
           FN f() RETURNS !Void ->
             items: Item[] = [];
-            result = items |> FIND _.x > 0.0;
+            result:? = items |> FIND _.x > 0.0;
             RETURN;
           END
         CLEAR
@@ -1650,7 +1827,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums |> FIND _ > 1.0;
+            result:? = nums |> FIND _ > 1.0;
             RETURN;
           END
         CLEAR
@@ -1663,7 +1840,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
-            result = nums |> FIND _ > 0.5;
+            result:? = nums |> FIND _ > 0.5;
             RETURN;
           END
         CLEAR
@@ -1687,6 +1864,23 @@ RSpec.describe SemanticAnnotator do
         fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
         bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
         expect(bind.resolved_type).to eq(:Bool)
+      end
+
+      it "accepts an IF expression as the predicate clause" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Bool ->
+            nums: []Int64 = [1, 2];
+            RETURN nums |> ANY (IF _ > 0 THEN
+              TRUE
+            ELSE
+              FALSE
+            END);
+          END
+        CLEAR
+
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        return_node = fn_node.body.find { |n| n.is_a?(AST::ReturnNode) }
+        expect(return_node.value.resolved_type).to eq(:Bool)
       end
 
       it "raises when ANY is applied to a non-array" do
@@ -1923,7 +2117,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT User { score: Float64 }
           FN f() RETURNS !Void ->
             users: User[] = [];
-            found = users |> FIND _.score > 50.0;
+            found:? = users |> FIND _.score > 50.0;
             RETURN;
           END
         CLEAR
@@ -2448,7 +2642,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE slist: []@sharded(2) Item = [];
-          result = slist |> FIND _.value > 0.0;
+          result:? = slist |> FIND _.value > 0.0;
         FLUX
       }
 
@@ -2651,7 +2845,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: [Pool(100)]Item = [];
-          found = pool |> FIND _.value == 10.0;
+          found:? = pool |> FIND _.value == 10.0;
         FLUX
       }
 
@@ -2669,7 +2863,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: [Pool(100)]Item = [];
-          found = pool |> FIND _.value == 99.0;
+          found:? = pool |> FIND _.value == 99.0;
         FLUX
       }
 
@@ -2684,7 +2878,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Item { value: Float64 }
           FN f() RETURNS !Void ->
             MUTABLE pool: [Pool(100)]Item = [];
-            found = pool |> FIND _.value == 10.0;
+            found:? = pool |> FIND _.value == 10.0;
             RETURN;
           END
         FLUX

@@ -13,6 +13,24 @@ require_relative "../ruby/ast/parser" unless defined?(ClearParser)
 # src/backends/formatter.rb.
 
 RSpec.describe Formatter do
+  it "preserves inferred-binding tense annotations without joining assignment" do
+    source = <<~CLEAR
+      FN main() RETURNS !Void ->
+        retained:!? = both();
+        optional:? = maybe();
+        fallible:! = fail();
+        future:~ = later();
+      END
+    CLEAR
+
+    formatted = T.must(Formatter.format(source))
+    expect(formatted).to include("retained:!? = both()")
+    expect(formatted).to include("optional:? = maybe()")
+    expect(formatted).to include("fallible:! = fail()")
+    expect(formatted).to include("future:~ = later()")
+    expect(Formatter.format(formatted)).to eq(formatted)
+  end
+
   it "preserves shift operators and adjacent nested generic closers" do
     source = <<~CLEAR
       FN shift(value: Int64, amount: Int64, nested: ProjectionBox<Store<Int64>>) RETURNS Int64 ->
@@ -1040,7 +1058,7 @@ RSpec.describe Formatter do
     it "wraps BG body when single statement is a FOR block" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          task = BG { @parallel ->
+          task:~ = BG { @parallel ->
             FOR i IN (0 ..< 10) DO
               MUTABLE a = i;
               MUTABLE b = i + 1;

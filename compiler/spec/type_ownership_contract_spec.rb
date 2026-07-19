@@ -44,6 +44,16 @@ RSpec.describe Type, "ownership and cleanup contracts" do
       expect(Type.new(:Box, layout: :indirect).heap_ptr?).to eq(true)
     end
 
+    it "preserves element capabilities when constructing arrays semantically" do
+      element = Type.new(:String)
+      element.sync = :symbol
+
+      array = Type.array_of(element)
+      expect(array.element_type&.sync).to eq(:symbol)
+      expect(array).to be_list_collection
+      expect(TypeExpressionPrinter.inline(array.shape.expression)).to eq("[]String@symbol")
+    end
+
     it "promotes only managed slices, not sharded or rodata-backed values" do
       expect(Type.new(:String).needs_escape_promotion?).to eq(true)
       expect(rodata_string.needs_escape_promotion?).to eq(false)
@@ -93,12 +103,21 @@ RSpec.describe Type, "ownership and cleanup contracts" do
   end
 
   describe "cleanup and ownership predicates" do
+    it "normalizes symbolic schema field inputs before generic substitution" do
+      schema = Schemas::StructSchema.new(fields: {}, type_params: [:T])
+      box = Type.generic_instance_of(:Box, [Type.new(:String)])
+
+      expect(box.send(:substitute_generic_schema_field_type, :T, schema)).to eq(Type.new(:String))
+      expect(box.send(:substitute_generic_schema_field_type, :Int64, schema)).to eq(Type.new(:Int64))
+    end
+
     it "distinguishes cleanup ownership from borrowed and copyable values" do
       expect(Type.new(:Int64).needs_cleanup?(schema_lookup)).to eq(false)
       expect(Type.new(:String).needs_cleanup?(schema_lookup)).to eq(false)
       expect(heap_string.needs_cleanup?(schema_lookup)).to eq(true)
       expect(Type.optional_of(:String).needs_cleanup?(schema_lookup)).to eq(true)
       expect(Type.new(:String, location: :borrow).needs_cleanup?(schema_lookup)).to eq(false)
+      expect(Type.new("String@symbol").recursive_cleanup_shape?(schema_lookup)).to eq(false)
       expect(Type.new(:"Int64[]", collection: :list).needs_cleanup?(schema_lookup)).to eq(true)
       expect(Type.new(:Box).needs_cleanup?(schema_lookup)).to eq(false)
       expect(Type.new(:Box).recursive_cleanup_shape?(schema_lookup)).to eq(true)

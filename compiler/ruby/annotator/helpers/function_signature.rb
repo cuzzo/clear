@@ -22,7 +22,7 @@ class FunctionSignature
   GenericBounds = T.type_alias { T::Hash[Symbol, T::Array[Type]] }
   ExternEffectValue = T.type_alias { T.any(Symbol, TrueClass) }
   ExternEffects = T.type_alias { T::Hash[Symbol, ExternEffectValue] }
-  EffectSet = T.type_alias { T::Set[Symbol] }
+  SignatureEffectSet = T.type_alias { T::Set[Symbol] }
   SyncSource = T.type_alias { T.any(AST::FunctionDef, Struct) }
 
   class Contract
@@ -101,7 +101,7 @@ class FunctionSignature
     prop :can_fail, T.nilable(T::Boolean), default: nil
     prop :alloc_fault, T.nilable(T::Boolean), default: nil
     prop :error_fallible, T.nilable(T::Boolean), default: nil
-    prop :effects, T.nilable(EffectSet), default: nil
+    prop :effects, T.nilable(SignatureEffectSet), default: nil
     prop :return_strategy, T.nilable(Symbol), default: nil
     prop :stack_tier, T.nilable(Symbol), default: nil
     prop :requires, RequiresMap, factory: -> { {} }
@@ -207,7 +207,7 @@ class FunctionSignature
   sig { returns(T.nilable(T::Boolean)) }
   def error_fallible = @facts.error_fallible
 
-  sig { returns(T.nilable(EffectSet)) }
+  sig { returns(T.nilable(SignatureEffectSet)) }
   def effects = @facts.effects
 
   sig { returns(T.nilable(Symbol)) }
@@ -278,7 +278,7 @@ class FunctionSignature
     return x if x.is_a?(FunctionSignature)
     if x.is_a?(Type)
       type = x
-      function_type = type.function_type
+      function_type = T.let(type.function_type, T.nilable(Type::FunctionType))
       return nil unless function_type
 
       source_signature = T.cast(function_type.source_signature, T.nilable(FunctionSignature))
@@ -405,7 +405,7 @@ class FunctionSignature
       can_fail: T.nilable(T::Boolean),
       alloc_fault: T.nilable(T::Boolean),
       error_fallible: T.nilable(T::Boolean),
-      effects: T.nilable(EffectSet),
+      effects: T.nilable(SignatureEffectSet),
       return_strategy: T.nilable(Symbol),
       stack_tier: T.nilable(Symbol),
       requires: T.nilable(RequiresMap),
@@ -476,19 +476,19 @@ class FunctionSignature
     @intrinsic_contract = T.let(nil, T.nilable(IntrinsicContract))
   end
 
-  sig { params(return_type: T.nilable(Type::TypeInput)).returns(FunctionSignature) }
+  sig { params(return_type: T.nilable(Type::TypeInput)).void }
   def replace_return_type!(return_type)
     @contract.return_type = coerce_return_type(return_type)
     self
   end
 
-  sig { params(return_strategy: T.nilable(Symbol)).returns(FunctionSignature) }
+  sig { params(return_strategy: T.nilable(Symbol)).void }
   def replace_return_strategy!(return_strategy)
     @facts.return_strategy = return_strategy
     self
   end
 
-  sig { params(emit: T.nilable(IntrinsicEmit)).returns(FunctionSignature) }
+  sig { params(emit: T.nilable(IntrinsicEmit)).void }
   def replace_intrinsic_emit!(emit)
     if emit
       @facts.emit = emit.dup
@@ -499,13 +499,13 @@ class FunctionSignature
     self
   end
 
-  sig { returns(FunctionSignature) }
+  sig { void }
   def mark_runtime_required!
     @facts.needs_rt = true
     self
   end
 
-  sig { returns(FunctionSignature) }
+  sig { void }
   def mark_faulting_allocation!
     @facts.can_fail = true
     @facts.alloc_fault = true
@@ -515,6 +515,14 @@ class FunctionSignature
   sig { returns(T::Boolean) }
   def emits_allocating?
     intrinsic_contract.allocation.allocates
+  end
+
+  # Signature can_fail is explicit source-visible behavior. Allocation-only
+  # effects are stamped on call nodes separately and must not turn every
+  # allocating expression into !T.
+  sig { returns(T::Boolean) }
+  def recoverable_result?
+    @facts.error_fallible == true || can_fail == true
   end
 
   sig { returns(T::Boolean) }
@@ -632,7 +640,7 @@ class FunctionSignature
 
   sig { params(pattern: IntrinsicEmit::StrOrSym, alloc: T.nilable(Symbol)).returns(FunctionSignature) }
   def with_intrinsic_override(pattern:, alloc: nil)
-    copy = dup
+    copy = T.let(dup, FunctionSignature)
     emit_copy = T.let(IntrinsicEmit.new, IntrinsicEmit)
     if copy.emit
       emit_copy = T.must(copy.emit).dup

@@ -6,6 +6,7 @@ require "sorbet-runtime"
 require_relative "../../ast/ast"
 require_relative "../../ast/scope"
 require_relative "../../semantic/ownership_graph"
+require_relative "../../semantic/lifecycle_plan"
 require_relative "../function_registry"
 require_relative "body_analysis"
 require_relative "conformance_registration"
@@ -100,6 +101,8 @@ module Annotator
       attr_reader :unresolved_node_count
       sig { returns(OwnershipGraph) }
       attr_reader :ownership_graph
+      sig { returns(Semantic::LifecycleRegistry) }
+      attr_reader :lifecycle_registry
 
       sig do
         params(
@@ -107,10 +110,11 @@ module Annotator
           body_summaries: BodySummaries,
           typed_node_count: Integer,
           unresolved_node_count: Integer,
-          ownership_graph: OwnershipGraph
+          ownership_graph: OwnershipGraph,
+          lifecycle_registry: Semantic::LifecycleRegistry
         ).void
       end
-      def initialize(resolution:, body_summaries:, typed_node_count:, unresolved_node_count:, ownership_graph:)
+      def initialize(resolution:, body_summaries:, typed_node_count:, unresolved_node_count:, ownership_graph:, lifecycle_registry: Semantic::LifecycleRegistry.empty)
         raise "typed program cannot publish unresolved nodes" unless unresolved_node_count.zero?
 
         @resolution = T.let(resolution, ResolutionFacts)
@@ -118,6 +122,7 @@ module Annotator
         @typed_node_count = T.let(typed_node_count, Integer)
         @unresolved_node_count = T.let(unresolved_node_count, Integer)
         @ownership_graph = T.let(ownership_graph, OwnershipGraph)
+        @lifecycle_registry = T.let(lifecycle_registry, Semantic::LifecycleRegistry)
         freeze
       end
 

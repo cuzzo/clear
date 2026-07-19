@@ -16,7 +16,7 @@ END
 
 FN main() RETURNS Void ->
     # Test 1: basic string return + overwrite
-    greeting = makeGreeting("World");
+    greeting = TRY makeGreeting("World");
 
     # Force frame allocations that reuse the same arena region.
     # Without promotion, these overwrite greeting's backing data.
@@ -29,9 +29,9 @@ FN main() RETURNS Void ->
     ASSERT greeting == "Hello World", "returned string must survive callee frame rewind";
 
     # Test 2: multiple returned strings coexist
-    a = makeLabel("item-", 1);
-    b = makeLabel("item-", 2);
-    c = makeLabel("item-", 3);
+    a = TRY makeLabel("item-", 1);
+    b = TRY makeLabel("item-", 2);
+    c = TRY makeLabel("item-", 3);
 
     # More frame churn
     MUTABLE j: Int64 = 0;

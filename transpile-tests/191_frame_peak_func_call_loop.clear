@@ -9,7 +9,7 @@ END
 FN main() RETURNS Void ->
     MUTABLE total: Int64 = 0;
     FOR i IN (1_i64 ..= 500) DO
-        result = greet("World");
+        result = TRY greet("World");
         total += result.length();
     END
     peak = framePeakBytes();

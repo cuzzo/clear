@@ -5,6 +5,7 @@ module Annotator
   module Domains
     module Expressions
       extend T::Sig
+      include RecoverableResult
 
 
       sig { params(fn_node: AST::FunctionDef).returns(T::Array[String]) }
@@ -78,7 +79,7 @@ module Annotator
           sigil: sigil, n: node.n, variant_hint: variant_hint)
       end
 
-      sig { params(node: AST::UnaryOp).returns(T.any(Type, Symbol)) }
+      sig { params(node: AST::UnaryOp).returns(Type) }
       def visit_UnaryOp(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
@@ -98,13 +99,9 @@ module Annotator
           end
           stamp_type!(node, :Bool)
         when :IS_OK
-          operand_type = if node.right.respond_to?(:error_union_type) && T.unsafe(node.right).error_union_type
-            T.unsafe(node.right).error_union_type
-          else
-            node.right.full_type!(context: "IS_OK operand")
-          end
-          unless Type.new(operand_type).error_union?
-            error!(node, :IS_OK_REQUIRES_FALLIBLE, got: operand_type)
+          operand_type = recoverable_result_type(node.right, context: "IS_OK operand")
+          unless operand_type
+            error!(node, :IS_OK_REQUIRES_FALLIBLE, got: node.right.full_type!(context: "IS_OK operand"))
           end
           stamp_type!(node, :Bool)
         when :IS_READY
@@ -114,9 +111,25 @@ module Annotator
             error!(node, :IS_READY_REQUIRES_FUTURE, got: operand_type)
           end
           stamp_type!(node, :Bool)
+        when :TRY
+          declared = recoverable_result_type(node.right, context: "TRY operand")
+          raw_type = Type.new(node.right.full_type!(context: "TRY operand"))
+          if declared
+            stamp_type!(node, declared.success_type)
+          elsif raw_type.optional?
+            stamp_type!(node, T.must(raw_type.wrapped_type))
+          else
+            error!(node, :UNWRAP_NON_OPTIONAL, got: raw_type)
+          end
+          # TRY changes the control-flow channel, not where the successful
+          # payload lives. Keep allocator/borrow provenance transparent so
+          # escape analysis and cleanup planning see the original value.
+          node.storage = node.right.storage
         else
           stamp_type!(node, node.right.full_type!(context: "unary right"))
         end
+
+        node.full_type!(context: "unary expression")
       end
 
       # ==========================================
@@ -180,9 +193,16 @@ module Annotator
         when :OR_ELSE then return visit_OrElse(node)
         end
 
-        # Standard binary operations - visit children first
+        # Standard binary operations - visit children first. The right side of
+        # AND/OR is reached under a known truth value for the left side, so
+        # preserve non-nil facts implied by that short-circuit edge.
         visit(node.left)
-        visit(node.right)
+        if node.op == :AND || node.op == :OR
+          refinements = short_circuit_non_nil_refinements(node.left, truthy: node.op == :AND)
+          with_value_type_refinements(refinements) { visit(node.right) }
+        else
+          visit(node.right)
+        end
         promote_to_expr_if!(node, node.left) if node.left.is_a?(AST::IfStatement)
         promote_to_expr_match!(node, node.left) if node.left.is_a?(AST::MatchStatement)
         promote_to_expr_if!(node, node.right) if node.right.is_a?(AST::IfStatement)
@@ -236,6 +256,65 @@ module Annotator
         end
         result.type
       end
+
+      sig { params(node: AST::Node, truthy: T::Boolean).returns(T::Hash[Integer, Type]) }
+      def short_circuit_non_nil_refinements(node, truthy:)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        if node.is_a?(AST::UnaryOp)
+          return short_circuit_non_nil_refinements(node.right, truthy: !truthy) if node.op == :NOT
+          return identifier_non_nil_refinement(node.right) if node.op == :EXISTS && truthy
+          return {}
+        end
+
+        return {} unless node.is_a?(AST::BinaryOp)
+
+        if (node.op == :AND && truthy) || (node.op == :OR && !truthy)
+          return short_circuit_non_nil_refinements(node.left, truthy: truthy)
+            .merge(short_circuit_non_nil_refinements(node.right, truthy: truthy))
+        end
+
+        return {} unless node.op == :EQ || node.op == :NEQ
+
+        identifier = nil_comparison_identifier(node)
+        proves_non_nil = (node.op == :EQ && !truthy) || (node.op == :NEQ && truthy)
+        identifier && proves_non_nil ? identifier_non_nil_refinement(identifier) : {}
+      end
+      private :short_circuit_non_nil_refinements
+
+      sig { params(node: AST::BinaryOp).returns(T.nilable(AST::Identifier)) }
+      def nil_comparison_identifier(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        return node.left if node.left.is_a?(AST::Identifier) && nil_literal?(node.right)
+        return node.right if node.right.is_a?(AST::Identifier) && nil_literal?(node.left)
+
+        nil
+      end
+      private :nil_comparison_identifier
+
+      sig { params(node: AST::Node).returns(T::Boolean) }
+      def nil_literal?(node)
+        node.is_a?(AST::Literal) && node.type == :NIL
+      end
+      private :nil_literal?
+
+      sig { params(node: AST::Node).returns(T::Hash[Integer, Type]) }
+      def identifier_non_nil_refinement(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        return {} unless node.is_a?(AST::Identifier)
+
+        scope = resolve_variable_scope(node.name)
+        entry = scope&.resolve_entry(node.name)
+        return {} unless scope && entry
+
+        full_type = scope.resolve_full_type(node.name)
+        return {} unless full_type.optional?
+
+        { entry.binding_id => T.must(full_type.wrapped_type) }
+      end
+      private :identifier_non_nil_refinement
 
       sig { params(site: AST::BinaryOp, operand: AST::Node, operand_type: Type).void }
       def reject_direct_observable_operand!(site, operand, operand_type)
@@ -437,6 +516,14 @@ module Annotator
         result = Type.new(T.must(unwrapped))
         result.merge_capabilities_from!(type, include_affine_ownership: true)
         stamp_type!(node, result)
+        # UNWRAP proves presence without copying or relocating the payload.
+        node.storage = node.target.storage
+        # `UNWRAP` removes the optional payload layer, not an outer failure
+        # channel. This lets `TRY UNWRAP value` compose as !?T -> T.
+        if recoverable_result_type(node.target, context: "optional unwrap target")
+          T.unsafe(node).error_union_type = Type.error_union_of(result)
+          node.can_fail = true if node.respond_to?(:can_fail=)
+        end
         # A nullable foreign pointer remains a borrow after the null check.
         # Unwrapping proves presence; it must not manufacture ownership or a
         # scope-exit cleanup for storage that is still owned by C.
@@ -552,8 +639,13 @@ module Annotator
           return fallback
         end
 
-        result_type = merged_expression_branch_type(all_types)
         value_types = all_types.reject { |t| t.resolved == :NoReturn }
+        expected_type = expression_parent_expected_type(parent_node)
+        result_type = if expected_type && value_types.all? { |type| expression_branch_assignable?(expected_type, type) }
+          expected_type
+        else
+          merged_expression_branch_type(all_types)
+        end
         resolved_types = value_types.map { |t| expression_branch_compare_type(t) }.uniq.reject { |t| t == :Any }
         if !result_type && resolved_types.size > 1
           error!(match_node, :MATCH_EXPR_BRANCHES_INCOMPATIBLE, types: resolved_types.join(', '))
@@ -567,6 +659,28 @@ module Annotator
         match_node.expr_mode = true
         stamp_type!(match_node, (result_type.string? && !result_type.symbol?) ? Type.new(:String, location: :rodata) : result_type)
       end
+
+      sig { params(parent_node: AST::Node).returns(T.nilable(Type)) }
+      def expression_parent_expected_type(parent_node)
+        declared = case parent_node
+        when AST::VarDecl, AST::BindExpr
+          parent_node.type
+        end
+        return nil if declared.nil?
+
+        declared.is_a?(Type) ? declared : Type.new(T.unsafe(declared))
+      end
+
+      sig { params(expected: Type, actual: Type).returns(T::Boolean) }
+      def expression_branch_assignable?(expected, actual)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        return true if actual.resolved == :NoReturn || expected.any? || actual.any?
+        return true if expected.accepts?(actual)
+
+        schema = lookup_type_schema(expected.value_payload_type.resolved)
+        !UnionPayloadCompatibility.unique_variant(expected, actual, schema).nil?
+      end
       private :collect_implicit_type_params
 
       sig { params(type: Type).returns(Symbol) }
@@ -579,15 +693,24 @@ module Annotator
         value_types = types.reject { |type| type.resolved == :NoReturn }
         return Type.new(:NoReturn) if value_types.empty?
 
-        concrete = value_types.reject { |type| type.resolved == :NIL || type.any? }
-        nil_seen = concrete.length != value_types.reject(&:any?).length
-        return nil unless nil_seen && concrete.any?
-        compare_types = concrete.map { |type| expression_branch_compare_type(type) }.uniq
+        relevant = value_types.reject(&:any?)
+        optional_seen = relevant.any? { |type| type.resolved == :NIL || type.optional? }
+        return nil unless optional_seen
+
+        payloads = relevant.filter_map do |type|
+          next if type.resolved == :NIL
+
+          type.optional? ? type.wrapped_type : type
+        end
+        return nil if payloads.empty?
+
+        compare_types = payloads.map { |type| expression_branch_compare_type(type) }.uniq
         return nil unless compare_types.length == 1
 
-        Type.optional_of(T.unsafe(concrete.first))
+        Type.optional_of(T.must(payloads.first))
       end
-      private :expression_branch_compare_type, :merged_expression_branch_type
+      private :expression_parent_expected_type, :expression_branch_assignable?,
+        :expression_branch_compare_type, :merged_expression_branch_type
 
 end
   end

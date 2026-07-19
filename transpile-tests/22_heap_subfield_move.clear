@@ -10,7 +10,7 @@ END
 
 FN main() RETURNS Void ->
     # Container owns a heap-allocated Node
-    container = makeContainer(777);
+    container = TRY makeContainer(777);
 
     # Move the heap node out of container
     extracted = container.node;

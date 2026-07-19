@@ -23,6 +23,10 @@ class AST::Assignment
   sig { params(value: T.untyped).returns(T.untyped) }
   def auto_lock=(value); end
   sig { returns(T.untyped) }
+  def field_lifecycle_plan; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def field_lifecycle_plan=(value); end
+  sig { returns(T.untyped) }
   def field_pre_cleanup; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def field_pre_cleanup=(value); end
@@ -95,6 +99,10 @@ class AST::BgStreamBlock
 end
 
 class AST::BinaryOp
+  sig { returns(T.untyped) }
+  def error_union_type; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_union_type=(value); end
   sig { returns(T.untyped) }
   def observable_dest; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -225,6 +233,10 @@ class AST::FuncCall
   def pipe_lhs; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def pipe_lhs=(value); end
+  sig { returns(T.untyped) }
+  def retain_error_channel; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def retain_error_channel=(value); end
 end
 
 class AST::FunctionDef
@@ -450,6 +462,10 @@ class AST::MethodCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def pool_method=(value); end
   sig { returns(T.untyped) }
+  def retain_error_channel; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def retain_error_channel=(value); end
+  sig { returns(T.untyped) }
   def safe_nav_chain; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def safe_nav_chain=(value); end
@@ -457,6 +473,13 @@ class AST::MethodCall
   def set_method; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def set_method=(value); end
+end
+
+class AST::OptionalUnwrap
+  sig { returns(T.untyped) }
+  def error_union_type; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_union_type=(value); end
 end
 
 class AST::Program
@@ -468,6 +491,17 @@ class AST::Program
   def sync_policy; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def sync_policy=(value); end
+end
+
+class AST::StaticCall
+  sig { returns(T.untyped) }
+  def error_union_type; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_union_type=(value); end
+  sig { returns(T.untyped) }
+  def retain_error_channel; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def retain_error_channel=(value); end
 end
 
 class AST::StructLit
@@ -659,6 +693,8 @@ end
 class Annotator::Phases::TypedProgramFacts
   sig { returns(Annotator::Phases::TypedProgramFacts::BodySummaries) }
   def body_summaries; end
+  sig { returns(Semantic::LifecycleRegistry) }
+  def lifecycle_registry; end
   sig { returns(OwnershipGraph) }
   def ownership_graph; end
   sig { returns(Annotator::Phases::ResolutionFacts) }
@@ -678,6 +714,10 @@ class Assignment
   def auto_lock; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def auto_lock=(value); end
+  sig { returns(T.untyped) }
+  def field_lifecycle_plan; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def field_lifecycle_plan=(value); end
   sig { returns(T.untyped) }
   def field_pre_cleanup; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -808,6 +848,10 @@ class BgStreamBlock
 end
 
 class BinaryOp
+  sig { returns(T.untyped) }
+  def error_union_type; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_union_type=(value); end
   sig { returns(T.untyped) }
   def observable_dest; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1012,6 +1056,10 @@ class FuncCall
   def pipe_lhs; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def pipe_lhs=(value); end
+  sig { returns(T.untyped) }
+  def retain_error_channel; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def retain_error_channel=(value); end
 end
 
 class FunctionCFG
@@ -1491,6 +1539,10 @@ class MethodCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def pool_method=(value); end
   sig { returns(T.untyped) }
+  def retain_error_channel; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def retain_error_channel=(value); end
+  sig { returns(T.untyped) }
   def safe_nav_chain; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def safe_nav_chain=(value); end
@@ -1503,6 +1555,13 @@ end
 class ModuleImporter
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   def module_cache; end
+end
+
+class OptionalUnwrap
+  sig { returns(T.untyped) }
+  def error_union_type; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_union_type=(value); end
 end
 
 class OwnershipDataflow
@@ -1654,6 +1713,17 @@ class StackVerifier
   def binary_path; end
   sig { returns(T.untyped) }
   def module_prefix; end
+end
+
+class StaticCall
+  sig { returns(T.untyped) }
+  def error_union_type; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_union_type=(value); end
+  sig { returns(T.untyped) }
+  def retain_error_channel; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def retain_error_channel=(value); end
 end
 
 class StructLit
@@ -1877,13 +1947,6 @@ class TypeCapabilities
   def soa; end
   sig { returns(T.untyped) }
   def sync; end
-end
-
-class TypeShape
-  sig { returns(T::Boolean) }
-  def auto; end
-  sig { returns(TypeExpression) }
-  def expression; end
 end
 
 class UseAfterMoveChecker

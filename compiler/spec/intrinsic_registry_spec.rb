@@ -90,6 +90,15 @@ RSpec.describe IntrinsicRegistry do
     expect(fs.intrinsic_contract).to equal(replacement)
   end
 
+  it "keeps source-visible failure on an allocating intrinsic recoverable" do
+    signature = T.must(IntrinsicRegistry.lookup(STD_LIB, "codepointToString"))
+
+    expect(signature.emits_allocating?).to be(true)
+    expect(signature.can_fail).to be(true)
+    expect(signature.error_fallible).to be(true)
+    expect(signature.recoverable_result?).to be(true)
+  end
+
   it "uses registry identity before structural compatibility matching" do
     allow(IntrinsicRegistry).to receive(:registry_matches?).and_call_original
 

@@ -182,6 +182,8 @@ def build_lowering(frontend, source_dir, importer)
     struct_schemas: frontend.struct_schemas,
     enum_schemas: frontend.enum_schemas,
     union_schemas: frontend.union_schemas,
+    schema_lookup: ->(name) { frontend.annotator.lookup_type_schema(name) },
+    lifecycle_registry: frontend.lifecycle_registry,
     fn_sigs: frontend.fn_sigs,
     moved_guard_info: frontend.moved_guard_info,
     importer: importer,

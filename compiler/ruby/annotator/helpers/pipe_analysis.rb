@@ -14,7 +14,7 @@ module PipeAnalysis
   ObservableTypeKwValue = T.type_alias do
     T.nilable(T.any(Symbol, Integer, T::Boolean))
   end
-  ShardScanNode = T.type_alias { T.nilable(T.any(AST::Locatable, AST::RawBody)) }
+  ShardScanNode = T.type_alias { T.nilable(T.any(AST::Locatable, AST::Capability, AST::RawBody)) }
 
   class PipeArityPlan < T::Struct
     extend T::Sig
@@ -39,7 +39,7 @@ module PipeAnalysis
     extend T::Sig
 
     const :kind, Symbol
-    const :item_type, Symbol
+    const :item_type, Type
 
     sig { returns(T::Boolean) }
     def stream?
@@ -59,6 +59,19 @@ module PipeAnalysis
     sig { returns(T::Boolean) }
     def valid?
       kind != :invalid
+    end
+  end
+
+  class SelectorEffectFact < T::Struct
+    extend T::Sig
+
+    const :value_type, Type
+    const :asynchronous, T::Boolean
+    const :required_mode, T.nilable(Symbol)
+
+    sig { returns(T::Boolean) }
+    def fallible?
+      required_mode == :fallible || required_mode == :fallible_optional
     end
   end
 
@@ -182,27 +195,27 @@ module PipeAnalysis
   def pipeline_source_fact(source, source_type, include_inf_stream: false)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     if include_inf_stream && source_type.inf_stream?
-      return PipelineSourceFact.new(kind: :inf_stream, item_type: T.must(source_type.inf_stream_element_type).resolved)
+      return PipelineSourceFact.new(kind: :inf_stream, item_type: T.must(source_type.inf_stream_element_type))
     end
 
-    return PipelineSourceFact.new(kind: :range, item_type: range_element_type(source).resolved) if source.is_a?(AST::RangeLit)
+    return PipelineSourceFact.new(kind: :range, item_type: range_element_type(source)) if source.is_a?(AST::RangeLit)
 
     if source_type.open_stream?
-      return PipelineSourceFact.new(kind: :open_stream, item_type: T.must(source_type.open_stream_element_type).resolved)
+      return PipelineSourceFact.new(kind: :open_stream, item_type: T.must(source_type.open_stream_element_type))
     end
 
     if source_type.dynamic_stream?
-      return PipelineSourceFact.new(kind: :dynamic_stream, item_type: T.must(source_type.tense_type.element_type).resolved)
+      return PipelineSourceFact.new(kind: :dynamic_stream, item_type: T.must(source_type.tense_type.element_type))
     end
 
     if source_type.bounded_stream?
-      return PipelineSourceFact.new(kind: :bounded_stream, item_type: T.must(source_type.tense_type.element_type).resolved)
+      return PipelineSourceFact.new(kind: :bounded_stream, item_type: T.must(source_type.tense_type.element_type))
     end
 
     element_type = source_type.element_type
-    return PipelineSourceFact.new(kind: :collection, item_type: element_type.resolved) if source_type.linear_collection? && element_type
+    return PipelineSourceFact.new(kind: :collection, item_type: element_type) if source_type.linear_collection? && element_type
 
-    PipelineSourceFact.new(kind: :invalid, item_type: :Any)
+    PipelineSourceFact.new(kind: :invalid, item_type: Type.new(:Any))
   end
 
   sig { returns(T::Boolean) }
@@ -276,6 +289,15 @@ module PipeAnalysis
     stamp_type!(node.right, node.full_type!(context: "pipeline result"))
   end
 
+  sig { params(parent: AST::Node, expression: AST::Node).void }
+  def annotate_pipeline_expression!(parent, expression)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+    visit(expression)
+    promote_to_expr_if!(parent, expression) if expression.is_a?(AST::IfStatement)
+    promote_to_expr_match!(parent, expression) if expression.is_a?(AST::MatchStatement)
+  end
+
   # COLLECT: pipe-terminal that joins a `~T@observable` and returns
   # the underlying T. Validates the LHS is observable; sets result
   # type to the inner element of the observable. Marks the LHS as
@@ -320,6 +342,8 @@ module PipeAnalysis
     require_array_input!(node, "SELECT", allow_range: is_stream, allow_stream: is_stream)
     item_type = source.item_type
 
+    selector_effect = T.let(nil, T.nilable(SelectorEffectFact))
+
     # Create a temporary Scope for the body
     with_new_scope do
       # Declare '_' with the specific item type
@@ -327,11 +351,14 @@ module PipeAnalysis
 
       # Analyze the Body (e.g., _["count"])
       with_soa_tracking(node, item_type) do
-        visit(node.right.expression)
+        annotate_pipeline_expression!(node.right, node.right.expression)
       end
 
-      if node.right.is_a?(AST::WhereOp) && node.right.expression.resolved_type != :Bool
-        error!(node.right, :WHERE_NEEDS_BOOL)
+      selector_effect = selector_effect_fact(node.right.expression)
+      if node.right.is_a?(AST::WhereOp)
+        validate_where_effect_contract!(node.right, selector_effect)
+      elsif node.right.is_a?(AST::SelectOp)
+        validate_select_effect_contract!(node.right, selector_effect)
       end
     end
 
@@ -340,8 +367,16 @@ module PipeAnalysis
     # can see the source is still infinite; LIMIT will convert to T[].
     case node.right
     when AST::SelectOp
-      result_base = node.right.expression.full_type!(context: "pipeline op expression")
-      stamp_type!(node, source.inf_stream? ? :"~#{result_base}[INF]" : :"#{result_base}[]")
+      effect = T.must(selector_effect)
+      result_base = effect.value_type
+      result_type = if source.inf_stream?
+        Type.new(StreamTypeExpression.new(cardinality: :INF, item: result_base.shape.expression))
+      elsif effect.asynchronous
+        Type.promise_list_of(result_base)
+      else
+        Type.array_of(result_base)
+      end
+      stamp_type!(node, result_type)
     when AST::WhereOp
       stamp_type!(node, source.inf_stream? ? :"~#{item_type}[INF]" : :"#{item_type}[]")
     when AST::IndexOp
@@ -355,13 +390,100 @@ module PipeAnalysis
       stamp_type!(node.right, node.right.expression.resolved_type)
     end
 
-    node.storage = :frame
+    # Promise-list SELECT results own heap-backed fiber handles. Keep their
+    # aggregate in the heap ownership domain so each transferred child and its
+    # container have one coherent cleanup allocator.
+    node.storage = node.full_type!(context: "pipeline result storage").promise_list? ? :heap : :frame
 
     # WHERE/SELECT/ORDER_BY allocate intermediate ArrayListUnmanaged at the
     # transpiler level via rt.frameAlloc(). InfStream results are not materialized;
     # only count frame allocation for finite (list-producing) results.
-    current_fn_ctx&.record_frame_use! unless source.inf_stream?
+    current_fn_ctx&.record_frame_use! unless source.inf_stream? || node.storage == :heap
     nil
+  end
+
+  sig { params(expression: AST::Node).returns(SelectorEffectFact) }
+  def selector_effect_fact(expression)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+    expression_type = expression.full_type!(context: "pipeline selector expression")
+    recoverable = recoverable_result_type(expression, context: "pipeline selector recovery")
+    wrapped = recoverable || expression_type
+    asynchronous = wrapped.future?
+    value_type = asynchronous ? wrapped.tense_type : wrapped
+    fallible = value_type.error_union?
+    success = fallible ? value_type.success_type : value_type
+    optional = success.optional?
+    required_mode = if fallible && optional
+      :fallible_optional
+    elsif fallible
+      :fallible
+    elsif optional
+      :optional
+    end
+    SelectorEffectFact.new(
+      value_type: value_type,
+      asynchronous: asynchronous,
+      required_mode: required_mode,
+    )
+  end
+
+  sig { params(op: AST::SelectOp, effect: SelectorEffectFact).void }
+  def validate_select_effect_contract!(op, effect)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+    declared = op.effect_mode
+    required = effect.required_mode
+    if declared == required
+      retain_select_error_channel!(op.expression) if effect.fallible?
+      return
+    end
+
+    expected_suffix = select_effect_suffix(required)
+    expected_selector = expected_suffix.empty? ? "SELECT" : "SELECT:#{expected_suffix}"
+    if declared.nil?
+      fixes = [Fix.new(
+        description: fix_description(:INSERT_SELECT_EFFECT_ANNOTATION, selector: expected_selector),
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: op.token.line,
+            col: op.token.column + op.token.text!.length, length: 0),
+          replacement: ":#{expected_suffix}",
+        )],
+      )]
+      fixable!(op, code: :SELECT_EFFECT_ANNOTATION_REQUIRED,
+        got: Type.surface_name_type(effect.value_type), selector: expected_selector,
+        category: :type, level: :error, fixes: fixes, raise_in_collector: true)
+      return
+    end
+
+    error!(op, :SELECT_EFFECT_ANNOTATION_MISMATCH,
+      declared: select_effect_suffix(declared), got: Type.surface_name_type(effect.value_type),
+      expected: expected_selector)
+  end
+
+  sig { params(expression: AST::Node).void }
+  def retain_select_error_channel!(expression)
+    T.unsafe(expression).retain_error_channel = true if expression.respond_to?(:retain_error_channel=)
+  end
+
+  sig { params(mode: T.nilable(Symbol)).returns(String) }
+  def select_effect_suffix(mode)
+    case mode
+    when :fallible then "!"
+    when :optional then "?"
+    when :fallible_optional then "!?"
+    else ""
+    end
+  end
+
+  sig { params(op: AST::WhereOp, effect: SelectorEffectFact).void }
+  def validate_where_effect_contract!(op, effect)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+    return if !effect.asynchronous && effect.required_mode.nil? && effect.value_type.resolved == :Bool
+
+    error!(op, :WHERE_NEEDS_BOOL, got: Type.surface_name_type(effect.value_type))
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
@@ -375,7 +497,7 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      visit(node.right.expression)
+      annotate_pipeline_expression!(node.right, node.right.expression)
     end
 
     unless node.right.expression.resolved_type == :Bool
@@ -404,7 +526,7 @@ module PipeAnalysis
     # _ is a sub-slice of the same element type
     with_new_scope do
       current_scope.declare("_", nil, :"#{item_type}[]", false, false, nil, :stack)
-      visit(node.right.expression)
+      annotate_pipeline_expression!(node.right, node.right.expression)
     end
 
     # Result is a list of whatever the expression produces
@@ -597,7 +719,7 @@ module PipeAnalysis
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
 
       # Analyze the body expression
-      visit(node.right.expression)
+      annotate_pipeline_expression!(node.right, node.right.expression)
     end
 
     # Result type is the accumulator type
@@ -679,7 +801,7 @@ module PipeAnalysis
     # Analyze the expression with '_' in scope
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      visit(node.right.expression)
+      annotate_pipeline_expression!(node.right, node.right.expression)
     end
 
     # Check that the expression evaluates to an array type
@@ -718,11 +840,11 @@ module PipeAnalysis
     # Analyze the expression with '_' in scope
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      visit(node.right.expression)
+      annotate_pipeline_expression!(node.right, node.right.expression)
     end
 
     # Key type is what the expression evaluates to; result is a Set of those keys.
-    key_type = node.right.expression.resolved_type
+    key_type = node.right.expression.full_type!(context: "DISTINCT key expression")
     stamp_type!(node.right, key_type)
 
     # Bounded stream source (~T[N]) → lift to ~K[N]@set:observable so the
@@ -734,12 +856,14 @@ module PipeAnalysis
       shape&.capacity
     end
     if bounded_n
-      stamp_type!(node, Type.new(:"#{key_type}[#{bounded_n}]", collection: :set))
+      result_type = Type.set_of(key_type, capacity: bounded_n)
+      stamp_type!(node, result_type)
       node.storage = :heap
       current_fn_ctx&.record_heap_use!
       mark_observable_terminal!(node, terminal: :distinct, raw: :"~#{key_type}[#{bounded_n}]", collection: :set)
     else
-      stamp_type!(node, Type.new(:"#{key_type}[]", collection: :set))
+      result_type = Type.set_of(key_type)
+      stamp_type!(node, result_type)
       node.storage = :heap
       current_fn_ctx&.record_heap_use!
       mark_observable_terminal!(node, terminal: :distinct, raw: :"~#{key_type}[]", collection: :set)
@@ -766,6 +890,11 @@ module PipeAnalysis
       result_type = T.must(t.payload_type).resolved if t.error_union?
     end
     stamp_type!(node, result_type)
+    # CATCH absorbs the error channel for an ordinary binding, but the call
+    # still needs a failure fact so an enclosing explicit OR_ELSE can restore
+    # that channel contextually.
+    propagate_pipeline_recovery!(node, node.right, retain_error_union: !has_catch_blocks?)
+    node.full_type!(context: "pipeline function result")
   end
 
   sig { params(node: AST::BinaryOp).void }
@@ -776,8 +905,8 @@ module PipeAnalysis
 
     visit(node.right) # Resolves 'f' to its Signature/Type
 
-    callable_type = node.right.full_type!(context: "pipeline callable")
-    sig = callable_type.fn_type? ? callable_type.function_signature : callable_type.resolved
+    t = node.right.full_type!(context: "pipeline callable")
+    sig = FunctionSignature.unwrap(t) || t
     func_name = node.right.name
 
     if sig.is_a?(FunctionSignature)
@@ -827,6 +956,20 @@ module PipeAnalysis
       result_type = T.must(t.payload_type).resolved if t.error_union?
     end
     stamp_type!(node, result_type)
+    recoverable = Type.new(sig.return_type)
+    if recoverable.error_union? || sig.recoverable_result?
+      unless has_catch_blocks?
+        node.error_union_type = recoverable.error_union? ? recoverable : Type.error_union_of(recoverable)
+      end
+      node.can_fail = true
+    end
+  end
+
+  sig { params(node: AST::BinaryOp, call: AST::FuncCall, retain_error_union: T::Boolean).void }
+  def propagate_pipeline_recovery!(node, call, retain_error_union:)
+    error_type = call.error_union_type if call.respond_to?(:error_union_type)
+    node.error_union_type = error_type if retain_error_union && error_type
+    node.can_fail = true if error_type || call.can_fail == true
   end
 
   sig { params(sig: FunctionSignature, given_args: Integer).returns(PipeArityPlan) }
@@ -931,7 +1074,7 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      visit(node.right.expression)
+      annotate_pipeline_expression!(node.right, node.right.expression)
     end
 
     unless node.right.expression.resolved_type == :Bool
@@ -955,7 +1098,7 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      visit(node.right.expression)
+      annotate_pipeline_expression!(node.right, node.right.expression)
     end
 
     unless node.right.expression.resolved_type == :Bool
@@ -979,7 +1122,7 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      visit(node.right.expression)
+      annotate_pipeline_expression!(node.right, node.right.expression)
     end
 
     unless node.right.expression.resolved_type == :Bool
@@ -1003,7 +1146,7 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      visit(node.right.expression)
+      annotate_pipeline_expression!(node.right, node.right.expression)
     end
 
     unless node.right.expression.resolved_type == :Bool
@@ -1034,7 +1177,9 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      with_soa_tracking(node, item_type) { visit(node.right.expression) }
+      with_soa_tracking(node, item_type) do
+        annotate_pipeline_expression!(node.right, node.right.expression)
+      end
     end
 
     expr_type = node.right.expression.resolved_type
@@ -1059,7 +1204,9 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      with_soa_tracking(node, item_type) { visit(node.right.expression) }
+      with_soa_tracking(node, item_type) do
+        annotate_pipeline_expression!(node.right, node.right.expression)
+      end
     end
 
     expr_type = node.right.expression.resolved_type
@@ -1084,7 +1231,9 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      with_soa_tracking(node, item_type) { visit(node.right.expression) }
+      with_soa_tracking(node, item_type) do
+        annotate_pipeline_expression!(node.right, node.right.expression)
+      end
     end
 
     expr_type = node.right.expression.resolved_type
@@ -1109,7 +1258,9 @@ module PipeAnalysis
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
-      with_soa_tracking(node, item_type) { visit(node.right.expression) }
+      with_soa_tracking(node, item_type) do
+        annotate_pipeline_expression!(node.right, node.right.expression)
+      end
     end
 
     expr_type = node.right.expression.resolved_type
@@ -1287,6 +1438,14 @@ module PipeAnalysis
       node.each { |child| each_shard_scan_node(child, &blk) }
       return
     end
+    if node.is_a?(AST::Capability)
+      node.each_pair do |_, val|
+        if val.is_a?(Array) || val.is_a?(AST::Capability) || val.is_a?(AST::Locatable)
+          each_shard_scan_node(val, &blk)
+        end
+      end
+      return
+    end
     return unless node.is_a?(AST::Locatable)
 
     yield node
@@ -1294,7 +1453,7 @@ module PipeAnalysis
 
     node.class.members.each do |member|
       val = node[member]
-      if val.is_a?(Array) || val.is_a?(AST::Locatable)
+      if val.is_a?(Array) || val.is_a?(AST::Capability) || val.is_a?(AST::Locatable)
         each_shard_scan_node(val, &blk)
       end
     end
@@ -1667,7 +1826,7 @@ module PipeAnalysis
     validate_concurrent_where_expression!(node)
 
     result_type = concurrent_select_family_result_type(node, item_type)
-    stamp_type!(node, Type.new(result_type))
+    stamp_type!(node, result_type)
     node.storage = :heap
     current_fn_ctx&.record_frame_use!
     nil
@@ -1732,18 +1891,18 @@ module PipeAnalysis
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     op = node.right.op
     return unless op.is_a?(AST::WhereOp)
-    return if op.expression.resolved_type == :Bool
-
-    error!(op, :WHERE_NEEDS_BOOL)
+    validate_where_effect_contract!(op, selector_effect_fact(op.expression))
   end
 
-  sig { params(node: AST::BinaryOp, item_type: Symbol).returns(Symbol) }
+  sig { params(node: AST::BinaryOp, item_type: Type).returns(Type) }
   def concurrent_select_family_result_type(node, item_type)
     op = node.right.op
     if op.is_a?(AST::SelectOp)
-      return :"#{op.expression.full_type!(context: "concurrent op expression")}[]"
+      effect = selector_effect_fact(op.expression)
+      validate_select_effect_contract!(op, effect)
+      return effect.asynchronous ? Type.promise_list_of(effect.value_type) : Type.array_of(effect.value_type)
     end
-    return :"#{item_type}[]" if op.is_a?(AST::WhereOp)
+    return Type.array_of(item_type) if op.is_a?(AST::WhereOp)
 
     Kernel.raise "expected CONCURRENT SELECT/WHERE, got #{op.class.name}"
   end
@@ -1826,14 +1985,14 @@ module PipeAnalysis
   SOA_MIN_FIELDS = 4
   SOA_THRESHOLD  = 0.5  # warn when < 50% of fields accessed
 
-  sig { params(node: AST::BinaryOp, item_type: Symbol).void }
+  sig { params(node: AST::BinaryOp, item_type: Type).void }
   def check_soa_opportunity!(node, item_type)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     accessed = phase_traversal_state.pipeline_accessed_fields
     return unless accessed
     return if accessed.empty?
 
-    schema = lookup_type_schema(item_type)
+    schema = lookup_type_schema(item_type.resolved)
     return unless Schemas.field_bearing?(schema)
 
     total = schema.fields.keys.size
@@ -1848,7 +2007,7 @@ module PipeAnalysis
   end
 
   # Wraps a pipeline body visit with SOA field tracking.
-  sig { params(node: AST::BinaryOp, item_type: Symbol, blk: T.untyped).void }
+  sig { params(node: AST::BinaryOp, item_type: Type, blk: T.untyped).void }
   def with_soa_tracking(node, item_type, &blk)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     traversal_state = phase_traversal_state

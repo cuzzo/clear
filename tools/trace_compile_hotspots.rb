@@ -82,6 +82,7 @@ def run_phase(phase, source, source_dir, importer)
     MIRPass.new(
       fn_nodes: fn_nodes,
       schema_lookup: schema_lookup,
+      lifecycle_registry: T.must(annotator.annotation_products.typed_program).lifecycle_registry,
       body_summaries: annotator.semantic_index.body_summaries
     ).transform!(ast)
   when "lower"
@@ -90,6 +91,8 @@ def run_phase(phase, source, source_dir, importer)
       struct_schemas: frontend.struct_schemas,
       enum_schemas: frontend.enum_schemas,
       union_schemas: frontend.union_schemas,
+      schema_lookup: ->(name) { frontend.annotator.lookup_type_schema(name) },
+      lifecycle_registry: frontend.lifecycle_registry,
       fn_sigs: frontend.fn_sigs,
       moved_guard_info: frontend.moved_guard_info,
       importer: importer,
@@ -102,6 +105,8 @@ def run_phase(phase, source, source_dir, importer)
       struct_schemas: frontend.struct_schemas,
       enum_schemas: frontend.enum_schemas,
       union_schemas: frontend.union_schemas,
+      schema_lookup: ->(name) { frontend.annotator.lookup_type_schema(name) },
+      lifecycle_registry: frontend.lifecycle_registry,
       fn_sigs: frontend.fn_sigs,
       moved_guard_info: frontend.moved_guard_info,
       importer: importer,

@@ -170,6 +170,27 @@ RSpec.describe ClearBuildSupport do
     end
   end
 
+  it "collects packages reachable through packages and local REQUIRE files" do
+    support_tree do |dir, _config|
+      app = File.join(dir, "app")
+      leaf = write(
+        File.join(app, "packages", "leaf", "src", "lib.clear"),
+        "PUB FN leaf() RETURNS Int64 -> RETURN 1; END\n"
+      )
+      middle = write(
+        File.join(app, "packages", "middle", "src", "lib.clear"),
+        "REQUIRE \"pkg:leaf\";\nPUB FN middle() RETURNS Int64 -> RETURN leaf(); END\n"
+      )
+      helper = write(File.join(app, "src", "helper.clear"), "REQUIRE \"pkg:middle\";\n")
+      main = write(File.join(app, "src", "main.clear"), "REQUIRE \"helper.clear\";\n")
+
+      expect(described_class.collect_package_dependencies(main)).to eq(
+        "middle" => middle,
+        "leaf" => leaf
+      )
+    end
+  end
+
   it "handles dependency cycles without revisiting already seen files" do
     support_tree do |dir, _config|
       a = write(File.join(dir, "a.clear"), "REQUIRE \"b.clear\";\n")

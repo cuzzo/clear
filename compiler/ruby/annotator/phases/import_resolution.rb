@@ -47,10 +47,27 @@ module Annotator
           vis = schema.visibility || :package
           next if vis == :private
           next unless (vis == :pub) || (vis == :package && same_dir)
-          current_scope.declare_type(type_name, clone_imported_schema(schema))
+          imported_schema = clone_imported_schema(schema)
+          current_scope.declare_type(type_name, imported_schema)
+          import_inline_struct_variants!(type_name, imported_schema) if imported_schema.is_a?(Schemas::UnionSchema)
         end
         nil
       end
+      private :visit_RequireNode
+
+      sig { params(union_name: Symbol, schema: Schemas::UnionSchema).void }
+      def import_inline_struct_variants!(union_name, schema)
+        T.bind(self, ResolutionSession)
+        schema.variants.each do |variant_name, variant|
+          next unless variant.is_a?(Schemas::InlineStructVariant)
+
+          synthetic_name = :"#{union_name}_#{variant_name}"
+          current_scope.declare_type(synthetic_name, Schemas::StructSchema.new(
+            fields: variant.fields.transform_values { |type| AST::StructField.new(type: Type.new(type)) }
+          ))
+        end
+      end
+      private :import_inline_struct_variants!
 
       sig { params(schema: Scope::ScopeTypeSchema).returns(Scope::ScopeTypeSchema) }
       def clone_imported_schema(schema)

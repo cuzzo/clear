@@ -5,7 +5,7 @@
 FN main() RETURNS Void ->
     # File::open is a static constructor that returns a linear File resource.
     # The compiler will emit: `defer f.close();` at this declaration site.
-    f = File::open("testdata/fruits.csv");
+    f = TRY File::open("testdata/fruits.csv");
 
     # Use the high-level readAll to get the file's contents.
     contents = fileReadAll(f);

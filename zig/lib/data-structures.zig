@@ -2722,17 +2722,29 @@ pub fn bind(comptime deps: type) type {
             // owning scheduler, and the shard index is known from routing.
             // Zero overhead: no shardIndex(), no sendAndWait(), no key dupe.
 
-            pub fn putDirect(self: *Self, shard: usize, _: std.mem.Allocator, key: []const u8, value: V) !void {
-                const gop = try self.shards[shard].map.getOrPut(remote_alloc, key);
-                if (gop.found_existing) {
-                    cleanup(V, remote_alloc, gop.value_ptr);
-                } else {
-                    gop.key_ptr.* = try remote_alloc.dupe(u8, key);
-                }
-                gop.value_ptr.* = if (comptime is_slice_value)
+            pub fn putDirect(self: *Self, shard: usize, caller_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+                const owned_key = try remote_alloc.dupe(u8, key);
+                errdefer remote_alloc.free(owned_key);
+                const safe_value = if (comptime is_slice_value)
                     try remote_alloc.dupe(@typeInfo(V).pointer.child, value)
                 else
                     value;
+                errdefer if (comptime is_slice_value) remote_alloc.free(safe_value);
+
+                const gop = try self.shards[shard].map.getOrPut(remote_alloc, owned_key);
+                if (gop.found_existing) {
+                    cleanup(V, remote_alloc, gop.value_ptr);
+                    remote_alloc.free(owned_key);
+                } else {
+                    gop.key_ptr.* = owned_key;
+                }
+                gop.value_ptr.* = safe_value;
+
+                // The compiler models putDirect as a consuming sink. Slice
+                // values may originate in a fiber-local allocator, while map
+                // storage must use the cross-scheduler remote allocator; after
+                // cloning into that domain, release the transferred source.
+                if (comptime is_slice_value) caller_alloc.free(value);
             }
 
             /// Insert using a pre-computed hash. The hash MUST have been computed

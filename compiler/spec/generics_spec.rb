@@ -614,6 +614,18 @@ RSpec.describe SemanticAnnotator do
         expect(annotator.send(:find_container_source, slice)).to eq("items")
       end
 
+      it "preserves indexed borrow provenance through TRY" do
+        annotator = Annotator::Phases::TypeAnalysisSession.new
+        token = Lexer::Token.new(:IDENTIFIER, "items", 1, 1)
+        target = AST::Identifier.new(token, "items")
+        target.full_type = Type.new("Managed[]@list")
+        index = AST::GetIndex.new(token, target, AST::Literal.new(token, :INT64, 0, nil))
+        index.full_type = Type.new("!?Managed")
+        expression = AST::UnaryOp.new(token, :TRY, index)
+
+        expect(annotator.send(:find_container_source, expression)).to eq("items")
+      end
+
       it "finds the receiver source for explicit container borrow markers" do
         annotator = Annotator::Phases::TypeAnalysisSession.new
         token = Lexer::Token.new(:IDENTIFIER, "items", 1, 1)

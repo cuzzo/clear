@@ -32,7 +32,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
           FN spawn_bumper(counter: Int64) RETURNS counter:~Void
             REQUIRES counter: ATOMIC
           ->
-            bg = BG { v = counter; print(v.toString()); };
+            bg:~ = BG { v = counter; print(v.toString()); };
             RETURN bg;
           END
         CLEAR
@@ -44,7 +44,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
         annotate(<<~CLEAR)
           FN make_handle() RETURNS ~Void ->
             MUTABLE counter: Int64 = 0 @shared:atomic;
-            bg = BG { v = counter; print(v.toString()); };
+            bg:~ = BG { v = counter; print(v.toString()); };
             RETURN bg;
           END
 
@@ -64,7 +64,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
             REQUIRES other: ATOMIC
           ->
             MUTABLE counter: Int64 = 0 @shared:atomic;
-            bg = BG { v = counter; print(v.toString()); };
+            bg:~ = BG { v = counter; print(v.toString()); };
             RETURN bg;
           END
 
@@ -84,7 +84,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
           FN make_handle(counter: Int64) RETURNS *:~Void
             REQUIRES counter: ATOMIC
           ->
-            bg = BG { v = counter; print(v.toString()); };
+            bg:~ = BG { v = counter; print(v.toString()); };
             RETURN bg;
           END
         CLEAR
@@ -108,7 +108,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
         annotate(<<~CLEAR)
           FN make_handle() RETURNS ~Void ->
             MUTABLE counter: Int64 = 0 @shared:atomic;
-            bg = BG { v = counter; print(v.toString()); };
+            bg:~ = BG { v = counter; print(v.toString()); };
             RETURN COPY bg;
           END
         CLEAR
@@ -125,7 +125,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
           FN spawn(a: Int64, b: Int64) RETURNS (a, b):~Void
             REQUIRES a: ATOMIC, b: ATOMIC
           ->
-            bg = BG { x = a; y = b; print(x.toString()); print(y.toString()); };
+            bg:~ = BG { x = a; y = b; print(x.toString()); print(y.toString()); };
             RETURN bg;
           END
         CLEAR
@@ -138,7 +138,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
           FN spawn(a: Int64, b: Int64, c: Int64) RETURNS (a, b):~Void
             REQUIRES a: ATOMIC, b: ATOMIC, c: ATOMIC
           ->
-            bg = BG { x = c; print(x.toString()); };
+            bg:~ = BG { x = c; print(x.toString()); };
             RETURN bg;
           END
         CLEAR
@@ -235,7 +235,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
           STRUCT Slot { bg: ~Void }
           FN main() RETURNS Void ->
             MUTABLE counter: Int64 = 0 @shared:atomic;
-            bg = BG { v = counter; print(v.toString()); };
+            bg:~ = BG { v = counter; print(v.toString()); };
             MUTABLE slot = Slot{ bg: bg };
             NEXT slot.bg;
             RETURN;
@@ -256,7 +256,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
             MUTABLE slot = Slot{ val: 0 };
             IF TRUE THEN
               MUTABLE counter: Int64 = 0 @shared:atomic;
-              bg = BG { v = counter; print(v.toString()); };
+              bg:~ = BG { v = counter; print(v.toString()); };
               slot.val = counter;
               slot.val = bg;
             END
@@ -285,7 +285,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
       expect {
         annotate(<<~CLEAR)
           FN make() RETURNS ~Int64 ->
-            bg = BG { 2 + 2; };
+            bg:~ = BG { 2 + 2; };
             RETURN bg;
           END
         CLEAR
@@ -298,7 +298,7 @@ RSpec.describe "Lifetime escape audit matrix (M2.6)" do
           STRUCT C { v: Int64 }
           FN make() RETURNS ~Void ->
             c = C{ v: 0 } @shared;
-            bg = BG { x = c.v; print(x.toString()); };
+            bg:~ = BG { x = c.v; print(x.toString()); };
             RETURN bg;
           END
         CLEAR

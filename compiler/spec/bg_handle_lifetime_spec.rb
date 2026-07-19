@@ -42,7 +42,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
       ast = annotate(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE c: Int64 = 0 @shared:atomic;
-          bg = BG { v = c; print(v.toString()); };
+          bg:~ = BG { v = c; print(v.toString()); };
           NEXT bg;
           RETURN;
         END
@@ -60,7 +60,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         FN main() RETURNS Void ->
           MUTABLE x: Int64 = 0 @shared:atomic;
           MUTABLE y: Int64 = 0 @shared:atomic;
-          bg = BG { print(x.toString()); print(y.toString()); };
+          bg:~ = BG { print(x.toString()); print(y.toString()); };
           NEXT bg;
           RETURN;
         END
@@ -74,7 +74,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
       ast = annotate(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE c: Int64 = 0 @shared:atomic;
-          bg = BG { v = c; print(v.toString()); };
+          bg:~ = BG { v = c; print(v.toString()); };
           NEXT bg;
           RETURN;
         END
@@ -95,7 +95,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         STRUCT C { v: Int64 }
         FN main() RETURNS Void ->
           c = C{ v: 0 } @locked;
-          bg = BG { WITH EXCLUSIVE c AS inner { inner.v = inner.v + 1; } };
+          bg:~ = BG { WITH EXCLUSIVE c AS inner { inner.v = inner.v + 1; } };
           NEXT bg;
           RETURN;
         END
@@ -109,7 +109,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         STRUCT C { v: Int64 }
         FN main() RETURNS Void ->
           c = C{ v: 0 } @writeLocked;
-          bg = BG { WITH EXCLUSIVE c AS inner { inner.v = inner.v + 1; } };
+          bg:~ = BG { WITH EXCLUSIVE c AS inner { inner.v = inner.v + 1; } };
           NEXT bg;
           RETURN;
         END
@@ -125,7 +125,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         STRUCT C { v: Int64 }
         FN main() RETURNS Void ->
           c = C{ v: 0 } @shared;
-          bg = BG { x = c.v; };
+          bg:~ = BG { x = c.v; };
           NEXT bg;
           RETURN;
         END
@@ -144,7 +144,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         FN main() RETURNS Void ->
           MUTABLE counter: Int64 = 0 @shared:atomic;
           shared = C{ v: 0 } @shared;
-          bg = BG { print(counter.toString()); print(shared.v.toString()); };
+          bg:~ = BG { print(counter.toString()); print(shared.v.toString()); };
           NEXT bg;
           RETURN;
         END
@@ -161,7 +161,7 @@ RSpec.describe "BG handle tied lifetime (M2.3)" do
         FN main() RETURNS Void ->
           MUTABLE a: Int64 = 0 @shared:atomic;
           b = C{ v: 0 } @locked;
-          bg = BG {
+          bg:~ = BG {
             print(a.toString());
             WITH EXCLUSIVE b AS inner { inner.v = inner.v + 1; }
           };

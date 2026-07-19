@@ -74,7 +74,7 @@ FN handleClient(client: TCPClient) RETURNS !Void ->
 END
 
 FN main() RETURNS Void ->
-  server = TCPServer::listen(6390);
+  server = TRY TCPServer::listen(6390);
   print("CLEAR pathological server listening on port 6390");
 
   # Pin BG fibers to the main scheduler to prevent work-stealing
@@ -83,7 +83,7 @@ FN main() RETURNS Void ->
 
   MUTABLE tasks: ~Void[]@list = [];
   WHILE TRUE DO
-    client = server.accept();
+    client = TRY server.accept();
     &tasks.append(
       BG {
         n = pin.count();
