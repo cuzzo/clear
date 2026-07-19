@@ -1168,7 +1168,8 @@ module MIRLoweringExpressions
       can_fail == true
     OrElseFacts.new(
       left_is_error: left_type.error_union? || !!has_error_union || fault_recoverable,
-      left_success_optional: effective_left.error_union? && effective_left.success_type.optional?,
+      left_success_optional: !!((effective_left.error_union? && effective_left.success_type.optional?) ||
+        (fault_recoverable && left_type.optional?)),
       line: node.token&.line || 0,
       target: lowering_target
     )

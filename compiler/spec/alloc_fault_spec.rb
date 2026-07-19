@@ -102,4 +102,21 @@ RSpec.describe "alloc_fault (allocation FAULT axis)" do
 
     expect(zig).to match(/grow\(rt, 100000\) catch undefined/)
   end
+
+  it "recovers both allocation faults and NIL from an allocating optional call" do
+    zig = ZigTranspiler.new.transpile(<<~CLEAR)
+      FN maybeSome(flag: Bool) RETURNS ?String ->
+        IF flag THEN RETURN COPY "value"; END
+        RETURN NIL;
+      END
+      FN main() RETURNS Void ->
+        value: String = maybeSome(FALSE) OR_ELSE COPY "fallback";
+        ASSERT value == "fallback";
+        RETURN;
+      END
+    CLEAR
+
+    expect(zig).to match(/maybeSome\(rt, false\) catch/)
+    expect(zig).to match(/if \(__tmp_\d+\) \|__or_val_\d+\|/)
+  end
 end
