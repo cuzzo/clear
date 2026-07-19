@@ -133,6 +133,19 @@ RSpec.describe Semantic::LifecyclePlan do
     expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
   end
 
+  it "inventories concrete lifecycle types for generic optional struct fields" do
+    source = <<~CLEAR
+      STRUCT Store<K, V> { last_key: ?K fallback: ?V marker: Int64 }
+      FN main() RETURNS Void ->
+        store = Store<String, Int64>{ last_key: NIL, fallback: NIL, marker: 1_i64 };
+        ASSERT store.marker == 1_i64;
+        RETURN;
+      END
+    CLEAR
+
+    expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
+  end
+
   it "transfers an owned OR_ELSE fallback only inside the selected branch" do
     source = <<~CLEAR
       FN makeList() RETURNS []@sharded(2) Int64 ->

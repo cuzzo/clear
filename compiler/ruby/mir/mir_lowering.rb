@@ -1033,15 +1033,83 @@ class MIRLowering
 
   sig { params(mir: MIR::Node, dst_ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
   def place_owned_branch_value_for_destination(mir, dst_ti, dest_alloc)
+    # Nested optional merges have not yet received finalized ownership facts
+    # when destination placement runs. Preserve their branch structure now;
+    # treating the merge as a borrowed DeepCopy source leaves an allocating
+    # Orelse anonymously nested under that copy.
+    return place_owned_orelse_for_destination(mir, dst_ti, dest_alloc) if mir.is_a?(MIR::Orelse)
+    return copy_lazy_owned_branch_for_destination(mir, dst_ti, dest_alloc) if mir.is_a?(MIR::BlockExpr)
+
     owned_alloc = mir_owned_alloc(mir)
-    return transfer_owned_branch_binding(mir, dst_ti, dest_alloc) if owned_alloc == dest_alloc
+    if owned_alloc == dest_alloc
+      return transfer_owned_branch_binding(mir, dst_ti, dest_alloc) if mir.is_a?(MIR::Ident)
+      return owned_branch_result_value(mir, dst_ti, dest_alloc) if mir_allocates?(mir)
+    end
     return place_owned_alloc_mismatch_for_destination(mir, dst_ti, dest_alloc, owned_alloc) if owned_alloc
     return MIR::DupeSlice.new(mir, dest_alloc) if dst_ti.string?
     if dst_ti.any_rc?
       return MIR::RcRetain.new(mir, rc_payload_zig_type(dst_ti), dst_ti.shared? ? "arcRetain" : "rcRetain")
     end
 
+    # Lazy branch blocks cannot be hoisted outside their branch, but a
+    # recursive owned result still needs a named source owner when it is
+    # cloned. Keep both materializations inside a new lazy block: the source
+    # receives normal cleanup and the clone is transferred as the result.
+    return copy_lazy_owned_branch_for_destination(mir, dst_ti, dest_alloc) if mir_allocates?(mir)
+
     MIR::DeepCopy.new(mir, dst_ti.zig_type, nil, :full_value, dest_alloc)
+  end
+
+  sig { params(mir: MIR::Node, type_info: Type, dest_alloc: Symbol).returns(MIR::BlockExpr) }
+  def copy_lazy_owned_branch_for_destination(mir, type_info, dest_alloc)
+    tmp_id = lowering_counters.next_tmp_id
+    label = "__owned_branch_copy_#{tmp_id}"
+    source_name = "__owned_branch_src_#{tmp_id}"
+    copy_name = "__owned_branch_copy_val_#{tmp_id}"
+
+    source_alloc = mir_owned_alloc(mir) || MIR::OwnershipEffect.alloc_of(mir) || dest_alloc
+    source_cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false,
+                                        zig_type: type_info.zig_type)
+    build_drop_entry!(source_cleanup, type_info, nil)
+    source = MIR::BindingMaterialization.new(
+      name: source_name,
+      expr: mir,
+      alloc: source_alloc,
+      type_info: type_info,
+      mutable: false,
+      cleanup_entry: source_cleanup,
+    )
+
+    copied_expr = MIR::DeepCopy.new(
+      MIR::Ident.new(source_name),
+      type_info.zig_type,
+      nil,
+      :full_value,
+      dest_alloc,
+      MIR::DeepCopy.copy_shape_for_zig_type(type_info.zig_type),
+      type_info,
+    )
+    copy_cleanup = CleanupEntry.build(:uniform, alloc: dest_alloc, has_moved_guard: true,
+                                      zig_type: type_info.zig_type)
+    build_drop_entry!(copy_cleanup, type_info, nil)
+    copied = MIR::BindingMaterialization.new(
+      name: copy_name,
+      expr: copied_expr,
+      alloc: dest_alloc,
+      type_info: type_info,
+      mutable: false,
+      cleanup_entry: copy_cleanup,
+      cleanup_mode: :err,
+    )
+
+    body = T.let(source.statements + copied.statements, T::Array[MIR::Stmt])
+    body.concat(ownership_transfer_marks(copy_name, :block_result,
+                                         target_alloc: dest_alloc, move_guarded: true))
+    body << MIR::BreakStmt.new(label, MIR::Ident.new(copy_name))
+    out = MIR::BlockExpr.new(label, body)
+    out.lazy_boundary = true
+    out.result_type = Type.new(type_info)
+    out
   end
 
   # An owned local selected by one branch of OR_ELSE/orelse becomes the
@@ -1587,6 +1655,14 @@ class MIRLowering
   def append_already_finalized_node!(state, node)
     state.out << node
     record_ownership_finalization_node!(state, node) if node.is_a?(MIR::Emittable)
+    # Normalization can replace an aggregate child with a newly hoisted owner
+    # after the aggregate itself received its stable lowering id. Re-scan
+    # transfer contracts on reuse so the refreshed consumption fact is not
+    # mistaken for already-emitted ownership state.
+    append_transfer_marks!(
+      ownership_transfers_for_targets(ownership_transfer_operands_for_node(node, state), state),
+      state,
+    )
     nil
   end
 

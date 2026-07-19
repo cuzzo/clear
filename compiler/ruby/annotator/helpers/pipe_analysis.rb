@@ -1870,7 +1870,7 @@ module PipeAnalysis
   def analyze_concurrent_bounded_select_family_op(node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     lhs_type = node.left.full_type!(context: "pipeline left")
-    item_type = lhs_type.stream_element_type.resolved
+    item_type = T.must(lhs_type.stream_element_type)
     is_parallel = concurrent_parallel_enabled?(node.right.options)
 
     analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do
@@ -1898,7 +1898,7 @@ module PipeAnalysis
   def analyze_concurrent_bounded_each_op(node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     lhs_type = node.left.full_type!(context: "pipeline left")
-    item_type = lhs_type.stream_element_type.resolved
+    item_type = T.must(lhs_type.stream_element_type)
     is_parallel = concurrent_parallel_enabled?(node.right.options)
 
     analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do

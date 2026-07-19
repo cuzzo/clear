@@ -1944,8 +1944,12 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
 
+      expect(zig).to match(/const __tmp_\d+ = try text\(rt\);/)
       expect(zig).to match(/const __tmp_\d+ = \.\{1, __tmp_\d+\};/)
       expect(zig).to match(/defer CheatLib\.cleanup\(@TypeOf\(__tmp_\d+\), rt\.heapAlloc\(\), &__tmp_\d+\)/)
+      expect(zig).to match(/const __hoist_\d+ = try copyTuple\(rt, __tmp_\d+\);/)
+      expect(zig).to match(/defer if \(!__hoist_\d+_moved\) CheatLib\.cleanup\(@TypeOf\(__hoist_\d+\), rt\.heapAlloc\(\), &__hoist_\d+\)/)
+      expect(zig).to match(/consume\(rt, __hoist_\d+\);\n__hoist_\d+_moved = true;/)
     end
 
     it "materializes a fixed list literal for a TAKES slice without transferring its stack binding" do
@@ -1956,6 +1960,98 @@ RSpec.describe ZigTranspiler do
 
       expect(zig).to include('heapAlloc().dupe(@typeInfo(@TypeOf(__x)).array.child, __x[0..])')
       expect(zig).not_to match(/__hoist_\d+_moved/)
+    end
+
+    it "transfers the owned backing allocation of a copied list into a TAKES slice" do
+      expect do
+        transpile(<<~CLEAR)
+          FN consume(TAKES input: Int64[]) RETURNS Void -> RETURN; END
+          FN main() RETURNS Void -> consume(COPY ([1_i64])); RETURN; END
+        CLEAR
+      end.not_to raise_error
+    end
+
+    it "materializes nested owned OR_ELSE branches before copying their result" do
+      expect do
+        transpile(<<~CLEAR)
+          FN text() RETURNS String -> RETURN COPY "x"; END
+          FN choose() RETURNS Tuple<Int64,String> ->
+            RETURN NIL OR_ELSE (NIL OR_ELSE (NIL OR_ELSE Tuple{1_i64, text()}));
+          END
+          FN main() RETURNS Void -> value = choose(); RETURN; END
+        CLEAR
+      end.not_to raise_error
+    end
+
+    it "materializes an owned OR_ELSE passed to a borrowing call inside a lazy branch" do
+      expect do
+        transpile(<<~CLEAR)
+          FN text() RETURNS String -> RETURN COPY "x"; END
+          FN identity(v: Tuple<Int64,String>) RETURNS Tuple<Int64,String> -> RETURN COPY v; END
+          FN main() RETURNS Void ->
+            value = identity(NIL OR_ELSE identity(NIL OR_ELSE Tuple{1_i64, text()}));
+            RETURN;
+          END
+        CLEAR
+      end.not_to raise_error
+    end
+
+    it "materializes an owned OR_ELSE before explicitly copying it into a list" do
+      expect do
+        transpile(<<~CLEAR)
+          FN text() RETURNS String -> RETURN COPY "x"; END
+          FN main() RETURNS Void ->
+            values: Tuple<Int64,String>[] = [COPY (NIL OR_ELSE COPY Tuple{1_i64, text()})];
+            RETURN;
+          END
+        CLEAR
+      end.not_to raise_error
+    end
+
+    it "reads direct RC string comparisons and list indexes through their payload" do
+      zig = transpile(<<~CLEAR)
+        FN main() RETURNS Void ->
+          text = COPY "one" @multiowned;
+          values = [1_i64] @shared;
+          ASSERT text == "one";
+          ASSERT values[0_i64] == 1_i64;
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("text.ctrl.data.*")
+      expect(zig).to include("values.ctrl.data.*")
+      expect(zig).to include('@as([]const u8, try rt.heapAlloc().dupe(u8, "one"))')
+      expect(zig).to include('rcCreate([]const u8, rt.heapAlloc(), __tmp_1)')
+    end
+
+    it "transfers nested copies of fresh managed aggregates without leaking the constructor" do
+      zig = transpile(<<~CLEAR)
+        FN text() RETURNS String -> RETURN COPY "one"; END
+        FN main() RETURNS Void ->
+          value = COPY (COPY Tuple{1_i64, text()}) @shared;
+          ASSERT value._1 == "one";
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include('arcCreate(struct { i64, []const u8 }, rt.heapAlloc(), .{1, __tmp_1})')
+      expect(zig).not_to include('const __copy_src = .{1, __tmp_1};')
+    end
+
+    it "converges an optional owned success payload with an allocating fallback" do
+      zig = transpile(<<~CLEAR)
+        STRUCT Box { label: String }
+        FN main() RETURNS Void ->
+          maybe: ?Box = Box{ label: COPY "abc" };
+          value: ?String = maybe?.label;
+          ASSERT (value OR_ELSE COPY "").length() == 3_i64;
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include('if (value) |__or_val_')
+      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8, __or_val_\d+\)/)
     end
 
     it "threads runtime through a managed OR_ELSE return" do

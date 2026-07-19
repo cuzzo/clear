@@ -1250,6 +1250,36 @@ still execute all 390 depth-1 cases. An attempted 390-case-per-mutant experiment
 produced seven timeouts and was correctly rejected by the differential runner;
 timeout results are never counted as kills.
 
+### Total incremental mutation comparison (2026-07-19)
+
+The completed framework was compared against the old compiler/spec,
+transpile-test, and fuzz coverage using stable mutant identities and a
+survivor-first differential. The exact new-suite manifest contains 2,654 cases
+at seed 1: 1,700 expanded capability cases and 954 remaining semantic,
+reviewed-capability, whole-program, transport, and SELECT-tense cases. Both
+frozen partitions pass with zero failure, leak, MIR-error, or unexpected-pass
+buckets.
+
+The hand-reviewed invariant-patch registry has 21 viable unique patch-SHA
+identities (27 logical registry entries). The old system kills 18; its three
+surviving identities were each run through all 2,654 new cases and all three
+still survive. This namespace therefore has **0 incremental kills** and remains
+18/21. Logical aliases are not counted as independent mutants.
+
+The stochastic `ClearParser#parse_binary_op` comparison selected the same 369
+mutants on both sides with zero timeouts. The old specs kill 86; adding
+`semantic_equivalence_integration_spec.rb`, `semantic_advanced_spec.rb`, and
+`select_tense_matrix_spec.rb` kills 136. The new framework therefore adds
+**50 stable stochastic mutant kills**, raising coverage from 23.30% to 36.85%.
+Invariant patch SHAs and stochastic mutant IDs are separate identity namespaces
+and must not be combined into one denominator.
+
+The comparison also uncovered and fixed 12 baseline compiler/runtime ownership
+or lowering root causes before any mutant result was accepted. Those baseline
+defects are evidence of suite value, but are deliberately not counted as mutant
+kills. The normalized local artifact is
+`/tmp/csmith-mutant-delta/facts.json`.
+
 ### Acceptance decision
 
 All Phase 1-3 correctness, incremental-value, and cost gates pass. The system

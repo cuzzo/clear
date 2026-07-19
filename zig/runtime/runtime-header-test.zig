@@ -82,6 +82,20 @@ test "dupeValue promotes a fixed array into an owned ArrayList" {
     try std.testing.expectEqualSlices(i64, source[0..], copied.items);
 }
 
+test "dupeValue promotes a concrete managed payload into an optional" {
+    const allocator = std.testing.allocator;
+    var copied = try CheatLib.dupeValue(?[]const u8, "key", allocator);
+    defer CheatLib.cleanup(@TypeOf(copied), allocator, &copied);
+
+    try std.testing.expect(copied != null);
+    try std.testing.expectEqualStrings("key", copied.?);
+
+    const literal = "array";
+    var array_copy = try CheatLib.dupeValue(?[]const u8, literal.*, allocator);
+    defer CheatLib.cleanup(@TypeOf(array_copy), allocator, &array_copy);
+    try std.testing.expectEqualStrings("array", array_copy.?);
+}
+
 test "dupeValue retains Rc Arc and Weak handles instead of cloning control blocks" {
     const allocator = std.testing.allocator;
 

@@ -1116,7 +1116,8 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(a, context: "call boundary argument")
 
-    moved_arg = a.is_a?(AST::MoveNode) ||
+    moved_arg = a.is_a?(AST::CopyNode) || a.is_a?(AST::CloneNode) ||
+                a.is_a?(AST::MoveNode) ||
                 (AST.moved?(a) &&
                  !a.is_a?(AST::CopyNode) && !a.is_a?(AST::CloneNode) &&
                  !arg.is_a?(MIR::DupeSlice) && !arg.is_a?(MIR::DeepCopy))
@@ -1170,6 +1171,31 @@ module MIRLoweringFunctions
       # caller-owned and is released by its normal cleanup path after the copy.
       placed = materialize_owned_sink_value(arg, a, sink_alloc, callee_param_type)
       arg = hoist_alloc(placed, a, err_cleanup: true)
+    end
+
+    # An owned OR_ELSE used as a borrowing call argument is evaluated inside
+    # its lazy branch. At this point its ownership effect is not finalized, so
+    # the generic hoister cannot yet see it. Place and bind the merge using the
+    # annotated argument type before it becomes anonymously nested in Call.
+    if callee_param && !callee_param.takes && arg.is_a?(MIR::Orelse) &&
+       (ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) || ti.needs_cleanup?(T.unsafe(mir_schema_lookup)))
+      arg_alloc = placement_for_node(a)
+      placed = place_owned_orelse_for_destination(arg, ti, arg_alloc)
+      arg = hoist_alloc(placed, a, transfer_on_success: false)
+    end
+
+    if callee_param && !callee_param.takes &&
+        (arg.is_a?(MIR::StructInit) || arg.is_a?(MIR::TupleLiteral) || arg.is_a?(MIR::ArrayInit))
+      # A non-TAKES parameter borrows its argument. Fresh composites with
+      # owned children therefore need a caller-side owner that survives the
+      # call and is cleaned afterwards; moving children directly into an
+      # anonymous argument abandons them when the callee only copies/reads it.
+      arg = hoist_alloc(
+        arg,
+        a,
+        transfer_on_success: false,
+        ownership_materialization_alloc: placement_for_node(a),
+      )
     end
 
     if borrowed_array_argument_required?(ti, a, callee_param_type)

@@ -506,6 +506,12 @@ RSpec.describe "MIR gap-burn characterization" do
       MIR::BreakStmt.new("__blk", MIR::StructInit.new("Box", [{ name: :value, value: MIR::Ident.new("tmp") }])),
     ], result_type: nil)
     expect(composite_transfer).to have_attributes(produces_owned: true, alloc: :heap)
+
+    composite_sink_transfer = MIR::OwnershipEffect.from_block_body([
+      MIR::TransferMark.new("tmp", :owned_sink, :heap),
+      MIR::BreakStmt.new("__blk", MIR::TupleLiteral.new([MIR::Lit.new("1"), MIR::Ident.new("tmp")])),
+    ], result_type: Type.new(:"Tuple<Int64,String>"))
+    expect(composite_sink_transfer).to have_attributes(produces_owned: true, alloc: :heap)
   end
 
   it "treats sharded map allocator metadata as store consumption, not an owned result" do

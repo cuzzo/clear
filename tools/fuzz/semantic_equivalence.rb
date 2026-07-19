@@ -976,7 +976,7 @@ module SemanticEquivalence
       <<~CLEAR
         #{definitions(fragment)}
         FN main() RETURNS Void ->
-          value = [7_i64] |> FIND #{bool_slot(fragment)};
+          value: ?Int64 = [7_i64] |> FIND #{bool_slot(fragment)};
           ASSERT value != NIL, "semantic pipeline find";
           ASSERT value == 7_i64, "semantic pipeline find value";
           RETURN;

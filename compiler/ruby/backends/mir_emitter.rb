@@ -2707,7 +2707,7 @@ class MIREmitter
       # value-shaped sources unchanged. No allocation -- this is the
       # no-op COPY for Copy-type sources. comptime-evaluated branch.
       "(if (comptime @typeInfo(@TypeOf(#{src})) == .pointer and " \
-        "@typeInfo(@TypeOf(#{src})).pointer.size == .one) #{src}.* else #{src})"
+        "@typeInfo(@TypeOf(#{src})).pointer.size == .one) (#{src}).* else #{src})"
     when :full_value
       type_arg = node.copy_shape == :pointer ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(#{src})")
       if node.copy_shape == :slice

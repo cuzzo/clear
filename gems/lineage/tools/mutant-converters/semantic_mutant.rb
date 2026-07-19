@@ -11,7 +11,12 @@ module SemanticMutants
   ROOT = MutationTesting::ROOT
   DEFAULT_SUBJECT = 'ClearParser#parse_binary_op'
   DEFAULT_SEMANTIC_LIMIT = 148
-  SEMANTIC_SPEC = 'compiler/spec/semantic_equivalence_integration_spec.rb'
+  SEMANTIC_SPECS = %w[
+    compiler/spec/semantic_equivalence_integration_spec.rb
+    compiler/spec/semantic_advanced_spec.rb
+    compiler/spec/select_tense_matrix_spec.rb
+  ].freeze
+  SEMANTIC_SPEC = SEMANTIC_SPECS.first
   SUBJECTS = {
     DEFAULT_SUBJECT => {
       requires: %w[ast/lexer ast/parser],
@@ -67,7 +72,7 @@ module SemanticMutants
     args = ['bundle', 'exec', 'mutant', '--zombie', 'run', '--usage', 'opensource', '-I', 'compiler/ruby']
     config.fetch(:requires).each { |required| args.concat(['-r', required]) }
     args.concat(['--integration', 'rspec', '--jobs', jobs.to_s, '--mutation-timeout', timeout.to_s])
-    specs = config.fetch(:specs) + (semantic ? [SEMANTIC_SPEC] : [])
+    specs = config.fetch(:specs) + (semantic ? SEMANTIC_SPECS : [])
     specs.each { |spec| args.concat(['--integration-argument', spec]) }
     args << subject
   end
@@ -110,7 +115,7 @@ module SemanticMutants
       generated_at: Time.now.utc.iso8601,
       subject: subject,
       source: 'gems/lineage/tools/mutant-converters/semantic_mutant.rb',
-      semantic_spec: SEMANTIC_SPEC,
+      semantic_specs: SEMANTIC_SPECS,
     }.merge(comparison)
     File.write(File.join(out, 'facts.json'), JSON.pretty_generate(facts))
     puts "#{subject}: baseline=#{comparison.fetch(:baseline).fetch(:killed)}/#{comparison.fetch(:baseline).fetch(:mutations)} " \

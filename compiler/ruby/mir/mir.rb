@@ -636,7 +636,12 @@ module MIR
       return none if result_names.empty?
 
       transferred_allocs = stmts.grep(MIR::TransferMark)
-        .select { |stmt| stmt.target == :block_result && result_names.include?(stmt.name.to_s) }
+        # An owned child moved into a composite is part of the block result
+        # when that composite is the break value. Preserve that ownership
+        # effect just as we do for a direct :block_result transfer; otherwise
+        # destination placement deep-copies the composite and abandons the
+        # moved source child on the success path.
+        .select { |stmt| [:block_result, :owned_sink].include?(stmt.target) && result_names.include?(stmt.name.to_s) }
         .filter_map(&:target_alloc)
       effect_when(!transferred_allocs.empty?,
         owned(alloc: unique_symbol_or_nil(transferred_allocs), cleanup_kind: :uniform))

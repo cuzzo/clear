@@ -1607,6 +1607,17 @@ RSpec.describe MIRChecker do
       ]))
       expect(block_errors.any? { |e| e.include?("OWNERSHIP_UNVERIFIED_PATH") && e.include?("block break expression") }).to be true
 
+      tuple_block_errors = checker.check_fn!(fn_def("block_transfer_tuple_expr", [
+        MIR::ExprStmt.new(MIR::BlockExpr.new("__tuple_blk", [
+          alloc_mark("x", :heap),
+          MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),
+          MIR::TransferMark.new("x", :block_result),
+          MIR::BreakStmt.new("__tuple_blk", MIR::TupleLiteral.new([MIR::Ident.new("x"), MIR::Lit.new("1")])),
+        ]), false),
+      ]))
+      expect(tuple_block_errors.none? { |e| e.include?("OWNERSHIP_USE_AFTER_TRANSFER") && e.include?("x") }).to be true
+      expect(tuple_block_errors.none? { |e| e.include?("OWNERSHIP_UNVERIFIED_PATH") && e.include?("block break expression") }).to be true
+
       guarded_return = checker.check_fn!(fn_def("guarded_return", [
         alloc_mark("x", :heap),
         MIR::Let.new("x", MIR::Lit.new("owned"), false, nil, nil),

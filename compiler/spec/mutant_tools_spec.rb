@@ -98,7 +98,8 @@ RSpec.describe SemanticMutants do
     baseline = described_class.argv(described_class::DEFAULT_SUBJECT, config, jobs: 4, timeout: 30, semantic: false)
     semantic = described_class.argv(described_class::DEFAULT_SUBJECT, config, jobs: 4, timeout: 30, semantic: true)
 
-    expect(semantic).to eq(baseline[0...-1] + ['--integration-argument', described_class::SEMANTIC_SPEC, described_class::DEFAULT_SUBJECT])
+    additions = described_class::SEMANTIC_SPECS.flat_map { |spec| ['--integration-argument', spec] }
+    expect(semantic).to eq(baseline[0...-1] + additions + [described_class::DEFAULT_SUBJECT])
   end
 
   it 'rejects invalid paired experiments instead of reporting a false delta' do

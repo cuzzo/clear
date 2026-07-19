@@ -1057,7 +1057,7 @@ class MIRChecker
   def linear_expr_consumed_names(expr)
     names = T.let(Set.new, T::Set[String])
     walk_mir_node(expr) do |node|
-      if node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit)
+      if node.is_a?(MIR::StructInit) || node.is_a?(MIR::ArrayInit) || node.is_a?(MIR::TupleLiteral)
         collect_linear_expr_ident_names(node, names)
       end
       next unless node.is_a?(MIR::Call) || node.is_a?(MIR::RuntimeCall) || node.is_a?(MIR::TailCall) || node.is_a?(MIR::MethodCall)

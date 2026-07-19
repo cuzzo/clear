@@ -160,6 +160,7 @@ module Semantic
         add_type!(types, node.full_type!(context: "lifecycle inventory")) if node.typed?
       end
       add_declaration_types!(types, program)
+      add_instantiated_schema_types!(types, schema_lookup)
 
       plans = T.let({}, PlanMap)
       types.each do |key, type_info|
@@ -255,6 +256,73 @@ module Semantic
             add_type!(types, Type.new(statement.return_type)) if statement.return_type
           end
         end
+      end
+
+      # Generic declaration fields are inventoried in their symbolic form
+      # (for example `?V`), but MIR lowers a concrete literal using the
+      # instantiated field type (`?String`).  Inventory that concrete closure
+      # during annotation so lowering never has to invent lifecycle policy.
+      sig { params(types: T::Hash[String, Type], schema_lookup: Type::SchemaLookup).void }
+      def add_instantiated_schema_types!(types, schema_lookup)
+        pending = T.let(types.values.dup, T::Array[Type])
+        index = T.let(0, Integer)
+        while index < pending.length
+          type_info = pending.fetch(index)
+          index += 1
+          next unless type_info.generic_instance?
+
+          schema = schema_lookup.call(type_info.resolved)
+          next unless schema.is_a?(Schemas::StructSchema) || schema.is_a?(Schemas::ResourceSchema)
+          fields = schema.fields.values.map(&:type)
+
+          params = schema.type_params
+          subst = T.let({}, T::Hash[Symbol, Type])
+          params.zip(type_info.generic_args).each do |param, argument|
+            subst[param.to_sym] = Type.new(argument) if param && argument
+          end
+          fields.each do |field_type|
+            concrete = substitute_schema_type(field_type, subst)
+            before = types.length
+            add_type!(types, concrete)
+            pending.concat(types.values.drop(before)) if types.length > before
+          end
+        end
+        nil
+      end
+
+      sig { params(raw_type: Type::TypeInput, subst: T::Hash[Symbol, Type]).returns(Type) }
+      def substitute_schema_type(raw_type, subst)
+        type_info = Type.from_input(raw_type)
+        replacement = if type_info.optional?
+          Type.optional_of(substitute_schema_type(T.must(type_info.wrapped_type), subst))
+        elsif type_info.error_union?
+          Type.error_union_of(substitute_schema_type(T.must(type_info.payload_type), subst))
+        elsif type_info.array?
+          Type.array_of(substitute_schema_type(T.must(type_info.element_type), subst), capacity: type_info.capacity)
+        elsif type_info.map?
+          expression = T.cast(type_info.shape.expression, MapTypeExpression)
+          key = substitute_schema_type(type_info.key_type, subst)
+          value = substitute_schema_type(type_info.value_type, subst)
+          Type.new(MapTypeExpression.new(
+            key: key.shape.expression,
+            value: value.shape.expression,
+            key_implicit: expression.key_implicit,
+            legacy_separator: expression.legacy_separator,
+            capabilities: expression.capabilities,
+          ))
+        elsif type_info.generic_instance?
+          Type.generic_instance_of(
+            type_info.generic_base,
+            type_info.generic_args.map { |argument| substitute_schema_type(argument, subst) },
+          )
+        elsif type_info.tense?
+          Type.tense_of(substitute_schema_type(type_info.tense_type, subst))
+        else
+          subst[type_info.resolved] || type_info
+        end
+        replacement.merge_capabilities_from!(type_info)
+        replacement.copy_placement_from!(type_info)
+        replacement
       end
     end
   end
