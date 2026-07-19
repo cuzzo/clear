@@ -4,6 +4,8 @@
 require "sorbet-runtime"
 
 require_relative "../backends/transpiler"
+require_relative "../ffi/c_header_importer"
+require_relative "dependency_snapshot"
 require_relative "program_artifact"
 
 module Incremental
@@ -18,20 +20,42 @@ module Incremental
     const :ownership_mode, Symbol, default: :default
   end
 
-  # Thin adapter around the ordinary checked compiler boundary.  It owns no
-  # invalidation policy and deliberately constructs a fresh transpiler for each
-  # revision so importer and annotator state cannot leak between revisions.
+  # Thin adapter around the ordinary checked compiler boundary. Transpilers are
+  # revision-local, while imported modules are retained behind content-hash
+  # invalidation. Root annotator state is never reused.
   class ZigCompiler
     extend T::Sig
 
     sig { params(config: ZigCompilerConfig).void }
     def initialize(config)
       @config = config
+      @importer = T.let(build_importer, ModuleImporter)
+      @dependency_snapshot = T.let(nil, T.nilable(DependencySnapshot))
+    end
+
+    sig { params(source: String).returns(T.nilable(String)) }
+    def prepare_revision(source)
+      source # reserved for source-declared dependency policies
+      snapshot = @dependency_snapshot
+      return nil unless snapshot
+
+      changed = snapshot.changed_paths
+      return nil if changed.empty?
+
+      reset_importer!
+      "dependency changed: #{changed.map { |path| File.basename(path) }.join(', ')}"
+    end
+
+    sig { params(source: String).void }
+    def publish_dependencies!(source)
+      paths = @importer.module_cache.keys.map(&:to_s)
+      paths.concat(c_header_paths(source))
+      @dependency_snapshot = DependencySnapshot.capture(paths)
     end
 
     sig { params(source: String).returns(ZigTranspiler::MIRCompilation) }
     def compile(source)
-      transpiler = ZigTranspiler.new
+      transpiler = ZigTranspiler.new(importer: @importer, source_dir: @config.source_dir)
       transpiler.compile_mir_program(
         source,
         source_dir: @config.source_dir,
@@ -45,6 +69,12 @@ module Incremental
         default_stack: @config.default_stack,
         ownership_mode: @config.ownership_mode,
       )
+    end
+
+    sig { returns(T::Array[String]) }
+    def dependency_paths
+      snapshot = @dependency_snapshot
+      snapshot ? snapshot.entries.map(&:path) : []
     end
 
     sig { params(compilation: ZigTranspiler::MIRCompilation).returns(ProgramArtifact) }
@@ -76,6 +106,30 @@ module Incremental
         state_before: state_before,
         state_after: emitter.emission_state,
       )
+    end
+
+    private
+
+    sig { returns(ModuleImporter) }
+    def build_importer
+      ModuleImporter.new(
+        base_dir: @config.source_dir,
+        pkg_paths: @config.pkg_paths,
+        use_mir: true,
+      )
+    end
+
+    sig { void }
+    def reset_importer!
+      @importer = build_importer
+      @dependency_snapshot = nil
+    end
+
+    sig { params(source: String).returns(T::Array[String]) }
+    def c_header_paths(source)
+      source.scan(CHeaderImporter::DIRECTIVE).map do |match|
+        File.expand_path(T.must(match[0]), @config.source_dir)
+      end
     end
   end
 end

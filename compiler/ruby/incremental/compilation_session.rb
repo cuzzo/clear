@@ -40,6 +40,8 @@ module Incremental
     def compile(source)
       previous = @snapshot
       return clean_compile(source, reason: "initial compilation") unless previous
+      dependency_reason = @compiler.prepare_revision(source)
+      return clean_compile(source, reason: dependency_reason) if dependency_reason
       if source == previous.source
         return CompilationResult.new(
           zig: previous.artifact.render,
@@ -68,6 +70,7 @@ module Incremental
     def clean_compile(source, reason:)
       compilation = @compiler.compile(source)
       artifact = @compiler.artifact(compilation)
+      @compiler.publish_dependencies!(source)
       current = catalog(source)
       if current
         @snapshot = CompilationSnapshot.new(source: source, catalog: current, artifact: artifact)

@@ -201,6 +201,54 @@ RSpec.describe "incremental CLEAR compilation" do
     end
   end
 
+  it "retains unchanged imports and invalidates them by content" do
+    Dir.mktmpdir("incremental-imports") do |dir|
+      dependency_path = File.join(dir, "dep.clear")
+      root_path = File.join(dir, "root.clear")
+      File.write(dependency_path, <<~CLEAR)
+        PUB FN importedValue() RETURNS Int64 -> RETURN 7; END
+      CLEAR
+      root = <<~CLEAR
+        REQUIRE "dep.clear";
+        FN alpha() RETURNS Int64 -> RETURN 1; END
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+
+      config = Incremental::ZigCompilerConfig.new(source_dir: dir)
+      compiler = Incremental::ZigCompiler.new(config)
+      session = Incremental::CompilationSession.new(compiler: compiler, module_path: root_path)
+      initial = session.compile(root)
+      expect(compiler.dependency_paths).to eq([dependency_path])
+      expect(session.compile(root).status).to eq(:exact_hit)
+
+      File.write(dependency_path, <<~CLEAR)
+        PUB FN importedValue() RETURNS Int64 -> RETURN 8; END
+      CLEAR
+      changed = session.compile(root)
+      expect(changed.status).to eq(:clean)
+      expect(changed.reason).to eq("dependency changed: dep.clear")
+      expect(changed.zig).not_to eq(initial.zig)
+
+      oracle = Incremental::ZigCompiler.new(config)
+      expect(changed.zig).to eq(oracle.artifact(oracle.compile(root)).render)
+    end
+  end
+
+  it "detects changed and missing dependency content" do
+    Dir.mktmpdir("incremental-fingerprints") do |dir|
+      path = File.join(dir, "dep.clear")
+      File.write(path, "one")
+      snapshot = Incremental::DependencySnapshot.capture([path, path])
+      expect(snapshot.current?).to be(true)
+      expect(snapshot.entries.length).to eq(1)
+
+      File.write(path, "two")
+      expect(snapshot.changed_paths).to eq([path])
+      FileUtils.rm_f(path)
+      expect(snapshot.changed_paths).to eq([path])
+    end
+  end
+
   it "falls back cleanly for a caller-sensitive edit" do
     compiler = Incremental::ZigCompiler.new(
       Incremental::ZigCompilerConfig.new(source_dir: Dir.pwd),
