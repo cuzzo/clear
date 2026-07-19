@@ -182,7 +182,7 @@ class PipelineLoweringBridge
 
   sig { params(kind: Symbol, dispatch: Symbol, analysis: T.nilable(CapabilityHelper::CaptureAnalysis)).returns(MIR::ExecutionBoundaryFact) }
   def execution_boundary_fact(kind, dispatch, analysis)
-    @lowering.send(:execution_boundary_fact, kind, dispatch, analysis)
+    @lowering.pipeline_execution_boundary_fact(kind, dispatch, analysis)
   end
 
   sig do

@@ -239,7 +239,7 @@ module Semantic
 
       sig { params(types: T::Hash[String, Type], program: AST::Program).void }
       def add_declaration_types!(types, program)
-        program.statements.each do |statement|
+        AST.each_locatable(program, descend_functions: true) do |statement|
           case statement
           when AST::StructDef, AST::ExternStructDecl
             statement.field_decls.each_value { |field| add_type!(types, field.type) }
@@ -293,7 +293,24 @@ module Semantic
       sig { params(raw_type: Type::TypeInput, subst: T::Hash[Symbol, Type]).returns(Type) }
       def substitute_schema_type(raw_type, subst)
         type_info = Type.from_input(raw_type)
-        replacement = if type_info.optional?
+        replacement = if type_info.projection?
+          owner = T.must(type_info.projection_owner)
+          concrete_input = subst[owner]
+          if concrete_input
+            concrete = Type.new(concrete_input)
+            projected = case type_info.projection_member
+            when :Key then concrete.key_type if concrete.map?
+            when :Value then concrete.value_type if concrete.map?
+            end
+            projected || Type.new(TypeProjectionExpression.new(
+              owner: concrete.resolved,
+              member: T.must(type_info.projection_member),
+              protocol: type_info.projection_protocol,
+            ))
+          else
+            type_info
+          end
+        elsif type_info.optional?
           Type.optional_of(substitute_schema_type(T.must(type_info.wrapped_type), subst))
         elsif type_info.error_union?
           Type.error_union_of(substitute_schema_type(T.must(type_info.payload_type), subst))

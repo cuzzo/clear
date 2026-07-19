@@ -73,7 +73,7 @@ class PipelineScalarLowerer < T::Struct
   def lower_sum(site, sum_node)
     list_node = site.list
     expr_mir = visit_pipeline_expr_mir(list_node, sum_node.expression)
-    result_type = Type.new(sum_node.full_type!)
+    result_type = Type.new(site.options.full_type!)
     zero = result_type.integer? ? "0" : "0.0"
     self.pipeline_block.call(list_node, lambda do |items, label|
       [

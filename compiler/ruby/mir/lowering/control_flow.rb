@@ -1162,6 +1162,11 @@ module MIRLoweringControlFlow
     return value unless node.value && value.is_a?(MIR::Ident)
     return value unless current_function_param_name?(value.name)
     return value unless current_function_has_rt?
+    # A TAKES parameter already transfers its unique ownership into the
+    # function. Returning that same binding transfers it to the caller; making
+    # another value here both adds an unnecessary allocation-fault channel and
+    # leaves the original payload on the guarded-cleanup path.
+    return value if current_function_takes_param_name?(value.name)
 
     ret_type = Type.from_node!(node.value, context: "generic parameter return")
     return value unless ret_type.generic_type_parameter?

@@ -52,7 +52,7 @@ FN main() RETURNS Void ->
     ASSERT f_none == NIL, "find >10 in 0..5 should be NIL";
 
     # COUNT with SELECT stage
-    cs: Int64 = (1_i64 ..< 10) |> SELECT _ * 2 |> COUNT _ > 10;
+    cs: Int64 = (1_i64 ..< 10) |> SELECT _ * 2 |> COUNT _ > 10 |> COLLECT;
     # 1..10 -> *2: 2,4,6,8,10,12,14,16,18 -> >10: 12,14,16,18 = 4
     ASSERT cs == 4, "count select*2 >10 should be 4";
 

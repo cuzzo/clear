@@ -163,7 +163,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
     when :next_stream_string
       %(FN ownedString(value: String) RETURNS String -> RETURN COPY value; END\nFN main() RETURNS Void ->\n    s: ~String[INF] = BG STREAM { WHILE TRUE DO YIELD ownedString("abc"); END };\n    x: String = NEXT s;\n    ASSERT x.length() == 3_i64, "next stream string";\n    RETURN;\nEND\n)
     when :pipeline_collect
-      %(FN main() RETURNS Void ->\n    s: ~Int64[] = 1_i64 ..< 5_i64;\n    total = s |> SELECT _ * 2_i64 |> SUM _;\n    ASSERT total == 20_i64, "pipeline materialization";\n    RETURN;\nEND\n)
+      %(FN main() RETURNS Void ->\n    s: ~Int64[] = 1_i64 ..< 5_i64;\n    total = s |> SELECT _ * 2_i64 |> SUM _ |> COLLECT;\n    ASSERT total == 20_i64, "pipeline materialization";\n    RETURN;\nEND\n)
     when :pipeline_collect_inline
       <<~CHT
         FN main() RETURNS Void ->

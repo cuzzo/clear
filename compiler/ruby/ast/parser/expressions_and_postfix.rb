@@ -109,8 +109,7 @@ class ClearParser
       consume(:CHAR, current.value)
     end
     unless VALID_SELECT_MODIFIER_ORDERS.include?(order)
-      error!(modifier, "Invalid SELECT modifier order `#{order}`. " \
-        "`?~`, `?!`, and `!?~` are not valid wrapper orderings.")
+      error!(modifier, :SELECT_MODIFIER_ORDER_INVALID, order: order)
     end
     order
   end

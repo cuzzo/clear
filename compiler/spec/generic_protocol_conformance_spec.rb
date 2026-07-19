@@ -231,6 +231,30 @@ RSpec.describe "explicit generic protocol conformances" do
     expect(zig).not_to include("vtable")
   end
 
+  it "transfers a generic TAKES value back through a protocol adapter without copying it" do
+    zig = ZigTranspiler.new.transpile(<<~CLEAR)
+      PROTOCOL Identity<Value> {
+        METHOD identity(self: Self, TAKES value: Value) RETURNS Value;
+      }
+      STRUCT Store<V> { marker: Int64 }
+      IMPLEMENTATION Identity<V> FOR Store {
+        METHOD identity(self, TAKES value: V) RETURNS V -> RETURN value; END
+      }
+      FN roundTrip<S: Identity>(store: S, TAKES value: S::Value) RETURNS S::Value ->
+        RETURN store.identity(value);
+      END
+      FN main() RETURNS !Void ->
+        store = Store<Int64>{ marker: 1_i64 };
+        ASSERT roundTrip(store, 42_i64) == 42_i64;
+      END
+    CLEAR
+
+    expect(zig).to include("fn __conformance_Identity_Store_identity")
+    expect(zig).to include("return __conformance_Identity_Store_identity(V, rt, self, arg1)")
+    expect(zig).not_to match(/__conformance_Identity_Store_identity[^\n]*!V/)
+    expect(zig).not_to include("dupeValue(@TypeOf(value)")
+  end
+
   it "rejects unknown and ambiguous methods on a constrained receiver" do
     expect_error(<<~CLEAR, /Named has no METHOD named 'missing'.*name/m)
       PROTOCOL Named { METHOD name(self: Self) RETURNS String; }

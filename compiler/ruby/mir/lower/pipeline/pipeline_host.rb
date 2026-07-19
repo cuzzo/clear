@@ -640,7 +640,54 @@ class PipelineHost
     plan = @plan_builder.build(node)
     return nil unless plan
 
-    lower_dispatch_plan(plan)
+    lowered = lower_dispatch_plan(plan)
+    if concurrent_async_stream_select?(node)
+      return lower_concurrent_async_stream_result(node, T.must(lowered))
+    end
+    lowered
+  end
+
+  sig { params(node: AST::BinaryOp).returns(T::Boolean) }
+  def concurrent_async_stream_select?(node)
+    concurrent = node.right
+    return false unless concurrent.is_a?(AST::ConcurrentOp)
+    select = concurrent.op
+    return false unless select.is_a?(AST::SelectOp)
+    return false unless select.modifier_order.to_s.include?('~')
+
+    result_type = Type.new(node.full_type!)
+    result_type.canonical_stream_result? &&
+      (result_type.error_union? ? T.must(result_type.payload_type) : result_type).dynamic_stream?
+  end
+
+  sig do
+    params(
+      node: AST::BinaryOp,
+      promises: T.any(MIR::BgBlock, MIR::BlockExpr, MIR::ForStmt, MIR::ScopeBlock, MIR::ShardConcurrentEach),
+    ).returns(MIR::BlockExpr)
+  end
+  def lower_concurrent_async_stream_result(node, promises)
+    result_type = Type.new(node.full_type!)
+    stream_type = result_type.error_union? ? T.must(result_type.payload_type) : result_type
+    item_type = T.must(stream_type.canonical_stream_item_type)
+    promises_name = "__concurrent_select_promises_#{@stream_select_counter += 1}"
+    call = @lowering_bridge.emit_builtin(:promiseListToStream, [
+      MIR::Ident.new(item_type.nested_zig_type),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
+      MIR::Ident.new(@do_rt_name || "rt"),
+      MIR::Ident.new(promises_name),
+    ])
+    label = next_pipe_label
+    typed_block_expr(label, [
+      MIR::Let.new(promises_name, promises, false, nil, nil),
+      MIR::BreakStmt.new(label, call),
+      *MIR::OwnershipTransferPlan.new(
+        name: promises_name,
+        target: :call,
+        target_alloc: :heap,
+        move_guarded: false,
+      ).marks,
+    ], result_type)
   end
 
   sig { params(plan: PipelineOperationPlan).returns(PipelineLoweringResult) }

@@ -417,7 +417,10 @@ class MIRLowering
       enum_schemas: input.enum_schemas,
       union_schemas: input.union_schemas,
     )
-    schemas.replace_lookup_proc!(T.must(input.schema_lookup)) if input.schema_lookup
+    if input.schema_lookup
+      external_lookup = T.must(input.schema_lookup)
+      schemas.replace_lookup_proc!(->(name) { schemas.lookup(name) || external_lookup.call(name) })
+    end
     @state = T.let(
       MIRLoweringState.new(
         input: input,
@@ -573,6 +576,11 @@ class MIRLowering
   sig { params(name: String).returns(T::Boolean) }
   def pipeline_guarded_cleanup_name?(name)
     function_state.guarded_cleanup_names[name] == true
+  end
+
+  sig { params(kind: Symbol, dispatch: Symbol, analysis: T.nilable(CapabilityHelper::CaptureAnalysis)).returns(MIR::ExecutionBoundaryFact) }
+  def pipeline_execution_boundary_fact(kind, dispatch, analysis)
+    execution_boundary_fact(kind, dispatch, analysis)
   end
 
   sig { params(name: String).returns(T::Boolean) }
@@ -4405,6 +4413,10 @@ class MIRLowering
   sig { params(value: MIR::Node, type_info: Type).returns(MIR::Node) }
   def rc_payload_value(value, type_info)
     return value unless type_info.any_rc?
+    # For `?T@shared` / `!?T@shared`, the ref-counted handle is inside the
+    # optional/error wrapper. Projecting `.ctrl.data` on the wrapper itself
+    # emits invalid Zig (`?*Arc(...).ctrl`). Consumers must first unwrap it.
+    return value if type_info.optional? || type_info.error_union?
 
     MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(value, "ctrl"), "data"))
   end

@@ -1872,25 +1872,38 @@ module MIRLoweringExpressions
       node.name.to_s
     end
 
-    owned_field_names = fields.flat_map do |field|
+    field_operands = fields.flat_map do |field|
+      field_ast = literal_fields.find { |name, _| name.to_s == field[:name].to_s }&.last
+      next [] unless field_ast
       raw_field_type = field_types[field[:name].to_s]
-      next [] unless raw_field_type && !raw_field_type.is_a?(Schemas::InlineStructVariant)
-      field_type = raw_field_type.is_a?(Type) ? raw_field_type : Type.new(raw_field_type)
-      next [] unless lifecycle_registry.fetch(field_type).needs_drop?
-
-      mir_ident_names(field[:value])
+      next [] if raw_field_type.is_a?(Schemas::InlineStructVariant)
+      actual_type = if field_ast.is_a?(AST::Identifier)
+        function_state.binding_types[field_ast.name.to_s] ||
+          (field_ast.symbol&.type if field_ast.symbol&.type.is_a?(Type))
+      end
+      actual_type ||= Type.from_node!(field_ast, context: "struct field payload ownership")
+      if node.borrowed_field_names&.include?(field[:name].to_s)
+        next [MIR::OwnershipOperandFact.non_owning(actual_type, "MIR::StructInit borrowed field")]
+      end
+      ownership_operands_for_sink_value(
+        field[:value],
+        field_ast,
+        actual_type,
+        "MIR::StructInit",
+        struct_alloc,
+        require_visible_owned: false,
+      )
     end
-    init = T.cast(with_ownership_consumption(
-      MIR::StructInit.new(type_name, fields),
-      # Visibility/lifecycle facts decide which field identifiers are actual
-      # owners. Do not discard candidates merely because a field's allocator
-      # metadata is implicit; inferred recursive fields still transfer their
-      # hoisted owner into the enclosing struct.
-      owned_field_names,
-      "MIR::StructInit",
-      target_alloc: struct_alloc,
-      require_visible: false,
-    ), MIR::StructInit)
+    init = MIR::StructInit.new(type_name, fields)
+    unless field_operands.empty?
+      init.ownership_consumption = MIR::OwnershipConsumptionFact.new(
+        operands: field_operands,
+        target: :owned_sink,
+        target_alloc: struct_alloc,
+        source: "MIR::StructInit",
+        covers_consuming_params: true,
+      )
+    end
 
     # Struct literals remain value-shaped. Heap/frame placement is a storage
     # decision for the owning binding or wrapper; it must not change `T` into
@@ -1992,17 +2005,46 @@ module MIRLoweringExpressions
       { name: k.to_s, value: val, alloc: field_sink_alloc }
     }
 
-    inner = T.cast(with_ownership_consumption(
-      MIR::StructInit.new(variant_struct_name, field_values),
-      field_values.flat_map { |field| field[:alloc].is_a?(Symbol) ? mir_ident_names(field[:value]) : [] },
-      "MIR::StructInit",
-      target_alloc: variant_alloc,
-    ), MIR::StructInit)
+    field_operands = field_values.flat_map do |field|
+      field_ast = node.fields.find { |name, _| name.to_s == field[:name].to_s }&.last
+      next [] unless field_ast
+      # Generic union schemas retain their projected type parameter here (T/E).
+      # Ownership, however, belongs to the concrete constructor argument.  A
+      # Result<Float64, Bool>.Ok payload must not manufacture a transfer for a
+      # primitive parameter merely because unconcretized T is conservatively
+      # droppable; a String instantiation still correctly transfers.
+      symbol_type = if field_ast.is_a?(AST::Identifier)
+        function_state.binding_types[field_ast.name.to_s] ||
+          (field_ast.symbol&.type if field_ast.symbol&.type.is_a?(Type))
+      end
+      field_type = symbol_type || Type.from_node!(field_ast, context: "union variant payload ownership")
+      ownership_operands_for_sink_value(
+        field[:value],
+        field_ast,
+        field_type,
+        "MIR::StructInit",
+        variant_alloc,
+        require_visible_owned: false,
+      )
+    end
+    inner = MIR::StructInit.new(variant_struct_name, field_values)
+    unless field_operands.empty?
+      inner.ownership_consumption = MIR::OwnershipConsumptionFact.new(
+        operands: field_operands,
+        target: :owned_sink,
+        target_alloc: variant_alloc,
+        source: "MIR::StructInit",
+        covers_consuming_params: true,
+      )
+    end
     result = T.cast(with_ownership_consumption(
       MIR::StructInit.new(node.union_name.to_s, [
         { name: node.variant_name.to_s, value: inner }
       ]),
-      mir_ident_names(inner),
+      # `inner` already owns any droppable constructor arguments.  Wrapping
+      # that rvalue in the tagged union does not consume those source bindings
+      # a second time.
+      [],
       "MIR::StructInit",
       target_alloc: variant_alloc,
     ), MIR::StructInit)
@@ -2342,7 +2384,6 @@ module MIRLoweringExpressions
     if fresh_copy_constructor?(node.value)
       return source
     end
-    source = hoist_alloc(source, node.value) if mir_allocates?(source)
     # A payload-free union constructor (for example `Value.Nil`) is already a
     # fresh value and contains no storage to duplicate. Auto-COPY may wrap it
     # when it appears as an owned fallback; lowering that wrapper as a full
@@ -2372,6 +2413,8 @@ module MIRLoweringExpressions
     if source.is_a?(MIR::Orelse) && lifecycle.needs_drop?
       source = place_owned_orelse_for_destination(source, source_ti, alloc)
       source = hoist_alloc(source, node.value, transfer_on_success: false)
+    elsif mir_allocates?(source)
+      source = hoist_alloc(source, node.value)
     end
 
     case lifecycle.copy_strategy

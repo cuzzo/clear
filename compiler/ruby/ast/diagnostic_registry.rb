@@ -101,6 +101,12 @@ module DiagnosticRegistry
       summary: "SELECT uses the same `:!`, `:?`, and `:!?` explicit-tense spelling as inferred bindings.",
       fix_hint: "Insert `:` between SELECT and its effect marker.",
     },
+    SELECT_MODIFIER_ORDER_INVALID: {
+      severity: :error, category: :syntax,
+      template: "Invalid SELECT modifier order `%{order}`. `?~`, `?!`, and `!?~` are not valid wrapper orderings.",
+      summary: "SELECT wrapper modifiers must follow the language's valid tense nesting order.",
+      fix_hint: "Put `~` outside `?`, and put `!` outside `?`; for example, use SELECT:~?, SELECT:!~, or SELECT:!~?.",
+    },
     INVALID_ASSIGNMENT: {
       severity: :error, category: :syntax,
       template: "Invalid assignment target. You can only SET variables, fields, or indices.",

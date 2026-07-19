@@ -27,7 +27,7 @@ FN main() RETURNS Void ->
     ASSERT filtered == 30, "reduce where >5 in 0..10 should be 30";
 
     # REDUCE with SELECT stage
-    doubled: Int64 = (1_i64 ..< 5) |> SELECT _ * 2 |> REDUCE(0_i64) acc + _;
+    doubled: Int64 = (1_i64 ..< 5) |> SELECT _ * 2 |> REDUCE(0_i64) acc + _ |> COLLECT;
     # 2+4+6+8 = 20
     ASSERT doubled == 20, "reduce select*2 1..5 should be 20";
 

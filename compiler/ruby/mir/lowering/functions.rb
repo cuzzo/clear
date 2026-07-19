@@ -1557,8 +1557,11 @@ module MIRLoweringFunctions
     # to borrow or materialize the concrete payload.
     wants_ptr_intrinsic = ti.is_a?(Type) && Type.new(ti).needs_pointer_passing? &&
                           !callee_param_type.generic_type_parameter?
+    wants_ptr_protocol_map = !!(callee_sig && callee_param &&
+      protocol_map_signature_param?(callee_sig, callee_param))
     wants_ptr_poly      = universal_poly_arg_needs_addr?(a, callee_sig, idx)
-    !!(wants_ptr_mut_list || wants_ptr_mut_value || wants_ptr_intrinsic || wants_ptr_poly)
+    !!(wants_ptr_mut_list || wants_ptr_mut_value || wants_ptr_intrinsic ||
+      wants_ptr_protocol_map || wants_ptr_poly)
   end
 
   sig { params(a: AST::Node).returns(T::Boolean) }

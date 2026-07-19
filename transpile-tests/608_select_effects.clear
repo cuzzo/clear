@@ -71,11 +71,12 @@ FN main() RETURNS !Void ->
     recovered = values |> SELECT fallible(_) OR_ELSE 0;
     ASSERT recovered.length() == 3, "recovered SELECT is definite";
 
-    futures:~ = values |> SELECT later(_);
-    resolved: []Int64 = NEXT futures;
-    ASSERT resolved.length() == 3, "async SELECT produces a promise list";
-    ASSERT resolved[0] == 10, "promise list retains SELECT order";
-    ASSERT resolved[2] == 30, "promise list awaits every SELECT result";
+    futures:~ = values |> SELECT:~ later(_);
+    MUTABLE resolvedCount: Int64 = 0;
+    MUTABLE resolvedSum: Int64 = 0;
+    futures |> EACH { resolvedCount = resolvedCount + 1; resolvedSum = resolvedSum + _; };
+    ASSERT resolvedCount == 3, "async SELECT produces a finite stream";
+    ASSERT resolvedSum == 60, "finite stream awaits every SELECT result";
 
     filtered = values |> WHERE falliblePredicate(_) OR_ELSE FALSE;
     ASSERT filtered.length() == 3, "WHERE accepts a recovered Bool";
@@ -95,9 +96,10 @@ FN main() RETURNS !Void ->
     concurrentBoth |> EACH { concurrentBothSum = concurrentBothSum + (_ OR_ELSE 0); };
     ASSERT concurrentBothSum == 1, "CONCURRENT SELECT:!? preserves both effects";
 
-    concurrentFutures:~ = values |> CONCURRENT(workers: 2) SELECT later(_);
-    concurrentResolved: []Int64 = NEXT concurrentFutures;
-    ASSERT concurrentResolved.length() == 3, "CONCURRENT async SELECT produces a promise list";
+    concurrentFutures:~ = values |> CONCURRENT(workers: 2) SELECT:~ later(_);
+    MUTABLE concurrentResolvedCount: Int64 = 0;
+    concurrentFutures |> EACH { concurrentResolvedCount = concurrentResolvedCount + 1; };
+    ASSERT concurrentResolvedCount == 3, "CONCURRENT async SELECT produces a finite stream";
 
     RETURN;
 END

@@ -1143,9 +1143,8 @@ RSpec.describe SemanticAnnotator do
         FN later(value: Int64) RETURNS ~Int64 -> RETURN BG { value * 2; }; END
         FN main() RETURNS !Void ->
           items: []Int64 = [1, 2];
-          pending:~ = items |> CONCURRENT(workers: 2) SELECT later(_);
-          resolved: []Int64 = NEXT pending;
-          ASSERT resolved.length() == 2;
+          pending:~ = items |> CONCURRENT(workers: 2) SELECT:~ later(_);
+          IF NEXT pending EXISTS AS resolved THEN ASSERT resolved > 0; END
           RETURN;
         END
       CLEAR

@@ -193,7 +193,11 @@ class MIRPass
       # Its generic placeholder can otherwise look cleanup-bearing before a
       # concrete call is known, so decide this narrow shape from call sites.
       if generic_direct_parameter_return?(fn)
-        fn.needs_rt = generic_return_needs_runtime?(fn)
+        # A TAKES generic still emits a guarded cleanup for the not-moved path.
+        # Even when every current call instantiates it with a scalar, that
+        # cleanup is compiled in the generic body and therefore needs `rt`.
+        fn.needs_rt = params_need_runtime_cleanup?(fn.params) ||
+          generic_return_needs_runtime?(fn)
         next
       end
       if generic_projection_return?(fn)
