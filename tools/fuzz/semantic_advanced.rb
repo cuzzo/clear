@@ -75,24 +75,76 @@ module SemanticAdvanced
         END
       CLEAR
     ).freeze,
+    Gap.new(
+      id: :select_modifier_order_contract,
+      status: :fixed,
+      summary: 'SELECT now preserves and validates the exact ordered !/?/~ modifier sequence instead of collapsing it to an unordered effect mode.',
+      witness: 'values |> SELECT:!~? project(_)'
+    ).freeze,
+    Gap.new(
+      id: :select_outer_fallible_tense_type,
+      status: :fixed,
+      summary: 'The type parser now admits recursively ordered outer-fallible tense types such as !~T, !~!T, and !~?T.',
+      witness: 'FN project(value: Int64) RETURNS !~?Int64 -> RETURN BG { value; }; END'
+    ).freeze,
+    Gap.new(
+      id: :select_stream_cardinality_inference,
+      status: :fixed,
+      summary: 'SELECT type inference preserves [~], [~N], and [~INF] source cardinality and places selector wrappers on the correct side of the stream boundary.',
+      witness: 'selected: [~2]?Int64 = input |> SELECT:? project(_)'
+    ).freeze,
+    Gap.new(
+      id: :select_stream_effect_annotation,
+      status: :fixed,
+      summary: 'A list selector returning ~T now requires SELECT:~ and infers [~]T; omitting the marker produces a focused annotation error.',
+      witness: 'selected: [~]Int64 = values |> SELECT:~ streamBar(_)'
+    ).freeze,
+    Gap.new(
+      id: :obsolete_question_stream_syntax,
+      status: :fixed,
+      summary: 'The parser rejects ?[~]T and obsolete ~T[?], while retaining [~]?T for optional stream items.',
+      witness: 'ok: [~]?Int64 = source; bad_outer: ?[~]Int64 = DEFAULT; bad_legacy: ~Int64[?] = DEFAULT;'
+    ).freeze,
   ].freeze
-  EXPECTED_GAPS = [
+  SELECT_LOWERING_FIXED_GAPS = [
     Gap.new(
       id: :select_preserves_tense,
-      status: :expected,
-      summary: 'SELECT over a tense pipeline source currently materializes a plain collection instead of returning a tense result; implementation is in progress in litedb.',
+      status: :fixed,
+      summary: 'SELECT lowering now emits cardinality-preserving [~]/[~N]/[~INF] producers instead of materializing an ArrayList.',
       witness: <<~CLEAR
         FN main() RETURNS !Void ->
-          source: ~Int64[3] = [BG { 1_i64; }, BG { 2_i64; }, BG { 3_i64; }];
-          selected: ~Int64[] = source |> SELECT _ * 2_i64;
-          total = selected |> SUM _ |> COLLECT;
-          ASSERT total == 12_i64;
+          source: [~]Int64 = BG STREAM { YIELD 1_i64; YIELD 2_i64; CLOSE; };
+          selected: [~]Int64 = source |> SELECT _ * 2_i64;
+          IF NEXT selected EXISTS AS first THEN ASSERT first == 2_i64; END
           RETURN;
         END
       CLEAR
     ).freeze,
+    Gap.new(
+      id: :select_outer_fallible_tense_lowering,
+      status: :fixed,
+      summary: 'SELECT:!~* now tracks the outer fallible stream payload lifecycle and emits conditional cleanup without an invalid ownership DROP.',
+      witness: <<~CLEAR
+        FN project(value: Int64) RETURNS !~?Int64 -> RETURN BG { value; }; END
+        FN main(values: []Int64) RETURNS !Void ->
+          selected: ![~]?Int64 = values |> SELECT:!~? project(_);
+          RETURN;
+        END
+      CLEAR
+    ).freeze,
+    Gap.new(
+      id: :select_fallible_future_payload_lowering,
+      status: :fixed,
+      summary: 'Selectors returning ~!T or ~!?T preserve the nested error payload through FSM storage and Promise spawn/error ABI lowering.',
+      witness: <<~CLEAR
+        FN project(value: Int64) RETURNS ~!Int64 ->
+          RETURN BG { value.toString().toInt(); };
+        END
+      CLEAR
+    ).freeze,
   ].freeze
-  GAPS = (FIXED_GAPS + EXPECTED_GAPS).freeze
+  EXPECTED_GAPS = [].freeze
+  GAPS = (FIXED_GAPS + SELECT_LOWERING_FIXED_GAPS + EXPECTED_GAPS).freeze
 
   Trace = Struct.new(:value, :state, :events, :outcome, keyword_init: true) do
     def validate!

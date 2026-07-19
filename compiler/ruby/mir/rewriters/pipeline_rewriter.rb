@@ -140,6 +140,14 @@ class PipelineRewriter
     # they require LIMIT to be finite.  Other stream types bypass unconditionally.
     source_type = real_source.full_type!
     has_limit = stages.any? { |s| s.is_a?(AST::LimitOp) }
+    # Stream-producing SELECT is lazy and owns a generator boundary.  The
+    # ordinary fusion path always initializes an ArrayList result, which both
+    # destroys cardinality and eagerly drains infinite inputs.
+    if Type.new(node.full_type!).canonical_stream_result? &&
+       stages.any? { |stage| stage.is_a?(AST::SelectOp) }
+      patch_chain_source!(node, real_source) unless real_source.equal?(chain.source)
+      return node
+    end
     if is_range_fold_terminal && stages.all? { |s| AST.pipeline_fusible_stage?(s) }
       if real_source.is_a?(AST::RangeLit) || source_type.bounded_pipeline_stream_source?(has_limit)
         patch_chain_source!(node, real_source) unless real_source.equal?(chain.source)

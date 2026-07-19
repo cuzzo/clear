@@ -1307,7 +1307,7 @@ module CapabilityHelper
     phase_audit_inputs.capture_move_suppression_depth -= 1
   end
 
-  sig { params(node: AST::ConcurrentOp, analysis: CapabilityHelper::CaptureAnalysis, is_parallel: T::Boolean, is_pinned: T::Boolean).returns(T.nilable(CapabilityHelper::CaptureAnalysis)) }
+  sig { params(node: T.any(AST::ConcurrentOp, AST::SelectOp), analysis: CapabilityHelper::CaptureAnalysis, is_parallel: T::Boolean, is_pinned: T::Boolean).returns(T.nilable(CapabilityHelper::CaptureAnalysis)) }
   def validate_capture_analysis!(node, analysis, is_parallel, is_pinned)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
 

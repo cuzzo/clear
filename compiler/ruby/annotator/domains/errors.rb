@@ -394,6 +394,9 @@ module Annotator
 
         value = T.must(raw_value)
         return_payload = expected.plain_return_payload_type || expected
+        if value.is_a?(AST::BgBlock) && return_payload.single_future?
+          T.unsafe(value).declared_async_payload = Type.new(return_payload.tense_type)
+        end
         if value.is_a?(AST::ListLit) && (return_payload.collection? || return_payload.tuple?)
           value.coerced_type = return_payload
         elsif value.is_a?(AST::HashLit) && return_payload.map?

@@ -192,11 +192,12 @@ class ClearParser
         consume(:CHAR, ']')
         inner = "[#{size}]"
 
-      # Case 4: Open stream marker "T[?]" (used inside tense type ~T[?])
+      # Obsolete question-mark stream cardinality. Canonical streams put the
+      # tense/cardinality layer first: [~]T, [~N]T, or [~INF]T.
       elsif match?(:CHAR, '?')
-        consume(:CHAR, '?')
-        consume(:CHAR, ']')
-        inner = "[?]"
+        error!(current, :PARSER_EXPECTED,
+          expected: "[~]T, [~N]T, or [~INF]T stream syntax",
+          got: "[?]", type: current.type, line: current.line)
 
       # Case 5: Infinite stream marker "T[INF]" (used inside tense type ~T[INF])
       elsif match?(:TYPE_ID) && current.value == 'INF'
@@ -318,11 +319,19 @@ class ClearParser
   def inline_type_annotation_start?
     offset = T.let(0, Integer)
     token = T.must(peek_at(0))
+    prefixes = T.let("", String)
     while token.type == :CHAR && %w[? ! ~].include?(token.value)
+      prefixes << token.value.to_s
       offset += 1
       token = peek_at(offset) || token
     end
-    token.type == :CHAR && ["[", "{"].include?(token.value)
+    return true if token.type == :CHAR && ["[", "{"].include?(token.value)
+
+    # The legacy nominal parser only represents the historical fixed prefix
+    # order (~, then !, then ?).  Ordered SELECT types such as !~T and !~!T
+    # must use the recursive Inline Pivot prefix parser so no wrapper order is
+    # silently normalized or rejected.
+    !prefixes.empty? && !%w[~ ! ? ~! ~? !? ~!?].include?(prefixes)
   end
 
   sig { returns(TypeExpression) }
@@ -362,9 +371,17 @@ class ClearParser
 
   sig { returns(TypeExpression) }
   def parse_inline_prefixed_expression
-    prefix = consume(:CHAR).text!
+    prefix_token = consume(:CHAR)
+    prefix = prefix_token.text!
     inner = parse_inline_type_expression
-    return OptionalTypeExpression.new(inner: inner) if prefix == "?"
+    if prefix == "?"
+      if inner.is_a?(StreamTypeExpression)
+        error!(prefix_token, :PARSER_EXPECTED,
+          expected: "an optional stream item such as [~]?T",
+          got: "?[~]T", type: prefix_token.type, line: prefix_token.line)
+      end
+      return OptionalTypeExpression.new(inner: inner)
+    end
     return FallibleTypeExpression.new(inner: inner) if prefix == "!"
 
     FutureTypeExpression.new(inner: inner)

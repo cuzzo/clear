@@ -2027,7 +2027,9 @@ RSpec.describe "MIR gap-burn characterization" do
     discarded_orelse, hoisted_orelse = low.send(:materialize_statement_discard, discarded_optional, orelse)
     expect(hoisted_orelse).to eq(true)
     orelse_init = T.cast(discarded_orelse, MIR::ScopeBlock).body.grep(MIR::Let).first.init
-    expect(orelse_init).to be_a(MIR::IfOptional)
+    expect(orelse_init).to be_a(MIR::BlockExpr)
+    optional_merge = T.cast(orelse_init, MIR::BlockExpr).body.grep(MIR::Let).first
+    expect(optional_merge.init).to be_a(MIR::IfOptional)
     expect(MIR::OwnershipEffect.of(orelse_init).produces_owned).to eq(true)
 
     if_bind = MIR::IfBindStmt.new([

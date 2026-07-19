@@ -478,7 +478,7 @@ module EscapeAnalysis
       mark_symbol_heap!(param.symbol)
     end
 
-    facts.binding_values.each_key do |name|
+    facts.binding_values.each do |name, values|
       sym = facts.symbols[name]
       next unless sym
       reg = sym.reg
@@ -494,7 +494,7 @@ module EscapeAnalysis
       # allocator.  This is deliberately source-driven: a plain value struct
       # remains frame-backed unless one of its fields refers to a heap owner.
       next unless aggregate_owner_requires_heap?(ti, schema_lookup) ||
-                  aggregate_contains_heap_owned_value?(node.value)
+                  values.any? { |value| aggregate_contains_heap_owned_value?(value) }
       mark_symbol_heap!(sym)
     end
   end

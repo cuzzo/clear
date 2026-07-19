@@ -783,7 +783,7 @@ RSpec.describe SemanticAnnotator do
       it "errors when BG STREAM has no YIELD statements" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Float64[?] = BG STREAM { RETURN; };
+            s: [~]Float64 = BG STREAM { RETURN; };
             RETURN;
           END
         CLEAR
@@ -803,7 +803,7 @@ RSpec.describe SemanticAnnotator do
       it "errors when YIELD types are inconsistent" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Float64[?] = BG STREAM { YIELD 1.0; YIELD TRUE; };
+            s: [~]Float64 = BG STREAM { YIELD 1.0; YIELD TRUE; };
             RETURN;
           END
         CLEAR
@@ -853,7 +853,7 @@ RSpec.describe SemanticAnnotator do
       it "emits plain defer s.deinit() when stream is never moved" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
+            s: [~]Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -870,7 +870,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.Stream(f64) in the var declaration" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
+            s: [~]Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -881,7 +881,7 @@ RSpec.describe SemanticAnnotator do
       it "emits var (not const) for the stream binding" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
+            s: [~]Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -892,7 +892,7 @@ RSpec.describe SemanticAnnotator do
       it "emits spawnNew in the BG STREAM block" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
+            s: [~]Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -903,7 +903,7 @@ RSpec.describe SemanticAnnotator do
       it "emits push() calls for each YIELD" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~Float64[?] = BG STREAM { YIELD 1.0; YIELD 2.0; };
+            s: [~]Float64 = BG STREAM { YIELD 1.0; YIELD 2.0; };
             RETURN;
           END
         CLEAR
@@ -914,7 +914,7 @@ RSpec.describe SemanticAnnotator do
       it "emits defer close() inside generator fiber" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
+            s: [~]Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -922,23 +922,25 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include(".close()")
       end
 
-      it "emits .next() for NEXT on open stream" do
+      it "emits .next() for NEXT on a canonical finite stream" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
-            v: ?Float64 = NEXT s;
+            s: [~]Float64 = BG STREAM { YIELD 1.0; };
+            IF NEXT s EXISTS AS v THEN
+              ASSERT v == 1.0;
+            END
             RETURN;
           END
         CLEAR
         out = transpile_fn(src)
-        expect(out).to include("s.next()")
+        expect(out).to include("s.nextStep()")
       end
 
       it "emits independent labels for two open streams in same function" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s1: ~Float64[?] = BG STREAM { YIELD 1.0; };
-            s2: ~Float64[?] = BG STREAM { YIELD 2.0; };
+            s1: [~]Float64 = BG STREAM { YIELD 1.0; };
+            s2: [~]Float64 = BG STREAM { YIELD 2.0; };
             RETURN;
           END
         CLEAR
@@ -1136,8 +1138,8 @@ RSpec.describe SemanticAnnotator do
         expect(Type.new(:"~Float64[3]").inf_stream?).to be false
       end
 
-      it "inf_stream? is false for ~Float64[?] (open stream)" do
-        expect(Type.new(:"~Float64[?]").inf_stream?).to be false
+      it "inf_stream? is false for [~]Float64 (finite stream)" do
+        expect(Type.new(:"[~]Float64").inf_stream?).to be false
       end
 
       it "inf_stream_element_type returns Float64 for ~Float64[INF]" do
@@ -1386,7 +1388,7 @@ RSpec.describe SemanticAnnotator do
       it "raises an error when an open stream is declared @multiowned (BindExpr path)" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Float64[?] @multiowned = BG STREAM { YIELD 1.0; };
+            s: ~?Float64[] @multiowned = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1514,14 +1516,14 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.not_to raise_error
       end
 
-      it "still accepts legacy ~T[?] as an alias during migration" do
+      it "rejects obsolete ~T[?] syntax" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(ParserError, /\[~\]T, \[~N\]T, or \[~INF\]T/)
       end
 
       it "does NOT raise when ~T[INF] is used (valid infinite stream)" do

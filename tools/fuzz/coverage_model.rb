@@ -309,6 +309,24 @@ module FuzzCoverageModel
     pipeline_source_shape_matrix: profile(
       failure_proves: 'Pipeline source and terminal shapes preserve cleanup across stream and promise boundaries.'
     ),
+    select_tense_assignment_matrix: profile(
+      failure_proves: 'Every legal ordered SELECT effect/tense modifier preserves its exact wrapper order and stream cardinality; forbidden orders and obsolete stream spellings fail closed.',
+      matrix_strategy: :exhaustive
+    ),
+    semantic_advanced_matrix: profile(
+      failure_proves: 'Advanced capability, depth, concurrency, effect, generic, and diagnostic entries retain their independent legality and trace contracts.',
+      matrix_strategy: :bounded_pairwise,
+      known_exclusions: ['The PR lane deterministically samples the runtime schedule registry; the opt-in nightly lane executes the complete bounded schedule set.']
+    ),
+    semantic_capability_expansion_matrix: profile(
+      failure_proves: 'Opt-in depth-four capability expansion preserves the approved value/access oracle for every generated payload.',
+      matrix_strategy: :bounded_pairwise,
+      known_exclusions: ['Template loading emits zero cells unless SEMANTIC_CAPABILITY_EXPANSION=1; the documented campaign owns the full 1,700 cases.']
+    ),
+    semantic_capability_transport_matrix: profile(
+      failure_proves: 'Managed capability values retain ownership and payload through COPY, GIVE, TAKES, and nested-field transport.',
+      matrix_strategy: :exhaustive
+    ),
     semantic_equivalence_matrix: profile(
       failure_proves: 'Recursively derived scalar, String, struct, list, map, and Tuple expressions retain their declared type and payload in every compatible local, call, aggregate, and pipeline expression slot.',
       matrix_strategy: :bounded_pairwise,

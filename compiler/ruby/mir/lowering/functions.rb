@@ -683,7 +683,11 @@ module MIRLoweringFunctions
                     false
                   end
     return "CheatLib.Arc(#{type_info.resolved})" if type_info.shared? && type_info.generic_type_parameter?
-    return "anytype" if is_user_struct || polymorphic_generic_struct || type_info.collection? || atomic_sync
+    # Canonical finite stream parameters accept all compatible producers
+    # (range cursors, open generators, and bounded generators). Their shared
+    # NEXT protocol is the ABI; their concrete storage representation is not.
+    return "anytype" if is_user_struct || polymorphic_generic_struct || type_info.collection? ||
+      type_info.canonical_stream? || atomic_sync
 
     base_zig
   end

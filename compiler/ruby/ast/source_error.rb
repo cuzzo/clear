@@ -202,7 +202,17 @@ end
 class SourceError < StandardError
     extend T::Sig
 
-  attr_reader :token, :original_message, :source_code, :code
+  sig { returns(T.nilable(Lexer::Token)) }
+  attr_reader :token
+
+  sig { returns(String) }
+  attr_reader :original_message
+
+  sig { returns(T.nilable(String)) }
+  attr_reader :source_code
+
+  sig { returns(T.nilable(Symbol)) }
+  attr_reader :code
 
   sig { params(token: T.nilable(Lexer::Token), message: String, source_code: T.nilable(String), code: T.nilable(Symbol)).void }
   def initialize(token, message, source_code, code: nil)

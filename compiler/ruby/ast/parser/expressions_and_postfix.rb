@@ -69,8 +69,10 @@ class ClearParser
   def parse_select_op
     token = consume(:KEYWORD, 'SELECT')
     reject_legacy_select_effect_spelling!
-    effect_mode = parse_select_effect_mode
-    AST::SelectOp.new(token, parse_expression(1), effect_mode)
+    modifier_order = parse_select_modifier_order
+    effect_mode = select_effect_mode_for(modifier_order)
+    AST::SelectOp.new(token, parse_expression(1), effect_mode,
+      modifier_order&.include?('~') == true, modifier_order)
   end
 
   sig { void }
@@ -92,23 +94,36 @@ class ClearParser
       fixes: [fix], raise_in_collector: true)
   end
 
-  sig { returns(T.nilable(Symbol)) }
-  def parse_select_effect_mode
+  VALID_SELECT_MODIFIER_ORDERS = T.let(%w[! ? !? ~ ~! ~? ~!? !~ !~! !~? !~!?].freeze, T::Array[String])
+
+  sig { returns(T.nilable(String)) }
+  def parse_select_modifier_order
     return nil unless match?(:CHAR, ':')
     modifier = peek
-    return nil unless modifier.type == :CHAR && (modifier.value == '!' || modifier.value == '?')
+    return nil unless modifier.type == :CHAR && %w[! ? ~].include?(modifier.value)
 
     consume(:CHAR, ':')
-    if match?(:CHAR, '!')
-      consume(:CHAR, '!')
-      if match?(:CHAR, '?')
-        consume(:CHAR, '?')
-        return :fallible_optional
-      end
-      return :fallible
+    order = +''
+    while match?(:CHAR, '!') || match?(:CHAR, '?') || match?(:CHAR, '~')
+      order << current.value
+      consume(:CHAR, current.value)
     end
-    consume(:CHAR, '?')
-    :optional
+    unless VALID_SELECT_MODIFIER_ORDERS.include?(order)
+      error!(modifier, "Invalid SELECT modifier order `#{order}`. " \
+        "`?~`, `?!`, and `!?~` are not valid wrapper orderings.")
+    end
+    order
+  end
+
+  sig { params(order: T.nilable(String)).returns(T.nilable(Symbol)) }
+  def select_effect_mode_for(order)
+    return nil if order.nil? || order == '~'
+    inner = order.delete('~')
+    return :fallible_optional if inner.include?('!') && inner.include?('?')
+    return :optional if inner.include?('?')
+    return :fallible if inner.include?('!')
+
+    nil
   end
 
   sig { returns(AST::Cast) }

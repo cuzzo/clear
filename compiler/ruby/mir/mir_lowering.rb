@@ -4322,6 +4322,17 @@ class MIRLowering
     MIR::Cast.new(MIR::ListLength.new(recv), "i64", :intCast)
   end
 
+  # Rc/Arc capability values expose ordinary methods and TAKES boundaries in
+  # terms of their managed payload, not the ref-counting handle.  Keep this
+  # projection structural so every caller (direct intrinsics, method calls and
+  # argument materialization) agrees on the same `ctrl.data` representation.
+  sig { params(value: MIR::Node, type_info: Type).returns(MIR::Node) }
+  def rc_payload_value(value, type_info)
+    return value unless type_info.any_rc?
+
+    MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(value, "ctrl"), "data"))
+  end
+
   sig { params(node: MIR::Node).returns(T.nilable(String)) }
   def emit_expr(node)
     emitter = runtime_state.emitter!

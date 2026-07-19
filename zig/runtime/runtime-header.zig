@@ -3709,6 +3709,16 @@ pub const CheatLib = struct {
             return;
         }
 
+        // Error unions own their success payload exactly like optionals own
+        // their present payload. Errors themselves carry no owned storage.
+        if (comptime @typeInfo(T) == .error_union) {
+            const PayloadT = @typeInfo(T).error_union.payload;
+            if (comptime needsCleanup(PayloadT)) {
+                if (ptr.*) |*payload| cleanup(PayloadT, alloc, payload) else |_| {}
+            }
+            return;
+        }
+
         // Inline lock-wrapper values (not the ordinary heap `*Locked(T)`
         // binding form) appear as Arc payloads for `@shared:locked` and
         // `@shared:writeLocked`. Their mutex/rw fields contain runtime
@@ -4075,6 +4085,11 @@ pub const CheatLib = struct {
             return if (value) |payload| try dupeValue(ChildT, payload, alloc) else null;
         }
 
+        if (info == .error_union) {
+            const PayloadT = info.error_union.payload;
+            return if (value) |payload| try dupeValue(PayloadT, payload, alloc) else |err| err;
+        }
+
         if (info == .@"union" and info.@"union".tag_type != null) {
             return dupeUnionValue(T, value, alloc);
         }
@@ -4413,6 +4428,7 @@ pub const CheatLib = struct {
         if (FT == []const u8 or FT == []u8) return true;
         const ft_info = @typeInfo(FT);
         if (ft_info == .optional) return needsCleanup(ft_info.optional.child);
+        if (ft_info == .error_union) return needsCleanup(ft_info.error_union.payload);
         if (refInnerType(FT) != null) return true;
         if (isArrayList(FT)) return true;
         if (isStringMap(FT)) return true;

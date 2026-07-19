@@ -815,9 +815,19 @@ module Annotator
         # `~!Void` -- the latter would force callers to write `~!Void[]@list`
         # and break the Zig codegen, which expects `Promise(T)` where `T`
         # is the success type.
+        # A contextual `~!T` contract is different: `!T` is deliberately the
+        # Promise payload and must survive the join boundary.  Mark the final
+        # call so lowering stores the error union as a value instead of applying
+        # the usual implicit `try` used for fiber transport failures.
+        declared_payload = T.cast(T.unsafe(node).declared_async_payload, T.nilable(Type))
+        preserve_payload_error = declared_payload&.error_union? == true
         last_type_str = last_type.to_s
-        if last_type_str.start_with?('!')
+        if last_type_str.start_with?('!') && !preserve_payload_error
           last_type = Type.new(T.must(last_type_str[1..]).to_sym)
+        end
+        if preserve_payload_error && node.body.last&.respond_to?(:retain_error_channel=)
+          T.unsafe(node.body.last).retain_error_channel = true
+          last_type = T.must(declared_payload)
         end
         payload_type = owned_async_payload_type(last_type)
         T.unsafe(node).async_result_shape = AsyncResultShape.promise(payload_type)

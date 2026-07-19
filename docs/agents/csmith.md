@@ -5,9 +5,10 @@
 Full bounded system completed and remeasured on 2026-07-19. The generator is
 permanent fuzz infrastructure: all seven enabled value families meet the
 1,000-case target, all reviewed capability combinations are enabled, the
-bounded whole-program lane is implemented, all discovered compiler gaps have
-active positive witnesses, and the 54 addressable historical matrices are
-registered through the semantic migration layer with parity checks.
+bounded whole-program lane is implemented, all fixed compiler gaps have active
+positive witnesses, and the 54 addressable historical matrices are registered
+through the semantic migration layer with parity checks. The ordered SELECT
+tense expansion below has three explicit outstanding executable-lowering gaps.
 
 ## Decision
 
@@ -1384,11 +1385,11 @@ generated cases, with zero runtime failures,
 leaks, MIR errors, or unexpected passes. Allocation-fault execution is now an
 active deterministic oracle: generated list-growth recovery cases run with
 `CLEAR_OOM_AFTER=20` and assert both `OR_ELSE PASS` rollback and
-`OR_ELSE <value>` fallback. The advanced ledger records four fixed witnesses
-and one expected outstanding language gap.
-`SELECT` does not yet preserve tenseness. This is an explicitly expected,
-external future gap owned by the ongoing litedb implementation work, so it is
-retained as an expected witness rather than counted as a compiler regression.
+`OR_ELSE <value>` fallback. The advanced ledger records all twelve discovered
+witnesses as fixed, with no expected outstanding language gaps. `SELECT`
+preserves tenseness through parsing, annotation, executable lowering,
+ownership verification, and runtime cleanup for open, bounded, and infinite
+streams.
 `generic_identity_owned_return` is now fixed and active
 for String, list, map, and tuple substitutions: generic returns materialize
 owned payloads with the runtime allocator, and generic map/list calls preserve
@@ -1399,6 +1400,42 @@ allocation FAULT now selects error `catch` lowering rather than optional
 `orelse`. The historical `SemanticGaps` ledger is not evidence of
 advanced-system completion and must not be used to claim zero outstanding
 compiler gaps.
+
+### Ordered SELECT tense assignment matrix
+
+`select_tense_assignment_matrix` is an exhaustive independent-oracle matrix for
+the SELECT rules introduced by the Inline Pivot stream syntax. It owns 56
+cells: 48 positive assignments (`4 source shapes x 12 legal ordered modifier
+sequences`), one executable direct `(range) |> future-returning-function` cell,
+and seven negative syntax cells. The source shapes are `[]T`,
+`[~]T`, `[~2]T`, and `[~INF]T`. The legal ordered modifiers are plain, `!`, `?`,
+`!?`, `~`, `~!`, `~?`, `~!?`, `!~`, `!~!`, `!~?`, and `!~!?`; the negative
+set includes `?!`, `?~`, `!?~`, `~?!`, and `~~`.
+
+The oracle is implemented independently in
+`tools/fuzz/select_tense_semantics.rb`. It splits a selector wrapper order at
+the tense boundary, preserves the source cardinality for an existing stream,
+uses finite `[~]` for list-to-stream projection, places the prefix outside the
+stream, and places the suffix on each yielded item. Thus `!~?T` selected over a
+list produces `![~]?T`, while `[~]?T` is legal and `?[~]T` is rejected.
+
+The expansion found eight distinct compiler gaps. All eight are fixed and retained:
+
+- exact SELECT modifier ordering and invalid-order rejection;
+- parsing `!~T`, `!~!T`, and `!~?T` without normalizing wrapper order;
+- `[~]`, `[~N]`, and `[~INF]` result-cardinality inference;
+- mandatory `SELECT:~` for a list selector returning `~T`; and
+- rejection of obsolete `~T[?]` and invalid outer-optional `?[~]T` while
+  accepting `[~]?T`;
+- executable cardinality-preserving stream producers rather than `ArrayList`
+  materialization, including generator-backed `[~N]T`;
+- ownership-safe outer-fallible `SELECT:!~*` cleanup; and
+- nested `~!T`/`~!?T` Promise payload ABI preservation.
+
+The complete executable SELECT run is green and fail-complete: all 56 cells
+pass their independent oracle (48 positive assignments, the direct
+range-to-future pipe, and seven syntax rejections), with zero runtime failures,
+leaks, MIR errors, or unexpected passes.
 
 ### Deep whole-program campaign manifest
 

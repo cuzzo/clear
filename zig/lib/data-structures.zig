@@ -841,13 +841,53 @@ pub fn bind(comptime deps: type) type {
     pub fn BoundedStream(comptime T: type, comptime N: usize) type {
         return struct {
             const Self = @This();
+            const Generator = Stream(T);
+            pub const Inner = Generator.Inner;
 
-            items: [N]Promise(T),
+            items: [N]Promise(T) = undefined,
             head: usize = 0,
+            inner: *Inner = undefined,
+            alloc: std.mem.Allocator = undefined,
+            generated: bool = false,
+
+            fn generator(self: *Self) Generator {
+                return .{ .inner = self.inner, .alloc = self.alloc };
+            }
+
+            /// Construct the generator-backed representation used by
+            /// canonical `[~N]T` projections. Legacy `~T[N]` literals keep
+            /// using the fixed Promise array representation above.
+            pub fn spawnNew(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
+                const stream = try Generator.spawnNew(alloc, sched);
+                return .{
+                    .inner = stream.inner,
+                    .alloc = stream.alloc,
+                    .generated = true,
+                };
+            }
+
+            pub fn push(self: *Self, value: T) error{StreamClosed}!void {
+                var stream = self.generator();
+                return stream.push(value);
+            }
+
+            pub fn close(self: *Self) void {
+                var stream = self.generator();
+                stream.close();
+            }
+
+            pub fn setError(self: *Self, err: anyerror) void {
+                var stream = self.generator();
+                stream.setError(err);
+            }
 
             /// Block on the next unconsumed BG fiber and return its result.
             /// Propagates errors from the underlying Promise.
             pub fn next(self: *Self) anyerror!T {
+                if (self.generated) {
+                    var stream = self.generator();
+                    return (try stream.next()) orelse @panic("BoundedStream exhausted: generator closed");
+                }
                 if (self.head >= N) @panic("BoundedStream exhausted: all items consumed");
                 const val = try self.items[self.head].next();
                 self.head += 1;
@@ -857,6 +897,10 @@ pub fn bind(comptime deps: type) type {
             /// Optional form of next() for use in while-loop pipeline iteration.
             /// Returns null when all N items have been consumed.
             pub fn nextOrNull(self: *Self) anyerror!?T {
+                if (self.generated) {
+                    var stream = self.generator();
+                    return stream.next();
+                }
                 if (self.head >= N) return null;
                 const val = try self.items[self.head].next();
                 self.head += 1;
@@ -866,6 +910,10 @@ pub fn bind(comptime deps: type) type {
             /// Tagged completion form used by canonical `[~N]T`. Unlike an
             /// optional sentinel, this preserves `null` when T is optional.
             pub fn nextStep(self: *Self) anyerror!StreamStep(T) {
+                if (self.generated) {
+                    var stream = self.generator();
+                    return stream.nextStep();
+                }
                 if (self.head >= N) return .{ .Closed = {} };
                 const val = try self.items[self.head].next();
                 self.head += 1;
@@ -877,8 +925,18 @@ pub fn bind(comptime deps: type) type {
             /// Must be called after a pipeline loop that may terminate early
             /// (TAKE_WHILE, LIMIT) to avoid leaking Promise.Inner allocations.
             pub fn deinit(self: *Self) void {
+                if (self.generated) {
+                    var stream = self.generator();
+                    stream.deinit();
+                    return;
+                }
                 while (self.head < N) {
-                    _ = self.items[self.head].next() catch {};
+                    const item_alloc = self.items[self.head].alloc;
+                    var value = self.items[self.head].next() catch {
+                        self.head += 1;
+                        continue;
+                    };
+                    if (comptime needsCleanup(T)) cleanup(T, item_alloc, &value);
                     self.head += 1;
                 }
             }

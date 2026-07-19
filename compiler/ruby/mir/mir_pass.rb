@@ -263,7 +263,7 @@ class MIRPass
     # T with an owned cleanup-bearing payload.
     @fn_nodes.each_value.any? do |caller|
       next false unless caller.body
-      needs_runtime = false
+      needs_runtime = T.let(false, T::Boolean)
       AST.each_locatable(caller.body) do |node|
         next unless node.is_a?(AST::FuncCall) && node.name.to_s == fn.name.to_s
         arg = node.args[index]
@@ -288,7 +288,7 @@ class MIRPass
     AST.each_locatable(fn.body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
     return false unless returns.length == 1
 
-    returns.first.value.is_a?(AST::GetField)
+    T.must(returns.first).value.is_a?(AST::GetField)
   end
 
   sig { params(fn: AST::FunctionDef).returns(T.nilable(String)) }
@@ -298,7 +298,7 @@ class MIRPass
     returns = T.let([], T::Array[AST::ReturnNode])
     AST.each_locatable(fn.body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
     return nil unless returns.length == 1
-    value = returns.first.value
+    value = T.must(returns.first).value
     return nil unless value.is_a?(AST::Identifier)
     return nil unless fn.params.any? { |param| param.name.to_s == value.name.to_s }
 

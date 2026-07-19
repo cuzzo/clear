@@ -3695,8 +3695,9 @@ class Type
   sig { returns(T::Boolean) }
   def specialization_may_need_cleanup?
     return true if projection? || generic_instance?
+    return payload_type&.specialization_may_need_cleanup? == true if error_union?
 
-    (optional? || error_union?) && wrapped_type&.specialization_may_need_cleanup? == true
+    optional? && wrapped_type&.specialization_may_need_cleanup? == true
   end
 
   sig { returns(T.nilable(Symbol)) }
@@ -4047,6 +4048,32 @@ class Type
   sig { returns(T::Boolean) }
   def canonical_stream?
     shape.expression.is_a?(StreamTypeExpression)
+  end
+
+  # True when this value is a canonical stream, possibly behind the one legal
+  # outer SELECT wrapper (`![~]T`). Optional-before-stream is intentionally
+  # rejected by the parser, so no optional recursion belongs here.
+  sig { returns(T::Boolean) }
+  def canonical_stream_result?
+    return true if canonical_stream?
+    return false unless error_union?
+
+    payload = payload_type
+    payload&.canonical_stream? == true
+  end
+
+  # Preserve all wrappers on the item (`?T`, `!T`, `!?T`) instead of
+  # deriving through tense_type/element_type, which intentionally normalizes
+  # some collection shapes for older stream aliases.
+  sig { returns(T.nilable(Type)) }
+  def canonical_stream_item_type
+    stream = error_union? ? payload_type : self
+    return nil unless stream&.canonical_stream?
+
+    expression = stream.shape.expression
+    return nil unless expression.is_a?(StreamTypeExpression)
+
+    Type.from_child_expression(expression.item)
   end
 
   sig { returns(T::Boolean) }
@@ -4478,6 +4505,11 @@ class Type
       return false unless optional_inner
       return optional_inner.recursive_cleanup_shape?(schema_lookup, seen_set)
     end
+    if error_union?
+      payload = payload_type
+      return false unless payload
+      return payload.recursive_cleanup_shape?(schema_lookup, seen_set)
+    end
     return true if string? || any_rc? || any_sync? || frozen? || link? || collection? || indirect? || future?
 
     if tuple?
@@ -4600,6 +4632,12 @@ class Type
       return false unless inner
 
       return inner.needs_cleanup?(schema_lookup, seen) || inner.string?
+    end
+    if error_union?
+      payload = payload_type
+      return false unless payload
+
+      return payload.needs_cleanup?(schema_lookup, seen) || payload.string?
     end
     return non_string_array_needs_cleanup?(schema_lookup, seen) if non_string_array?
 
@@ -5403,6 +5441,15 @@ class Type
     if promise_list?
       elem_zig = T.must(tense_type.element_type).nested_zig_type(is_param: is_param, is_field: is_field)
       return "std.ArrayListUnmanaged(CheatLib.Promise(#{elem_zig}))"
+    end
+    if canonical_stream?
+      expression = T.cast(shape.expression, StreamTypeExpression)
+      elem_zig = Type.from_child_expression(expression.item)
+        .nested_zig_type(is_param: is_param, is_field: is_field)
+      return "CheatLib.Stream(#{elem_zig})" if expression.cardinality == :FINITE
+      return "CheatLib.InfStream(#{elem_zig})" if expression.cardinality == :INF
+
+      return "CheatLib.BoundedStream(#{elem_zig}, #{expression.cardinality})"
     end
     if bounded_stream?
       elem_zig = T.must(stream_element_type).nested_zig_type(is_param: is_param, is_field: is_field)

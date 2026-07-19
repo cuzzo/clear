@@ -502,6 +502,12 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:cleanup_on_all_paths, :error_path_allocator_identity],
     },
 
+    select_tense_assignment_matrix: {
+      escape_sources: [:stream_next],
+      execution_boundaries: [:stream_pipeline, :future_promise],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :move_suppresses_cleanup],
+    },
+
     # Semantic expression/consumer coverage; managed payloads are observed but
     # ordinary contexts do not claim a capability surface.
     semantic_equivalence_matrix: {},
