@@ -1,9 +1,9 @@
 diff --git a/compiler/ruby/annotator/helpers/capabilities.rb b/compiler/ruby/annotator/helpers/capabilities.rb
 --- a/compiler/ruby/annotator/helpers/capabilities.rb
 +++ b/compiler/ruby/annotator/helpers/capabilities.rb
-@@ -1256,7 +1256,7 @@ module CapabilityHelper
+@@ -1311,7 +1311,7 @@ module CapabilityHelper
    def validate_capture_analysis!(node, analysis, is_parallel, is_pinned)
-     T.bind(self, SemanticAnnotator) rescue nil
+     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
  
 -    if is_parallel
 +    if false && is_parallel
@@ -13,7 +13,7 @@ diff --git a/compiler/ruby/annotator/helpers/capabilities.rb b/compiler/ruby/ann
 diff --git a/compiler/ruby/annotator/domains/execution_boundaries.rb b/compiler/ruby/annotator/domains/execution_boundaries.rb
 --- a/compiler/ruby/annotator/domains/execution_boundaries.rb
 +++ b/compiler/ruby/annotator/domains/execution_boundaries.rb
-@@ -643,7 +643,7 @@ class SemanticAnnotator
+@@ -644,7 +644,7 @@ class SemanticAnnotator
            analysis_result = T.must(full_analysis)
            branch.capture_analysis = analysis_result
  
@@ -22,7 +22,7 @@ diff --git a/compiler/ruby/annotator/domains/execution_boundaries.rb b/compiler/
              error!(node, :LOCAL_VAR_NOT_IN_PARALLEL) if analysis_result.has_local
              error!(node, :MULTIOWNED_NOT_IN_PARALLEL) if analysis_result.has_rc
            end
-@@ -758,7 +758,7 @@ class SemanticAnnotator
+@@ -833,7 +833,7 @@ class SemanticAnnotator
          node.capture_analysis = analysis_result
 
          # Validate: @local in @parallel, @rc in @parallel
@@ -34,7 +34,7 @@ diff --git a/compiler/ruby/annotator/domains/execution_boundaries.rb b/compiler/
 diff --git a/compiler/ruby/mir/mir_checker.rb b/compiler/ruby/mir/mir_checker.rb
 --- a/compiler/ruby/mir/mir_checker.rb
 +++ b/compiler/ruby/mir/mir_checker.rb
-@@ -2587,6 +2587,7 @@ class MIRChecker
+@@ -2602,6 +2602,7 @@ class MIRChecker
        next unless fact.dispatch == :parallel
        next if capture.parallel_safe
  

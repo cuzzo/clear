@@ -1,11 +1,11 @@
 diff --git a/compiler/ruby/semantic/escape_analysis.rb b/compiler/ruby/semantic/escape_analysis.rb
 --- a/compiler/ruby/semantic/escape_analysis.rb
 +++ b/compiler/ruby/semantic/escape_analysis.rb
-@@ -565,6 +565,7 @@
+@@ -400,6 +400,7 @@
  
-   sig { params(expr: NodeValue).returns(T::Boolean) }
-   private_class_method def self.mark_expr_identifiers_heap!(expr)
-+    return false # MUTANT: escape sinks no longer heap-place identifier sources.
-     changed = T.let(false, T::Boolean)
-     stack = T.let([expr], NodeStack)
-     until stack.empty?
+   sig { params(node: AST::ReturnNode, context: EscapeContext).void }
+   private_class_method def self.apply_return_escape_sink!(node, context)
++    return # MUTANT: returned owned values no longer receive escape placement.
+     value = node.value
+     return unless value
+     return unless owning_return_needs_heap_placement?(context.fn, value, context.schema_lookup)

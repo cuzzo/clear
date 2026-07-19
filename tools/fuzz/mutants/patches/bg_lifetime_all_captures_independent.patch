@@ -2,9 +2,9 @@ diff --git a/compiler/ruby/annotator/domains/lifetimes.rb b/compiler/ruby/annota
 index 000000000..000000000 100644
 --- a/compiler/ruby/annotator/domains/lifetimes.rb
 +++ b/compiler/ruby/annotator/domains/lifetimes.rb
-@@ -982,9 +982,7 @@ class SemanticAnnotator
+@@ -1029,9 +1029,7 @@ class SemanticAnnotator
        def bg_lifetime_sources(analysis)
-         T.bind(self, SemanticAnnotator)
+         T.bind(self, Annotator::Phases::TypeAnalysisSession)
  
 -        analysis.capture_symbols.each_value.reject { |info|
 -          info && bg_capture_independent?(info)

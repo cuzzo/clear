@@ -294,8 +294,8 @@ module FuzzMutants
     ),
     Mutant.new(
       name: :escape_via_return_heap_placement,
-      description: 'Disable the identifier heap-placement walker for returned ' \
-                   'owned values. Returning frame-owned cleanup-bearing values ' \
+      description: 'Disable the return escape-placement sink for owned values. ' \
+                   'Returning frame-owned cleanup-bearing values ' \
                    'must still promote or reject before backend emission.',
       invariant: :return_escape_heap_placement,
       patch: File.join(PATCH_DIR, 'escape_identifier_heap_noop.patch'),
