@@ -28,6 +28,22 @@ RSpec.describe "automatic ownership transport" do
     expect(zig).not_to match(/cleanupValue\([^\n]*y/)
   end
 
+  it "materializes a borrowed generic parameter before storing it in an owned struct" do
+    zig = transpile(<<~CLEAR)
+      STRUCT Box<T> { value: T }
+      FN boxValue<T>(value: T) RETURNS Box<T> ->
+        RETURN Box<T>{ value: value };
+      END
+      FN main() RETURNS Void ->
+        box = boxValue("owned");
+        ASSERT box.value == "owned";
+      END
+    CLEAR
+
+    expect(zig).to include("const __copy_src = value")
+    expect(zig).to include("CheatLib.dupeValue(@TypeOf(value), __copy_src, rt.heapAlloc())")
+  end
+
   it "keeps parent cleanup when a local field view is inferred as a borrow" do
     zig = transpile(<<~CLEAR)
       STRUCT Node { value: Int64 }
