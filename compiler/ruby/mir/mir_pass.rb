@@ -18,7 +18,7 @@ require_relative "control_flow"
 require_relative "../semantic/pass_state"
 require_relative "placement"
 require_relative "../semantic/lifecycle_plan"
-require_relative "function_mir_plan"
+require_relative "mir_planning"
 require_relative "program_mir_facts"
 
 class MIRPass
@@ -53,7 +53,6 @@ class MIRPass
     @lifecycle_registry = T.let(lifecycle_registry, T.nilable(Semantic::LifecycleRegistry))
     @body_summaries = T.let(body_summaries, T::Hash[String, Annotator::Phases::FunctionBodySummary])
     @hoist_bindings = T.let(hoist_bindings || {}, HoistBindings)
-    @function_plans = T.let({}, FunctionMIRPlanningResult::PlanMap)
     @escape_placement_facts = T.let(EscapeAnalysis::EscapePlacementFacts.new, EscapeAnalysis::EscapePlacementFacts)
     @program_facts = T.let(ProgramMIRFacts.empty, ProgramMIRFacts)
     @current_transform_fn = T.let(nil, T.nilable(AST::FunctionDef))
@@ -81,14 +80,13 @@ class MIRPass
 
     # Escape analysis writes final SymbolEntry#storage and now also returns the
     # typed placement table explaining which phase forced each heap placement.
-    planning = FunctionMIRPlanner.plan_all!(
+    planning = MIRPlanner.plan_all!(
       fn_nodes: @fn_nodes,
       schema_lookup: @schema_lookup,
       lifecycle_registry: @lifecycle_registry,
       body_summaries: @body_summaries,
       hoist_bindings: @hoist_bindings,
     )
-    @function_plans = planning.plans
     @escape_placement_facts = planning.escape_placements
     pass_state.mark!(:escape_analyzed)
 
@@ -107,7 +105,8 @@ class MIRPass
     # function actually needs an allocator for a heap/frame binding or cleanup.
     # Propagate to callers so runtime threading is decided once from final data.
     @program_facts = ProgramMIRFinalizer.finalize(
-      function_plans: @function_plans,
+      fn_nodes: @fn_nodes,
+      cleanup_plans: planning.cleanup_plans,
       body_summaries: @body_summaries,
       schema_lookup: @schema_lookup,
     )
@@ -117,7 +116,7 @@ class MIRPass
     # Phase 3: insert MIR nodes + stamp AST.
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
-      transform_function!(@function_plans.fetch(stmt.name.to_s))
+      transform_function!(stmt, planning.cleanup_plan_for(stmt.name.to_s), planning.can_fail_functions)
     end
 
     # Synthetic test-body wrappers live in @fn_nodes but never appear
@@ -127,7 +126,7 @@ class MIRPass
     @fn_nodes.each do |name, fn|
       next unless name.is_a?(String) && name.start_with?("__test_body_")
       next unless fn&.body
-      transform_function!(@function_plans.fetch(name))
+      transform_function!(fn, planning.cleanup_plan_for(name), planning.can_fail_functions)
     end
 
     pass_state.mark!(:mir_pass_complete)
@@ -140,8 +139,7 @@ class MIRPass
   # mutable AST/signature model consumed by the current lowerer.
   sig { void }
   def apply_program_facts!
-    @function_plans.each do |name, plan|
-      function = plan.function
+    @fn_nodes.each do |name, function|
       function.needs_rt = @program_facts.functions.fetch(name).needs_runtime
       signature = FunctionSignature.from_function_def(function)
       signature.sync_from_function_def!(function) if signature.is_a?(FunctionSignature)
@@ -149,23 +147,28 @@ class MIRPass
     nil
   end
 
-  sig { params(plan: FunctionMIRPlan).void }
-  def transform_function!(plan)
-    cleanup_facts = plan.cleanup_facts
-    function = plan.function
+  sig do
+    params(
+      function: AST::FunctionDef,
+      cleanup_plan: CleanupClassifier::CleanupClassificationPlan,
+      can_fail_functions: T::Set[String],
+    ).void
+  end
+  def transform_function!(function, cleanup_plan, can_fail_functions)
+    cleanup_facts = cleanup_plan.facts
     CleanupClassifier.stamp_field_pre_cleanups!(
       function.body,
       cleanup_facts,
       schema_lookup: @schema_lookup,
       lifecycle_registry: @lifecycle_registry,
     )
-    return unless plan.cleanup?
+    return if cleanup_plan.empty?
 
     bc_errors = BorrowChecker.check(function, schema_lookup: @schema_lookup)
     raise "[Borrow Error] #{bc_errors.first}" unless bc_errors.empty?
 
     pre_mark_bg_resource_captures!(function, cleanup_facts)
-    dataflow = OwnershipDataflow.analyze(function, can_fail_fns: plan.can_fail_functions, schema_lookup: @schema_lookup)
+    dataflow = OwnershipDataflow.analyze(function, can_fail_fns: can_fail_functions, schema_lookup: @schema_lookup)
     dataflow.cleanup_decisions!(function, cleanup_facts)
     mark_returned_cleanup_bindings!(function, cleanup_facts)
     function.cleanup_bindings = cleanup_facts.bindings

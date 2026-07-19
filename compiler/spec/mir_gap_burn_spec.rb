@@ -1170,31 +1170,23 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(dataflow.send(:stmt_moves_name?, call, "captured")).to eq(true)
   end
 
-  it "builds typed function MIR plans before mutating function bodies" do
+  it "publishes one typed whole-program MIR planning result" do
     main_fn = fn([])
     fallible_fn = fn([])
     fallible_fn.name = "fallible"
     fallible_fn.can_fail = true
     entry = CleanupEntry.build(:uniform, alloc: :heap)
-    plan = FunctionMIRPlan.new(
-      function: main_fn,
-      cleanup_plan: CleanupClassifier::CleanupClassificationPlan.from_bindings("main", "owned" => entry),
-      escape_placements: [],
+    main_cleanup = CleanupClassifier::CleanupClassificationPlan.from_bindings("main", "owned" => entry)
+    empty_cleanup = CleanupClassifier::CleanupClassificationPlan.from_bindings("fallible", {})
+    plan = MIRPlanningResult.new(
+      cleanup_plans: { "main" => main_cleanup, "fallible" => empty_cleanup },
+      escape_placements: EscapeAnalysis::EscapePlacementFacts.new,
       can_fail_functions: Set["fallible"],
     )
 
-    expect(plan.function).to eq(main_fn)
-    expect(plan.cleanup_facts.entry_for("owned")).to eq(entry)
-    expect(plan.cleanup?).to eq(true)
+    expect(plan.cleanup_plan_for("main").facts.entry_for("owned")).to eq(entry)
+    expect(plan.cleanup_plan_for("fallible")).to be_empty
     expect(plan.can_fail_functions).to eq(Set["fallible"])
-
-    empty = FunctionMIRPlan.new(
-      function: fallible_fn,
-      cleanup_plan: CleanupClassifier::CleanupClassificationPlan.from_bindings("fallible", {}),
-      escape_placements: [],
-      can_fail_functions: Set["fallible"],
-    )
-    expect(empty.cleanup?).to eq(false)
   end
 
   it "single-sources MIR result types for hoist cleanup planning" do
@@ -1251,14 +1243,9 @@ RSpec.describe "MIR gap-burn characterization" do
     guarded = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
     guarded.set_lifecycle_plan!(Semantic::LifecyclePlanner.plan(Type.new(:String), ->(_name) { nil }))
     borrow_fn = fn([id("body", type: :String)])
-    borrow_plan = FunctionMIRPlan.new(
-      function: borrow_fn,
-      cleanup_plan: CleanupClassifier::CleanupClassificationPlan.from_bindings(borrow_fn.name, "body" => guarded),
-      escape_placements: [],
-      can_fail_functions: Set.new,
-    )
+    borrow_plan = CleanupClassifier::CleanupClassificationPlan.from_bindings(borrow_fn.name, "body" => guarded)
     allow(BorrowChecker).to receive(:check).and_return(["borrowed move"])
-    expect { pass.send(:transform_function!, borrow_plan) }.to raise_error(/\[Borrow Error\] borrowed move/)
+    expect { pass.send(:transform_function!, borrow_fn, borrow_plan, Set.new) }.to raise_error(/\[Borrow Error\] borrowed move/)
 
     captured_bg = AST::BgBlock.new(tok, [AST::PassStmt.new(tok)], nil, nil, false, false, nil, false)
     captured_bg.capture_analysis = double(captures: { "outer" => true })

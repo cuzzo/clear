@@ -1,6 +1,6 @@
 # Function Compilation Boundaries and Parallelization
 
-Status: core boundary work complete; production concurrency rejected by gate
+Status: soundness subset retained; Ruby parallelization experiment archived
 
 Date: 2026-07-19
 
@@ -9,18 +9,29 @@ incremental reuse, and eventual function-granular concurrency
 
 ## Implementation Result
 
-The implementation landed as independently gated commits:
+The complete boundary experiment is preserved on the local
+`incremental-parallelization-experiment` branch. It proved that stable
+lifecycle identity and single-authority MIR preparation are valuable, but it
+did not make function analysis independently schedulable. The active result
+therefore retains only changes with present compiler consumers:
 
-1. `ae2f07927` documents the ownership post-mortem and boundary design.
-2. `bf38d61ec` removes a brittle generated-name oracle.
-3. `3ab7f6cd7` publishes a portable declared `ProgramInterface`.
-4. `a620291a3` publishes immutable per-function body facts.
-5. `ea64ddddd` publishes portable finalized program facts.
-6. `62f834ea1` keys lifecycle contracts by stable semantic places.
-7. `5854416a1` replaces parallel MIR cleanup maps with one
-   `FunctionMIRPlan` per function.
-8. `2f9162522` makes runtime finalization pure and materialization consume
-   published plans without late lifecycle reconstruction.
+1. immutable local function facts consumed by capability auditing;
+2. caller-visible semantic and MIR compatibility facts consumed by the
+   incremental compiler;
+3. lifecycle contracts keyed by deterministic semantic places instead of Ruby
+   object identity;
+4. complete lifecycle inventory for source, nested, and synthetic bindings;
+5. fail-closed lifecycle consumption during MIR materialization;
+6. one whole-program MIR planning result that owns placement, cleanup,
+   fallibility, and loop-frame ordering; and
+7. an explicit whole-program runtime finalizer with one AST compatibility
+   seam.
+
+The discarded experiment included an unconsumed 236-line `ProgramInterface`
+and a purportedly local `FunctionMIRPlan` that contained a mutable AST node,
+duplicated the global fallibility set into every function, and exposed local
+escape-placement fields that no consumer read. Those were scaffolding, not
+completed phase boundaries, and are not part of the retained architecture.
 
 Every semantic stage passed the full unit suite through `prspec`, all 497
 transpile cases, Sorbet, and the 3,718-cell fuzz matrix. The final matrix was
@@ -44,11 +55,18 @@ The in-process incremental `loadRegisterOps` edit is 1.126s versus 1.131s
 before this work: effectively unchanged (-0.4%). It remained an exact,
 checked isolated-function artifact replacement.
 
-The cold movement is useful but not the reason to retain the refactor. The
+These timings describe the archived experiment and must not be represented as
+the result of the smaller retained subset until it is remeasured. The cold
+movement was useful but is not the reason to retain the refactor. The
 generated MIR/Zig contract is unchanged, and some checker/lowering movement is
 run-to-run or intervening-architecture variance. The durable result is that
 local facts, graph facts, lifecycle identity, and MIR preparation each have a
 named owner and a fail-closed handoff.
+
+A fresh retained-subset run measured 14.027s total versus the 14.128s baseline
+(-0.7%), with annotation at 6.547s and MIR pass at 1.653s. That is effectively
+neutral and confirms the decision: this subset is justified by soundness and
+reduced mutable authority, not by Ruby compilation speed.
 
 ### Analyzer result
 
@@ -68,20 +86,75 @@ The exact baseline/final target was `compiler/ruby/annotator` plus
 | WICC | 263 | 260 | -3 |
 | False simplicity | 1,248 | 1,256 | +8 |
 
-The aggregate is not a blanket win because it counts the new explicit product
-classes. The intended owner is: `MIRPass` fell from 43 methods and 10 state
+These analyzer values likewise describe the archived experiment. They were not
+a blanket win because they counted speculative product classes. The useful
+owner-level result was that `MIRPass` fell from 43 methods and 10 state
 fields to 26 methods and 9 fields; its public surface fell from four methods
 to the required `initialize` and `transform!`; and it disappeared from
 Decomplex's 11-detector/13-method project-prioritization finding.
 
-Espalier moved from 13,063 nodes / 42,976 edges / 4,032 pressure records to
+In the archived experiment, Espalier moved from 13,063 nodes / 42,976 edges / 4,032 pressure records to
 13,228 / 43,351 / 4,052. NilKill moved from 114 files, 766 owners, 4,032
 methods, and 315 fields to 118 / 782 / 4,052 / 321. NilKill's 12 alias
 recommendations and 24 static dead-nil candidates were unchanged. The raw
 increases are the cost of explicit products, not new mutable coupling. Both
 analyzers need a product-boundary/single-authority credit if aggregate scores
 are expected to recognize replacement of duplicate maps, object identity,
-fallback reconstruction, and public temporal protocols.
+fallback reconstruction, and public temporal protocols. The retained subset
+removes the unused products so the aggregate result can be evaluated without
+that confounder.
+
+### Retained-subset analyzer result
+
+The reduced implementation was measured against the same `bab8bc259` baseline
+and the same `compiler/ruby/annotator compiler/ruby/mir` target.
+
+| Decomplex metric | Baseline | Retained | Delta |
+| --- | ---: | ---: | ---: |
+| Cross-detector convergence | 710 | 708 | -2 |
+| Root-cause clusters | 629 | 631 | +2 |
+| Decision pressure | 252 | 257 | +5 |
+| State heatmap | 58 | 57 | -1 |
+| Missing abstractions | 137 | 135 | -2 |
+| Structural similarity | 111 | 110 | -1 |
+| WICC | 263 | 260 | -3 |
+| False simplicity | 1,248 | 1,252 | +4 |
+
+The result is mixed globally but positive on the architecture-specific state,
+duplication, abstraction, and hidden-helper-chain measures. The added decision
+pressure is concentrated in explicit contract capture and runtime-requirement
+classification; it does not recreate mutable coordination in `MIRPass`.
+
+| Espalier metric | Baseline | Retained | Delta |
+| --- | ---: | ---: | ---: |
+| Classes/modules | 399 | 406 | +7 |
+| Functions | 3,993 | 4,003 | +10 |
+| State slots | 301 | 303 | +2 |
+| State reads | 1,264 | 1,244 | -20 |
+| State writes | 483 | 484 | +1 |
+| Delegation edges | 35,245 | 35,365 | +120 |
+
+The important owner delta is unambiguous: `MIRPass` falls from 43 to 26
+methods, 10 to 8 state slots, 4 to 2 public methods, and 13 to 11 fan-out
+owners. Its 288.55 state-owner-pressure finding disappears from the ranked
+list, while its encapsulation score falls from 71.20 to 55.20. The new
+`ProgramMIRFinalizer` and `MIRPlanner` are stateless coordinators with one
+public operation each and do not enter Espalier's pressure rankings.
+
+NilKill moves from 114 files / 766 owners / 4,032 methods / 315 fields to
+117 / 775 / 4,042 / 317. Its 12 alias recommendations and 24 dead-nil
+candidates remain unchanged. These totals correctly count three new explicit
+production units but cannot distinguish an immutable result record from an
+additional mutable subsystem. NilKill is useful here as a nilability/type-state
+regression gate, not as the primary proof of architectural simplification.
+
+The remaining detector gap is narrow and concrete: none of the tools directly
+credits replacing Ruby object identity and late lifecycle reconstruction with
+one deterministic, fail-closed lifecycle authority. Espalier does recognize
+the resulting owner/API contraction; Decomplex recognizes less state and
+hidden helper pressure. A future metric should report duplicated semantic
+authority or fallback policy reconstruction rather than treating every added
+record and delegation edge as equivalent mutable complexity.
 
 ### Concurrency gate result
 
@@ -101,8 +174,10 @@ scheduler.
 
 ## Executive Decision
 
-Do not undertake this as a Ruby Ractor project. Undertake it only as a bounded
-compiler-authority refactor with four combined goals:
+Do not undertake the remaining work as a Ruby Ractor project. The retained
+work is a bounded compiler-authority and soundness refactor. The following
+goals describe a possible future self-hosting project, not completed Ruby
+function isolation:
 
 1. Make one function body an explicit semantic computation.
 2. Separate local ownership/lifecycle preparation from whole-program graph
@@ -111,7 +186,7 @@ compiler-authority refactor with four combined goals:
    the same immutable phase products.
 4. Make function jobs schedulable after those boundaries are correct.
 
-Under that definition, the work is substantially synergistic with real current
+Under that definition, future work would be substantially synergistic with real current
 architectural problems. It is not merely parallelization scaffolding. The
 strongest evidence is the concentration of real bugs found by the semantic
 generator in ownership transfer, allocator convergence, lifecycle planning,
@@ -125,8 +200,10 @@ not be disguised as solved merely because a function-compilation API exists.
 
 The recommendation is therefore:
 
-- proceed through the semantic and MIR boundary refactors if self-hosting,
-  compiler soundness, and broader incremental reuse are still primary goals;
+- retain only semantic and MIR changes that improve compiler soundness or have
+  a current incremental consumer;
+- use the archived design as a reference when self-hosting makes portable
+  function inputs an immediate requirement;
 - do not approve production concurrency until those boundaries independently
   improve the architecture and pass the semantic generator;
 - stop if the implementation becomes a second compiler, serializes the Ruby
@@ -650,7 +727,12 @@ or MIR on its own. Its architectural value comes from being forced to consume
 the exact same products as a clean build. Roughly one quarter to one third of
 the additional production code should live in `compiler/ruby/incremental/`.
 
-## Proposed Architecture
+## Experimental Self-Hosting Reference Architecture (Not Implemented)
+
+The following model records what would be required to make annotation and MIR
+genuinely function-local. It is not a description of the retained Ruby
+compiler. In particular, no production `ProgramInterface` or independently
+schedulable `FunctionMIRPlan` exists after the experiment was reduced.
 
 ### Overview
 
@@ -1029,7 +1111,7 @@ own architectural and incremental merits before concurrency code is merged.
 1. Clean compilation and incremental compilation call the same semantic and
    MIR APIs.
 2. Function analysis cannot mutate another function's local facts.
-3. Published `ProgramInterface`, local summaries, derived facts, lifecycle
+3. Any future declared interface, local summaries, derived facts, lifecycle
    registry, MIR plans, and artifacts are immutable.
 4. Whole-program results are independent of function visitation order.
 5. No semantic cache entry is keyed by Ruby object identity or session ordinal.
@@ -1414,22 +1496,13 @@ Stop or redesign if any of the following occurs:
 
 ## Final Recommendation
 
-The annotation and MIR boundary work is justified as soundness and self-hosting
-architecture, with incremental reuse as a second benefit and concurrency as an
-experiment. It is not justified as a Ractor optimization or solely as a way to
-reduce the already-fast 1.13-second leaf-edit path.
+Merge the retained work only as a compiler soundness and single-authority
+cleanup. Do not claim independent function compilation, Ractor readiness, or a
+material incremental-performance improvement.
 
-The most valuable outcome is not four workers. It is a compiler in which:
-
-- one function's semantic inputs are explicit;
-- local and global facts have single authorities;
-- ownership/lifecycle policy is complete before lowering;
-- clean, incremental, hybrid Ruby/CLEAR, and parallel compilation use the same
-  operations;
-- the semantic generator can permute function order and prove that hidden
-  mutable context no longer affects results.
-
-Proceed through Commits 0-8 under the stated LoC, analyzer, performance, and
-semantic-oracle gates. Decide whether to add the production scheduler only
-after the tools-only concurrency experiment proves that the architecture pays
-for itself independently.
+The archived experiment remains useful when the self-hosted compiler needs a
+real function boundary. At that point, begin with a consumer: make body type
+analysis accept an immutable declared environment and return a closed local
+result. Do not recreate portable products speculatively ahead of that
+consumer. Any future scheduler remains gated on byte-identical output,
+order-independent semantic results, and a measured 20% clean-frontend gain.

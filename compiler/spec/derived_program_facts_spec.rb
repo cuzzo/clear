@@ -26,6 +26,11 @@ RSpec.describe Annotator::Phases::DerivedProgramFacts do
     expect(root.return_type_key).to start_with("Int64|")
     expect(root.effects).to be_frozen
     expect(root.requires).to be_frozen
+    expect(root.to_h.keys).not_to include(
+      "heap_carry_return_variables",
+      "fsm_eligible",
+      "fsm_ineligible_reason",
+    )
     expect(root.fingerprint).to match(/\A[0-9a-f]{64}\z/)
     expect(MessagePack.unpack(MessagePack.pack(facts.to_h))).to eq(facts.to_h)
   end

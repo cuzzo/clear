@@ -11,17 +11,13 @@ require_relative "../annotator/helpers/function_signature"
 require_relative "../annotator/phases/body_analysis"
 require_relative "../compiler/entrypoint"
 require_relative "cleanup_classifier"
-require_relative "function_mir_plan"
+require_relative "mir_planning"
 
 class FunctionMIRFacts < T::Struct
   extend T::Sig
 
   const :name, String
   const :needs_runtime, T::Boolean
-  const :cleanup_binding_count, Integer
-  const :heap_binding_count, Integer
-  const :frame_binding_count, Integer
-
   sig { returns(String) }
   def fingerprint
     Digest::SHA256.hexdigest(JSON.generate([
@@ -59,25 +55,24 @@ class ProgramMIRFinalizer
   extend T::Sig
 
   FnNodes = T.type_alias { T::Hash[String, AST::FunctionDef] }
-  Plans = T.type_alias { T::Hash[String, FunctionMIRPlan] }
+  CleanupPlans = T.type_alias { MIRPlanningResult::CleanupPlans }
   BodySummaries = T.type_alias { T::Hash[String, Annotator::Phases::FunctionBodySummary] }
 
   sig do
     params(
-      function_plans: Plans,
+      fn_nodes: FnNodes,
+      cleanup_plans: CleanupPlans,
       body_summaries: BodySummaries,
       schema_lookup: Type::SchemaLookup,
     ).returns(ProgramMIRFacts)
   end
-  def self.finalize(function_plans:, body_summaries:, schema_lookup:)
-    fn_nodes = function_plans.transform_values(&:function)
-    needs_runtime = local_runtime_requirements(function_plans, schema_lookup)
+  def self.finalize(fn_nodes:, cleanup_plans:, body_summaries:, schema_lookup:)
+    needs_runtime = local_runtime_requirements(fn_nodes, cleanup_plans, schema_lookup)
     propagate_runtime_requirements!(needs_runtime, body_summaries)
 
     functions = T.let({}, ProgramMIRFacts::FunctionMap)
-    fn_nodes.sort.each do |name, function|
-      cleanup = function_plans.fetch(name).cleanup_facts
-      functions[name] = function_facts(name, needs_runtime.fetch(name, false), cleanup)
+    fn_nodes.keys.sort.each do |name|
+      functions[name] = function_facts(name, needs_runtime.fetch(name, false))
     end
     ProgramMIRFacts.new(functions: functions)
   end
@@ -89,18 +84,17 @@ class ProgramMIRFinalizer
 
     sig do
       params(
-        function_plans: Plans,
+        fn_nodes: FnNodes,
+        cleanup_plans: CleanupPlans,
         schema_lookup: Type::SchemaLookup,
       ).returns(T::Hash[String, T::Boolean])
     end
-    def local_runtime_requirements(function_plans, schema_lookup)
+    def local_runtime_requirements(fn_nodes, cleanup_plans, schema_lookup)
       result = T.let({}, T::Hash[String, T::Boolean])
-      fn_nodes = function_plans.transform_values(&:function)
-      function_plans.each do |name, plan|
-        function = plan.function
+      fn_nodes.each do |name, function|
         next unless function.body
 
-        result[name] = function_needs_runtime?(function, plan.cleanup_facts, fn_nodes, schema_lookup)
+        result[name] = function_needs_runtime?(function, cleanup_plans.fetch(name).facts, fn_nodes, schema_lookup)
       end
       result
     end
@@ -321,24 +315,12 @@ class ProgramMIRFinalizer
       params(
         name: String,
         needs_runtime: T::Boolean,
-        cleanup: T.nilable(CleanupClassifier::FrozenCleanupFacts),
       ).returns(FunctionMIRFacts)
     end
-    def function_facts(name, needs_runtime, cleanup)
-      heap = T.let(0, Integer)
-      frame = T.let(0, Integer)
-      count = T.let(0, Integer)
-      cleanup&.each_entry do |_place, entry|
-        count += 1
-        heap += 1 if entry.heap?
-        frame += 1 if entry.frame?
-      end
+    def function_facts(name, needs_runtime)
       FunctionMIRFacts.new(
         name: name,
         needs_runtime: needs_runtime,
-        cleanup_binding_count: count,
-        heap_binding_count: heap,
-        frame_binding_count: frame,
       ).freeze
     end
   end

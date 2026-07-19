@@ -12,7 +12,6 @@ require_relative "body_analysis"
 require_relative "conformance_registration"
 require_relative "declaration_index"
 require_relative "implementation_registration"
-require_relative "program_interface"
 require_relative "derived_program_facts"
 
 module Annotator
@@ -59,9 +58,6 @@ module Annotator
       attr_reader :type_names
       sig { returns(T::Array[String]) }
       attr_reader :function_names
-      sig { returns(ProgramInterface) }
-      attr_reader :program_interface
-
       sig do
         params(
           program: AST::Program,
@@ -70,13 +66,12 @@ module Annotator
           function_registry: Annotator::FunctionRegistry,
           type_names: T::Array[Symbol],
           function_names: T::Array[String],
-          program_interface: T.nilable(ProgramInterface),
           implementation_resolutions: T::Array[ImplementationResolution],
           conformance_resolutions: T::Array[ConformanceResolution],
           protocols: T::Hash[String, AST::ProtocolDef]
         ).void
       end
-      def initialize(program:, declarations:, root_scope:, function_registry:, type_names:, function_names:, program_interface: nil, implementation_resolutions: [], conformance_resolutions: [], protocols: {})
+      def initialize(program:, declarations:, root_scope:, function_registry:, type_names:, function_names:, implementation_resolutions: [], conformance_resolutions: [], protocols: {})
         @program = T.let(program, AST::Program)
         @declarations = T.let(declarations, DeclarationIndex)
         @root_scope = T.let(root_scope, Scope)
@@ -86,14 +81,6 @@ module Annotator
         @protocols = T.let(protocols.dup.freeze, T::Hash[String, AST::ProtocolDef])
         @type_names = T.let(type_names.dup.freeze, T::Array[Symbol])
         @function_names = T.let(function_names.dup.freeze, T::Array[String])
-        @program_interface = T.let(
-          program_interface || ProgramInterface.capture(
-            function_names: function_names,
-            root_scope: root_scope,
-            declarations: declarations
-          ),
-          ProgramInterface
-        )
         freeze
       end
     end

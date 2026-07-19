@@ -29,10 +29,7 @@ module Annotator
       const :stack_tier, T.nilable(String)
       const :requires, T::Hash[String, T::Array[String]]
       const :heap_carry_return, T::Boolean
-      const :heap_carry_return_variables, T::Array[String]
       const :reentrance_kind, T.nilable(String)
-      const :fsm_eligible, T::Boolean
-      const :fsm_ineligible_reason, T.nilable(String)
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
@@ -48,10 +45,7 @@ module Annotator
           "stack_tier" => stack_tier,
           "requires" => requires,
           "heap_carry_return" => heap_carry_return,
-          "heap_carry_return_variables" => heap_carry_return_variables,
           "reentrance_kind" => reentrance_kind,
-          "fsm_eligible" => fsm_eligible,
-          "fsm_ineligible_reason" => fsm_ineligible_reason,
         }
       end
 
@@ -127,10 +121,7 @@ module Annotator
             stack_tier: signature.stack_tier&.to_s,
             requires: requires.freeze,
             heap_carry_return: signature.heap_carry_return == true,
-            heap_carry_return_variables: (signature.heap_carry_return_vars || Set.new).to_a.sort.freeze,
             reentrance_kind: node.reentrance_kind&.to_s,
-            fsm_eligible: node.fsm_eligible == true,
-            fsm_ineligible_reason: node.fsm_ineligible_reason&.to_s,
           ).freeze
         end
       end
