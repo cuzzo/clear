@@ -1,11 +1,103 @@
 # Function Compilation Boundaries and Parallelization
 
-Status: proposed, conditional go
+Status: core boundary work complete; production concurrency rejected by gate
 
 Date: 2026-07-19
 
 Scope: Ruby compiler annotation, semantic finalization, MIR preparation,
 incremental reuse, and eventual function-granular concurrency
+
+## Implementation Result
+
+The implementation landed as independently gated commits:
+
+1. `ae2f07927` documents the ownership post-mortem and boundary design.
+2. `bf38d61ec` removes a brittle generated-name oracle.
+3. `3ab7f6cd7` publishes a portable declared `ProgramInterface`.
+4. `a620291a3` publishes immutable per-function body facts.
+5. `ea64ddddd` publishes portable finalized program facts.
+6. `62f834ea1` keys lifecycle contracts by stable semantic places.
+7. `5854416a1` replaces parallel MIR cleanup maps with one
+   `FunctionMIRPlan` per function.
+8. `2f9162522` makes runtime finalization pure and materialization consume
+   published plans without late lifecycle reconstruction.
+
+Every semantic stage passed the full unit suite through `prspec`, all 497
+transpile cases, Sorbet, and the 3,718-cell fuzz matrix. The final matrix was
+3,718/3,718 with zero failures, leaks, MIR errors, or unexpected passes.
+
+### Measured result
+
+The baseline and final cold profiles used the exact command documented below.
+Final values are medians of three idle runs; the original baseline was the
+fresh run captured before implementation.
+
+| Stage | Baseline | Final median | Delta |
+| --- | ---: | ---: | ---: |
+| Annotation | 6.368s | 6.169s | -3.1% |
+| MIR pass | 1.688s | 1.541s | -8.7% |
+| MIR lowering | 4.010s | 3.810s | -5.0% |
+| MIR checker | 1.258s | 1.024s | -18.6% |
+| Total compiler profile | 14.128s | 13.352s | -5.5% |
+
+The in-process incremental `loadRegisterOps` edit is 1.126s versus 1.131s
+before this work: effectively unchanged (-0.4%). It remained an exact,
+checked isolated-function artifact replacement.
+
+The cold movement is useful but not the reason to retain the refactor. The
+generated MIR/Zig contract is unchanged, and some checker/lowering movement is
+run-to-run or intervening-architecture variance. The durable result is that
+local facts, graph facts, lifecycle identity, and MIR preparation each have a
+named owner and a fail-closed handoff.
+
+### Analyzer result
+
+The exact baseline/final target was `compiler/ruby/annotator` plus
+`compiler/ruby/mir`.
+
+| Decomplex metric | Baseline | Final | Delta |
+| --- | ---: | ---: | ---: |
+| Cross-detector convergence | 710 | 712 | +2 |
+| Root-cause clusters | 629 | 635 | +6 |
+| Decision pressure | 252 | 259 | +7 |
+| State heatmap | 58 | 58 | 0 |
+| Temporal ordering | 17 | 17 | 0 |
+| Missing abstractions | 137 | 136 | -1 |
+| Structural similarity | 111 | 110 | -1 |
+| Implicit control flow | 19 | 19 | 0 |
+| WICC | 263 | 260 | -3 |
+| False simplicity | 1,248 | 1,256 | +8 |
+
+The aggregate is not a blanket win because it counts the new explicit product
+classes. The intended owner is: `MIRPass` fell from 43 methods and 10 state
+fields to 26 methods and 9 fields; its public surface fell from four methods
+to the required `initialize` and `transform!`; and it disappeared from
+Decomplex's 11-detector/13-method project-prioritization finding.
+
+Espalier moved from 13,063 nodes / 42,976 edges / 4,032 pressure records to
+13,228 / 43,351 / 4,052. NilKill moved from 114 files, 766 owners, 4,032
+methods, and 315 fields to 118 / 782 / 4,052 / 321. NilKill's 12 alias
+recommendations and 24 static dead-nil candidates were unchanged. The raw
+increases are the cost of explicit products, not new mutable coupling. Both
+analyzers need a product-boundary/single-authority credit if aggregate scores
+are expected to recognize replacement of duplicate maps, object identity,
+fallback reconstruction, and public temporal protocols.
+
+### Concurrency gate result
+
+Ractor remains infeasible for the reasons below. A minimal fork/process probe
+compiled isolated MiniVM functions using the production incremental compiler:
+
+- `runRegisterBytecode`: 9.835s;
+- `loadPackedRegisterProgram`: 5.022s;
+- parallel wall time: 9.848s.
+
+That is before serial declaration/graph work and deterministic merging. Adding
+the remaining serial work cannot beat the current 13.352s frontend by the
+required 20%; it approximately reaches or exceeds it. The probe also does not
+prove byte-identical whole-program assembly. Commits 9 and 10 are therefore
+intentionally omitted. This is the designed stop condition, not an unfinished
+scheduler.
 
 ## Executive Decision
 
