@@ -1,7 +1,9 @@
 require "spec_helper"
 require "set"
+require "tmpdir"
 
 require_relative "../ruby/compiler/module_importer" unless defined?(ModuleImporter)
+require_relative "../ruby/compiler/compiler_frontend" unless defined?(CompilerFrontend)
 require_relative "../ruby/annotator" unless defined?(SemanticAnnotator)
 
 RSpec.describe "annotator import resolution boundaries" do
@@ -24,14 +26,16 @@ RSpec.describe "annotator import resolution boundaries" do
     )
   end
 
-  def import_scope(source_scope, kind: :local, module_source_dir: Dir.pwd)
+  def import_scope(source_scope, kind: :local, module_source_dir: Dir.pwd, statements: nil)
     source_dir = Dir.pwd
-    statements = []
-    source_scope.visible_entries.each do |name, entry|
-      statements << AST::FunctionDef.new(tok(name), name)
-    end
-    source_scope.visible_types.each do |name, entry|
-      statements << AST::StructDef.new(tok(name.to_s), name.to_s)
+    unless statements
+      statements = []
+      source_scope.visible_entries.each_key do |name|
+        statements << AST::FunctionDef.new(tok(name), name)
+      end
+      source_scope.visible_types.each_key do |name|
+        statements << AST::StructDef.new(tok(name.to_s), name.to_s)
+      end
     end
     mod = ModuleImporter::CompiledModule.new(
       AST::Program.new(tok, statements),
@@ -194,6 +198,58 @@ RSpec.describe "annotator import resolution boundaries" do
 
     expect(struct_schema.fields.fetch("value").type.resolved).to eq(:Int64)
     expect(resource_schema.static_methods.fetch("open").fetch(:alloc)).to eq(:heap)
+  end
+
+  it "imports synthetic field schemas for inline union variants" do
+    pair = Schemas::InlineStructVariant.new(
+      fields: { "car" => Type.new(:Value), "cdr" => Type.new(:Value) }
+    )
+    union = Schemas::UnionSchema.new(
+      variants: { "Nil" => nil, "Pair" => pair },
+      visibility: :pub
+    )
+    source_scope = Scope.new
+    source_scope.declare_type(:Value, union)
+    source_scope.declare_type(
+      :Value_Pair,
+      Schemas::StructSchema.new(
+        fields: pair.fields.transform_values { |type| AST::StructField.new(type: type) }
+      )
+    )
+    union_declaration = AST::UnionDef.new(tok("Value"), "Value", { "Nil" => nil, "Pair" => pair }, :pub)
+
+    imported_scope = import_scope(source_scope, statements: [union_declaration])
+    imported_pair = imported_scope.resolve_type_definition(:Value_Pair)
+
+    expect(imported_pair).to be_a(Schemas::StructSchema)
+    expect(imported_pair.fields.keys).to contain_exactly("car", "cdr")
+    expect(imported_pair.fields.fetch("car").type.resolved).to eq(:Value)
+  end
+
+  it "type-checks fields captured from an imported recursive inline union" do
+    Dir.mktmpdir("clear-import-recursive-union") do |dir|
+      File.write(File.join(dir, "value.clear"), <<~CLEAR)
+        PUB UNION Value {
+          Nil,
+          Pair { car: Value @boxed, cdr: Value @boxed }
+        }
+      CLEAR
+      source = <<~CLEAR
+        REQUIRE "value.clear";
+        FN first(value: Value) RETURNS Value ->
+          PARTIAL MATCH value START
+            Value.Pair AS pair -> RETURN COPY pair.car;,
+            DEFAULT -> RETURN Value.Nil;
+          END
+        END
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+      importer = ModuleImporter.new(base_dir: dir, use_mir: true)
+
+      expect {
+        CompilerFrontend.compile(source, importer: importer, source_dir: dir)
+      }.not_to raise_error
+    end
   end
 
   it "skips non-importable bindings and supports package imports" do

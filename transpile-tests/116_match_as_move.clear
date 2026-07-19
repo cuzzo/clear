@@ -27,7 +27,7 @@ FN makeOuter() RETURNS !Value ->
 END
 
 FN main() RETURNS Void ->
-    result = makeOuter();
+    result = TRY makeOuter();
 
     PARTIAL MATCH result START
         Value.List AS items ->

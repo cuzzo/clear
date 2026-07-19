@@ -15,7 +15,7 @@ FN main() RETURNS Void ->
 
     ASSERT sp.length() == 3, "sharded pool should have 3 items";
 
-    pa = sp.get(id_a);
+    pa:? = sp.get(id_a);
     ASSERT pa != NIL, "get should find id_a";
 
     &sp.remove(id_b);

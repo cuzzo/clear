@@ -130,6 +130,39 @@ RSpec.describe "predicate library — numeric" do
       expect(out).to match(/std\.mem\.endsWith\(u8, /)
     end
 
+    it "emits zero-copy String.deletePrefix with the receiver lifetime" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          prefixed = "@shared";
+          stripped = prefixed.deletePrefix("@");
+          ASSERT stripped == "shared";
+          unchanged = prefixed.deletePrefix("missing");
+          ASSERT unchanged == prefixed;
+          RETURN;
+        END
+      CLEAR
+
+      out = transpile(src)
+      expect(out).to match(/std\.mem\.startsWith\(u8, /)
+      expect(out).to include('["@".len..]')
+    end
+
+    it "types split results as bounds-safe dynamic lists" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          parts = "a@b".split("@");
+          first = parts[0] OR_ELSE "";
+          missing = parts[20] OR_ELSE "fallback";
+          ASSERT first == "a";
+          ASSERT missing == "fallback";
+          RETURN;
+        END
+      CLEAR
+
+      out = transpile(src)
+      expect(out).to include("CheatLib.getAtOpt")
+    end
+
     it "compiles xs.first() / xs.last() on Int64[]" do
       src = <<~CLEAR
         FN main() RETURNS Void ->

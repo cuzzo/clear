@@ -105,7 +105,8 @@ RSpec.describe "the intrinsic generic Map protocol" do
         map[key] = COPY value;
       END
     CLEAR
-    expect(zig).to include("CheatLib.dupeValue(CheatLib.MapFacts(M).Value")
+    expect(zig).to include("CheatLib.dupeValue(@TypeOf(__copy_src)")
+    expect(zig).not_to include("CheatLib.dupeValue(CheatLib.MapFacts(M).Value")
     expect(zig).to include("CheatLib.mapProtocolPut(map")
     expect(zig).to match(/__(?:tmp|hoist)_1_moved = true/)
   end

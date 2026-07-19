@@ -3,6 +3,7 @@ require "sorbet-runtime"
 require "set"
 
 # ruby-to-clear: pub
+# ruby-to-clear: value
 class ZigType
   extend T::Sig
 

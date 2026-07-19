@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
     MUTABLE items: []Val = List[];
     &items.append(Val{ Str: "hello" });
     &items.append(Val{ Str: "world" });
-    result = copySlice(items);
+    result = TRY copySlice(items);
     PARTIAL MATCH result START
         Val.Str AS s -> ASSERT s == "hello", "deep copy preserves string";,
         DEFAULT -> ASSERT FALSE, "should be Str";

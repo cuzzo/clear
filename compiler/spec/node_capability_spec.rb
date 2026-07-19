@@ -46,6 +46,21 @@ RSpec.describe "@node capability" do
     expect(append.args.first.coerced_type_info&.node_reference?).to be(true)
   end
 
+  it "copies node handles between node-typed fields without copying their payloads" do
+    source = <<~CLEAR
+      STRUCT Node { peer: ?Node@node, id: Int64 }
+      FN main() RETURNS Void ->
+        MUTABLE first: Node@node = Node{ id: 1 };
+        MUTABLE second: Node@node = Node{ id: 2 };
+        first.peer = second;
+        ASSERT first.peer?.id == 2;
+      END
+    CLEAR
+
+    expect { ZigTranspiler.new(source_dir: Dir.pwd).transpile(source, source_dir: Dir.pwd) }
+      .not_to raise_error
+  end
+
   it "lowers object-style code through the hidden NodeStore" do
     zig = ZigTranspiler.new(source_dir: Dir.pwd).transpile(SOURCE, source_dir: Dir.pwd)
 

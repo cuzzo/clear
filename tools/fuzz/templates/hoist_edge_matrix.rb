@@ -63,7 +63,7 @@ end
 def hem_expr(shape)
   case shape
   when :string_concat then 'COPY "a" $+ COPY "b"'
-  when :list_call then 'mkList() OR_ELSE RAISE'
+  when :list_call then '(mkList() OR_ELSE RAISE)'
   when :struct_literal then 'Box{ label: COPY "a" $+ COPY "b" }'
   when :union_literal then 'Slot{ Text: COPY "a" $+ COPY "b" }'
   end
@@ -72,7 +72,7 @@ end
 def hem_fallback(shape)
   case shape
   when :string_concat then 'COPY "f" $+ COPY "b"'
-  when :list_call then 'mkList() OR_ELSE RAISE'
+  when :list_call then '(mkList() OR_ELSE RAISE)'
   when :struct_literal then 'Box{ label: COPY "f" $+ COPY "b" }'
   when :union_literal then 'Slot{ Text: COPY "f" $+ COPY "b" }'
   end

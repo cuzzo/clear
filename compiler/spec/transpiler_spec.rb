@@ -34,6 +34,25 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "symbol intrinsic" do
+    it "treats interning failure as an allocation fault, not a source error union" do
+      zig = transpile(<<~CLEAR)
+        FN intern(text: String) RETURNS String@symbol ->
+          RETURN symbol(text);
+        END
+
+        FN main() RETURNS Void ->
+          value = intern("name");
+          print(value);
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("try rt.internSymbol(text)")
+      expect(zig).to include("fn intern(")
+    end
+  end
+
   describe "fallible intrinsic spelling" do
     it "exposes line input without the retired bang suffix" do
       zig = transpile(<<~CLEAR)
@@ -51,6 +70,35 @@ RSpec.describe ZigTranspiler do
   end
 
   describe "collection ownership regressions" do
+    it "preserves owned allocation through an optional unwrap reassignment" do
+      src = <<~CLEAR
+        FN parse(lines: []String, pos: Int64) RETURNS ![]String ->
+          MUTABLE header: []String = [];
+          header = UNWRAP (UNWRAP lines[pos]).split(" ");
+          RETURN header;
+        END
+      CLEAR
+
+      expect { transpile(src) }.not_to raise_error
+    end
+
+    it "copies a named frame owner into a heap destination before reassignment" do
+      src = <<~CLEAR
+        FN select(data: String) RETURNS !String ->
+          MUTABLE result = "";
+          MUTABLE pos = 0;
+          WHILE pos < 1 DO
+            value = data.substr(pos, 1);
+            result = value;
+            pos += 1;
+          END
+          RETURN result;
+        END
+      CLEAR
+
+      expect { transpile(src) }.not_to raise_error
+    end
+
     it "contextually types an empty hash literal from its declared return type" do
       zig = transpile(<<~CLEAR)
         FN make() RETURNS !HashMap<Int64> ->
@@ -537,8 +585,9 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("try ctx.__shard_map.*.putDirect(ctx.shard")
-      expect(zig).to include(%(putDirect(ctx.shard, __rt.heapAlloc(), __sh1_key, "value")))
-      expect(zig).not_to match(/dupe\(u8, (?:@as\(\[\]const u8, )?"value"/)
+      expect(zig).to match(/dupe\(u8, (?:@as\(\[\]const u8, )?"value"/)
+      expect(zig).to include("putDirect(ctx.shard, __rt.heapAlloc(), __sh1_key, __tmp_")
+      expect(zig).to match(/__tmp_\d+_moved = true;/)
     end
 
     it "keeps borrowed SHARD string map reads borrowed through OR_ELSE fallback" do
@@ -1191,9 +1240,9 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         UNION Value { Nil, Str: String }
         FN makeStr(s: String) RETURNS !Value -> RETURN Value{ Str: COPY s }; END
-        FN main() RETURNS Void ->
-            MUTABLE result = TRY makeStr("hello");
-            result = makeStr("world");
+        FN main() RETURNS !Void ->
+            MUTABLE result: Value = TRY makeStr("hello");
+            result = TRY makeStr("world");
             RETURN;
         END
       CLEAR
@@ -1280,7 +1329,7 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
 
-      expect(zig).to include("pub fn dupe(self: @This(), alloc: std.mem.Allocator) !@This()")
+      expect(zig).to include("pub fn __clear_clone(self: @This(), alloc: std.mem.Allocator) !@This()")
       expect(zig).to include("try CheatLib.dupeValue(@TypeOf(self.errMsg), self.errMsg, alloc)")
       expect(zig).to include("errdefer CheatLib.cleanup(@TypeOf(__dupe_errMsg), alloc, &__dupe_errMsg)")
       expect(zig).to include("result.errKind = __dupe_errKind")
@@ -1484,7 +1533,8 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       # COPY already dupes - should not double-dupe
-      lines = zig.scan(/dupeValue\(/).length
+      main_body = zig[/fn clearMain\(rt: \*Runtime\).*?(?=\/\/ -{20,})/m]
+      lines = T.must(main_body).scan(/dupeValue\(/).length
       expect(lines).to eq(1)
     end
 
@@ -2144,9 +2194,12 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # Post-collapse: @soa routes through CheatLib.cleanup ("struct with
-      # deinit" comptime arm dispatches to ptr.deinit(alloc) internally).
-      expect(zig).to include("CheatLib.cleanup(@TypeOf(soa), rt.frameAlloc(), &soa)")
+      # Primitive SOA storage is frame-owned. Restoring the arena mark releases
+      # the backing allocation in one operation; an explicit deinit would be
+      # redundant and cannot release any element-owned state here.
+      expect(zig).to include("const frame_mark = rt.saveFrameMark()")
+      expect(zig).to include("defer rt.restoreFrameMark(frame_mark)")
+      expect(zig).not_to include("CheatLib.cleanup(@TypeOf(soa)")
     end
   end
 

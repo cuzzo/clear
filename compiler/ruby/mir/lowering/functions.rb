@@ -1382,7 +1382,13 @@ module MIRLoweringFunctions
         with_expected_type(facts.callee_param_type) { lower(facts.ast_arg) }
       end
     end
-    arg = hoist_alloc(raw_arg, facts.ast_arg, err_cleanup: facts.takes, mutable: facts.copy_to_owning)
+    arg = hoist_alloc(
+      raw_arg,
+      facts.ast_arg,
+      err_cleanup: facts.takes,
+      mutable: facts.copy_to_owning,
+      ownership_materialization_alloc: facts.takes ? facts.arg_alloc : nil,
+    )
     boundary_arg = cross_boundary_arg(
       arg,
       facts.ast_arg,
@@ -1530,7 +1536,7 @@ module MIRLoweringFunctions
     # Resolve rt/fail from fn_sigs
     needs_rt = callee_needs_rt?(node.name)
     can_fail = callee_can_fail?(node.name)
-    can_fail = false if node.respond_to?(:retain_error_channel) && node.retain_error_channel
+    can_fail = false if node.respond_to?(:retain_error_channel) && T.unsafe(node).retain_error_channel
 
     # Generic type args
     type_args = if node.respond_to?(:generic_type_args) && node.generic_type_args&.any?
@@ -1608,7 +1614,7 @@ module MIRLoweringFunctions
     mod_prefix = mod_alias ? "#{mod_alias.gsub('.', '_')}." : ""
     needs_rt = callee_needs_rt?(node.name)
     can_fail = callee_can_fail?(node.name)
-    can_fail = false if node.respond_to?(:retain_error_channel) && node.retain_error_channel
+    can_fail = false if node.respond_to?(:retain_error_channel) && T.unsafe(node).retain_error_channel
 
     type_args = if node.respond_to?(:generic_type_args) && node.generic_type_args&.any?
       node.generic_type_args.map { |t| MIR::Ident.new(generic_type_arg_zig(t)) }
@@ -1973,14 +1979,20 @@ module MIRLoweringFunctions
         # *const T auto-derefs for method calls in Zig — no _root deref needed
       end
       lowered_args = node.args.each_with_index.map do |a, ai|
-        takes = ownership_facts.takes?(ai + 1)
-        takes && pre_resolved_alloc ? with_decl_alloc(pre_resolved_alloc) { lower(a) } : lower(a)
+        fact = stdlib_facts.args[ai + 1]
+        with_sink_type(fact&.sink_type) do
+          takes = ownership_facts.takes?(ai + 1)
+          takes && pre_resolved_alloc ? with_decl_alloc(pre_resolved_alloc) { lower(a) } : lower(a)
+        end
       end
       [obj_mir] + lowered_args
     else
       node.args.each_with_index.map do |a, ai|
-        takes = ownership_facts.takes?(ai)
-        takes && pre_resolved_alloc ? with_decl_alloc(pre_resolved_alloc) { lower(a) } : lower(a)
+        fact = stdlib_facts.args[ai]
+        with_sink_type(fact&.sink_type) do
+          takes = ownership_facts.takes?(ai)
+          takes && pre_resolved_alloc ? with_decl_alloc(pre_resolved_alloc) { lower(a) } : lower(a)
+        end
       end
     end
 
@@ -2122,7 +2134,12 @@ module MIRLoweringFunctions
     end
 
     materialized_args = materialized_args.each_with_index.map do |arg_mir, index|
-      hoist_alloc(arg_mir, stdlib_facts.ast_arg(index), err_cleanup: ownership_facts.takes?(index))
+      hoist_alloc(
+        arg_mir,
+        stdlib_facts.ast_arg(index),
+        err_cleanup: ownership_facts.takes?(index),
+        ownership_materialization_alloc: ownership_facts.takes?(index) ? sink_alloc : nil,
+      )
     end if stdlib_facts.args.any?
 
     consumed_names = ownership_facts.takes_any? ? [] : ownership_facts.consumed_names.dup
@@ -2136,6 +2153,7 @@ module MIRLoweringFunctions
           stdlib_facts.ast_arg(index),
           "stdlib argument #{index}",
           sink_alloc,
+          sink_type: stdlib_facts.args[index]&.sink_type,
         )
         consumed_operands.concat(operands)
         operands.each do |operand|
@@ -2238,7 +2256,13 @@ module MIRLoweringFunctions
     mod_alias = nil if source&.abi == :c
     mod_prefix = mod_alias ? "#{mod_alias.gsub('.', '_')}." : ""
     callee_name = source&.symbol || node.name
-    MIR::Call.new("#{mod_prefix}#{callee_name}", args, false, false, callable_contract_for(sig, node.args))
+    MIR::Call.new(
+      "#{mod_prefix}#{callee_name}",
+      args,
+      false,
+      call_owned_return?(node),
+      callable_contract_for(sig, node.args),
+    )
   end
 
   sig { params(node: AST::MethodCall).returns(MIR::MethodCall) }

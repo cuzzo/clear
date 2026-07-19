@@ -1487,6 +1487,9 @@ module FunctionAnalysis
   sig { params(node: AST::Node).returns(T::Boolean) }
   def return_is_borrow?(node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    if node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
+      return call_returns_borrowed_view?(node)
+    end
     if node.is_a?(AST::Identifier)
       return false unless ownership_graph[node.name]&.kind == :borrowed
       # Parameters (reg=nil) and MATCH bindings (reg=nil) are safe to return —

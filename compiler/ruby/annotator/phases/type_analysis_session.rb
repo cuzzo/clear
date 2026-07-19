@@ -132,6 +132,7 @@ class Annotator::Phases::TypeAnalysisSession
     prop :struct_literal_call_argument_depth, Integer, default: 0
     prop :annotation_ancestors, T::Array[AST::Node], factory: -> { [] }
     prop :comptime_type_param_refinements, T::Hash[Symbol, Type], factory: -> { {} }
+    prop :value_type_refinements, T::Hash[Integer, Type], factory: -> { {} }
     prop :branch_terminated, T::Boolean, default: false
   end
 
@@ -232,6 +233,11 @@ class Annotator::Phases::TypeAnalysisSession
     @audit_inputs.deferred_with_validations
   end
 
+  sig { returns(T::Array[Annotator::Phases::DeferredRecoveryValidation]) }
+  def deferred_recovery_validations
+    @audit_inputs.deferred_recovery_validations
+  end
+
   sig { returns(T.nilable(FunctionContext)) }
   def current_fn_ctx
     @traversal_state.function_contexts.last
@@ -290,6 +296,23 @@ class Annotator::Phases::TypeAnalysisSession
     @traversal_state.comptime_type_param_refinements = T.unsafe(previous)
   end
   private :with_comptime_type_param_refinement
+
+  sig do
+    type_parameters(:Result)
+      .params(
+        refinements: T::Hash[Integer, Type],
+        blk: T.proc.returns(T.type_parameter(:Result)),
+      )
+      .returns(T.type_parameter(:Result))
+  end
+  def with_value_type_refinements(refinements, &blk)
+    previous = @traversal_state.value_type_refinements
+    @traversal_state.value_type_refinements = previous.merge(refinements)
+    blk.call
+  ensure
+    @traversal_state.value_type_refinements = T.unsafe(previous)
+  end
+  private :with_value_type_refinements
 
   sig { params(ctx: FunctionContext).returns(FunctionContext) }
   def push_function_context!(ctx)
@@ -627,12 +650,17 @@ class Annotator::Phases::TypeAnalysisSession
     ownership = analyze_resolution!(resolution)
     inventory = Annotator::Phases::AnnotationTypeInventory.scan(resolution.program)
     inventory.verify_resolved!
+    lifecycle_registry = Semantic::LifecycleRegistry.build(
+      resolution.program,
+      ->(name) { lookup_type_schema(name) },
+    )
     typed_program = Annotator::Phases::TypedProgramFacts.new(
       resolution: resolution,
       body_summaries: resolution.function_registry.body_summaries,
       typed_node_count: inventory.typed_node_count,
       unresolved_node_count: inventory.unresolved_node_count,
-      ownership_graph: ownership
+      ownership_graph: ownership,
+      lifecycle_registry: lifecycle_registry,
     )
     Annotator::Phases::TypeAnalysisHandoff.new(
       typed_program: typed_program,
@@ -1073,6 +1101,7 @@ private
   private :current_predicate_context
   private :current_stream_yield_frame
   private :deferred_with_validations
+  private :deferred_recovery_validations
   private :function_node_for
   private :function_node_map
   private :handle_prefixed_int_overflow!

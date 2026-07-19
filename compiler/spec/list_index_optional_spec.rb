@@ -117,6 +117,22 @@ RSpec.describe "optional @list indexing" do
     expect(zig).to include("CheatLib.getOptionalPtr(&parent.child)")
   end
 
+  it "copies an owned conditional replacement without creating a second owner for its source" do
+    source = <<~CLEAR
+      STRUCT Item { name: String }
+      FN main() RETURNS Void ->
+        MUTABLE items: []Item = [];
+        &items.append(Item{ name: COPY "old" });
+        items[0]?.name = COPY "new";
+        ASSERT (items[0]?.name OR_ELSE "") == "new";
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new(source_dir: Dir.pwd).transpile(source, source_dir: Dir.pwd)
+    expect(zig).to match(/rt\.frameAlloc\(\)\.dupe\(u8, __hoist_\d+\)/)
+    expect(zig).not_to match(/const __owned_val_\d+ = __hoist_\d+/)
+  end
+
   it "keeps the single safe boundary through an intrinsic method call" do
     source = <<~CLEAR
       STRUCT Item { name: String }

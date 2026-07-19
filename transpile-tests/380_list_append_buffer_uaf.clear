@@ -57,11 +57,11 @@ END
 FN main() RETURNS !Void ->
     MUTABLE items: []TraceItem = List[];
     record(&items, 1_i64);
-    junk1 = burnFrame(42_i64);
-    junk2 = burnFrame(43_i64);
-    junk3 = burnFrame(44_i64);
+    junk1 = TRY burnFrame(42_i64);
+    junk2 = TRY burnFrame(43_i64);
+    junk3 = TRY burnFrame(44_i64);
     record(&items, 2_i64);
-    junk4 = burnFrame(45_i64);
+    junk4 = TRY burnFrame(45_i64);
     record(&items, 3_i64);
 
     ASSERT items.length() == 3_i64, "len";

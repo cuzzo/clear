@@ -445,6 +445,10 @@ class ClearParser
   def brace_literal_is_hash?
     return false unless match?(:CHAR, '{')
     return true if match_at?(1, :CHAR, '}')
+    first = peek_at(1)
+    if first&.type == :KEYWORD && VALUE_BLOCK_STATEMENT_KEYWORDS.include?(T.must(first).value)
+      return false
+    end
 
     depth = 0
     offset = 0
@@ -543,15 +547,10 @@ class ClearParser
     var_name = consume(:VAR_ID).text!
     consume(:KEYWORD, 'IN')
 
-    # Ranges need parens for precedence; collections don't.
-    expr = if match?(:CHAR, '(')
-      consume(:CHAR, '(')
-      parsed = parse_expression
-      consume(:CHAR, ')')
-      parsed
-    else
-      parse_expression
-    end
+    # Grouping is an ordinary primary expression. Let the shared expression
+    # parser consume it so suffixes such as `(source).values()` remain part of
+    # the iterable instead of being mistaken for tokens after the FOR source.
+    expr = parse_expression
 
     # Shorthand: FOR var IN range -> single_statement;
     if match?(:ARROW, '->')

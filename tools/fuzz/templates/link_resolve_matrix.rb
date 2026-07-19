@@ -25,14 +25,14 @@ FuzzGenerator.register(:link_resolve_matrix, cells: LR_CELLS) do |p|
           RETURN LINK strong;
       END
     CLEAR
-    "weak = makeDead_#{suffix}(); resolved = RESOLVE weak; value = resolved?.value OR_ELSE -1_i64; ASSERT value == -1_i64;"
+    "weak = TRY makeDead_#{suffix}(); resolved:? = RESOLVE weak; value = resolved?.value OR_ELSE -1_i64; ASSERT value == -1_i64;"
   end
 
   <<~CLEAR
     STRUCT Node { value: Int64, text: String }
     STRUCT Edge { target: Node@link }
     #{helpers}
-    FN main() RETURNS Void ->
+    FN main() RETURNS !Void ->
         #{body}
         RETURN;
     END

@@ -22,7 +22,7 @@ FN main() RETURNS Void ->
     b = Counter{ value: 0 } @shared:locked;
 
     # Fiber 1: WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y
-    t1 = BG {
+    t1:~ = BG {
         WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
             napFor(50);
             x.value = x.value + 1;
@@ -31,7 +31,7 @@ FN main() RETURNS Void ->
     };
 
     # Fiber 2: reversed source order: WITH EXCLUSIVE b AS y, EXCLUSIVE a AS x
-    t2 = BG {
+    t2:~ = BG {
         WITH EXCLUSIVE b AS y, EXCLUSIVE a AS x {
             napFor(50);
             x.value = x.value + 1;

@@ -49,7 +49,7 @@ FN main() RETURNS Void ->
 
   # Test 3: Safe divide wrapping
   print("Test 3: safe_divide(10, 0)");
-  r3 = safe_divide(10, 0);
+  r3 = TRY safe_divide(10, 0);
   print(r3);
   ASSERT r3 == 0, "Expected 0 from safe_divide";
 

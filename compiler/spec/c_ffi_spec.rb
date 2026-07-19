@@ -49,6 +49,21 @@ RSpec.describe "C ABI integration" do
     expect(zig).not_to include('@import("fixture")')
   end
 
+  it "generates semantic cleanup for optional C resources without freeing symbol fields" do
+    zig = transpile(<<~CLEAR)
+      EXTERN STRUCT Handle {} CLOSE "release_handle" FROM "fixture" ABI C;
+      EXTERN FN release_handle(handle: Handle) RETURNS TargetInt FROM "fixture" ABI C;
+      STRUCT Owner { marker: String@symbol, name: String, handle: ?Handle }
+      FN inspect(owner: Owner) RETURNS Void -> print(owner.marker); END
+    CLEAR
+
+    owner = zig[/const Owner = struct \{.*?\n\};/m]
+    expect(owner).to include("pub fn __clear_drop")
+    expect(owner).to include("release_handle(__close_handle.*)")
+    expect(owner).to include("CheatLib.cleanup([]const u8, alloc, &self.name)")
+    expect(owner).not_to include("&self.marker")
+  end
+
   it "preserves borrowed C string representation through nested calls" do
     zig = transpile(<<~CLEAR)
       EXTERN STRUCT Handle {} FROM "fixture" ABI C;

@@ -1018,12 +1018,18 @@ class ClearParser
     end
   end
 
-  # Parses `EACH { stmts... }` — side-effect block over a collection.
-  # `_` is the implicit item binding inside the body.
+  # Parses `EACH { stmts... }` or `EACH callback` — side-effect iteration
+  # over a collection. `_` is the implicit item binding inside the body.
   sig { returns(AST::EachOp) }
   def parse_each_op
     token = consume(:KEYWORD, 'EACH')
-    body = parse_brace_block
+    body = if match?(:CHAR, '{')
+      parse_brace_block
+    else
+      callback = parse_expression(1)
+      [AST::FuncCall.new(token, callback.respond_to?(:name) ? T.unsafe(callback).name : callback.to_s,
+        [AST::Identifier.new(token, "_")])]
+    end
     AST::EachOp.new(token, body)
   end
 

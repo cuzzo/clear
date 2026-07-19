@@ -64,6 +64,7 @@ module Annotator
 
         validate_c_extern_signature!(node) if node.extern_source.abi == :c
         signature = SignatureRegistry.extern_function_signature(node)
+        validate_extern_return_lifetime!(node, signature)
         if node.owner_type
           type_schema = current_scope.resolve_type_definition(node.owner_type.to_sym)
           if Schemas.struct?(type_schema) || Schemas.resource?(type_schema)
@@ -76,6 +77,22 @@ module Annotator
         end
         stamp_type!(node, :Void)
       end
+
+      sig { params(node: AST::ExternFnDecl, signature: FunctionSignature).void }
+      def validate_extern_return_lifetime!(node, signature)
+        T.bind(self, ResolutionSession)
+
+        parameter_names = node.params.map(&:name).to_set
+        signature.return_lifetime.each do |source|
+          next if source == :wildcard
+
+          root = source.to_s.split(".").first
+          next unless root
+
+          error!(node, :LIFETIME_ROOT_NOT_PARAM, name: root) unless parameter_names.include?(root)
+        end
+      end
+      private :validate_extern_return_lifetime!
 
       sig { params(node: AST::ExternFnDecl).void }
       def validate_c_extern_signature!(node)

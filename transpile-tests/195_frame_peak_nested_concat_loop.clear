@@ -9,7 +9,7 @@ END
 FN main() RETURNS Void ->
     MUTABLE total: Int64 = 0;
     FOR i IN (1_i64 ..= 500) DO
-        line = formatLine(i);
+        line = TRY formatLine(i);
         total += line.length();
     END
     peak = framePeakBytes();

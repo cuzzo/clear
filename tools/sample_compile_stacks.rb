@@ -167,6 +167,7 @@ begin
   ast = timed_phase("parse", sampler, timings) { ClearParser.new(tokens, source, budget: budget).parse }
   annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: false, source_code: source)
   timed_phase("annotate", sampler, timings) { annotator.annotate!(ast) }
+  lifecycle_registry = annotator.annotation_products.typed_program.lifecycle_registry
   timed_phase("pipeline_rewrite", sampler, timings) do
     PipelineRewriter.new(annotator).rewrite!(ast)
     MIRPassState.for!(ast).mark!(:pipeline_rewritten)
@@ -185,6 +186,7 @@ begin
     MIRPass.new(
       fn_nodes: fn_nodes,
       schema_lookup: schema_lookup,
+      lifecycle_registry: lifecycle_registry,
       body_summaries: annotator.semantic_index.body_summaries,
       hoist_bindings: hoist_result.bindings_by_function
     ).transform!(ast)
@@ -216,13 +218,25 @@ begin
   end
   moved_guard_info = {}
   fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }
-  frontend = CompilerFrontend::Result.new(ast, annotator, fn_nodes, fn_sigs, struct_schemas, enum_schemas, union_schemas, moved_guard_info)
+  frontend = CompilerFrontend::Result.new(
+    ast: ast,
+    annotator: annotator,
+    lifecycle_registry: lifecycle_registry,
+    fn_nodes: fn_nodes,
+    fn_sigs: fn_sigs,
+    struct_schemas: struct_schemas,
+    enum_schemas: enum_schemas,
+    union_schemas: union_schemas,
+    moved_guard_info: moved_guard_info,
+  )
 
   unless options[:mode] == "frontend-only"
     lowering = MIRLowering.new(input: MIRLoweringInput.new(
       struct_schemas: frontend.struct_schemas,
       enum_schemas: frontend.enum_schemas,
       union_schemas: frontend.union_schemas,
+      schema_lookup: schema_lookup,
+      lifecycle_registry: frontend.lifecycle_registry,
       fn_sigs: frontend.fn_sigs,
       moved_guard_info: frontend.moved_guard_info,
       importer: importer,

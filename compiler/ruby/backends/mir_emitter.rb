@@ -55,6 +55,7 @@ class MIREmitter
     @discard_counter = T.let(0, Integer)
     @symbol_literals = T.let({}, T::Hash[String, String])
     @ident_overrides = T.let({}, T::Hash[String, String])
+    @move_guard_overrides = T.let({}, T::Hash[String, String])
     @uses_c_callback = T.let(false, T::Boolean)
   end
 
@@ -84,6 +85,7 @@ class MIREmitter
     when MIR::Set              then emit_set(node)
     when MIR::DestructureSet   then emit_destructure_set(node)
     when MIR::ReassignWithCleanup then emit_reassign_cleanup(node)
+    when MIR::ResourceClose      then emit_resource_close(node)
     when MIR::IfStmt           then emit_if_stmt(node)
     when MIR::IfBindStmt       then emit_if_bind_stmt(node)
     when MIR::WhileStmt        then emit_while(node)
@@ -1161,13 +1163,18 @@ class MIREmitter
     captures = polymorphic_read_captures(node.body || [], [node.alias_name])
     captures.unshift(node.rt.to_s) unless captures.include?(node.rt.to_s)
     overrides = polymorphic_capture_overrides(captures)
-    body_zig = with_ident_overrides(overrides) do
-      with_runtime_name(T.must(overrides[node.rt.to_s])) { emit_body(node.body || []) }
+    guard_captures = polymorphic_move_guard_captures(node.body || [], [node.alias_name])
+    guard_overrides = polymorphic_move_guard_overrides(guard_captures, captures.length)
+    body_zig = with_move_guard_overrides(guard_overrides) do
+      with_ident_overrides(overrides) do
+        with_runtime_name(T.must(overrides[node.rt.to_s])) { emit_body(node.body || []) }
+      end
     end
     cell_zig = T.must(emit(node.cell))
     capture_param = captures.empty? ? "" : ", __captures: anytype"
     capture_suppress = captures.empty? ? "" : "_ = &__captures;"
-    capture_args = captures.empty? ? ".{}" : ".{.{#{captures.join(', ')}}}"
+    all_capture_args = captures + guard_captures.map { |name| "&#{name}_moved" }
+    capture_args = all_capture_args.empty? ? ".{}" : ".{.{#{all_capture_args.join(', ')}}}"
     <<~ZIG.rstrip
       try CheatLib.polymorphicMutate(#{cell_zig}, #{node.rt}, struct {
           fn run(#{node.alias_name}: *#{node.bare_type.zig_type}#{capture_param}) !void {
@@ -1190,19 +1197,27 @@ class MIREmitter
     )
     captures.unshift(node.rt.to_s) unless captures.include?(node.rt.to_s)
     overrides = polymorphic_capture_overrides(captures)
-    body_zig = with_ident_overrides(overrides) do
-      with_runtime_name(T.must(overrides[node.rt.to_s])) do
-        emit_body_flow(node.body || [], :ret_commit)
+    all_bodies = (node.body || []) + (node.guard_fail_body || [])
+    guard_captures = polymorphic_move_guard_captures(all_bodies, [node.alias_name, "__flow"])
+    guard_overrides = polymorphic_move_guard_overrides(guard_captures, captures.length)
+    body_zig = with_move_guard_overrides(guard_overrides) do
+      with_ident_overrides(overrides) do
+        with_runtime_name(T.must(overrides[node.rt.to_s])) do
+          emit_body_flow(node.body || [], :ret_commit)
+        end
       end
     end
     capture_param = captures.empty? ? "" : ", __captures: anytype"
     capture_suppress = captures.empty? ? "" : "_ = &__captures;"
-    capture_args = captures.empty? ? ".{&__poly_flow}" : ".{&__poly_flow, .{#{captures.join(', ')}}}"
+    all_capture_args = captures + guard_captures.map { |name| "&#{name}_moved" }
+    capture_args = all_capture_args.empty? ? ".{&__poly_flow}" : ".{&__poly_flow, .{#{all_capture_args.join(', ')}}}"
     guard_block = ""
     if node.guard_cond
-      fail_zig = with_ident_overrides(overrides) do
-        with_runtime_name(T.must(overrides[node.rt.to_s])) do
-          emit_body_flow(node.guard_fail_body || [], :ret_no_commit)
+      fail_zig = with_move_guard_overrides(guard_overrides) do
+        with_ident_overrides(overrides) do
+          with_runtime_name(T.must(overrides[node.rt.to_s])) do
+            emit_body_flow(node.guard_fail_body || [], :ret_no_commit)
+          end
         end
       end
       unless flow_body_terminates?(node.guard_fail_body || [])
@@ -1259,6 +1274,25 @@ class MIREmitter
     captures.each_with_index.to_h { |name, index| [name, "__captures[#{index}]"] }
   end
 
+  sig { params(body: T::Array[MIR::Node], excluded: T::Array[String]).returns(T::Array[String]) }
+  def polymorphic_move_guard_captures(body, excluded)
+    declared = T.let(Set.new(excluded), T::Set[String])
+    moved = T.let([], T::Array[String])
+    MIR.each_node(body) do |part|
+      declared << part.name.to_s if part.is_a?(MIR::Let)
+      next unless part.is_a?(MIR::MoveMark)
+
+      name = part.name.to_s
+      moved << name unless declared.include?(name) || moved.include?(name)
+    end
+    moved
+  end
+
+  sig { params(captures: T::Array[String], offset: Integer).returns(T::Hash[String, String]) }
+  def polymorphic_move_guard_overrides(captures, offset)
+    captures.each_with_index.to_h { |name, index| [name, "__captures[#{offset + index}].*"] }
+  end
+
   sig do
     type_parameters(:U)
       .params(overrides: T::Hash[String, String], blk: T.proc.returns(T.type_parameter(:U)))
@@ -1270,6 +1304,19 @@ class MIREmitter
     blk.call
   ensure
     @ident_overrides = T.must(previous)
+  end
+
+  sig do
+    type_parameters(:U)
+      .params(overrides: T::Hash[String, String], blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def with_move_guard_overrides(overrides, &blk)
+    previous = T.let(@move_guard_overrides, T::Hash[String, String])
+    @move_guard_overrides = previous.merge(overrides)
+    blk.call
+  ensure
+    @move_guard_overrides = T.must(previous)
   end
 
   sig do
@@ -1856,13 +1903,13 @@ class MIREmitter
   sig { params(node: MIR::UnionTypeDef).returns(String) }
   def emit_union_def(node)
     vis = node.visibility == :pub ? "pub " : ""
-    fields = node.variants.map { |v|
-      "#{v[:name]}: #{v[:zig_type]}"
-    }.join(", ")
+    fields = node.variants.map { |v| "#{v[:name]}: #{v[:zig_type]}," }.join("\n    ")
+    methods = (node.methods || []).map { |method| emit(method) }.join("\n\n    ")
+    parts = [fields, methods].reject(&:empty?).join("\n\n    ")
     if node.name
-      "#{vis}const #{node.name} = union(enum) { #{fields} };"
+      "#{vis}const #{node.name} = union(enum) {\n    #{parts}\n};"
     else
-      "union(enum) { #{fields} }"
+      "union(enum) {\n    #{parts}\n    }"
     end
   end
 
@@ -2020,7 +2067,8 @@ class MIREmitter
         result += " else |_| {\n#{else_body}\n}" if else_body
         result += " else |_| {}" unless else_body
       else
-        result = "if (#{expr}) |#{b[:capture]}| {\n#{suppress}#{then_body}\n}"
+        capture = b[:pointer_capture] ? "*#{b[:capture]}" : b[:capture]
+        result = "if (#{expr}) |#{capture}| {\n#{suppress}#{then_body}\n}"
         result += " else {\n#{else_body}\n}" if else_body
       end
       result
@@ -2212,7 +2260,8 @@ class MIREmitter
     arms = node.arms.map do |arm|
       body = emit_body(arm.body)
       payload = arm.payload
-      capture = payload ? " |#{payload}|" : ""
+      capture_name = arm.pointer_payload ? "*#{payload}" : payload
+      capture = payload ? " |#{capture_name}|" : ""
       suppress = payload ? "_ = &#{payload};\n" : ""
       ".#{arm.variant} =>#{capture} {\n#{suppress}#{body}\n}"
     end
@@ -2561,6 +2610,8 @@ class MIREmitter
     when :resource
       close = render_resource_close_plan(T.must(entry.resource_close_plan), name)
       direct_cleanup_statement(name, close, guarded)
+    when :tuple
+      direct_cleanup_statement(name, render_tuple_cleanup(entry, name, alloc), guarded)
     else
       rc_alloc = entry.rc_alloc
       use_alloc =
@@ -2597,6 +2648,9 @@ class MIREmitter
       close = render_resource_close_plan(T.must(entry.resource_close_plan), name)
       guarded_defer(name, close, g, errdefer:)
 
+    when :tuple
+      guarded_defer(name, render_tuple_cleanup(entry, name, alloc), g, errdefer:)
+
     else
       # The uniform cleanup path. Every other kind dispatches identically
       # through CheatLib.cleanup(@TypeOf(name), alloc, &name) -- the
@@ -2631,7 +2685,8 @@ class MIREmitter
 
   sig { params(node: MIR::MoveMark).returns(String) }
   def emit_move_mark(node)
-    "#{node.name}_moved = true;"
+    guard = @move_guard_overrides.fetch(node.name.to_s, "#{node.name}_moved")
+    "#{guard} = true;"
   end
 
   sig { params(node: MIR::DeepCopy).returns(T.nilable(String)) }
@@ -2646,7 +2701,8 @@ class MIREmitter
       # Borrow-to-owned passthrough: auto-deref single pointers but keep
       # value-shaped sources unchanged. No allocation -- this is the
       # no-op COPY for Copy-type sources. comptime-evaluated branch.
-      "(if (@typeInfo(@TypeOf(#{src})) == .pointer) #{src}.* else #{src})"
+      "(if (comptime @typeInfo(@TypeOf(#{src})) == .pointer and " \
+        "@typeInfo(@TypeOf(#{src})).pointer.size == .one) #{src}.* else #{src})"
     when :full_value
       type_arg = node.copy_shape == :pointer ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(#{src})")
       if node.copy_shape == :slice
@@ -3284,6 +3340,26 @@ class MIREmitter
     else
       raise "unknown resource close call kind: #{action.call_kind.inspect}"
     end
+  end
+
+  sig { params(entry: CleanupEntry, root_name: String, alloc: String).returns(String) }
+  def render_tuple_cleanup(entry, root_name, alloc)
+    statements = entry.tuple_cleanup_fields.map do |field|
+      target = "#{root_name}.@\"#{field.fetch(:index)}\""
+      close_plan = T.cast(field[:close_plan], T.nilable(Schemas::ResourceClosePlan))
+      if close_plan
+        "#{render_resource_close_plan(close_plan, target)};"
+      else
+        "CheatLib.cleanup(@TypeOf(#{target}), #{alloc}, &#{target});"
+      end
+    end
+    "{ #{statements.join(' ')} }"
+  end
+
+  sig { params(node: MIR::ResourceClose).returns(String) }
+  def emit_resource_close(node)
+    target = T.must(emit(node.target))
+    "#{render_resource_close_plan(node.close_plan, target)};"
   end
 
   sig { params(name: String, body: String, guarded: T::Boolean).returns(String) }

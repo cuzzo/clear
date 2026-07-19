@@ -23,7 +23,7 @@ FN makeOuter() RETURNS !Value ->
 END
 
 FN main() RETURNS Void ->
-    result = makeOuter();
+    result = TRY makeOuter();
     # result is Value.List containing two Value.List elements.
     # cleanup(Value) must free: outer []Value slice + each inner []Value slice.
     RETURN;

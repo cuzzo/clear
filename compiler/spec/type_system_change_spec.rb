@@ -28,6 +28,7 @@ RSpec.describe "type-system change contracts" do
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
+      lifecycle_registry: result.lifecycle_registry,
       fn_sigs: result.fn_sigs,
       moved_guard_info: result.moved_guard_info,
       importer: importer,
@@ -847,6 +848,15 @@ RSpec.describe "type-system change contracts" do
       .to raise_error(ParserError, /maximum is 3/)
     expect { parse("value: []@list Int64 = DEFAULT;") }
       .to raise_error(ParserError, /topology in the Inline Pivot layer sigil/)
+  end
+
+  it "applies the capability-site budget to access paths, not sibling generic arguments" do
+    sibling_caps = "Tuple<String@symbol, String@symbol, String@symbol, String@symbol>"
+    expect { parse("value: #{sibling_caps} = DEFAULT;") }.not_to raise_error
+
+    nested_caps = "[]@local {Symbol}@versioned []@shared {Int64}@locked String"
+    expect { parse("value: #{nested_caps} = DEFAULT;") }
+      .to raise_error(ParserError, /maximum is 3/)
   end
 
   it "does not migrate an ambiguous capability attached to a tense wrapper" do

@@ -52,14 +52,14 @@ FN main() RETURNS Void ->
     END
 
     # Look up x in child (direct)
-    xVal = envGet(childId, "x", &pool);
+    xVal = TRY envGet(childId, "x", &pool);
     PARTIAL MATCH xVal START
         Value.Number AS n -> ASSERT n == 5.0, "x=5";,
         DEFAULT -> ASSERT FALSE, "x not found";
     END
 
     # Look up a in child (should follow __p to root)
-    aVal = envGet(childId, "a", &pool);
+    aVal = TRY envGet(childId, "a", &pool);
     PARTIAL MATCH aVal START
         Value.Number AS n -> ASSERT n == 10.0, "a=10 via parent";,
         DEFAULT -> ASSERT FALSE, "a not found via parent";

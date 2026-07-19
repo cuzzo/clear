@@ -211,7 +211,12 @@ module MIRLoweringVariables
 
   sig { params(init: MIR::Node, facts: VarDeclFacts, ast_value: AST::Node).returns(MIR::Node) }
   def ensure_cleanup_binding_owns_string_init(init, facts, ast_value)
-    return init unless facts.has_mir_drop
+    # A binding returned on every path intentionally has no lexical cleanup,
+    # but its binding lifecycle still owns storage. It must not begin life as
+    # a rodata slice: an intervening reassignment cleans the old slot and the
+    # eventual caller cleans the transferred result.
+    owns_storage = facts.has_mir_drop || facts.binding_entry.lifecycle_plan&.needs_drop?
+    return init unless owns_storage
     return init unless facts.ft.string?
 
     effect = MIR::OwnershipEffect.of(init)
@@ -246,7 +251,11 @@ module MIRLoweringVariables
     inferred_borrow = transport_plan.is_a?(OwnershipTransportPlan) && transport_plan.action == :borrow
     binding_entry = CleanupEntry::NONE if inferred_borrow
     empty_optional_init = optional_nil_initializer?(ft, node.value)
-    binding_entry = CleanupEntry::NONE if empty_optional_init
+    # CleanupClassifier already distinguishes a permanently-empty optional
+    # from a mutable optional slot that can acquire an owned payload later.
+    # Discarding its entry here loses the slot's AllocMark/guard while later
+    # reassignments still transfer ownership into it, producing an owner with
+    # no verifiable lifecycle.
     has_mir_drop = binding_entry.needs_cleanup? && !binding_entry.match_as?
     heap_return_var = !empty_optional_init && current_function_heap_carry_return_var?(node.name.to_s)
     heap_return_binding_allocates = (heap_return_var && escaping_value_alloc(ft) == :heap) == true
@@ -493,7 +502,7 @@ module MIRLoweringVariables
   def mutated_owned_var_decl?(facts, init)
     T.bind(self, MIRLowering) rescue nil
     facts.binding_entry.present? && !facts.binding_entry.needs_cleanup? && facts.actually_mutated &&
-      ownership_bearing_type?(facts.ft) &&
+      lifecycle_registry.fetch(facts.ft).needs_drop? &&
       (!facts.ft.string? || mir_allocates?(init) || owned_return_call_init?(init))
   end
 
@@ -520,7 +529,7 @@ module MIRLoweringVariables
 
     mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
     alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, facts.ft, binding_entry)
-    return MIR::MaterializationPacket.owned(alloc_mark, let_node) unless ownership_bearing_type?(facts.ft)
+    return MIR::MaterializationPacket.owned(alloc_mark, let_node) unless lifecycle_registry.fetch(facts.ft).needs_drop?
 
     cleanup_entry = moved_guard_cleanup_entry(facts.ft, mir_alloc, node)
     mark_guarded_cleanup_name!(safe_name)
@@ -558,13 +567,8 @@ module MIRLoweringVariables
   sig { params(ft: Type, alloc: Symbol).returns(T::Boolean) }
   def type_requires_alloc_cleanup?(ft, alloc)
     T.bind(self, MIRLowering) rescue nil
-    return false if ft.primitive? || ft.void? || ft.any? || ft.id_handle?
-    return true if ft.needs_cleanup?(T.unsafe(mir_schema_lookup))
-    return true if ft.needs_explicit_cleanup?(alloc, T.unsafe(mir_schema_lookup))
-
-    MIR::Placement.explicit_heap?(alloc) && (ft.string? || ft.heap_ptr? || ft.collection_value? ||
-      ft.any_sync? || ft.any_rc? || ft.link? || ft.indirect? ||
-      ft.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)))
+    _ = alloc
+    lifecycle_registry.fetch(ft).needs_drop?
   end
 
   sig { params(name: String, alloc: Symbol, type_info: Type, binding_entry: CleanupEntry).returns(MIR::AllocMark) }
@@ -795,9 +799,15 @@ module MIRLoweringVariables
       else
         rp ? alloc_from_sym(rp.alloc!) : (binding_entry.present? ? binding_entry.alloc : nil)
       end
+      # Preserve the RHS semantic shape while applying the destination's
+      # annotation-owned allocator. This turns replacement string literals
+      # into owned storage and lets named frame owners take the explicit
+      # frame-to-heap copy path without reconstructing a type from Zig text.
+      source_type = Type.from_node!(node.value, context: "reassignment value type")
+      target_type = assign_alloc ? Type.new(source_type, location: assign_alloc) : source_type
       value = with_decl_alloc(assign_alloc) do
         lowered = lower(node.value)
-        place_value_for_destination(lowered, node.value, assign_alloc, node.full_type!)
+        place_value_for_destination(lowered, node.value, assign_alloc, target_type)
       end
       # Some synthetic/branch-local BindExpr reassignments do not retain a
       # name-keyed cleanup entry. The lowered owning value still carries its
@@ -809,15 +819,26 @@ module MIRLoweringVariables
       value = hoist_alloc(value, node.value, err_cleanup: true) if value && mir_allocates?(value) &&
         !fallible_self_fallback_reassign?(target_name, value)
       result = if rp
+        plan = rp.lifecycle_plan
+        raise "reassignment cleanup lacks annotation lifecycle plan for #{target_name}" unless plan&.needs_drop?
         MIR::ReassignWithCleanup.new(target_name, value, rp.zig_type!, alloc_from_sym(rp.alloc!))
-      elsif heap_return_var && node.full_type!(context: "reassign target").needs_explicit_cleanup?(:heap, T.unsafe(mir_schema_lookup))
+      elsif heap_return_var && lifecycle_registry.fetch(node.full_type!(context: "reassign target")).needs_drop?
         target_type = node.full_type!(context: "reassign target")
         MIR::ReassignWithCleanup.new(target_name, value, transpile_type(target_type), :heap)
       else
         MIR::Set.new(MIR::Ident.new(target_name), value)
       end
-      result = with_ownership_consumption_for_value(result, value, node.value, result.class.name.to_s,
-        target_alloc: result.is_a?(MIR::ReassignWithCleanup) ? result.alloc : assign_alloc)
+      ownership_value = fallible_self_fallback_success_expr(target_name, value) || value
+      ownership_ast = if ownership_value.equal?(value)
+        node.value
+      elsif node.value.is_a?(AST::BinaryOp)
+        node.value.left
+      else
+        node.value
+      end
+      result = with_ownership_consumption_for_value(result, ownership_value, ownership_ast, result.class.name.to_s,
+        target_alloc: result.is_a?(MIR::ReassignWithCleanup) ? result.alloc : assign_alloc,
+        value_type: Type.from_node!(node.value, context: "reassignment ownership value"))
       result
     end
   end
@@ -884,12 +905,19 @@ module MIRLoweringVariables
 
   sig { params(name: String, value: MIR::Node).returns(T::Boolean) }
   def fallible_self_fallback_reassign?(name, value)
+    !fallible_self_fallback_success_expr(name, value).nil?
+  end
+
+  sig { params(name: String, value: MIR::Node).returns(T.nilable(MIR::Node)) }
+  def fallible_self_fallback_success_expr(name, value)
     expr = value
     expr = expr.expr if expr.is_a?(MIR::Cast)
-    return false unless expr.is_a?(MIR::TryCatch) && expr.capture.nil?
+    return nil unless expr.is_a?(MIR::TryCatch) && expr.capture.nil?
 
     catch_body = expr.catch_body
-    catch_body.is_a?(MIR::Ident) && catch_body.name.to_s == name.to_s
+    return nil unless catch_body.is_a?(MIR::Ident) && catch_body.name.to_s == name.to_s
+
+    expr.expr
   end
 
   # Emit `cell.<op>(arg)` for atomic assignments. The annotator stamped
@@ -967,8 +995,7 @@ module MIRLoweringVariables
     return lower_conditional_field_assignment(node) if conditional_field_assignment?(name)
     return T.cast(lower_indexed_assignment(node), MIR::Stmt) if name.is_a?(AST::GetIndex)
     return T.cast(lower_auto_lock_assignment(node), MIR::Stmt) if name.is_a?(AST::GetField) && node.auto_lock
-    return lower_field_assignment_with_cleanup(node) if name.is_a?(AST::GetField) &&
-      (node.field_pre_cleanup || field_assignment_requires_cleanup?(name))
+    return lower_field_assignment_with_cleanup(node) if name.is_a?(AST::GetField) && node.field_pre_cleanup
 
     nil
   end
@@ -1011,12 +1038,13 @@ module MIRLoweringVariables
     target = MIR::FieldGet.new(MIR::Ident.new(capture), field.field.to_s)
     field_type = field.full_type!(context: "conditional assignment field")
     field_type = T.must(field_type.wrapped_type) if field.safe_nav_chain == true && field_type.optional?
+    field_lifecycle = lifecycle_registry.fetch(field_type)
     value, value_pending = lower_head do
       lowered = with_decl_alloc(target_alloc) do
         raw = lower(node.value)
         place_value_for_destination(raw, node.value, target_alloc, field_type)
       end
-      materialized = if field_assignment_requires_cleanup?(field)
+      materialized = if field_lifecycle.needs_drop?
         materialize_owned_sink_value(lowered, node.value, target_alloc)
       else
         lowered
@@ -1035,7 +1063,7 @@ module MIRLoweringVariables
     )
     then_body = T.let([], T::Array[MIR::Stmt])
     then_body.concat(T.unsafe(value_pending))
-    if field_assignment_requires_cleanup?(field)
+    if field_lifecycle.needs_drop?
       cleanup_call = MIR::Call.new("CheatLib.cleanup", [
         MIR::TypeOf.new(target), MIR::AllocatorRef.new(target_alloc), MIR::AddressOf.new(target)
       ], false, false, MIR::CallableContract.no_ownership(3))
@@ -1078,23 +1106,10 @@ module MIRLoweringVariables
 
   sig { params(result: MIR::Set, plan: AssignmentTargetPlan).void }
   def mark_field_assignment_cleanup!(result, plan)
-    field = plan.cleanup_field
-    result.needs_field_cleanup = true if field && field_assignment_requires_cleanup?(field)
-    nil
-  end
-
-  sig { params(field: AST::GetField).returns(T::Boolean) }
-  def field_assignment_requires_cleanup?(field)
     T.bind(self, MIRLowering) rescue nil
-    field_type = field.full_type!
-    if field.safe_nav_chain == true && field_type.optional?
-      field_type = T.must(field_type.wrapped_type)
-    end
-    return true if field_type.specialization_may_need_cleanup?
-    return true if field_type.needs_cleanup?(T.unsafe(mir_schema_lookup))
-    return false unless field_type.string?
-
-    !!field_assignment_root_identifier(field)&.symbol&.heap_storage?
+    field = plan.cleanup_field
+    result.needs_field_cleanup = true if field && lifecycle_registry.fetch(field.full_type!).needs_drop?
+    nil
   end
 
   sig { params(field: AST::GetField).returns(T.nilable(AST::Identifier)) }
@@ -1198,6 +1213,7 @@ module MIRLoweringVariables
     value_type = Type.from_node!(node.value, context: "direct indexed assignment value")
     val = with_decl_alloc(target_alloc) { lower(node.value) }
     if ownership_tracked_transfer_type?(value_type)
+      val = place_value_for_destination(val, node.value, target_alloc, value_type)
       val = materialize_owned_sink_value(val, node.value, target_alloc, value_type)
       val = hoist_alloc(val, node.value, err_cleanup: true) if mir_allocates?(val)
     end
@@ -1236,6 +1252,7 @@ module MIRLoweringVariables
     # Map put takes ownership of the stored value on success. If the value
     # expression produces owned children, expose that temporary to MIRChecker
     # with error-only cleanup: normal cleanup would double-free after the map owns it.
+    val = place_value_for_destination(val, node.value, dispatch.sink_alloc, sink_type)
     val = materialize_owned_sink_value(val, node.value, dispatch.sink_alloc) unless dispatch.shard_direct && rodata_ownership_ast?(node.value)
     val = hoist_alloc(val, node.value, err_cleanup: true)
 
@@ -1283,7 +1300,6 @@ module MIRLoweringVariables
 
     val_node = node.value
     value_type_for_transfer = Type.from_node!(val_node, context: "indexed assignment value transfer")
-    owns_transferred_value = ownership_tracked_transfer_type?(value_type_for_transfer)
     dispatch = indexed_assignment_dispatch(
       kind,
       receiver_type,
@@ -1292,13 +1308,19 @@ module MIRLoweringVariables
       op
     )
 
-    sink_type = receiver_type.value_type || value_type_for_transfer
+    sink_type = if kind == :array || kind == :list
+                  receiver_type.element_type || value_type_for_transfer
+                else
+                  receiver_type.value_type || value_type_for_transfer
+                end
+    owns_transferred_value = ownership_tracked_transfer_type?(sink_type)
     val = with_decl_alloc(dispatch.sink_alloc) do
       with_sink_type(sink_type) { lower(node.value) }
     end
-    if op.intrinsic_takes_value? && owns_transferred_value && !dispatch.shard_direct
-      val = materialize_owned_sink_value(val, val_node, dispatch.sink_alloc, sink_type)
-      val = hoist_alloc(val, val_node, err_cleanup: true)
+    unless dispatch.shard_direct
+      val = place_value_for_destination(val, val_node, dispatch.sink_alloc, sink_type)
+      val = materialize_owned_sink_value(val, val_node, dispatch.sink_alloc, sink_type) if owns_transferred_value
+      val = hoist_alloc(val, val_node, err_cleanup: true) if mir_allocates?(val)
       if val.is_a?(MIR::Ident)
         move_mark_field!(val_node)
       end
@@ -1431,6 +1453,8 @@ module MIRLoweringVariables
   sig { params(node: AST::Assignment).returns(MIR::ScopeBlock) }
   def lower_field_assignment_with_cleanup(node)
     T.bind(self, MIRLowering) rescue nil
+    lifecycle = node.field_lifecycle_plan
+    raise "field cleanup lacks annotation lifecycle plan" unless lifecycle&.needs_drop?
     # Field cleanup uses the container binding's finalized placement.
     alloc_sym = placement_for_node(root_receiver_node(node.name) || node.name)
     receiver_type = Type.from_node!(node.name.target, context: "field assignment receiver")
@@ -1462,6 +1486,10 @@ module MIRLoweringVariables
   def lower_auto_lock_assignment(node)
     T.bind(self, MIRLowering) rescue nil
     facts = auto_lock_assignment_facts(node)
+    if facts.cleanup_alloc
+      lifecycle = node.field_lifecycle_plan
+      raise "auto-lock field cleanup lacks annotation lifecycle plan" unless lifecycle&.needs_drop?
+    end
 
     len_guard = ->(old_name, alloc_sym) {
       MIR::IfStmt.new(
@@ -1567,7 +1595,6 @@ module MIRLoweringVariables
   private :capability_wrapped_mir?
   private :ensure_cleanup_binding_owns_string_init
   private :field_access_moves_owner?
-  private :field_assignment_requires_cleanup?
   private :field_assignment_root_identifier
   private :field_owner_move_marks
   private :indexed_assignment_allocs

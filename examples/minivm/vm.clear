@@ -209,7 +209,7 @@ FN loadRegisterOps(path: String) RETURNS !Int64[] ->
     parts = split(raw, ",");
     MUTABLE ops: []Int64 = List[];
     FOR pi IN (0_i64 ..< parts.length()) DO
-        part = trim(parts[pi]);
+        part = trim(UNWRAP parts[pi]);
         IF part.length() > 0 THEN
             n = toInt(part) OR_ELSE 0_i64;
             &ops.append(n);
@@ -254,59 +254,59 @@ FN loadRegisterVarNames(path: String) RETURNS ![]RegisterVarName ->
     MUTABLE entries: []RegisterVarName = List[];
     parts = split(raw, "\n");
     TIGHT FOR pi IN (0_i64 ..< parts.length()) DO
-        entry = trim(parts[pi]);
+        entry = trim(UNWRAP parts[pi]);
         IF entry.length() == 0_i64 THEN PASS;
         ELSE
             fields = split(entry, ":");
             IF fields.length() == 8_i64 THEN
-                funcIp = toInt(fields[0]) OR_ELSE -1_i64;
-                srcLine = toInt(fields[1]) OR_ELSE -1_i64;
-                srcCol = toInt(fields[2]) OR_ELSE 0_i64;
-                endSrc = toInt(fields[3]) OR_ELSE -1_i64;
-                physIdx = toInt(fields[5]) OR_ELSE -1_i64;
+                funcIp = toInt(UNWRAP fields[0]) OR_ELSE -1_i64;
+                srcLine = toInt(UNWRAP fields[1]) OR_ELSE -1_i64;
+                srcCol = toInt(UNWRAP fields[2]) OR_ELSE 0_i64;
+                endSrc = toInt(UNWRAP fields[3]) OR_ELSE -1_i64;
+                physIdx = toInt(UNWRAP fields[5]) OR_ELSE -1_i64;
                 IF funcIp >= 0_i64 AND srcLine >= 0_i64 AND physIdx >= 0_i64 THEN
                     &entries.append(RegisterVarName{
                         funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: srcCol,
                         endSourceLine: endSrc,
-                        kind: COPY fields[4], physIdx: physIdx,
-                        name: COPY fields[6], typeName: COPY fields[7]
+                        kind: COPY UNWRAP fields[4], physIdx: physIdx,
+                        name: COPY UNWRAP fields[6], typeName: COPY UNWRAP fields[7]
                     });
                 END
             ELSE_IF fields.length() == 7_i64 THEN
-                funcIp = toInt(fields[0]) OR_ELSE -1_i64;
-                srcLine = toInt(fields[1]) OR_ELSE -1_i64;
-                endSrc = toInt(fields[2]) OR_ELSE -1_i64;
-                physIdx = toInt(fields[4]) OR_ELSE -1_i64;
+                funcIp = toInt(UNWRAP fields[0]) OR_ELSE -1_i64;
+                srcLine = toInt(UNWRAP fields[1]) OR_ELSE -1_i64;
+                endSrc = toInt(UNWRAP fields[2]) OR_ELSE -1_i64;
+                physIdx = toInt(UNWRAP fields[4]) OR_ELSE -1_i64;
                 IF funcIp >= 0_i64 AND srcLine >= 0_i64 AND physIdx >= 0_i64 THEN
                     &entries.append(RegisterVarName{
                         funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: 0_i64,
                         endSourceLine: endSrc,
-                        kind: COPY fields[3], physIdx: physIdx,
-                        name: COPY fields[5], typeName: COPY fields[6]
+                        kind: COPY UNWRAP fields[3], physIdx: physIdx,
+                        name: COPY UNWRAP fields[5], typeName: COPY UNWRAP fields[6]
                     });
                 END
             ELSE_IF fields.length() == 6_i64 THEN
-                funcIp = toInt(fields[0]) OR_ELSE -1_i64;
-                srcLine = toInt(fields[1]) OR_ELSE -1_i64;
-                physIdx = toInt(fields[3]) OR_ELSE -1_i64;
+                funcIp = toInt(UNWRAP fields[0]) OR_ELSE -1_i64;
+                srcLine = toInt(UNWRAP fields[1]) OR_ELSE -1_i64;
+                physIdx = toInt(UNWRAP fields[3]) OR_ELSE -1_i64;
                 IF funcIp >= 0_i64 AND srcLine >= 0_i64 AND physIdx >= 0_i64 THEN
                     &entries.append(RegisterVarName{
                         funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: 0_i64,
                         endSourceLine: -1_i64,
-                        kind: COPY fields[2], physIdx: physIdx,
-                        name: COPY fields[4], typeName: COPY fields[5]
+                        kind: COPY UNWRAP fields[2], physIdx: physIdx,
+                        name: COPY UNWRAP fields[4], typeName: COPY UNWRAP fields[5]
                     });
                 END
             ELSE_IF fields.length() == 5_i64 THEN
-                funcIp = toInt(fields[0]) OR_ELSE -1_i64;
-                srcLine = toInt(fields[1]) OR_ELSE -1_i64;
-                physIdx = toInt(fields[3]) OR_ELSE -1_i64;
+                funcIp = toInt(UNWRAP fields[0]) OR_ELSE -1_i64;
+                srcLine = toInt(UNWRAP fields[1]) OR_ELSE -1_i64;
+                physIdx = toInt(UNWRAP fields[3]) OR_ELSE -1_i64;
                 IF funcIp >= 0_i64 AND srcLine >= 0_i64 AND physIdx >= 0_i64 THEN
                     &entries.append(RegisterVarName{
                         funcEntryIp: funcIp, sourceLine: srcLine, sourceColumn: 0_i64,
                         endSourceLine: -1_i64,
-                        kind: COPY fields[2], physIdx: physIdx,
-                        name: COPY fields[4], typeName: ""
+                        kind: COPY UNWRAP fields[2], physIdx: physIdx,
+                        name: COPY UNWRAP fields[4], typeName: ""
                     });
                 END
             END
@@ -325,7 +325,7 @@ FN loadRegisterBreakpoints(path: String) RETURNS ![]Int64 ->
     MUTABLE bps: []Int64 = List[];
     parts = split(raw, "\n");
     FOR pi IN (0_i64 ..< parts.length()) DO
-        entry = trim(parts[pi]);
+        entry = trim(UNWRAP parts[pi]);
         IF entry.length() > 0 THEN
             n = toInt(entry) OR_ELSE -1_i64;
             IF n >= 0_i64 THEN &bps.append(n); END
@@ -343,7 +343,7 @@ FN loadRegisterSourcePaths(path: String) RETURNS ![]String ->
     MUTABLE paths: []String = List[];
     parts = split(raw, "\n");
     FOR pi IN (0_i64 ..< parts.length()) DO
-        entry = parts[pi];
+        entry = UNWRAP parts[pi];
         IF entry.length() > 0 THEN &paths.append(COPY entry); END
     END
     RETURN paths;

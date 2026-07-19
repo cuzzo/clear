@@ -2331,9 +2331,8 @@ module DiagnosticRegistry
       severity: :error, category: :ownership,
       template: "Cannot COPY non-copyable type '%{type}'",
       summary:  "Some types (e.g., closed streams, raw fds) deliberately have no COPY semantics.",
-      cause: "Reserved for resource types — `File`, `TCPClient`, `TCPServer`, raw fds, closed streams — that intentionally cannot be deep-copied. Today `visit_CopyNode` happily generates Zig code for any type, which produces broken behaviour for resources. Wiring this code requires extending `Type#copyable?` (or an equivalent registry on resource schemas) so the visitor can reject the truly non-copyable cases.",
+      cause: "The value is, or transitively contains, a linear resource with a CLOSE contract. Duplicating the handle would make two owners close the same underlying resource.",
       fix_hint: "Use `CLONE` for shared / refcounted handles. For linear resources, transfer ownership via `GIVE` or pass through a borrow.",
-      pending: true,
     },
     CLONE_WITH_SCOPED: {
       severity: :error, category: :escape,

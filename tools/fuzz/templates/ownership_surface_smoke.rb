@@ -246,8 +246,8 @@ def ownership_surface_escape_sink_cell(sink)
   when :return_value
     <<~CHT
       FN make() RETURNS !String -> RETURN COPY "ret"; END
-      FN main() RETURNS Void ->
-          s = make();
+      FN main() RETURNS !Void ->
+          s = TRY make();
           ASSERT s == "ret", "return sink";
           RETURN;
       END
@@ -378,8 +378,8 @@ def ownership_surface_contract_cell(contract)
   when :promotion_on_escape
     <<~CHT
       FN make() RETURNS !String -> RETURN "promote" $+ 1_i64.toString(); END
-      FN main() RETURNS Void ->
-          s = make();
+      FN main() RETURNS !Void ->
+          s = TRY make();
           ASSERT s.length() > 0_i64, "promotion on escape";
           RETURN;
       END
@@ -414,9 +414,9 @@ def ownership_surface_contract_cell(contract)
           IF raise_it THEN RAISE; END
           RETURN s;
       END
-      FN main() RETURNS Void ->
+      FN main() RETURNS !Void ->
           maybe(TRUE) OR_ELSE PASS;
-          s = maybe(FALSE);
+          s = TRY maybe(FALSE);
           ASSERT s.length() > 0_i64, "error path allocator identity";
           RETURN;
       END

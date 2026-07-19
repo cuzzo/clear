@@ -18,11 +18,11 @@ FN pick(kind: Int64) RETURNS !Int64 ->
 END
 
 FN main() RETURNS Void ->
-    a = pick(1);
+    a = TRY pick(1);
     ASSERT a == 3_i64, "kind 1 should be 3";
-    b = pick(2);
+    b = TRY pick(2);
     ASSERT b == 2_i64, "kind 2 should be 2";
-    c = pick(3);
+    c = TRY pick(3);
     ASSERT c == 0_i64, "kind 3 should be 0";
     RETURN;
 END

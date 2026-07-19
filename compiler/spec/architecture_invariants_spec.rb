@@ -112,6 +112,89 @@ RSpec.describe "architecture invariants: placement-field writers" do
   end
 end
 
+RSpec.describe "architecture invariants: semantic lifecycle authority" do
+  def source(rel)
+    File.read(File.join(ARCH_ROOT, rel))
+  end
+
+  def method_body(rel, name)
+    text = source(rel)
+    body = text[/^\s*(?:private_class_method\s+)?def (?:self\.)?#{Regexp.escape(name)}(?![\w!?=]).*?(?=^\s*(?:sig\b|def\b|private\b))/m]
+    expect(body).not_to be_nil, "#{rel} is missing #{name}"
+    body
+  end
+
+  it "threads annotation lifecycle facts through every production frontend boundary" do
+    {
+      "compiler/ruby/compiler/compiler_frontend.rb" => ["MIRPass.new", "lifecycle_registry: lifecycle_registry"],
+      "compiler/ruby/compiler/module_importer.rb" => ["MIRPass.new", "MIRLoweringInput.new", "lifecycle_registry: lifecycle_registry"],
+      "compiler/ruby/backends/transpiler.rb" => ["MIRLoweringInput.new", "lifecycle_registry: compiled.lifecycle_registry"],
+      "transpile-tests/gen.rb" => ["MIRLoweringInput.new", "lifecycle_registry: result.lifecycle_registry"],
+    }.each do |rel, required|
+      text = source(rel)
+      required.each { |needle| expect(text).to include(needle), "#{rel} must carry #{needle}" }
+    end
+  end
+
+  it "makes COPY and owned-sink materialization consume LifecyclePlan instead of type cleanup predicates" do
+    copy = method_body("compiler/ruby/mir/lowering/expressions.rb", "lower_copy")
+    sink = method_body("compiler/ruby/mir/mir_lowering.rb", "owned_sink_plan")
+    [copy, sink].each do |body|
+      expect(body).to include("lifecycle_registry.fetch")
+      expect(body).not_to match(/(?:needs_cleanup\?|recursive_cleanup_shape\?|contains_linear_resource\?|specialization_may_need_cleanup\?)/)
+    end
+  end
+
+  it "makes owned composite hoisting consume LifecyclePlan instead of reclassifying MIR shape" do
+    materialization = method_body("compiler/ruby/mir/hoist.rb", "owned_composite_transfer_materialization")
+
+    expect(materialization).to include("lifecycle_registry.fetch")
+    expect(materialization).to include("lifecycle_plan.needs_drop?")
+    expect(materialization).not_to match(
+      /(?:needs_cleanup\?|needs_explicit_cleanup\?|recursive_cleanup_shape\?|contains_linear_resource\?|ownership_bearing_type\?)/,
+    )
+  end
+
+  it "makes aggregate glue and TAKES cleanup consume the annotation plan" do
+    struct_drop = method_body("compiler/ruby/mir/mir_lowering.rb", "lower_struct_lifecycle_methods")
+    union_drop = method_body("compiler/ruby/mir/mir_lowering.rb", "lower_union_lifecycle_methods")
+    takes = method_body("compiler/ruby/mir/cleanup_classifier.rb", "takes_param_base_entry")
+    expect(struct_drop).to include("lifecycle_registry.fetch")
+    expect(union_drop).to include("lifecycle_registry.fetch")
+    expect(takes).to include("lifecycle_registry&.fetch")
+    expect(takes).to include("return nil if lifecycle && !lifecycle.needs_drop?")
+  end
+
+  it "forbids semantic DROP, CLONE, replacement, and field cleanup without LifecyclePlan" do
+    drop_builder = method_body("compiler/ruby/mir/mir_lowering.rb", "build_drop_entry!")
+    drop_lowering = method_body("compiler/ruby/mir/mir_lowering.rb", "lower_drop")
+    clone_lowering = method_body("compiler/ruby/mir/lowering/expressions.rb", "lower_clone")
+    replacement = method_body("compiler/ruby/mir/lowering/variables.rb", "type_requires_alloc_cleanup?")
+    field_cleanup = method_body("compiler/ruby/mir/lowering/variables.rb", "lower_field_assignment_with_cleanup")
+
+    expect(drop_builder).to include("lifecycle_registry.fetch")
+    expect(drop_builder).to include("set_lifecycle_plan!")
+    expect(drop_lowering).to include("entry.lifecycle_plan")
+    expect(clone_lowering).to include("lifecycle_registry.fetch")
+    expect(replacement).to include("lifecycle_registry.fetch")
+    expect(field_cleanup).to include("field_lifecycle_plan")
+
+    [drop_builder, drop_lowering, clone_lowering, replacement, field_cleanup].each do |body|
+      expect(body).not_to match(/(?:needs_cleanup\?|needs_explicit_cleanup\?|recursive_cleanup_shape\?|contains_linear_resource\?|specialization_may_need_cleanup\?)/)
+    end
+  end
+
+  it "preserves LifecyclePlan on classifier cleanup entries and replacement facts" do
+    classifier = source("compiler/ruby/mir/cleanup_classifier.rb")
+    cleanup_entry = source("compiler/ruby/mir/cleanup_entry.rb")
+    ast = source("compiler/ruby/ast/ast.rb")
+    expect(classifier).to include("set_lifecycle_plan!")
+    expect(cleanup_entry).to include("def lifecycle_plan")
+    expect(ast).to include("field_lifecycle_plan")
+    expect(ast).to include("ReassignPlan = Struct.new(:alloc, :zig_type, :lifecycle_plan")
+  end
+end
+
 RSpec.describe "architecture invariants: annotator shell" do
   def source(rel)
     File.read(File.join(ARCH_ROOT, rel))
@@ -202,12 +285,10 @@ RSpec.describe "architecture invariants: MIR pass order" do
   it "runs imported modules through the same rewrite/hoist/typecheck/MIRPass boundary" do
     expect_order(
       "compiler/ruby/compiler/module_importer.rb",
-      "annotator.annotate!",
       "PipelineRewriter.new(annotator).rewrite!(ast)",
-      "MIRPassState.for!(ast).mark!(:pipeline_rewritten)",
+      "state.mark!(:pipeline_rewritten)",
       "StringConcatRewriter.new.rewrite!(ast)",
-      "MIRPassState.for!(ast).mark!(:string_concat_rewritten)",
-      "schema_lookup = ->(name) { annotator.lookup_type_schema(name) }",
+      "state.mark!(:string_concat_rewritten)",
       "Hoist.apply!(ast, schema_lookup: schema_lookup)",
       "PreMirTypeCheck.verify!(ast)",
       "mir_pass = MIRPass.new",

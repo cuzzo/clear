@@ -329,7 +329,7 @@ RSpec.describe TypeShape do
     shape = described_class.from_core("!?HashMap<Symbol,String[]>")
 
     expect(shape.expression).to be_a(FallibleTypeExpression)
-    expect(shape.instance_variables.sort).to eq([:@auto, :@expression, :@legacy_raw, :@semantic_key])
+    expect(shape.instance_variables.sort).to eq([:@auto, :@expression, :@legacy_raw, :@semantic_key_value])
     expect(shape.error_union).to be(true)
     expect(shape.optional).to be(true)
     expect(shape.map).to be(true)
@@ -376,8 +376,8 @@ RSpec.describe TypeShape do
     expect(optional.wrapped_function_type_raw).to be_nil
 
     signature = Type::FunctionType.new(params: [], return_type: Type.new(:Void))
-    function = described_class.new(raw: signature)
-    optional_function = described_class.new(
+    function = described_class.from_raw(raw: signature)
+    optional_function = described_class.from_raw(
       raw: :Any,
       optional: true,
       wrapped_function_type_raw: signature
@@ -397,13 +397,13 @@ RSpec.describe TypeShape do
     expect(shape.copy_with_auto(true).expression).to equal(shape.expression)
   end
 
-  it "interns bounded core shapes and caches their normalized semantic projection" do
+  it "interns bounded core shapes with an immutable normalized semantic projection" do
     first = described_class.from_core("[~]Tuple<String,Int64>")
     second = described_class.from_core("[~]Tuple<String,Int64>")
 
     expect(second).to equal(first)
     expect(first.semantic_key).to eq("~Tuple<String,Int64>[]")
-    expect(Type).not_to receive(:surface_name_type)
+    expect(TypeExpressionPrinter).not_to receive(:semantic)
     expect(first.semantic_key).to eq("~Tuple<String,Int64>[]")
   end
 

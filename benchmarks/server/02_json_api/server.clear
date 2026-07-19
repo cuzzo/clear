@@ -72,7 +72,7 @@ FN handleClient(client: TCPClient) RETURNS !Void ->
         ELSE_IF line.startsWith?("SET:") THEN
           idStr = line.substr(4, line.length() - 4);
           id = (idStr.toNumber() OR_ELSE 0.0).toInt();
-          json = generateJson(id);
+          json = TRY generateJson(id);
           ("data/${id.toString()}.json").writeFile(json);
           resp = resp $+ "+OK\r\n";
         ELSE_IF line.startsWith?("GET:") THEN
@@ -97,7 +97,7 @@ END
 
 FN main() RETURNS Void ->
   mkdir("data", 0o755_u32);
-  server = TCPServer::listen(6390);
+  server = TRY TCPServer::listen(6390);
   print("CLEAR json-api listening on port 6390");
 
   # Cache pins BG fibers to the main scheduler, preventing fiber stealing
@@ -106,7 +106,7 @@ FN main() RETURNS Void ->
 
   MUTABLE tasks: ~Void[]@list = [];
   WHILE TRUE DO
-    client = server.accept();
+    client = TRY server.accept();
     &tasks.append(
       BG {
         n = cache.count();

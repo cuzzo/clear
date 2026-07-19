@@ -5,6 +5,7 @@ require_relative "../mir/fsm_ops"
 
 STRING_TYPE = :String
 HEAP_STRING_TYPE = :String
+STRING_LIST_TYPE = T.let(Type.array_of(STRING_TYPE), Type)
 
 # Shorthand for FsmOps DSL constructors used in FSM templates below.
 # Usage in std_lib entries:
@@ -299,6 +300,20 @@ STD_LIB = T.let({
     is_method: true,
   },
 
+  # Encode one Unicode scalar value as an owned UTF-8 String.
+  "codepointToString" => {
+    args: [:Int64],
+    return: STRING_TYPE,
+    return_alloc: :frame,
+    zig: "try CheatLib.codepointToString({alloc}, {0})",
+    bc: true,
+    can_fail: true,
+    error_fallible: true,
+    allocates: true,
+    alloc: :node_storage,
+    borrows: :all,
+  },
+
   # byteAt(string, index) → Int64 — O(1) byte-level numeric access.
   # Out-of-range returns 0 rather than raising. Used by the register VM
   # bytecode parser; not a method to discourage misuse from CLEAR code.
@@ -482,7 +497,7 @@ STD_LIB = T.let({
   # 7. Split (String -> String[])
   "split" => {
     args: [STRING_TYPE, STRING_TYPE],
-    return: :"String[]",
+    return: STRING_LIST_TYPE,
     zig: "try CheatLib.split({alloc}, {0}, {1})",
     bc: true,
     allocates: true,
@@ -517,6 +532,17 @@ STD_LIB = T.let({
     return: :Bool,
     zig: "std.mem.startsWith(u8, {0}, {1})",
     bc: true,
+    borrows: :all,
+    is_method: true,
+  },
+
+  # "@shared".deletePrefix("@") -> "shared"
+  # Returns either the original string or a zero-copy suffix borrowed from it.
+  "deletePrefix" => {
+    args: [STRING_TYPE, STRING_TYPE],
+    return: STRING_TYPE,
+    lifetime: "self",
+    zig: "if (std.mem.startsWith(u8, {0}, {1})) {0}[{1}.len..] else {0}",
     borrows: :all,
     is_method: true,
   },
@@ -865,7 +891,7 @@ STD_LIB = T.let({
   # Usage: files = listDir("/some/dir")
   "listDir" => {
     args: [STRING_TYPE],
-    return: :"String[]",
+    return: STRING_LIST_TYPE,
     zig: "try CheatLib.listDir({alloc}, {0})",
     allocates: true,
     alloc: :node_storage,
@@ -876,7 +902,7 @@ STD_LIB = T.let({
   # Usage: entries = listAll("/some/dir")
   "listAll" => {
     args: [STRING_TYPE],
-    return: :"String[]",
+    return: STRING_LIST_TYPE,
     zig: "try CheatLib.listAll({alloc}, {0})",
     allocates: true,
     alloc: :node_storage,

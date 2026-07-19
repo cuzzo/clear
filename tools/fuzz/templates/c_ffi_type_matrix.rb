@@ -26,7 +26,7 @@ FuzzGenerator.register(:c_ffi_type_matrix, cells: C_FFI_TYPE_CELLS) do |p|
     next <<~CLEAR
       FN first(values: []@c Int64, count: TargetUInt@size) RETURNS Int64 ->
         WITH UNSAFE VIEW values LENGTH count AS bounded {
-          RETURN bounded[0_i64] OR_ELSE 0_i64;
+          RETURN bounded[0_i64];
         }
       END
 

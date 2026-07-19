@@ -448,7 +448,10 @@ module AST
         next
       end
       if node.is_a?(Hash)
-        node.each_value { |child| stack << child }
+        node.to_a.reverse_each do |key, value|
+          stack << value
+          stack << key
+        end
         next
       end
       yield node if node.is_a?(Locatable)
@@ -506,10 +509,24 @@ module AST
   def self.container_borrow?(node)
     return false unless node
     return true if node.respond_to?(:container_borrow) && T.unsafe(node).container_borrow == true
-    return container_borrow?(node.target) if node.is_a?(AST::OptionalUnwrap)
-    return false unless node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_ELSE)
+    operand = borrow_transparent_operand(node)
+    return false unless operand
 
-    container_borrow?(node.left)
+    container_borrow?(operand)
+  end
+
+  # Return the operand whose ownership is preserved by a syntax wrapper.
+  # These nodes may change control flow or remove a tense, but they never
+  # manufacture an owned value. Keeping the rule here prevents annotation,
+  # cleanup classification, and lowering from independently guessing which
+  # wrappers preserve borrow provenance.
+  sig { params(node: AST::Node).returns(T.nilable(AST::Node)) }
+  def self.borrow_transparent_operand(node)
+    return node.target if node.is_a?(AST::OptionalUnwrap)
+    return node.right if node.is_a?(AST::UnaryOp) && node.op == :TRY
+    return node.left if node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_ELSE)
+
+    nil
   end
 
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
@@ -1315,15 +1332,12 @@ module AST
     #
     sig { params(declared_type: CoerceTypeInput).returns(CoerceResult) }
     def coerce!(declared_type)
-      # Function metadata and node-local capabilities cannot be reduced to a
-      # flat `resolved` symbol without loss. Ordinary inferred values retain
-      # the historical root-capability projection below.
+      # An inferred value already owns the authoritative semantic Type.
+      # Flattening it to `resolved` loses collection topology, nested element
+      # capabilities, and function metadata, forcing later phases to
+      # reconstruct an incomplete type from a legacy symbol.
       if @type_object && (declared_type.nil? || declared_type == :Any)
-        inferred_type = @type_object
-        if inferred_type.fn_type? || (inferred_type.optional? && inferred_type.wrapped_type&.fn_type?) ||
-            TypeExpressionTree.nested_capabilities?(inferred_type.shape.expression)
-          return [inferred_type, nil]
-        end
+        return [@type_object, nil]
       end
 
       inferred = @type_object&.resolved
@@ -1646,7 +1660,10 @@ module AST
       if value.is_a?(Array)
         value.each { |child| yield child if child.is_a?(Locatable) }
       elsif value.is_a?(Hash)
-        value.each_value { |child| yield child if child.is_a?(Locatable) }
+        value.each do |key, child|
+          yield key if key.is_a?(Locatable)
+          yield child if child.is_a?(Locatable)
+        end
       elsif value.is_a?(Locatable)
         yield value
       end
@@ -2148,6 +2165,7 @@ module AST
 	    include StatementVoidType
 	    attr_accessor :auto_lock  # AutoLockPlan set by annotator for inline @locked/@writeLocked guards.
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: Symbol (:heap or :frame) -- the allocator to free the OLD value with before the field overwrite. nil = no pre-cleanup needed.
+    attr_accessor :field_lifecycle_plan # immutable Semantic::LifecyclePlan authorizing field replacement cleanup.
     # Preserves the source compound operator so atomic targets can lower to
     # fetch_<op> instead of load/modify/store.
     # Stamped by the annotator for @shared:atomic targets so MIR lowering emits
@@ -2236,6 +2254,7 @@ module AST
     end
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
     attr_accessor :or_fallback_dupe  # true when OR_ELSE fallback struct needs string-field heap dupe
+    attr_accessor :error_union_type # recoverable result preserved through pipeline composition
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
     # outer scope. The lowering's `descend` helper consults this and wraps
     # the field's emission in MIR::BlockExpr when the field actually emitted
@@ -2493,6 +2512,10 @@ module AST
   IfBind       = Struct.new(:token, :bindings, :then_branch, :else_branch) do
     extend T::Sig
     include Locatable
+    include HasBodies
+
+    sig { returns(T::Array[RawBody]) }
+    def child_bodies = [then_branch, else_branch].compact
 
     sig { params(args: InitArgs).void }
     def initialize(*args)
@@ -3190,11 +3213,13 @@ module AST
   # Or method:    EXTERN FN TypeName<T>.method(params) RETURNS type FROM "module"
   # Declares a native Zig/C function importable via @import("module").
   ExternFnDecl     = Struct.new(:token, :name, :params, :return_type, :from_module, :effects,
-                                :owner_type, :owner_type_params, :fn_type_params, :extern_source) do
+                                :owner_type, :owner_type_params, :fn_type_params, :extern_source,
+                                :return_lifetime) do
     # ruby-to-clear: field-type return_type=?Type
     # ruby-to-clear: field-type owner_type=?String
     # ruby-to-clear: field-type owner_type_params=String[]@symbol
     # ruby-to-clear: field-type fn_type_params=String[]@symbol
+    # ruby-to-clear: field-type return_lifetime=Any
     extend T::Sig
     include Locatable
     # [:T, :U] for TypeName<T, U>.method
@@ -3970,7 +3995,7 @@ module MIR
   # the OLD value of the binding needs cleanup before the overwrite.
   # Replaces a `{ alloc:, zig_type: }` hash; the struct is the single
   # consumer-facing contract.
-  ReassignPlan = Struct.new(:alloc, :zig_type, keyword_init: true) do
+  ReassignPlan = Struct.new(:alloc, :zig_type, :lifecycle_plan, keyword_init: true) do
     extend T::Sig
 
     sig { returns(Symbol) }
@@ -3981,6 +4006,11 @@ module MIR
     sig { returns(String) }
     def zig_type!
       zig_type
+    end
+
+    sig { returns(T.untyped) }
+    def lifecycle_plan
+      self[:lifecycle_plan]
     end
   end
 

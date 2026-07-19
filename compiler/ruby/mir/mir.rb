@@ -55,6 +55,11 @@ module MIR
       new(kind: :owned_binding, name: name, borrowed: false, type_info: type_info, source: source, target_alloc: target_alloc)
     end
 
+    sig { params(type_info: Type, source: String, target_alloc: T.nilable(Symbol)).returns(OwnershipOperandFact) }
+    def self.owned_result(type_info, source, target_alloc = nil)
+      new(kind: :owned_result, name: nil, borrowed: false, type_info: type_info, source: source, target_alloc: target_alloc)
+    end
+
     sig { params(name: T.nilable(String), type_info: Type, source: String, target_alloc: T.nilable(Symbol)).returns(OwnershipOperandFact) }
     def self.borrowed_access(name, type_info, source, target_alloc = nil)
       new(kind: :borrowed_access, name: name, borrowed: true, type_info: type_info, source: source, target_alloc: target_alloc)
@@ -953,8 +958,16 @@ module MIR
   # Struct type definition.
   # Zig: const Name = struct { fields; methods };
   StructDef = Struct.new(:name, :fields, :methods, :visibility) do
+    extend T::Sig
     include NamedEmittable
     include Stmt
+
+    sig { returns(T::Array[BodySlot]) }
+    def body_slots
+      return Emittable::EMPTY_BODY_SLOTS unless methods
+
+      [body_slot(:methods, methods, ->(new_methods) { self.methods = new_methods })]
+    end
   end
 
   # One compile-time conformance branch in a generated static protocol
@@ -1022,7 +1035,7 @@ module MIR
     end
   end
 
-  UnionTypeDef = Struct.new(:name, :variants, :visibility) do
+  UnionTypeDef = Struct.new(:name, :variants, :visibility, :methods) do
     include NamedEmittable
     include Stmt
     # variants: [UnionTypeVariant] (legacy hash variants are still readable)
@@ -1157,6 +1170,16 @@ module MIR
     def child_exprs = compact_child_exprs([value])
   end
 
+  # Invoke a semantic CLOSE plan for a value. Unlike CheatLib.cleanup, this
+  # preserves the source-language resource contract even when the imported
+  # Zig representation is opaque or uses a free function rather than deinit.
+  ResourceClose = Struct.new(:target, :close_plan) do
+    extend T::Sig
+    include Stmt
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([target])
+  end
+
   # If statement (not expression).
   # Zig: if (cond) { then_body } [else { else_body }]
   IfStmt = Struct.new(:cond, :then_body, :else_body) do
@@ -1284,6 +1307,7 @@ module MIR
 
     const :variant, String
     const :payload, T.nilable(String)
+    const :pointer_payload, T::Boolean, default: false
     prop :body, T::Array[Emittable]
   end
 
@@ -2981,7 +3005,7 @@ module MIR
   }.freeze, T::Hash[String, Symbol])
 
   DeepCopy = Struct.new(:source, :zig_type, :elem_type, :strategy,
-                        :alloc, :copy_shape) do
+                        :alloc, :copy_shape, :type_info) do
     extend T::Sig
     include Expr
     sig do
@@ -2991,11 +3015,13 @@ module MIR
         elem_type: T.nilable(String),
         strategy: Symbol,
         alloc: T.nilable(Symbol),
-        copy_shape: Symbol
+        copy_shape: Symbol,
+        type_info: T.nilable(Type)
       ).void
     end
-    def initialize(source, zig_type, elem_type, strategy, alloc, copy_shape = self.class.copy_shape_for_zig_type(zig_type))
-      super(source, zig_type, elem_type, strategy, alloc, copy_shape)
+    def initialize(source, zig_type, elem_type, strategy, alloc,
+                   copy_shape = self.class.copy_shape_for_zig_type(zig_type), type_info = nil)
+      super(source, zig_type, elem_type, strategy, alloc, copy_shape, type_info)
     end
 
     sig { params(zig_type: T.nilable(String)).returns(Symbol) }
@@ -4337,9 +4363,10 @@ module MIR
     def owned_position_source_exprs = ownership_source_exprs
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.from_required_branch_pair(
+      OwnershipEffect.from_optional_fallback(
         OwnershipEffect.of(then_expr),
         OwnershipEffect.of(else_expr),
+        result_type: result_type,
       )
     end
   end
@@ -4532,6 +4559,10 @@ module MIR
     def ownership_source_exprs = child_exprs
     sig { returns(T::Array[Emittable]) }
     def owned_position_source_exprs = child_exprs
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.of(expr)
+    end
 
     sig { returns(Emittable) }
     def expr
@@ -4914,6 +4945,13 @@ module MIR
 	    def ownership_effect
 	      heap_return = stdlib_def.heap_return_alloc? == true
 	      actual_return = return_type.success_type || return_type
+	      if actual_return.resource?
+	        return OwnershipEffect.owned(
+	          alloc: alloc_kind,
+	          cleanup_kind: :resource,
+	          requires_hoist: false,
+	        )
+	      end
 	      OwnershipEffect.from_callable_facts(
 	        emits_allocating: stdlib_def.emits_allocating? == true,
 	        heap_return_alloc: heap_return,

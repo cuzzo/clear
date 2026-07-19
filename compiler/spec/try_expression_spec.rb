@@ -33,15 +33,27 @@ RSpec.describe "TRY propagation" do
     expect(zig).to include("try load()")
   end
 
-  it "unwraps both the error and optional layers of !?T" do
+  it "propagates the error layer while retaining the optional layer of !?T" do
     source = <<~CLEAR
       FN find(values: []Int64) RETURNS !?Int64 -> RETURN values[0]; END
-      FN main(values: []Int64) RETURNS !Int64 -> RETURN TRY find(values); END
+      FN main(values: []Int64) RETURNS !?Int64 -> RETURN TRY find(values); END
     CLEAR
 
     zig = ZigTranspiler.new.transpile(source)
     expect(zig).to include("try find(values)")
-    expect(zig).to include("orelse return error.TryOptional")
+    expect(zig).not_to include("try find(values) orelse return error.TryOptional")
+  end
+
+  it "lets TRY of !?T participate in optional predicates" do
+    source = <<~CLEAR
+      FN maybe() RETURNS !?Int64 -> RETURN NIL; END
+      FN main() RETURNS !Void ->
+        IF (TRY maybe()) == NIL THEN RETURN; END
+        RETURN;
+      END
+    CLEAR
+
+    expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
   end
 
   it "propagates a fallible intrinsic whose type channel is behavioral metadata" do
@@ -72,7 +84,28 @@ RSpec.describe "TRY propagation" do
       END
     CLEAR
 
-    expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
+    zig = ZigTranspiler.new.transpile(source)
+    expect(zig).to include("catch")
+    expect(zig).to include("fallback")
+    expect(zig).not_to match(/return try .*intToString/)
+  end
+
+  it "does not propagate a missing-file fault past an explicit fallback" do
+    source = <<~CLEAR
+      FN load(path: String) RETURNS String ->
+        raw = readFile(path) OR_ELSE "";
+        RETURN raw;
+      END
+      FN main() RETURNS !Void ->
+        ASSERT load("definitely-missing") == "";
+        RETURN;
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new.transpile(source)
+    expect(zig).to include("CheatLib.readFile")
+    expect(zig).to include("catch")
+    expect(zig).not_to match(/const raw[^\n]*try CheatLib\.readFile/)
   end
 
   it "composes with an explicit mutable receiver" do
@@ -157,18 +190,18 @@ RSpec.describe "TRY propagation" do
       FN fallibleMaybe(value: Int64) RETURNS !?Int64 -> RETURN value; END
       FN main() RETURNS !Int64 ->
         retained:!? = fallibleMaybe(7);
-        first = TRY retained;
+        first:? = TRY retained;
         second = TRY UNWRAP fallibleMaybe(8);
         optional:? = TRY fallibleMaybe(9);
         widened:! = UNWRAP maybe(10);
-        RETURN first + second + (UNWRAP optional) + TRY widened;
+        RETURN (UNWRAP first) + second + (UNWRAP optional) + TRY widened;
       END
     CLEAR
 
     zig = ZigTranspiler.new.transpile(source)
     expect(zig).to include("const retained: anyerror!?i64 = fallibleMaybe(7);")
     expect(zig).to include("(try fallibleMaybe(8)).?")
-    expect(zig).to include("const optional = @as(?i64")
+    expect(zig).to include("const optional = try fallibleMaybe(9)")
     expect(zig).to include("const widened: anyerror!i64")
   end
 
@@ -203,6 +236,19 @@ RSpec.describe "TRY propagation" do
         stream:~ = BG STREAM { YIELD 9; CLOSE; };
         IF NEXT stream EXISTS AS item THEN ASSERT item == 9; END
         ASSERT value == 7;
+        RETURN;
+      END
+    CLEAR
+
+    expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
+  end
+
+  it "materializes finite stream SELECT pipelines before binding" do
+    source = <<~CLEAR
+      FN main() RETURNS Void ->
+        stream:~ = BG STREAM { YIELD 9; CLOSE; };
+        selected = stream |> SELECT _ + 1;
+        ASSERT selected.length() == 1;
         RETURN;
       END
     CLEAR
@@ -287,5 +333,20 @@ RSpec.describe "TRY propagation" do
       CompilerError,
       /Type mismatch in OR_ELSE: expected Int64, got String/
     )
+  end
+
+  it "preserves recoverability through function pipelines" do
+    source = <<~CLEAR
+      FN risky(value: Int64) RETURNS !Int64 ->
+        IF value < 0 THEN RAISE "negative"; END
+        RETURN value + 1;
+      END
+      FN main() RETURNS !Int64 ->
+        RETURN (-1 |> risky) OR_ELSE 7;
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new.transpile(source)
+    expect(zig).to include("catch 7")
   end
 end

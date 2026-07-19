@@ -5,7 +5,7 @@ FN makeVal(label: String) RETURNS !Val ->
 END
 
 FN main() RETURNS Void ->
-    v = makeVal("hello");
+    v = TRY makeVal("hello");
     PARTIAL MATCH v START
         Val.Str AS s -> ASSERT s == "hello!", "promoted string in union";,
         DEFAULT -> ASSERT FALSE, "should be Str";

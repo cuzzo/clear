@@ -32,10 +32,10 @@ CATCH Input
 END
 
 FN main() RETURNS Void ->
-    r1 = processUser(User{ name: "Alice", age: 30 });
+    r1 = TRY processUser(User{ name: "Alice", age: 30 });
     ASSERT r1 == "Alice", "success";
 
-    r2 = processUser(User{ name: "Bob", age: -1 });
+    r2 = TRY processUser(User{ name: "Bob", age: -1 });
     ASSERT r2 == "Bob", "snapshot.name captured";
 
     r3 = processInt(5);

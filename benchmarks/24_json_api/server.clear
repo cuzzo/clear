@@ -92,12 +92,12 @@ END
 
 FN main() RETURNS Void ->
     mkdir("data", 0o755_u32);
-    server = TCPServer::listen(6390);
+    server = TRY TCPServer::listen(6390);
     print("CLEAR json-api listening on port 6390");
 
     MUTABLE tasks: ~Void[]@list = [];
     WHILE TRUE DO
-        client = accept(server);
+        client = TRY accept(server);
         &tasks.append(BG {
             handleClient(client);
         });

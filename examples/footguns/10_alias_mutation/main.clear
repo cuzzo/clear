@@ -54,7 +54,7 @@ FN shared_mutation() RETURNS !Void ->
   # the mutex enforces that at most one accessor holds the lock.
   counter = Counter{ value: 0 } @shared:locked;
 
-  writer = BG {
+  writer:~ = BG {
     WITH EXCLUSIVE counter AS c {
       c.value = 42;
       # Lock released here. No other accessor can read/write c

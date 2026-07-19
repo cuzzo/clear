@@ -140,6 +140,25 @@ RSpec.describe MIRChecker do
       expect(errors.none? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") }).to be true
     end
 
+    it "allows cleanup when lowering explicitly materialized the owner" do
+      type = Type.new(:Value)
+      body = [
+        alloc_mark("tmp", :heap, type),
+        MIR::OwnedCreate.new("tmp", :heap, type, "tmp"),
+        MIR::Let.new(
+          "tmp",
+          MIR::IndexGet.new(MIR::Ident.new("items"), MIR::Lit.new("0")),
+          false,
+          nil,
+          nil,
+        ),
+        MIR::Cleanup.new("tmp", CleanupEntry.from({ kind: :uniform, alloc: :heap, has_moved_guard: false })),
+      ]
+
+      errors = checker.check_fn!(fn_def("materialized_cleanup", body))
+      expect(errors.none? { |e| e.include?("OWNERSHIP_CLEANUP_FOR_BORROW") }).to be true
+    end
+
     it "allows cleanup when a registry call returns an owned resource" do
       signature = FunctionSignature.new(params: [], return_type: Type.new(:TCPClient), emit: IntrinsicEmit.new(zig: "accept()", allocates: true))
       registry_call = MIR::RegistryCall.new(
@@ -796,7 +815,7 @@ RSpec.describe MIRChecker do
         MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil),
       ]
       errors = checker.check_fn!(fn_def("loop_no_restore", body))
-      expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
+      expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") && e.include?("allocations: tmp") }).to be true
     end
 
     it "passes for loop with restoreLoopMark defer (structural check)" do

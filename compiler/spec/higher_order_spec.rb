@@ -44,6 +44,19 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "Projection preserving element capabilities" do
+      let(:code) do
+        <<~CLEAR
+          words: String[] = ["alpha", "beta"];
+          symbols = words |> SELECT symbol(_);
+        CLEAR
+      end
+
+      it "preserves @symbol on the projected list element" do
+        expect(result.element_type&.sync).to eq(:symbol)
+      end
+    end
+
     context "Chained Pipe: string |> split |> SELECT" do
       let(:code) {
         <<~FLUX
@@ -292,11 +305,11 @@ RSpec.describe SemanticAnnotator do
     context "LIMIT with structs" do
       let(:code) {
         <<~FLUX
-          STRUCT Item { value: Int64 }
+          STRUCT Item { name: String, value: Int64 }
           items = [
-            Item{ value: 10_i64 },
-            Item{ value: 20_i64 },
-            Item{ value: 30_i64 }
+            Item{ name: "a", value: 10_i64 },
+            Item{ name: "b", value: 20_i64 },
+            Item{ name: "c", value: 30_i64 }
           ];
           limited = items |> LIMIT 2;
         FLUX
@@ -304,6 +317,12 @@ RSpec.describe SemanticAnnotator do
 
       it "returns the same list type" do
         expect(result).to eq(:"Item[]")
+      end
+
+      it "copies each element using the collection element sink type" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to match(/dupeValue\(Item, __copy_src/)
+        expect(zig).not_to match(/dupeValue\(std\.ArrayListUnmanaged\(Item\), __copy_src/)
       end
     end
 
@@ -404,8 +423,9 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "returns the same list type" do
-        expect(result).to eq(:"Int64[]")
+      it "returns the canonical Set type" do
+        expect(result.collection).to eq(:set)
+        expect(result.element_type).to eq(:Int64)
       end
     end
 
@@ -422,8 +442,9 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "returns Set type of the key field" do
-        expect(result).to eq(:"Int64[]")
+      it "returns the canonical Set type of the key field" do
+        expect(result.collection).to eq(:set)
+        expect(result.element_type).to eq(:Int64)
       end
     end
 
@@ -1687,6 +1708,23 @@ RSpec.describe SemanticAnnotator do
         fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
         bind = fn_node.body.find { |n| (n.is_a?(AST::BindExpr) || n.is_a?(AST::VarDecl)) && n.name == "result" }
         expect(bind.resolved_type).to eq(:Bool)
+      end
+
+      it "accepts an IF expression as the predicate clause" do
+        tree = run(<<~CLEAR)
+          FN f() RETURNS Bool ->
+            nums: []Int64 = [1, 2];
+            RETURN nums |> ANY (IF _ > 0 THEN
+              TRUE
+            ELSE
+              FALSE
+            END);
+          END
+        CLEAR
+
+        fn_node = tree.statements.find { |n| n.is_a?(AST::FunctionDef) && n.name == "f" }
+        return_node = fn_node.body.find { |n| n.is_a?(AST::ReturnNode) }
+        expect(return_node.value.resolved_type).to eq(:Bool)
       end
 
       it "raises when ANY is applied to a non-array" do

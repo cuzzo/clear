@@ -23,11 +23,11 @@ END
 # Without fix: v.vals leaks on every iteration.
 FN test_while_pop_heap_capture() RETURNS !Void ->
     MUTABLE pool: []Container = [];
-    MUTABLE c1 = make_container(10);
+    MUTABLE c1 = TRY make_container(10);
     &pool.append(GIVE c1);
-    MUTABLE c2 = make_container(20);
+    MUTABLE c2 = TRY make_container(20);
     &pool.append(GIVE c2);
-    MUTABLE c3 = make_container(30);
+    MUTABLE c3 = TRY make_container(30);
     &pool.append(GIVE c3);
 
     MUTABLE count: Int64 = 0;

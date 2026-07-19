@@ -129,11 +129,11 @@ END
 FN tailAfterFirstSpace(line: String) RETURNS !String ->
   parts = line.split(" ");
   IF parts.length() <= 1 THEN RETURN ""; END
-  IF parts.length() == 2 THEN RETURN COPY parts[1]; END
-  MUTABLE rest: String = COPY parts[1];
+  IF parts.length() == 2 THEN RETURN UNWRAP COPY parts[1]; END
+  MUTABLE rest: String = UNWRAP COPY parts[1];
   MUTABLE i = 2;
   WHILE i < parts.length() DO
-    rest = rest $+ " " $+ parts[i];
+    rest = rest $+ " " $+ UNWRAP parts[i];
     i += 1;
   END
   RETURN rest;
@@ -142,7 +142,7 @@ END
 FN firstToken(line: String) RETURNS !String ->
   parts = line.split(" ");
   IF parts.length() == 0 THEN RETURN ""; END
-  RETURN COPY parts[0];
+  RETURN UNWRAP COPY parts[0];
 END
 
 FN loadProgram(path: String) RETURNS !Program ->
@@ -150,19 +150,19 @@ FN loadProgram(path: String) RETURNS !Program ->
   lines = raw.split("\n");
 
   IF lines.length() < 4 THEN RAISE "vm: truncated puckc"; END
-  IF lines[0] != "PUCKC 1" THEN RAISE "vm: not a puckc file"; END
+  IF UNWRAP lines[0] != "PUCKC 1" THEN RAISE "vm: not a puckc file"; END
 
   # Workaround for puck-clear-bugs.md #1: bind the OR_ELSE-defaulted expression
   # to a named local so the lifted temp lands in the right scope.
-  stringsTok = firstToken(lines[1]) OR_ELSE "";
+  stringsTok = firstToken(UNWRAP lines[1]) OR_ELSE "";
   IF stringsTok != "STRINGS" THEN RAISE "vm: missing STRINGS header"; END
-  stringsTail = tailAfterFirstSpace(lines[1]) OR_ELSE "";
+  stringsTail = tailAfterFirstSpace(UNWRAP lines[1]) OR_ELSE "";
   stringCount = parseInt(stringsTail);
   MUTABLE pos: Int64 = 2 + stringCount;
 
-  procsTok = firstToken(lines[pos]) OR_ELSE "";
+  procsTok = firstToken(UNWRAP lines[pos]) OR_ELSE "";
   IF procsTok != "PROCS" THEN RAISE "vm: missing PROCS header"; END
-  procsTail = tailAfterFirstSpace(lines[pos]) OR_ELSE "";
+  procsTail = tailAfterFirstSpace(UNWRAP lines[pos]) OR_ELSE "";
   procCount = parseInt(procsTail);
   pos += 1;
 
@@ -180,7 +180,7 @@ FN loadProgram(path: String) RETURNS !Program ->
   MUTABLE params: Int64 = 0;
   MUTABLE codesLen: Int64 = 0;
   WHILE p < procCount DO
-    header = lines[pos].split(" ");
+    header = UNWRAP (UNWRAP lines[pos]).split(" ");
     IF header.length() < 4 THEN RAISE "vm: bad PROC header"; END
     IF header[0] != "PROC" THEN RAISE "vm: bad PROC header"; END
     params   = parseInt(header[1]);
@@ -190,8 +190,8 @@ FN loadProgram(path: String) RETURNS !Program ->
     opStart = allOps.length();
     MUTABLE i = 0;
     WHILE i < codesLen DO
-      head = firstToken(lines[pos]) OR_ELSE "";
-      tail = tailAfterFirstSpace(lines[pos]) OR_ELSE "";
+      head = firstToken(UNWRAP lines[pos]) OR_ELSE "";
+      tail = tailAfterFirstSpace(UNWRAP lines[pos]) OR_ELSE "";
       opcode = parseOpName(head) OR_ELSE RAISE;
       argInt = 0;
       kind = kNone();

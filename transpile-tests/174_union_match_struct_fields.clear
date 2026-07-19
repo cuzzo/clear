@@ -33,13 +33,13 @@ END
 
 FN main() RETURNS Void ->
     err = Value.Error{ errMsg: "x", errKind: "E" };
-    result = tryEval(COPY err);
-    str = prStr(result);
+    result = TRY tryEval(COPY err);
+    str = TRY prStr(result);
     ASSERT str == "caught:x:E", "indirect string promoted through pointer";
 
     ok = Value{ Str: "hello" };
-    result2 = tryEval(COPY ok);
-    str2 = prStr(result2);
+    result2 = TRY tryEval(COPY ok);
+    str2 = TRY prStr(result2);
     ASSERT str2 == "hello", "non-error passthrough";
 
     print("174: union indirect promotion PASSED");

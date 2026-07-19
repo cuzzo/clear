@@ -3,7 +3,7 @@
 
 FN main() RETURNS Void ->
   MUTABLE values: {String}@shared:sharded(2):writeLocked Int64 = {};
-  worker = BG {
+  worker:~ = BG {
     values["answer"] = 42_i64;
     RETURN;
   };

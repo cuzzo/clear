@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
     all_pos = pts |> ALL _.x > 0.0;
     ASSERT all_pos == TRUE, "@list ALL positive";
 
-    found_pt = pts |> FIND _.x == 3.0;
+    found_pt:? = pts |> FIND _.x == 3.0;
     ASSERT found_pt != NIL, "@list FIND should find x=3";
 
     small_pts = pts |> WHERE _.x < 4.0;
@@ -42,7 +42,7 @@ FN main() RETURNS Void ->
     ASSERT pool.length() == 2, "pool should have 2 live items";
 
     # get returns ?*Point (optional pointer to the live slot)
-    p_a = pool.get(id_a);
+    p_a:? = pool.get(id_a);
     ASSERT p_a != NIL, "get should find a";
 
     # remove invalidates the handle

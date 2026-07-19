@@ -24,7 +24,7 @@ FN main() RETURNS Void ->
     b = Counter{ value: 0 } @shared:locked;
 
     # Fiber 1: source order (a, b). Holds both for 200ms.
-    t1 = BG {
+    t1:~ = BG {
         WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
             napFor(50);
             x.value = x.value + 1;
@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
     # Without runtime pointer-sort this is the classic AB/BA LockCycle
     # setup; with sort both fibers resolve the same pointer ordering
     # and serialize.
-    t2 = BG {
+    t2:~ = BG {
         WITH EXCLUSIVE b AS y, EXCLUSIVE a AS x {
             napFor(50);
             x.value = x.value + 1;

@@ -172,7 +172,8 @@ module Hoist
     when AST::Assignment
       if stmt.name.is_a?(AST::GetField)
         if stmt.value
-          stmt.value = hoist_escape_value!(stmt.value, hoists, counter, schema_lookup)
+          stmt.value = hoist_escape_value!(stmt.value, hoists, counter, schema_lookup,
+            expected_type: stmt.name.full_type!(context: "field assignment hoist destination"))
         end
       end
     when AST::DestructuringAssignment
@@ -213,6 +214,10 @@ module Hoist
     # lifetime; hoisting it through CLEAR's owned-slice duplication would both
     # change representation and fabricate ownership.
     return false if ti.c_string?
+    # Physical pointer shape is not ownership. Interned symbols, handles, and
+    # other lifecycle-approved bit-copy values may be pointer-shaped in Zig
+    # but do not allocate a new owner when copied.
+    return false if ti.implicitly_copyable?(T.unsafe(schema_lookup))
     ti.heap_ptr? || ti.needs_explicit_cleanup?(:heap, T.unsafe(schema_lookup))
   end
 
@@ -315,9 +320,7 @@ module Hoist
   # anonymous allocating fragments inside their arguments need bindings.
   sig { params(call: AST::MethodCall).returns(T::Boolean) }
   def self.composite_element_store?(call)
-    obj = call.object
-    sym = (obj.is_a?(AST::Identifier) || obj.is_a?(AST::GetField)) ? obj.symbol : nil
-    ti = sym&.type
+    ti = Type.from_node!(call.object, context: "composite element-store receiver")
     return false unless ti&.collection?
     et = ti.element_type
     !!(et && !et.primitive? && !et.string?)
@@ -330,9 +333,7 @@ module Hoist
     return false unless (sig&.mutates_receiver? && sig.takes_ownership?) ||
       IntrinsicRegistry.collection_value_store_method?(call.name, call.args.length)
 
-    obj = call.object
-    sym = (obj.is_a?(AST::Identifier) || obj.is_a?(AST::GetField)) ? obj.symbol : nil
-    ti = sym&.type
+    ti = Type.from_node!(call.object, context: "collection value-store receiver")
     !!(ti.is_a?(Type) && ti.collection?)
   end
 
@@ -663,12 +664,19 @@ module MIRHoistLowering
       ast_node: T.nilable(AST::Node),
       err_cleanup: T.nilable(T::Boolean),
       mutable: T::Boolean,
-      transfer_on_success: T::Boolean
+      transfer_on_success: T::Boolean,
+      ownership_materialization_alloc: T.nilable(Symbol)
     ).returns(MIR::Node)
   end
-  def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false, transfer_on_success: true)
+  def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false, transfer_on_success: true,
+                  ownership_materialization_alloc: nil)
     T.bind(self, MIRLowering) rescue nil
     return expr if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
+    composite_materialization = owned_composite_transfer_materialization(
+      expr,
+      ast_node,
+      ownership_materialization_alloc,
+    )
     if expr.respond_to?(:expr?) && expr.expr?
       function_state.pending_stmts.concat(normalize_allocating_result_expr!(
         expr,
@@ -678,18 +686,43 @@ module MIRHoistLowering
     end
     union_return_needs_hoist =
       ast_node && call_union_return_needs_hoist?(expr, ast_node)
-    return expr unless mir_produces_owned_result?(expr) || union_return_needs_hoist
+    return expr unless mir_produces_owned_result?(expr) || union_return_needs_hoist || composite_materialization
     plan = allocating_hoist_plan(
       T.cast(expr, MIR::Node),
       mutable: mutable,
       transfer_on_success: err_cleanup == true,
-      type_info: alloc_mark_type_info(expr, T.must(ast_node), "MIR allocating hoist"),
-      cleanup_entry: hoist_cleanup_entry(expr, ast_node)
+      type_info: composite_materialization&.type_info || alloc_mark_type_info(expr, T.must(ast_node), "MIR allocating hoist"),
+      cleanup_entry: composite_materialization&.cleanup_entry || hoist_cleanup_entry(expr, ast_node),
+      alloc: composite_materialization&.alloc,
     )
     stamp_allocating_result_target!(expr, plan.name, alloc: plan.alloc)
     function_state.pending_stmts.concat(plan.statements)
     record_hoisted_allocation!(plan)
     MIR::Ident.new(plan.name)
+  end
+
+  sig do
+    params(
+      expr: MIR::Node,
+      ast_node: T.nilable(AST::Node),
+      sink_alloc: T.nilable(Symbol),
+    ).returns(T.nilable(MIR::OwnedCompositeMaterialization))
+  end
+  def owned_composite_transfer_materialization(expr, ast_node, sink_alloc)
+    T.bind(self, MIRLowering) rescue nil
+    return nil unless sink_alloc && ast_node
+    return nil unless expr.is_a?(MIR::StructInit) || expr.is_a?(MIR::ArrayInit) || expr.is_a?(MIR::TupleLiteral)
+
+    type_info = Type.from_node!(ast_node, context: "owned composite argument materialization")
+    type_info = type_info.success_type || type_info
+    lifecycle_plan = lifecycle_registry.fetch(type_info)
+    return nil unless lifecycle_plan.needs_drop?
+
+    MIR::OwnedCompositeMaterialization.new(
+      type_info: type_info,
+      lifecycle_plan: lifecycle_plan,
+      alloc: sink_alloc,
+    )
   end
 
   sig { params(mir: MIR::Node, ast_node: T.nilable(AST::Node), context: String).returns(Type) }
@@ -715,7 +748,11 @@ module MIRHoistLowering
     when MIR::ContainerInit
       Type.new(mir.zig_type.to_s, location: alloc)
     when MIR::DeepCopy
-      Type.new(deep_copy_zig_type(mir, nil), location: alloc)
+      if mir.type_info
+        Type.new(T.must(mir.type_info), location: alloc)
+      else
+        Type.new(deep_copy_zig_type(mir, nil), location: alloc)
+      end
     when MIR::CapWrap
       wrapped = mir.sync_type || mir.zig_base
       ownership = case mir.own_fn
@@ -728,7 +765,7 @@ module MIRHoistLowering
       Type.new(mir.zig_base.to_s, ownership: :shared, location: :heap)
     when MIR::RcRetain, MIR::RcDowngrade, MIR::FreezeExpr
       Type.new(mir.zig_base.to_s, ownership: :multiowned, location: :heap)
-    when MIR::Cast, MIR::TryExpr, MIR::TryOptional
+    when MIR::Cast, MIR::TryExpr, MIR::TryOptional, MIR::OptionalUnwrap
       mir_alloc_mark_type_info(mir.expr, nil, context: context)
     when MIR::Call, MIR::MethodCall, MIR::TailCall
       raise "#{context}: allocating #{mir.class} has no callable return type"
@@ -822,10 +859,11 @@ module MIRHoistLowering
       mutable: T::Boolean,
       transfer_on_success: T::Boolean,
       type_info: Type,
-      cleanup_entry: T.nilable(CleanupEntry)
+      cleanup_entry: T.nilable(CleanupEntry),
+      alloc: T.nilable(Symbol),
     ).returns(MIR::BindingMaterialization)
   end
-  def allocating_hoist_plan(expr, mutable:, transfer_on_success:, type_info:, cleanup_entry:)
+  def allocating_hoist_plan(expr, mutable:, transfer_on_success:, type_info:, cleanup_entry:, alloc: nil)
     T.bind(self, MIRLowering) rescue nil
     tmp_id = lowering_counters.next_tmp_id
     entry = cleanup_entry
@@ -835,7 +873,7 @@ module MIRHoistLowering
     MIR::BindingMaterialization.new(
       name: "__tmp_#{tmp_id}",
       expr: expr,
-      alloc: mir_owned_alloc(expr) || :heap,
+      alloc: alloc || mir_owned_alloc(expr) || :heap,
       type_info: type_info,
       mutable: mutable,
       cleanup_entry: entry,
@@ -1180,11 +1218,20 @@ module MIRHoistLowering
 
   sig { params(parent: MIR::Node, old_child: MIR::Node, new_child: MIR::Node).void }
   def refresh_ownership_consumption_for_replaced_child!(parent, old_child, new_child)
+    T.bind(self, MIRLowering) rescue nil
     fact = parent.ownership_consumption
     return unless fact.is_a?(MIR::OwnershipConsumptionFact)
 
     old_names = mir_ident_names(old_child).map(&:to_s).to_set
     new_names = mir_ident_names(new_child).map(&:to_s)
+    # A value-only evaluation temporary is not a new owner. Replacing an
+    # owned composite with that identifier must preserve the composite's
+    # existing child-owner provenance; otherwise finalization emits a
+    # TransferMark for a name that never had an AllocMark. Standard
+    # BindingMaterialization registers real replacement owners before this
+    # rewrite and is the only path allowed to retarget provenance.
+    return unless new_names.any? { |name| owned_binding_visible?(name.to_s) }
+
     operands = fact.operands.reject { |operand| operand.name && old_names.include?(operand.name.to_s) }
     new_names.each do |name|
       operands << MIR::OwnershipOperandFact.owned_binding(name.to_s, Type.new(:Any), "hoist replacement", fact.target_alloc)
@@ -1261,7 +1308,13 @@ module MIRHoistLowering
 
   sig { params(mir: T.nilable(MIR::Node)).returns(T.nilable(Symbol)) }
   def mir_owned_alloc(mir)
-    MIR::OwnershipEffect.alloc_of(mir)
+    T.bind(self, MIRLowering) rescue nil
+    effect_alloc = MIR::OwnershipEffect.alloc_of(mir)
+    return effect_alloc if effect_alloc
+    return nil unless mir.is_a?(MIR::Ident)
+
+    entry = function_state.bindings[mir.name.to_s] || CleanupEntry::NONE
+    entry.present? ? entry.alloc : nil
   end
 
   sig { params(mir: MIR::Node, ast_node: T.nilable(AST::Node)).returns(T.nilable(CleanupEntry)) }
@@ -1297,7 +1350,7 @@ module MIRHoistLowering
       cleanup_entry_for_owned_result(ast_node, alloc: alloc) || CleanupEntry.build(:rc, alloc: alloc, has_moved_guard: false)
     when MIR::FreezeExpr
       CleanupEntry.build(:frozen, alloc: :heap, has_moved_guard: false, fixed_alloc: true)
-    when MIR::Cast, MIR::TryExpr, MIR::TryOptional
+    when MIR::Cast, MIR::TryExpr, MIR::TryOptional, MIR::OptionalUnwrap
       hoist_cleanup_entry(mir.expr, ast_node)
     when MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr,
          MIR::Pipeline,
@@ -1445,6 +1498,7 @@ module MIRHoistLowering
   private :normalize_allocating_mir_body
   private :normalize_used_expr_attr!
   private :normalized_alloc_wrapper_alias?
+  private :owned_composite_transfer_materialization
   private :owned_call_result_requires_cleanup?
   private :rc_cleanup_entry
   private :record_hoisted_allocation!

@@ -1050,7 +1050,8 @@ module GenericAnalysis
     true
   end
 
-  # Walk through OR/OR_ELSE to find the root container/struct variable name.
+  # Walk through ownership-transparent syntax to find the root
+  # container/struct variable name.
   # Returns the root variable name when the expression borrows from a container
   # (GetIndex on map/list) or extracts a non-Copy field from a struct (GetField).
   sig { params(expr: T.nilable(AST::Node)).returns(T.nilable(String)) }
@@ -1080,13 +1081,9 @@ module GenericAnalysis
     if expr.is_a?(AST::GetField)
       return field_container_source(expr)
     end
-    if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_ELSE)
-      return find_container_source(expr.left)
-    end
-    # pool[id]? parses as OptionalUnwrap(GetIndex) - peel through the unwrap.
-    if expr.is_a?(AST::OptionalUnwrap)
-      return find_container_source(expr.target)
-    end
+    transparent_operand = AST.borrow_transparent_operand(expr)
+    return find_container_source(transparent_operand) if transparent_operand
+
     nil
   end
 

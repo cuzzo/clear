@@ -531,7 +531,7 @@ module Annotator
         return true if actual_type.resolved == :NoReturn
         return expected_type.accepts?(actual_type) if expected_type.fn_type?
         return true if expected_type.optional? && actual_type.resolved == :NIL
-        return true if unique_union_payload_variant(expected_type, actual_type)
+        return true if union_payload_variant(expected_type, actual_type)
         return false unless same_return_capabilities?(expected_type, actual_type)
 
         is_safe_autocast?(actual_type, expected_type)
@@ -539,37 +539,14 @@ module Annotator
       private :return_type_compatible?
 
       sig { params(expected_type: Type, actual_type: Type).returns(T.nilable(T.any(String, Symbol))) }
-      def unique_union_payload_variant(expected_type, actual_type)
+      def union_payload_variant(expected_type, actual_type)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         target_type = expected_type.value_payload_type
         schema = lookup_type_schema(target_type.resolved)
-        return nil unless schema.is_a?(Schemas::UnionSchema)
-
-        compared_actual = if expected_type.optional? && actual_type.optional?
-          T.must(actual_type.wrapped_type)
-        else
-          actual_type
-        end
-
-        matches = schema.variants.filter_map do |variant_name, payload|
-          next unless payload.is_a?(Type)
-          union_payload_matches_return_type?(payload, compared_actual) ? variant_name : nil
-        end
-        matches.one? ? matches.first : nil
+        UnionPayloadCompatibility.unique_variant(expected_type, actual_type, schema)
       end
-      private :unique_union_payload_variant
-
-      sig { params(payload_type: Type, actual_type: Type).returns(T::Boolean) }
-      def union_payload_matches_return_type?(payload_type, actual_type)
-        payload_surface = Type.coercion_surface_name(payload_type)
-        actual_surface = Type.coercion_surface_name(actual_type)
-        return true if payload_surface == actual_surface
-        return false if payload_type.string? || actual_type.string?
-
-        payload_type.accepts?(actual_type)
-      end
-      private :union_payload_matches_return_type?
+      private :union_payload_variant
 
       sig { params(expected_t: Type, actual_t: Type).returns(T::Boolean) }
       def same_return_capabilities?(expected_t, actual_t)
@@ -631,8 +608,28 @@ module Annotator
         t_left_type = recoverable_result_type(node.left, context: "OR_ELSE left")
         unless t_left_type
           left_value_type = Type.new(node.left.full_type!(context: "OR_ELSE left"))
-          t_left_type = fault_recoverable_result?(node.left) ?
-            Type.error_union_of(left_value_type) : left_value_type
+          if fault_recoverable_result?(node.left)
+            t_left_type = Type.error_union_of(left_value_type)
+            # A pipeline inside CATCH normally exposes only its success value;
+            # the function-level CATCH owns the implicit failure edge.  At an
+            # explicit OR_ELSE boundary, restore the error channel on this AST
+            # site so MIR emits `catch` instead of treating the fallback as
+            # unreachable.
+            if node.left.is_a?(AST::BinaryOp) && node.left.smooth? &&
+               node.left.respond_to?(:error_union_type=)
+              node.left.error_union_type = t_left_type
+            end
+          elsif left_value_type.optional?
+            # Optional return values are already explicit recovery values.
+            # Do not defer them as if they were definite user-function
+            # results whose allocation effects might later become fallible.
+            t_left_type = left_value_type
+          elsif node.left.is_a?(AST::FuncCall) && function_node_map.key?(node.left.name)
+            record_deferred_recovery_validation!(node, node.left, node.left.name, left_value_type)
+            t_left_type = Type.error_union_of(left_value_type)
+          else
+            t_left_type = left_value_type
+          end
         end
         t_right_type = node.right.full_type!(context: "OR_ELSE right")
 

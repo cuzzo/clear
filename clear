@@ -310,12 +310,18 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   end
   transpile_flag += " --main-tier #{main_tier}" if main_tier
 
-  # Auto-detect package requires: REQUIRE "pkg:name" → look for packages/name/src/lib.clear
+  # Register the full package graph before annotation. A package can itself
+  # require another package, and the Ruby frontend resolves that import before
+  # the later per-package Zig build pass.
   source_text = File.read(source)
-  pkg_requires = source_text.scan(/REQUIRE\s+"pkg:([^"]+)"/).flatten.uniq
-  pkg_flags = pkg_requires.map do |pkg_name|
-    pkg_path = ClearBuildSupport.find_package_source(pkg_name, start_dir: source_dir)
-    error "Package '#{pkg_name}' not found from #{source_dir}" unless pkg_path
+  package_imports = source_text.scan(/REQUIRE\s+"pkg:([^"]+)"(?:\s+AS\s+([A-Za-z_]\w*))?/)
+  pkg_paths = begin
+    ClearBuildSupport.collect_package_dependencies(source)
+  rescue ClearBuildSupport::BuildError => e
+    error e.message
+  end
+  pkg_requires = pkg_paths.keys
+  pkg_flags = pkg_paths.map do |pkg_name, pkg_path|
     "--pkg #{pkg_name}=#{pkg_path}"
   end.join(" ")
   transpile_flag += " #{pkg_flags}" if pkg_flags.length > 0
@@ -366,9 +372,11 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   end
   # When packages are present, rewrite package @import("name") to @import("name.zig")
   # so all files live as file-path imports (avoids Zig module system complexity).
-  if pkg_requires.any?
-    pkg_requires.each do |pkg_name|
-      zig_code = zig_code.gsub("@import(\"#{pkg_name}\")", "@import(\"#{pkg_name}.zig\")")
+  if package_imports.any?
+    package_imports.each do |pkg_name, import_name|
+      zig_name = import_name.nil? || import_name.empty? ? pkg_name : import_name
+      zig_code = zig_code.gsub("@import(\"#{zig_name}\")", "@import(\"#{pkg_name}.zig\")")
+      zig_code = zig_code.gsub("@import(\"#{zig_name}.zig\")", "@import(\"#{pkg_name}.zig\")")
     end
   end
   # EXTERN ... FROM "cheat_runtime" emits `@import("cheat_runtime")`, but in
@@ -422,7 +430,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     error "Package '#{pkg_name}' not found from #{source_dir}" unless pkg_path
     # Collect transitive package deps for nested REQUIRE "pkg:..."
     pkg_src = File.read(pkg_path)
-    nested_pkgs = pkg_src.scan(/REQUIRE\s+"pkg:([^"]+)"/).flatten.uniq
+    nested_imports = pkg_src.scan(/REQUIRE\s+"pkg:([^"]+)"(?:\s+AS\s+([A-Za-z_]\w*))?/)
+    nested_pkgs = nested_imports.map(&:first).uniq
     nested_flags = nested_pkgs.map { |np|
       np_path = ClearBuildSupport.find_package_source(np, start_dir: File.dirname(pkg_path))
       error "Package '#{np}' not found from #{File.dirname(pkg_path)}" unless np_path
@@ -444,8 +453,10 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     # Rewrite module imports to file-path imports (all files live in zig/).
     # cheat_runtime → runtime-header.zig, nested packages → name.zig
     pkg_zig = pkg_zig.gsub('@import("cheat_runtime")', '@import("runtime/runtime-header.zig")')
-    nested_pkgs.each do |np|
-      pkg_zig = pkg_zig.gsub("@import(\"#{np}\")", "@import(\"#{np}.zig\")")
+    nested_imports.each do |np, import_name|
+      zig_name = import_name.nil? || import_name.empty? ? np : import_name
+      pkg_zig = pkg_zig.gsub("@import(\"#{zig_name}\")", "@import(\"#{np}.zig\")")
+      pkg_zig = pkg_zig.gsub("@import(\"#{zig_name}.zig\")", "@import(\"#{np}.zig\")")
     end
     pkg_zig_file = File.join(build_dir, "#{pkg_name}.zig")
     preexisting_pkg = File.exist?(pkg_zig_file)

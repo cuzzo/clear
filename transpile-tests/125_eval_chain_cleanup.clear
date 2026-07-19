@@ -30,7 +30,7 @@ FN evalList(TAKES items: Value[]) RETURNS !Value EFFECTS REENTRANT ->
 END
 
 FN main() RETURNS Void ->
-    ast = makeAst();
-    result = eval(ast);
+    ast = TRY makeAst();
+    result = TRY eval(ast);
     RETURN;
 END

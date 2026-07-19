@@ -9,7 +9,7 @@ FN makeNode(id_val: Int64) RETURNS !Node @multiowned ->
 END
 
 FN main() RETURNS Void ->
-    n = makeNode(99);
+    n = TRY makeNode(99);
     ASSERT n.id == 99, "id should be 99 after MOVE return";
 
     # Clone to verify sharing still works after a MOVE-return.

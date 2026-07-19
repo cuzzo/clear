@@ -52,20 +52,20 @@ END
 
 FN main() RETURNS Void ->
     # Test 1: single WORK command
-    r1 = handleData("WORK:42:100\r\n");
+    r1 = TRY handleData("WORK:42:100\r\n");
     ASSERT startsWith?(r1, ":"), "WORK result starts with colon";
 
     # Test 2: multiple pipelined commands
-    r2 = handleData("WORK:1:5\r\nWORK:2:10\r\nQUIT\r\n");
+    r2 = TRY handleData("WORK:1:5\r\nWORK:2:10\r\nQUIT\r\n");
     # Should have 3 response lines: two :results and one +OK
     ASSERT r2.length() > 10, "multi-command response has content";
 
     # Test 3: READY? and QUIT
-    r3 = handleData("QUIT\r\n");
+    r3 = TRY handleData("QUIT\r\n");
     ASSERT r3 == "+OK\r\n", "QUIT returns +OK";
 
     # Test 4: unknown command
-    r4 = handleData("BOGUS\r\n");
+    r4 = TRY handleData("BOGUS\r\n");
     ASSERT startsWith?(r4, "-ERR"), "unknown returns -ERR";
 
     print("PASS: line parse startsWith with WORK parsing");

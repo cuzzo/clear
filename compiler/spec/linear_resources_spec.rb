@@ -596,6 +596,11 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.not_to raise_error
       end
 
+      it "codepointToString exposes a fallible UTF-8 encoding boundary" do
+        src = 'FN f() RETURNS !String -> RETURN TRY codepointToString(0x1F680); END'
+        expect { run(src) }.not_to raise_error
+      end
+
       it "bytes compiles on String" do
         src = 'FN f() RETURNS !Void -> s = "hello"; n = s.bytes(); RETURN; END'
         expect { run(src) }.not_to raise_error

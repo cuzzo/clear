@@ -29,7 +29,7 @@ FN runMalFileCore(path: String) RETURNS !Int64 ->
   MUTABLE ran: Int64 = 0;
   MUTABLE i: Int64 = 0;
   WHILE i < lines.length() DO
-    rawLine = stripCr(lines[i]) OR_ELSE RAISE;
+    rawLine = stripCr(UNWRAP lines[i]) OR_ELSE RAISE;
     line = rawLine.trim();
 
     IF startsWith?(line, ";>>>") AND line.contains?("deferrable=True") THEN

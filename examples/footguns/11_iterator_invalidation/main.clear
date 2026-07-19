@@ -37,7 +37,7 @@ FN shared_list_access() RETURNS !Void ->
   items: []@shared:locked Int64 = [10, 20, 30, 40];
 
   # Reader: iterates while holding the lock.
-  reader = BG {
+  reader:~ = BG {
     WITH items AS list {
       # list is locked for read for the duration of this block.
       # No other fiber can acquire EXCLUSIVE during this WITH.
@@ -48,7 +48,7 @@ FN shared_list_access() RETURNS !Void ->
   };
 
   # Writer: must wait for reader to release lock before it can modify.
-  writer = BG {
+  writer:~ = BG {
     WITH EXCLUSIVE items AS list {
       # Only runs after reader releases lock.
       &list.append(50);

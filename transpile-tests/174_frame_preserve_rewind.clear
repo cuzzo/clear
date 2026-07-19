@@ -56,7 +56,7 @@ FN main() RETURNS Void ->
     # Pattern 4: string-returning function called in a loop
     MUTABLE total: Int64 = 0;
     FOR i IN (1_i64 ..= 100) DO
-        result = formatItem(i);
+        result = TRY formatItem(i);
         total += result.length();
     END
     ASSERT total > 0;

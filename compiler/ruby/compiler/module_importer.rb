@@ -21,7 +21,8 @@ class ModuleImporter
     :enum_schemas,    # transpiler's @enum_schemas for MATCH dispatch
     :type_defs,       # Zig type definitions (structs/unions/enums) for file-scope emission
     :mir_items,       # full MIR items list, including FnDef bodies, for the bc emitter
-    :type_items       # structural MIR type items for REQUIRE inlining
+    :type_items,      # structural MIR type items for REQUIRE inlining
+    :lifecycle_registry # immutable annotation lifecycle facts for re-lowering
   )
 
   # First-party stdlib packages live under <repo>/stdlib/<name>/src/lib.clear
@@ -173,35 +174,9 @@ class ModuleImporter
 
   sig { params(ast: AST::Program, annotator: SemanticAnnotator, source_dir: String).returns(ModuleImporter::CompiledModule) }
   def compile_module_mir(ast, annotator, source_dir)
-    require_relative "../mir/mir"
-    require_relative "../mir/mir_lowering"
-    require_relative "../backends/mir_emitter"
-    require_relative "../mir/hoist"
-    require_relative "../semantic/pass_state"
-    require_relative "../mir/pre_mir_type_check"
-    require_relative "../mir/rewriters/pipeline_rewriter"
-    require_relative "../mir/rewriters/string_concat_rewriter"
-    require_relative "compiler_frontend"
-
-    PipelineRewriter.new(annotator).rewrite!(ast)
-    MIRPassState.for!(ast).mark!(:pipeline_rewritten)
-    StringConcatRewriter.new.rewrite!(ast)
-    MIRPassState.for!(ast).mark!(:string_concat_rewritten)
+    fn_nodes = prepare_module_mir!(ast, annotator)
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-    hoist_result = Hoist.apply!(ast, schema_lookup: schema_lookup)
-
-    # Run MIRPass on the module AST (needed for cleanup stamps in function bodies).
-    PreMirTypeCheck.verify!(ast)
-    fn_nodes = T.let({}, T::Hash[String, AST::FunctionDef])
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-    mir_pass = MIRPass.new(
-      fn_nodes: fn_nodes,
-      schema_lookup: schema_lookup,
-      body_summaries: T.must(annotator.semantic_index).body_summaries,
-      hoist_bindings: hoist_result.bindings_by_function
-    )
-    mir_pass.transform!(ast)
-    sync_global_scope_function_signatures!(ast, annotator)
+    lifecycle_registry = T.must(annotator.annotation_products.typed_program).lifecycle_registry
 
     # Collect schemas
     struct_schemas = T.let({}, T::Hash[Symbol, Schemas::StructSchema])
@@ -228,6 +203,8 @@ class ModuleImporter
       struct_schemas: struct_schemas,
       enum_schemas: enum_schemas,
       union_schemas: union_schemas,
+      schema_lookup: schema_lookup,
+      lifecycle_registry: lifecycle_registry,
       fn_sigs: fn_sigs,
       moved_guard_info: moved_guard_info,
       importer: self,
@@ -249,8 +226,47 @@ class ModuleImporter
       enum_schemas,
       type_defs,
       result[:items],
-      result[:type_items]
+      result[:type_items],
+      lifecycle_registry
     )
+  end
+
+  sig { params(ast: AST::Program, annotator: SemanticAnnotator).returns(T::Hash[String, AST::FunctionDef]) }
+  def prepare_module_mir!(ast, annotator)
+    require_relative "../mir/mir"
+    require_relative "../mir/mir_lowering"
+    require_relative "../backends/mir_emitter"
+    require_relative "../mir/hoist"
+    require_relative "../semantic/pass_state"
+    require_relative "../mir/pre_mir_type_check"
+    require_relative "../mir/rewriters/pipeline_rewriter"
+    require_relative "../mir/rewriters/string_concat_rewriter"
+    require_relative "compiler_frontend"
+
+    state = MIRPassState.for!(ast)
+    fn_nodes = T.let({}, T::Hash[String, AST::FunctionDef])
+    ast.statements.each { |stmt| fn_nodes[stmt.name] = stmt if stmt.is_a?(AST::FunctionDef) }
+    return fn_nodes if state.completed.include?(:mir_pass_complete)
+
+    PipelineRewriter.new(annotator).rewrite!(ast)
+    state.mark!(:pipeline_rewritten)
+    StringConcatRewriter.new.rewrite!(ast)
+    state.mark!(:string_concat_rewritten)
+    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+    hoist_result = Hoist.apply!(ast, schema_lookup: schema_lookup)
+
+    # Run MIRPass on the module AST (needed for cleanup stamps in function bodies).
+    PreMirTypeCheck.verify!(ast)
+    mir_pass = MIRPass.new(
+      fn_nodes: fn_nodes,
+      schema_lookup: schema_lookup,
+      lifecycle_registry: T.must(annotator.annotation_products.typed_program).lifecycle_registry,
+      body_summaries: T.must(annotator.semantic_index).body_summaries,
+      hoist_bindings: hoist_result.bindings_by_function
+    )
+    mir_pass.transform!(ast)
+    sync_global_scope_function_signatures!(ast, annotator)
+    fn_nodes
   end
 
   sig { params(ast: AST::Program, annotator: SemanticAnnotator).void }

@@ -17,12 +17,12 @@ END
 FN wrapAndReturn(input: String) RETURNS !Value ->
     # Named binding: makeValue()'s cleanup is a regular defer.
     # identity returns a deep copy, so the returned Value survives v's cleanup.
-    v = makeValue(input);
+    v = TRY makeValue(input);
     RETURN identity(v);
 END
 
 FN main() RETURNS Void ->
-    result = wrapAndReturn("hello");
+    result = TRY wrapAndReturn("hello");
     PARTIAL MATCH result START
         Value.Str AS s -> ASSERT s == "hello", "string survives HPT cleanup";,
         DEFAULT -> ASSERT FALSE, "expected Str variant";

@@ -3115,6 +3115,13 @@ class Formatter::Emitter
       return false
     end
 
+    # Inferred-binding tense annotations are intentionally type-less:
+    # `value:?`, `value:!`, `value:!?`, and `value:~`. Keep the sigil flank
+    # attached to the annotation colon just like an ordinary named type.
+    if a.type == :SYM && a.raw == ':' && b.type == :SYM && %w[! ? % ~].include?(b.raw)
+      return false
+    end
+
     # Tense sigils (`!` `?` `%` `~`) attach to following type / sigil.
     if a.type == :SYM && %w[! ? % ~].include?(a.raw)
       if b.type == :TYPE_ID
@@ -3124,10 +3131,6 @@ class Formatter::Emitter
         return false
       end
       if b.type == :SYM && ['[', '{'].include?(b.raw)
-        return false
-      end
-      # Unary use at expression start: attach.
-      if unary_context?(line, b_idx - 1)
         return false
       end
     end

@@ -67,6 +67,31 @@ RSpec.describe "parser phase contracts" do
     expect(tight_collection.tight).to be(true)
   end
 
+  it "allows postfix calls on a grouped FOR source" do
+    loop_node = parse('FOR item IN (source).values() DO PASS; END').statements.fetch(0)
+
+    expect(loop_node).to be_a(AST::ForEach)
+    expect(loop_node.collection).to be_a(AST::MethodCall)
+    expect(loop_node.collection.name).to eq("values")
+  end
+
+  it "distinguishes a multi-statement REDUCE value block from a hash literal" do
+    bind = parse(<<~CLEAR).statements.fetch(0)
+      result = values |> REDUCE("") {
+        MUTABLE suffix = PARTIAL MATCH _ START
+          :list -> "[]",
+          DEFAULT -> "[1]"
+        END;
+        "${acc}${suffix}"
+      };
+    CLEAR
+
+    reduce = bind.value.right
+    expect(reduce).to be_a(AST::ReduceOp)
+    expect(reduce.expression).to be_a(AST::BlockExpr)
+    expect(reduce.expression.body.length).to eq(1)
+  end
+
   it "routes standalone test-support statements through the shared statement table" do
     program = parse(<<~CLEAR)
       STUB fetch RETURNS 1;

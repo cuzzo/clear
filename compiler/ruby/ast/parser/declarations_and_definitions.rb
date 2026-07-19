@@ -215,7 +215,12 @@ class ClearParser
 
     params = parse_argument_list
     explicit_return = match!(:KEYWORD, 'RETURNS')
-    return_type = explicit_return ? parse_type_annotation : nil
+    return_lifetime = T.let(nil, ReturnLifetime)
+    return_type = T.let(nil, T.nilable(Type))
+    if explicit_return
+      return_lifetime = parse_extern_return_lifetime
+      return_type = parse_type_annotation
+    end
 
     # Optional: EFFECTS :alloc:frame, :alloc:heap, :safe — declare side effects.
     # :alloc:frame → inject rt.frameAlloc() for Alloc-typed parameters
@@ -236,7 +241,34 @@ class ClearParser
     source = parse_extern_source(from_module, native_name)
     match!(:CHAR, ';')
     AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects.to_h,
-                          owner_type, owner_type_params, fn_type_params, source)
+                          owner_type, owner_type_params, fn_type_params, source, return_lifetime)
+  end
+
+  sig { returns(ReturnLifetime) }
+  def parse_extern_return_lifetime
+    if match?(:CHAR, '(')
+      consume(:CHAR, '(')
+      names = T.let([], T::Array[AST::Node])
+      until match?(:CHAR, ')')
+        names << parse_var_id
+        match!(:CHAR, ',')
+      end
+      consume(:CHAR, ')')
+      consume(:CHAR, ':')
+      return names
+    end
+
+    if match?(:CHAR, '*')
+      consume(:CHAR, '*')
+      consume(:CHAR, ':')
+      return :wildcard
+    end
+
+    return nil unless match?(:VAR_ID) && peek.type == :CHAR && peek.value == ':'
+
+    names = T.let([parse_var_id], T::Array[AST::Node])
+    consume(:CHAR, ':')
+    names
   end
 
   sig { returns(ParsedExternEffects) }

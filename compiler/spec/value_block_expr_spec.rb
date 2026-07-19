@@ -29,6 +29,7 @@ RSpec.describe "Clear value block expressions" do
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
+      lifecycle_registry: result.lifecycle_registry,
       fn_sigs: result.fn_sigs,
       moved_guard_info: result.moved_guard_info,
       importer: importer,

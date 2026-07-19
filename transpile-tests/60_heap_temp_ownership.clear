@@ -12,7 +12,7 @@ END
 
 FN main() RETURNS Void ->
     # 1. String return assigned to variable
-    a = buildGreeting("Alice");
+    a = TRY buildGreeting("Alice");
     ASSERT a == "Hello, Alice!", "string return assigned";
 
     # 2. String return as inline comparison

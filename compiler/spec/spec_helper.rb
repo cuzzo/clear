@@ -103,6 +103,39 @@ if defined?(ParallelRSpec) && File.basename($PROGRAM_NAME) == "prspec"
 end
 
 module MirPipelineSpecHelper
+  # Synthetic MIR-lowering specs build AST nodes without running annotation.
+  # Give those tests an explicit lifecycle source while keeping production
+  # lowering strict: compiler code must consume the registry annotation built.
+  def spec_lifecycle_registry(schema_lookup: ->(_name) { nil })
+    require_relative "../ruby/semantic/lifecycle_plan"
+
+    registry_class = Class.new(Semantic::LifecycleRegistry) do
+      def initialize(lookup)
+        @spec_schema_lookup = lookup
+        super({}, {})
+      end
+
+      def fetch(type_info)
+        Semantic::LifecyclePlanner.plan(type_info, @spec_schema_lookup)
+      end
+
+      def fetch_binding(node, type_info)
+        Semantic::LifecyclePlanner.plan_binding(type_info, node, @spec_schema_lookup)
+      end
+    end
+    registry_class.new(schema_lookup)
+  end
+
+  def spec_mir_lowering_input(**opts)
+    schema_lookup = opts[:schema_lookup] || lambda do |name|
+      opts.fetch(:struct_schemas, {})[name.to_sym] ||
+        opts.fetch(:enum_schemas, {})[name.to_sym] ||
+        opts.fetch(:union_schemas, {})[name.to_sym]
+    end
+    opts[:lifecycle_registry] ||= spec_lifecycle_registry(schema_lookup: schema_lookup)
+    MIRLoweringInput.new(**opts)
+  end
+
   def capability_transition(cap)
     require_relative "../ruby/semantic/capability_plan"
 

@@ -898,7 +898,7 @@ RSpec.describe MIREmitter do
     it "emits passthrough for value types as a comptime-evaluated inline expression" do
       node = MIR::DeepCopy.new(MIR::Ident.new("n"), nil, nil, :passthrough, nil)
       expect(node.copy_shape).to eq(:inferred)
-      expect(e.emit(node)).to eq("(if (@typeInfo(@TypeOf(n)) == .pointer) n.* else n)")
+      expect(e.emit(node)).to eq("(if (comptime @typeInfo(@TypeOf(n)) == .pointer and @typeInfo(@TypeOf(n)).pointer.size == .one) n.* else n)")
     end
 
     it "emits pointer-shaped full copies from the explicit MIR shape" do

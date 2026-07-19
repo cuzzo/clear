@@ -110,7 +110,11 @@ module FsmTransform
       # Push a frame of alias overrides during a recursive emit call.
       # Any segment filled / pushed inside the block gets tagged
       # with the merged overrides.
-      sig { params(overrides: AliasOverrideMap, blk: T.proc.void).void }
+      sig do
+        type_parameters(:U)
+          .params(overrides: AliasOverrideMap, blk: T.proc.returns(T.type_parameter(:U)))
+          .returns(T.type_parameter(:U))
+      end
       def with_alias_overrides(overrides, &blk)
         T.bind(self, T.untyped) rescue nil
         prev = @current_alias_overrides

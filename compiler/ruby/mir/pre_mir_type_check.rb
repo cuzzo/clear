@@ -94,7 +94,7 @@ module PreMirTypeCheck
       node.each_value { |v| walk(v, violations, seen) }
     elsif node.respond_to?(:each_pair) # Struct AST node
       T.unsafe(node).each_pair do |member, value|
-        next if node.is_a?(AST::FunctionDef) && member == :return_lifetime
+        next if (node.is_a?(AST::FunctionDef) || node.is_a?(AST::ExternFnDecl)) && member == :return_lifetime
         walk(value, violations, seen)
       end
     end

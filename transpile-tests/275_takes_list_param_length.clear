@@ -7,7 +7,7 @@ FN make_lst() RETURNS ![]Int64 ->
 END
 
 FN main() RETURNS Void ->
-    lst = make_lst();
+    lst = TRY make_lst();
     n: Int64 = consume(GIVE lst);
     ASSERT n == 3, "consume! saw all three items via .length() on @list TAKES";
 END

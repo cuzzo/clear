@@ -6,7 +6,7 @@ FN makeWriteLockedNode(n: Node) RETURNS !Node @writeLocked ->
 END
 
 FN main() RETURNS Void ->
-    ln = makeWriteLockedNode(Node{ v: 99 });
+    ln = TRY makeWriteLockedNode(Node{ v: 99 });
 
     WITH EXCLUSIVE ln AS inner {
         ASSERT inner.v == 99, "inner.v should be 99";

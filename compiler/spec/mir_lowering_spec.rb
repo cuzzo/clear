@@ -17,6 +17,12 @@ RSpec.describe MIRLowering do
   let(:emitter) { MIREmitter.new }
 
   def lowering(**opts)
+    schema_lookup = opts[:schema_lookup] || lambda do |name|
+      opts.fetch(:struct_schemas, {})[name.to_sym] ||
+        opts.fetch(:enum_schemas, {})[name.to_sym] ||
+        opts.fetch(:union_schemas, {})[name.to_sym]
+    end
+    opts[:lifecycle_registry] ||= spec_lifecycle_registry(schema_lookup: schema_lookup)
     MIRLowering.new(input: MIRLoweringInput.new(**opts))
   end
 
@@ -111,6 +117,7 @@ RSpec.describe MIRLowering do
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
       fn_sigs: result.fn_sigs,
+      lifecycle_registry: result.lifecycle_registry,
       importer: importer,
       source_dir: Dir.pwd,
       target: target
@@ -129,6 +136,7 @@ RSpec.describe MIRLowering do
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
       fn_sigs: result.fn_sigs,
+      lifecycle_registry: result.lifecycle_registry,
       importer: importer,
       source_dir: Dir.pwd,
       target: target
@@ -176,6 +184,7 @@ RSpec.describe MIRLowering do
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
       fn_sigs: result.fn_sigs,
+      lifecycle_registry: result.lifecycle_registry,
       moved_guard_info: result.moved_guard_info,
       importer: importer,
       source_dir: File.dirname(src_path),
@@ -191,6 +200,8 @@ RSpec.describe MIRLowering do
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
+      schema_lookup: ->(name) { result.annotator.lookup_type_schema(name) },
+      lifecycle_registry: result.lifecycle_registry,
       fn_sigs: result.fn_sigs,
       moved_guard_info: result.moved_guard_info,
       importer: importer,
@@ -403,7 +414,9 @@ RSpec.describe MIRLowering do
 
   describe "old MIR node translation" do
     it "translates MIR::Drop to MIR::Cleanup" do
-      entry = { kind: :uniform, zig_type: "ArrayList(i64)", alloc: :frame, has_moved_guard: false }
+      type = Type.new(:"Int64[]")
+      entry = CleanupEntry.build(:uniform, zig_type: "ArrayList(i64)", alloc: :frame, has_moved_guard: false)
+      entry.set_lifecycle_plan!(Semantic::LifecyclePlanner.plan(type, ->(_name) { nil }))
       drop = MIR::Drop.new(tok, "items")
       drop.cleanup_entry = entry
 
@@ -817,6 +830,74 @@ RSpec.describe MIRLowering do
   end
 
   describe "assignment allocator provenance" do
+    it "retains a map field's CLEAR value type when replacing it with an empty literal" do
+      mir = lower_source_mir(<<~CLEAR)
+        UNION Value { Nil, Count: Int64 }
+        STRUCT Slot { entries: {String}Value }
+
+        FN main() RETURNS Void ->
+          MUTABLE slot = Slot{ entries: {} };
+          slot.entries = {};
+          RETURN;
+        END
+      CLEAR
+
+      expect_checker_clean(mir)
+      zig = emit(mir)
+      expect(zig).to include("CheatLib.StringMap(Value)")
+      expect(zig).not_to include("CheatLib.StringMap(f64)")
+    end
+
+    it "retains cleanup for an outer rodata String first owned in an IF branch" do
+      mir = lower_source_mir(<<~CLEAR)
+        FN make() RETURNS String ->
+          RETURN "owned" $+ " value";
+        END
+
+        FN main() RETURNS Void ->
+          MUTABLE output = "";
+          IF TRUE THEN
+            output = make();
+          ELSE
+            output = "fallback";
+          END
+          ASSERT output.length() > 0, "branch result";
+          RETURN;
+        END
+      CLEAR
+
+      expect_checker_clean(mir)
+    end
+
+    it "does not reuse a cleanup entry for a same-name primitive sibling binding" do
+      mir = lower_source_mir(<<~CLEAR)
+        FN choose(flag: Bool) RETURNS Int64 ->
+          IF flag THEN
+            value = COPY "owned";
+            ASSERT value == "owned", "String branch";
+          ELSE
+            MUTABLE value: Int64 = 1;
+            value = 2;
+            RETURN value;
+          END
+          RETURN 0;
+        END
+
+        FN main() RETURNS Void ->
+          ASSERT choose(FALSE) == 2, "primitive shadow remains a value binding";
+          RETURN;
+        END
+      CLEAR
+
+      errors = MIRChecker.new.check_program!(mir)
+      expect(errors).to be_empty
+
+      primitive_allocs = collect_mir_nodes(mir, MIR::AllocMark).select do |node|
+        node.name.to_s.start_with?("value_L") && node.type_info&.primitive?
+      end
+      expect(primitive_allocs).to be_empty
+    end
+
     it "uses declaration identity for same-name branch reassignment cleanup allocators" do
       mir = lower_source_mir(<<~CLEAR)
         FN make() RETURNS String ->
@@ -1093,7 +1174,11 @@ RSpec.describe MIRLowering do
       node.full_type = :String
       node.instance_variable_set(:@mode, :assign)
       def node.mode; @mode; end
-      node.instance_variable_set(:@reassign_cleanup, MIR::ReassignPlan.new(zig_type: "[]const u8", alloc: :heap))
+      lifecycle = Semantic::LifecyclePlanner.plan(Type.new(:String), ->(_name) { nil })
+      node.instance_variable_set(
+        :@reassign_cleanup,
+        MIR::ReassignPlan.new(zig_type: "[]const u8", alloc: :heap, lifecycle_plan: lifecycle),
+      )
       def node.reassign_cleanup; @reassign_cleanup; end
       result = lowering.lower(node)
       expect(result).to be_a(MIR::ReassignWithCleanup)
@@ -1424,6 +1509,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
       result = lowering.lower(node)
       expect(result).to be_a(MIR::WhileStmt)
+      expect(result.tight).to be(false)
       zig = emit(result)
       expect(zig).to include("while (true)")
     end
@@ -1689,7 +1775,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:passthrough)
-      expect(emit(result)).to eq("(if (@typeInfo(@TypeOf(x)) == .pointer) x.* else x)")
+      expect(emit(result)).to eq("(if (comptime @typeInfo(@TypeOf(x)) == .pointer and @typeInfo(@TypeOf(x)).pointer.size == .one) x.* else x)")
     end
 
     it "uses symbol type information when COPY source has not been stamped" do
@@ -1714,6 +1800,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:full_value)
+      expect(result.zig_type).to eq("*CheatLib.Locked(Counter)")
       expect(emit(result)).to include("try CheatLib.dupeValue(@TypeOf(c), __copy_src, rt.heapAlloc())")
     end
 
@@ -1862,6 +1949,23 @@ RSpec.describe MIRLowering do
       expect(result.zig_type).to eq("Value")
       expect(emit(result)).to include("try CheatLib.dupeValue(Value, __copy_src, rt.heapAlloc())")
     end
+
+    it "keeps COPY of a payload-free union constructor allocation-free" do
+      target = make_id("Value", full_type: :Value)
+      variant = AST::GetField.new(tok, target, "Nil")
+      variant.full_type = :Value
+      node = AST::CopyNode.new(tok, variant)
+      node.full_type = :Value
+
+      result = lowering(
+        union_schemas: { Value: Schemas::UnionSchema.new(variants: { "Nil" => nil, "Str" => :String }) }
+      ).lower(node)
+
+      expect(result).to be_a(MIR::StructInit)
+      expect(emit(result)).to include("Value{ .Nil = {} }")
+      expect(emit(result)).not_to include("dupeValue")
+    end
+
   end
 
   # =========================================================================
@@ -1881,7 +1985,7 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::StructInit)
       zig = emit(result)
       expect(zig).to include("User{")
-      expect(zig).to include(".name = __tmp_")
+      expect(zig).to include('.name = "alice"')
       expect(zig).to include(".age = 30")
     end
 
@@ -1898,7 +2002,7 @@ RSpec.describe MIRLowering do
       expect(zig).to include(".value = 1.0")
     end
 
-    it "lowers borrowed dynamic array fields as borrowed items access" do
+    it "keeps borrowed list fields in their declared container representation" do
       source = make_id("items", full_type: Type.array_of(:Int64))
       node = AST::StructLit.new(tok, "Window", { "items" => source }, nil, nil)
       node.full_type = :Window
@@ -1909,9 +2013,7 @@ RSpec.describe MIRLowering do
       }).lower(node)
 
       field_value = MIR.struct_init_field_value(result.fields.first)
-      expect(field_value).to be_a(MIR::ItemsAccess)
-      expect(field_value.expr).to eq(MIR::Ident.new("items"))
-      expect(field_value.safe).to eq(true)
+      expect(field_value).to eq(MIR::Ident.new("items"))
     end
 
     it "retains an Rc-backed identifier stored in a struct field" do
@@ -2116,6 +2218,115 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "end-to-end lowering + emission" do
+    it "keeps nested boxed union collection copies in the collection layout" do
+      mir = lower_source_mir(<<~CLEAR)
+        UNION Value {
+          Nil,
+          List: Value[],
+          Pair { car: Value @boxed, cdr: Value @boxed }
+        }
+
+        FN main() RETURNS !Void ->
+          MUTABLE items: []Value = List[];
+          &items.append(Value.Nil);
+          MUTABLE slots: []Value = [Value.Nil];
+          slots[0_i64] = Value.Pair{
+            car: Value.Nil,
+            cdr: Value{ List: items }
+          };
+          RETURN;
+        END
+      CLEAR
+
+      expect_checker_clean(mir)
+      collection_copies = collect_mir_nodes(mir, MIR::DeepCopy).select do |copy|
+        collect_mir_nodes(copy.source, MIR::Ident).any? { |ident| ident.name.to_s.start_with?("items") }
+      end
+      expect(collection_copies).not_to be_empty
+      expect(collection_copies).to all(satisfy { |copy| copy.zig_type != "Value" })
+    end
+
+    it "keeps nested struct collection copies in the collection layout" do
+      mir = lower_source_mir(<<~CLEAR)
+        UNION Value { Nil, List: Value[] }
+        STRUCT Holder { value: Value }
+
+        FN main() RETURNS !Void ->
+          MUTABLE items: []Value = List[];
+          &items.append(Value.Nil);
+          MUTABLE holders: []Holder = [Holder{ value: Value.Nil }];
+          holders[0_i64] = Holder{ value: Value{ List: items } };
+          RETURN;
+        END
+      CLEAR
+
+      expect_checker_clean(mir)
+      collection_copies = collect_mir_nodes(mir, MIR::DeepCopy).select do |copy|
+        collect_mir_nodes(copy.source, MIR::Ident).any? { |ident| ident.name.to_s.start_with?("items") }
+      end
+      expect(collection_copies).not_to be_empty
+      expect(collection_copies).to all(satisfy { |copy| copy.zig_type != "Value" })
+    end
+
+    it "keeps a unit-union fallback borrowed through a nested call and indexed store" do
+      mir = lower_source_mir(<<~CLEAR)
+        UNION Value { Nil, Count: Int64, Text: String }
+
+        FN getInt(value: Value) RETURNS Int64 ->
+          PARTIAL MATCH value START
+            Value.Count AS count -> RETURN count;,
+            DEFAULT -> RETURN 0_i64;
+          END
+        END
+
+        FN main() RETURNS !Void ->
+          MUTABLE values: []Value = List[];
+          MUTABLE ints: []Int64 = [0_i64];
+          ints[0_i64] = getInt(values[0_i64] OR_ELSE Value.Nil);
+          RETURN;
+        END
+      CLEAR
+
+      expect_checker_clean(mir)
+      expect(emit(mir)).not_to match(/dupeValue\(Value,\s*Value\{ \.Nil/)
+    end
+
+    it "does not deep-copy fresh unit union variants into owned sinks" do
+      mir = lower_source_mir(<<~CLEAR)
+        UNION Value { Nil, Count: Int64 }
+        STRUCT Slot { payload: Value }
+
+        FN main() RETURNS !Void ->
+          MUTABLE values: []Value = List[];
+          &values.append(Value.Nil);
+          MUTABLE slot = Slot{ payload: Value.Nil };
+          MUTABLE current: Value = Value.Nil;
+          current = Value.Nil;
+          slot.payload = Value.Nil;
+          ASSERT values.length() == 1_i64, "unit variant append";
+          RETURN;
+        END
+      CLEAR
+
+      zig = emit(mir)
+      expect(zig).to include("Value{ .Nil = {} }")
+      expect(zig).to include("current = Value{ .Nil = {} }")
+      expect(zig).to include("slot.payload = Value{ .Nil = {} }")
+      expect(zig).not_to match(/dupeValue\(Value,.*\.Nil/)
+    end
+
+    it "moves owning lists into local array views without duplicating their backing" do
+      mir = lower_source_mir(<<~CLEAR)
+        FN hotView(TAKES items: []Int64) RETURNS Int64[] ->
+          RETURN GIVE items;
+        END
+      CLEAR
+
+      zig = emit(mir)
+      expect(zig).to include("return items;")
+      expect(zig).not_to include("dupeValue")
+    end
+
     it "lowers and emits a var decl with string literal" do
       value = make_lit(:STRING, "world")
       node = AST::VarDecl.new(tok, "greeting", nil, value, false)
@@ -2938,7 +3149,7 @@ RSpec.describe MIRLowering do
 	      expect(zig).to include("const d = data")
 	    end
 
-	    it "does not dereference borrowed raw array parameters" do
+	    it "dereferences borrowed list parameters at the pointer-shaped ABI boundary" do
 	      array_type = Type.array_of(:Int64)
 	      var_node = make_id("data", full_type: array_type)
 	      symbol = SymbolEntry.new(reg: "data", type: array_type, mutable: false, storage: :stack)
@@ -2953,8 +3164,7 @@ RSpec.describe MIRLowering do
 
 	      result = lowering.lower(node)
 	      zig = emit(result)
-	      expect(zig).to include("const ref = data;")
-	      expect(zig).not_to include("data.*")
+	      expect(zig).to include("const ref = data.*;")
 	    end
 
 	    it "lowers RESTRICT capability" do
@@ -3883,7 +4093,7 @@ RSpec.describe MIRLowering do
 
     it "falls back to a structural namespace for BC local require when no helper functions exist" do
       imported_mod = ModuleImporter::CompiledModule.new(
-        AST::Program.new(tok, []),
+        nil,
         nil,
         nil,
         Dir.pwd,
@@ -3931,6 +4141,29 @@ RSpec.describe MIRLowering do
       expect(items).not_to include(an_object_having_attributes(alias_name: "math", module_path: "math.zig"))
       expect(items).to include(an_object_having_attributes(alias_name: "c", module_path: "c.zig"))
       expect(items).to include(an_object_having_attributes(name: "private_helper"))
+    end
+
+    it "filters already-lowered dependency namespaces from imported module bodies" do
+      dependency = MIR::ModuleNamespace.new("types", [
+        MIR::FnDef.new("getStr", [], "void", [], :pub, false, nil),
+      ])
+      helper = MIR::FnDef.new("debugPause", [], "void", [], :pub, false, nil)
+      imported_mod = ModuleImporter::CompiledModule.new(
+        nil,
+        nil,
+        nil,
+        Dir.pwd,
+        {},
+        {},
+        {},
+        nil,
+        [dependency, helper],
+        [],
+      )
+
+      items = lowering.send(:imported_module_items, imported_mod)
+
+      expect(items).to contain_exactly(helper)
     end
 
     it "hoists imported module requires as dependency items" do
@@ -4472,6 +4705,12 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
   let(:tok) { Lexer::Token.new(:KEYWORD, "test", 1, 1) }
 
   def lowering(**opts)
+    schema_lookup = opts[:schema_lookup] || lambda do |name|
+      opts.fetch(:struct_schemas, {})[name.to_sym] ||
+        opts.fetch(:enum_schemas, {})[name.to_sym] ||
+        opts.fetch(:union_schemas, {})[name.to_sym]
+    end
+    opts[:lifecycle_registry] ||= spec_lifecycle_registry(schema_lookup: schema_lookup)
     MIRLowering.new(input: MIRLoweringInput.new(**opts))
   end
 

@@ -8,13 +8,13 @@ END
 FN main() RETURNS Void ->
     # Call a string-returning function multiple times.
     # If each call leaks, the GPA will catch it.
-    a = buildGreeting("Alice");
+    a = TRY buildGreeting("Alice");
     ASSERT a == "Hello, Alice!", "greeting Alice";
 
-    b = buildGreeting("Bob");
+    b = TRY buildGreeting("Bob");
     ASSERT b == "Hello, Bob!", "greeting Bob";
 
-    c = buildGreeting("Charlie");
+    c = TRY buildGreeting("Charlie");
     ASSERT c == "Hello, Charlie!", "greeting Charlie";
 
     RETURN;

@@ -24,10 +24,10 @@ FN main() RETURNS Void ->
     ASSERT list.length() == 2, "list has 2";
 
     # COPY from container index into binding
-    item = COPY list[0];
+    item = UNWRAP COPY list[0];
 
     # COPY in return position (tested by makeStr)
-    result = makeStr("test");
+    result = TRY makeStr("test");
 
     RETURN;
 END

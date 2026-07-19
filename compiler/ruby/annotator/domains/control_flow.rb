@@ -138,19 +138,26 @@ module Annotator
           with_if_is_a_condition(node.condition) { visit(node.condition) }
         end
 
+        then_value_refinements = short_circuit_non_nil_refinements(node.condition, truthy: true)
+        else_value_refinements = short_circuit_non_nil_refinements(node.condition, truthy: false)
+
         branch_logic = [
           proc {
             with_conditional_context do
-              declare_is_a_binding!(node.condition)
-              with_comptime_is_a_then_refinement(node.condition) do
-                visit_stmts(node.then_branch)
+              with_value_type_refinements(then_value_refinements) do
+                declare_is_a_binding!(node.condition)
+                with_comptime_is_a_then_refinement(node.condition) do
+                  visit_stmts(node.then_branch)
+                end
               end
             end
             finalize_scope(node, branch: :then)
             node.then_drops
           },
           proc {
-            with_conditional_context { visit_stmts(node.else_branch) }
+            with_conditional_context do
+              with_value_type_refinements(else_value_refinements) { visit_stmts(node.else_branch) }
+            end
             finalize_scope(node, branch: :else)
             node.else_drops
           }

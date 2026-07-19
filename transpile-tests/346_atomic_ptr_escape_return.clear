@@ -12,7 +12,7 @@ FN make() RETURNS !Cfg@boxed:atomic ->
 END
 
 FN main() RETURNS Void ->
-    cfg = make();
+    cfg = TRY make();
     WITH SNAPSHOT cfg AS c {
         ASSERT c.v == 42, "escaped cell read: expected 42";
     }

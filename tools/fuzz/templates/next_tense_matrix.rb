@@ -11,7 +11,7 @@ NEXT_TENSE_CELLS = [
   { shape: :implicit_future, expected: :compile_error },
   { shape: :implicit_future_call, expected: :compile_error },
   { shape: :implicit_stream, expected: :compile_error },
-  { shape: :implicit_stream_pipeline, expected: :compile_error },
+  { shape: :implicit_stream_pipeline },
 ].freeze
 
 FuzzGenerator.register(:next_tense_matrix, cells: NEXT_TENSE_CELLS) do |p|

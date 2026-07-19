@@ -129,7 +129,7 @@ FN test_where_find() RETURNS !Void ->
     MUTABLE data: []Float64 = [];
     FOR i IN (0_i64 ..< 10_i64) -> &data.append(toFloat(i));
     # find first > 5 after filtering > 3
-    result = data |> WHERE _ > 3.0 |> FIND _ > 5.0;
+    result = UNWRAP (data |> WHERE _ > 3.0 |> FIND _ > 5.0);
     ASSERT result == 6.0, "WHERE + FIND fusion";
     RETURN;
 END

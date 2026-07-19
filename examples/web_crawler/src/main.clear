@@ -47,7 +47,7 @@ FN fetchPage(baseUrl: String, path: String)
 ->
   url = baseUrl $+ path;
   html = httpGet(url);
-  title = extractTitle(html);
+  title = TRY extractTitle(html);
   links = countLinks(html);
   RETURN Page{ url: COPY path, title: COPY title, linkCount: links };
 END

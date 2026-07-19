@@ -92,4 +92,14 @@ TEST StringPredicates DO
       ASSERT url.contains?("example");
     END
   END
+
+  WHEN "deletePrefix" DO
+    TEST THAT "matching prefix returns the suffix" DO
+      ASSERT "@shared".deletePrefix("@") == "shared";
+    END
+
+    TEST THAT "missing prefix returns the original string" DO
+      ASSERT "shared".deletePrefix("@") == "shared";
+    END
+  END
 END

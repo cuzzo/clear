@@ -15,7 +15,7 @@ END
 FN main() RETURNS Void ->
     MUTABLE pool: [Pool(10)]Env = [];
     body = Value{ Num: 42.0 };
-    lambda = captureLambda(body, &pool);
+    lambda = TRY captureLambda(body, &pool);
     # lambda goes out of scope. cleanup(Value) must free *Value body.
     RETURN;
 END

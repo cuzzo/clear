@@ -18,8 +18,8 @@ FN consume(TAKES v: Value) RETURNS !String ->
 END
 
 FN main() RETURNS Void ->
-    sym = makeSymbol();
-    result = consume(sym);
+    sym = TRY makeSymbol();
+    result = TRY consume(sym);
     ASSERT result == "hello", "got symbol";
     RETURN;
 END

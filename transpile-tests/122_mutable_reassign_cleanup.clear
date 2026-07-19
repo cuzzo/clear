@@ -8,7 +8,7 @@ FN makeStr(s: String) RETURNS !Value ->
 END
 
 FN main() RETURNS Void ->
-    MUTABLE result = makeStr("hello");
+    MUTABLE result = TRY makeStr("hello");
     result = makeStr("world");
     result = Value.Nil;
     RETURN;

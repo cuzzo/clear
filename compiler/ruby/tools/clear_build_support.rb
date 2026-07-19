@@ -171,6 +171,17 @@ module ClearBuildSupport
     end
   end
 
+  # The root compiler resolves imports before the package-module build pass.
+  # Register every reachable package up front, including a package required by
+  # another package and one reached through a local REQUIRE dependency.
+  sig { params(source_path: String).returns(T::Hash[String, String]) }
+  def self.collect_package_dependencies(source_path)
+    packages = T.let({}, T::Hash[String, String])
+    seen = T.let(Set.new, T::Set[String])
+    collect_package_dependencies_into(File.expand_path(source_path), packages, seen)
+    packages
+  end
+
   sig { params(path: String).returns(T::Set[String]) }
   def self.collect_clear_dependencies(path)
     seen = T.let(Set.new, T::Set[String])
@@ -320,6 +331,34 @@ module ClearBuildSupport
     source.scan(/REQUIRE\s+"([^"]+)"/).flatten.uniq.each do |raw|
       dep_path = resolve_clear_require(T.must(raw), caller_dir: caller_dir)
       collect_clear_dependencies_into(dep_path, seen)
+    end
+  end
+
+  sig do
+    params(
+      path: String,
+      packages: T::Hash[String, String],
+      seen: T::Set[String]
+    ).void
+  end
+  private_class_method def self.collect_package_dependencies_into(path, packages, seen)
+    return if seen.include?(path)
+    raise FileMissingError, "File not found: #{path}" unless File.exist?(path)
+
+    seen.add(path)
+    source = File.read(path)
+    caller_dir = File.dirname(path)
+    source.scan(/REQUIRE\s+"([^"]+)"/).flatten.uniq.each do |raw|
+      if raw.start_with?("pkg:")
+        package_name = raw.delete_prefix("pkg:")
+        package_path = find_package_source(package_name, start_dir: caller_dir)
+        raise PackageMissingError, "Package '#{package_name}' not found from #{caller_dir}" unless package_path
+
+        packages[package_name] ||= package_path
+        collect_package_dependencies_into(package_path, packages, seen)
+      else
+        collect_package_dependencies_into(File.expand_path(raw, caller_dir), packages, seen)
+      end
     end
   end
 end

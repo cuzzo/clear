@@ -33,6 +33,8 @@ CLEANUP_CLASSIFIER_SHAPE_CELLS = %i[
   always_mutable_struct
   atomic_indirect_struct
   indirect_struct
+  try_index_borrow
+  try_index_copy
   split_stream_handle
   observable_sum_handle
 ].map { |shape| { shape: shape } }
@@ -271,9 +273,36 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
           RETURN cfg;
       END
 
-      FN main() RETURNS Void ->
-          c = make();
+      FN main() RETURNS !Void ->
+          c = TRY make();
           ASSERT c.setting == 99_i64, "indirect struct return";
+          RETURN;
+      END
+    CHT
+
+  when :try_index_borrow
+    <<~CHT
+      STRUCT Managed { text: String }
+
+      FN main() RETURNS !Void ->
+          MUTABLE items: []Managed = [];
+          &items.append(Managed{ text: COPY "owned by list" });
+          borrowed = TRY items[0];
+          ASSERT borrowed.text == "owned by list", "TRY preserves indexed borrow";
+          RETURN;
+      END
+    CHT
+
+  when :try_index_copy
+    <<~CHT
+      STRUCT Managed { text: String }
+
+      FN main() RETURNS !Void ->
+          MUTABLE items: []Managed = [];
+          &items.append(Managed{ text: COPY "copied from list" });
+          owned = COPY TRY items[0];
+          &items.clear();
+          ASSERT owned.text == "copied from list", "COPY owns TRY indexed value";
           RETURN;
       END
     CHT

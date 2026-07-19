@@ -1364,7 +1364,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(code) }.to raise_error(/OR_ELSE requires a fallible \(!T\) or optional \(\?T\) left operand/)
+        expect { run(code) }.to raise_error(/OR_ELSE PRUNE requires the expression to return an error union/)
       end
 
       it "rejects OR_ELSE RAISE when expression is not error-returning" do
@@ -1378,7 +1378,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(code) }.to raise_error(/OR_ELSE requires a fallible \(!T\) or optional \(\?T\) left operand/)
+        expect { run(code) }.to raise_error(/OR_ELSE RAISE requires the expression to return an error union/)
       end
 
       it "accepts OR_ELSE PRUNE when expression returns !T" do
@@ -2052,6 +2052,22 @@ RSpec.describe SemanticAnnotator do
       CLEAR
       zig = ZigTranspiler.new.transpile(src)
       expect(zig).to include("const ref = name;")
+    end
+
+    it "borrows a dynamic collection through its backing slice" do
+      zig = ZigTranspiler.new.transpile(<<~CLEAR)
+        STRUCT SliceIter<T> { source: BORROWED T[], pos: Int64 }
+        FN main() RETURNS Void ->
+          data: Int64[] = [1, 2];
+          WITH BORROWED data AS ref {
+            iter = SliceIter<Int64>{ source: ref, pos: 0 };
+            ASSERT iter.source[0] == 1;
+          }
+        END
+      CLEAR
+
+      expect(zig).to match(/const ref = .*@hasField\(@TypeOf\(__x\), "items"\).*__x\.items/)
+      expect(zig).not_to include("const ref = data;")
     end
 
     it "supports multiple BORROWED bindings in one WITH" do

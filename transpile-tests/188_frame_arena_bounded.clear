@@ -14,7 +14,7 @@ FN main() RETURNS Void ->
     # With proper frame mark/restore, memory stays bounded at ~1 iteration's worth.
     MUTABLE count: Int64 = 0;
     FOR i IN (1_i64 ..= 10000) DO
-        result = buildString(i);
+        result = TRY buildString(i);
         count += result.length();
     END
     ASSERT count > 0, "should have accumulated string lengths";

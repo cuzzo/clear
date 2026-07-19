@@ -55,7 +55,7 @@ module MIR
         case node
         when AST::WhileLoop, AST::WhileBindLoop, AST::ForRange, AST::ForEach, AST::FunctionDef, AST::LambdaLit
           next
-        when AST::IfStatement
+        when AST::IfStatement, AST::IfBind
           each_direct_loop_node(node.then_branch, &block)
           each_direct_loop_node(node.else_branch, &block)
         when AST::MatchStatement

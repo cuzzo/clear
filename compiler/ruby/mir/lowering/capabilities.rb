@@ -407,6 +407,11 @@ module MIRLoweringCapabilities
       MIR::CapabilityUnwrap.new(source_mir)
 	    elsif borrowed_const_param_alias?(context, is_param)
 	      MIR::Deref.new(source_mir)
+	    elsif context.resolved_type&.non_string_array?
+	      # A BORROWED linear collection exposes a slice view, not the
+	      # ArrayList storage owner. ItemsAccess also handles fixed arrays and
+	      # existing slices without introducing a copy.
+	      MIR::ItemsAccess.new(source_mir, true)
 	    else
 	      source_mir
 	    end

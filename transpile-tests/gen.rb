@@ -21,6 +21,8 @@ class TestGenerator
       struct_schemas: result.struct_schemas,
       enum_schemas: result.enum_schemas,
       union_schemas: result.union_schemas,
+      schema_lookup: ->(name) { result.annotator.lookup_type_schema(name) },
+      lifecycle_registry: result.lifecycle_registry,
       fn_sigs: result.fn_sigs,
       moved_guard_info: result.moved_guard_info,
       importer: importer,

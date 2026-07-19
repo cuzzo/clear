@@ -97,7 +97,17 @@ module FuzzMutants
                    'iteration scope under loop-local method-call temps.',
       invariant: :bug2_frame_no_rewind,
       patch: File.join(PATCH_DIR, 'local_frame_decls_stdlib_provenance.patch'),
-      templates: [:loop_local_method_temp],
+      templates: [:loop_local_method_temp, :loop_rewind_matrix],
+      kill: { bucket: :mir_error, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :loop_destination_copy_rewind,
+      description: 'Hide destination-sensitive COPY reassignment allocations ' \
+                   'from loop frame analysis. Every loop and sequential ' \
+                   'control-flow shape must still expose the missing rewind.',
+      invariant: :destination_copy_frame_rewind,
+      patch: File.join(PATCH_DIR, 'loop_destination_copy_rewind_noop.patch'),
+      templates: [:loop_rewind_matrix],
       kill: { bucket: :mir_error, min_delta: 1 }
     ),
     Mutant.new(

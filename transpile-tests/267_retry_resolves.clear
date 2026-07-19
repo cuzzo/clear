@@ -22,7 +22,7 @@ FN main() RETURNS Void ->
     marker = Marker{ bit: 0 } @shared:locked;
 
     # Holder: take c for 150ms, then release.
-    holder = BG {
+    holder:~ = BG {
         WITH EXCLUSIVE c AS inner {
             napFor(150);
             inner.value = 1;
@@ -32,7 +32,7 @@ FN main() RETURNS Void ->
     # Waiter: try to acquire with up to 3 retries. First attempt waits
     # 100ms and times out. Second attempt catches the (now-released)
     # lock and sets the marker.
-    waiter = BG {
+    waiter:~ = BG {
         napFor(20);
         WITH EXCLUSIVE c AS inner {
             inner.value = inner.value + 10;

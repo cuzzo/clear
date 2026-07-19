@@ -23,7 +23,7 @@ FN buildReport(name: String, data: String) RETURNS !Report ->
   parts = data.split(",");
   MUTABLE sum = 0;
   FOR i IN (0 ..< parts.length()) DO
-    val = parts[i].toInt();
+    val = TRY (UNWRAP parts[i]).toInt();
     sum += val;
   END
   RETURN Report{ name: COPY name, itemCount: parts.length(), total: sum };
@@ -36,7 +36,7 @@ FN buildReportOrFail(name: String, data: String) RETURNS !Report ->
   parts = data.split(",");
   MUTABLE sum = 0;
   FOR i IN (0 ..< parts.length()) DO
-    val = parts[i].toInt();
+    val = TRY (UNWRAP parts[i]).toInt();
     sum += val;
   END
   RETURN Report{ name: COPY name, itemCount: parts.length(), total: sum };

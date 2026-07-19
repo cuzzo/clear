@@ -60,8 +60,8 @@ def escape_via_return_shape_cell(shape)
           RETURN [1_i64, 2_i64, 3_i64];
       END
 
-      FN main() RETURNS Void ->
-          result = make();
+      FN main() RETURNS !Void ->
+          result = TRY make();
           ASSERT length(result) == 3_i64, "return list literal";
           RETURN;
       END
@@ -72,8 +72,8 @@ def escape_via_return_shape_cell(shape)
           RETURN {};
       END
 
-      FN main() RETURNS Void ->
-          result = make();
+      FN main() RETURNS !Void ->
+          result = TRY make();
           ASSERT result.count() == 0_i64, "return hash literal";
           RETURN;
       END
@@ -84,8 +84,8 @@ def escape_via_return_shape_cell(shape)
           RETURN COPY "literal";
       END
 
-      FN main() RETURNS Void ->
-          result = make();
+      FN main() RETURNS !Void ->
+          result = TRY make();
           ASSERT result == "literal", "return string literal";
           RETURN;
       END
@@ -96,8 +96,8 @@ def escape_via_return_shape_cell(shape)
           RETURN a $+ b;
       END
 
-      FN main() RETURNS Void ->
-          result = make("he", "llo");
+      FN main() RETURNS !Void ->
+          result = TRY make("he", "llo");
           ASSERT result == "hello", "return concat";
           RETURN;
       END
@@ -114,8 +114,8 @@ def escape_via_return_shape_cell(shape)
           RETURN inner();
       END
 
-      FN main() RETURNS Void ->
-          result = make();
+      FN main() RETURNS !Void ->
+          result = TRY make();
           ASSERT result.length() == 1_i64, "return call result";
           RETURN;
       END
@@ -132,10 +132,10 @@ def escape_via_return_shape_cell(shape)
           RETURN b;
       END
 
-      FN main() RETURNS Void ->
-          r1 = make(TRUE);
+      FN main() RETURNS !Void ->
+          r1 = TRY make(TRUE);
           ASSERT r1.length() == 1_i64, "return if-branch then";
-          r2 = make(FALSE);
+          r2 = TRY make(FALSE);
           ASSERT r2.length() == 2_i64, "return if-branch else";
           RETURN;
       END
@@ -151,8 +151,8 @@ def escape_via_return_shape_cell(shape)
           RETURN COPY hld.items;
       END
 
-      FN main() RETURNS Void ->
-          result = make();
+      FN main() RETURNS !Void ->
+          result = TRY make();
           ASSERT result.length() == 1_i64, "return field copy";
           RETURN;
       END
@@ -168,8 +168,8 @@ def escape_via_return_shape_cell(shape)
           RETURN COPY (outer[0_i64] OR_ELSE missing);
       END
 
-      FN main() RETURNS Void ->
-          result = make();
+      FN main() RETURNS !Void ->
+          result = TRY make();
           ASSERT result.length() == 1_i64, "return index copy";
           RETURN;
       END
@@ -183,8 +183,8 @@ def escape_via_return_shape_cell(shape)
           RETURN cfg;
       END
 
-      FN main() RETURNS Void ->
-          c = make();
+      FN main() RETURNS !Void ->
+          c = TRY make();
           ASSERT c.setting == 7_i64, "return @boxed struct";
           RETURN;
       END
@@ -198,8 +198,8 @@ def escape_via_return_shape_cell(shape)
           RETURN p;
       END
 
-      FN main() RETURNS Void ->
-          r = make();
+      FN main() RETURNS !Void ->
+          r = TRY make();
           ASSERT r.name == "alice", "return @boxed struct w/ String field";
           RETURN;
       END
@@ -321,8 +321,8 @@ FuzzGenerator.register(:escape_via_return, cells: ESCAPE_VIA_RETURN_CELLS) do |p
         RETURN #{return_var};
     END
 
-    FN main() RETURNS Void ->
-        result = make();
+    FN main() RETURNS !Void ->
+        result = TRY make();
         #{len_check}
         #{first_check}
         RETURN;

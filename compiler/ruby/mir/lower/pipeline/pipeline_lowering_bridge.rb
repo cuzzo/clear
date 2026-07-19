@@ -76,6 +76,11 @@ class PipelineLoweringBridge
     T.cast(@lowering.lower(node), MIR::Node)
   end
 
+  sig { params(node: AST::Node, alloc: Symbol).returns(MIR::Node) }
+  def lower_node_with_decl_alloc(node, alloc)
+    @lowering.pipeline_lower_node_with_decl_alloc(node, alloc)
+  end
+
   sig { params(nodes: T::Array[AST::Node]).returns(T::Array[MIR::Emittable]) }
   def lower_body(nodes)
     @lowering.lower_body(nodes)

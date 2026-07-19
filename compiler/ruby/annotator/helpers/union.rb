@@ -1,5 +1,47 @@
 # typed: strict
 require "sorbet-runtime"
+
+# Compatibility shared by expression, assignment, tuple, and return typing.
+# Keeping this calculation independent from any annotation domain prevents one
+# domain from relying on another domain's private methods.
+module UnionPayloadCompatibility
+  extend T::Sig
+
+  sig do
+    params(
+      expected_type: Type,
+      actual_type: Type,
+      schema: Schemas::SchemaValue
+    ).returns(T.nilable(T.any(String, Symbol)))
+  end
+  def self.unique_variant(expected_type, actual_type, schema)
+    return nil unless schema.is_a?(Schemas::UnionSchema)
+
+    compared_actual = if expected_type.optional? && actual_type.optional?
+      T.must(actual_type.wrapped_type)
+    else
+      actual_type
+    end
+
+    matches = schema.variants.filter_map do |variant_name, payload|
+      next unless payload.is_a?(Type)
+      payload_matches?(payload, compared_actual) ? variant_name : nil
+    end
+    matches.one? ? matches.first : nil
+  end
+
+  sig { params(payload_type: Type, actual_type: Type).returns(T::Boolean) }
+  def self.payload_matches?(payload_type, actual_type)
+    payload_surface = Type.coercion_surface_name(payload_type)
+    actual_surface = Type.coercion_surface_name(actual_type)
+    return true if payload_surface == actual_surface
+    return false if payload_type.string? || actual_type.string?
+
+    payload_type.accepts?(actual_type)
+  end
+  private_class_method :payload_matches?
+end
+
 # union.rb — Union type validation helpers for CLEAR.
 #
 # Provides validation for union method requirements (UNION ... REQUIRES)

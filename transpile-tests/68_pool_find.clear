@@ -11,20 +11,20 @@ FN main() RETURNS Void ->
     id3: Id<Item> = &pool.insert(Item{ value: 30.0 });
 
     # FIND: matching element
-    found = pool |> FIND _.value == 20.0;
+    found:? = pool |> FIND _.value == 20.0;
     ASSERT found != NIL, "FIND should find value 20";
 
     # FIND: no match returns NIL
-    missing = pool |> FIND _.value == 99.0;
+    missing:? = pool |> FIND _.value == 99.0;
     ASSERT missing == NIL, "FIND should return NIL for missing value";
 
     # FIND: after remove, deleted slot is skipped (alive check)
     &pool.remove(id1);
-    gone = pool |> FIND _.value == 10.0;
+    gone:? = pool |> FIND _.value == 10.0;
     ASSERT gone == NIL, "FIND should not return a removed item";
 
     # FIND: other items still findable after remove
-    still_there = pool |> FIND _.value == 30.0;
+    still_there:? = pool |> FIND _.value == 30.0;
     ASSERT still_there != NIL, "FIND should still find live items after remove";
 
     RETURN;

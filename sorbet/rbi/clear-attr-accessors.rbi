@@ -23,6 +23,10 @@ class AST::Assignment
   sig { params(value: T.untyped).returns(T.untyped) }
   def auto_lock=(value); end
   sig { returns(T.untyped) }
+  def field_lifecycle_plan; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def field_lifecycle_plan=(value); end
+  sig { returns(T.untyped) }
   def field_pre_cleanup; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def field_pre_cleanup=(value); end
@@ -95,6 +99,10 @@ class AST::BgStreamBlock
 end
 
 class AST::BinaryOp
+  sig { returns(T.untyped) }
+  def error_union_type; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_union_type=(value); end
   sig { returns(T.untyped) }
   def observable_dest; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -685,6 +693,8 @@ end
 class Annotator::Phases::TypedProgramFacts
   sig { returns(Annotator::Phases::TypedProgramFacts::BodySummaries) }
   def body_summaries; end
+  sig { returns(Semantic::LifecycleRegistry) }
+  def lifecycle_registry; end
   sig { returns(OwnershipGraph) }
   def ownership_graph; end
   sig { returns(Annotator::Phases::ResolutionFacts) }
@@ -704,6 +714,10 @@ class Assignment
   def auto_lock; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def auto_lock=(value); end
+  sig { returns(T.untyped) }
+  def field_lifecycle_plan; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def field_lifecycle_plan=(value); end
   sig { returns(T.untyped) }
   def field_pre_cleanup; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1929,13 +1943,6 @@ class TypeCapabilities
   def soa; end
   sig { returns(T.untyped) }
   def sync; end
-end
-
-class TypeShape
-  sig { returns(T::Boolean) }
-  def auto; end
-  sig { returns(TypeExpression) }
-  def expression; end
 end
 
 class UseAfterMoveChecker

@@ -8,7 +8,7 @@ FN makeNumbers() RETURNS ![]Int64 ->
 END
 
 FN main() RETURNS Void ->
-  nums = makeNumbers();
+  nums = TRY makeNumbers();
   ASSERT nums.length() == 1, "returned list length";
   ASSERT nums[0] == 2, "returned list contents";
   RETURN;

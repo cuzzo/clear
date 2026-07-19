@@ -125,6 +125,9 @@ module Annotator
       sig { returns(T::Array[DeferredWithValidation]) }
       def deferred_with_validations = phase_audit_inputs.deferred_with_validations
 
+      sig { returns(T::Array[DeferredRecoveryValidation]) }
+      def deferred_recovery_validations = phase_audit_inputs.deferred_recovery_validations
+
       sig { returns(CapabilityAudit::BindingAuditStore) }
       def capability_audit = phase_audit_inputs.capability_audit
 

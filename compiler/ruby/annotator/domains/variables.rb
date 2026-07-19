@@ -353,13 +353,22 @@ module Annotator
       def emit_inferred_wrapper_binding!(node, code, prefix, wrapper)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-        value_token = node.value.token
+        value_range = node.value.source_range
+        wraps_expression = node.value.is_a?(AST::BinaryOp)
         fixes = [Fix.new(
           description: fix_description(:MAKE_VALUE_RECOVERY_EXPLICIT), confidence: :auto,
-          edits: [Edit.new(
-            span: Span.new(file: nil, line: value_token.line, col: value_token.column, length: 0),
-            replacement: prefix,
-          )],
+          edits: [
+            Edit.new(
+              span: Span.new(file: nil, line: value_range.start_line,
+                col: value_range.start_column, length: 0),
+              replacement: wraps_expression ? "#{prefix}(" : prefix,
+            ),
+            *(wraps_expression ? [Edit.new(
+              span: Span.new(file: nil, line: value_range.end_line,
+                col: value_range.end_column, length: 0),
+              replacement: ")",
+            )] : []),
+          ],
         )]
         if node.is_a?(AST::BindExpr)
           fixes << Fix.new(
@@ -803,9 +812,13 @@ module Annotator
         scope.check_validity!(node.name)
 
         # 2. Resolve Type
-        raw_type = scope.resolve_full_type(node.name)
-        raw_type = refined_comptime_type_param_type(raw_type)
         entry = scope.resolve_entry(node.name)
+        raw_type = if entry
+          @traversal_state.value_type_refinements[entry.binding_id] || scope.resolve_full_type(node.name)
+        else
+          scope.resolve_full_type(node.name)
+        end
+        raw_type = refined_comptime_type_param_type(raw_type)
         if raw_type.fn_type? && entry&.storage == :static
           # Named function used as a value — preserve its function type and tag
           # it so MIR lowering emits a function reference.
@@ -1221,7 +1234,8 @@ module Annotator
         value = assignment_value_type(node, value_type)
         return if target.any? || value.any? || value.untyped?
         return if target.resolved == :NIL # Allow narrowing from initial NIL
-        if unique_union_payload_variant(target, value)
+        union_schema = lookup_type_schema(target.value_payload_type.resolved)
+        if UnionPayloadCompatibility.unique_variant(target, value, union_schema)
           node.value.coerced_type = target
           return
         end

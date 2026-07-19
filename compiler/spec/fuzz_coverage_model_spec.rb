@@ -28,6 +28,25 @@ RSpec.describe FuzzCoverageModel do
     expect(described_class.cross_product_gaps).to be_empty
   end
 
+  it "keeps loop rewind fuzz exhaustive across its declared control-flow axes" do
+    cells = templates.fetch(:loop_rewind_matrix).cells
+    container_cells = cells.select { |cell| cell[:scenario] == :container_matrix }
+    disruptor_cells = cells.select { |cell| cell[:scenario] == :disruptor }
+    nested_cells = cells.select { |cell| cell[:scenario] == :nested }
+
+    expect(container_cells.map { |cell| cell.values_at(:loop_kind, :container, :producer) }).to match_array(
+      LRM_LOOP_KINDS.product(LRM_CONTAINERS, LRM_PRODUCERS)
+    )
+    expect(disruptor_cells.map { |cell| cell.values_at(:loop_kind, :disruptor) }).to match_array(
+      LRM_LOOP_KINDS.product(LRM_DISRUPTORS)
+    )
+    expect(nested_cells.map { |cell| cell.values_at(:loop_kind, :placement, :producer) }).to match_array(
+      %i[while for_range for_each].product(%i[outer inner both], LRM_PRODUCERS)
+    )
+    expect(cells.select { |cell| cell[:scenario] == :zero_iterations }.map { |cell| cell[:loop_kind] })
+      .to match_array(LRM_LOOP_KINDS)
+  end
+
   it "has direct mutant coverage for every high-risk template" do
     high_risk = described_class.snapshots(templates).filter_map do |snapshot|
       snapshot.name if snapshot.profile.high_risk

@@ -32,7 +32,7 @@ FN main() RETURNS Void ->
 
   # Fan-in: sum results
   MUTABLE total = 0;
-  FOR j IN (0 ..< 10_000) -> total = total %+ results[j];
+  FOR j IN (0 ..< 10_000) -> total = total %+ UNWRAP results[j];
 
   checksum = total MOD 1_000_000_000;
   print("Checksum:", checksum);

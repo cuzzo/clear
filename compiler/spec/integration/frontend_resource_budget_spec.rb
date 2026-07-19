@@ -54,14 +54,20 @@ RSpec.describe "frontend resource-budget integration" do
   end
 
   it "keeps flat parsing geometric rather than replaying prefixes" do
+    parse(Array.new(100) { |index| "warm#{index} = #{index}_i64;" }.join("\n"))
+
     elapsed = [400, 800].map do |count|
       source = Array.new(count) { |index| "v#{index} = #{index}_i64;" }.join("\n")
-      Benchmark.realtime { parse(source) }
+      Array.new(3) do
+        started = Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID)
+        parse(source)
+        Process.clock_gettime(Process::CLOCK_PROCESS_CPUTIME_ID) - started
+      end.sort.fetch(1)
     end
 
     # Doubling a linear input should remain far below the 4x quadratic slope.
-    # The margin absorbs shared-runner scheduling noise while still catching
-    # the former recursive prefix replay.
+    # Process CPU time and the median discard shared-runner scheduling noise
+    # without weakening the former recursive prefix-replay regression.
     expect(elapsed.last).to be < (elapsed.first * 3.5)
   end
 end

@@ -26,19 +26,19 @@ END
 
 FN main() RETURNS Void ->
     # Success case: no error, CATCH not triggered
-    r1 = handleWithCatch("ok");
+    r1 = TRY handleWithCatch("ok");
     ASSERT r1 == "ok:ok", "success passes through";
 
     # Transient error: caught by CATCH Transient
-    r2 = handleWithCatch("transient");
+    r2 = TRY handleWithCatch("transient");
     ASSERT r2 == "recovered-transient", "CATCH Transient";
 
     # Input/InvalidJson: caught by CATCH Input WITH(InvalidJson)
-    r3 = handleWithCatch("input");
+    r3 = TRY handleWithCatch("input");
     ASSERT r3 == "recovered-invalid-json", "CATCH Input WITH(InvalidJson)";
 
     # NotFound: no specific CATCH, falls to DEFAULT
-    r4 = handleWithCatch("notfound");
+    r4 = TRY handleWithCatch("notfound");
     ASSERT r4 == "recovered-default", "DEFAULT catches NotFound";
 
     RETURN;

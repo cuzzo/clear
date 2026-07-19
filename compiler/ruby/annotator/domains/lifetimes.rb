@@ -142,16 +142,22 @@ module Annotator
         # COPY produces an owned deep-copy. The source is NOT consumed.
         # Clone the Type so mutating provenance doesn't affect the inner node.
         inner_type = node.value.full_type!(context: "COPY value")
+        resolver = ->(name) { lookup_type_schema(name) }
+        if inner_type.is_a?(Type) && inner_type.contains_linear_resource?(resolver)
+          error!(node, :COPY_NON_COPYABLE, type: inner_type.to_s)
+        end
         stamp_type!(node, inner_type.is_a?(Type) ? Type.new(inner_type) : inner_type)
         ti = node.full_type!(context: "COPY result")
-        resolver = ->(name) { lookup_type_schema(name) }
 
-        # COPY of a primitive or Id<T> is a semantic no-op (value copy, no allocation).
+        # COPY of a primitive, interned symbol, or Id<T> is a semantic no-op
+        # (value copy, no allocation). String@symbol is an intern-table handle,
+        # not an owned String buffer; heapifying it invents cleanup that the
+        # source type's no-drop lifecycle contract explicitly forbids.
         # All other explicit COPYs produce heap-owned data.
         source_sync = node.value.respond_to?(:symbol) ? node.value.symbol&.sync : nil
         is_value_copy = ti.is_a?(Type) &&
-          source_sync.nil? && !ti.multiowned? && !ti.shared? &&
-          (ti.primitive? || ti.id_handle?)
+          !ti.multiowned? && !ti.shared? &&
+          (ti.symbol? || (source_sync.nil? && (ti.primitive? || ti.id_handle?)))
         if is_value_copy
           node.storage = :stack
         else
@@ -163,7 +169,10 @@ module Annotator
           if ti.is_a?(Type)
             ti.mark_heap_allocated!
             base_ti = ti.optional? ? ti.wrapped_type : ti
-            if !ti.multiowned? && !ti.shared? && [:Type, :SymbolEntry, :Any].include?(base_ti&.resolved)
+            # Type is explicitly a ruby-to-CLEAR value class. A deep COPY of a
+            # Type produces an independent affine value; silently wrapping it
+            # in @multiowned changes the declared API and rejects safe returns.
+            if !ti.multiowned? && !ti.shared? && [:SymbolEntry, :Any].include?(base_ti&.resolved)
               ti.apply_reference_ownership!(:multiowned)
             end
           end
@@ -560,6 +569,18 @@ module Annotator
 
         args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
         args[param_index]
+      end
+
+      sig { params(call_node: T.any(AST::FuncCall, AST::MethodCall)).returns(T::Boolean) }
+      def call_returns_borrowed_view?(call_node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        matched_def = call_node.matched_stdlib_def
+        return true if matched_def && !matched_def.intrinsic_lifetime.empty?
+
+        scope = lookup_scope_for(call_node.name)
+        signature = FunctionSignature.unwrap(scope&.resolve_type(call_node.name))
+        !!signature && !signature.return_lifetime.empty?
       end
 
       sig { params(node: T.any(AST::Assignment, AST::VarDecl, AST::BindExpr)).void }
@@ -1349,7 +1370,7 @@ module Annotator
   private :handle_assignment_identifier_move!
   private :init_value_contents_heap?
   private :reject_scoped_assignment_move!
-  private :resolve_borrow_source
+  private :resolve_borrow_source, :call_returns_borrowed_view?
   private :share_consumes_source?
   private :value_copy_capture?
 

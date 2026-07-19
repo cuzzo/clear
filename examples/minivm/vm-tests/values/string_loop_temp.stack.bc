@@ -20,7 +20,9 @@ instructions:
 0032 STORE_ISLOT       0
 0034 JUMP              8
 0036 LOAD_SLOT         0
-0038 HALT
+0038 STORE_SLOT        2
+0040 LOAD_SLOT         2
+0042 HALT
 consts:
 S:4:done
 I:0

@@ -34,7 +34,7 @@ END
 FN benchHeap(n: Int64) RETURNS !Int64 ->
   MUTABLE total = 0;
   FOR i IN (0 ..< n) DO
-    s = makeString(i);
+    s = TRY makeString(i);
     total += s.length();
   END
   RETURN total;
@@ -49,13 +49,13 @@ FN main() RETURNS Void ->
 
   # Benchmark Frame (fast path)
   t0 = timestampMs();
-  frameTotal = benchFrame(n);
+  frameTotal = TRY benchFrame(n);
   frameMs = timestampMs() - t0;
   frameRssKb = currentMemoryKb();
 
   # Benchmark Heap (escape path)
   t1 = timestampMs();
-  heapTotal = benchHeap(n);
+  heapTotal = TRY benchHeap(n);
   heapMs = timestampMs() - t1;
   heapRssKb = currentMemoryKb();
 

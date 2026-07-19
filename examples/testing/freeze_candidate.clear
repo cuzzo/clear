@@ -60,7 +60,7 @@ FN main() RETURNS Void ->
   # After FREEZE the frozen buffer holds the Doc struct + all 3 string bodies
   # at adjacent offsets. Access is one pointer hop into the buffer.
   # Working set ≈ 80 B → always in L1.
-  doc_fr = buildDoc(42);
+  doc_fr = TRY buildDoc(42);
   frozen = FREEZE doc_fr;
 
   t1 = timestampMs();

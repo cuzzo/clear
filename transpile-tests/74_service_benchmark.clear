@@ -55,13 +55,13 @@ END
 
 FN main() RETURNS Void ->
     # Small workload: fibers should win (less overhead)
-    fiberSmall = benchFiber(10000, 4);
-    serviceSmall = benchService(10000, 4);
+    fiberSmall = TRY benchFiber(10000, 4);
+    serviceSmall = TRY benchService(10000, 4);
     ASSERT fiberSmall == serviceSmall, "small: same result";
 
     # Large workload: OS threads benefit from true parallelism
-    fiberLarge = benchFiber(1000000, 4);
-    serviceLarge = benchService(1000000, 4);
+    fiberLarge = TRY benchFiber(1000000, 4);
+    serviceLarge = TRY benchService(1000000, 4);
     ASSERT fiberLarge == serviceLarge, "large: same result";
 
     print("All @service benchmark tests passed!");

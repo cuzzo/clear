@@ -110,6 +110,22 @@ RSpec.describe ClearFixSupport do
       .to include("Retain the stream deliberately.")
   end
 
+  it "wraps an optional pipeline before inserting UNWRAP" do
+    source = <<~CLEAR
+      FN main() RETURNS Void ->
+        nums: []Float64 = [1.0, 4.0];
+        found = nums |> FIND _ > 3.0;
+        ASSERT found == 4.0;
+      END
+    CLEAR
+
+    rewritten, edits, = apply_fix(source, take_first: true, only: Set[:type])
+
+    expect(edits).to eq(2)
+    expect(rewritten).to include("found = UNWRAP (nums |> FIND _ > 3.0);")
+    expect(described_class.preview_source(rewritten, only_set: Set[:type])).to be_empty
+  end
+
   it "applies lint and ownership fixes to exact golden source" do
     expect_rewrite(
       "FN main() RETURNS Int64 ->\n  MUTABLE x = 42;\n  RETURN x;\nEND\n",

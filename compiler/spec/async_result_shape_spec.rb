@@ -22,4 +22,19 @@ RSpec.describe "AsyncResultShape" do
     expect(out).to include("var ys = try xs.next()")
     expect(out).not_to include("for (xs.items)")
   end
+
+  it "publishes a literal String as an owned promise result" do
+    src = <<~CLEAR
+      FN main() RETURNS Void ->
+        promise:~ = BG { "hello"; };
+        result = NEXT promise;
+        ASSERT result == "hello";
+      END
+    CLEAR
+
+    out = ZigTranspiler.new.transpile(src)
+    expect(out).to include("CheatLib.Promise([]const u8)")
+    expect(out).to include("const result: []const u8 = try promise.next()")
+    expect(out).to include("CheatLib.free")
+  end
 end

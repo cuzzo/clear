@@ -594,7 +594,8 @@ module Annotator
             expected_item = T.must(tuple_types[index])
             actual_item = item.full_type!(context: "tuple literal element")
             next if expected_item.accepts?(actual_item)
-            if unique_union_payload_variant(expected_item, actual_item)
+            union_schema = lookup_type_schema(expected_item.value_payload_type.resolved)
+            if UnionPayloadCompatibility.unique_variant(expected_item, actual_item, union_schema)
               item.coerced_type = expected_item
               next
             end
