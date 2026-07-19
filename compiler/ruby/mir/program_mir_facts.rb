@@ -185,11 +185,23 @@ class ProgramMIRFinalizer
         indexed_assignment_lowers_through_runtime?(node)
       when AST::CopyNode, AST::CloneNode
         copy_node_lowers_through_runtime?(node, schema_lookup)
+      when AST::BinaryOp
+        owned_or_else_lowers_through_runtime?(node, schema_lookup)
       when AST::WithBlock
         with_block_lowers_through_runtime?(node)
       else
         false
       end
+    end
+
+    sig { params(node: AST::BinaryOp, schema_lookup: Type::SchemaLookup).returns(T::Boolean) }
+    def owned_or_else_lowers_through_runtime?(node, schema_lookup)
+      return false unless node.op == :OR_ELSE || node.op == :OR
+
+      type = Type.from_node!(node, context: "owned OR runtime requirement").success_type
+      type.string? || type.heap_ptr? || type.collection_value? || type.collection? ||
+        type.needs_cleanup?(T.unsafe(schema_lookup)) ||
+        type.recursive_cleanup_shape?(T.unsafe(schema_lookup))
     end
 
     sig { params(node: T.any(AST::FuncCall, AST::MethodCall), fn_nodes: FnNodes).returns(T::Boolean) }
