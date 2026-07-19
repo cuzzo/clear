@@ -1744,6 +1744,8 @@ RSpec.describe MIREmitter do
       expect(owned_slice).to include("try __x.toOwnedSlice(rt.heapAlloc())")
       expect(owned_slice).to include("try rt.heapAlloc().dupe(@typeInfo(@TypeOf(__x)).array.child, __x[0..])")
       expect(owned_slice).to include("break :blk_owned_slice_")
+      expect(owned_slice).to include("blk_owned_slice_1")
+      expect(MIREmitter.new.emit(MIR::OwnedSlice.new(MIR::Ident.new("list"), :heap))).to eq(owned_slice)
     end
 
     it "emits structural union matches through emit" do

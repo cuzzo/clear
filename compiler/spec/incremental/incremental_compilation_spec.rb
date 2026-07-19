@@ -186,6 +186,21 @@ RSpec.describe "incremental CLEAR compilation" do
     expect(reverted.zig).to eq(initial.zig)
   end
 
+  it "emits deterministic Zig for capability-generated names across clean compilations" do
+    %w[40_locked.clear 264_multi_lock_sort.clear 333_with_match_per_arm_dispatch.clear].each do |fixture|
+      path = File.expand_path("../../../transpile-tests/#{fixture}", __dir__)
+      text = File.binread(path)
+      config = Incremental::ZigCompilerConfig.new(source_dir: File.dirname(path))
+      first_compiler = Incremental::ZigCompiler.new(config)
+      second_compiler = Incremental::ZigCompiler.new(config)
+
+      first = first_compiler.artifact(first_compiler.compile(text)).render
+      second = second_compiler.artifact(second_compiler.compile(text)).render
+
+      expect(second).to eq(first), fixture
+    end
+  end
+
   it "falls back cleanly for a caller-sensitive edit" do
     compiler = Incremental::ZigCompiler.new(
       Incremental::ZigCompilerConfig.new(source_dir: Dir.pwd),

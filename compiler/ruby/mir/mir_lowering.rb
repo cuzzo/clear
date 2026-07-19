@@ -543,6 +543,15 @@ class MIRLowering
     lowering_state.counters
   end
 
+  # Stable source identity for generated local names. Ruby object_id is useful
+  # for in-memory identity maps, but embedding it in Zig makes clean builds
+  # nondeterministic and prevents checked incremental artifact reuse.
+  sig { params(node: AST::Locatable).returns(String) }
+  def stable_node_suffix(node)
+    range = node.source_range
+    "#{range.start_offset}_#{range.end_offset}"
+  end
+
   sig { returns(MIRLoweringFunctions::FunctionState) }
   def function_state
     lowering_state.function_state

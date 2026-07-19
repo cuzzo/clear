@@ -326,7 +326,7 @@ module MIRLoweringCapabilities
   sig { params(context: WithCapabilityBindingContext, lock_expr: MIR::Emittable, lock_sync: T.nilable(Symbol)).returns(LockBindingPlan) }
   def lock_binding_plan(context, lock_expr, lock_sync)
     LockBindingPlan.new(
-      guard_var: "__#{context.var_name}_guard_#{context.node.object_id.abs}",
+      guard_var: "__#{context.var_name}_guard_#{T.cast(self, MIRLowering).stable_node_suffix(context.node)}",
       alias_name: context.alias_name,
       lock_expr: lock_expr,
       lock_sync: lock_sync,
@@ -350,7 +350,7 @@ module MIRLoweringCapabilities
           clause.matched_types,
           clause.bubble_types,
           plan.with_node.token&.line.to_s,
-          "__acq_#{plan.with_node.object_id.abs}_#{plan.guard_var}",
+          "__acq_#{T.cast(self, MIRLowering).stable_node_suffix(plan.with_node)}_#{plan.guard_var}",
           T.cast(self, MIRLowering).runtime_binding_name,
         ),
       ]
@@ -509,7 +509,7 @@ module MIRLoweringCapabilities
 
     source_mir = with_capability_source_mir(context.var_node, raw_atomic: true)
     safe_alias = safe_with_capability_alias(context.alias_name)
-    guard_var = "__#{context.var_name}_snap_#{context.node.object_id.abs}"
+    guard_var = "__#{context.var_name}_snap_#{T.cast(self, MIRLowering).stable_node_suffix(context.node)}"
     MIR::SnapshotRead.new(MIR::CapabilityUnwrap.new(source_mir), context.rt_name, safe_alias, guard_var, [])
   end
 
@@ -546,7 +546,7 @@ module MIRLoweringCapabilities
   def with_block_control_label(node, clause)
     return nil unless clause && (clause.action == AST::ErrorActionKind::Pass || clause.action == AST::ErrorActionKind::Block)
 
-    "__with_#{node.object_id.abs}"
+    "__with_#{T.cast(self, MIRLowering).stable_node_suffix(node)}"
   end
 
   sig { params(node: AST::WithBlock).returns(T::Boolean) }
@@ -738,12 +738,12 @@ module MIRLoweringCapabilities
     cell = with_capability_source_mir(var_node, raw_atomic: true)
     alias_name = cap.alias_name
     safe_alias = safe_with_capability_alias(alias_name)
-    snapshot_mode = node.respond_to?(:snapshot_mode) && node.snapshot_mode
+    snapshot_mode = !!(node.respond_to?(:snapshot_mode) && node.snapshot_mode)
 
     arms_meta = T.must(node.arms).map { |arm|
       MIR::WithMatchArm.new(
         family: arm.family,
-        guard_var: "__#{alias_name}_match_#{node.object_id.abs}",
+        guard_var: "__#{alias_name}_match_#{stable_node_suffix(node)}",
         body: lower_body(arm.body),
       )
     }
@@ -1171,7 +1171,7 @@ module MIRLoweringCapabilities
   sig { params(fallible_caps: T::Array[CapabilitySpec], fallible: T::Boolean, with_node: T.nilable(AST::WithBlock)).returns(T::Array[MIR::SortedLockAcquireEntry]) }
   def build_sorted_acquire_entries(fallible_caps, fallible:, with_node: nil)
     T.bind(self, MIRLowering) rescue nil
-    suffix = with_node ? "_#{with_node.object_id.abs}" : ""
+    suffix = with_node ? "_#{stable_node_suffix(with_node)}" : ""
     fallible_caps.each_with_index.map do |cap, i|
       var_node = T.cast(cap.var_node, CapabilityVarNode)
       var_name   = cap.target_label
@@ -1212,7 +1212,7 @@ module MIRLoweringCapabilities
       clause&.bubble_types || [],
       clause&.retries,
       with_node.token&.line.to_s,
-      "__acq_sort_#{with_node.object_id.abs}",
+      "__acq_sort_#{stable_node_suffix(with_node)}",
       runtime_binding_name,
       fallible,
     )

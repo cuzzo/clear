@@ -40,6 +40,9 @@ class MIREmitter
     const :uses_c_callback, T::Boolean, default: false
     const :if_bind_counter, T.nilable(Integer), default: nil
     const :discard_counter, Integer, default: 0
+    const :deep_copy_counter, Integer, default: 0
+    const :items_block_counter, Integer, default: 0
+    const :owned_slice_counter, Integer, default: 0
   end
 
   # Public boundary accepts Object so the explicit unknown-node diagnostic below
@@ -64,6 +67,9 @@ class MIREmitter
     @flow_alias_name = T.let(nil, T.nilable(String))
     @if_bind_counter = T.let(state&.if_bind_counter, T.nilable(Integer))
     @discard_counter = T.let(state&.discard_counter || 0, Integer)
+    @deep_copy_counter = T.let(state&.deep_copy_counter || 0, Integer)
+    @items_block_counter = T.let(state&.items_block_counter || 0, Integer)
+    @owned_slice_counter = T.let(state&.owned_slice_counter || 0, Integer)
     @symbol_literals = T.let(state ? state.symbol_literals.dup : {}, T::Hash[String, String])
     @ident_overrides = T.let({}, T::Hash[String, String])
     @move_guard_overrides = T.let({}, T::Hash[String, String])
@@ -77,6 +83,9 @@ class MIREmitter
       uses_c_callback: @uses_c_callback,
       if_bind_counter: @if_bind_counter,
       discard_counter: @discard_counter,
+      deep_copy_counter: @deep_copy_counter,
+      items_block_counter: @items_block_counter,
+      owned_slice_counter: @owned_slice_counter,
     )
   end
 
@@ -2720,7 +2729,7 @@ class MIREmitter
     src = emit(node.source)
     alloc = node.alloc ? alloc_expr(node.alloc) : nil
     # Uniquify the blk label across nested DeepCopy emits in the same scope.
-    @deep_copy_counter = T.let(T.let(@deep_copy_counter || 0, Integer) + 1, T.nilable(Integer))
+    @deep_copy_counter += 1
     bc = "blk_copy_#{@deep_copy_counter}"
     case node.strategy
     when :passthrough
@@ -3261,7 +3270,7 @@ class MIREmitter
       # Uniquify the blk label so multiple ItemsAccess emits in the same
       # Zig scope don't redefine each other. Zig rejects duplicate labels
       # even in nested expression positions.
-      @items_block_counter = T.let(T.let(@items_block_counter || 0, Integer) + 1, T.nilable(Integer))
+      @items_block_counter += 1
       label = "blk_items_#{@items_block_counter}"
       "(#{label}: { const __x = if (@typeInfo(@TypeOf(#{inner})) == .pointer and @typeInfo(@TypeOf(#{inner})).pointer.size == .one) #{inner}.* else #{inner}; break :#{label} (if (@hasField(@TypeOf(__x), \"items\")) __x.items else @constCast(__x[0..])); })"
     else
@@ -3272,7 +3281,8 @@ class MIREmitter
   sig { params(node: MIR::OwnedSlice).returns(String) }
   def emit_owned_slice(node)
     inner = emit(node.expr)
-    label = "blk_owned_slice_#{node.object_id.abs}"
+    @owned_slice_counter += 1
+    label = "blk_owned_slice_#{@owned_slice_counter}"
     alloc = alloc_expr(node.alloc)
     "#{label}: { var __x = #{inner}; " \
       "break :#{label} if (comptime @typeInfo(@TypeOf(__x)) == .@\"struct\" and @hasDecl(@TypeOf(__x), \"toOwnedSlice\")) " \

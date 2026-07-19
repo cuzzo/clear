@@ -159,7 +159,10 @@ module Incremental
       left.symbol_literals == right.symbol_literals &&
         left.uses_c_callback == right.uses_c_callback &&
         left.if_bind_counter == right.if_bind_counter &&
-        left.discard_counter == right.discard_counter
+        left.discard_counter == right.discard_counter &&
+        left.deep_copy_counter == right.deep_copy_counter &&
+        left.items_block_counter == right.items_block_counter &&
+        left.owned_slice_counter == right.owned_slice_counter
     end
   end
 end
