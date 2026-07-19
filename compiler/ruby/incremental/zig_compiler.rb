@@ -78,6 +78,16 @@ module Incremental
       snapshot ? snapshot.entries.map(&:path) : []
     end
 
+    sig { returns(DependencySnapshot) }
+    def dependency_snapshot
+      @dependency_snapshot || DependencySnapshot.new([])
+    end
+
+    sig { params(snapshot: DependencySnapshot).void }
+    def restore_dependency_snapshot!(snapshot)
+      @dependency_snapshot = snapshot
+    end
+
     sig { params(compilation: ZigTranspiler::MIRCompilation).returns(ProgramArtifact) }
     def artifact(compilation)
       footer = ZigTranspiler.new.runtime_footer(compilation.main_stack_variant)

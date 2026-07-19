@@ -16,13 +16,14 @@ module Incremental
   class WatchCompiler
     extend T::Sig
 
-    sig { params(config: ZigCompilerConfig, module_path: String, verify: T::Boolean).void }
-    def initialize(config:, module_path:, verify: false)
+    sig { params(config: ZigCompilerConfig, module_path: String, verify: T::Boolean, cache: T.nilable(PortableCache)).void }
+    def initialize(config:, module_path:, verify: false, cache: nil)
       @session = T.let(
         CompilationSession.new(
           compiler: ZigCompiler.new(config),
           module_path: module_path,
           verify: verify,
+          cache: cache,
         ),
         CompilationSession,
       )

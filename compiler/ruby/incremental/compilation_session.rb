@@ -5,6 +5,7 @@ require "set"
 require "sorbet-runtime"
 
 require_relative "item_reconciler"
+require_relative "portable_cache"
 require_relative "program_artifact"
 require_relative "zig_compiler"
 
@@ -30,12 +31,14 @@ module Incremental
   class CompilationSession
     extend T::Sig
 
-    sig { params(compiler: ZigCompiler, module_path: String, verify: T::Boolean).void }
-    def initialize(compiler:, module_path:, verify: false)
+    sig { params(compiler: ZigCompiler, module_path: String, verify: T::Boolean, cache: T.nilable(PortableCache)).void }
+    def initialize(compiler:, module_path:, verify: false, cache: nil)
       @compiler = compiler
       @module_path = T.let(File.expand_path(module_path), String)
       @verify = verify
+      @cache = T.let(cache, T.nilable(PortableCache))
       @snapshot = T.let(nil, T.nilable(CompilationSnapshot))
+      restore_portable_snapshot!
     end
 
     sig { params(source: String).returns(CompilationResult) }
@@ -84,6 +87,7 @@ module Incremental
       else
         @snapshot = nil
       end
+      persist_snapshot!
       CompilationResult.new(zig: artifact.render, status: :clean, reason: reason)
     end
 
@@ -154,6 +158,8 @@ module Incremental
         function_counter_snapshots: previous.function_counter_snapshots,
         proven_contexts: proven_contexts,
       )
+      @compiler.publish_dependencies!(source)
+      persist_snapshot!
       CompilationResult.new(
         zig: zig,
         status: :incremental,
@@ -205,6 +211,36 @@ module Incremental
         left.deep_copy_counter == right.deep_copy_counter &&
         left.items_block_counter == right.items_block_counter &&
         left.owned_slice_counter == right.owned_slice_counter
+    end
+
+    sig { void }
+    def restore_portable_snapshot!
+      cached = @cache&.load
+      return unless cached
+
+      current = catalog(cached.source)
+      return unless current
+
+      @compiler.restore_dependency_snapshot!(cached.dependency_snapshot)
+      @snapshot = CompilationSnapshot.new(
+        source: cached.source,
+        catalog: current,
+        artifact: cached.artifact,
+        function_counter_snapshots: cached.function_counter_snapshots,
+      )
+    end
+
+    sig { void }
+    def persist_snapshot!
+      snapshot = @snapshot
+      return unless snapshot && @cache
+
+      @cache.write(
+        source: snapshot.source,
+        artifact: snapshot.artifact,
+        function_counter_snapshots: snapshot.function_counter_snapshots,
+        dependencies: @compiler.dependency_snapshot,
+      )
     end
   end
 end

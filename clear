@@ -251,6 +251,45 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
+def incremental_transpile_runner(source:, source_dir:, pkg_paths:, use_c_allocator:, use_debug_allocator:, default_stack:, ownership_mode:, transpile_flag:, cache_path:)
+  require_relative 'compiler/ruby/incremental'
+  fingerprint = Digest::SHA256.hexdigest([
+    ClearBuildSupport.compiler_signature(BUILD_SUPPORT_CONFIG),
+    transpile_flag
+  ].join("\0"))
+  cache = Incremental::PortableCache.new(
+    path: cache_path,
+    module_path: source,
+    compiler_fingerprint: fingerprint
+  )
+  compiler = Incremental::WatchCompiler.new(
+    config: Incremental::ZigCompilerConfig.new(
+      source_dir: source_dir,
+      pkg_paths: pkg_paths,
+      use_c_allocator: use_c_allocator,
+      use_debug_allocator: use_debug_allocator,
+      default_stack: default_stack,
+      ownership_mode: ownership_mode
+    ),
+    module_path: source,
+    verify: ENV['CLEAR_VERIFY_INCREMENTAL'] == '1',
+    cache: cache
+  )
+  lambda do |_config, _transpile_flag, source_path|
+    timed = compiler.compile_file(source_path)
+    result = timed.result
+    changed = result.changed_function ? " changed=#{result.changed_function}" : ''
+    $stderr.puts format(
+      "\e[90m[clear-incremental] status=%s%s seconds=%.3f reason=%s\e[0m",
+      result.status,
+      changed,
+      timed.elapsed_seconds,
+      result.reason
+    )
+    result.zig
+  end
+end
+
 def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false, zig_coverage: false, zig_coverage_suite: 'clear-cli', zig_coverage_name: nil, zig_coverage_run_dir: nil, ownership_mode: :default, prepare_only: false, transpile_runner: nil)
   invocation_cwd = Dir.pwd
   error "File not found: #{source}" unless File.exist?(source)
@@ -346,6 +385,20 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   tmp_name = coverage_module_mode ? "._clear_cov_#{base_name}_#{$$}.zig" : "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(build_dir, tmp_name)
+
+  if transpile_runner.nil? && !module_mode
+    transpile_runner = incremental_transpile_runner(
+      source: source,
+      source_dir: source_dir,
+      pkg_paths: pkg_paths,
+      use_c_allocator: use_c_allocator,
+      use_debug_allocator: use_debug_allocator,
+      default_stack: default_stack,
+      ownership_mode: ownership_mode,
+      transpile_flag: transpile_flag,
+      cache_path: File.join(build_dir, 'root.clearc')
+    )
+  end
 
   begin
     zig_code, _cache_file = ClearBuildSupport.transpile_cached(
@@ -521,7 +574,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       signature: signature,
       dependency_paths: (ffi_dependency_paths + ffi_modules.map(&:last)).uniq,
       extra_link_libs: extra_link_libs,
-      c_link_flags: c_link_flags
+      c_link_flags: c_link_flags,
+      transpile_runner: transpile_runner
     }
   end
 
@@ -711,37 +765,6 @@ end
 
 def do_watch_build(source, output:, incremental:, default_stack:, use_c_allocator:, use_debug_allocator:, bypass_transpile_cache:, ownership_mode:)
   source = File.expand_path(source)
-  require_relative 'compiler/ruby/incremental'
-  pkg_paths = begin
-    ClearBuildSupport.collect_package_dependencies(source)
-  rescue ClearBuildSupport::BuildError => e
-    error e.message
-  end
-  watch_compiler = Incremental::WatchCompiler.new(
-    config: Incremental::ZigCompilerConfig.new(
-      source_dir: File.dirname(source),
-      pkg_paths: pkg_paths,
-      use_c_allocator: use_c_allocator,
-      use_debug_allocator: use_debug_allocator,
-      default_stack: default_stack,
-      ownership_mode: ownership_mode
-    ),
-    module_path: source,
-    verify: ENV['CLEAR_VERIFY_INCREMENTAL'] == '1'
-  )
-  transpile_runner = lambda do |_config, _transpile_flag, source_path|
-    timed = watch_compiler.compile_file(source_path)
-    result = timed.result
-    changed = result.changed_function ? " changed=#{result.changed_function}" : ''
-    $stderr.puts format(
-      "\e[90m[clear-incremental] status=%s%s seconds=%.3f reason=%s\e[0m",
-      result.status,
-      changed,
-      timed.elapsed_seconds,
-      result.reason
-    )
-    result.zig
-  end
   context_options = {
     output: output,
     opt_level: 'Debug',
@@ -752,10 +775,10 @@ def do_watch_build(source, output:, incremental:, default_stack:, use_c_allocato
     use_debug_allocator: use_debug_allocator,
     bypass_transpile_cache: bypass_transpile_cache,
     ownership_mode: ownership_mode,
-    prepare_only: true,
-    transpile_runner: transpile_runner
+    prepare_only: true
   }
   context = do_build(source, **context_options)
+  context_options[:transpile_runner] = context[:transpile_runner]
   build_dir = context[:build_dir]
   switch_object = File.join(build_dir, 'runtime-switch.o')
   onroot_object = File.join(build_dir, 'runtime-onRoot.o')

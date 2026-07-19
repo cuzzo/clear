@@ -260,6 +260,83 @@ RSpec.describe "incremental CLEAR compilation" do
     end
   end
 
+  it "restores a portable primitive cache across compiler processes" do
+    Dir.mktmpdir("incremental-portable") do |dir|
+      path = File.join(dir, "main.clear")
+      cache_path = File.join(dir, "main.clearc")
+      File.write(path, source)
+      config = Incremental::ZigCompilerConfig.new(source_dir: dir)
+      cache = Incremental::PortableCache.new(
+        path: cache_path,
+        module_path: path,
+        compiler_fingerprint: "compiler-v1",
+      )
+
+      first = Incremental::CompilationSession.new(
+        compiler: Incremental::ZigCompiler.new(config),
+        module_path: path,
+        cache: cache,
+      )
+      initial = first.compile(source)
+      expect(File.binread(cache_path)).not_to start_with("\x04\x08")
+
+      restored_compiler = Incremental::ZigCompiler.new(config)
+      restored = Incremental::CompilationSession.new(
+        compiler: restored_compiler,
+        module_path: path,
+        cache: cache,
+        verify: true,
+      )
+      expect(restored.compile(source).status).to eq(:exact_hit)
+      changed = restored.compile(source(alpha: "3"))
+      expect(changed.status).to eq(:incremental)
+      expect(changed.zig).to eq(restored_compiler.artifact(restored_compiler.compile(source(alpha: "3"))).render)
+
+      incompatible = Incremental::PortableCache.new(
+        path: cache_path,
+        module_path: path,
+        compiler_fingerprint: "compiler-v2",
+      )
+      expect(incompatible.load).to be_nil
+      expect(initial.zig).not_to eq(changed.zig)
+    end
+  end
+
+  it "rejects corrupt, oversized, and stale portable caches" do
+    Dir.mktmpdir("incremental-portable-invalid") do |dir|
+      path = File.join(dir, "main.clear")
+      dependency = File.join(dir, "dep.clear")
+      cache_path = File.join(dir, "main.clearc")
+      File.write(path, source)
+      File.write(dependency, "one")
+      cache = Incremental::PortableCache.new(
+        path: cache_path,
+        module_path: path,
+        compiler_fingerprint: "compiler-v1",
+      )
+
+      File.binwrite(cache_path, "not messagepack")
+      expect(cache.load).to be_nil
+      File.truncate(cache_path, Incremental::PortableCache::MAX_BYTES + 1)
+      expect(cache.load).to be_nil
+
+      artifact = Incremental::ProgramArtifact.new(
+        error_name_enum: "errors",
+        footer: "footer",
+        items: [],
+        final_state: MIREmitter::EmissionState.new,
+      )
+      cache.write(
+        source: source,
+        artifact: artifact,
+        function_counter_snapshots: {},
+        dependencies: Incremental::DependencySnapshot.capture([dependency]),
+      )
+      File.write(dependency, "two")
+      expect(cache.load).to be_nil
+    end
+  end
+
   it "detects changed and missing dependency content" do
     Dir.mktmpdir("incremental-fingerprints") do |dir|
       path = File.join(dir, "dep.clear")
