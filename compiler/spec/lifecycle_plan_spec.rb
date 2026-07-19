@@ -90,6 +90,79 @@ RSpec.describe Semantic::LifecyclePlan do
       .to raise_error(RuntimeError, /missing annotation lifecycle plan/)
   end
 
+  it "assigns stable binding place identities across independent compilations" do
+    source = <<~CLEAR
+      FN value() RETURNS String ->
+        MUTABLE content: String = COPY "initial";
+        content = COPY "updated";
+        RETURN content;
+      END
+    CLEAR
+
+    bindings = 2.times.map do
+      frontend = ZigTranspiler.new.compile_mir_program(source).frontend
+      found = nil
+      AST.each_locatable(frontend.ast, descend_functions: true) do |node|
+        found = node if node.is_a?(AST::VarDecl) && node.name.to_s == "content"
+      end
+      T.must(found)
+    end
+
+    place_ids = bindings.map { |binding| T.must(binding.symbol).semantic_place_id }
+    expect(place_ids).to all(be_a(Integer))
+    expect(place_ids.uniq.length).to eq(1)
+  end
+
+  it "gives synthetic test bodies distinct place identities that are stable across compilations" do
+    source = <<~CLEAR
+      FN main() RETURNS Void -> RETURN; END
+      TEST Places DO
+        WHEN "bindings" DO
+          TEST THAT "first" DO
+            value: Float64 = 1.0;
+            ASSERT value == 1.0;
+          END
+          TEST THAT "second" DO
+            value: String = COPY "two";
+            ASSERT value == "two";
+          END
+        END
+      END
+    CLEAR
+
+    compile_ids = 2.times.map do
+      frontend = ZigTranspiler.new.compile_mir_program(source).frontend
+      ids = []
+      frontend.fn_nodes.each_value do |function|
+        next unless function.name.to_s.start_with?("__test_body_")
+
+        AST.each_locatable(function.body) do |node|
+          next unless (node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)) && node.name.to_s == "value"
+
+          ids << T.must(node.symbol).semantic_place_id
+        end
+      end
+      ids.compact.sort
+    end
+
+    expect(compile_ids.first.length).to eq(2)
+    expect(compile_ids.first.uniq.length).to eq(2)
+    expect(compile_ids.last).to eq(compile_ids.first)
+  end
+
+  it "fails closed when a known binding place has no annotation plan" do
+    token = Lexer::Token.new(:VAR_ID, "content", 1, 1)
+    binding = AST::VarDecl.new(token, "content", Type.new(:String), nil, true)
+    symbol = SymbolEntry.new(reg: binding, type: Type.new(:String), mutable: true, storage: :stack)
+    symbol.adopt_semantic_place_id!(42)
+    binding.symbol = symbol
+    plan = Semantic::LifecyclePlanner.plan(Type.new(:String), no_schema)
+    registry = Semantic::LifecycleRegistry.new({ Type.new(:String).lifecycle_type_key => plan }, {})
+
+    expect { registry.fetch_binding(binding, Type.new(:String)) }
+      .to raise_error(RuntimeError, /missing annotation binding lifecycle plan for place 42/)
+  end
+
   it "inventories intermediate optional payloads inside fallible returns before MIR cleanup" do
     source = <<~CLEAR
       STRUCT Descriptor {

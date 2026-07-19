@@ -136,6 +136,14 @@ RSpec.describe "architecture invariants: semantic lifecycle authority" do
     end
   end
 
+  it "indexes binding lifecycle plans by semantic place rather than Ruby object identity" do
+    registry = source("compiler/ruby/semantic/lifecycle_plan.rb")
+
+    expect(registry).to include("semantic_place_id")
+    expect(registry).not_to include("binding_plans[node.object_id]")
+    expect(method_body("compiler/ruby/semantic/lifecycle_plan.rb", "fetch_binding")).not_to include("object_id")
+  end
+
   it "makes COPY and owned-sink materialization consume LifecyclePlan instead of type cleanup predicates" do
     copy = method_body("compiler/ruby/mir/lowering/expressions.rb", "lower_copy")
     sink = method_body("compiler/ruby/mir/mir_lowering.rb", "owned_sink_plan")

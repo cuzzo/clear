@@ -134,6 +134,7 @@ class Annotator::Phases::TypeAnalysisSession
     prop :comptime_type_param_refinements, T::Hash[Symbol, Type], factory: -> { {} }
     prop :value_type_refinements, T::Hash[Integer, Type], factory: -> { {} }
     prop :branch_terminated, T::Boolean, default: false
+    prop :next_synthetic_body_ordinal, Integer, default: -1
   end
 
   class Config < T::Struct
@@ -653,6 +654,7 @@ class Annotator::Phases::TypeAnalysisSession
     lifecycle_registry = Semantic::LifecycleRegistry.build(
       resolution.program,
       ->(name) { lookup_type_schema(name) },
+      binding_nodes: resolution.function_registry.body_summaries.values.flat_map(&:binding_nodes),
     )
     typed_program = Annotator::Phases::TypedProgramFacts.new(
       resolution: resolution,

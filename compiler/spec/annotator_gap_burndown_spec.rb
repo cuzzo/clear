@@ -3957,8 +3957,11 @@ RSpec.describe "annotator branch gap burndown" do
     expect(summary.assignment_nodes).to eq([bind, assign])
     expect(summary.escape_nodes).to include(decl, bind, assign)
     expect(summary.local_facts.map(&:name)).to eq(["created"])
-    expect(summary.local_facts.map { |fact| fact.id.value }).to all(be > 0)
-    expect(summary.local_facts.map { |fact| fact.place_id.value }).to all(be > 0)
+    # Zero alone is the unassigned sentinel. Synthetic bodies deliberately use
+    # the negative ID namespace so their deterministic places cannot collide
+    # with source definitions assigned from the positive namespace.
+    expect(summary.local_facts.map { |fact| fact.id.value }).to all(satisfy { |id| id != 0 })
+    expect(summary.local_facts.map { |fact| fact.place_id.value }).to all(satisfy { |id| id != 0 })
   end
 
   it "treats callees without effect sets as non-suspending body-scan calls" do

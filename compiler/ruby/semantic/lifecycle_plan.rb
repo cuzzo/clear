@@ -146,14 +146,15 @@ module Semantic
 
     PlanMap = T.type_alias { T::Hash[String, LifecyclePlan] }
     BindingPlanMap = T.type_alias { T::Hash[Integer, LifecyclePlan] }
+    BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr, AST::DestructureTarget) }
 
     sig { returns(LifecycleRegistry) }
     def self.empty
       new({}, {})
     end
 
-    sig { params(program: AST::Program, schema_lookup: Type::SchemaLookup).returns(LifecycleRegistry) }
-    def self.build(program, schema_lookup)
+    sig { params(program: AST::Program, schema_lookup: Type::SchemaLookup, binding_nodes: T::Array[BindingNode]).returns(LifecycleRegistry) }
+    def self.build(program, schema_lookup, binding_nodes: [])
       types = T.let({}, T::Hash[String, Type])
 
       AST.each_locatable(program, descend_functions: true) do |node|
@@ -167,15 +168,48 @@ module Semantic
         plans[key] = LifecyclePlanner.plan(type_info, schema_lookup)
       end
       binding_plans = T.let({}, BindingPlanMap)
+      inventoried_bindings = T.let(binding_nodes.dup, T::Array[BindingNode])
       AST.each_locatable(program, descend_functions: true) do |node|
-        next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+        next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr) || node.is_a?(AST::DestructureTarget)
+        next if node.is_a?(AST::BindExpr) && node.mode == :assign
         next unless node.typed?
 
-        binding_plans[node.object_id] = LifecyclePlanner.plan_binding(
+        inventoried_bindings << node
+      end
+      inventoried_bindings.each do |node|
+        symbol = T.unsafe(node).respond_to?(:symbol) ? T.unsafe(node).symbol : nil
+        declaration = symbol.is_a?(SymbolEntry) ? symbol.reg : nil
+        if declaration.is_a?(AST::VarDecl) || declaration.is_a?(AST::BindExpr) || declaration.is_a?(AST::DestructureTarget)
+          node = declaration
+        end
+        next if node.is_a?(AST::BindExpr) && node.mode == :assign
+        next unless node.typed?
+        place_id = binding_place_id(node)
+        next unless place_id
+
+        plan = LifecyclePlanner.plan_binding(
           node.full_type!(context: "binding lifecycle inventory"),
           node,
           schema_lookup,
         )
+        existing = binding_plans[place_id]
+        existing_close = existing&.resource_close_plan&.actions&.map do |action|
+          [action.call_kind.serialize, action.name, action.field_path, action.runtime_heap_alloc_args]
+        end
+        planned_close = plan.resource_close_plan&.actions&.map do |action|
+          [action.call_kind.serialize, action.name, action.field_path, action.runtime_heap_alloc_args]
+        end
+        same_contract = existing &&
+          existing.type_key == plan.type_key &&
+          existing.drop_strategy == plan.drop_strategy &&
+          existing.copy_strategy == plan.copy_strategy &&
+          existing_close == planned_close
+        if existing && !same_contract
+          raise "conflicting annotation binding lifecycle plans for place #{place_id}: " \
+            "#{existing.type_key}/#{existing.drop_strategy} vs #{plan.type_key}/#{plan.drop_strategy} " \
+            "at #{node.class} line #{node.token.line}"
+        end
+        binding_plans[place_id] = plan
       end
       new(plans, binding_plans)
     end
@@ -197,12 +231,20 @@ module Semantic
 
     sig { params(node: AST::Node, type_info: Type).returns(LifecyclePlan) }
     def fetch_binding(node, type_info)
-      @binding_plans.fetch(node.object_id) { fetch(type_info) }
+      place_id = binding_place_id(node)
+      return fetch(type_info) unless place_id
+
+      @binding_plans.fetch(place_id) do
+        raise "missing annotation binding lifecycle plan for place #{place_id}"
+      end
     end
 
-    sig { returns(Integer) }
-    def size
-      @plans.size
+    private
+
+    sig { params(node: AST::Node).returns(T.nilable(Integer)) }
+    def binding_place_id(node)
+      symbol = T.unsafe(node).respond_to?(:symbol) ? T.unsafe(node).symbol : nil
+      symbol.is_a?(SymbolEntry) ? symbol.semantic_place_id : nil
     end
 
     class << self
@@ -235,6 +277,12 @@ module Semantic
         add_type!(types, element) if element
         add_type!(types, type_info.key_type) if type_info.map?
         add_type!(types, type_info.value_type) if type_info.map?
+      end
+
+      sig { params(node: AST::Node).returns(T.nilable(Integer)) }
+      def binding_place_id(node)
+        symbol = T.unsafe(node).respond_to?(:symbol) ? T.unsafe(node).symbol : nil
+        symbol.is_a?(SymbolEntry) ? symbol.semantic_place_id : nil
       end
 
       sig { params(types: T::Hash[String, Type], program: AST::Program).void }

@@ -192,6 +192,15 @@ module Annotator
       def with_body_fact_frame(identity, &block)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
+        if identity.body_id == Semantic::UNASSIGNED_BODY_ID
+          ordinal = phase_traversal_state.next_synthetic_body_ordinal
+          phase_traversal_state.next_synthetic_body_ordinal -= 1
+          identity = Semantic::BodyIdentity.new(
+            definition_id: Semantic::DefId.new(value: ordinal),
+            body_id: Semantic::BodyId.new(value: ordinal),
+          )
+        end
+
         frame = BodyFactFrame.for_identity(identity)
         body_fact_frames << frame
         begin
@@ -365,6 +374,23 @@ module Annotator
         summary
       end
 
+      sig { params(frame: BodyFactFrame, node: BindingNode, name: String).void }
+      def record_local_binding_fact!(frame, node, name)
+        summary = frame.summary
+        frame.next_local_ordinal += 1
+        frame.next_place_ordinal += 1
+        body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
+        place_id = body_id_base + frame.next_place_ordinal
+        summary.local_facts << Semantic::LocalFact.new(
+          id: Semantic::LocalId.new(value: body_id_base + frame.next_local_ordinal),
+          place_id: Semantic::PlaceId.new(value: place_id),
+          name: name,
+        )
+        symbol = T.unsafe(node).respond_to?(:symbol) ? T.unsafe(node).symbol : nil
+        symbol.adopt_semantic_place_id!(place_id) if symbol.is_a?(SymbolEntry)
+      end
+      private :record_local_binding_fact!
+
       sig { params(node: AST::Node).void }
       def record_body_fact_node!(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
@@ -406,27 +432,13 @@ module Annotator
             summary.return_nodes << node
           when AST::VarDecl
             summary.binding_nodes << node
-            frame.next_local_ordinal += 1
-            frame.next_place_ordinal += 1
-            var_body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
-            summary.local_facts << Semantic::LocalFact.new(
-              id: Semantic::LocalId.new(value: var_body_id_base + frame.next_local_ordinal),
-              place_id: Semantic::PlaceId.new(value: var_body_id_base + frame.next_place_ordinal),
-              name: node.name.to_s
-            )
+            record_local_binding_fact!(frame, node, node.name.to_s)
           when AST::BindExpr
             if node.mode == :assign
               summary.assignment_nodes << node
             else
               summary.binding_nodes << node
-              frame.next_local_ordinal += 1
-              frame.next_place_ordinal += 1
-              bind_body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
-              summary.local_facts << Semantic::LocalFact.new(
-                id: Semantic::LocalId.new(value: bind_body_id_base + frame.next_local_ordinal),
-                place_id: Semantic::PlaceId.new(value: bind_body_id_base + frame.next_place_ordinal),
-                name: node.name.to_s
-              )
+              record_local_binding_fact!(frame, node, node.name.to_s)
             end
           when AST::Assignment
             summary.assignment_nodes << node
@@ -435,14 +447,7 @@ module Annotator
             node.targets.each do |target|
               next if target.name == "_"
               summary.binding_nodes << target
-              frame.next_local_ordinal += 1
-              frame.next_place_ordinal += 1
-              destructure_body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
-              summary.local_facts << Semantic::LocalFact.new(
-                id: Semantic::LocalId.new(value: destructure_body_id_base + frame.next_local_ordinal),
-                place_id: Semantic::PlaceId.new(value: destructure_body_id_base + frame.next_place_ordinal),
-                name: target.name.to_s
-              )
+              record_local_binding_fact!(frame, target, target.name.to_s)
             end
           when AST::Identifier
             summary.references_snapshot = true if node.name == "snapshot"

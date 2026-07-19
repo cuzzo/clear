@@ -68,6 +68,10 @@ class SymbolEntry
   class BindingLifecycleFacts < T::Struct
     prop :type, Type
     prop :storage, Symbol
+    # Deterministic body-local identity assigned by annotation. Lifecycle and
+    # ownership products use this instead of Ruby object identity so a clean,
+    # incremental, or worker parse addresses the same source binding.
+    prop :semantic_place_id, T.nilable(Integer), default: nil
     prop :sync, T.nilable(Symbol), default: nil
     prop :layout, T.nilable(Symbol), default: nil
     prop :resource, T.nilable(T::Boolean), default: nil
@@ -136,6 +140,16 @@ class SymbolEntry
   lifecycle_attr :link_source
   lifecycle_attr :foreign_out_owner
   lifecycle_attr :owned_optional_capture
+
+  sig { returns(T.nilable(Integer)) }
+  def semantic_place_id
+    @lifecycle.semantic_place_id
+  end
+
+  sig { params(value: Integer).void }
+  def adopt_semantic_place_id!(value)
+    @lifecycle.semantic_place_id ||= value
+  end
 
   flow_attr :non_escaping
   flow_attr :borrowed_alias
