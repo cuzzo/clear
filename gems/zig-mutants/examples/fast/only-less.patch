@@ -1,0 +1,6 @@
+diff --git a/src/math.zig b/src/math.zig
+--- a/src/math.zig
++++ b/src/math.zig
+@@ -4 +4 @@
+-    return left < right;
++    return left <= right;

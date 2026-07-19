@@ -2,9 +2,10 @@
 
 ## Summary
 
-`gems/zig-mutants` is a Zig-native MVP modeled after Rust's `cargo-mutants`.
-It is not equivalent to Ruby `mutant` or `cargo-mutants` yet. It implements the
-core architecture that matters most:
+`gems/zig-mutants` is a Zig-native runner with Mull-style PR selection and
+Stryker-style mutation switching. It is not as mature as Mull, Ruby `mutant`,
+or `cargo-mutants`, but it now implements the core architecture that matters
+most:
 
 - parsed-source mutant discovery
 - stable mutant IDs
@@ -17,6 +18,9 @@ core architecture that matters most:
 - survivor reproduction artifacts
 - function-level attribution
 - survivor-ID ratcheting
+- Git-diff mutant selection with `--since` and `--diff-file`
+- source-level mutant schemata with direct per-test mutation coverage
+- persistent content-addressed Zig build caching
 
 It deliberately does not try to be a full ecosystem-grade mutation-testing
 framework in the first pass.
@@ -83,13 +87,15 @@ Cargo-mutants has much more:
 - runtime subject manifest
 - ratchet mode for reviewed alive mutants
 - optional `mutant-facts/v1` output
+- one-build mutation switching and standard Zig test-root instrumentation
+- conservative static/concurrency/full-target fallbacks
 
 ## Current Gaps
 
 The most important remaining operational gaps are:
 
 - in-process worker pools
-- import graph or test-target narrowing
+- generalized test-root discovery for nonstandard build systems
 - allowlist support for reviewed equivalent mutants
 - richer HTML or terminal reports
 
@@ -103,8 +109,9 @@ The most important semantic gaps are:
 ## Recommendation
 
 This is now good enough to run repeatedly against the CLEAR Zig runtime as an
-advisory safety signal. The next investment should be driven by survivor
-quality, not by trying to match `cargo-mutants` feature-for-feature.
+advisory safety signal. See [incremental-switching.md](./incremental-switching.md)
+for the Mull/Stryker design, DWARF-independent coverage contract, fallbacks,
+and verification evidence.
 
 Do not invest heavily yet in broad mutator families or deep semantic analysis.
 If the Zig community eventually produces a mature cargo-mutants equivalent, we
