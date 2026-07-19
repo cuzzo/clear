@@ -1,0 +1,41 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+require "optparse"
+require_relative "../lib/test_miser/github_artifact_store"
+
+options = { github_output: ENV["GITHUB_OUTPUT"] }
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: test-miser-github-artifact restore [options]"
+  opts.on("--repository OWNER/REPO") { |value| options[:repository] = value }
+  opts.on("--commit SHA") { |value| options[:commit] = value }
+  opts.on("--output DIR") { |value| options[:output] = value }
+  opts.on("--github-output FILE") { |value| options[:github_output] = value }
+  opts.on("-h", "--help") { puts opts; exit 0 }
+end
+
+begin
+  command = ARGV.shift
+  parser.parse!
+  unless command == "restore" && options[:repository] && options[:commit] && options[:output]
+    warn parser
+    exit 1
+  end
+
+  result = TestMiser::GithubArtifactStore.new(repository: options[:repository]).restore(
+    commit: options[:commit], output: options[:output]
+  )
+  if options[:github_output]
+    File.open(options[:github_output], "a") do |output|
+      output.puts "found=#{result.found}"
+      output.puts "artifact_id=#{result.artifact_id}" if result.artifact_id
+      output.puts "corpus=#{result.corpus}" if result.corpus
+      output.puts "manifest=#{result.manifest}" if result.manifest
+    end
+  end
+  puts JSON.generate(result.to_h.compact)
+rescue TestMiser::CorpusError, Errno::ENOENT => error
+  warn "test-miser-github-artifact: #{error.message}"
+  exit 1
+end

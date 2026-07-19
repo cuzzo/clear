@@ -1,5 +1,38 @@
 # Incremental mutation artifacts and Lineage sync
 
+## Implemented checkpoint path
+
+The repository now implements the safe file-based checkpoint boundary used by
+GitHub CI:
+
+- `test-miser-artifact update` creates a canonical, self-contained
+  `mutation-corpus/v1`, an immutable `mutation-delta/v1`, a digest manifest,
+  per-suite `mutant-facts/v1`, and combined Weak Tests SARIF;
+- `test-miser-github-artifact restore` looks up the artifact for the exact
+  parent commit, rejects expired/corrupt/cross-repository artifacts, and never
+  substitutes a checkpoint from another commit;
+- Ruby subjects and Zig source files are independently replaceable components,
+  so an incremental run carries unchanged components forward without losing
+  whole-corpus auditability;
+- a missing exact parent forces a complete runner plan, producing a new
+  self-contained checkpoint rather than depending on a distant artifact; and
+- `.github/workflows/test-miser.yml` republishes that complete state at every
+  successfully tested default-branch commit as
+  `test-miser-corpus-<head-sha>`.
+
+GitHub's 90-day retention is a cache lifetime, not a correctness assumption.
+An active default branch continuously advances the exact-parent checkpoint. If
+the repository is idle beyond retention, the next successful commit performs
+a complete refresh. Thus the latest successfully processed default-branch
+artifact is sufficient by itself to populate Lineage; no delta chain or old
+artifact is needed to recover current state.
+
+The richer Lineage-native transactional tables described later in this design
+remain future work. Today the checkpoint materializes Lineage's existing
+`ingest-mutants` and `ingest-sarif` inputs, which is enough to rebuild current
+mutation and Weak Tests views without teaching Lineage to read compressed
+corpus envelopes directly.
+
 ## Decision
 
 Test Miser should own a file-based, cross-run mutation corpus that can be

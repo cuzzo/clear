@@ -1,0 +1,105 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+require "optparse"
+require_relative "../lib/test_miser"
+
+def assignments(values, label)
+  values.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |value, out|
+    key, path = value.split("=", 2)
+    raise TestMiser::CorpusError, "#{label} must use SUITE=PATH" unless key && path && !key.empty? && !path.empty?
+
+    out[key] << path
+  end
+end
+
+command = ARGV.shift
+begin
+case command
+when "update"
+  options = { inventories: [], reports: [], required_suites: [] }
+  parser = OptionParser.new do |opts|
+    opts.banner = "Usage: test-miser-artifact update [options]"
+    opts.on("--repository NAME") { |value| options[:repository] = value }
+    opts.on("--commit SHA") { |value| options[:commit] = value }
+    opts.on("--parent SHA") { |value| options[:parent] = value }
+    opts.on("--base FILE") { |value| options[:base] = value }
+    opts.on("--inventory SUITE=FILE") { |value| options[:inventories] << value }
+    opts.on("--report SUITE=FILE") { |value| options[:reports] << value }
+    opts.on("--require-suite SUITE") { |value| options[:required_suites] << value }
+    opts.on("--output FILE") { |value| options[:output] = value }
+    opts.on("--delta FILE") { |value| options[:delta] = value }
+    opts.on("--manifest FILE") { |value| options[:manifest] = value }
+    opts.on("--materialize DIR") { |value| options[:materialize] = value }
+    opts.on("-h", "--help") { puts opts; exit 0 }
+  end
+  parser.parse!
+  required = %i[repository commit parent output manifest]
+  raise TestMiser::CorpusError, parser.to_s unless required.all? { |key| options[key] }
+
+  inventories = assignments(options[:inventories], "--inventory").transform_values do |paths|
+    raise TestMiser::CorpusError, "each suite accepts one inventory" unless paths.one?
+    paths.first
+  end
+  reports = assignments(options[:reports], "--report")
+  base = options[:base] && TestMiser::ZstdJSON.read(options[:base])
+  corpus = TestMiser::MutationCorpus.update(
+    repository: options[:repository],
+    commit: options[:commit],
+    parent_commit: options[:parent],
+    base: base,
+    inventories: inventories,
+    reports: reports,
+    required_suites: options[:required_suites]
+  )
+  manifest = corpus.write(
+    output: options[:output],
+    manifest: options[:manifest],
+    delta: options[:delta],
+    materialize: options[:materialize]
+  )
+  puts JSON.pretty_generate(manifest)
+when "verify"
+  options = {}
+  parser = OptionParser.new do |opts|
+    opts.banner = "Usage: test-miser-artifact verify --corpus FILE --manifest FILE"
+    opts.on("--corpus FILE") { |value| options[:corpus] = value }
+    opts.on("--manifest FILE") { |value| options[:manifest] = value }
+    opts.on("-h", "--help") { puts opts; exit 0 }
+  end
+  parser.parse!
+  raise TestMiser::CorpusError, parser.to_s unless options[:corpus] && options[:manifest]
+
+  corpus = TestMiser::MutationCorpus.verify!(
+    corpus_path: options[:corpus], manifest_path: options[:manifest]
+  )
+  puts JSON.generate(
+    "commit" => corpus.fetch("commit"),
+    "state_digest" => corpus.fetch("state_digest"),
+    "complete" => true
+  )
+when "materialize"
+  options = {}
+  parser = OptionParser.new do |opts|
+    opts.banner = "Usage: test-miser-artifact materialize --corpus FILE --output DIR"
+    opts.on("--corpus FILE") { |value| options[:corpus] = value }
+    opts.on("--output DIR") { |value| options[:output] = value }
+    opts.on("-h", "--help") { puts opts; exit 0 }
+  end
+  parser.parse!
+  raise TestMiser::CorpusError, parser.to_s unless options[:corpus] && options[:output]
+
+  payload = TestMiser::ZstdJSON.read(options[:corpus])
+  corpus = TestMiser::MutationCorpus.allocate
+  corpus.instance_variable_set(:@payload, payload)
+  corpus.instance_variable_set(:@commit, payload.fetch("commit"))
+  puts corpus.materialize_to(options[:output])
+else
+  warn "Usage: test-miser-artifact <update|verify|materialize> ..."
+  exit 1
+end
+rescue TestMiser::CorpusError, JSON::ParserError, Errno::ENOENT, KeyError => error
+  warn "test-miser-artifact: #{error.message}"
+  exit 1
+end

@@ -47,6 +47,7 @@ PATH
     test-miser (0.1.0)
       mutant (~> 0.15.1)
       mutant-minitest (~> 0.15.1)
+      mutant-rspec (~> 0.15.1)
       sqlite3 (>= 2.0, < 3)
 
 GEM

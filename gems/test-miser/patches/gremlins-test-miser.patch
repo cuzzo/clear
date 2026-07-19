@@ -272,7 +272,11 @@ index ecfd0e3..0f36287 100644
  
  	if m.testCPU != 0 {
  		args = append(args, "-cpu", fmt.Sprintf("%d", m.testCPU))
-@@ -250,6 +270,28 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+@@ -244,0 +265,3 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
++	if m.testMiser {
++		path = "./" + filepath.ToSlash(filepath.Dir(m.mutant.Position().Filename))
++	}
+@@ -250,6 +273,28 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
  	return args
  }
  

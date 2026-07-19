@@ -80,6 +80,11 @@ Problem:
 
 - Gremlins passes `-failfast` to `go test`.
 - Its result schema records the mutant outcome but not all failed test names.
+- A mutated file can belong to a package below the module root; Test Miser mode
+  must run that package rather than derive an invalid module import path.
+- Some failed package trials emit no named failing-test event. On Boobytrap,
+  39 of 994 mutant trials had this shape, so merely retaining JSON events does
+  not yet make attribution complete.
 
 Proposed change:
 
@@ -88,9 +93,16 @@ Proposed change:
 - Remove `-failfast` for that mode.
 - Consume the existing `go test -json` event stream.
 - Record every event with `Action == "fail"` and a non-empty test name.
+- Define and expose the reason for package-level failures without a named test,
+  or explicitly mark those trials incomplete.
 - Emit the complete baseline inventory and attribution completeness metadata.
 
 Proof patch: `patches/gremlins-test-miser.patch`.
+
+The proof ran successfully against Boobytrap but took 14m31s for 994 mutants
+and produced the 39 incomplete trials above. The repository therefore keeps
+the Go suite in the CI manifest but disabled until the PR can provide complete
+attribution at a sustainable cost.
 
 ### PHP: Infection
 

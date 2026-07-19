@@ -4,6 +4,7 @@ require "json"
 require "fileutils"
 require "minitest/autorun"
 require "open3"
+require "pathname"
 require "rbconfig"
 require "tmpdir"
 require_relative "../lib/test_miser"
@@ -291,6 +292,7 @@ class TestMiserTest < Minitest::Test
       assert_equal 0, payload.dig("testMiser", "expectedMutants")
       assert_equal "pr", payload.dig("testMiser", "selectionScope")
       assert_equal "HEAD", payload.dig("testMiser", "sinceRevision")
+      assert_equal [], payload.dig("testMiser", "matchedSubjects")
       assert_equal true, payload.dig("testMiser", "complete")
       assert_equal 2, Dir["#{report_path}.shards/*.json"].length
 
@@ -299,6 +301,160 @@ class TestMiserTest < Minitest::Test
       assert_equal false, report.corpus_complete
       assert_empty analysis.zero_kill_tests
       assert_empty analysis.redundant_groups
+    end
+  end
+
+  def test_mutation_corpus_bootstrap_is_complete_compressed_and_self_contained
+    Dir.mktmpdir("test-miser-corpus") do |dir|
+      ruby_inventory = write_json(dir, "ruby-inventory.json", ruby_inventory_payload)
+      zig_inventory = write_json(dir, "zig-inventory.json", zig_inventory_payload)
+      ruby_report = write_json(dir, "ruby-report.json", ruby_report_payload)
+      zig_report = write_json(dir, "zig-report.json", zig_report_payload)
+      output = File.join(dir, "mutation-corpus.json.zst")
+      delta = File.join(dir, "mutation-delta.json.zst")
+      manifest = File.join(dir, "manifest.json")
+      lineage = File.join(dir, "lineage")
+
+      corpus = TestMiser::MutationCorpus.update(
+        repository: "example/repo",
+        commit: "head-1",
+        parent_commit: "base-0",
+        inventories: { "ruby:example" => ruby_inventory, "zig:example" => zig_inventory },
+        reports: { "ruby:example" => [ruby_report], "zig:example" => [zig_report] },
+        required_suites: %w[ruby:example zig:example]
+      )
+      manifest_payload = corpus.write(output: output, delta: delta, manifest: manifest, materialize: lineage)
+      verified = TestMiser::MutationCorpus.verify!(corpus_path: output, manifest_path: manifest)
+
+      assert_equal true, verified.fetch("complete")
+      assert_equal 3, verified.fetch("components").length
+      assert_equal "head-1", verified.fetch("commit")
+      assert_operator File.size(output), :<, TestMiser::CanonicalJSON.generate(verified).bytesize
+      facts = Dir[File.join(lineage, "mutant-facts-*.json")].map { |path| JSON.parse(File.read(path)) }
+      assert_equal %w[ruby zig], facts.map { |payload| payload.fetch("language") }.sort
+      assert_equal 2, manifest_payload.dig("lineage", "mutant_facts").length
+      assert_equal ["lineage/weak-tests.sarif"], manifest_payload.dig("lineage", "sarif")
+      assert File.file?(File.join(lineage, "weak-tests.sarif"))
+
+      materialized = File.join(dir, manifest_payload.dig("lineage", "mutant_facts").first)
+      File.open(materialized, "a") { |file| file.write("tampered") }
+      error = assert_raises(TestMiser::CorpusError) do
+        TestMiser::MutationCorpus.verify!(corpus_path: output, manifest_path: manifest)
+      end
+      assert_includes error.message, "member size mismatch"
+    end
+  end
+
+  def test_mutation_corpus_incrementally_replaces_exact_components
+    Dir.mktmpdir("test-miser-corpus-update") do |dir|
+      ruby_inventory = write_json(dir, "ruby-inventory.json", ruby_inventory_payload)
+      zig_inventory = write_json(dir, "zig-inventory.json", zig_inventory_payload)
+      ruby_report = write_json(dir, "ruby-report.json", ruby_report_payload)
+      zig_report = write_json(dir, "zig-report.json", zig_report_payload)
+      base = TestMiser::MutationCorpus.update(
+        repository: "example/repo",
+        commit: "base",
+        parent_commit: "older",
+        inventories: { "ruby:example" => ruby_inventory, "zig:example" => zig_inventory },
+        reports: { "ruby:example" => [ruby_report], "zig:example" => [zig_report] },
+        required_suites: %w[ruby:example zig:example]
+      ).payload
+
+      changed_inventory = ruby_inventory_payload
+      changed_inventory["subjects"] = [
+        changed_inventory.fetch("subjects").first,
+        { "expression" => "Example#third", "file" => "lib/example.rb", "line" => 9 }
+      ]
+      changed_report = ruby_report_payload
+      changed_report["testMiser"]["selectionScope"] = "pr"
+      changed_report["testMiser"]["matchedSubjects"] = ["Example#first", "Example#third"]
+      changed_report["files"]["lib/example.rb"]["mutants"] = [{
+        "id" => "evil:Example#third:lib/example.rb:9:new",
+        "subject" => "Example#third", "line" => 9, "status" => "Killed",
+        "coveredBy" => ["test:one"], "killedBy" => ["test:one"]
+      }]
+      inventory_path = write_json(dir, "changed-inventory.json", changed_inventory)
+      report_path = write_json(dir, "changed-report.json", changed_report)
+      updated = TestMiser::MutationCorpus.update(
+        repository: "example/repo",
+        commit: "head",
+        parent_commit: "base",
+        base: base,
+        inventories: { "ruby:example" => inventory_path },
+        reports: { "ruby:example" => [report_path] },
+        required_suites: %w[ruby:example zig:example]
+      )
+
+      ruby_components = updated.payload.fetch("components").values
+        .select { |component| component["suite"] == "ruby:example" }
+      assert_equal %w[Example#first Example#third], ruby_components.map { |component| component["identity"] }.sort
+      assert_equal 1, updated.delta.fetch("remove_components").length
+      assert_equal "base", updated.delta.dig("base", "commit")
+      assert_equal "head", updated.delta.dig("head", "commit")
+      assert_equal true, updated.payload.fetch("complete")
+    end
+  end
+
+  def test_mutation_corpus_accepts_one_native_report_for_multiple_selected_files
+    Dir.mktmpdir("test-miser-multi-file-facts") do |dir|
+      inventory = write_json(dir, "inventory.json", {
+        "schemaVersion" => "test-miser-component-inventory/v1",
+        "subjects" => [{ "source" => "src/first.rs" }, { "source" => "src/empty.rs" }]
+      })
+      facts = zig_report_payload
+      facts["language"] = "rust"
+      facts["subjects"][0]["file"] = "src/first.rs"
+      facts["mutants"][0]["file"] = "src/first.rs"
+      facts["test_miser"]["selected_components"] = ["src/first.rs", "src/empty.rs"]
+      report = write_json(dir, "facts.json", facts)
+
+      corpus = TestMiser::MutationCorpus.update(
+        repository: "example/repo", commit: "head", parent_commit: "base",
+        inventories: { "rust:example" => inventory },
+        reports: { "rust:example" => [report] }, required_suites: ["rust:example"]
+      ).payload
+
+      components = corpus.fetch("components").values
+      assert_equal %w[src/empty.rs src/first.rs], components.map { |row| row.fetch("identity") }.sort
+      assert_empty components.find { |row| row["identity"] == "src/empty.rs" }.fetch("mutants")
+    end
+  end
+
+  def test_github_artifact_store_treats_missing_or_expired_exact_base_as_cache_miss
+    status = Struct.new(:success?).new(true)
+    calls = []
+    runner = lambda do |*argv|
+      calls << argv
+      [JSON.generate("artifacts" => [{
+        "id" => 7, "name" => "test-miser-corpus-base", "expired" => true
+      }]), "", status]
+    end
+    store = TestMiser::GithubArtifactStore.new(repository: "example/repo", runner: runner)
+
+    result = store.restore(commit: "base", output: "/unused")
+
+    assert_equal false, result.found
+    assert_equal 1, calls.length
+    assert_includes calls.first.last, "name=test-miser-corpus-base"
+  end
+
+  def test_mutation_corpus_rejects_a_non_parent_base
+    Dir.mktmpdir("test-miser-wrong-base") do |dir|
+      ruby_inventory = write_json(dir, "ruby-inventory.json", ruby_inventory_payload)
+      ruby_report = write_json(dir, "ruby-report.json", ruby_report_payload)
+      base = TestMiser::MutationCorpus.update(
+        repository: "example/repo", commit: "base", parent_commit: "older",
+        inventories: { "ruby:example" => ruby_inventory },
+        reports: { "ruby:example" => [ruby_report] }, required_suites: ["ruby:example"]
+      ).payload
+
+      error = assert_raises(TestMiser::CorpusError) do
+        TestMiser::MutationCorpus.update(
+          repository: "example/repo", commit: "head", parent_commit: "different",
+          base: base, required_suites: ["ruby:example"]
+        )
+      end
+      assert_includes error.message, "does not equal parent"
     end
   end
 
@@ -316,6 +472,16 @@ class TestMiserTest < Minitest::Test
           "test_command" => "cd zig && zig build test -Dtest-file=value-test.zig -j1",
           "timeout_seconds" => 30
         }]
+      ))
+      FileUtils.mkdir_p(File.join(dir, "gems/test-miser/config"))
+      File.write(File.join(dir, "gems/test-miser/config/ci-suites.json"), JSON.generate(
+        "schema" => "test-miser-ci-suites/v1",
+        "ruby" => [{
+          "id" => "espalier", "suite" => "ruby:espalier",
+          "source_root" => "gems/espalier/lib", "test_root" => "gems/espalier/test",
+          "namespace" => "Espalier", "require" => "espalier", "integration" => "minitest"
+        }],
+        "rust" => [], "go" => []
       ))
       assert system("git", "init", "-q", chdir: dir)
       assert system("git", "config", "user.email", "test@example.com", chdir: dir)
@@ -336,11 +502,26 @@ class TestMiserTest < Minitest::Test
       ).call
 
       assert_equal true, plan.dig("ruby", "run")
-      assert_equal "diff", plan.dig("ruby", "mode")
-      assert_equal 3, plan.dig("ruby", "matrix", "include").length
+      assert_equal "diff", plan.dig("ruby", "matrix", "include", 0, "mode")
+      assert_operator plan.dig("ruby", "matrix", "include").length, :>=, 1
       assert_equal true, plan.dig("zig", "run")
       assert_equal "full", plan.dig("zig", "matrix", "include", 0, "mode")
       assert_operator plan.dig("zig", "matrix", "include").length, :>, 1
+
+      canonical = TestMiserCIPlan::Planner.new(
+        root: dir,
+        base: "HEAD",
+        zig_manifest: "gems/zig-mutants/subjects.json",
+        lines_per_shard: 1,
+        max_ruby_jobs: 3,
+        max_zig_jobs: 3,
+        canonical: true,
+        force_full: true
+      ).call
+      assert canonical.dig("ruby", "matrix", "include").all? { |row| row["mode"] == "full" }
+      assert_operator canonical.dig("ruby", "matrix", "include").length, :>=, 1
+      assert_equal 1, canonical.dig("zig", "matrix", "include").length
+      assert_equal "full", canonical.dig("zig", "matrix", "include", 0, "mode")
     end
   end
 
@@ -389,6 +570,35 @@ class TestMiserTest < Minitest::Test
     end
   end
 
+  def test_rspec_collector_runs_every_selected_example
+    executable = File.expand_path("../exe/test-miser-mutant", __dir__)
+    fixture = File.expand_path("fixtures/rspec_collector", __dir__)
+    spec_path = Pathname.new(File.join(fixture, "spec")).relative_path_from(Pathname.pwd).to_s
+    report_path = File.join(fixture, "mutants.json")
+    _stdout, stderr, status = Open3.capture3(
+      "bundle", "exec", "ruby", executable,
+      "-I", File.join(fixture, "lib"),
+      "-r", "example",
+      "--integration", "rspec",
+      "--integration-argument", spec_path,
+      "--run-to-complete",
+      "-o", report_path,
+      "TestMiserRspecFixture#classify"
+    )
+
+    assert status.success?, stderr
+    payload = JSON.parse(File.read(report_path))
+    killed = payload.fetch("files").values.flat_map { |file| file.fetch("mutants") }
+      .select { |mutant| mutant.fetch("status") == "Killed" }
+    assert killed.any? { |mutant| mutant.fetch("killedBy").length == 2 }
+    tests = payload.fetch("testFiles").fetch(File.join(spec_path, "example_spec.rb")).fetch("tests")
+    assert_equal [8, 12, 16], tests.map { |test| test.fetch("line") }
+    assert_equal "TestMiserRspecFixture recognizes a positive value", tests.first.fetch("name")
+    assert_equal true, payload.dig("testMiser", "complete")
+  ensure
+    File.delete(report_path) if report_path && File.exist?(report_path)
+  end
+
   def test_mutant_collector_removes_isolated_test_scratch_files
     collector = TestMiser::MutantCollector.allocate
     leaked_path = nil
@@ -427,6 +637,77 @@ class TestMiserTest < Minitest::Test
     assert_equal false, result.fetch("passed")
     assert_equal [test.id], result.fetch("killedBy")
   end
+
+  private
+
+  def write_json(directory, name, payload)
+    path = File.join(directory, name)
+    File.write(path, JSON.generate(payload))
+    path
+  end
+
+  def ruby_inventory_payload
+    {
+      "schemaVersion" => "test-miser-subject-inventory/v1",
+      "subjects" => [
+        { "expression" => "Example#first", "file" => "lib/example.rb", "line" => 2 },
+        { "expression" => "Example#second", "file" => "lib/example.rb", "line" => 6 }
+      ]
+    }
+  end
+
+  def zig_inventory_payload
+    {
+      "subjects" => [{ "source" => "src/example.zig", "test_command" => "zig build test" }]
+    }
+  end
+
+  def ruby_report_payload
+    mutants = %w[first second].each_with_index.map do |name, index|
+      {
+        "id" => "evil:Example##{name}:lib/example.rb:#{index * 4 + 2}:digest-#{name}",
+        "subject" => "Example##{name}",
+        "line" => index * 4 + 2,
+        "status" => "Killed",
+        "coveredBy" => ["test:one"],
+        "killedBy" => ["test:one"]
+      }
+    end
+    {
+      "schemaVersion" => "2.0",
+      "files" => { "lib/example.rb" => { "mutants" => mutants } },
+      "testFiles" => {
+        "test/example_test.rb" => {
+          "tests" => [{ "id" => "test:one", "name" => "ExampleTest#test_one", "line" => 3 }]
+        }
+      },
+      "testMiser" => {
+        "selectionScope" => "full", "matchedSubjects" => %w[Example#first Example#second],
+        "complete" => true, "runToComplete" => true
+      }
+    }
+  end
+
+  def zig_report_payload
+    {
+      "schema" => "mutant-facts/v1",
+      "source" => "zig-mutants",
+      "language" => "zig",
+      "subjects" => [{
+        "file" => "src/example.zig", "method" => "value", "mutations" => 1,
+        "killed" => 1, "alive" => 0, "kill_rate" => 100.0
+      }],
+      "tests" => [{ "id" => "zig:test:value", "name" => "value", "file" => "src/example_test.zig", "line" => 1 }],
+      "mutants" => [{
+        "id" => "zig-1", "file" => "src/example.zig", "method" => "value",
+        "outcome" => "killed", "line" => 2,
+        "covered_by" => ["zig:test:value"], "killed_by" => ["zig:test:value"]
+      }],
+      "test_miser" => { "complete" => true, "attribution_complete" => true, "run_to_complete" => true }
+    }
+  end
+
+  public
 
   def test_incomplete_generated_corpus_withholds_findings
     payload = JSON.parse(File.read(FIXTURE))
@@ -472,6 +753,31 @@ class TestMiserTest < Minitest::Test
       assert_equal ["ValueTest::testSmoke"], analysis.zero_kill_tests.map { |row| row.test.name }
       assert_equal %w[ValueTest::testDuplicate ValueTest::testPrimary],
         analysis.redundant_groups.first.tests.map(&:name).sort
+    end
+  end
+
+  def test_cargo_mutants_adapter_rejects_a_kill_without_a_named_failed_test
+    Dir.mktmpdir("test-miser-cargo-mutants") do |dir|
+      baseline_log = File.join(dir, "baseline.log")
+      mutant_log = File.join(dir, "mutant.log")
+      File.write(baseline_log, "test classifier::primary ... ok\n")
+      File.write(mutant_log, "test classifier::primary ... ok\n")
+      File.write(File.join(dir, "outcomes.json"), JSON.generate("outcomes" => [
+        { "scenario" => "Baseline", "summary" => "Success", "log_path" => "baseline.log" },
+        {
+          "scenario" => { "Mutant" => {
+            "name" => "replace comparison", "file" => "src/lib.rs", "genre" => "comparison",
+            "function" => { "function_name" => "classify" },
+            "span" => { "start" => { "line" => 2, "column" => 1 } }
+          } },
+          "summary" => "CaughtMutant", "log_path" => "mutant.log",
+          "phase_results" => [{ "phase" => "Test", "argv" => ["cargo", "test", "--no-fail-fast"] }]
+        }
+      ]))
+
+      payload = TestMiser::Adapters::CargoMutants.new(output_dir: dir, root: dir).call
+
+      assert_equal false, payload.dig("test_miser", "attribution_complete")
     end
   end
 

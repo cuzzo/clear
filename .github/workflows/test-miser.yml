@@ -1,4 +1,4 @@
-name: Test Miser PR mutations
+name: Test Miser mutations
 
 on:
   workflow_run:
@@ -10,6 +10,15 @@ on:
         description: Base revision (defaults to origin/master)
         required: false
         type: string
+      head:
+        description: Head revision (defaults to the dispatched ref)
+        required: false
+        type: string
+      canonical:
+        description: Publish a complete canonical checkpoint for the head
+        default: false
+        required: false
+        type: boolean
       max_ruby_jobs:
         description: Maximum Ruby mutation jobs
         default: "6"
@@ -27,6 +36,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   RUBY_VERSION: "3.2"
@@ -34,28 +44,38 @@ env:
 
 jobs:
   plan:
-    name: Plan PR mutant jobs
+    name: Plan mutant jobs
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'pull_request' &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
-       github.event.workflow_run.pull_requests[0].number > 0)
+       ((github.event.workflow_run.event == 'pull_request' &&
+         github.event.workflow_run.pull_requests[0].number > 0) ||
+        (github.event.workflow_run.event == 'push' &&
+         (github.event.workflow_run.head_branch == 'master' ||
+          github.event.workflow_run.head_branch == 'main'))))
     runs-on: ubuntu-latest
     outputs:
       base: ${{ steps.resolve.outputs.base }}
       head_repository: ${{ steps.resolve.outputs.head_repository }}
       head_sha: ${{ steps.resolve.outputs.head_sha }}
+      canonical: ${{ steps.resolve.outputs.canonical }}
+      base_found: ${{ steps.restore.outputs.found || 'false' }}
+      required_suites: ${{ steps.plan.outputs.required_suites }}
       ruby_run: ${{ steps.plan.outputs.ruby_run }}
-      ruby_mode: ${{ steps.plan.outputs.ruby_mode }}
+      ruby_prepare_matrix: ${{ steps.plan.outputs.ruby_prepare_matrix }}
       ruby_matrix: ${{ steps.plan.outputs.ruby_matrix }}
+      rust_run: ${{ steps.plan.outputs.rust_run }}
+      rust_matrix: ${{ steps.plan.outputs.rust_matrix }}
+      go_run: ${{ steps.plan.outputs.go_run }}
+      go_matrix: ${{ steps.plan.outputs.go_matrix }}
       zig_run: ${{ steps.plan.outputs.zig_run }}
       zig_matrix: ${{ steps.plan.outputs.zig_matrix }}
     steps:
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name || github.repository }}
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.head || github.sha }}
           fetch-depth: 0
       - id: resolve
         name: Resolve the tested revisions
@@ -65,39 +85,81 @@ jobs:
           EVENT_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
           INPUT_BASE: ${{ inputs.base }}
+          INPUT_HEAD: ${{ inputs.head }}
+          INPUT_CANONICAL: ${{ inputs.canonical }}
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$EVENT_NAME" = workflow_run ]; then
-            base="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .base.sha)"
             head_repository="$EVENT_HEAD_REPOSITORY"
             head_sha="$EVENT_HEAD_SHA"
+            if [ -n "$PR_NUMBER" ]; then
+              base="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .base.sha)"
+              canonical=false
+            else
+              base="$(git rev-parse "${head_sha}^")"
+              canonical=true
+            fi
           else
-            base="${INPUT_BASE:-origin/master}"
             head_repository="$GITHUB_REPOSITORY"
-            head_sha="$GITHUB_SHA"
+            head_sha="$(git rev-parse "${INPUT_HEAD:-$GITHUB_SHA}^{commit}")"
+            base="$(git rev-parse "${INPUT_BASE:-origin/master}^{commit}")"
+            canonical="${INPUT_CANONICAL:-false}"
           fi
           {
             echo "base=$base"
             echo "head_repository=$head_repository"
             echo "head_sha=$head_sha"
+            echo "canonical=$canonical"
           } >> "$GITHUB_OUTPUT"
+      - id: restore
+        name: Restore the exact parent checkpoint
+        if: steps.resolve.outputs.canonical == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ steps.resolve.outputs.base }}
+        run: |
+          ruby gems/test-miser/exe/test-miser-github-artifact restore \
+            --repository "$GITHUB_REPOSITORY" \
+            --commit "$BASE_SHA" \
+            --output tmp/test-miser-base
       - id: plan
-        name: Build dynamic mutation matrix
+        name: Build dynamic mutation matrices
         env:
           BASE: ${{ steps.resolve.outputs.base }}
           MAX_RUBY_JOBS: ${{ inputs.max_ruby_jobs || '6' }}
           MAX_ZIG_JOBS: ${{ inputs.max_zig_jobs || '12' }}
+          CANONICAL: ${{ steps.resolve.outputs.canonical }}
+          BASE_FOUND: ${{ steps.restore.outputs.found || 'false' }}
         run: |
-          ruby tools/test_miser_ci_plan.rb \
-            --base "$BASE" \
-            --max-ruby-jobs "$MAX_RUBY_JOBS" \
+          args=(
+            ruby tools/test_miser_ci_plan.rb
+            --base "$BASE"
+            --max-ruby-jobs "$MAX_RUBY_JOBS"
             --max-zig-jobs "$MAX_ZIG_JOBS"
+          )
+          if [ "$CANONICAL" = true ]; then args+=(--canonical); fi
+          if [ "$CANONICAL" = true ] && [ "$BASE_FOUND" != true ]; then args+=(--force-full); fi
+          "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: steps.restore.outputs.found == 'true'
+        with:
+          name: test-miser-base-${{ github.run_id }}
+          path: tmp/test-miser-base
+          if-no-files-found: error
+          retention-days: 1
 
   ruby-prepare:
-    name: Prepare Ruby test selection
+    name: Prepare Ruby ${{ matrix.id }}
     needs: plan
     if: needs.plan.outputs.ruby_run == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.ruby_prepare_matrix) }}
+    env:
+      TEST_MISER_TEST_ROOT: ${{ matrix.test_root }}
+      SIMPLECOV_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -108,46 +170,86 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --legacy-peer-deps
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/cache@v4
         with:
-          path: gems/fact-mine/target
-          key: test-miser-fact-mine-${{ runner.os }}-${{ hashFiles('gems/fact-mine/Cargo.lock', 'gems/fact-mine/src/**') }}
-          restore-keys: test-miser-fact-mine-${{ runner.os }}-
-      - name: Build Fact Mine once
-        run: cargo build --release --manifest-path gems/fact-mine/Cargo.toml
-      - name: Trace the complete Espalier test map once
-        env:
-          FACT_MINE_RUST_BINARY: ${{ github.workspace }}/gems/fact-mine/target/release/fact-mine-rust
-          TEST_MISER_FACT_MINE_CACHE_WRITE: "1"
+          path: |
+            gems/fact-mine/target
+            gems/nil-kill/target
+            gems/decomplex/target
+          key: test-miser-ruby-tools-${{ runner.os }}-${{ hashFiles('gems/{fact-mine,nil-kill,decomplex}/Cargo.lock', 'gems/{fact-mine,nil-kill,decomplex}/src/**') }}
+          restore-keys: test-miser-ruby-tools-${{ runner.os }}-
+      - name: Install Z3 for dependent suites
+        if: matrix.id == 'nil-kill' || matrix.id == 'auto-type'
         run: |
-          mkdir -p tmp/test-miser-ruby-prepare
-          bundle exec ruby gems/test-miser/exe/test-miser-map \
-            -I gems/espalier/lib \
-            -r ./gems/espalier/script/test_miser_mutant_setup \
-            -o tmp/test-miser-ruby-prepare/runtime-map.json
-          install -m 755 \
-            gems/fact-mine/target/release/fact-mine-rust \
-            tmp/test-miser-ruby-prepare/fact-mine-rust
+          sudo apt-get update
+          sudo apt-get install -y z3
+      - name: Build shared Rust helpers
+        env:
+          RUST_HELPERS: ${{ toJSON(matrix.rust_helpers) }}
+        run: |
+          while IFS= read -r helper; do
+            cargo build --release --manifest-path "gems/$helper/Cargo.toml"
+          done < <(jq -r '.[]' <<< "$RUST_HELPERS")
+      - name: Trace test map and inventory subjects
+        env:
+          INTEGRATION_ARGUMENTS: ${{ toJSON(matrix.integration_arguments) }}
+        run: |
+          output="tmp/test-miser-ruby-prepare/${{ matrix.token }}"
+          mkdir -p "$output/bin"
+          if [ -x gems/fact-mine/target/release/fact-mine-rust ]; then
+            export FACT_MINE_RUST_BINARY="$GITHUB_WORKSPACE/gems/fact-mine/target/release/fact-mine-rust"
+            install -m 755 "$FACT_MINE_RUST_BINARY" "$output/bin/fact-mine-rust"
+          fi
+          if [ -x gems/nil-kill/target/release/nil-kill-infer-rust ]; then
+            export NIL_KILL_INFER_RUST_BINARY="$GITHUB_WORKSPACE/gems/nil-kill/target/release/nil-kill-infer-rust"
+            install -m 755 "$NIL_KILL_INFER_RUST_BINARY" "$output/bin/nil-kill-infer-rust"
+          fi
+          if [ -x gems/decomplex/target/release/decomplex-rust ]; then
+            export DECOMPLEX_RUST_BINARY="$GITHUB_WORKSPACE/gems/decomplex/target/release/decomplex-rust"
+            install -m 755 "$DECOMPLEX_RUST_BINARY" "$output/bin/decomplex-rust"
+          fi
+          args=(
+            bundle exec ruby gems/test-miser/exe/test-miser-map
+            -I "${{ matrix.source_root }}"
+            -r "${{ matrix.require }}"
+            --integration "${{ matrix.integration }}"
+            --timeout "${{ matrix.timeout }}"
+            -o "$output/runtime-map.json"
+          )
+          while IFS= read -r argument; do args+=(--integration-argument "$argument"); done \
+            < <(jq -r '.[]' <<< "$INTEGRATION_ARGUMENTS")
+          "${args[@]}"
+          bundle exec ruby gems/test-miser/exe/test-miser-inventory \
+            -I "${{ matrix.source_root }}" \
+            -r "${{ matrix.inventory_require }}" \
+            --namespace "${{ matrix.namespace }}" \
+            -o "$output/inventory.json"
+          printf '%s\n' '${{ matrix.suite }}' > "$output/suite.txt"
       - uses: actions/upload-artifact@v4
         with:
-          name: test-miser-ruby-prepare
-          path: |
-            tmp/test-miser-ruby-prepare
-            tmp/espalier-test-miser-fact-cache
+          name: test-miser-ruby-prepare-${{ matrix.token }}
+          path: tmp/test-miser-ruby-prepare/${{ matrix.token }}
           if-no-files-found: error
           retention-days: 1
 
   ruby:
-    name: Ruby mutants ${{ matrix.index }}/${{ matrix.total }} (${{ matrix.mode }})
+    name: Ruby ${{ matrix.id }} ${{ matrix.index }}/${{ matrix.total }} (${{ matrix.mode }})
     needs: [plan, ruby-prepare]
     if: needs.plan.outputs.ruby_run == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       max-parallel: 6
       matrix: ${{ fromJSON(needs.plan.outputs.ruby_matrix) }}
+    env:
+      TEST_MISER_TEST_ROOT: ${{ matrix.test_root }}
+      SIMPLECOV_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -158,46 +260,60 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --legacy-peer-deps
+      - name: Install Z3 for dependent suites
+        if: matrix.id == 'nil-kill' || matrix.id == 'auto-type'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y z3
       - uses: actions/download-artifact@v4
         with:
-          name: test-miser-ruby-prepare
-          path: tmp
-      - name: Run PR-selected Ruby mutants to completion
+          name: test-miser-ruby-prepare-${{ matrix.token }}
+          path: tmp/test-miser-ruby-prepare/${{ matrix.token }}
+      - name: Run selected Ruby mutants to completion
         env:
           BASE_SHA: ${{ needs.plan.outputs.base }}
-          FACT_MINE_RUST_BINARY: ${{ github.workspace }}/tmp/test-miser-ruby-prepare/fact-mine-rust
+          INTEGRATION_ARGUMENTS: ${{ toJSON(matrix.integration_arguments) }}
         run: |
-          chmod +x "$FACT_MINE_RUST_BINARY"
-          mkdir -p tmp/test-miser-ruby
+          output="tmp/test-miser-ruby/${{ matrix.token }}"
+          mkdir -p "$output"
+          helper_dir="$GITHUB_WORKSPACE/tmp/test-miser-ruby-prepare/${{ matrix.token }}/bin"
+          if [ -x "$helper_dir/fact-mine-rust" ]; then export FACT_MINE_RUST_BINARY="$helper_dir/fact-mine-rust"; fi
+          if [ -x "$helper_dir/nil-kill-infer-rust" ]; then export NIL_KILL_INFER_RUST_BINARY="$helper_dir/nil-kill-infer-rust"; fi
+          if [ -x "$helper_dir/decomplex-rust" ]; then export DECOMPLEX_RUST_BINARY="$helper_dir/decomplex-rust"; fi
           args=(
-            -I gems/espalier/lib
-            -r ./gems/espalier/script/test_miser_mutant_setup
-            --selection-map tmp/test-miser-ruby-prepare/runtime-map.json
+            -I "${{ matrix.source_root }}"
+            -r "${{ matrix.require }}"
+            --integration "${{ matrix.integration }}"
+            --selection-map "tmp/test-miser-ruby-prepare/${{ matrix.token }}/runtime-map.json"
             --run-to-complete
             --shard "${{ matrix.index }}/${{ matrix.total }}"
-            --timeout 10
-            -o "tmp/test-miser-ruby/shard-${{ matrix.index }}-of-${{ matrix.total }}.json"
+            --timeout "${{ matrix.timeout }}"
+            -o "$output/shard-${{ matrix.index }}-of-${{ matrix.total }}.json"
           )
-          if [ "${{ matrix.mode }}" = diff ]; then
-            args+=(--since "$BASE_SHA")
-          fi
-          bundle exec ruby gems/test-miser/exe/test-miser-mutant "${args[@]}" 'Espalier*'
+          while IFS= read -r argument; do args+=(--integration-argument "$argument"); done \
+            < <(jq -r '.[]' <<< "$INTEGRATION_ARGUMENTS")
+          if [ "${{ matrix.mode }}" = diff ]; then args+=(--since "$BASE_SHA"); fi
+          bundle exec ruby gems/test-miser/exe/test-miser-mutant "${args[@]}" '${{ matrix.namespace }}*'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-miser-ruby-${{ matrix.index }}-of-${{ matrix.total }}
-          path: tmp/test-miser-ruby/*.json
+          name: test-miser-ruby-${{ matrix.token }}-${{ matrix.index }}-of-${{ matrix.total }}
+          path: tmp/test-miser-ruby/${{ matrix.token }}/*.json
           if-no-files-found: error
           retention-days: 7
 
   ruby-merge:
-    name: Merge Ruby mutant facts
+    name: Merge Ruby ${{ matrix.id }} facts
     needs: [plan, ruby]
     if: needs.plan.outputs.ruby_run == 'true' && needs.ruby.result == 'success'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.ruby_prepare_matrix) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -209,35 +325,177 @@ jobs:
           bundler-cache: true
       - uses: actions/download-artifact@v4
         with:
-          pattern: test-miser-ruby-*-of-*
-          path: tmp/test-miser-ruby-shards
+          pattern: test-miser-ruby-${{ matrix.token }}-*-of-*
+          path: tmp/test-miser-ruby-shards/${{ matrix.token }}
           merge-multiple: true
       - name: Merge cross-node reports
         run: |
-          mapfile -t reports < <(find tmp/test-miser-ruby-shards -name '*.json' -type f | sort)
+          mapfile -t reports < <(find "tmp/test-miser-ruby-shards/${{ matrix.token }}" -name '*.json' -type f | sort)
           test "${#reports[@]}" -gt 0
-          mkdir -p tmp/test-miser-ruby-merged
-          bundle exec ruby gems/test-miser/exe/test-miser-merge \
-            -o tmp/test-miser-ruby-merged/mutants.json \
-            "${reports[@]}"
-      - name: Generate whole-corpus Weak Tests SARIF
-        if: needs.plan.outputs.ruby_mode == 'full'
-        run: |
-          bundle exec ruby gems/test-miser/exe/test-miser infer \
-            --root . \
-            -o tmp/test-miser-ruby-merged/test-miser.sarif \
-            tmp/test-miser-ruby-merged/mutants.json
-      - uses: github/codeql-action/upload-sarif@v4
-        if: >-
-          needs.plan.outputs.ruby_mode == 'full' &&
-          github.event_name == 'workflow_run'
-        with:
-          sarif_file: tmp/test-miser-ruby-merged/test-miser.sarif
-          category: test-miser-ruby
+          output="tmp/test-miser-ruby-merged/${{ matrix.token }}"
+          mkdir -p "$output"
+          bundle exec ruby gems/test-miser/exe/test-miser-merge -o "$output/mutants.json" "${reports[@]}"
+          printf '%s\n' '${{ matrix.suite }}' > "$output/suite.txt"
       - uses: actions/upload-artifact@v4
         with:
-          name: test-miser-ruby-merged
-          path: tmp/test-miser-ruby-merged
+          name: test-miser-ruby-merged-${{ matrix.token }}
+          path: tmp/test-miser-ruby-merged/${{ matrix.token }}
+          if-no-files-found: error
+          retention-days: 14
+
+  rust:
+    name: Rust ${{ matrix.id }} (${{ matrix.mode }})
+    needs: plan
+    if: needs.plan.outputs.rust_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix: ${{ fromJSON(needs.plan.outputs.rust_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.plan.outputs.head_repository }}
+          ref: ${{ needs.plan.outputs.head_sha }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.crate_root }}
+          key: test-miser-${{ matrix.id }}
+      - name: Install Z3 for Nil Kill
+        if: matrix.id == 'nil-kill'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y z3
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - name: Run stock cargo-mutants and adapt its logs
+        env:
+          SELECTED_COMPONENTS: ${{ toJSON(matrix.selected_components) }}
+          ALL_COMPONENTS: ${{ toJSON(matrix.sources) }}
+        run: |
+          output="tmp/test-miser-rust/${{ matrix.token }}"
+          mkdir -p "$output"
+          args=(
+            cargo mutants
+            --dir "${{ matrix.crate_root }}"
+            --output "$output"
+            --jobs 2
+            --timeout "${{ matrix.timeout }}"
+            --cargo-test-arg=--no-fail-fast
+          )
+          while IFS= read -r component; do
+            args+=(--file "${component#${{ matrix.crate_root }}/}")
+          done < <(jq -r '.[]' <<< "$SELECTED_COMPONENTS")
+          set +e
+          "${args[@]}"
+          mutant_status=$?
+          set -e
+          if [ "$mutant_status" -ne 0 ] && [ "$mutant_status" -ne 2 ]; then
+            echo "cargo-mutants failed with status $mutant_status" >&2
+            exit "$mutant_status"
+          fi
+          outcomes_file="$(find "$output" -name outcomes.json -type f | head -n 1)"
+          test -n "$outcomes_file"
+          outcomes="$(dirname "$outcomes_file")"
+          adapt=(
+            bundle exec ruby gems/test-miser/exe/test-miser adapt
+            --root "${{ matrix.crate_root }}"
+            --path-prefix "${{ matrix.crate_root }}"
+            -o "$output/facts.json"
+          )
+          while IFS= read -r component; do adapt+=(--selected-component "$component"); done \
+            < <(jq -r '.[]' <<< "$SELECTED_COMPONENTS")
+          adapt+=(cargo-mutants "$outcomes")
+          "${adapt[@]}"
+          inventory=(bundle exec ruby gems/test-miser/exe/test-miser-inventory -o "$output/inventory.json")
+          while IFS= read -r component; do inventory+=(--source "$component"); done \
+            < <(jq -r '.[]' <<< "$ALL_COMPONENTS")
+          "${inventory[@]}"
+          printf '%s\n' '${{ matrix.suite }}' > "$output/suite.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-miser-rust-${{ matrix.token }}
+          path: |
+            tmp/test-miser-rust/${{ matrix.token }}/facts.json
+            tmp/test-miser-rust/${{ matrix.token }}/inventory.json
+            tmp/test-miser-rust/${{ matrix.token }}/suite.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  go:
+    name: Go ${{ matrix.id }}
+    needs: plan
+    if: needs.plan.outputs.go_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.go_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.plan.outputs.head_repository }}
+          ref: ${{ needs.plan.outputs.head_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --legacy-peer-deps
+      - name: Build the pinned run-to-completion Gremlins patch
+        run: |
+          git clone --filter=blob:none https://github.com/go-gremlins/gremlins.git tmp/gremlins
+          git -C tmp/gremlins checkout b48a4aad
+          git -C tmp/gremlins apply "$GITHUB_WORKSPACE/gems/test-miser/patches/gremlins-test-miser.patch"
+          (cd tmp/gremlins && go build -o "$GITHUB_WORKSPACE/tmp/gremlins-bin" ./cmd/gremlins)
+      - name: Run Go mutants with complete test attribution
+        working-directory: ${{ matrix.module_root }}
+        env:
+          ALL_COMPONENTS: ${{ toJSON(matrix.sources) }}
+        run: |
+          output="$GITHUB_WORKSPACE/tmp/test-miser-go/${{ matrix.token }}"
+          mkdir -p "$output"
+          bundle exec "$GITHUB_WORKSPACE/tmp/gremlins-bin" unleash \
+            --silent \
+            --workers "${{ matrix.workers }}" \
+            --test-miser-output "$output/raw-facts.json"
+          normalize=(
+            bundle exec ruby "$GITHUB_WORKSPACE/gems/test-miser/exe/test-miser-facts" normalize
+            --input "$output/raw-facts.json"
+            --output "$output/facts.json"
+            --path-prefix "${{ matrix.module_root }}"
+          )
+          while IFS= read -r component; do normalize+=(--selected-component "$component"); done \
+            < <(jq -r '.[]' <<< "$ALL_COMPONENTS")
+          "${normalize[@]}"
+          inventory=(bundle exec ruby "$GITHUB_WORKSPACE/gems/test-miser/exe/test-miser-inventory" -o "$output/inventory.json")
+          while IFS= read -r component; do inventory+=(--source "$component"); done \
+            < <(jq -r '.[]' <<< "$ALL_COMPONENTS")
+          (cd "$GITHUB_WORKSPACE" && "${inventory[@]}")
+          printf '%s\n' '${{ matrix.suite }}' > "$output/suite.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-miser-go-${{ matrix.token }}
+          path: |
+            tmp/test-miser-go/${{ matrix.token }}/facts.json
+            tmp/test-miser-go/${{ matrix.token }}/inventory.json
+            tmp/test-miser-go/${{ matrix.token }}/suite.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -264,7 +522,7 @@ jobs:
       - name: Build Zig Mutants
         working-directory: gems/zig-mutants
         run: zig build -Doptimize=ReleaseSafe
-      - name: Run PR-selected Zig mutants
+      - name: Run selected Zig mutants
         working-directory: gems/zig-mutants
         env:
           BASE_SHA: ${{ needs.plan.outputs.base }}
@@ -279,21 +537,15 @@ jobs:
         run: |
           mkdir -p "../../tmp/test-miser-zig/${SHARD_INDEX}-of-${SHARD_TOTAL}"
           args=(
-            run
-            --root ../..
-            --source "$MUTANT_SOURCE"
-            --test-command "$MUTANT_TEST_COMMAND"
-            --timeout "$MUTANT_TIMEOUT"
-            --mutation-switching
-            --test-miser
+            run --root ../.. --source "$MUTANT_SOURCE"
+            --test-command "$MUTANT_TEST_COMMAND" --timeout "$MUTANT_TIMEOUT"
+            --mutation-switching --test-miser
             --shard "${SHARD_INDEX0}/${SHARD_TOTAL}"
             --build-cache /tmp/zig-mutants-build-cache
             --out "/tmp/test-miser-zig-${MUTANT_TOKEN}-${SHARD_INDEX}-of-${SHARD_TOTAL}"
             --facts "../../tmp/test-miser-zig/${SHARD_INDEX}-of-${SHARD_TOTAL}/mutant-facts.json"
           )
-          if [ "$MUTANT_MODE" = diff ]; then
-            args+=(--since "$BASE_SHA")
-          fi
+          if [ "$MUTANT_MODE" = diff ]; then args+=(--since "$BASE_SHA"); fi
           ./zig-out/bin/zig-mutants "${args[@]}"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -303,9 +555,134 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  corpus:
+    name: Publish canonical mutation corpus
+    needs: [plan, ruby-prepare, ruby, ruby-merge, rust, go, zig]
+    if: >-
+      always() && needs.plan.result == 'success' &&
+      needs.plan.outputs.canonical == 'true' &&
+      (needs.plan.outputs.ruby_run != 'true' ||
+       (needs.ruby-prepare.result == 'success' && needs.ruby.result == 'success' && needs.ruby-merge.result == 'success')) &&
+      (needs.plan.outputs.rust_run != 'true' || needs.rust.result == 'success') &&
+      (needs.plan.outputs.go_run != 'true' || needs.go.result == 'success') &&
+      (needs.plan.outputs.zig_run != 'true' || needs.zig.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.plan.outputs.head_repository }}
+          ref: ${{ needs.plan.outputs.head_sha }}
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.base_found == 'true'
+        with:
+          name: test-miser-base-${{ github.run_id }}
+          path: tmp/test-miser-base
+      - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.ruby_run == 'true'
+        with:
+          pattern: test-miser-ruby-prepare-*
+          path: tmp/corpus-input/ruby-prepare
+      - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.ruby_run == 'true'
+        with:
+          pattern: test-miser-ruby-merged-*
+          path: tmp/corpus-input/ruby-merged
+      - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.rust_run == 'true'
+        with:
+          pattern: test-miser-rust-*
+          path: tmp/corpus-input/rust
+      - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.go_run == 'true'
+        with:
+          pattern: test-miser-go-*
+          path: tmp/corpus-input/go
+      - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.zig_run == 'true'
+        with:
+          pattern: test-miser-zig-*-of-*
+          path: tmp/corpus-input/zig
+      - name: Materialize the complete head checkpoint
+        env:
+          BASE_FOUND: ${{ needs.plan.outputs.base_found }}
+          BASE_SHA: ${{ needs.plan.outputs.base }}
+          HEAD_SHA: ${{ needs.plan.outputs.head_sha }}
+          REQUIRED_SUITES: ${{ needs.plan.outputs.required_suites }}
+          RUBY_RUN: ${{ needs.plan.outputs.ruby_run }}
+          RUST_RUN: ${{ needs.plan.outputs.rust_run }}
+          GO_RUN: ${{ needs.plan.outputs.go_run }}
+          ZIG_RUN: ${{ needs.plan.outputs.zig_run }}
+        run: |
+          mkdir -p tmp/test-miser-corpus/lineage
+          args=(
+            bundle exec ruby gems/test-miser/exe/test-miser-artifact update
+            --repository "$GITHUB_REPOSITORY"
+            --commit "$HEAD_SHA"
+            --parent "$BASE_SHA"
+            --output tmp/test-miser-corpus/mutation-corpus.json.zst
+            --delta tmp/test-miser-corpus/mutation-delta.json.zst
+            --manifest tmp/test-miser-corpus/manifest.json
+            --materialize tmp/test-miser-corpus/lineage
+          )
+          while IFS= read -r suite; do args+=(--require-suite "$suite"); done \
+            < <(jq -r '.[]' <<< "$REQUIRED_SUITES")
+          if [ "$BASE_FOUND" = true ]; then args+=(--base tmp/test-miser-base/mutation-corpus.json.zst); fi
+
+          if [ "$RUBY_RUN" = true ]; then
+            while IFS= read -r report; do
+              directory="$(dirname "$report")"
+              suite="$(cat "$directory/suite.txt")"
+              inventory="$(find tmp/corpus-input/ruby-prepare -path '*/inventory.json' -type f -exec grep -l "\"namespace\"" {} + | while read -r candidate; do
+                candidate_suite="$(cat "$(dirname "$candidate")/suite.txt")"
+                if [ "$candidate_suite" = "$suite" ]; then echo "$candidate"; break; fi
+              done)"
+              test -n "$inventory"
+              args+=(--inventory "$suite=$inventory" --report "$suite=$report")
+            done < <(find tmp/corpus-input/ruby-merged -name mutants.json -type f | sort)
+          fi
+          for language in rust go; do
+            run_var="${language^^}_RUN"
+            if [ "${!run_var}" = true ]; then
+              while IFS= read -r facts; do
+                directory="$(dirname "$facts")"
+                suite="$(cat "$directory/suite.txt")"
+                args+=(--inventory "$suite=$directory/inventory.json" --report "$suite=$facts")
+              done < <(find "tmp/corpus-input/$language" -name facts.json -type f | sort)
+            fi
+          done
+          if [ "$ZIG_RUN" = true ]; then
+            args+=(--inventory zig:clear=gems/zig-mutants/subjects.json)
+            while IFS= read -r report; do args+=(--report "zig:clear=$report"); done \
+              < <(find tmp/corpus-input/zig -name mutant-facts.json -type f | sort)
+          fi
+          "${args[@]}"
+          bundle exec ruby gems/test-miser/exe/test-miser-artifact verify \
+            --corpus tmp/test-miser-corpus/mutation-corpus.json.zst \
+            --manifest tmp/test-miser-corpus/manifest.json
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/test-miser-corpus/lineage/weak-tests.sarif
+          category: test-miser-canonical
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-miser-corpus-${{ needs.plan.outputs.head_sha }}
+          path: tmp/test-miser-corpus
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+
   result:
-    name: Test Miser PR mutations
-    needs: [plan, ruby, ruby-merge, zig]
+    name: Test Miser mutations
+    needs: [plan, ruby, ruby-merge, rust, go, zig, corpus]
     if: always() && needs.plan.result != 'skipped'
     runs-on: ubuntu-latest
     steps:
@@ -315,19 +692,29 @@ jobs:
           RUBY_RUN: ${{ needs.plan.outputs.ruby_run }}
           RUBY_RESULT: ${{ needs.ruby.result }}
           RUBY_MERGE_RESULT: ${{ needs.ruby-merge.result }}
+          RUST_RUN: ${{ needs.plan.outputs.rust_run }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          GO_RUN: ${{ needs.plan.outputs.go_run }}
+          GO_RESULT: ${{ needs.go.result }}
           ZIG_RUN: ${{ needs.plan.outputs.zig_run }}
           ZIG_RESULT: ${{ needs.zig.result }}
+          CANONICAL: ${{ needs.plan.outputs.canonical }}
+          CORPUS_RESULT: ${{ needs.corpus.result }}
         run: |
-          if [ "$PLAN_RESULT" != success ]; then
-            echo "Test Miser planning failed" >&2
-            exit 1
-          fi
+          if [ "$PLAN_RESULT" != success ]; then echo "Test Miser planning failed" >&2; exit 1; fi
           if [ "$RUBY_RUN" = true ] && { [ "$RUBY_RESULT" != success ] || [ "$RUBY_MERGE_RESULT" != success ]; }; then
-            echo "Ruby Test Miser jobs failed" >&2
-            exit 1
+            echo "Ruby Test Miser jobs failed" >&2; exit 1
+          fi
+          if [ "$RUST_RUN" = true ] && [ "$RUST_RESULT" != success ]; then
+            echo "Rust Test Miser jobs failed" >&2; exit 1
+          fi
+          if [ "$GO_RUN" = true ] && [ "$GO_RESULT" != success ]; then
+            echo "Go Test Miser jobs failed" >&2; exit 1
           fi
           if [ "$ZIG_RUN" = true ] && [ "$ZIG_RESULT" != success ]; then
-            echo "Zig Test Miser jobs failed" >&2
-            exit 1
+            echo "Zig Test Miser jobs failed" >&2; exit 1
+          fi
+          if [ "$CANONICAL" = true ] && [ "$CORPUS_RESULT" != success ]; then
+            echo "Canonical Test Miser corpus publication failed" >&2; exit 1
           fi
           echo "All requested Test Miser mutation jobs completed"

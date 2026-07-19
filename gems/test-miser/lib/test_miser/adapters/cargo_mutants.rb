@@ -8,9 +8,11 @@ module TestMiser
     class CargoMutants
       TEST_RESULT = /^test (?<name>.+) \.\.\. (?<status>ok|FAILED|ignored)$/
 
-      def initialize(output_dir:, root: Dir.pwd)
+      def initialize(output_dir:, root: Dir.pwd, path_prefix: nil, selected_components: [])
         @output_dir = File.expand_path(output_dir)
         @root = File.expand_path(root)
+        @path_prefix = path_prefix&.sub(%r{/+\z}, "")
+        @selected_components = selected_components
       end
 
       def call
@@ -24,6 +26,9 @@ module TestMiser
         mutant_outcomes = outcomes.reject { |outcome| outcome["scenario"] == "Baseline" }
         complete = mutant_outcomes.all? { |outcome| outcome.dig("scenario", "Mutant") }
         run_to_complete = mutant_outcomes.all? { |outcome| no_fail_fast?(outcome) }
+        attribution_complete = complete && run_to_complete &&
+          mutant_outcomes.none? { |outcome| outcome["summary"] == "Timeout" } &&
+          mutant_outcomes.none? { |outcome| unattributed_kill?(outcome) }
 
         {
           "schema" => "mutant-facts/v1",
@@ -33,13 +38,17 @@ module TestMiser
           "subjects" => subjects(mutant_outcomes),
           "tests" => test_names.map do |name|
             location = locations[name] || {}
-            { "id" => test_id(name), "name" => name, "file" => location[:file], "line" => location[:line] }.compact
+            {
+              "id" => test_id(name), "name" => name,
+              "file" => prefixed(location[:file]), "line" => location[:line]
+            }.compact
           end,
           "mutants" => mutant_outcomes.map { |outcome| mutant(outcome) },
           "test_miser" => {
             "complete" => complete,
-            "attribution_complete" => complete && run_to_complete,
-            "run_to_complete" => run_to_complete
+            "attribution_complete" => attribution_complete,
+            "run_to_complete" => run_to_complete,
+            "selected_components" => @selected_components
           }
         }
       rescue JSON::ParserError => error
@@ -53,7 +62,7 @@ module TestMiser
         failures = test_results(outcome).select { |_name, status| status == "FAILED" }.keys
         {
           "id" => details.fetch("name"),
-          "file" => details.fetch("file"),
+          "file" => prefixed(details.fetch("file")),
           "method" => details.dig("function", "function_name"),
           "kind" => details["genre"],
           "outcome" => normalize_outcome(outcome.fetch("summary")),
@@ -73,7 +82,7 @@ module TestMiser
 
           killed = rows.count { |row| row["summary"] == "CaughtMutant" }
           {
-            "file" => file,
+            "file" => prefixed(file),
             "method" => method,
             "mutations" => rows.length,
             "killed" => killed,
@@ -101,6 +110,11 @@ module TestMiser
         end
       end
 
+      def unattributed_kill?(outcome)
+        outcome["summary"] == "CaughtMutant" &&
+          test_results(outcome).none? { |_name, status| status == "FAILED" }
+      end
+
       def locate_tests(names)
         wanted = names.to_h { |name| [name.split("::").last, name] }
         locations = {}
@@ -124,6 +138,12 @@ module TestMiser
 
       def test_id(name)
         "rust:#{name}"
+      end
+
+      def prefixed(path)
+        return path unless path && @path_prefix
+
+        "#{@path_prefix}/#{path.sub(%r{\A\./}, '')}"
       end
 
       def normalize_outcome(summary)

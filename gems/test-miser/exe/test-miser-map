@@ -6,13 +6,22 @@ require "optparse"
 require_relative "../lib/test_miser/mutant_collector"
 require_relative "../lib/test_miser/runtime_map_collector"
 
-options = { includes: [], requires: [], output: nil, timeout: 5.0 }
+options = {
+  includes: [], requires: [], output: nil, timeout: 5.0,
+  integration: "minitest", integration_arguments: []
+}
 parser = OptionParser.new do |opts|
   opts.banner = "Usage: test-miser-map [options]"
   opts.on("-I", "--include DIR", "Production source root to trace (repeatable)") { |path| options[:includes] << path }
   opts.on("-r", "--require LIBRARY", "Require LIBRARY before tracing (repeatable)") { |name| options[:requires] << name }
   opts.on("-o", "--output FILE", "Write the complete runtime map to FILE") { |path| options[:output] = path }
   opts.on("--timeout SECONDS", Float, "Per-test timeout (default: 5.0)") { |seconds| options[:timeout] = seconds }
+  opts.on("--integration NAME", %w[minitest rspec], "Mutant integration (default: minitest)") do |name|
+    options[:integration] = name
+  end
+  opts.on("--integration-argument ARG", "Pass an argument to the Mutant test integration") do |argument|
+    options[:integration_arguments] << argument
+  end
   opts.on("-h", "--help", "Show this help") { puts opts; exit 0 }
 end
 
@@ -26,6 +35,8 @@ begin
     includes: options[:includes],
     requires: options[:requires],
     timeout: options[:timeout],
+    integration: options[:integration],
+    integration_arguments: options[:integration_arguments],
     progress: ->(message) { warn message }
   )
   File.write(options[:output], "#{JSON.pretty_generate(collector.call)}\n")

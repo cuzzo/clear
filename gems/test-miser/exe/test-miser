@@ -5,7 +5,10 @@ require "optparse"
 require_relative "../lib/test_miser"
 
 command = %w[infer adapt].include?(ARGV.first) ? ARGV.shift : "report"
-options = { format: command == "infer" ? "sarif" : "markdown", output: nil, root: Dir.pwd, language: "java" }
+options = {
+  format: command == "infer" ? "sarif" : "markdown", output: nil,
+  root: Dir.pwd, language: "java", selected_components: []
+}
 parser = OptionParser.new do |opts|
   opts.banner = "Usage: test-miser [infer|adapt] [options] INPUT [...]"
   opts.on("-f", "--format FORMAT", %w[markdown json sarif], "Output format: markdown, json, or sarif") do |format|
@@ -19,6 +22,10 @@ parser = OptionParser.new do |opts|
   end
   opts.on("--language LANGUAGE", "Adapter source language (for example java or kotlin)") do |language|
     options[:language] = language
+  end
+  opts.on("--path-prefix PATH", "Prefix adapter source and test paths") { |path| options[:path_prefix] = path }
+  opts.on("--selected-component PATH", "Declare an exactly refreshed source component") do |path|
+    options[:selected_components] << path
   end
   opts.on("-h", "--help", "Show this help") do
     puts opts
@@ -41,7 +48,10 @@ begin
         warn "Usage: test-miser adapt [options] cargo-mutants MUTANTS_OUT"
         exit 1
       end
-      TestMiser::Adapters::CargoMutants.new(output_dir: ARGV.fetch(0), root: options[:root]).call
+      TestMiser::Adapters::CargoMutants.new(
+        output_dir: ARGV.fetch(0), root: options[:root],
+        path_prefix: options[:path_prefix], selected_components: options[:selected_components]
+      ).call
     when "pit"
       unless ARGV.length == 2
         warn "Usage: test-miser adapt [options] pit MUTATIONS_XML TEST_REPORT_DIR"

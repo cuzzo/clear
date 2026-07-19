@@ -10,7 +10,8 @@ require_relative "../lib/test_miser/mutant_report_merger"
 options = {
   includes: [], requires: [], output: nil, timeout: 5.0,
   jobs: 1, resume: false, shard_index: 0, shard_total: 1, selection_map: nil,
-  run_to_complete: false, candidate_seed: nil, since: nil
+  run_to_complete: false, candidate_seed: nil, since: nil,
+  integration: "minitest", integration_arguments: []
 }
 parser = OptionParser.new do |opts|
   opts.banner = "Usage: test-miser-mutant [options] SUBJECT_EXPRESSION [...]"
@@ -37,6 +38,12 @@ parser = OptionParser.new do |opts|
   end
   opts.on("--since REVISION", "Only mutate Ruby subjects touched since REVISION") do |revision|
     options[:since] = revision
+  end
+  opts.on("--integration NAME", %w[minitest rspec], "Mutant integration (default: minitest)") do |name|
+    options[:integration] = name
+  end
+  opts.on("--integration-argument ARG", "Pass an argument to the Mutant test integration") do |argument|
+    options[:integration_arguments] << argument
   end
   opts.on("--run-to-complete", "Run every selected test and record all killers") do
     options[:run_to_complete] = true
@@ -90,6 +97,8 @@ begin
       options[:requires].each { |library| command.concat(["-r", library]) }
       command.concat(["--selection-map", options[:selection_map]]) if options[:selection_map]
       command.concat(["--since", options[:since]]) if options[:since]
+      command.concat(["--integration", options[:integration]])
+      options[:integration_arguments].each { |argument| command.concat(["--integration-argument", argument]) }
       command << "--run-to-complete" if options[:run_to_complete]
       command.concat(["--candidate-seed", options[:candidate_seed]]) if options[:candidate_seed]
       command.concat(["--timeout", options[:timeout].to_s, "--shard", "#{index + 1}/#{options[:jobs]}", "-o", path])
@@ -120,6 +129,8 @@ begin
       candidate_signatures: options[:candidate_seed] ?
         JSON.parse(File.read(options[:candidate_seed])).fetch("signatures") : {},
       since: options[:since],
+      integration: options[:integration],
+      integration_arguments: options[:integration_arguments],
       checkpoint: ->(payload) { write_report.call(options[:output], payload) }
     )
     write_report.call(options[:output], collector.call)

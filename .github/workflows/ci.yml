@@ -138,6 +138,20 @@ jobs:
           FACT_MINE_RUST_BINARY: ./gems/fact-mine/target/release/fact-mine-rust
           NIL_KILL_INFER_RUST_BINARY: ./gems/nil-kill/target/release/nil-kill-infer-rust
 
+  test-miser-checkpoint:
+    name: Test Miser corpus and runner integration
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - name: Verify runner adapters, dynamic planning, and canonical checkpoints
+        run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/test_miser_test.rb
+
   boobytrap-go-unit:
     name: boobytrap Go tests
     needs: changes

@@ -3,11 +3,12 @@
 require "digest"
 require "mutant"
 require "mutant/reporter/null"
+require "open3"
 require "pathname"
 require "set"
 require "tmpdir"
 require_relative "fast_mutant_fork"
-require_relative "run_to_complete_minitest"
+require_relative "run_to_complete"
 require_relative "runtime_map_collector"
 
 TestMiser::FastMutantFork.install
@@ -21,7 +22,8 @@ module TestMiser
     def initialize(
       includes:, requires:, subjects:, timeout: 5.0, progress: nil,
       shard_index: 0, shard_total: 1, resume_payload: nil, checkpoint: nil,
-      selection_payload: nil, run_to_complete: false, candidate_signatures: {}, since: nil
+      selection_payload: nil, run_to_complete: false, candidate_signatures: {}, since: nil,
+      integration: "minitest", integration_arguments: []
     )
       @includes = includes
       @requires = requires
@@ -36,16 +38,23 @@ module TestMiser
       @run_to_complete = run_to_complete
       @candidate_signatures = candidate_signatures
       @since = since
+      @integration = integration
+      @integration_arguments = integration_arguments
       validate_shard
     end
 
     def call
       env = bootstrap
       tests = env.integration.all_tests.sort_by(&:id)
-      raise CollectionError, "Minitest integration discovered no tests" if tests.empty?
+      if @selection_payload&.key?("testIds")
+        selected_ids = @selection_payload.fetch("testIds").to_set
+        tests = tests.select { |test| selected_ids.include?(test.id) }
+      end
+      raise CollectionError, "#{@integration} integration discovered no tests" if tests.empty?
 
       selections = @selection_payload ? load_selections(tests) : trace_baselines(env, tests)
       all_mutations = evil_mutations(env)
+      matched_subjects = env.subjects.map { |subject| subject.expression.syntax }.uniq.sort
       fingerprint = corpus_fingerprint(all_mutations)
       assigned_mutations = shard(all_mutations)
       rows = resumed_rows(fingerprint, assigned_mutations)
@@ -61,10 +70,10 @@ module TestMiser
         row = collect_mutation(env, mutation, selections, index + 1, pending.length)
         rows << row
         record_audit_result(row)
-        checkpoint(tests, rows, all_mutations, fingerprint) if checkpoint?(index + 1, pending.length)
+        checkpoint(tests, rows, all_mutations, fingerprint, matched_subjects) if checkpoint?(index + 1, pending.length)
       end
 
-      build_report(tests, rows, all_mutations, fingerprint)
+      build_report(tests, rows, all_mutations, fingerprint, matched_subjects)
     end
 
     private
@@ -89,7 +98,9 @@ module TestMiser
       end
       config = ::Mutant::Config::DEFAULT.with(
         includes: @includes.map { |path| File.expand_path(path) },
-        integration: ::Mutant::Integration::Config::DEFAULT.with(name: "minitest"),
+        integration: ::Mutant::Integration::Config::DEFAULT.with(
+          name: @integration, arguments: expanded_integration_arguments
+        ),
         matcher: matcher,
         mutation: ::Mutant::Mutation::Config::DEFAULT.with(timeout: @timeout),
         reporter: ::Mutant::Reporter::Null.new,
@@ -102,17 +113,38 @@ module TestMiser
           raise CollectionError, error
         end
       end
-      if @since
-        # Mutant resolves --since lazily through Git while expanding matchers,
-        # so it must remain in the repository worktree during bootstrap.
-        boot.call
-      else
-        Dir.mktmpdir("test-miser-bootstrap") do |directory|
+      Dir.mktmpdir("test-miser-bootstrap") do |directory|
+        if @since
+          with_repository_git_environment { Dir.chdir(directory) { boot.call } }
+        else
           Dir.chdir(directory) { boot.call }
         end
       end
     rescue LoadError, ::Mutant::Repository::Diff::Error => error
       raise CollectionError, error.message
+    end
+
+    def expanded_integration_arguments
+      @integration_arguments.map { |argument| File.exist?(argument) ? File.expand_path(argument) : argument }
+    end
+
+    def with_repository_git_environment
+      root, root_status = Open3.capture2e("git", "rev-parse", "--show-toplevel")
+      git_dir, dir_status = Open3.capture2e("git", "rev-parse", "--absolute-git-dir")
+      unless root_status.success? && dir_status.success?
+        raise CollectionError, "--since requires a Git worktree"
+      end
+      root = root.chomp
+      git_dir = git_dir.chomp
+
+      previous_dir = ENV["GIT_DIR"]
+      previous_work_tree = ENV["GIT_WORK_TREE"]
+      ENV["GIT_DIR"] = git_dir
+      ENV["GIT_WORK_TREE"] = root
+      yield
+    ensure
+      previous_dir ? ENV["GIT_DIR"] = previous_dir : ENV.delete("GIT_DIR")
+      previous_work_tree ? ENV["GIT_WORK_TREE"] = previous_work_tree : ENV.delete("GIT_WORK_TREE")
     end
 
     def trace_baselines(env, tests)
@@ -207,7 +239,9 @@ module TestMiser
         "coveredBy" => selected_tests.map(&:id),
         "killedBy" => killed_by,
         "auditAttributionComplete" => attribution_complete,
-        "sourceFile" => relative_path(mutation.subject.source_path)
+        "sourceFile" => relative_path(mutation.subject.source_path),
+        "subject" => mutation.subject.expression.syntax,
+        "line" => mutation.subject.source_line
       }
     end
 
@@ -253,7 +287,7 @@ module TestMiser
             ->(_value) do
               refresh_module_function(mutation.subject)
               test_result = if @run_to_complete
-                RunToCompleteMinitest.call(env.integration, tests, timeout: @timeout)
+                RunToComplete.call(env.integration, tests, timeout: @timeout)
               else
                 standard_result = env.integration.call(tests)
                 { "passed" => standard_result.passed, "killedBy" => [] }
@@ -326,18 +360,19 @@ module TestMiser
       completed == total || (completed % CHECKPOINT_INTERVAL).zero?
     end
 
-    def checkpoint(tests, rows, all_mutations, fingerprint)
-      @checkpoint.call(build_report(tests, rows, all_mutations, fingerprint))
+    def checkpoint(tests, rows, all_mutations, fingerprint, matched_subjects)
+      @checkpoint.call(build_report(tests, rows, all_mutations, fingerprint, matched_subjects))
     end
 
-    def build_report(tests, rows, all_mutations, fingerprint)
+    def build_report(tests, rows, all_mutations, fingerprint, matched_subjects)
       files = rows.group_by { |row| row.fetch("sourceFile") }.transform_values do |file_rows|
         { "mutants" => file_rows.map { |row| row.reject { |key, _value| key == "sourceFile" } } }
       end
-      test_files = tests.group_by { |test| test_file(test) }.transform_values do |file_tests|
+      test_files = tests.group_by { |test| test_location(test).fetch(:file) }.transform_values do |file_tests|
         {
           "tests" => file_tests.map do |test|
-            { "id" => test.id, "name" => test.id.delete_prefix("minitest:") }
+            location = test_location(test)
+            { "id" => test.id, "name" => location.fetch(:name), "line" => location[:line] }.compact
           end
         }
       end
@@ -355,6 +390,7 @@ module TestMiser
           "subjectExpressions" => @subjects.sort,
           "selectionScope" => @since ? "pr" : "full",
           "sinceRevision" => @since,
+          "matchedSubjects" => matched_subjects,
           "mutationCompatibleSubjects" => compatible_subjects,
           "corpusFingerprint" => fingerprint,
           "expectedMutants" => all_mutations.length,
@@ -383,13 +419,25 @@ module TestMiser
       [expanded_path(subject.source_path), subject.source_line]
     end
 
-    def test_file(test)
+    def test_location(test)
+      if (match = test.id.match(%r{\Arspec:\d+:(.+):(\d+)/(.*)\z}))
+        return {
+          file: relative_path(match[1]),
+          line: Integer(match[2]),
+          name: match[3]
+        }
+      end
+
       class_name, method_name = test.id.delete_prefix("minitest:").split("#", 2)
       klass = class_name.split("::").reject(&:empty?).inject(Object) { |namespace, name| namespace.const_get(name) }
-      location = klass.instance_method(method_name).source_location&.first
-      location ? relative_path(location) : "(unknown)"
+      file, line = klass.instance_method(method_name).source_location
+      {
+        file: file ? relative_path(file) : "(unknown)",
+        line: line,
+        name: test.id.delete_prefix("minitest:")
+      }
     rescue NameError
-      "(unknown)"
+      { file: "(unknown)", line: nil, name: test.id }
     end
 
     def expanded_path(path)

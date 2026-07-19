@@ -1,0 +1,47 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+require "optparse"
+
+options = { selected_components: [] }
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: test-miser-facts normalize [options]"
+  opts.on("--input FILE") { |value| options[:input] = value }
+  opts.on("--output FILE") { |value| options[:output] = value }
+  opts.on("--path-prefix PATH") { |value| options[:path_prefix] = value.sub(%r{/+\z}, "") }
+  opts.on("--selected-component FILE") { |value| options[:selected_components] << value }
+  opts.on("-h", "--help") { puts opts; exit 0 }
+end
+
+begin
+  command = ARGV.shift
+  parser.parse!
+  unless command == "normalize" && options[:input] && options[:output]
+    warn parser
+    exit 1
+  end
+
+  payload = JSON.parse(File.read(options[:input]))
+  raise KeyError, "input is not mutant-facts" unless payload["schema"].to_s.start_with?("mutant-facts/")
+
+  if options[:path_prefix]
+    ["subjects", "tests", "mutants"].each do |collection|
+      Array(payload[collection]).each do |row|
+        next unless row["file"]
+
+        row["file"] = "#{options[:path_prefix]}/#{row['file'].sub(%r{\A\./}, '')}"
+      end
+    end
+  end
+  metadata = payload["test_miser"] ||= {}
+  metadata["selected_components"] = options[:selected_components] unless options[:selected_components].empty?
+  temporary = "#{options[:output]}.tmp-#{Process.pid}"
+  File.write(temporary, "#{JSON.pretty_generate(payload)}\n")
+  File.rename(temporary, options[:output])
+rescue JSON::ParserError, Errno::ENOENT, KeyError => error
+  warn "test-miser-facts: #{error.message}"
+  exit 1
+ensure
+  File.delete(temporary) if defined?(temporary) && temporary && File.exist?(temporary)
+end

@@ -163,29 +163,71 @@ It is also the maintained copy-and-adapt example for another repository.
 The workflow:
 
 - starts automatically only after the repository's complete `CI` workflow has
-  passed for a same-repository pull request, and checks out that exact tested
-  commit;
+  passed for a same-repository pull request or default-branch push, and checks
+  out that exact tested commit;
 - derives the PR base from GitHub and uses native, stateless diff selection;
-- passes `--since` into Ruby Mutant and Zig Mutants;
-- traces the Espalier Ruby test-to-subject map once, then shares it only when
-  the Ruby workload fans out across GitHub nodes;
+- passes `--since` into Ruby Mutant and Zig Mutants, and restricts stock
+  `cargo-mutants` to changed Rust source components;
+- traces each affected Ruby gem's test-to-subject map once, then shares it only
+  when that gem's workload fans out across GitHub nodes;
 - creates one job for a small change and dynamically adds shards from changed
   line weight, within configured Ruby and Zig limits;
 - creates Zig jobs per affected `subjects.json` entry and enables mutation
   switching plus direct `T(m)` selection;
 - escalates a changed test or build configuration to the complete affected
-  Ruby corpus or Zig subject rather than using an unsafe source-only diff;
-- merges cross-node Ruby reports with `test-miser-merge`; and
+  Ruby, Rust, or Zig corpus rather than using an unsafe source-only diff;
+- merges cross-node Ruby reports with `test-miser-merge`;
+- restores only the complete checkpoint named for the exact default-branch
+  parent commit, then replaces every affected Ruby subject, Rust source, or Zig
+  source;
+- falls back to a complete enabled-suite refresh when the exact parent artifact
+  is absent, expired, corrupt, or from another repository;
+- publishes a fresh, self-contained `mutation-corpus/v1` checkpoint named
+  `test-miser-corpus-<head-sha>` for every successfully processed
+  default-branch commit; and
 - emits Weak Tests SARIF only for a complete full-scope run. PR-diff reports are
   retained as mutation evidence but deliberately do not produce global audit
   findings.
 
-The runtime map, cross-node shard reports, and final SARIF are the only CI
-artifacts. They coordinate independent GitHub machines or feed Lineage; native
-PR selection itself does not require historical artifacts. A failed or
-cancelled `CI` run never launches mutants. `workflow_dispatch` is the explicit
-override and exposes the base revision and maximum job counts for a deliberate
-rerun.
+Native PR selection does not require a historical artifact. The canonical
+default-branch job does: its exact-parent checkpoint makes unchanged mutation
+components cheap to carry forward. GitHub artifact expiry cannot break the
+chain because a cache miss forces a complete rebuild instead of accepting an
+older checkpoint. Each successful head artifact contains the compressed
+canonical corpus, its delta and manifest, normalized `mutant-facts/v1` files
+for all suites, and combined Weak Tests SARIF. It therefore has all data needed
+to synchronize an empty or existing `lineage.db`; no earlier artifact is
+required for ingestion.
+
+Download and verify a checkpoint before ingesting its materialized members:
+
+```sh
+gh run download "$RUN_ID" --name "test-miser-corpus-$HEAD_SHA" \
+  --dir tmp/test-miser-corpus
+bundle exec test-miser-artifact verify \
+  --corpus tmp/test-miser-corpus/mutation-corpus.json.zst \
+  --manifest tmp/test-miser-corpus/manifest.json
+
+for facts in tmp/test-miser-corpus/lineage/mutant-facts-*.json; do
+  bundle exec lineage ingest-mutants --input "$facts"
+done
+bundle exec lineage ingest-sarif \
+  --input tmp/test-miser-corpus/lineage/weak-tests.sarif --replace
+```
+
+See [`docs/agents/lineage-sync.md`](docs/agents/lineage-sync.md) for the
+checkpoint, expiry, and incremental-sync design. A failed or cancelled `CI`
+run never launches mutants. `workflow_dispatch` is the explicit override and
+exposes the base revision and maximum job counts for a deliberate rerun.
+
+The maintained suite manifest is
+[`config/ci-suites.json`](config/ci-suites.json). It enables every Ruby gem
+with Ruby implementation code, all five Rust crates, and the Zig runtime
+subjects. The Boobytrap Go module is present but explicitly disabled: the
+pinned run-to-completion Gremlins patch took 14m31s for 994 mutants and still
+left 39 killed mutants attributable only to package failure rather than a named
+test. The dormant Go job and adapter remain ready to enable after that runner
+gap is fixed; incomplete Go facts are never admitted to the canonical corpus.
 
 Generated shard reports include a fingerprint and expected mutant count.
 Partial generated corpora withhold audit findings; the merged report becomes
