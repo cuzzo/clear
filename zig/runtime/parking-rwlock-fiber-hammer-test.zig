@@ -177,9 +177,12 @@ fn withMainRuntimeN(comptime workers: usize, comptime body: fn (*Runtime) anyerr
 
     const Runner = struct {
         rt: *Runtime,
+        failure: ?anyerror = null,
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const self: *@This() = @ptrCast(@alignCast(raw.?));
-            try body(self.rt);
+            body(self.rt) catch |err| {
+                self.failure = err;
+            };
         }
     };
 
@@ -191,6 +194,7 @@ fn withMainRuntimeN(comptime workers: usize, comptime body: fn (*Runtime) anyerr
         .{ .stack_size = test_stack_size, .pinned = true },
     );
     sched.run();
+    if (runner.failure) |err| return err;
 }
 
 // ---------------- Stackful Writer / Reader fibers --------------------
@@ -214,6 +218,11 @@ const Sample = struct {
 const Shared = struct {
     rw: pl.ParkingRwLock = .{},
     sample: Sample = .{},
+    // Atomic only keeps TSan from treating the protected payload as an
+    // unmodelled race. The load+store pair is deliberately non-atomic as a
+    // transaction: if two writers are ever granted together, an increment
+    // is lost and the final exact-count assertion catches it.
+    protected_count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     torn_reads: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     done_writers: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     done_readers: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
@@ -248,6 +257,10 @@ const WriterCtx = struct {
             var k: usize = 0;
             while (k < 32) : (k += 1) std.atomic.spinLoopHint();
             ctx.shared.sample.b.store(i * 2, .monotonic);
+            const count = ctx.shared.protected_count.load(.monotonic);
+            k = 0;
+            while (k < 32) : (k += 1) std.atomic.spinLoopHint();
+            ctx.shared.protected_count.store(count + 1, .monotonic);
             ctx.shared.rw.unlock();
             i += 1;
         }
@@ -311,7 +324,7 @@ fn waitForHammerCompletion(rt: *Runtime, shared: *Shared, expected_writers: usiz
     }
 }
 
-// Stackful fiber ParkingRwLock hammer: 4 writers + 8 readers spawned
+// Stackful fiber ParkingRwLock hammer: 4 writers + 28 readers spawned
 // across multiple worker schedulers + main via spawnBest. Each writer
 // mutates Sample{a, b} non-atomically; each reader checks the invariant
 // b == a * 2.
@@ -325,7 +338,24 @@ fn waitForHammerCompletion(rt: *Runtime, shared: *Shared, expected_writers: usiz
 // With the guard, wake-on-undo skips the wake when WRITE_LOCKED is
 // set (the writer's eventual unlock will fire the wake), and the test
 // passes deterministically.
-test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant under wake-on-undo" {
+test "ParkingRwLock harness propagates scheduled assertion failures" {
+    stack_pool = StackPool.init(test_alloc);
+    defer stack_pool.deinit();
+    defer {
+        fp.global_registry.deinit(test_alloc);
+        global_ebr.deinit(test_alloc);
+        fp.global_registry = .{};
+        global_ebr = .{};
+    }
+
+    try testing.expectError(error.ScheduledAssertionSentinel, withMainRuntimeN(1, struct {
+        fn body(_: *Runtime) !void {
+            return error.ScheduledAssertionSentinel;
+        }
+    }.body));
+}
+
+test "ParkingRwLock fiber hammer: 4 writers + 28 readers, exact updates and torn-read invariant" {
     if (SKIP_BY_DEFAULT) return error.SkipZigTest;
 
     stack_pool = StackPool.init(test_alloc);
@@ -333,6 +363,8 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
     defer {
         fp.global_registry.deinit(test_alloc);
         global_ebr.deinit(test_alloc);
+        fp.global_registry = .{};
+        global_ebr = .{};
     }
 
     // TSan needs true cross-thread execution here, but not four worker
@@ -343,9 +375,14 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
     const workers = if (build_options.coverage) 1 else if (build_options.tsan) 2 else 4;
     try withMainRuntimeN(workers, struct {
         fn body(rt: *Runtime) !void {
+            // Match the CLEAR writer-pressure benchmark. The old 8/4 x 500
+            // shape detected torn reader snapshots but was too short to
+            // catch rare writer/writer overlap and never asserted an exact
+            // protected update count.
             const NW = if (build_options.coverage) 1 else 4;
-            const NR = if (build_options.coverage) 1 else 8;
-            const ITERS: usize = if (build_options.coverage) 1 else 500;
+            const NR = if (build_options.coverage) 1 else 28;
+            const WRITER_ITERS: usize = if (build_options.coverage) 1 else 25_000;
+            const READER_ITERS: usize = if (build_options.coverage) 1 else 100_000;
 
             var shared = Shared{};
             const sa = rt.getSched().allocator;
@@ -360,7 +397,7 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
                     .inner = wprom[i].inner,
                     .bg_alloc = sa,
                     .shared = &shared,
-                    .iters = ITERS,
+                    .iters = WRITER_ITERS,
                 };
                 try CheatHeader.spawnBest(
                     @intFromPtr(&Runtime.entryWrapper),
@@ -376,7 +413,7 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
                     .inner = rprom[i].inner,
                     .bg_alloc = sa,
                     .shared = &shared,
-                    .iters = ITERS,
+                    .iters = READER_ITERS,
                 };
                 try CheatHeader.spawnBest(
                     @intFromPtr(&Runtime.entryWrapper),
@@ -388,10 +425,11 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
 
             try waitForHammerCompletion(rt, &shared, NW, NR);
 
-            for (&wprom) |*p| _ = try p.next();
-            for (&rprom) |*p| _ = try p.next();
+            for (&wprom) |*p| try testing.expectEqual(WRITER_ITERS, try p.next());
+            for (&rprom) |*p| try testing.expectEqual(READER_ITERS, try p.next());
 
             try testing.expectEqual(@as(usize, 0), shared.torn_reads.load(.monotonic));
+            try testing.expectEqual(@as(u64, NW * WRITER_ITERS), shared.protected_count.load(.monotonic));
             try testing.expect(!shared.rw.isWriteLocked());
             try testing.expectEqual(@as(i32, 0), shared.rw.readerCount());
         }

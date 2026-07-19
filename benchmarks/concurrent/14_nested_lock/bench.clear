@@ -105,7 +105,8 @@ FN main() RETURNS Void ->
   expected = numAccounts * 1000;
   ASSERT total == expected, "balance mismatch";
   totalOps = nWorkers * opsPerWorker;
-  opsPerSec = totalOps * 1000 / elapsed;
+  rateElapsed = IF elapsed > 0 THEN elapsed ELSE 1 END;
+  opsPerSec = totalOps * 1000 / rateElapsed;
 
   print("BENCH_RESULT: ${elapsed.toString()} ms");
   print("Nested lock (${nWorkers.toString()} workers x ${opsPerWorker.toString()} ops)");

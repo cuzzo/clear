@@ -72,4 +72,39 @@ RSpec.describe "benchmark failure accounting" do
       expect($benchmark_failures).to eq(["#{source}: coverage build or execution failed"])
     end
   end
+
+  it "retains the captured crash tail instead of hiding non-leak failures" do
+    output = (1..25).map { |i| "diagnostic #{i}\n" }.join
+
+    tail = benchmark_output_tail(output)
+
+    expect(tail).not_to include("diagnostic 5\n")
+    expect(tail).to include("      diagnostic 6\n")
+    expect(tail).to include("      diagnostic 25\n")
+  end
+end
+
+RSpec.describe "scaled MVCC writer-pressure benchmark", :integration do
+  it "completes repeatedly when a measured phase is shorter than one millisecond" do
+    source_path = File.expand_path(
+      "../../benchmarks/inter-clear/06_concurrent_mvcc_writer_pressure/bench.clear",
+      __dir__,
+    )
+
+    Dir.mktmpdir("clear-mvcc-writer-pressure") do |dir|
+      source = File.join(dir, "bench.clear")
+      binary = File.join(dir, "bench")
+      File.write(source, apply_leak_substitutions(File.read(source_path)))
+
+      build_output, build_status = Open3.capture2e(
+        File.expand_path("../../clear", __dir__), "build", source, "-o", binary,
+      )
+      expect(build_status.success?).to be(true), build_output
+
+      50.times do |attempt|
+        output, status = Open3.capture2e({ "CLEAR_THREADS" => "4" }, binary)
+        expect(status.success?).to be(true), "attempt #{attempt + 1}: #{output}"
+      end
+    end
+  end
 end

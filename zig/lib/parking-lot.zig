@@ -1739,9 +1739,12 @@ pub const ParkingRwLock = struct {
                     // (they fetchAdd then undo when they see HAS_WAITERS).
                     var cur = self.state.load(.acquire);
                     while (true) {
-                        // If readers hold, the last one's unlockShared
-                        // will call us again. Stop draining.
-                        if ((cur & READER_MASK) != 0) return;
+                        // Revalidate after taking queue_spin. More than one
+                        // release/undo path can decide a wake is needed and
+                        // then serialize here; an earlier caller may already
+                        // have granted the lock to a writer. The later caller
+                        // must not grant a second writer from that state.
+                        if ((cur & (READER_MASK | WRITE_LOCKED_BIT)) != 0) return;
                         // Target: claim WRITE_LOCKED, preserve HAS_WAITERS
                         // iff more waiters remain after this pop.
                         const more_after = (self.waiters.head != self.waiters.tail);
@@ -1795,6 +1798,14 @@ pub const ParkingRwLock = struct {
                     return; // grant one writer per wakeNext
                 },
                 .Read => {
+                    // As above, a previous wakeNext caller may have granted a
+                    // writer while this caller was waiting for queue_spin.
+                    // Granting a reader slot unconditionally in that state
+                    // violates mutual exclusion and produces torn reads/lost
+                    // writer updates. HAS_WAITERS prevents a new fast-path
+                    // writer after this recheck, and queue_spin serializes
+                    // all queued grants.
+                    if ((self.state.load(.acquire) & WRITE_LOCKED_BIT) != 0) return;
                     // Grant a reader slot. WRITE_LOCKED is clear here (we
                     // only enter wakeNext after clearing it). HAS_WAITERS
                     // stays set; we'll fix it up after the drain.

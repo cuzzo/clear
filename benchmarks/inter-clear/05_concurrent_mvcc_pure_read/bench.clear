@@ -69,9 +69,11 @@ FN main() RETURNS Void ->
     elapsed_v_ms = timestampMs() - t0_v;
 
     # ---------- Report ----------
-    rw_ops_per_sec = (total_reads * 1000_i64) / elapsed_rw_ms;
-    v_ops_per_sec  = (total_reads * 1000_i64) / elapsed_v_ms;
-    speedup_x100 = (elapsed_rw_ms * 100_i64) / elapsed_v_ms;
+    rw_rate_ms = IF elapsed_rw_ms > 0_i64 THEN elapsed_rw_ms ELSE 1_i64 END;
+    v_rate_ms = IF elapsed_v_ms > 0_i64 THEN elapsed_v_ms ELSE 1_i64 END;
+    rw_ops_per_sec = (total_reads * 1000_i64) / rw_rate_ms;
+    v_ops_per_sec  = (total_reads * 1000_i64) / v_rate_ms;
+    speedup_x100 = (rw_rate_ms * 100_i64) / v_rate_ms;
 
     print("\n=== Pure-read stress (no writers): ${n_readers.toString()} readers x ${reads_per.toString()} reads ===\n");
     print("BENCH_INFO: RwLock  ${elapsed_rw_ms.toString()} ms  (${rw_ops_per_sec.toString()} reads/sec)\n");

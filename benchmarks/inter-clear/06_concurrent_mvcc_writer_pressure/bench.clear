@@ -95,9 +95,13 @@ FN main() RETURNS Void ->
     elapsed_v_ms = timestampMs() - t0_v;
 
     # ---------- Report ----------
-    rw_ops_per_sec = (total_reads * 1000_i64) / elapsed_rw_ms;
-    v_ops_per_sec  = (total_reads * 1000_i64) / elapsed_v_ms;
-    speedup_x100 = (elapsed_rw_ms * 100_i64) / elapsed_v_ms;
+    # Leak mode intentionally shrinks this workload. On a fast runner a
+    # complete phase can then fit inside one timestampMs tick.
+    rw_rate_ms = IF elapsed_rw_ms > 0_i64 THEN elapsed_rw_ms ELSE 1_i64 END;
+    v_rate_ms = IF elapsed_v_ms > 0_i64 THEN elapsed_v_ms ELSE 1_i64 END;
+    rw_ops_per_sec = (total_reads * 1000_i64) / rw_rate_ms;
+    v_ops_per_sec  = (total_reads * 1000_i64) / v_rate_ms;
+    speedup_x100 = (rw_rate_ms * 100_i64) / v_rate_ms;
 
     print("\n=== Writer pressure: ${n_readers.toString()} readers x ${reads_per.toString()} reads + ${n_writers.toString()} writers x ${writes_per.toString()} writes ===\n");
     print("BENCH_INFO: RwLock  ${elapsed_rw_ms.toString()} ms  (${rw_ops_per_sec.toString()} reads/sec)\n");
@@ -106,6 +110,14 @@ FN main() RETURNS Void ->
 
     ASSERT s_rw >= 0_i64, "rwlock sum sanity";
     ASSERT s_v  >= 0_i64, "mvcc sum sanity";
+    WITH c_rw AS final_rw {
+        print("BENCH_INFO: RwLock final writes ${final_rw.value.toString()}/${(n_writers * writes_per).toString()}\n");
+        ASSERT final_rw.value == n_writers * writes_per, "rwlock lost a writer update";
+    }
+    WITH SNAPSHOT c_v AS final_v {
+        print("BENCH_INFO: MVCC final writes ${final_v.value.toString()}/${(n_writers * writes_per).toString()}\n");
+        ASSERT final_v.value == n_writers * writes_per, "mvcc lost a writer update";
+    }
 
     print("BENCH_RESULT: ${elapsed_v_ms.toString()} ms\n");
     RETURN;

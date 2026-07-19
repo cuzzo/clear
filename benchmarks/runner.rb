@@ -247,10 +247,7 @@ def run_leak_check(dir, bench_bin, timeout_s: 60, timeout_ok: false)
   elsif exit_status != 0 && exit_status != 124
     puts "    CRASH (exit #{exit_status}), leaks: #{leak_count}"
     status = :crash
-    if leak_count > 0
-      sources = output.scan(/in (\S+) \(/).flatten.uniq
-      sources.each { |s| puts "      - #{s}" }
-    end
+    puts benchmark_output_tail(output)
   elsif leak_count > 0
     puts "    LEAKS: #{leak_count}"
     status = :leaks
@@ -267,6 +264,10 @@ def run_leak_check(dir, bench_bin, timeout_s: 60, timeout_ok: false)
     exit_status: exit_status,
     leak_count: leak_count,
   }
+end
+
+def benchmark_output_tail(output, max_lines: 20)
+  output.lines.last(max_lines).map { |line| "      #{line}" }.join
 end
 
 # -------------------------------------------------------------------------

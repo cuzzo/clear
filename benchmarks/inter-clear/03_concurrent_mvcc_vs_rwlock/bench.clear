@@ -677,9 +677,14 @@ t0_v = timestampMs();
     t1_v = timestampMs();
     elapsed_v_ms = t1_v - t0_v;
 
-    rw_ops_per_sec = (total_reads * 1000_i64) / elapsed_rw_ms;
-    v_ops_per_sec  = (total_reads * 1000_i64) / elapsed_v_ms;
-    speedup_x100 = (elapsed_rw_ms * 100_i64) / elapsed_v_ms;
+    # Millisecond timing can legitimately report zero for a short phase
+    # (especially when a leak-check scales the workload down). Keep the
+    # measured value for reporting, but never use zero as a rate divisor.
+    rw_rate_ms = IF elapsed_rw_ms > 0_i64 THEN elapsed_rw_ms ELSE 1_i64 END;
+    v_rate_ms = IF elapsed_v_ms > 0_i64 THEN elapsed_v_ms ELSE 1_i64 END;
+    rw_ops_per_sec = (total_reads * 1000_i64) / rw_rate_ms;
+    v_ops_per_sec  = (total_reads * 1000_i64) / v_rate_ms;
+    speedup_x100 = (rw_rate_ms * 100_i64) / v_rate_ms;
 
     print("\n=== Read-heavy: 32 readers x ${reads_per.toString()} reads + 4 writers x ${writes_per.toString()} writes ===\n");
     print("BENCH_INFO: RwLock  ${elapsed_rw_ms.toString()} ms  (${rw_ops_per_sec.toString()} reads/sec)\n");
@@ -688,6 +693,12 @@ t0_v = timestampMs();
 
     ASSERT s_rw >= 0_i64, "rwlock sum sanity";
     ASSERT s_v  >= 0_i64, "mvcc sum sanity";
+    WITH c_rw AS final_rw {
+        ASSERT final_rw.value == 4_i64 * writes_per, "rwlock lost a writer update";
+    }
+    WITH SNAPSHOT c_v AS final_v {
+        ASSERT final_v.value == 4_i64 * writes_per, "mvcc lost a writer update";
+    }
 
     print("BENCH_RESULT: ${elapsed_v_ms.toString()} ms\n");
     RETURN;
