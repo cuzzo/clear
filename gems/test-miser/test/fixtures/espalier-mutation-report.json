@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "2.0",
+  "files": {
+    "gems/espalier/lib/espalier/big_o_gap_impact.rb": {
+      "mutants": [
+        {
+          "id": "root-category-negation",
+          "coveredBy": ["gap:direct", "gap:transitive"],
+          "killedBy": ["gap:direct", "gap:transitive"]
+        },
+        {
+          "id": "empty-roots",
+          "coveredBy": ["gap:untraced-a", "gap:untraced-b", "gap:untraced-c"],
+          "killedBy": ["gap:untraced-a", "gap:untraced-b", "gap:untraced-c"]
+        },
+        {
+          "id": "drop-incomplete-callers",
+          "coveredBy": ["gap:untraced-a", "gap:untraced-b", "gap:untraced-c"],
+          "killedBy": ["gap:untraced-a", "gap:untraced-b", "gap:untraced-c"]
+        }
+      ]
+    },
+    "gems/espalier/lib/espalier/alias_recommendations.rb": {
+      "mutants": [
+        {
+          "id": "substring-guard",
+          "coveredBy": ["alias:exact"],
+          "killedBy": ["alias:exact"]
+        },
+        {
+          "id": "reference-kind",
+          "coveredBy": ["alias:no-kill"],
+          "killedBy": []
+        }
+      ]
+    }
+  },
+  "testFiles": {
+    "gems/espalier/test/big_o_gap_impact_test.rb": {
+      "tests": [
+        { "id": "gap:direct", "name": "BigOGapImpactTest#test_propagates_direct_root" },
+        { "id": "gap:transitive", "name": "BigOGapImpactTest#test_propagates_transitive_root" },
+        { "id": "gap:untraced-a", "name": "BigOGapImpactTest#test_untraced_a" },
+        { "id": "gap:untraced-b", "name": "BigOGapImpactTest#test_untraced_b" },
+        { "id": "gap:untraced-c", "name": "BigOGapImpactTest#test_untraced_c" }
+      ]
+    },
+    "gems/espalier/test/alias_recommendations_test.rb": {
+      "tests": [
+        { "id": "alias:exact", "name": "AliasRecommendationsTest#test_exact_alias" },
+        { "id": "alias:no-kill", "name": "AliasRecommendationsTest#test_reference_kind" },
+        { "id": "alias:not-covered", "name": "AliasRecommendationsTest#test_empty_input" }
+      ]
+    }
+  }
+}

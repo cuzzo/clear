@@ -1,0 +1,164 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "digest"
+require "json"
+require "optparse"
+require "rbconfig"
+require "set"
+require_relative "../lib/test_miser/mutant_collector"
+require_relative "../lib/test_miser/mutant_report_merger"
+require_relative "../lib/test_miser/subject_inventory"
+
+options = {
+  includes: [], requires: [], namespace: nil, selection_map: nil,
+  output: nil, jobs: 1, collector_jobs: 1, resume: false, timeout: 5.0, batch_size: 8
+}
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: test-miser-corpus [options]"
+  opts.on("-I", "--include DIR", "Production source root (repeatable)") { |path| options[:includes] << path }
+  opts.on("-r", "--require LIBRARY", "Require before inventory/collection (repeatable)") { |name| options[:requires] << name }
+  opts.on("--namespace NAME", "Inventory constants under NAME") { |name| options[:namespace] = name }
+  opts.on("--selection-map FILE", "Complete runtime test-to-subject map") { |path| options[:selection_map] = path }
+  opts.on("-o", "--output FILE", "Write merged complete corpus to FILE") { |path| options[:output] = path }
+  opts.on("-j", "--jobs JOBS", Integer, "Run scope corpora in parallel") { |jobs| options[:jobs] = jobs }
+  opts.on("--collector-jobs JOBS", Integer, "Shard mutants within each corpus component") do |jobs|
+    options[:collector_jobs] = jobs
+  end
+  opts.on("--resume", "Resume completed scope corpus files") { options[:resume] = true }
+  opts.on("--batch-size SUBJECTS", Integer, "Maximum subjects per resumable batch (default: 8)") do |value|
+    options[:batch_size] = value
+  end
+  opts.on("--timeout SECONDS", Float, "Per-test timeout (default: 5.0)") { |value| options[:timeout] = value }
+  opts.on("-h", "--help", "Show this help") { puts opts; exit 0 }
+end
+
+begin
+  parser.parse!
+  required = options[:namespace] && options[:selection_map] && options[:output] &&
+    !options[:includes].empty? && options[:jobs].positive? && options[:collector_jobs].positive? &&
+    options[:batch_size].positive?
+  unless required
+    warn parser
+    exit 1
+  end
+
+  options[:includes].each { |path| $LOAD_PATH.unshift(path) }
+  options[:requires].each { |name| require name }
+  entries = TestMiser::SubjectInventory.new(
+    namespace: options[:namespace],
+    roots: options[:includes]
+  ).call
+  raise TestMiser::CollectionError, "subject inventory is empty" if entries.empty?
+
+  grouped = entries.group_by(&:scope).sort.to_h
+  corpus_dir = "#{options[:output]}.corpora"
+  Dir.mkdir(corpus_dir) unless Dir.exist?(corpus_dir)
+  inventory_path = "#{options[:output]}.inventory.json"
+  inventory = {
+    "schemaVersion" => "test-miser-subject-inventory/v1",
+    "namespace" => options[:namespace],
+    "fingerprint" => Digest::SHA256.hexdigest(entries.map(&:expression).join("\0")),
+    "subjects" => entries.map(&:to_h)
+  }
+  File.write(inventory_path, "#{JSON.pretty_generate(inventory)}\n")
+
+  collector_executable = File.expand_path("test-miser-mutant", __dir__)
+  tasks = grouped.flat_map do |scope, scope_entries|
+    batches = scope_entries.each_slice(options[:batch_size]).to_a
+    batches.each_with_index.map do |batch, index|
+      expressions = batch.map(&:expression)
+      label = batches.one? ? scope : "#{scope} [#{index + 1}/#{batches.length}]"
+      identity = batches.one? ? scope : expressions.join("\0")
+      token = Digest::SHA256.hexdigest(identity)[0, 12]
+      [label, expressions, File.join(corpus_dir, "#{token}.json")]
+    end
+  end
+  pending = tasks.dup
+  seed_path = "#{options[:output]}.candidate-seed.json"
+  completed_payloads = tasks.filter_map do |_scope, _expressions, path|
+    next unless File.file?(path)
+
+    payload = JSON.parse(File.read(path))
+    payload if payload.dig("testMiser", "complete") == true
+  end
+  unless completed_payloads.empty?
+    test_ids = completed_payloads.flat_map do |payload|
+      payload.fetch("testFiles", {}).values.flat_map { |details| Array(details["tests"]).map { |test| test.fetch("id") } }
+    end.uniq.sort
+    killed_mutants = test_ids.to_h { |test_id| [test_id, Set.new] }
+    completed_payloads.each do |payload|
+      payload.fetch("files").each_value do |details|
+        Array(details["mutants"]).each do |mutant|
+          mutant.fetch("killedBy").each { |test_id| killed_mutants.fetch(test_id).add(mutant.fetch("id")) }
+        end
+      end
+    end
+    signatures = killed_mutants.transform_values do |mutant_ids|
+      Digest::SHA256.hexdigest(mutant_ids.to_a.sort.join("\0")) unless mutant_ids.empty?
+    end
+    seed = {
+      "schemaVersion" => "test-miser-candidate-seed/v1",
+      "componentCorpora" => completed_payloads.length,
+      "signatures" => signatures
+    }
+    File.write(seed_path, "#{JSON.pretty_generate(seed)}\n")
+  end
+  running = {}
+  failures = []
+  until pending.empty? && running.empty?
+    while running.length < options[:jobs] && (task = pending.shift)
+      scope, expressions, path = task
+      if options[:resume] && File.file?(path)
+        payload = JSON.parse(File.read(path))
+        if payload.dig("testMiser", "complete") == true
+          warn "Complete scope retained: #{scope}"
+          next
+        end
+      end
+
+      command = [RbConfig.ruby, collector_executable]
+      options[:includes].each { |include_path| command.concat(["-I", include_path]) }
+      options[:requires].each { |name| command.concat(["-r", name]) }
+      command.concat([
+        "--selection-map", options[:selection_map],
+        "--run-to-complete",
+        "--timeout", options[:timeout].to_s,
+        "-o", path
+      ])
+      command.concat(["--candidate-seed", seed_path]) if File.file?(seed_path)
+      command.concat(["--jobs", options[:collector_jobs].to_s]) if options[:collector_jobs] > 1
+      command << "--resume" if options[:resume]
+      command.concat(expressions)
+      warn "Starting scope: #{scope} (#{expressions.length} subjects)"
+      running[Process.spawn(*command)] = task
+    end
+
+    break if running.empty?
+
+    pid, status = Process.wait2
+    scope, = running.delete(pid)
+    if status.success?
+      warn "Completed scope: #{scope}"
+    else
+      failures << scope
+    end
+  end
+  unless failures.empty?
+    raise TestMiser::CollectionError, "scope collection failed: #{failures.join(', ')}"
+  end
+
+  payloads = tasks.map { |_scope, _expressions, path| JSON.parse(File.read(path)) }
+  merged = TestMiser::MutantReportMerger.call(payloads)
+  unless merged.dig("testMiser", "complete") == true
+    raise TestMiser::CollectionError, "merged mutant corpus is incomplete"
+  end
+  compatible = merged.dig("testMiser", "mutationCompatibleSubjects") || []
+  merged["testMiser"]["inventoryFingerprint"] = inventory.fetch("fingerprint")
+  merged["testMiser"]["inventorySubjects"] = entries.length
+  merged["testMiser"]["mutationIncompatibleSubjects"] = entries.map(&:expression) - compatible
+  File.write(options[:output], "#{JSON.pretty_generate(merged)}\n")
+rescue TestMiser::CollectionError, JSON::ParserError, Errno::ENOENT => error
+  warn "test-miser-corpus: #{error.message}"
+  exit 1
+end

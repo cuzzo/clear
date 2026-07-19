@@ -1,0 +1,35 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+require "optparse"
+require_relative "../lib/test_miser/mutant_collector"
+require_relative "../lib/test_miser/runtime_map_collector"
+
+options = { includes: [], requires: [], output: nil, timeout: 5.0 }
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: test-miser-map [options]"
+  opts.on("-I", "--include DIR", "Production source root to trace (repeatable)") { |path| options[:includes] << path }
+  opts.on("-r", "--require LIBRARY", "Require LIBRARY before tracing (repeatable)") { |name| options[:requires] << name }
+  opts.on("-o", "--output FILE", "Write the complete runtime map to FILE") { |path| options[:output] = path }
+  opts.on("--timeout SECONDS", Float, "Per-test timeout (default: 5.0)") { |seconds| options[:timeout] = seconds }
+  opts.on("-h", "--help", "Show this help") { puts opts; exit 0 }
+end
+
+begin
+  parser.parse!
+  unless options[:output] && !options[:includes].empty?
+    warn parser
+    exit 1
+  end
+  collector = TestMiser::RuntimeMapCollector.new(
+    includes: options[:includes],
+    requires: options[:requires],
+    timeout: options[:timeout],
+    progress: ->(message) { warn message }
+  )
+  File.write(options[:output], "#{JSON.pretty_generate(collector.call)}\n")
+rescue TestMiser::CollectionError, Errno::ENOENT => error
+  warn "test-miser-map: #{error.message}"
+  exit 1
+end

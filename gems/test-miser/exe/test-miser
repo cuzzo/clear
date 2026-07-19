@@ -1,0 +1,42 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+require_relative "../lib/test_miser"
+
+options = { format: "markdown", output: nil }
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: test-miser [options] MUTATION_REPORT.json [...]"
+  opts.on("-f", "--format FORMAT", %w[markdown json], "Output format: markdown or json") do |format|
+    options[:format] = format
+  end
+  opts.on("-o", "--output FILE", "Write the report to FILE") do |path|
+    options[:output] = path
+  end
+  opts.on("-h", "--help", "Show this help") do
+    puts opts
+    exit 0
+  end
+end
+
+begin
+  parser.parse!
+  if ARGV.empty?
+    warn parser
+    exit 1
+  end
+
+  report = TestMiser::MutationReport.load_files(ARGV)
+  analysis = TestMiser::Analyzer.new(report).analyze
+  reporter = TestMiser::Reporter.new(analysis)
+  output = options[:format] == "json" ? reporter.json : reporter.markdown
+
+  if options[:output]
+    File.write(options[:output], "#{output}\n")
+  else
+    puts output
+  end
+rescue TestMiser::InvalidReport, Errno::ENOENT => error
+  warn "test-miser: #{error.message}"
+  exit 1
+end

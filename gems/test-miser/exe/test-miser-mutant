@@ -1,0 +1,125 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+require "optparse"
+require "rbconfig"
+require_relative "../lib/test_miser/mutant_collector"
+require_relative "../lib/test_miser/mutant_report_merger"
+
+options = {
+  includes: [], requires: [], output: nil, timeout: 5.0,
+  jobs: 1, resume: false, shard_index: 0, shard_total: 1, selection_map: nil,
+  run_to_complete: false, candidate_seed: nil
+}
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: test-miser-mutant [options] SUBJECT_EXPRESSION [...]"
+  opts.on("-I", "--include DIR", "Add DIR to the Ruby load path (repeatable)") do |path|
+    options[:includes] << path
+  end
+  opts.on("-r", "--require LIBRARY", "Require LIBRARY before collecting (repeatable)") do |library|
+    options[:requires] << library
+  end
+  opts.on("-o", "--output FILE", "Write Mutation Testing Elements JSON to FILE") do |path|
+    options[:output] = path
+  end
+  opts.on("--timeout SECONDS", Float, "Per-test timeout (default: 5.0)") do |seconds|
+    options[:timeout] = seconds
+  end
+  opts.on("-j", "--jobs JOBS", Integer, "Run JOBS process shards in parallel") do |jobs|
+    options[:jobs] = jobs
+  end
+  opts.on("--resume", "Resume completed mutants from existing shard files") do
+    options[:resume] = true
+  end
+  opts.on("--selection-map FILE", "Reuse a complete runtime test-to-subject map") do |path|
+    options[:selection_map] = path
+  end
+  opts.on("--run-to-complete", "Run every selected test and record all killers") do
+    options[:run_to_complete] = true
+  end
+  opts.on("--candidate-seed FILE", "Seed prior per-test kill signatures") do |path|
+    options[:candidate_seed] = path
+  end
+  opts.on("--shard INDEX/TOTAL", "Collect one shard (one-based INDEX)") do |value|
+    match = /\A(\d+)\/(\d+)\z/.match(value)
+    raise OptionParser::InvalidArgument, value unless match
+
+    options[:shard_index] = Integer(match[1], 10) - 1
+    options[:shard_total] = Integer(match[2], 10)
+  end
+  opts.on("-h", "--help", "Show this help") do
+    puts opts
+    exit 0
+  end
+end
+
+begin
+  parser.parse!
+  unless options[:output] && !ARGV.empty? && options[:jobs].positive?
+    warn parser
+    exit 1
+  end
+
+  write_report = lambda do |path, payload|
+    temporary = "#{path}.tmp-#{Process.pid}"
+    File.write(temporary, "#{JSON.pretty_generate(payload)}\n")
+    File.rename(temporary, path)
+  end
+
+  if options[:jobs] > 1
+    raise TestMiser::CollectionError, "--jobs cannot be combined with --shard" if options[:shard_total] > 1
+
+    shard_dir = "#{options[:output]}.shards"
+    Dir.mkdir(shard_dir) unless Dir.exist?(shard_dir)
+    shard_paths = options[:jobs].times.map do |index|
+      File.join(shard_dir, format("shard-%03d-of-%03d.json", index + 1, options[:jobs]))
+    end
+    if options[:resume] && File.file?(options[:output])
+      seed_payload = JSON.parse(File.read(options[:output]))
+      shard_paths.each do |path|
+        write_report.call(path, seed_payload) unless File.file?(path)
+      end
+    end
+    pids = shard_paths.each_with_index.map do |path, index|
+      command = [RbConfig.ruby, File.expand_path(__FILE__)]
+      options[:includes].each { |include_path| command.concat(["-I", include_path]) }
+      options[:requires].each { |library| command.concat(["-r", library]) }
+      command.concat(["--selection-map", options[:selection_map]]) if options[:selection_map]
+      command << "--run-to-complete" if options[:run_to_complete]
+      command.concat(["--candidate-seed", options[:candidate_seed]]) if options[:candidate_seed]
+      command.concat(["--timeout", options[:timeout].to_s, "--shard", "#{index + 1}/#{options[:jobs]}", "-o", path])
+      command << "--resume" if options[:resume]
+      command.concat(ARGV)
+      Process.spawn(*command)
+    end
+    statuses = pids.map { |pid| Process.wait2(pid).last }
+    raise TestMiser::CollectionError, "one or more mutant shards failed" unless statuses.all?(&:success?)
+
+    payloads = shard_paths.map { |path| JSON.parse(File.read(path)) }
+    write_report.call(options[:output], TestMiser::MutantReportMerger.call(payloads))
+  else
+    resume_payload = if options[:resume] && File.file?(options[:output])
+                       JSON.parse(File.read(options[:output]))
+                     end
+    collector = TestMiser::MutantCollector.new(
+      includes: options[:includes],
+      requires: options[:requires],
+      subjects: ARGV,
+      timeout: options[:timeout],
+      progress: ->(message) { warn message },
+      shard_index: options[:shard_index],
+      shard_total: options[:shard_total],
+      resume_payload: resume_payload,
+      selection_payload: options[:selection_map] && JSON.parse(File.read(options[:selection_map])),
+      run_to_complete: options[:run_to_complete],
+      candidate_signatures: options[:candidate_seed] ?
+        JSON.parse(File.read(options[:candidate_seed])).fetch("signatures") : {},
+      checkpoint: ->(payload) { write_report.call(options[:output], payload) }
+    )
+    write_report.call(options[:output], collector.call)
+  end
+rescue TestMiser::CollectionError, JSON::ParserError, Errno::ENOENT => error
+  warn "test-miser-mutant: #{error.message}"
+  exit 1
+end
