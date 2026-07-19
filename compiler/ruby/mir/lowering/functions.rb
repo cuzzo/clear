@@ -1118,8 +1118,17 @@ module MIRLoweringFunctions
                  !arg.is_a?(MIR::DupeSlice) && !arg.is_a?(MIR::DeepCopy))
     if owned_slice_argument_required?(callee_param, moved_arg, ti, callee_param_type)
       sink_alloc = allocator_for_takes_param!(callee_param)
+      owned_slice = MIR::OwnedSlice.new(arg, sink_alloc)
+      # Fixed array literals are copied into the destination allocator by
+      # OwnedSlice; their stack binding is not an ownership source.  Dynamic
+      # owning containers, by contrast, transfer their backing allocation via
+      # toOwnedSlice and must retain the consumption fact.
+      owns_slice_input = ownership_tracked_transfer_type?(ti) ||
+        mir_ident_names(arg).any? { |name| function_state.lowered_alloc_names.include?(name.to_s) }
+      return owned_slice unless owns_slice_input
+
       return T.cast(with_ownership_consumption(
-        MIR::OwnedSlice.new(arg, sink_alloc),
+        owned_slice,
         mir_ident_names(arg),
         "MIR::OwnedSlice",
         target_alloc: sink_alloc,
@@ -1978,8 +1987,8 @@ module MIRLoweringFunctions
       # shared collections (e.g. map.contains?, map.count) get rewritten
       # to operate on `Deref(map.ctrl.data)`, which the bc_emitter doesn't
       # resolve to the underlying MapRef.
-      if receiver_type&.rc_map? && !bc_target?
-        obj_mir = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(obj_mir, "ctrl"), "data"))
+      if receiver_type&.any_rc? && !bc_target?
+        obj_mir = rc_payload_value(T.cast(obj_mir, MIR::Node), receiver_type)
       elsif receiver_type&.frozen?
         # *const T auto-derefs for method calls in Zig — no _root deref needed
       end

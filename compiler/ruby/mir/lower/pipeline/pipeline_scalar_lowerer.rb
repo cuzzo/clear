@@ -73,9 +73,11 @@ class PipelineScalarLowerer < T::Struct
   def lower_sum(site, sum_node)
     list_node = site.list
     expr_mir = visit_pipeline_expr_mir(list_node, sum_node.expression)
+    result_type = Type.new(sum_node.full_type!)
+    zero = result_type.integer? ? "0" : "0.0"
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
-        MIR::Let.new("sum_result", MIR::Lit.new("0"), true, Type.new("f64"), nil),
+        MIR::Let.new("sum_result", MIR::Lit.new(zero), true, result_type, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Set.new(MIR::Ident.new("sum_result"),
             MIR::BinOp.new("+", MIR::Ident.new("sum_result"), expr_mir)),
@@ -111,6 +113,8 @@ class PipelineScalarLowerer < T::Struct
   def lower_min(site, min_node)
     list_node = site.list
     expr_mir = visit_pipeline_expr_mir(list_node, min_node.expression)
+    result_type = Type.new(min_node.expression.full_type!)
+    zig_type = result_type.zig_type
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::IfStmt.new(
@@ -119,8 +123,8 @@ class PipelineScalarLowerer < T::Struct
             MIR::Lit.new("0")),
           [MIR::Panic.new("MIN applied to empty list")],
           nil),
-        MIR::Let.new("min_result", MIR::TypeSentinel.new(:max, "f64"),
-          true, Type.new("f64"), nil),
+        MIR::Let.new("min_result", MIR::TypeSentinel.new(:max, zig_type),
+          true, result_type, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("min_val", expr_mir, false, nil, nil),
           MIR::IfStmt.new(
@@ -137,6 +141,9 @@ class PipelineScalarLowerer < T::Struct
   def lower_max(site, max_node)
     list_node = site.list
     expr_mir = visit_pipeline_expr_mir(list_node, max_node.expression)
+    result_type = Type.new(max_node.expression.full_type!)
+    zig_type = result_type.zig_type
+    sentinel = result_type.unsigned_integer? ? MIR::Lit.new("0") : MIR::TypeSentinel.new(:min, zig_type)
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::IfStmt.new(
@@ -145,8 +152,8 @@ class PipelineScalarLowerer < T::Struct
             MIR::Lit.new("0")),
           [MIR::Panic.new("MAX applied to empty list")],
           nil),
-        MIR::Let.new("max_result", MIR::TypeSentinel.new(:min, "f64"),
-          true, Type.new("f64"), nil),
+        MIR::Let.new("max_result", sentinel,
+          true, result_type, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("max_val", expr_mir, false, nil, nil),
           MIR::IfStmt.new(

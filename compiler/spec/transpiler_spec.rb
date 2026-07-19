@@ -1932,6 +1932,74 @@ RSpec.describe ZigTranspiler do
       # Int64 is a Copy type -- no cleanup needed, no __tmp hoisting
       expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &num\)/)
     end
+
+    it "hoists a managed tuple literal passed to a borrowing parameter" do
+      zig = transpile(<<~CLEAR)
+        FN text() RETURNS String -> RETURN COPY "one"; END
+        FN copyTuple(v: Tuple<Int64,String>) RETURNS Tuple<Int64,String> -> RETURN COPY v; END
+        FN consume(TAKES v: Tuple<Int64,String>) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+          consume(copyTuple(Tuple{1_i64, text()}));
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to match(/const __tmp_\d+ = \.\{1, __tmp_\d+\};/)
+      expect(zig).to match(/defer CheatLib\.cleanup\(@TypeOf\(__tmp_\d+\), rt\.heapAlloc\(\), &__tmp_\d+\)/)
+    end
+
+    it "materializes a fixed list literal for a TAKES slice without transferring its stack binding" do
+      zig = transpile(<<~CLEAR)
+        FN consume(TAKES input: Int64[]) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void -> consume([1_i64]); RETURN; END
+      CLEAR
+
+      expect(zig).to include('heapAlloc().dupe(@typeInfo(@TypeOf(__x)).array.child, __x[0..])')
+      expect(zig).not_to match(/__hoist_\d+_moved/)
+    end
+
+    it "threads runtime through a managed OR_ELSE return" do
+      zig = transpile(<<~CLEAR)
+        FN choose() RETURNS Int64[] -> RETURN NIL OR_ELSE [1_i64]; END
+        FN main() RETURNS Void -> value = choose(); RETURN; END
+      CLEAR
+
+      expect(zig).to match(/fn choose\(rt: \*Runtime\)/)
+      expect(zig).to include('choose(rt)')
+    end
+
+    it "uses a declared tuple field type for an untyped List constructor" do
+      zig = transpile(<<~CLEAR)
+        FN main() RETURNS Void ->
+          value: Tuple<[List]Int64, Bool> = Tuple{List[], TRUE};
+          ASSERT value._0.length() == 0_i64;
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include('std.ArrayListUnmanaged(i64)')
+      expect(zig).not_to include('std.ArrayListUnmanaged(f64)')
+    end
+
+    it "transports a heap-owned OR result into a frame collection element" do
+      expect do
+        transpile(<<~CLEAR)
+          FN inner() RETURNS !Int64[]@list ->
+            MUTABLE value: Int64[]@list = [];
+            &value.append(1_i64);
+            RETURN value;
+          END
+          FN run() RETURNS !Void ->
+            MUTABLE items: Int64[][]@list = [inner() OR_ELSE PASS];
+            RETURN;
+          END
+          FN main() RETURNS Void ->
+            run() OR_ELSE PASS;
+            RETURN;
+          END
+        CLEAR
+      end.not_to raise_error
+    end
   end
 
   describe "INV-1: HPT string dupe matches storage" do

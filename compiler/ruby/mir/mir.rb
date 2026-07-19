@@ -544,6 +544,7 @@ module MIR
       first_active_effect([
         [same_owned_alloc?(left, right), left],
         [owned_cleanup_result?(left, result_type), left],
+        [owned_cleanup_result?(right, result_type), right],
       ])
     end
 
@@ -608,7 +609,11 @@ module MIR
 
     sig { params(result_type: T.nilable(Type)).returns(T::Boolean) }
     private_class_method def self.cleanup_result_type?(result_type)
-      result_type&.needs_cleanup?(nil) == true
+      return false unless result_type
+
+      result_type.needs_cleanup?(nil) ||
+        result_type.recursive_cleanup_shape?(nil) ||
+        result_type.specialization_may_need_cleanup?
     end
 
     sig { params(stmts: T::Array[Emittable], value: OwnershipEffectInput).returns(OwnershipEffect) }
@@ -4021,6 +4026,8 @@ module MIR
       items.each { |item| values << item if item.is_a?(Emittable) }
       compact_child_exprs(values)
     end
+    sig { returns(OwnershipEffect) }
+    def ownership_effect = OwnershipEffect.from_children(child_exprs)
   end
 
   # Function pointer reference.

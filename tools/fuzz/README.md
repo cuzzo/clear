@@ -26,6 +26,19 @@ UAF / double-free (at runtime via `std.testing.allocator`).
     # CI gate: every registered cell, with no quarantine mechanism
     ruby tools/fuzz/run.rb --matrix --out /tmp/fuzz --clean
 
+    # Deterministic semantic campaign; depth, seed, limit, and shard are stable
+    SEMANTIC_FUZZ_DEPTH=2 SEMANTIC_FUZZ_SEED=42 SEMANTIC_FUZZ_LIMIT=200 \
+      ruby tools/fuzz/run.rb --matrix --templates semantic_equivalence_matrix
+
+    # Inspect/reproduce a derivation, or emit a same-class reduced program
+    ruby tools/fuzz/semantic.rb --depth 2 --seed 42 --json
+    ruby tools/fuzz/semantic.rb --depth 2 --seed 42 --case CASE_ID --json
+    ruby tools/fuzz/semantic.rb --depth 2 --seed 42 --case CASE_ID --shrink
+
+    # Full completion campaign: 1,000 cases for each of seven families.
+    ruby tools/fuzz/semantic_full_cli.rb --depth 3 --target-per-family 1000 --json
+    SEMANTIC_FULL_LIMIT=0 ruby tools/fuzz/run.rb --matrix --templates semantic_full_matrix
+
 ## No quarantine
 
 Every registered fuzz cell runs. There is no quarantine file, skip flag, or
@@ -34,6 +47,23 @@ an active `:compile_error` cell, and a compiler/runtime defect must make CI red.
 
 Exit code is 0 only if every program parses, type-checks, transpiles, runs,
 and reports zero leaks.
+
+## Semantic mutation gate
+
+The differential semantic gate runs the same Ruby mutant set with and without
+the generated end-to-end semantic test. It verifies that the extra example was
+actually selected, rejects both baseline and semantic runs if any result is a
+timeout, compares individual surviving mutant IDs, and writes
+`semantic-mutant-delta/v1` facts.
+
+    bundle exec ruby gems/lineage/tools/mutant-converters/semantic_mutant.rb \
+      --out /tmp/clear-semantic-mutants --timeout 60 --min-new-kills 1
+
+The final paired run selected the same 369 parser mutants on both sides and
+completed with zero timeouts: baseline 86 kills, baseline plus the 148-case
+semantic representative set 136 kills, for 50 stable new mutant kills. The
+ordinary semantic matrix still executes all 390 cases; the bounded mutation set
+keeps hundreds of repeated integration runs below the timeout gate.
 
 ## Mutant Harness
 
@@ -177,6 +207,10 @@ expected hard error is absent.
 | `fsm_edge_matrix`           | 8               | Additional FSM splitter edges around OR fallbacks, nested loop/branch suspension, stream branches, locks before NEXT, and known early-return lowering failures. |
 | `diagnostic_policy_matrix`  | 16              | Policy-heavy front-end diagnostics for reentrancy, hold-lock-across-yield, lock ordering, handlers, and ownership/fixable rejection paths. |
 | `pipeline_source_shape_matrix` | 44           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and observable terminals. |
+| `semantic_equivalence_matrix` | 390           | Recursively derived Int64, Bool, String, struct, list, map, and Tuple equivalences crossed with compatible local, call, aggregate, ownership, and pipeline slots. |
+| `semantic_gap_matrix` | 21                    | Raw positive witnesses for every fixed compiler defect found by the original, capability-expansion, whole-program, and migration-completion campaigns. |
+| `semantic_capability_matrix` | 17             | Closed reviewed capability allowlist across String, struct, list, map, Tuple, synchronized struct, and shared-atomic Int64 payloads. |
+| `semantic_full_matrix` | 250                  | Balanced deterministic CI tier of the 7,000-case full campaign; set `SEMANTIC_FULL_LIMIT=0` for all 1,000 cases per family. |
 | `pipeline_gap_matrix`        | 8            | Focused pipeline operator gaps: TAKE_WHILE, SKIP, WINDOW(time), UNNEST bindings, and CONCURRENT terminals. |
 | `pipeline_value_block_matrix` | 24           | Source-level value blocks plus SELECT:!/:? effect contracts, async selectors, strict WHERE predicates, and concurrent variants. |
 | `call_ownership_contract_matrix` | 73         | Normal calls, TAKES bare/COPY/GIVE, owned/fallible returns, receiver mutation, BG calls, and pipeline call contracts across string/list/struct/union/nested owned shapes. |

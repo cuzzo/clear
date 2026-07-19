@@ -200,8 +200,9 @@ class MIRLowering
                              ((moved_without_copy && (!ti.string? || !ti.rodata?)) ||
                               same_alloc_verifiable ||
                               same_alloc_transfer_source)
+      owned_value_matches_sink = already_owned_value && (source_alloc.nil? || same_alloc)
       same_alloc_satisfies || owned_parameter || needs_heap_create ||
-	        transfer_without_local_cleanup || already_owned_value
+	        (transfer_without_local_cleanup && same_alloc) || owned_value_matches_sink
 	    end
 
 	    sig { returns(T::Boolean) }
@@ -888,7 +889,7 @@ class MIRLowering
     )
   end
 
-  sig { params(mir: MIR::Orelse, ti: Type, dest_alloc: Symbol).returns(MIR::IfOptional) }
+  sig { params(mir: MIR::Orelse, ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
   def place_owned_orelse_for_destination(mir, ti, dest_alloc)
     tmp_id = lowering_counters.next_tmp_id
     capture = "__or_val_#{tmp_id}"
@@ -896,7 +897,11 @@ class MIRLowering
     right = place_owned_branch_value_for_destination(mir.fallback, ti, dest_alloc)
     out = MIR::IfOptional.new(mir.expr, capture, left, right)
     out.result_type = Type.new(ti)
-    out
+    # `IfOptional` keeps its branches lexically scoped, so the generic hoister
+    # deliberately does not lift it out of a call/return/aggregate position.
+    # Materialize this owned merge here instead: both copied branches now have
+    # one allocator and the block transfers its single owned result outward.
+    owned_branch_result_value(out, ti, dest_alloc)
   end
 
   sig { params(mir: MIR::TryCatch, ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
@@ -4310,7 +4315,7 @@ class MIRLowering
     # slice via .items; the runtime helper handles both).
     return nil if ti.direct_indexable_collection?
 
-    recv = lower(recv_ast)
+    recv = rc_payload_value(T.cast(lower(recv_ast), MIR::Node), recv_ti)
     recv = hoist_alloc(recv, recv_ast) if mir_allocates?(recv)
     return nil unless ti.string?
 

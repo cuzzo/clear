@@ -459,12 +459,13 @@ class PipelineRewriter
       [decl]
     when AST::MinOp, AST::MaxOp
       # Found-flag pattern: first element always sets result, subsequent compare
-      zero = AST::Literal.new(token, :NUMBER, 0.0)
-      AST.stamp_synthetic_type!(zero, Type.new(:Float64), context: "synthetic AST type")
+      result_type = Type.new(smooth_node.full_type!)
+      zero = AST::Literal.new(token, result_type.integer? ? :INT64 : :NUMBER, result_type.integer? ? 0 : 0.0)
+      AST.stamp_synthetic_type!(zero, result_type, context: "synthetic AST type")
       val_decl = AST::VarDecl.new(token, res_var, nil, zero, true)
-      AST.stamp_synthetic_type!(val_decl, Type.new(:Float64), context: "synthetic AST type")
+      AST.stamp_synthetic_type!(val_decl, result_type, context: "synthetic AST type")
       val_decl.storage   = :stack
-      val_decl.slot_size = 1
+      val_decl.slot_size = result_type.slot_size(T.unsafe(schema_lookup))
       val_decl.var_used = true
       val_decl.var_mutated = true
 
@@ -820,6 +821,19 @@ class PipelineRewriter
     if node.is_a?(AST::Placeholder) || (node.is_a?(AST::Identifier) && node.name == "_")
       return replacement.dup
     end
+
+    # A nested pipeline introduces a new placeholder scope.  Its source still
+    # belongs to the enclosing expression (`_ |> SUM _` consumes the outer `_`
+    # as its source), but placeholders in its stages/terminal bind to the
+    # nested pipeline.  Recursing through the whole SMOOTH node used to replace
+    # both and made independent nested folds refer to the outer iterator.
+    if node.is_a?(AST::BinaryOp) && node.smooth?
+      new_node = node.dup
+      new_node.left = replace_placeholder(node.left, replacement)
+      new_node.right = clone_ast_node(node.right)
+      return new_node
+    end
+
     new_node = node.dup
     node.class.members.each do |member|
       val = T.unsafe(node)[member]
@@ -829,6 +843,23 @@ class PipelineRewriter
         T.unsafe(new_node)[member] = val.transform_values { |v| v.is_a?(AST::Locatable) ? replace_placeholder(v, replacement) : v }
       elsif val.is_a?(AST::Locatable)
         T.unsafe(new_node)[member] = replace_placeholder(val, replacement)
+      end
+    end
+    new_node
+  end
+
+
+  sig { params(node: AST::Node).returns(AST::Node) }
+  def clone_ast_node(node)
+    new_node = node.dup
+    node.class.members.each do |member|
+      val = T.unsafe(node)[member]
+      if val.is_a?(Array)
+        T.unsafe(new_node)[member] = val.map { |item| item.is_a?(AST::Locatable) ? clone_ast_node(item) : item }
+      elsif val.is_a?(Hash)
+        T.unsafe(new_node)[member] = val.transform_values { |item| item.is_a?(AST::Locatable) ? clone_ast_node(item) : item }
+      elsif val.is_a?(AST::Locatable)
+        T.unsafe(new_node)[member] = clone_ast_node(val)
       end
     end
     new_node

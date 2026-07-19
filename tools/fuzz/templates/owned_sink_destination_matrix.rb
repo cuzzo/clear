@@ -3,6 +3,10 @@
 # Crosses ownership-bearing source expressions with every sink that should
 # consume/materialize them uniformly.
 
+require_relative '../semantic_equivalence'
+
+OSD_SEMANTIC_STRING = SemanticEquivalence::VALUES.fetch_id(:string)
+
 OWNED_SINK_DESTINATION_CELLS = []
 OSD_OWNED_VALUE_SHAPES = %i[string list_owned string_list_owned struct_owned union_owned nested_owned].freeze
 
@@ -44,7 +48,7 @@ end
 
 def osd_type(shape)
   case shape
-  when :string then "String"
+  when :string then OSD_SEMANTIC_STRING.clear_type
   when :struct_owned then "Box"
   when :list_owned then "Int64[]@list"
   when :string_list_owned then "String[]@list"
@@ -56,7 +60,7 @@ end
 def osd_build_value(shape, name = "v")
   case shape
   when :string
-    "#{name}: String = COPY \"abc\";"
+    "#{name}: #{OSD_SEMANTIC_STRING.clear_type} = #{OSD_SEMANTIC_STRING.render_literal};"
   when :struct_owned
     "#{name}: Box = Box{ label: COPY \"abc\" };"
   when :list_owned
@@ -72,7 +76,7 @@ end
 
 def osd_return_expr(shape)
   case shape
-  when :string then 'COPY "abc"'
+  when :string then OSD_SEMANTIC_STRING.render_literal
   when :struct_owned then 'Box{ label: COPY "abc" }'
   when :list_owned then "mkList()"
   when :string_list_owned then "mkStringList()"
@@ -95,7 +99,7 @@ def osd_source_setup(source, shape)
     ["", "maybe(FALSE) OR_ELSE #{osd_return_expr(shape)}"]
   when :branch_result
     init = case shape
-           when :string then 'MUTABLE v: String = COPY "seed";'
+           when :string then "MUTABLE v: #{OSD_SEMANTIC_STRING.clear_type} = COPY \"seed\";"
            when :struct_owned then 'MUTABLE v: Box = Box{ label: COPY "seed" };'
            when :list_owned then "MUTABLE v: Int64[]@list = [];\n    &v.append(0_i64);"
            when :string_list_owned then "MUTABLE v: String[]@list = List[];\n    &v.append(COPY \"seed\");"
@@ -103,7 +107,7 @@ def osd_source_setup(source, shape)
            when :nested_owned then "MUTABLE v: Nest = Nest{ items: mkStringList() };"
            end
     assign = case shape
-             when :string then 'v = COPY "abc";'
+             when :string then "v = #{OSD_SEMANTIC_STRING.render_literal};"
              when :struct_owned then 'v = Box{ label: COPY "abc" };'
              when :list_owned then "v = mkList();"
              when :string_list_owned then "v = mkStringList();"

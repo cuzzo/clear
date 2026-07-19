@@ -287,11 +287,23 @@ class MIRPass
       indexed_assignment_lowers_through_runtime?(node)
     when AST::CopyNode, AST::CloneNode
       copy_node_lowers_through_runtime?(node)
+    when AST::BinaryOp
+      owned_or_else_lowers_through_runtime?(node)
     when AST::WithBlock
       with_block_lowers_through_runtime?(node)
     else
       false
     end
+  end
+
+  sig { params(node: AST::BinaryOp).returns(T::Boolean) }
+  def owned_or_else_lowers_through_runtime?(node)
+    return false unless node.op == :OR_ELSE || node.op == :OR
+
+    ti = Type.from_node!(node, context: "owned OR runtime requirement").success_type
+    ti.string? || ti.heap_ptr? || ti.collection_value? || ti.collection? ||
+      ti.needs_cleanup?(T.unsafe(@schema_lookup)) ||
+      ti.recursive_cleanup_shape?(T.unsafe(@schema_lookup))
   end
 
   sig { params(node: T.any(AST::CopyNode, AST::CloneNode)).returns(T::Boolean) }

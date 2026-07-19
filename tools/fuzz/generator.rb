@@ -26,6 +26,8 @@ class FuzzGenerator
   def load_templates!
     Dir[File.expand_path('templates/*.rb', __dir__)].sort.each { |f| require f }
     raise "no templates loaded" if TEMPLATES.empty?
+    require_relative 'semantic_migration'
+    SemanticMigration.adopt!(TEMPLATES)
   end
 
   def full_matrix

@@ -2832,7 +2832,7 @@ class MIREmitter
 
   sig { params(node: MIR::Call).returns(String) }
   def emit_call(node)
-    args = node.args.map { |a| emit(a) }.join(", ")
+    args = node.args.map { |a| emit_call_argument(a) }.join(", ")
     call = "#{runtime_scoped_callee(node.callee)}(#{args})"
     node.try_wrap ? "try #{call}" : call
   end
@@ -2850,21 +2850,29 @@ class MIREmitter
 
   sig { params(node: MIR::TailCall).returns(String) }
   def emit_tail_call(node)
-    args = node.args.map { |a| emit(a) }.join(", ")
+    args = node.args.map { |a| emit_call_argument(a) }.join(", ")
     "@call(.always_tail, #{node.callee}, .{#{args}})"
   end
 
   sig { params(node: MIR::MethodCall).returns(String) }
   def emit_method_call(node)
     recv = emit(node.receiver)
-    args = node.args.map { |a| emit(a) }.join(", ")
+    args = node.args.map { |a| emit_call_argument(a) }.join(", ")
     call = "#{recv}.#{node.method}(#{args})"
     node.try_wrap ? "try #{call}" : call
   end
 
+  sig { params(argument: MIR::Node).returns(String) }
+  def emit_call_argument(argument)
+    rendered = T.must(emit(argument))
+    argument.is_a?(MIR::BlockExpr) ? "(#{rendered})" : rendered
+  end
+
   sig { params(node: MIR::FieldGet).returns(String) }
   def emit_field_get(node)
-    "#{paren_if_try(T.must(emit(node.object)))}.#{node.field}"
+    object = T.must(emit(node.object))
+    object = "(#{object})" if node.object.is_a?(MIR::StructInit) || node.object.is_a?(MIR::TupleLiteral)
+    "#{paren_if_try(object)}.#{node.field}"
   end
 
   sig { params(node: MIR::UnionPayloadGet).returns(String) }
@@ -3082,7 +3090,9 @@ class MIREmitter
     fallback = emit(node.fallback)
     result_type = node.result_type
     fallback = "@as(#{result_type.zig_type}, #{fallback})" if result_type
-    "(#{emit(node.expr)} orelse #{fallback})"
+    expr = emit(node.expr)
+    expr = "@as(?#{result_type.zig_type}, null)" if result_type && expr == "null"
+    "(#{expr} orelse #{fallback})"
   end
 
   sig { params(node: MIR::TryCatch).returns(String) }
@@ -3232,7 +3242,7 @@ class MIREmitter
       # even in nested expression positions.
       @items_block_counter = T.let(T.let(@items_block_counter || 0, Integer) + 1, T.nilable(Integer))
       label = "blk_items_#{@items_block_counter}"
-      "#{label}: { const __x = if (@typeInfo(@TypeOf(#{inner})) == .pointer and @typeInfo(@TypeOf(#{inner})).pointer.size == .one) #{inner}.* else #{inner}; break :#{label} if (@hasField(@TypeOf(__x), \"items\")) __x.items else @constCast(__x[0..]); }"
+      "(#{label}: { const __x = if (@typeInfo(@TypeOf(#{inner})) == .pointer and @typeInfo(@TypeOf(#{inner})).pointer.size == .one) #{inner}.* else #{inner}; break :#{label} (if (@hasField(@TypeOf(__x), \"items\")) __x.items else @constCast(__x[0..])); })"
     else
       "#{inner}.items"
     end
@@ -3246,6 +3256,8 @@ class MIREmitter
     "#{label}: { var __x = #{inner}; " \
       "break :#{label} if (comptime @typeInfo(@TypeOf(__x)) == .@\"struct\" and @hasDecl(@TypeOf(__x), \"toOwnedSlice\")) " \
       "try __x.toOwnedSlice(#{alloc}) else " \
+      "if (comptime @typeInfo(@TypeOf(__x)) == .array) " \
+      "try #{alloc}.dupe(@typeInfo(@TypeOf(__x)).array.child, __x[0..]) else " \
       "__x; }"
   end
 

@@ -507,7 +507,17 @@ def run_fail_complete_bundles(entries, out_dir)
   result = FuzzFailComplete.run(entries) do |batch|
     attempts += 1
     puts "[fuzz] fail-complete bundle attempt #{attempts}: #{batch.size} cells"
-    run_pass_bundle(batch, out_dir)
+    batch_result = run_pass_bundle(batch, out_dir)
+    if batch.size == 1
+      # A singleton bundle diagnostic belongs to its sole source cell. Keep
+      # that identity instead of reporting the transient all-fuzz.zig path.
+      batch_result.drop(1).each do |diagnostics|
+        diagnostics.map! do |path, output|
+          File.basename(path) == 'all-fuzz.zig' ? [batch.first.fetch(:path), output] : [path, output]
+        end
+      end
+    end
+    batch_result
   end
   elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
   puts "[fuzz] fail-complete bundles: #{entries.size} cells in #{attempts} " \
