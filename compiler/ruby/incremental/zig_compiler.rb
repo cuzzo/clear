@@ -53,8 +53,8 @@ module Incremental
       @dependency_snapshot = DependencySnapshot.capture(paths)
     end
 
-    sig { params(source: String).returns(ZigTranspiler::MIRCompilation) }
-    def compile(source)
+    sig { params(source: String, function_counter_seeds: T::Hash[String, MIRLoweringCounterSnapshot]).returns(ZigTranspiler::MIRCompilation) }
+    def compile(source, function_counter_seeds: {})
       transpiler = ZigTranspiler.new(importer: @importer, source_dir: @config.source_dir)
       transpiler.compile_mir_program(
         source,
@@ -68,6 +68,7 @@ module Incremental
         main_tier: nil,
         default_stack: @config.default_stack,
         ownership_mode: @config.ownership_mode,
+        function_counter_seeds: function_counter_seeds,
       )
     end
 

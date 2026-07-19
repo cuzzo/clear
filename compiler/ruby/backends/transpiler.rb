@@ -50,6 +50,7 @@ class ZigTranspiler
     const :program, MIR::Program
     const :error_name_enum, String
     const :main_stack_variant, String
+    const :function_counter_snapshots, T::Hash[String, MIRLoweringCounterSnapshot], factory: -> { {} }
   end
 
   attr_reader :struct_schemas, :union_schemas, :enum_schemas, :module_type_defs
@@ -99,8 +100,8 @@ class ZigTranspiler
   # Compile through the ownership checker but do not render Zig.  This is a
   # general compiler phase boundary, not an incremental mode: every consumer
   # receives the same checked MIR::Program.
-  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String), ownership_mode: Symbol).returns(MIRCompilation) }
-  def compile_mir_program(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil, ownership_mode: :default)
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String), ownership_mode: Symbol, function_counter_seeds: T::Hash[String, MIRLoweringCounterSnapshot]).returns(MIRCompilation) }
+  def compile_mir_program(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil, ownership_mode: :default, function_counter_seeds: {})
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
     @default_stack_size = default_stack unless default_stack.nil?
@@ -133,7 +134,8 @@ class ZigTranspiler
       moved_guard_info: compiled.moved_guard_info,
       importer: @importer,
       source_dir: @source_dir,
-      debug_mode: @default_stack_size == "Large"
+      debug_mode: @default_stack_size == "Large",
+      function_counter_seeds: function_counter_seeds,
     ))
 
     needs_c_alloc = use_c_allocator
@@ -155,6 +157,7 @@ class ZigTranspiler
       program: T.must(program),
       error_name_enum: error_name_enum,
       main_stack_variant: main_variant,
+      function_counter_snapshots: lowering.function_counter_snapshots,
     )
   end
 

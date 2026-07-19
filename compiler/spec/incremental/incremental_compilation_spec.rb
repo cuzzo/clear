@@ -10,7 +10,7 @@ require_relative "../../../tools/incremental-testing/differential_runner"
 require_relative "../../../tools/incremental-testing/cli"
 
 RSpec.describe "incremental CLEAR compilation" do
-  FakeCompilation = Struct.new(:error_name_enum, :source, keyword_init: true)
+  FakeCompilation = Struct.new(:error_name_enum, :source, :function_counter_snapshots, keyword_init: true)
 
   class FakeIncrementalCompiler < Incremental::ZigCompiler
     def initialize(mode)
@@ -19,12 +19,13 @@ RSpec.describe "incremental CLEAR compilation" do
       @compile_calls = 0
     end
 
-    def compile(text)
+    def compile(text, function_counter_seeds: {})
+      function_counter_seeds
       @compile_calls += 1
       raise "candidate failed" if @mode == :candidate_failure && @compile_calls == 2
 
       errors = @mode == :new_error && @compile_calls == 2 ? "  NewError = 11," : "  None = 0,"
-      FakeCompilation.new(error_name_enum: errors, source: text)
+      FakeCompilation.new(error_name_enum: errors, source: text, function_counter_snapshots: {})
     end
 
     def artifact(_compilation)
@@ -143,7 +144,6 @@ RSpec.describe "incremental CLEAR compilation" do
       "main function changed" => source(main_body: 'print("no");'),
       "function interface changed" => source.sub("FN alpha() RETURNS Int64", "FN alpha(x: Int64) RETURNS Int64"),
       "source line layout changed" => source.sub("RETURN 1;", "\n  RETURN 1;"),
-      "changed function calls a user function" => source(alpha: "beta()"),
     }
     cases.each do |reason, changed_source|
       decision = Incremental::ItemReconciler.reconcile(baseline, catalog(changed_source))
@@ -155,8 +155,12 @@ RSpec.describe "incremental CLEAR compilation" do
     caller_baseline = catalog(source(main_body: "ASSERT alpha() == 1;"))
     caller_edit = catalog(source(alpha: "3", main_body: "ASSERT alpha() == 1;"))
     caller_decision = Incremental::ItemReconciler.reconcile(caller_baseline, caller_edit)
-    expect(caller_decision.fast_path).to be(false)
-    expect(caller_decision.reason).to eq("changed function has a user-code caller")
+    expect(caller_decision.fast_path).to be(true)
+    expect(caller_decision.changed_function).to eq("alpha")
+
+    dependency_edit = Incremental::ItemReconciler.reconcile(baseline, catalog(source(alpha: "beta()")))
+    expect(dependency_edit.fast_path).to be(false)
+    expect(dependency_edit.reason).to eq("function call dependencies changed")
   end
 
   it "produces byte-identical Zig for a checked isolated body edit and revert" do
@@ -271,7 +275,7 @@ RSpec.describe "incremental CLEAR compilation" do
     end
   end
 
-  it "falls back cleanly for a caller-sensitive edit" do
+  it "reuses a caller when the changed callee preserves its interface" do
     compiler = Incremental::ZigCompiler.new(
       Incremental::ZigCompilerConfig.new(source_dir: Dir.pwd),
     )
@@ -280,8 +284,24 @@ RSpec.describe "incremental CLEAR compilation" do
     session.compile(original)
 
     changed = session.compile(source(alpha: "3", main_body: "ASSERT alpha() == 1;"))
-    expect(changed.status).to eq(:clean)
-    expect(changed.reason).to eq("changed function has a user-code caller")
+    expect(changed.status).to eq(:incremental)
+    oracle = compiler.artifact(compiler.compile(source(alpha: "3", main_body: "ASSERT alpha() == 1;"))).render
+    expect(changed.zig).to eq(oracle)
+  end
+
+  it "compiles a changed function with its transitive user-function dependencies" do
+    original = source(alpha: "beta()")
+    changed_source = source(alpha: "beta() + 1")
+    compiler = Incremental::ZigCompiler.new(
+      Incremental::ZigCompilerConfig.new(source_dir: Dir.pwd),
+    )
+    session = Incremental::CompilationSession.new(compiler: compiler, module_path: module_path, verify: true)
+    session.compile(original)
+
+    changed = session.compile(changed_source)
+    expect(changed.status).to eq(:incremental)
+    expect(changed.changed_function).to eq("alpha")
+    expect(changed.zig).to eq(compiler.artifact(compiler.compile(changed_source)).render)
   end
 
   it "fails closed at every function artifact boundary" do

@@ -31,6 +31,7 @@ class MIRLoweringInput < T::Struct
   const :source_dir, T.nilable(String), default: nil
   const :debug_mode, T::Boolean, default: false
   const :target, Symbol, default: :zig
+  const :function_counter_seeds, T::Hash[String, MIRLoweringCounterSnapshot], factory: -> { {} }
 end
 
 class MIRLoweringRuntimeState < T::Struct
@@ -84,6 +85,7 @@ class MIRLoweringProgramState < T::Struct
   prop :used_sharded_map, T::Boolean, default: false
   prop :use_debug_allocator, T.nilable(T::Boolean), default: nil
   prop :fn_nodes, FnNodeMap, factory: -> { {} }
+  prop :function_counter_snapshots, T::Hash[String, MIRLoweringCounterSnapshot], factory: -> { {} }
 end
 
 class MIRLoweringCaptureState < T::Struct

@@ -20,6 +20,8 @@ module Incremental
     const :source, String
     const :catalog, SourceCatalog
     const :artifact, ProgramArtifact
+    const :function_counter_snapshots, T::Hash[String, MIRLoweringCounterSnapshot], factory: -> { {} }
+    const :proven_contexts, T::Set[String], factory: -> { Set.new }
   end
 
   # Persistent, single-module compilation coordinator.  Unsupported edits are
@@ -73,7 +75,12 @@ module Incremental
       @compiler.publish_dependencies!(source)
       current = catalog(source)
       if current
-        @snapshot = CompilationSnapshot.new(source: source, catalog: current, artifact: artifact)
+        @snapshot = CompilationSnapshot.new(
+          source: source,
+          catalog: current,
+          artifact: artifact,
+          function_counter_snapshots: compilation.function_counter_snapshots,
+        )
       else
         @snapshot = nil
       end
@@ -92,8 +99,28 @@ module Incremental
       baseline_function = previous.artifact.function(changed_name)
       return clean_compile(source, reason: "function emission is not independently addressable") unless baseline_function
 
+      seed = previous.function_counter_snapshots[changed_name]
+      seeds = seed ? { changed_name => seed } : {}
+      proven_contexts = previous.proven_contexts.dup
+      if context_sensitive?(previous.catalog, changed_name) && !proven_contexts.include?(changed_name)
+        baseline_candidate = begin
+          @compiler.compile(previous.catalog.isolated_source(changed_name), function_counter_seeds: seeds)
+        rescue StandardError
+          return clean_compile(source, reason: "reduced semantic context could not be verified")
+        end
+        baseline_replacement = @compiler.function_artifact(
+          baseline_candidate,
+          name: changed_name,
+          state_before: baseline_function.state_before,
+        )
+        unless baseline_replacement && baseline_replacement.code == baseline_function.code
+          return clean_compile(source, reason: "reduced semantic context changed function emission")
+        end
+        proven_contexts.add(changed_name)
+      end
+
       candidate = begin
-        @compiler.compile(current.isolated_source(changed_name))
+        @compiler.compile(current.isolated_source(changed_name), function_counter_seeds: seeds)
       rescue StandardError
         return clean_compile(source, reason: "isolated candidate compilation failed")
       end
@@ -120,7 +147,13 @@ module Incremental
       artifact = previous.artifact.replace_function(replacement)
       zig = artifact.render
       verify_clean!(source, zig) if @verify
-      @snapshot = CompilationSnapshot.new(source: source, catalog: current, artifact: artifact)
+      @snapshot = CompilationSnapshot.new(
+        source: source,
+        catalog: current,
+        artifact: artifact,
+        function_counter_snapshots: previous.function_counter_snapshots,
+        proven_contexts: proven_contexts,
+      )
       CompilationResult.new(
         zig: zig,
         status: :incremental,
@@ -147,6 +180,12 @@ module Incremental
     sig { params(left: String, right: String).returns(T::Boolean) }
     def same_function_contract?(left, right)
       left.lines.first == right.lines.first
+    end
+
+    sig { params(catalog: SourceCatalog, name: String).returns(T::Boolean) }
+    def context_sensitive?(catalog, name)
+      item = catalog.fetch(name)
+      !T.must(item).called_functions.empty? || catalog.called_by_user_function?(name)
     end
 
     sig { params(value: String).returns(T::Set[String]) }

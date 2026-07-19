@@ -34,10 +34,7 @@ module Incremental
       return fallback("main function changed") if name == "main"
       return fallback("function interface changed") unless old_item.interface_fingerprint == new_item.interface_fingerprint
       return fallback("source line layout changed") unless line_layout_equal?(previous, current, old_item, new_item)
-      return fallback("changed function calls a user function") unless old_item.called_functions.empty? && new_item.called_functions.empty?
-      if previous.called_by_user_function?(name) || current.called_by_user_function?(name)
-        return fallback("changed function has a user-code caller")
-      end
+      return fallback("function call dependencies changed") unless old_item.called_functions == new_item.called_functions
 
       Reconciliation.new(
         fast_path: true,

@@ -543,13 +543,18 @@ class MIRLowering
     lowering_state.counters
   end
 
+  sig { returns(T::Hash[String, MIRLoweringCounterSnapshot]) }
+  def function_counter_snapshots
+    program_state.function_counter_snapshots
+  end
+
   # Stable source identity for generated local names. Ruby object_id is useful
   # for in-memory identity maps, but embedding it in Zig makes clean builds
   # nondeterministic and prevents checked incremental artifact reuse.
   sig { params(node: AST::Locatable).returns(String) }
   def stable_node_suffix(node)
     range = node.source_range
-    "#{range.start_offset}_#{range.end_offset}"
+    "#{range.start_line}_#{range.start_column}_#{range.end_line}_#{range.end_column}"
   end
 
   sig { returns(MIRLoweringFunctions::FunctionState) }
@@ -3074,6 +3079,11 @@ class MIRLowering
 
     # Lower each statement, adding source line comments
     node.statements.each do |stmt|
+      if stmt.is_a?(AST::FunctionDef)
+        seed = lowering_input.function_counter_seeds[stmt.name]
+        lowering_counters.restore!(seed) if seed
+        program_state.function_counter_snapshots[stmt.name] = lowering_counters.snapshot
+      end
       append_lowered_items!(LoweredItemTarget.new(items: items, line: stmt.token&.line), lower(stmt))
     end
 

@@ -117,8 +117,27 @@ module Incremental
 
     sig { params(changed_name: String).returns(String) }
     def isolated_source(changed_name)
-      mask = @functions.reject { |item| item.name == changed_name }
+      isolated_source_for(dependency_closure(changed_name))
+    end
+
+    sig { params(names: T::Set[String]).returns(String) }
+    def isolated_source_for(names)
+      mask = @functions.reject { |item| names.include?(item.name) }
       self.class.mask_functions(@source, mask)
+    end
+
+    sig { params(name: String).returns(T::Set[String]) }
+    def dependency_closure(name)
+      pending = T.let([name], T::Array[String])
+      found = T.let(Set.new, T::Set[String])
+      until pending.empty?
+        current = T.must(pending.pop)
+        next unless found.add?(current)
+
+        item = fetch(current)
+        pending.concat(item.called_functions.to_a) if item
+      end
+      found
     end
 
     sig { params(name: String).returns(T::Boolean) }

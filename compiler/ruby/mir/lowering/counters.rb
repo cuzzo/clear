@@ -47,6 +47,10 @@ class MIRLoweringGeneratedId < T::Struct
   end
 end
 
+class MIRLoweringCounterSnapshot < T::Struct
+  const :values, T::Hash[MIRLoweringCounterKind, Integer]
+end
+
 class MIRLoweringCounters
   extend T::Sig
 
@@ -123,6 +127,16 @@ class MIRLoweringCounters
   sig { returns(MIRLoweringGeneratedId) }
   def next_for_loop_id
     next_one_based(MIRLoweringCounterKind::ForLoop)
+  end
+
+  sig { returns(MIRLoweringCounterSnapshot) }
+  def snapshot
+    MIRLoweringCounterSnapshot.new(values: @values.dup.freeze)
+  end
+
+  sig { params(snapshot: MIRLoweringCounterSnapshot).void }
+  def restore!(snapshot)
+    @values = snapshot.values.dup
   end
 
   private
