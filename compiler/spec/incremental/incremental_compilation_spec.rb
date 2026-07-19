@@ -39,6 +39,7 @@ RSpec.describe "incremental CLEAR compilation" do
           kind: :function,
           name: "alpha",
           code: "fn alpha() i64 {\nreturn 1;\n}",
+          contract_fingerprint: "alpha-contract",
           state_before: state,
           state_after: state,
         )
@@ -75,6 +76,7 @@ RSpec.describe "incremental CLEAR compilation" do
         kind: :function,
         name: name,
         code: "#{first_line}\nreturn 3;\n}",
+        contract_fingerprint: @mode == :contract_change ? "changed-contract" : "alpha-contract",
         state_before: state_before,
         state_after: after,
       )

@@ -306,7 +306,7 @@ RSpec.describe "architecture invariants: MIR pass order" do
       "pass_state.mark!(:cleanup_classified)",
       "LoopFrameAnalysis.analyze!",
       "pass_state.mark!(:loop_frame_analyzed)",
-      "finalize_needs_rt!",
+      "ProgramMIRFinalizer.finalize",
       "pass_state.mark!(:needs_rt_finalized)",
       "transform_function!",
       "pass_state.mark!(:mir_pass_complete)",

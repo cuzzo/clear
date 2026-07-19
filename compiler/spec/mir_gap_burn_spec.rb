@@ -1054,7 +1054,6 @@ RSpec.describe "MIR gap-burn characterization" do
   end
 
   it "covers missing runtime metadata paths for MIR pass and InlineBc emission" do
-    pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
     plain_call = AST::FuncCall.new(tok, "plain", [])
     plain_sig = FunctionSignature.intrinsic_signature
     plain_call.matched_signature = plain_sig
@@ -1063,9 +1062,9 @@ RSpec.describe "MIR gap-burn characterization" do
     runtime_call.matched_signature = runtime_sig
     missing_call = AST::FuncCall.new(tok, "missing", [])
 
-    expect(pass.send(:ast_call_needs_rt?, missing_call)).to be(false)
-    expect(pass.send(:ast_call_needs_rt?, plain_call)).to be(false)
-    expect(pass.send(:ast_call_needs_rt?, runtime_call)).to be(true)
+    expect(ProgramMIRFinalizer.send(:ast_call_needs_runtime?, missing_call, {})).to be(false)
+    expect(ProgramMIRFinalizer.send(:ast_call_needs_runtime?, plain_call, {})).to be(false)
+    expect(ProgramMIRFinalizer.send(:ast_call_needs_runtime?, runtime_call, {})).to be(true)
     expect { MIREmitter.new.emit(MIR::InlineBc.new(:missing, [], nil)) }
       .to raise_error(/emit_inline_bc_as_zig: node has no stdlib_def/)
   end
@@ -1210,38 +1209,38 @@ RSpec.describe "MIR gap-burn characterization" do
     pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
 
     bg = AST::BgBlock.new(tok, [], nil, nil, false, false, nil, false)
-    expect(pass.send(:ast_node_lowers_through_runtime?, bg)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:ast_node_lowers_through_runtime?, bg, {}, ->(_name) { nil })).to eq(true)
 
     snapshot_with = AST::WithBlock.new(tok, [], [], nil)
     snapshot_with.snapshot_mode = :transaction
-    expect(pass.send(:with_block_lowers_through_runtime?, snapshot_with)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:with_block_lowers_through_runtime?, snapshot_with)).to eq(true)
 
     view_with = AST::WithBlock.new(tok, [], [], nil)
     view_with.view_kind = :materialized_view
-    expect(pass.send(:with_block_lowers_through_runtime?, view_with)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:with_block_lowers_through_runtime?, view_with)).to eq(true)
 
     poly_with = AST::WithBlock.new(tok, [], [], nil)
     poly_with.universal_poly = true
-    expect(pass.send(:with_block_lowers_through_runtime?, poly_with)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:with_block_lowers_through_runtime?, poly_with)).to eq(true)
 
     plain_with = AST::WithBlock.new(tok, [], [], nil)
-    expect(pass.send(:with_block_lowers_through_runtime?, plain_with)).to eq(false)
+    expect(ProgramMIRFinalizer.send(:with_block_lowers_through_runtime?, plain_with)).to eq(false)
 
     raise_with = AST::WithBlock.new(tok, [], [], nil)
     raise_with.lock_error_clause = AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Raise, retries: nil, token: tok)
-    expect(pass.send(:with_block_lowers_through_runtime?, raise_with)).to eq(true)
-    expect(pass.send(:ast_node_lowers_through_runtime?, raise_with)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:with_block_lowers_through_runtime?, raise_with)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:ast_node_lowers_through_runtime?, raise_with, {}, ->(_name) { nil })).to eq(true)
 
     bubble_clause = AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Pass, retries: nil, token: tok)
     bubble_clause.bubble_types = [:Timeout]
     bubble_with = AST::WithBlock.new(tok, [], [], nil)
     bubble_with.lock_error_clause = bubble_clause
-    expect(pass.send(:with_block_lowers_through_runtime?, bubble_with)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:with_block_lowers_through_runtime?, bubble_with)).to eq(true)
 
     moved_return = AST::MoveNode.new(tok, id("returned", type: :String))
-    expect(pass.send(:unwrap_return_expr, moved_return).name).to eq("returned")
+    expect(ProgramMIRFinalizer.send(:unwrap_return_expr, moved_return).name).to eq("returned")
     rescued_return = AST::BinaryOp.new(tok, id("fallible", type: :String), :OR_ELSE, lit("fallback"))
-    expect(pass.send(:unwrap_return_expr, rescued_return).name).to eq("fallible")
+    expect(ProgramMIRFinalizer.send(:unwrap_return_expr, rescued_return).name).to eq("fallible")
 
     guarded = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
     guarded.set_lifecycle_plan!(Semantic::LifecyclePlanner.plan(Type.new(:String), ->(_name) { nil }))
@@ -1590,17 +1589,16 @@ RSpec.describe "MIR gap-burn characterization" do
   end
 
   it "finalizes rt for heap-carrying string payload alias returns" do
-    pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
     alias_fn = fn([AST::ReturnNode.new(tok, id("payload", type: Type.new(:String)))], return_type: Type.new(:String))
     alias_fn.heap_carry_return = true
 
-    expect(pass.send(:return_path_needs_allocator?, alias_fn)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:return_path_needs_allocator?, alias_fn, ->(_name) { nil })).to eq(true)
 
     taken = param("owned", type: Type.new(:String), takes: true)
     transfer_fn = fn([AST::ReturnNode.new(tok, id("owned", type: Type.new(:String)))], params: [taken], return_type: Type.new(:String))
     transfer_fn.heap_carry_return = true
 
-    expect(pass.send(:return_path_needs_allocator?, transfer_fn)).to eq(false)
+    expect(ProgramMIRFinalizer.send(:return_path_needs_allocator?, transfer_fn, ->(_name) { nil })).to eq(false)
   end
 
   it "treats heap-carry return signatures as owned despite return lifetime metadata" do

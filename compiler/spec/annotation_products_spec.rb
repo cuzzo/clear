@@ -33,6 +33,7 @@ RSpec.describe Annotator::Phases::AnnotationProducts do
     )
     audit = Annotator::Phases::CapabilityAuditReport.new(
       typed_program: typed,
+      derived_program: Annotator::Phases::DerivedProgramFacts.empty,
       checked_functions: ["main"],
       checked_call_sites: 0,
       checked_with_sites: 0,

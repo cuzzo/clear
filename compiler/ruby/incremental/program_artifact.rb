@@ -1,6 +1,7 @@
 # typed: strict
 # frozen_string_literal: true
 
+require "digest"
 require "sorbet-runtime"
 require "set"
 
@@ -13,6 +14,7 @@ module Incremental
     const :kind, Symbol
     const :name, T.nilable(String)
     const :code, String
+    const :contract_fingerprint, T.nilable(String), default: nil
     const :state_before, MIREmitter::EmissionState
     const :state_after, MIREmitter::EmissionState
   end
@@ -65,6 +67,10 @@ module Incremental
           kind: kind,
           name: name,
           code: code,
+          contract_fingerprint: name && Digest::SHA256.hexdigest([
+            compilation.frontend.derived_program.functions[name]&.fingerprint,
+            compilation.frontend.program_mir_facts.functions[name]&.fingerprint,
+          ].join("|")),
           state_before: before,
           state_after: emitter.emission_state,
         )
@@ -101,6 +107,7 @@ module Incremental
             kind: item.kind,
             name: item.name,
             code: replacement.code,
+            contract_fingerprint: replacement.contract_fingerprint,
             state_before: item.state_before,
             state_after: item.state_after,
           )

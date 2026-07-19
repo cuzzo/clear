@@ -13,6 +13,7 @@ require_relative "conformance_registration"
 require_relative "declaration_index"
 require_relative "implementation_registration"
 require_relative "program_interface"
+require_relative "derived_program_facts"
 
 module Annotator
   module Phases
@@ -157,6 +158,8 @@ module Annotator
 
       sig { returns(TypedProgramFacts) }
       attr_reader :typed_program
+      sig { returns(DerivedProgramFacts) }
+      attr_reader :derived_program
       sig { returns(T::Array[String]) }
       attr_reader :checked_functions
       sig { returns(Integer) }
@@ -165,14 +168,16 @@ module Annotator
       sig do
         params(
           typed_program: TypedProgramFacts,
+          derived_program: DerivedProgramFacts,
           checked_functions: T::Array[String],
           checked_call_sites: Integer,
           checked_with_sites: Integer,
           violation_count: Integer
         ).void
       end
-      def initialize(typed_program:, checked_functions:, checked_call_sites:, checked_with_sites:, violation_count:)
+      def initialize(typed_program:, derived_program:, checked_functions:, checked_call_sites:, checked_with_sites:, violation_count:)
         @typed_program = T.let(typed_program, TypedProgramFacts)
+        @derived_program = T.let(derived_program, DerivedProgramFacts)
         @checked_functions = T.let(checked_functions.dup.freeze, T::Array[String])
         @checked_call_sites = T.let(checked_call_sites, Integer)
         @checked_with_sites = T.let(checked_with_sites, Integer)

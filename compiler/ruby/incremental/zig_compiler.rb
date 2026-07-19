@@ -1,6 +1,7 @@
 # typed: strict
 # frozen_string_literal: true
 
+require "digest"
 require "sorbet-runtime"
 
 require_relative "../backends/transpiler"
@@ -114,6 +115,10 @@ module Incremental
         kind: :function,
         name: name,
         code: code,
+        contract_fingerprint: Digest::SHA256.hexdigest([
+          compilation.frontend.derived_program.functions[name]&.fingerprint,
+          compilation.frontend.program_mir_facts.functions[name]&.fingerprint,
+        ].join("|")),
         state_before: state_before,
         state_after: emitter.emission_state,
       )

@@ -21,7 +21,7 @@ module Incremental
   class PortableCache
     extend T::Sig
 
-    FORMAT_VERSION = T.let(1, Integer)
+    FORMAT_VERSION = T.let(2, Integer)
     MAX_BYTES = T.let(128 * 1024 * 1024, Integer)
 
     sig { params(path: String, module_path: String, compiler_fingerprint: String).void }
@@ -101,6 +101,7 @@ module Incremental
             "kind" => item.kind.to_s,
             "name" => item.name,
             "code" => item.code,
+            "contract_fingerprint" => item.contract_fingerprint,
             "state_before" => encode_emission_state(item.state_before),
             "state_after" => encode_emission_state(item.state_after),
           }
@@ -119,6 +120,7 @@ module Incremental
           kind: String(item.fetch("kind")).to_sym,
           name: raw_name.nil? ? nil : String(raw_name),
           code: String(item.fetch("code")),
+          contract_fingerprint: item["contract_fingerprint"]&.to_s,
           state_before: decode_emission_state(item.fetch("state_before")),
           state_after: decode_emission_state(item.fetch("state_after")),
         )

@@ -32,8 +32,10 @@ module Annotator
         end
 
         summaries = typed_program.body_summaries
+        derived_program = DerivedProgramFacts.capture(typed_program.resolution.function_registry.nodes)
         CapabilityAuditReport.new(
           typed_program: typed_program,
+          derived_program: derived_program,
           checked_functions: summaries.keys,
           checked_call_sites: summaries.each_value.sum { |summary| summary.call_site_facts.length },
           checked_with_sites: summaries.each_value.sum { |summary| summary.with_blocks.length },

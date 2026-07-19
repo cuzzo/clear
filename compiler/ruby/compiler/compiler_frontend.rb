@@ -30,6 +30,8 @@ class CompilerFrontend
     const :ast, AST::Program
     const :annotator, ::SemanticAnnotator
     const :lifecycle_registry, Semantic::LifecycleRegistry
+    const :derived_program, Annotator::Phases::DerivedProgramFacts
+    const :program_mir_facts, ProgramMIRFacts
     const :fn_nodes, T::Hash[String, AST::FunctionDef]
     const :fn_sigs, T::Hash[String, FunctionSignature]
     const :struct_schemas, T::Hash[Symbol, Schemas::StructSchema]
@@ -85,6 +87,7 @@ class CompilerFrontend
     PreMirTypeCheck.verify!(ast)
 
     lifecycle_registry = T.must(annotator.annotation_products.typed_program).lifecycle_registry
+    derived_program = T.must(annotator.annotation_products.capability_audit).derived_program
     mir_pass = MIRPass.new(
       fn_nodes: fn_nodes,
       schema_lookup: schema_lookup,
@@ -131,6 +134,8 @@ class CompilerFrontend
       ast: ast,
       annotator: annotator,
       lifecycle_registry: lifecycle_registry,
+      derived_program: derived_program,
+      program_mir_facts: mir_pass.program_facts,
       fn_nodes: fn_nodes,
       fn_sigs: fn_sigs,
       struct_schemas: struct_schemas,

@@ -55,6 +55,9 @@ RSpec.describe "annotator completion phases" do
     )
     audit = Annotator::Phases::CapabilityAuditReport.new(
       typed_program: typed_program,
+      derived_program: Annotator::Phases::DerivedProgramFacts.capture(
+        registry.nodes.select { |_name, fn| FunctionSignature.unwrap(fn.full_type) }
+      ),
       checked_functions: registry.names,
       checked_call_sites: 0,
       checked_with_sites: 0,

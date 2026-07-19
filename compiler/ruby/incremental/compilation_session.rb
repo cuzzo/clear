@@ -137,7 +137,7 @@ module Incremental
       unless same_state?(replacement.state_after, baseline_function.state_after)
         return clean_compile(source, reason: "function changed global emission state")
       end
-      unless same_function_contract?(baseline_function.code, replacement.code)
+      unless baseline_function.contract_fingerprint == replacement.contract_fingerprint
         return clean_compile(source, reason: "derived function contract changed")
       end
       unless error_names(candidate.error_name_enum).subset?(error_names(previous.artifact.error_name_enum))
@@ -181,11 +181,6 @@ module Incremental
       SourceCatalog.build(source, module_path: @module_path)
     rescue Lexer::Error, ParserError
       nil
-    end
-
-    sig { params(left: String, right: String).returns(T::Boolean) }
-    def same_function_contract?(left, right)
-      left.lines.first == right.lines.first
     end
 
     sig { params(catalog: SourceCatalog, name: String).returns(T::Boolean) }
