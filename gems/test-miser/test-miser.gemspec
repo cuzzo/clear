@@ -17,4 +17,5 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "mutant", "~> 0.15.1"
   spec.add_dependency "mutant-minitest", "~> 0.15.1"
+  spec.add_dependency "sqlite3", ">= 2.0", "< 3"
 end

@@ -1,0 +1,10 @@
+arguments:
+  - test
+  - --enable-code-coverage
+executable: /usr/bin/swift
+exclude:
+  - .build
+  - Package.swift
+  - muter-report.json
+  - muter_logs
+excludeCalls: []

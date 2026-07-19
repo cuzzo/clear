@@ -1,0 +1,339 @@
+diff --git a/cmd/test_miser.go b/cmd/test_miser.go
+new file mode 100644
+index 0000000..4e4e5be
+--- /dev/null
++++ b/cmd/test_miser.go
+@@ -0,0 +1,130 @@
++package cmd
++
++import (
++	"encoding/json"
++	"go/ast"
++	"go/parser"
++	"go/token"
++	"os"
++	"path/filepath"
++	"strings"
++
++	"github.com/go-gremlins/gremlins/internal/engine"
++	"github.com/go-gremlins/gremlins/internal/gomodule"
++	"github.com/go-gremlins/gremlins/internal/mutator"
++	"github.com/go-gremlins/gremlins/internal/report"
++)
++
++type testMiserTest struct {
++	ID   string `json:"id"`
++	Name string `json:"name"`
++	File string `json:"file"`
++	Line int    `json:"line"`
++}
++
++type testMiserMutant struct {
++	ID        string   `json:"id"`
++	File      string   `json:"file"`
++	Kind      string   `json:"kind"`
++	Outcome   string   `json:"outcome"`
++	Line      int      `json:"line"`
++	Column    int      `json:"column"`
++	CoveredBy []string `json:"covered_by"`
++	KilledBy  []string `json:"killed_by"`
++}
++
++func writeTestMiserFacts(output string, mod gomodule.GoModule, results report.Results) error {
++	attribution := engine.TestAttribution()
++	mutants := make([]testMiserMutant, 0, len(results.Mutants))
++	attributionComplete := true
++	for _, mutant := range results.Mutants {
++		position := mutant.Position()
++		id := engine.MutantID(mutant)
++		killedBy := attribution[id]
++		if killedBy == nil {
++			killedBy = []string{}
++		}
++		if mutant.Status() == mutator.Killed && len(killedBy) == 0 {
++			attributionComplete = false
++		}
++		mutants = append(mutants, testMiserMutant{
++			ID: id, File: position.Filename, Kind: mutant.Type().String(),
++			Outcome: testMiserOutcome(mutant.Status()), Line: position.Line, Column: position.Column,
++			CoveredBy: []string{}, KilledBy: killedBy,
++		})
++	}
++
++	tests, err := collectGoTests(mod)
++	if err != nil {
++		return err
++	}
++	payload := map[string]any{
++		"schema": "mutant-facts/v1", "source": "gremlins", "language": "go",
++		"mutation_kind": "stochastic", "subjects": []any{}, "tests": tests, "mutants": mutants,
++		"test_miser": map[string]bool{
++			"complete": true, "attribution_complete": attributionComplete, "run_to_complete": true,
++		},
++	}
++	data, err := json.MarshalIndent(payload, "", "  ")
++	if err != nil {
++		return err
++	}
++	return os.WriteFile(output, append(data, '\n'), 0o644)
++}
++
++func testMiserOutcome(status mutator.Status) string {
++	switch status {
++	case mutator.Killed:
++		return "killed"
++	case mutator.Lived:
++		return "survived"
++	case mutator.NotCovered:
++		return "uncovered"
++	case mutator.NotViable:
++		return "unviable"
++	case mutator.TimedOut:
++		return "timeout"
++	case mutator.Skipped:
++		return "skipped"
++	default:
++		return strings.ToLower(status.String())
++	}
++}
++
++func collectGoTests(mod gomodule.GoModule) ([]testMiserTest, error) {
++	var tests []testMiserTest
++	set := token.NewFileSet()
++	err := filepath.WalkDir(mod.Root, func(path string, entry os.DirEntry, err error) error {
++		if err != nil {
++			return err
++		}
++		if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == "vendor") {
++			return filepath.SkipDir
++		}
++		if entry.IsDir() || !strings.HasSuffix(path, "_test.go") {
++			return nil
++		}
++		file, err := parser.ParseFile(set, path, nil, 0)
++		if err != nil {
++			return err
++		}
++		relFile, _ := filepath.Rel(mod.Root, path)
++		relDir := filepath.Dir(relFile)
++		pkg := mod.Name
++		if relDir != "." {
++			pkg += "/" + filepath.ToSlash(relDir)
++		}
++		for _, decl := range file.Decls {
++			fn, ok := decl.(*ast.FuncDecl)
++			if !ok || !strings.HasPrefix(fn.Name.Name, "Test") {
++				continue
++			}
++			tests = append(tests, testMiserTest{
++				ID: "go:" + pkg + ":" + fn.Name.Name, Name: fn.Name.Name,
++				File: filepath.ToSlash(relFile), Line: set.Position(fn.Pos()).Line,
++			})
++		}
++		return nil
++	})
++	return tests, err
++}
+diff --git a/cmd/unleash.go b/cmd/unleash.go
+index a9ac2e5..3dddf4e 100644
+--- a/cmd/unleash.go
++++ b/cmd/unleash.go
+@@ -54,6 +54,7 @@ const (
+ 	paramOutputStatuses     = "output-statuses"
+ 	paramOutputDiffStatuses = "output-diff-statuses"
+ 	paramOutput             = "output"
++	paramTestMiserOutput    = "test-miser-output"
+ 	paramIntegrationMode    = "integration"
+ 	paramExcludeFiles       = "exclude-files"
+ 	paramTestCPU            = "test-cpu"
+@@ -136,6 +137,12 @@ func runUnleash(ctx context.Context) func(cmd *cobra.Command, args []string) err
+ 			return nil
+ 		}
+ 
++		if output := configuration.Get[string](configuration.UnleashTestMiserOutputKey); output != "" {
++			if err := writeTestMiserFacts(output, mod, results); err != nil {
++				return fmt.Errorf("write Test Miser facts: %w", err)
++			}
++		}
++
+ 		return report.Do(results)
+ 	}
+ }
+@@ -213,6 +220,7 @@ func setFlagsOnCmd(cmd *cobra.Command) error {
+ 		{Name: paramCoverPackages, CfgKey: configuration.UnleashCoverPkgKey, DefaultV: "", Usage: "a comma-separated list of package patterns"},
+ 		{Name: paramDiff, CfgKey: configuration.UnleashDiffRef, Shorthand: "D", DefaultV: "", Usage: "diff branch or commit"},
+ 		{Name: paramOutput, CfgKey: configuration.UnleashOutputKey, Shorthand: "o", DefaultV: "", Usage: "set the output file for machine readable results"},
++		{Name: paramTestMiserOutput, CfgKey: configuration.UnleashTestMiserOutputKey, DefaultV: "", Usage: "run tests to completion and write complete per-test mutant attribution"},
+ 		{Name: paramIntegrationMode, CfgKey: configuration.UnleashIntegrationMode, Shorthand: "i", DefaultV: false, Usage: "makes Gremlins run the complete test suite for each mutation"},
+ 		{Name: paramExcludeFiles, CfgKey: configuration.UnleashExcludeFiles, Shorthand: "E", DefaultV: []string{}, Usage: "exclude files from Gremlins run by filepath regexp"},
+ 		{Name: paramThresholdEfficacy, CfgKey: configuration.UnleashThresholdEfficacyKey, DefaultV: float64(0), Usage: "threshold for code-efficacy percent"},
+diff --git a/internal/configuration/configuration.go b/internal/configuration/configuration.go
+index cf13433..6442c6e 100644
+--- a/internal/configuration/configuration.go
++++ b/internal/configuration/configuration.go
+@@ -37,6 +37,7 @@ const (
+ 	UnleashDryRunKey             = "unleash.dry-run"
+ 	UnleashOutputStatusesKey     = "unleash.output-statuses"
+ 	UnleashOutputKey             = "unleash.output"
++	UnleashTestMiserOutputKey    = "unleash.test-miser-output"
+ 	UnleashTagsKey               = "unleash.tags"
+ 	UnleashCoverPkgKey           = "unleash.coverpkg"
+ 	UnleashWorkersKey            = "unleash.workers"
+diff --git a/internal/engine/executor.go b/internal/engine/executor.go
+index ecfd0e3..0f36287 100644
+--- a/internal/engine/executor.go
++++ b/internal/engine/executor.go
+@@ -17,12 +17,15 @@
+ package engine
+ 
+ import (
++	"bytes"
+ 	"context"
++	"encoding/json"
+ 	"errors"
+ 	"fmt"
+ 	"os"
+ 	"os/exec"
+ 	"path/filepath"
++	"slices"
+ 	"sync"
+ 	"time"
+ 
+@@ -60,6 +63,7 @@ type MutantExecutorDealer struct {
+ 	dryRun            bool
+ 	integrationMode   bool
+ 	testCPU           int
++	testMiser         bool
+ }
+ 
+ // ExecutorDealerOption is the defining option for the initialisation of a ExecutorDealer.
+@@ -81,6 +85,7 @@ func NewExecutorDealer(mod gomodule.GoModule, wdd workdir.Dealer, elapsed time.D
+ 	integrationMode := configuration.Get[bool](configuration.UnleashIntegrationMode)
+ 	testCPU := configuration.Get[int](configuration.UnleashTestCPUKey)
+ 	tCoefficient := configuration.Get[int](configuration.UnleashTimeoutCoefficientKey)
++	testMiser := configuration.Get[string](configuration.UnleashTestMiserOutputKey) != ""
+ 
+ 	coefficient := DefaultTimeoutCoefficient
+ 	if tCoefficient != 0 {
+@@ -106,6 +111,7 @@ func NewExecutorDealer(mod gomodule.GoModule, wdd workdir.Dealer, elapsed time.D
+ 		integrationMode:   integrationMode,
+ 		testCPU:           testCPU,
+ 		testExecutionTime: baseTime * time.Duration(coefficient),
++		testMiser:         testMiser,
+ 		execContext:       exec.CommandContext,
+ 	}
+ 
+@@ -133,6 +139,7 @@ func (m MutantExecutorDealer) NewExecutor(mut mutator.Mutator, outCh chan<- muta
+ 		execContext:       m.execContext,
+ 		testCPU:           m.testCPU,
+ 		testExecutionTime: m.testExecutionTime,
++		testMiser:         m.testMiser,
+ 	}
+ 
+ 	return &mj
+@@ -152,6 +159,7 @@ type mutantExecutor struct {
+ 	dryRun            bool
+ 	integrationMode   bool
+ 	testCPU           int
++	testMiser         bool
+ }
+ 
+ // Start is the implementation of the workerpool.Executor definition and is the
+@@ -209,11 +217,19 @@ func (m *mutantExecutor) runTests(rootDir, pkg string) mutator.Status {
+ 	}
+ 	cmd.Env = append(cmd.Env, os.Environ()...)
+ 	cmd.Env = append(cmd.Env, fmt.Sprintf("GOTMPDIR=%s", m.wdDealer.WorkDir()))
++	var output bytes.Buffer
++	if m.testMiser {
++		cmd.Stdout = &output
++		cmd.Stderr = &output
++	}
+ 
+ 	// Set up process group for killing entire process tree
+ 	setupProcessGroup(cmd)
+ 
+ 	err := run(ctx, cmd)
++	if m.testMiser {
++		recordTestAttribution(m.mutant, parseFailedGoTests(output.Bytes()))
++	}
+ 
+ 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+ 		return mutator.TimedOut
+@@ -235,7 +251,11 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+ 	// timeout and not the test itself. The timeout on the test prevents the test.* processes
+ 	// from hanging forever.
+ 	args = append(args, "-timeout", (2*time.Second + m.testExecutionTime).String())
+-	args = append(args, "-failfast")
++	if m.testMiser {
++		args = append(args, "-json")
++	} else {
++		args = append(args, "-failfast")
++	}
+ 
+ 	if m.testCPU != 0 {
+ 		args = append(args, "-cpu", fmt.Sprintf("%d", m.testCPU))
+@@ -250,6 +270,28 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+ 	return args
+ }
+ 
++type goTestEvent struct {
++	Action  string `json:"Action"`
++	Package string `json:"Package"`
++	Test    string `json:"Test"`
++}
++
++func parseFailedGoTests(output []byte) []string {
++	failed := make(map[string]struct{})
++	for _, line := range bytes.Split(output, []byte("\n")) {
++		var event goTestEvent
++		if json.Unmarshal(line, &event) == nil && event.Action == "fail" && event.Test != "" {
++			failed["go:"+event.Package+":"+event.Test] = struct{}{}
++		}
++	}
++	result := make([]string, 0, len(failed))
++	for test := range failed {
++		result = append(result, test)
++	}
++	slices.Sort(result)
++	return result
++}
++
+ func run(ctx context.Context, cmd *exec.Cmd) error {
+ 	if err := cmd.Start(); err != nil {
+ 		return err
+diff --git a/internal/engine/test_miser.go b/internal/engine/test_miser.go
+new file mode 100644
+index 0000000..73187b6
+--- /dev/null
++++ b/internal/engine/test_miser.go
+@@ -0,0 +1,30 @@
++package engine
++
++import (
++	"fmt"
++	"sync"
++
++	"github.com/go-gremlins/gremlins/internal/mutator"
++)
++
++var testAttribution sync.Map
++
++// MutantID is stable across the executor and the Test Miser exporter.
++func MutantID(m mutator.Mutator) string {
++	position := m.Position()
++	return fmt.Sprintf("go:%s:%d:%d:%s", position.Filename, position.Line, position.Column, m.Type().String())
++}
++
++func recordTestAttribution(m mutator.Mutator, killedBy []string) {
++	testAttribution.Store(MutantID(m), killedBy)
++}
++
++// TestAttribution returns the complete failure set captured for each executed mutant.
++func TestAttribution() map[string][]string {
++	result := make(map[string][]string)
++	testAttribution.Range(func(key, value any) bool {
++		result[key.(string)] = value.([]string)
++		return true
++	})
++	return result
++}

@@ -6,9 +6,9 @@ require "set"
 module TestMiser
   class InvalidReport < ArgumentError; end
 
-  Test = Struct.new(:id, :name, :file, keyword_init: true) do
+  Test = Struct.new(:id, :name, :file, :line, keyword_init: true) do
     def to_h
-      { id: id, name: name, file: file }.compact
+      { id: id, name: name, file: file, line: line }.compact
     end
   end
 
@@ -51,6 +51,13 @@ module TestMiser
       rows = reports.filter_map(&:corpus_metadata)
       return nil if rows.empty?
 
+      if rows.any? { |row| row.key?("attribution_complete") }
+        complete = rows.all? do |row|
+          row["complete"] == true && row["attribution_complete"] == true
+        end
+        return rows.first.merge("completed_mutants" => mutant_count, "complete" => complete)
+      end
+
       fingerprints = rows.map { |row| row["corpusFingerprint"] }.uniq
       expected = rows.map { |row| row["expectedMutants"] }.uniq
       complete = fingerprints.length == 1 && expected.length == 1 && mutant_count == expected.first
@@ -63,21 +70,42 @@ module TestMiser
         report.instance_variable_set(:@tests, tests.sort_by(&:id).freeze)
         report.instance_variable_set(:@mutants, mutants.sort_by(&:id).freeze)
         report.instance_variable_set(:@corpus_metadata, corpus_metadata&.freeze)
-        report.instance_variable_set(:@corpus_complete, corpus_metadata && corpus_metadata["complete"] == true)
+        report.instance_variable_set(
+          :@corpus_complete,
+          metadata_complete?(corpus_metadata, mutants.length)
+        )
       end
     end
 
+    def self.metadata_complete?(metadata, mutant_count)
+      return nil unless metadata
+      return false unless metadata["complete"] == true
+      return false if metadata.key?("attribution_complete") && metadata["attribution_complete"] != true
+      return false if metadata["expectedMutants"] && metadata["expectedMutants"] != mutant_count
+
+      true
+    end
+    private_class_method :metadata_complete?
+
     def initialize(payload, source: "mutation report")
-      unless payload.is_a?(Hash) && payload["files"].is_a?(Hash)
-        raise InvalidReport, "#{source}: expected a Mutation Testing Elements report with a files object"
+      unless payload.is_a?(Hash)
+        raise InvalidReport, "#{source}: expected a JSON object"
       end
 
-      @tests = parse_tests(payload).sort_by(&:id).freeze
-      @mutants = parse_mutants(payload, source).sort_by(&:id).freeze
-      @corpus_metadata = payload["testMiser"]&.freeze
-      @corpus_complete = @corpus_metadata &&
-        @corpus_metadata["complete"] == true &&
-        @mutants.length == @corpus_metadata["expectedMutants"]
+      if payload["schema"].to_s.start_with?("mutant-facts/")
+        @tests = parse_fact_tests(payload).sort_by(&:id).freeze
+        @mutants = parse_fact_mutants(payload, source).sort_by(&:id).freeze
+        @corpus_metadata = payload["test_miser"]&.freeze
+        @corpus_complete = self.class.__send__(:metadata_complete?, @corpus_metadata, @mutants.length)
+      elsif payload["files"].is_a?(Hash)
+        @tests = parse_tests(payload).sort_by(&:id).freeze
+        @mutants = parse_mutants(payload, source).sort_by(&:id).freeze
+        @corpus_metadata = payload["testMiser"]&.freeze
+        @corpus_complete = self.class.__send__(:metadata_complete?, @corpus_metadata, @mutants.length)
+      else
+        raise InvalidReport,
+          "#{source}: expected mutant-facts or Mutation Testing Elements input"
+      end
       add_referenced_tests
       validate_references(source)
     end
@@ -90,8 +118,40 @@ module TestMiser
           id = string(test, "id")
           next unless id
 
-          Test.new(id: id, name: string(test, "name") || id, file: file)
+          Test.new(
+            id: id,
+            name: string(test, "name") || id,
+            file: string(test, "file") || file,
+            line: test_line(test)
+          )
         end
+      end
+    end
+
+    def parse_fact_tests(payload)
+      Array(payload["tests"]).filter_map do |test|
+        id = string(test, "id")
+        next unless id
+
+        Test.new(
+          id: id,
+          name: string(test, "name") || id,
+          file: string(test, "file"),
+          line: test_line(test)
+        )
+      end
+    end
+
+    def parse_fact_mutants(payload, source)
+      Array(payload["mutants"]).map do |mutant|
+        id = string(mutant, "id")
+        raise InvalidReport, "#{source}: mutant has no id" unless id
+
+        file = string(mutant, "file")
+        killed_by = string_set(mutant["killed_by"] || mutant["killedBy"])
+        covered_by = string_set(mutant["covered_by"] || mutant["coveredBy"])
+        covered_by.merge(killed_by)
+        Mutant.new(id: id, file: file, covered_by: covered_by, killed_by: killed_by)
       end
     end
 
@@ -141,6 +201,11 @@ module TestMiser
 
     def string_set(values)
       Array(values).map(&:to_s).reject(&:empty?).to_set
+    end
+
+    def test_line(test)
+      value = test["line"] || test.dig("location", "start", "line")
+      Integer(value, exception: false)&.then { |line| line.positive? ? line : nil }
     end
   end
 end

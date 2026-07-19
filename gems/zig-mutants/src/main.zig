@@ -20,6 +20,7 @@ const Options = struct {
     timeout_seconds: u32 = 120,
     json: bool = false,
     hard_gate: bool = false,
+    test_miser: bool = false,
 
     const Command = enum { list, run, help };
 
@@ -31,11 +32,14 @@ const Options = struct {
 const Subject = struct {
     source: []const u8,
     test_command: []const u8,
+    test_commands: [][]const u8,
     timeout_seconds: u32,
 
     fn deinit(self: Subject, allocator: Allocator) void {
         allocator.free(self.source);
         allocator.free(self.test_command);
+        for (self.test_commands) |command| allocator.free(command);
+        allocator.free(self.test_commands);
     }
 };
 
@@ -45,7 +49,8 @@ const Manifest = struct {
 
 const ManifestSubject = struct {
     source: []const u8,
-    test_command: []const u8,
+    test_command: ?[]const u8 = null,
+    test_commands: ?[][]const u8 = null,
     timeout_seconds: ?u32 = null,
 };
 
@@ -104,6 +109,8 @@ fn parseOptions(allocator: Allocator, args: std.process.Args) !Options {
             opts.json = true;
         } else if (std.mem.eql(u8, arg, "--hard-gate")) {
             opts.hard_gate = true;
+        } else if (std.mem.eql(u8, arg, "--test-miser")) {
+            opts.test_miser = true;
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             opts.command = .help;
         } else {
@@ -150,7 +157,7 @@ fn usage() void {
     std.debug.print(
         \\Usage:
         \\  zig-mutants list (--source FILE | --manifest FILE) [--json]
-        \\  zig-mutants run --root DIR (--source FILE | --manifest FILE) [--test-command CMD] [--facts FILE] [--out DIR] [--artifact-dir DIR] [--shard INDEX/COUNT] [--ratchet FACTS]
+        \\  zig-mutants run --root DIR (--source FILE | --manifest FILE) [--test-command CMD] [--facts FILE] [--test-miser] [--out DIR] [--artifact-dir DIR] [--shard INDEX/COUNT] [--ratchet FACTS]
         \\
         \\Examples:
         \\  zig build -Doptimize=ReleaseSafe run -- list --source ../../zig/lib/safety.zig
@@ -177,9 +184,12 @@ fn loadSubjects(allocator: Allocator, io: std.Io, opts: Options) ![]Subject {
     }
 
     for (opts.sources.items) |source| {
+        const commands = try copyTestCommands(allocator, opts.test_command orelse "", null);
+        errdefer freeTestCommands(allocator, commands);
         try subjects.append(.{
             .source = try allocator.dupe(u8, source),
             .test_command = try allocator.dupe(u8, opts.test_command orelse ""),
+            .test_commands = commands,
             .timeout_seconds = opts.timeout_seconds,
         });
     }
@@ -212,14 +222,49 @@ fn loadManifestSubjects(
     }
 
     for (parsed.value.subjects) |subject| {
-        const command = command_override orelse subject.test_command;
+        const command = command_override orelse subject.test_command orelse "";
+        const command_list = if (command_override != null)
+            try copyTestCommands(allocator, command, null)
+        else
+            try copyTestCommands(allocator, command, subject.test_commands);
+        errdefer freeTestCommands(allocator, command_list);
+        const joined = try joinTestCommands(allocator, command_list, " && ");
+        errdefer allocator.free(joined);
         try subjects.append(.{
             .source = try allocator.dupe(u8, subject.source),
-            .test_command = try allocator.dupe(u8, command),
+            .test_command = joined,
+            .test_commands = command_list,
             .timeout_seconds = subject.timeout_seconds orelse 120,
         });
     }
     return subjects.toOwnedSlice();
+}
+
+fn copyTestCommands(allocator: Allocator, legacy: []const u8, commands: ?[][]const u8) ![][]const u8 {
+    var copied = std.array_list.Managed([]const u8).init(allocator);
+    errdefer {
+        for (copied.items) |command| allocator.free(command);
+        copied.deinit();
+    }
+    if (commands) |items| {
+        for (items) |command| try copied.append(try allocator.dupe(u8, command));
+    } else {
+        var parts = std.mem.splitSequence(u8, legacy, "&&");
+        while (parts.next()) |part| {
+            const command = std.mem.trim(u8, part, " \t\r\n");
+            if (command.len != 0) try copied.append(try allocator.dupe(u8, command));
+        }
+    }
+    return copied.toOwnedSlice();
+}
+
+fn freeTestCommands(allocator: Allocator, commands: [][]const u8) void {
+    for (commands) |command| allocator.free(command);
+    allocator.free(commands);
+}
+
+fn joinTestCommands(allocator: Allocator, commands: []const []const u8, separator: []const u8) ![]u8 {
+    return std.mem.join(allocator, separator, commands);
 }
 
 fn freeSubjects(allocator: Allocator, subjects: []Subject) void {
@@ -275,17 +320,29 @@ fn runMutants(allocator: Allocator, io: std.Io, opts: Options) !void {
 
     try copyWorkspace(allocator, io, opts.root, work_dir);
 
+    var test_records = std.array_list.Managed(zig_mutants.TestRecord).init(allocator);
+    defer {
+        for (test_records.items) |record| record.deinit(allocator);
+        test_records.deinit();
+    }
+
     for (subjects) |subject| {
-        if (subject.test_command.len == 0) return error.MissingTestCommand;
-        const baseline = try runShell(allocator, io, work_dir, subject.test_command, subject.timeout_seconds);
-        defer baseline.deinit(allocator);
-        if (!baseline.success()) {
-            std.debug.print("baseline failed for {s}; refusing to test mutants\n{s}{s}\n", .{
-                subject.source,
-                baseline.stdout,
-                baseline.stderr,
-            });
-            return error.BaselineFailed;
+        if (subject.test_commands.len == 0) return error.MissingTestCommand;
+        for (subject.test_commands) |command| {
+            const baseline = try runShell(allocator, io, work_dir, command, subject.timeout_seconds);
+            defer baseline.deinit(allocator);
+            if (!baseline.success()) {
+                std.debug.print("baseline failed for {s}; refusing to test mutants\n{s}{s}\n", .{
+                    subject.source,
+                    baseline.stdout,
+                    baseline.stderr,
+                });
+                return error.BaselineFailed;
+            }
+            if (opts.test_miser) {
+                try appendBaselineTests(allocator, io, opts.root, command, baseline.stdout, &test_records);
+                try appendBaselineTests(allocator, io, opts.root, command, baseline.stderr, &test_records);
+            }
         }
     }
 
@@ -342,7 +399,16 @@ fn runMutants(allocator: Allocator, io: std.Io, opts: Options) !void {
             continue;
         }
 
-        const trial = try runShell(allocator, io, work_dir, subject.test_command, subject.timeout_seconds);
+        const test_command = if (opts.test_miser)
+            try runToCompleteCommand(allocator, index, subject.test_commands)
+        else
+            try std.fmt.allocPrint(
+                allocator,
+                "export ZIG_GLOBAL_CACHE_DIR=.zig-mutants-cache/{d}; {s}",
+                .{ index, subject.test_command },
+            );
+        defer allocator.free(test_command);
+        const trial = try runShell(allocator, io, work_dir, test_command, subject.timeout_seconds);
         defer trial.deinit(allocator);
         const outcome: zig_mutants.Outcome = if (trial.timed_out)
             .timeout
@@ -364,11 +430,16 @@ fn runMutants(allocator: Allocator, io: std.Io, opts: Options) !void {
             )
         else
             null;
+        const killed_by = if (opts.test_miser and outcome == .killed)
+            try failedTestIds(allocator, trial.stdout, trial.stderr)
+        else
+            &.{};
         try results.append(.{
             .mutant_index = index,
             .outcome = outcome,
             .exit_code = trial.exitCode(),
             .artifact_path = artifact_path,
+            .killed_by = killed_by,
         });
 
         try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = source_path, .data = original });
@@ -382,7 +453,18 @@ fn runMutants(allocator: Allocator, io: std.Io, opts: Options) !void {
     }
 
     if (opts.facts_path) |facts_path| {
-        const facts = try zig_mutants.writeFactsJson(allocator, sources, mutants, results.items, opts.hard_gate);
+        const attribution: ?zig_mutants.TestAttribution = if (opts.test_miser)
+            .{ .tests = test_records.items, .complete = opts.max_mutants == null and opts.shard_count == 1 }
+        else
+            null;
+        const facts = try zig_mutants.writeFactsJsonWithAttribution(
+            allocator,
+            sources,
+            mutants,
+            results.items,
+            opts.hard_gate,
+            attribution,
+        );
         defer allocator.free(facts);
         const dir_name = std.fs.path.dirname(facts_path);
         if (dir_name) |dir| try std.Io.Dir.cwd().createDirPath(io, dir);
@@ -405,6 +487,169 @@ fn runMutants(allocator: Allocator, io: std.Io, opts: Options) !void {
             summary.skipped,
         });
     }
+}
+
+fn runToCompleteCommand(allocator: Allocator, mutant_index: usize, commands: []const []const u8) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    const writer = &out.writer;
+    try writer.print("export ZIG_GLOBAL_CACHE_DIR=.zig-mutants-cache/{d}; status=0; ", .{mutant_index});
+    for (commands) |command| {
+        try writer.print("{{ {s}; }} || status=$?; ", .{command});
+    }
+    try writer.writeAll("exit $status");
+    return out.toOwnedSlice();
+}
+
+const ParsedTestLine = struct {
+    name: []const u8,
+    failed: bool,
+};
+
+fn parsedTestName(line: []const u8) ?[]const u8 {
+    const dots = std.mem.indexOf(u8, line, "...") orelse return null;
+    const prefix = std.mem.trim(u8, line[0..dots], " \t\r");
+    const first_space = std.mem.indexOfScalar(u8, prefix, ' ') orelse return null;
+    const progress = prefix[0..first_space];
+    if (std.mem.indexOfScalar(u8, progress, '/') == null) return null;
+    const name = std.mem.trim(u8, prefix[first_space + 1 ..], " \t\r");
+    if (name.len == 0) return null;
+    return name;
+}
+
+fn parsedTestLine(line: []const u8) ?ParsedTestLine {
+    const dots = std.mem.indexOf(u8, line, "...") orelse return null;
+    const name = parsedTestName(line) orelse return null;
+    const status = std.mem.trim(u8, line[dots + 3 ..], " \t\r");
+    if (std.mem.startsWith(u8, status, "OK") or std.mem.startsWith(u8, status, "SKIP")) {
+        return .{ .name = name, .failed = false };
+    }
+    if (std.mem.startsWith(u8, status, "FAIL")) {
+        return .{ .name = name, .failed = true };
+    }
+    return null;
+}
+
+fn appendBaselineTests(
+    allocator: Allocator,
+    io: std.Io,
+    root: []const u8,
+    test_command: []const u8,
+    output: []const u8,
+    records: *std.array_list.Managed(zig_mutants.TestRecord),
+) !void {
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |line| {
+        const parsed = parsedTestLine(line) orelse continue;
+        var duplicate = false;
+        for (records.items) |record| {
+            if (std.mem.eql(u8, record.name, parsed.name)) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) continue;
+        const test_file = testFileFromCommand(test_command) orelse return error.MissingTestFile;
+        const id = try std.fmt.allocPrint(allocator, "zig:{s}", .{parsed.name});
+        errdefer allocator.free(id);
+        try records.append(.{
+            .id = id,
+            .name = try allocator.dupe(u8, parsed.name),
+            .file = try allocator.dupe(u8, test_file),
+            .line = try testSourceLine(allocator, io, root, test_file, parsed.name),
+        });
+    }
+}
+
+fn testFileFromCommand(command: []const u8) ?[]const u8 {
+    var words = std.mem.tokenizeAny(u8, command, " \t\r\n\"'");
+    var saw_test = false;
+    while (words.next()) |word| {
+        if (saw_test and std.mem.endsWith(u8, word, ".zig")) return word;
+        if (std.mem.eql(u8, word, "test")) saw_test = true;
+    }
+    return null;
+}
+
+fn testSourceLine(
+    allocator: Allocator,
+    io: std.Io,
+    root: []const u8,
+    source: []const u8,
+    test_name: []const u8,
+) !usize {
+    const marker = ".test.";
+    const marker_index = std.mem.lastIndexOf(u8, test_name, marker) orelse return 1;
+    const leaf = test_name[marker_index + marker.len ..];
+    const needle = try std.fmt.allocPrint(allocator, "test \"{s}\"", .{leaf});
+    defer allocator.free(needle);
+    const path = try std.fs.path.join(allocator, &.{ root, source });
+    defer allocator.free(path);
+    const bytes = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        path,
+        allocator,
+        .limited(32 * 1024 * 1024),
+        .of(u8),
+        0,
+    );
+    defer allocator.free(bytes);
+    var line_number: usize = 1;
+    var lines = std.mem.splitScalar(u8, bytes, '\n');
+    while (lines.next()) |line| : (line_number += 1) {
+        if (std.mem.indexOf(u8, line, needle) != null) return line_number;
+    }
+    return 1;
+}
+
+fn failedTestIds(allocator: Allocator, stdout: []const u8, stderr: []const u8) ![]const []const u8 {
+    var ids = std.array_list.Managed([]const u8).init(allocator);
+    errdefer {
+        for (ids.items) |id| allocator.free(id);
+        ids.deinit();
+    }
+    for ([_][]const u8{ stdout, stderr }) |output| {
+        var pending: ?[]const u8 = null;
+        var lines = std.mem.splitScalar(u8, output, '\n');
+        while (lines.next()) |line| {
+            if (parsedTestName(line)) |name| {
+                pending = name;
+                if (parsedTestLine(line)) |parsed| {
+                    if (parsed.failed) try appendFailedTestId(allocator, &ids, parsed.name);
+                    pending = null;
+                }
+                continue;
+            }
+            const status = std.mem.trim(u8, line, " \t\r");
+            if (pending) |name| {
+                if (std.mem.startsWith(u8, status, "FAIL")) {
+                    try appendFailedTestId(allocator, &ids, name);
+                    pending = null;
+                }
+            }
+        }
+    }
+    if (ids.items.len == 0) {
+        ids.deinit();
+        return &.{};
+    }
+    return ids.toOwnedSlice();
+}
+
+fn appendFailedTestId(
+    allocator: Allocator,
+    ids: *std.array_list.Managed([]const u8),
+    name: []const u8,
+) !void {
+    const id = try std.fmt.allocPrint(allocator, "zig:{s}", .{name});
+    errdefer allocator.free(id);
+    for (ids.items) |existing| {
+        if (std.mem.eql(u8, existing, id)) {
+            allocator.free(id);
+            return;
+        }
+    }
+    try ids.append(id);
 }
 
 fn discoverAll(allocator: Allocator, io: std.Io, root: []const u8, sources: []const []const u8) ![]zig_mutants.Mutant {

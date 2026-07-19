@@ -2,7 +2,13 @@
 
 require_relative "test_miser/mutation_report"
 require_relative "test_miser/analyzer"
+require_relative "test_miser/location_resolver"
 require_relative "test_miser/reporter"
+require_relative "test_miser/adapters/cargo_mutants"
+require_relative "test_miser/adapters/pit"
+require_relative "test_miser/adapters/infection"
+require_relative "test_miser/adapters/mull_gtest"
+require_relative "test_miser/adapters/muter"
 
 module TestMiser
   VERSION = "0.1.0"

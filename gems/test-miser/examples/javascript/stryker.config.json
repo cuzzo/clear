@@ -1,0 +1,8 @@
+{
+  "mutate": ["src/**/*.js"],
+  "testRunner": "mocha",
+  "coverageAnalysis": "perTest",
+  "disableBail": true,
+  "reporters": ["json"],
+  "jsonReporter": { "fileName": "reports/mutation.json" }
+}

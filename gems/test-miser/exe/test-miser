@@ -4,14 +4,21 @@
 require "optparse"
 require_relative "../lib/test_miser"
 
-options = { format: "markdown", output: nil }
+command = %w[infer adapt].include?(ARGV.first) ? ARGV.shift : "report"
+options = { format: command == "infer" ? "sarif" : "markdown", output: nil, root: Dir.pwd, language: "java" }
 parser = OptionParser.new do |opts|
-  opts.banner = "Usage: test-miser [options] MUTATION_REPORT.json [...]"
-  opts.on("-f", "--format FORMAT", %w[markdown json], "Output format: markdown or json") do |format|
+  opts.banner = "Usage: test-miser [infer|adapt] [options] INPUT [...]"
+  opts.on("-f", "--format FORMAT", %w[markdown json sarif], "Output format: markdown, json, or sarif") do |format|
     options[:format] = format
   end
   opts.on("-o", "--output FILE", "Write the report to FILE") do |path|
     options[:output] = path
+  end
+  opts.on("--root DIR", "Repository root used to infer missing test line numbers") do |path|
+    options[:root] = path
+  end
+  opts.on("--language LANGUAGE", "Adapter source language (for example java or kotlin)") do |language|
+    options[:language] = language
   end
   opts.on("-h", "--help", "Show this help") do
     puts opts
@@ -26,10 +33,71 @@ begin
     exit 1
   end
 
+  if command == "adapt"
+    adapter = ARGV.shift
+    payload = case adapter
+    when "cargo-mutants"
+      unless ARGV.length == 1
+        warn "Usage: test-miser adapt [options] cargo-mutants MUTANTS_OUT"
+        exit 1
+      end
+      TestMiser::Adapters::CargoMutants.new(output_dir: ARGV.fetch(0), root: options[:root]).call
+    when "pit"
+      unless ARGV.length == 2
+        warn "Usage: test-miser adapt [options] pit MUTATIONS_XML TEST_REPORT_DIR"
+        exit 1
+      end
+      TestMiser::Adapters::Pit.new(
+        mutations_xml: ARGV.fetch(0), test_reports: ARGV.fetch(1),
+        root: options[:root], language: options[:language]
+      ).call
+    when "infection"
+      unless ARGV.length == 2
+        warn "Usage: test-miser adapt [options] infection INFECTION_HTML JUNIT_XML"
+        exit 1
+      end
+      TestMiser::Adapters::Infection.new(
+        report: ARGV.fetch(0), junit: ARGV.fetch(1), root: options[:root]
+      ).call
+    when "mull-gtest"
+      unless ARGV.length == 2
+        warn "Usage: test-miser adapt [options] mull-gtest MULL_SQLITE GTEST_JSON"
+        exit 1
+      end
+      TestMiser::Adapters::MullGtest.new(
+        database: ARGV.fetch(0), gtest_json: ARGV.fetch(1),
+        root: options[:root], language: options[:language]
+      ).call
+    when "muter"
+      unless ARGV.length == 2
+        warn "Usage: test-miser adapt [options] muter MUTER_JSON MUTER_LOG_DIR"
+        exit 1
+      end
+      TestMiser::Adapters::Muter.new(
+        report: ARGV.fetch(0), logs: ARGV.fetch(1), root: options[:root]
+      ).call
+    else
+      warn "Unknown adapter: #{adapter}"
+      exit 1
+    end
+    output = JSON.pretty_generate(payload)
+    if options[:output]
+      File.write(options[:output], "#{output}\n")
+    else
+      puts output
+    end
+    exit 0
+  end
+
   report = TestMiser::MutationReport.load_files(ARGV)
+  report = TestMiser::LocationResolver.new(root: options[:root]).call(report) if command == "infer"
   analysis = TestMiser::Analyzer.new(report).analyze
   reporter = TestMiser::Reporter.new(analysis)
-  output = options[:format] == "json" ? reporter.json : reporter.markdown
+  output = case options[:format]
+  when "json" then reporter.json
+  when "sarif" then reporter.sarif
+  else reporter.markdown
+  end
 
   if options[:output]
     File.write(options[:output], "#{output}\n")

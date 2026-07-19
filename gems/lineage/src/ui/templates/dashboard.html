@@ -10,6 +10,7 @@
           <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-finding-changes" data-dashboard-panel="dashboard-panel-finding-changes">Finding Changes</button>
           <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-review-next" data-dashboard-panel="dashboard-panel-review-next">Review Next</button>
           <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-test-next" data-dashboard-panel="dashboard-panel-test-next">Test Next</button>
+          <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-weak-tests" data-dashboard-panel="dashboard-panel-weak-tests">Weak Tests</button>
           <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-highest-hazard-files" data-dashboard-panel="dashboard-panel-highest-hazard-files">Hazard Files</button>
           <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-highest-risk-units" data-dashboard-panel="dashboard-panel-highest-risk-units">Risky Units</button>
           <button type="button" role="tab" aria-selected="false" aria-controls="dashboard-panel-highest-architectural-risks" data-dashboard-panel="dashboard-panel-highest-architectural-risks">Architectural Risks</button>
@@ -19,6 +20,7 @@
       {{ finding_changes|safe }}
       {{ review_next|safe }}
       {{ test_next|safe }}
+      {{ weak_tests|safe }}
       {{ highest_hazard_files|safe }}
       {{ highest_risk_units|safe }}
       {{ highest_architecture_risks|safe }}

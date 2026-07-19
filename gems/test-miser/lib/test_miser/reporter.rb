@@ -37,7 +37,91 @@ module TestMiser
       lines.join("\n")
     end
 
+    def sarif
+      JSON.pretty_generate(
+        "$schema" => "https://json.schemastore.org/sarif-2.1.0.json",
+        "version" => "2.1.0",
+        "runs" => [{
+          "tool" => { "driver" => sarif_driver },
+          "properties" => { "format" => "test-miser.report.sarif.v1" },
+          "results" => sarif_results
+        }]
+      )
+    end
+
     private
+
+    def sarif_driver
+      {
+        "name" => "Test Miser",
+        "semanticVersion" => TestMiser::VERSION,
+        "informationUri" => "https://github.com/cuzzo/clear/tree/master/gems/test-miser",
+        "rules" => [
+          sarif_rule("test-miser.zero-kill", "Test kills no mutants"),
+          sarif_rule("test-miser.possibly-redundant", "Tests have identical mutant kill sets")
+        ]
+      }
+    end
+
+    def sarif_rule(id, text)
+      { "id" => id, "shortDescription" => { "text" => text }, "defaultConfiguration" => { "level" => "warning" } }
+    end
+
+    def sarif_results
+      return [] if @analysis.corpus_complete == false
+
+      zero = @analysis.zero_kill_tests.filter_map do |result|
+        sarif_result(
+          result.test,
+          "test-miser.zero-kill",
+          "#{result.test.name} kills no mutants",
+          "zero-kill",
+          "coveredMutantCount" => result.covered_mutants.length,
+          "killedMutantCount" => 0
+        )
+      end
+      redundant = @analysis.redundant_groups.each_with_index.flat_map do |group, index|
+        group.tests.filter_map do |test|
+          sarif_result(
+            test,
+            "test-miser.possibly-redundant",
+            "#{test.name} is POSSIBLY REDUNDANT with #{group.tests.length - 1} other test(s)",
+            "possibly-redundant",
+            "groupId" => "group-#{index + 1}",
+            "groupSize" => group.tests.length,
+            "killedMutantCount" => group.killed_mutants.length,
+            "peerTests" => group.tests.reject { |peer| peer.id == test.id }.map(&:name)
+          )
+        end
+      end
+      zero + redundant
+    end
+
+    def sarif_result(test, rule_id, message, kind, details)
+      return nil unless test.file
+
+      properties = {
+        "category" => "weak-test",
+        "kind" => kind,
+        "testId" => test.id,
+        "testName" => test.name,
+        "testFile" => test.file,
+        "testLine" => test.line
+      }.merge(details).compact
+      {
+        "ruleId" => rule_id,
+        "level" => "warning",
+        "message" => { "text" => message },
+        "locations" => [{
+          "physicalLocation" => {
+            "artifactLocation" => { "uri" => test.file },
+            "region" => { "startLine" => test.line || 1 }
+          }
+        }],
+        "partialFingerprints" => { "testMiser/v1" => "#{rule_id}:#{test.id}" },
+        "properties" => properties
+      }
+    end
 
     def corpus_notice
       return "" unless @analysis.corpus_complete == false

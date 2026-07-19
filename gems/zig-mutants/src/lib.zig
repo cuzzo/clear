@@ -64,10 +64,33 @@ pub const TrialResult = struct {
     outcome: Outcome,
     exit_code: i32 = 0,
     artifact_path: ?[]const u8 = null,
+    killed_by: []const []const u8 = &.{},
 
     pub fn deinit(self: TrialResult, allocator: Allocator) void {
         if (self.artifact_path) |path| allocator.free(path);
+        if (self.killed_by.len > 0) {
+            for (self.killed_by) |test_id| allocator.free(test_id);
+            allocator.free(self.killed_by);
+        }
     }
+};
+
+pub const TestRecord = struct {
+    id: []const u8,
+    name: []const u8,
+    file: []const u8,
+    line: usize,
+
+    pub fn deinit(self: TestRecord, allocator: Allocator) void {
+        allocator.free(self.id);
+        allocator.free(self.name);
+        allocator.free(self.file);
+    }
+};
+
+pub const TestAttribution = struct {
+    tests: []const TestRecord,
+    complete: bool,
 };
 
 pub const RunSummary = struct {
@@ -184,6 +207,17 @@ pub fn writeFactsJson(
     results: []const TrialResult,
     hard_gate: bool,
 ) ![]u8 {
+    return writeFactsJsonWithAttribution(allocator, sources, mutants, results, hard_gate, null);
+}
+
+pub fn writeFactsJsonWithAttribution(
+    allocator: Allocator,
+    sources: []const []const u8,
+    mutants: []const Mutant,
+    results: []const TrialResult,
+    hard_gate: bool,
+    attribution: ?TestAttribution,
+) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     errdefer out.deinit();
     const w = &out.writer;
@@ -226,6 +260,20 @@ pub fn writeFactsJson(
         }
     }
     try w.writeAll("\n  ],\n");
+    if (attribution) |data| {
+        try w.writeAll("  \"tests\": [\n");
+        for (data.tests, 0..) |test_record, index| {
+            if (index != 0) try w.writeAll(",\n");
+            try w.writeAll("    { \"id\": ");
+            try writeJsonString(w, test_record.id);
+            try w.writeAll(", \"name\": ");
+            try writeJsonString(w, test_record.name);
+            try w.writeAll(", \"file\": ");
+            try writeJsonString(w, test_record.file);
+            try w.print(", \"line\": {d} }}", .{test_record.line});
+        }
+        try w.writeAll("\n  ],\n");
+    }
     try w.writeAll("  \"mutants\": [\n");
     var mutants_written: usize = 0;
     for (results) |result| {
@@ -252,9 +300,25 @@ pub fn writeFactsJson(
             try w.writeAll(", \"artifact\": ");
             try writeJsonString(w, artifact_path);
         }
+        if (attribution != null) {
+            try w.writeAll(", \"covered_by\": [], \"killed_by\": [");
+            for (result.killed_by, 0..) |test_id, killer_index| {
+                if (killer_index != 0) try w.writeAll(", ");
+                try writeJsonString(w, test_id);
+            }
+            try w.writeByte(']');
+        }
         try w.writeAll(" }");
     }
-    try w.writeAll("\n  ]\n");
+    try w.writeAll("\n  ]");
+    if (attribution) |data| {
+        try w.writeAll(",\n  \"test_miser\": { \"complete\": ");
+        try w.writeAll(if (data.complete) "true" else "false");
+        try w.writeAll(", \"attribution_complete\": ");
+        try w.writeAll(if (data.complete) "true" else "false");
+        try w.writeAll(", \"run_to_complete\": true }");
+    }
+    try w.writeByte('\n');
     try w.writeAll("}\n");
 
     return out.toOwnedSlice();

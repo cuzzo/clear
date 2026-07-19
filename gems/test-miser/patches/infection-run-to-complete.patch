@@ -1,0 +1,49 @@
+diff --git a/src/Reporter/Html/StrykerHtmlReportBuilder.php b/src/Reporter/Html/StrykerHtmlReportBuilder.php
+index 53f50f4..b6cf328 100644
+--- a/src/Reporter/Html/StrykerHtmlReportBuilder.php
++++ b/src/Reporter/Html/StrykerHtmlReportBuilder.php
+@@ -66,6 +66,7 @@ use const PHP_EOL;
+ use PhpParser\NodeAbstract;
+ use function Safe\file_get_contents;
+ use function Safe\preg_match;
++use function Safe\preg_match_all;
+ use function Safe\preg_split;
+ use function sprintf;
+ use function str_starts_with;
+@@ -304,8 +305,11 @@ final readonly class StrykerHtmlReportBuilder
+     {
+         $matches = [];
+ 
+-        if (preg_match('/(?<name>\S+::\S+)(?<dataname> with data set (?:#\d+|"[^"]+"))?/', $processOutput, $matches) === 1) {
+-            return [$this->buildTestMethodId($matches['name'] . ($matches['dataname'] ?? ''))];
++        if (preg_match_all('/^\d+\)\s+(?<name>\S+::\S+)(?<dataname> with data set (?:#\d+|"[^"]+"))?/m', $processOutput, $matches, PREG_SET_ORDER) > 0) {
++            return array_values(array_unique(array_map(
++                fn (array $match): string => $this->buildTestMethodId($match['name'] . ($match['dataname'] ?? '')),
++                $matches,
++            )));
+         }
+ 
+         return [];
+diff --git a/src/TestFramework/PhpUnit/Config/XmlConfigurationManipulator.php b/src/TestFramework/PhpUnit/Config/XmlConfigurationManipulator.php
+index acb2a16..37b13ad 100644
+--- a/src/TestFramework/PhpUnit/Config/XmlConfigurationManipulator.php
++++ b/src/TestFramework/PhpUnit/Config/XmlConfigurationManipulator.php
+@@ -133,14 +133,16 @@ final readonly class XmlConfigurationManipulator
+ 
+     public function setStopOnFailureOrDefect(string $version, SafeDOMXPath $xPath): void
+     {
++        $runToComplete = getenv('INFECTION_RUN_TO_COMPLETE') === '1';
++
+         // with phpunit 10.0  we need to use stopOnDefect instead: https://github.com/sebastianbergmann/phpunit/blob/10.0.0/ChangeLog-10.0.md
+         if (version_compare($version, '10.0', '>=')) {
+-            $this->setAttributeValue($xPath, 'stopOnDefect', 'true');
++            $this->setAttributeValue($xPath, 'stopOnDefect', $runToComplete ? 'false' : 'true');
+ 
+             return;
+         }
+ 
+-        $this->setAttributeValue($xPath, 'stopOnFailure', 'true');
++        $this->setAttributeValue($xPath, 'stopOnFailure', $runToComplete ? 'false' : 'true');
+     }
+ 
+     public function deactivateColours(SafeDOMXPath $xPath): void

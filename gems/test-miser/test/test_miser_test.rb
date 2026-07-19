@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "fileutils"
 require "minitest/autorun"
 require "open3"
 require "rbconfig"
@@ -50,6 +51,52 @@ class TestMiserTest < Minitest::Test
     assert_equal 5, payload.dig("summary", "mutants")
     assert_equal 2, payload.dig("summary", "tests_that_kill_no_mutants")
     assert_equal 2, payload.dig("summary", "possibly_redundant_groups")
+  end
+
+  def test_consumes_native_mutant_facts_and_emits_lineage_sarif
+    payload = {
+      "schema" => "mutant-facts/v1",
+      "source" => "probe",
+      "language" => "ruby",
+      "subjects" => [{ "file" => "lib/example.rb", "method" => "Example#value" }],
+      "tests" => [
+        { "id" => "test:a", "name" => "ExampleTest#test_a", "file" => "test/example_test.rb", "line" => 12 },
+        { "id" => "test:b", "name" => "ExampleTest#test_b", "file" => "test/example_test.rb", "line" => 18 }
+      ],
+      "mutants" => [{
+        "id" => "lib/example.rb:1", "file" => "lib/example.rb", "outcome" => "killed",
+        "covered_by" => ["test:a", "test:b"], "killed_by" => ["test:a"]
+      }],
+      "test_miser" => { "complete" => true, "attribution_complete" => true }
+    }
+
+    report = TestMiser::MutationReport.new(payload)
+    sarif = JSON.parse(TestMiser::Reporter.new(TestMiser::Analyzer.new(report).analyze).sarif)
+    result = sarif.dig("runs", 0, "results", 0)
+
+    assert_equal true, report.corpus_complete
+    assert_equal "test-miser.zero-kill", result.fetch("ruleId")
+    assert_equal "test:b", result.dig("properties", "testId")
+    assert_equal "test/example_test.rb", result.dig("locations", 0, "physicalLocation", "artifactLocation", "uri")
+    assert_equal 18, result.dig("locations", 0, "physicalLocation", "region", "startLine")
+    assert_equal "test-miser.report.sarif.v1", sarif.dig("runs", 0, "properties", "format")
+  end
+
+  def test_infer_finds_missing_test_line_from_source
+    Dir.mktmpdir("test-miser-location") do |dir|
+      path = File.join(dir, "test/example_test.rb")
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, "class ExampleTest\n  def test_value\n  end\nend\n")
+      report = TestMiser::MutationReport.from_records(
+        [TestMiser::Test.new(id: "test:value", name: "ExampleTest#test_value", file: "test/example_test.rb")],
+        [],
+        corpus_metadata: { "complete" => true }
+      )
+
+      resolved = TestMiser::LocationResolver.new(root: dir).call(report)
+
+      assert_equal 2, resolved.tests.first.line
+    end
   end
 
   def test_markdown_distinguishes_uncovered_from_covered_zero_kill_tests
@@ -144,6 +191,32 @@ class TestMiserTest < Minitest::Test
 
     assert status.success?, stderr
     assert_equal 2, JSON.parse(stdout).dig("summary", "tests_that_kill_no_mutants")
+  end
+
+  def test_cli_infer_defaults_to_sarif_and_scans_test_source
+    executable = File.expand_path("../exe/test-miser", __dir__)
+    Dir.mktmpdir("test-miser-infer") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "test"))
+      File.write(File.join(dir, "test/example_test.rb"), "def test_empty\nend\n")
+      facts = {
+        "schema" => "mutant-facts/v1",
+        "subjects" => [{ "file" => "lib/example.rb", "method" => "Example#run" }],
+        "tests" => [{ "id" => "test:empty", "name" => "ExampleTest#test_empty", "file" => "test/example_test.rb" }],
+        "mutants" => [{ "id" => "m1", "file" => "lib/example.rb", "covered_by" => [], "killed_by" => [] }],
+        "test_miser" => { "complete" => true, "attribution_complete" => true, "run_to_complete" => true }
+      }
+      facts_path = File.join(dir, "mutant-facts.json")
+      File.write(facts_path, JSON.generate(facts))
+
+      stdout, stderr, status = Open3.capture3(
+        "ruby", executable, "infer", "--root", dir, facts_path
+      )
+      sarif = JSON.parse(stdout)
+
+      assert status.success?, stderr
+      assert_equal "2.1.0", sarif.fetch("version")
+      assert_equal 1, sarif.dig("runs", 0, "results", 0, "locations", 0, "physicalLocation", "region", "startLine")
+    end
   end
 
   def test_mutant_collector_records_individual_killers
@@ -283,5 +356,109 @@ class TestMiserTest < Minitest::Test
     assert_empty analysis.zero_kill_tests
     assert_empty analysis.redundant_groups
     assert_includes TestMiser::Reporter.new(analysis).markdown, "Audit findings are withheld"
+  end
+
+  def test_infection_adapter_merges_junit_inventory_and_all_killers
+    Dir.mktmpdir("test-miser-infection") do |dir|
+      html = File.join(dir, "infection.html")
+      junit = File.join(dir, "junit.xml")
+      report = {
+        "files" => { "src/value.php" => { "mutants" => [{
+          "id" => "m1", "status" => "Killed", "killedBy" => %w[a b], "coveredBy" => %w[a b]
+        }] } },
+        "testFiles" => { "tests/ValueTest.php" => { "tests" => [
+          { "id" => "a", "name" => "ValueTest::testPrimary" },
+          { "id" => "b", "name" => "ValueTest::testDuplicate" }
+        ] } }
+      }
+      File.write(html, "<script>app.report = #{JSON.generate(report)}\n;</script>")
+      File.write(junit, <<~XML)
+        <testsuites><testsuite>
+          <testcase name="testSmoke" class="ValueTest" file="#{dir}/tests/ValueTest.php" line="4"/>
+          <testcase name="testPrimary" class="ValueTest" file="#{dir}/tests/ValueTest.php" line="8"/>
+          <testcase name="testDuplicate" class="ValueTest" file="#{dir}/tests/ValueTest.php" line="12"/>
+        </testsuite></testsuites>
+      XML
+
+      payload = TestMiser::Adapters::Infection.new(report: html, junit: junit, root: dir).call
+      analysis = TestMiser::Analyzer.new(TestMiser::MutationReport.new(payload)).analyze
+
+      assert_equal ["ValueTest::testSmoke"], analysis.zero_kill_tests.map { |row| row.test.name }
+      assert_equal %w[ValueTest::testDuplicate ValueTest::testPrimary],
+        analysis.redundant_groups.first.tests.map(&:name).sort
+    end
+  end
+
+  def test_mull_gtest_adapter_reads_standard_sqlite_output
+    Dir.mktmpdir("test-miser-mull") do |dir|
+      database_path = File.join(dir, "mull.sqlite")
+      database = SQLite3::Database.new(database_path)
+      database.execute <<~SQL
+        CREATE TABLE mutant (
+          mutant_id TEXT, mutator TEXT, filename TEXT, directory TEXT,
+          line_number INT, column_number INT, end_line_number INT, end_column_number INT,
+          execution_status INT, exit_status INT, duration INT, stdout TEXT, stderr TEXT,
+          mutation_replacement TEXT
+        )
+      SQL
+      output = "[  FAILED  ] Classifier.Primary (0 ms)\n[  FAILED  ] Classifier.Duplicate (0 ms)\n"
+      database.execute(
+        "INSERT INTO mutant VALUES (?, ?, ?, '', 2, 1, 2, 2, 1, 1, 1, ?, '', '<')",
+        ["m1", "cxx_gt_to_le", "src/classifier.cpp", output]
+      )
+      database.close
+      gtest = File.join(dir, "gtest.json")
+      File.write(gtest, JSON.generate("testsuites" => [{ "name" => "Classifier", "testsuite" => [
+        { "name" => "Smoke", "file" => "test.cpp", "line" => 1 },
+        { "name" => "Primary", "file" => "test.cpp", "line" => 2 },
+        { "name" => "Duplicate", "file" => "test.cpp", "line" => 3 }
+      ] }]))
+
+      payload = TestMiser::Adapters::MullGtest.new(
+        database: database_path, gtest_json: gtest, root: dir
+      ).call
+      analysis = TestMiser::Analyzer.new(TestMiser::MutationReport.new(payload)).analyze
+
+      assert_equal ["Classifier.Smoke"], analysis.zero_kill_tests.map { |row| row.test.name }
+      assert_equal 1, analysis.redundant_groups.length
+    end
+  end
+
+  def test_muter_adapter_verifies_every_xctest_completed
+    Dir.mktmpdir("test-miser-muter") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "Tests/ClassifierTests"))
+      File.write(File.join(dir, "Tests/ClassifierTests/ClassifierTests.swift"), <<~SWIFT)
+        func testSmoke() {}
+        func testPrimary() {}
+        func testDuplicate() {}
+      SWIFT
+      logs = File.join(dir, "logs/run")
+      FileUtils.mkdir_p(logs)
+      baseline = %w[testSmoke testPrimary testDuplicate].map do |name|
+        "Test Case 'ClassifierTests.#{name}' passed (0.0 seconds)"
+      end.join("\n")
+      failures = baseline.sub("testPrimary' passed", "testPrimary' failed")
+        .sub("testDuplicate' passed", "testDuplicate' failed")
+      File.write(File.join(logs, "baseline run.log"), baseline)
+      File.write(File.join(logs, "RelationalOperatorReplacement @ Classifier.swift-2-4.log"), failures)
+      report_path = File.join(dir, "muter.json")
+      File.write(report_path, JSON.generate("fileReports" => [{
+        "fileName" => "Classifier.swift",
+        "appliedOperators" => [{
+          "testSuiteOutcome" => "failed",
+          "mutationPoint" => {
+            "mutationOperatorId" => "RelationalOperatorReplacement",
+            "position" => { "line" => 2, "column" => 4 }
+          }
+        }]
+      }]))
+
+      payload = TestMiser::Adapters::Muter.new(report: report_path, logs: File.join(dir, "logs"), root: dir).call
+      analysis = TestMiser::Analyzer.new(TestMiser::MutationReport.new(payload)).analyze
+
+      assert_equal true, analysis.corpus_complete
+      assert_equal ["ClassifierTests.testSmoke"], analysis.zero_kill_tests.map { |row| row.test.name }
+      assert_equal 1, analysis.redundant_groups.length
+    end
   end
 end

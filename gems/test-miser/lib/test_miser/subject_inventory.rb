@@ -15,13 +15,17 @@ module TestMiser
 
     def call
       ObjectSpace.each_object(Module).filter_map do |scope|
-        next unless scope.name&.start_with?(@namespace)
+        next unless module_name(scope)&.start_with?(@namespace)
 
         entries_for(scope)
       end.flatten.sort_by(&:expression)
     end
 
     private
+
+    def module_name(scope)
+      Module.instance_method(:name).bind_call(scope)
+    end
 
     def entries_for(scope)
       instance_entries(scope) + singleton_entries(scope)
@@ -58,8 +62,8 @@ module TestMiser
       return unless @roots.any? { |root| path == root || path.start_with?("#{root}/") }
 
       Entry.new(
-        expression: "#{scope.name}#{separator}#{name}",
-        scope: scope.name,
+        expression: "#{module_name(scope)}#{separator}#{name}",
+        scope: module_name(scope),
         file: relative_path(path),
         line: location.last
       )

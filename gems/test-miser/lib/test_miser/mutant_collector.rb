@@ -81,17 +81,21 @@ module TestMiser
         parser.call(subject).from_right { |error| raise CollectionError, error }
       end
       config = ::Mutant::Config::DEFAULT.with(
-        includes: @includes,
+        includes: @includes.map { |path| File.expand_path(path) },
         integration: ::Mutant::Integration::Config::DEFAULT.with(name: "minitest"),
         matcher: ::Mutant::Matcher::Config::DEFAULT.with(subjects: expressions),
         mutation: ::Mutant::Mutation::Config::DEFAULT.with(timeout: @timeout),
         reporter: ::Mutant::Reporter::Null.new,
-        requires: @requires,
+        requires: @requires.map { |path| path.start_with?(".", "/") ? File.expand_path(path) : path },
         usage: ::Mutant::Usage::Opensource.new
       )
 
-      ::Mutant::Bootstrap.call(::Mutant::Env.empty(::Mutant::WORLD, config)).from_right do |error|
-        raise CollectionError, error
+      Dir.mktmpdir("test-miser-bootstrap") do |directory|
+        Dir.chdir(directory) do
+          ::Mutant::Bootstrap.call(::Mutant::Env.empty(::Mutant::WORLD, config)).from_right do |error|
+            raise CollectionError, error
+          end
+        end
       end
     rescue LoadError => error
       raise CollectionError, error.message

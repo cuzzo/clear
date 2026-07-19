@@ -1,0 +1,59 @@
+diff --git a/Sources/muterCore/MutationSchemata/SchemataMutationMapping.swift b/Sources/muterCore/MutationSchemata/SchemataMutationMapping.swift
+index f0a9756..c73acb1 100644
+--- a/Sources/muterCore/MutationSchemata/SchemataMutationMapping.swift
++++ b/Sources/muterCore/MutationSchemata/SchemataMutationMapping.swift
+@@ -61,7 +61,10 @@ final class SchemataMutationMapping {
+     func schemata(
+         _ codeBlockSyntax: CodeBlockItemListSyntax
+     ) -> MutationSchemata? {
+-        mappings[codeBlockSyntax]
++        mappings[codeBlockSyntax] ?? mappings.first(where: { stored, _ in
++            stored.position == codeBlockSyntax.position &&
++                stored.endPosition == codeBlockSyntax.endPosition
++        })?.value
+     }
+ }
+ 
+diff --git a/Sources/muterCore/MutationSteps/DiscoverMutationPoints.swift b/Sources/muterCore/MutationSteps/DiscoverMutationPoints.swift
+index 3ee6b67..35cdf95 100644
+--- a/Sources/muterCore/MutationSteps/DiscoverMutationPoints.swift
++++ b/Sources/muterCore/MutationSteps/DiscoverMutationPoints.swift
+@@ -80,7 +80,7 @@ private extension DiscoverMutationPoints {
+                         group.leave()
+                     }
+ 
+-                    autoreleasepool {
++                    withMuterAutoreleasePool {
+                         guard let sourceCode = self.prepareSourceCode(path) else {
+                             return
+                         }
+@@ -142,6 +142,14 @@ private extension DiscoverMutationPoints {
+     }
+ }
+ 
++private func withMuterAutoreleasePool(_ body: () -> Void) {
++#if os(Linux)
++    body()
++#else
++    autoreleasepool(invoking: body)
++#endif
++}
++
+ private class DiscoveredFiles {
+     var mappings: [SchemataMutationMapping] = []
+ }
+diff --git a/Sources/muterCore/MutationTesting/MutationTestingIODelegate.swift b/Sources/muterCore/MutationTesting/MutationTestingIODelegate.swift
+index bf6c0ae..fc8dd2c 100644
+--- a/Sources/muterCore/MutationTesting/MutationTestingIODelegate.swift
++++ b/Sources/muterCore/MutationTesting/MutationTestingIODelegate.swift
+@@ -170,7 +170,9 @@ struct MutationTestingDelegate: MutationTestingIODelegate {
+         let process = process()
+ 
+         if schemata != .null {
+-            process.environment?[schemata.id] = "YES"
++            var environment = process.environment ?? ProcessInfo.processInfo.environment
++            environment[schemata.id] = "YES"
++            process.environment = environment
+         }
+ 
+         process.arguments = testCommandArguments

@@ -13,7 +13,25 @@ to cover the whole suite must combine reports for the whole mutation scope.
 
 ## Input
 
-Test Miser consumes the
+The native input is Lineage's `mutant-facts/v1` artifact, starting from the
+format emitted by `gems/zig-mutants`. Mutation runners execute separately. An
+audit-capable artifact retains its existing `subjects` and `mutants` fields and
+adds a complete `tests` inventory, per-mutant `covered_by` and `killed_by`, and:
+
+```json
+"test_miser": {
+  "complete": true,
+  "attribution_complete": true,
+  "run_to_complete": true
+}
+```
+
+`killed_by` must include every test that failed during the one normal trial for
+the mutant. It must not contain only the first failure. See
+[`docs/agents/multi-lang-support.md`](docs/agents/multi-lang-support.md) for the
+runner contract and language support matrix.
+
+Test Miser also consumes the
 [Mutation Testing Elements](https://github.com/stryker-mutator/mutation-testing-elements)
 report shape. It uses only:
 
@@ -60,7 +78,19 @@ Minimal input:
 bundle exec test-miser mutation-report.json
 bundle exec test-miser --format json mutation-report.json
 bundle exec test-miser shard-0.json shard-1.json -o test-miser-report.md
+bundle exec test-miser infer --root . -o test-miser.sarif mutant-facts.json
+bundle exec test-miser adapt pit mutations.xml target/surefire-reports -o mutant-facts.json
+bundle exec test-miser adapt infection infection.html junit.xml -o mutant-facts.json
+bundle exec test-miser adapt mull-gtest mull.sqlite gtest.json -o mutant-facts.json
+bundle exec test-miser adapt muter muter.json muter_logs -o mutant-facts.json
 ```
+
+`infer` makes SARIF the default output. It uses explicit test file/line metadata
+when present, otherwise scans the named test file for common test declarations.
+Its SARIF format is `test-miser.report.sarif.v1`; ingest it with Lineage's
+existing `ingest-sarif` command. Lineage displays the findings in its Weak Tests
+tab using only the test name, test file, and line. Test source does not need to
+be indexed as production code.
 
 Multiple reports are merged by qualified mutant ID. This supports sharded
 mutation runs.
@@ -126,7 +156,7 @@ test-to-subject map:
 ```sh
 bundle exec ruby gems/test-miser/exe/test-miser-map \
   -I gems/espalier/lib \
-  -r ./gems/test-miser/tools/espalier_mutant_setup \
+  -r ./gems/espalier/script/test_miser_mutant_setup \
   -o tmp/espalier-test-miser-runtime-map.json
 ```
 
@@ -136,7 +166,7 @@ batches, and merge it only after every component is complete:
 ```sh
 bundle exec ruby gems/test-miser/exe/test-miser-corpus \
   -I gems/espalier/lib \
-  -r ./gems/test-miser/tools/espalier_mutant_setup \
+  -r ./gems/espalier/script/test_miser_mutant_setup \
   --namespace Espalier \
   --selection-map tmp/espalier-test-miser-runtime-map.json \
   --jobs 9 --collector-jobs 2 --batch-size 8 --resume \

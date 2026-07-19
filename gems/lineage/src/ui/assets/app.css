@@ -609,6 +609,9 @@
   .dashboard-section-switcher {
     margin-top: 16px;
   }
+  .weak-tests { width: 100%; border-collapse: collapse; }
+  .weak-tests th, .weak-tests td { padding: 0.55rem 0.7rem; border-bottom: 1px solid var(--border); text-align: left; }
+  .weak-tests th { font-size: 0.78rem; text-transform: uppercase; color: var(--muted); }
   .dashboard-section-bar {
     display: flex;
     max-width: 100%;
