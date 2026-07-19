@@ -10,7 +10,7 @@ require_relative "../lib/test_miser/mutant_report_merger"
 options = {
   includes: [], requires: [], output: nil, timeout: 5.0,
   jobs: 1, resume: false, shard_index: 0, shard_total: 1, selection_map: nil,
-  run_to_complete: false, candidate_seed: nil
+  run_to_complete: false, candidate_seed: nil, since: nil
 }
 parser = OptionParser.new do |opts|
   opts.banner = "Usage: test-miser-mutant [options] SUBJECT_EXPRESSION [...]"
@@ -34,6 +34,9 @@ parser = OptionParser.new do |opts|
   end
   opts.on("--selection-map FILE", "Reuse a complete runtime test-to-subject map") do |path|
     options[:selection_map] = path
+  end
+  opts.on("--since REVISION", "Only mutate Ruby subjects touched since REVISION") do |revision|
+    options[:since] = revision
   end
   opts.on("--run-to-complete", "Run every selected test and record all killers") do
     options[:run_to_complete] = true
@@ -86,6 +89,7 @@ begin
       options[:includes].each { |include_path| command.concat(["-I", include_path]) }
       options[:requires].each { |library| command.concat(["-r", library]) }
       command.concat(["--selection-map", options[:selection_map]]) if options[:selection_map]
+      command.concat(["--since", options[:since]]) if options[:since]
       command << "--run-to-complete" if options[:run_to_complete]
       command.concat(["--candidate-seed", options[:candidate_seed]]) if options[:candidate_seed]
       command.concat(["--timeout", options[:timeout].to_s, "--shard", "#{index + 1}/#{options[:jobs]}", "-o", path])
@@ -115,6 +119,7 @@ begin
       run_to_complete: options[:run_to_complete],
       candidate_signatures: options[:candidate_seed] ?
         JSON.parse(File.read(options[:candidate_seed])).fetch("signatures") : {},
+      since: options[:since],
       checkpoint: ->(payload) { write_report.call(options[:output], payload) }
     )
     write_report.call(options[:output], collector.call)

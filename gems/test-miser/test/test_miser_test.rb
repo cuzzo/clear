@@ -10,6 +10,7 @@ require_relative "../lib/test_miser"
 require_relative "../lib/test_miser/mutant_collector"
 require_relative "../lib/test_miser/mutant_report_merger"
 require_relative "../lib/test_miser/subject_inventory"
+require_relative "../../../tools/test_miser_ci_plan"
 
 class TestMiserTest < Minitest::Test
   FIXTURE = File.expand_path("fixtures/espalier-mutation-report.json", __dir__)
@@ -254,7 +255,92 @@ class TestMiserTest < Minitest::Test
         "TestMiserCollectorFixture#classify"
       )
       assert resume_status.success?, resume_stderr
+      shard_paths = Dir["#{report_path}.shards/*.json"]
+      assert_equal 2, shard_paths.length
+
+      merged_path = File.join(dir, "merged.json")
+      merge_executable = File.expand_path("../exe/test-miser-merge", __dir__)
+      _stdout, merge_stderr, merge_status = Open3.capture3(
+        "bundle", "exec", "ruby", merge_executable,
+        "-o", merged_path,
+        *shard_paths
+      )
+      assert merge_status.success?, merge_stderr
+      assert_equal true, JSON.parse(File.read(merged_path)).dig("testMiser", "complete")
+    end
+  end
+
+  def test_mutant_collector_applies_since_and_marks_pr_scope_non_auditable
+    executable = File.expand_path("../exe/test-miser-mutant", __dir__)
+    setup = File.expand_path("fixtures/collector/setup", __dir__)
+
+    Dir.mktmpdir("test-miser-since") do |dir|
+      report_path = File.join(dir, "mutants.json")
+      _stdout, stderr, status = Open3.capture3(
+        "bundle", "exec", "ruby", executable,
+        "-r", setup,
+        "--run-to-complete",
+        "--since", "HEAD",
+        "--jobs", "2",
+        "-o", report_path,
+        "TestMiserCollectorFixture#classify"
+      )
+
+      assert status.success?, stderr
+      payload = JSON.parse(File.read(report_path))
+      assert_equal 0, payload.dig("testMiser", "expectedMutants")
+      assert_equal "pr", payload.dig("testMiser", "selectionScope")
+      assert_equal "HEAD", payload.dig("testMiser", "sinceRevision")
+      assert_equal true, payload.dig("testMiser", "complete")
       assert_equal 2, Dir["#{report_path}.shards/*.json"].length
+
+      report = TestMiser::MutationReport.new(payload)
+      analysis = TestMiser::Analyzer.new(report).analyze
+      assert_equal false, report.corpus_complete
+      assert_empty analysis.zero_kill_tests
+      assert_empty analysis.redundant_groups
+    end
+  end
+
+  def test_ci_plan_dynamically_shards_changed_ruby_and_zig_subjects
+    Dir.mktmpdir("test-miser-ci-plan") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "gems/espalier/lib"))
+      FileUtils.mkdir_p(File.join(dir, "gems/zig-mutants"))
+      FileUtils.mkdir_p(File.join(dir, "zig/runtime"))
+      File.write(File.join(dir, "gems/espalier/lib/value.rb"), "VALUE = 1\n")
+      File.write(File.join(dir, "zig/runtime/value.zig"), "pub const value = 1;\n")
+      File.write(File.join(dir, "zig/runtime/value-test.zig"), "test \"value\" {}\n")
+      File.write(File.join(dir, "gems/zig-mutants/subjects.json"), JSON.generate(
+        "subjects" => [{
+          "source" => "zig/runtime/value.zig",
+          "test_command" => "cd zig && zig build test -Dtest-file=value-test.zig -j1",
+          "timeout_seconds" => 30
+        }]
+      ))
+      assert system("git", "init", "-q", chdir: dir)
+      assert system("git", "config", "user.email", "test@example.com", chdir: dir)
+      assert system("git", "config", "user.name", "Test", chdir: dir)
+      assert system("git", "add", ".", chdir: dir)
+      assert system("git", "commit", "-qm", "baseline", chdir: dir)
+
+      File.write(File.join(dir, "gems/espalier/lib/value.rb"), "VALUE = 2\nOTHER = 3\n")
+      File.write(File.join(dir, "zig/runtime/value.zig"), "pub const value = 2;\n")
+      File.write(File.join(dir, "zig/runtime/value-test.zig"), "test \"changed value\" {}\n")
+      plan = TestMiserCIPlan::Planner.new(
+        root: dir,
+        base: "HEAD",
+        zig_manifest: "gems/zig-mutants/subjects.json",
+        lines_per_shard: 1,
+        max_ruby_jobs: 3,
+        max_zig_jobs: 3
+      ).call
+
+      assert_equal true, plan.dig("ruby", "run")
+      assert_equal "diff", plan.dig("ruby", "mode")
+      assert_equal 3, plan.dig("ruby", "matrix", "include").length
+      assert_equal true, plan.dig("zig", "run")
+      assert_equal "full", plan.dig("zig", "matrix", "include", 0, "mode")
+      assert_operator plan.dig("zig", "matrix", "include").length, :>, 1
     end
   end
 

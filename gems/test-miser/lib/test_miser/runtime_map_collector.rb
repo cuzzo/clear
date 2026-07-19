@@ -5,6 +5,7 @@ require "mutant"
 require "mutant/reporter/null"
 require "pathname"
 require "set"
+require "tmpdir"
 
 module TestMiser
   module SourceFingerprint
@@ -38,14 +39,16 @@ module TestMiser
       selections = Hash.new { |hash, key| hash[key] = [] }
       @progress.call("Tracing #{tests.length} passing baseline tests once")
       failures = tests.filter_map do |test|
-        result = env.config.isolation.call(@timeout) do
-          calls = Set.new
-          trace = TracePoint.new(:call) do |event|
-            path = Pathname.new(event.path).expand_path.to_s
-            calls.add([path, event.lineno]) if roots.any? { |root| path == root || path.start_with?("#{root}/") }
+        result = with_scratch_directory do
+          env.config.isolation.call(@timeout) do
+            calls = Set.new
+            trace = TracePoint.new(:call) do |event|
+              path = Pathname.new(event.path).expand_path.to_s
+              calls.add([path, event.lineno]) if roots.any? { |root| path == root || path.start_with?("#{root}/") }
+            end
+            test_result = trace.enable { env.integration.call([test]) }
+            { "passed" => test_result.passed, "calls" => calls.to_a }
           end
-          test_result = trace.enable { env.integration.call([test]) }
-          { "passed" => test_result.passed, "calls" => calls.to_a }
         end
         unless result.valid_value? && result.value.fetch("passed")
           next test.id
@@ -70,6 +73,16 @@ module TestMiser
     end
 
     private
+
+    def with_scratch_directory
+      previous = ENV["TMPDIR"]
+      Dir.mktmpdir("test-miser-map") do |directory|
+        ENV["TMPDIR"] = directory
+        yield
+      ensure
+        previous ? ENV["TMPDIR"] = previous : ENV.delete("TMPDIR")
+      end
+    end
 
     def bootstrap
       config = ::Mutant::Config::DEFAULT.with(

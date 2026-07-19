@@ -80,6 +80,8 @@ module TestMiser
     def self.metadata_complete?(metadata, mutant_count)
       return nil unless metadata
       return false unless metadata["complete"] == true
+      selection_scope = metadata["selectionScope"] || metadata["selection_scope"]
+      return false if selection_scope && selection_scope != "full"
       return false if metadata.key?("attribution_complete") && metadata["attribution_complete"] != true
       return false if metadata["expectedMutants"] && metadata["expectedMutants"] != mutant_count
 

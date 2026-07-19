@@ -66,7 +66,7 @@ exactly that zero-kill test and exactly that pair.
 | PHP | Infection | Verified runner patch and adapter | Opt-in run-to-completion records all PHPUnit failures; `infection` merges MTE with the baseline JUnit inventory. |
 | Swift | Muter | Verified correctness patch and adapter | Standard per-mutant logs already contain all XCTest outcomes; `muter` normalizes them after three general Muter fixes. |
 | Lua | No ecosystem standard | Skipped for this pass | A project-specific runner must inventory tests, run them to completion, and emit mutant-facts. |
-| Ruby | Mutant | Patch exists on this branch | `--run-to-complete` captures all failing Minitest IDs in one mutated process; production version should live with the runner integration, not Test Miser analysis. |
+| Ruby | Mutant | Verified wrapper on this branch | `--run-to-complete` captures all failing Minitest IDs in one mutated process; `--since REVISION` now delegates stateless PR subject selection to Mutant and propagates through process and GitHub shards. Production attribution should ultimately live with the runner integration. |
 
 No language should run the mutant once per test. The acceptable cost is one
 normal mutation trial with fail-fast disabled. Any baseline inventory or source

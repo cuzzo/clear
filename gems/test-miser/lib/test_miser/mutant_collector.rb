@@ -21,7 +21,7 @@ module TestMiser
     def initialize(
       includes:, requires:, subjects:, timeout: 5.0, progress: nil,
       shard_index: 0, shard_total: 1, resume_payload: nil, checkpoint: nil,
-      selection_payload: nil, run_to_complete: false, candidate_signatures: {}
+      selection_payload: nil, run_to_complete: false, candidate_signatures: {}, since: nil
     )
       @includes = includes
       @requires = requires
@@ -35,6 +35,7 @@ module TestMiser
       @selection_payload = selection_payload
       @run_to_complete = run_to_complete
       @candidate_signatures = candidate_signatures
+      @since = since
       validate_shard
     end
 
@@ -80,24 +81,37 @@ module TestMiser
       expressions = @subjects.map do |subject|
         parser.call(subject).from_right { |error| raise CollectionError, error }
       end
+      matcher = ::Mutant::Matcher::Config::DEFAULT.with(subjects: expressions)
+      if @since
+        matcher = matcher.with(
+          diffs: [::Mutant::Repository::Diff.new(to: @since, world: ::Mutant::WORLD)]
+        )
+      end
       config = ::Mutant::Config::DEFAULT.with(
         includes: @includes.map { |path| File.expand_path(path) },
         integration: ::Mutant::Integration::Config::DEFAULT.with(name: "minitest"),
-        matcher: ::Mutant::Matcher::Config::DEFAULT.with(subjects: expressions),
+        matcher: matcher,
         mutation: ::Mutant::Mutation::Config::DEFAULT.with(timeout: @timeout),
         reporter: ::Mutant::Reporter::Null.new,
         requires: @requires.map { |path| path.start_with?(".", "/") ? File.expand_path(path) : path },
         usage: ::Mutant::Usage::Opensource.new
       )
 
-      Dir.mktmpdir("test-miser-bootstrap") do |directory|
-        Dir.chdir(directory) do
-          ::Mutant::Bootstrap.call(::Mutant::Env.empty(::Mutant::WORLD, config)).from_right do |error|
-            raise CollectionError, error
-          end
+      boot = lambda do
+        ::Mutant::Bootstrap.call(::Mutant::Env.empty(::Mutant::WORLD, config)).from_right do |error|
+          raise CollectionError, error
         end
       end
-    rescue LoadError => error
+      if @since
+        # Mutant resolves --since lazily through Git while expanding matchers,
+        # so it must remain in the repository worktree during bootstrap.
+        boot.call
+      else
+        Dir.mktmpdir("test-miser-bootstrap") do |directory|
+          Dir.chdir(directory) { boot.call }
+        end
+      end
+    rescue LoadError, ::Mutant::Repository::Diff::Error => error
       raise CollectionError, error.message
     end
 
@@ -152,7 +166,7 @@ module TestMiser
     def evil_mutations(env)
       mutations = env.mutations.reject { |mutation| mutation.identification.start_with?("neutral:") }
         .sort_by { |mutation| stable_mutation_id(mutation) }
-      if mutations.empty?
+      if mutations.empty? && !@since
         raise CollectionError, "subject expressions generated no non-neutral mutants: #{@subjects.join(', ')}"
       end
       mutations
@@ -339,6 +353,8 @@ module TestMiser
         "testMiser" => {
           "schemaVersion" => "1",
           "subjectExpressions" => @subjects.sort,
+          "selectionScope" => @since ? "pr" : "full",
+          "sinceRevision" => @since,
           "mutationCompatibleSubjects" => compatible_subjects,
           "corpusFingerprint" => fingerprint,
           "expectedMutants" => all_mutations.length,

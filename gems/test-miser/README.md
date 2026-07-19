@@ -83,6 +83,7 @@ bundle exec test-miser adapt pit mutations.xml target/surefire-reports -o mutant
 bundle exec test-miser adapt infection infection.html junit.xml -o mutant-facts.json
 bundle exec test-miser adapt mull-gtest mull.sqlite gtest.json -o mutant-facts.json
 bundle exec test-miser adapt muter muter.json muter_logs -o mutant-facts.json
+bundle exec test-miser-merge -o merged-mutants.json shard-*.json
 ```
 
 `infer` makes SARIF the default output. It uses explicit test file/line metadata
@@ -136,6 +137,55 @@ bundle exec test-miser-mutant --jobs 4 --resume \
   -o mutation-report.json \
   'Example*'
 ```
+
+For a stateless pull-request run, pass the Git base directly to Mutant through
+Test Miser:
+
+```sh
+bundle exec test-miser-mutant --since "$BASE_SHA" --run-to-complete \
+  -I gems/example/lib \
+  -r ./path/to/mutant_test_setup \
+  -o mutation-report.json \
+  'Example*'
+```
+
+`--since` uses Mutant's native changed-subject matcher. It needs a checkout with
+the base commit available, but no database, prior mutation report, or result
+cache. PR-scoped reports are marked `selectionScope: pr`; Test Miser will not
+mistake them for a complete whole-project Weak Tests audit.
+
+## GitHub CI
+
+The repository's live integration is
+[`.github/workflows/test-miser.yml`](../../.github/workflows/test-miser.yml).
+It is also the maintained copy-and-adapt example for another repository.
+
+The workflow:
+
+- starts automatically only after the repository's complete `CI` workflow has
+  passed for a same-repository pull request, and checks out that exact tested
+  commit;
+- derives the PR base from GitHub and uses native, stateless diff selection;
+- passes `--since` into Ruby Mutant and Zig Mutants;
+- traces the Espalier Ruby test-to-subject map once, then shares it only when
+  the Ruby workload fans out across GitHub nodes;
+- creates one job for a small change and dynamically adds shards from changed
+  line weight, within configured Ruby and Zig limits;
+- creates Zig jobs per affected `subjects.json` entry and enables mutation
+  switching plus direct `T(m)` selection;
+- escalates a changed test or build configuration to the complete affected
+  Ruby corpus or Zig subject rather than using an unsafe source-only diff;
+- merges cross-node Ruby reports with `test-miser-merge`; and
+- emits Weak Tests SARIF only for a complete full-scope run. PR-diff reports are
+  retained as mutation evidence but deliberately do not produce global audit
+  findings.
+
+The runtime map, cross-node shard reports, and final SARIF are the only CI
+artifacts. They coordinate independent GitHub machines or feed Lineage; native
+PR selection itself does not require historical artifacts. A failed or
+cancelled `CI` run never launches mutants. `workflow_dispatch` is the explicit
+override and exposes the base revision and maximum job counts for a deliberate
+rerun.
 
 Generated shard reports include a fingerprint and expected mutant count.
 Partial generated corpora withhold audit findings; the merged report becomes
