@@ -1350,13 +1350,13 @@ pub fn build(b: *std.Build) void {
     // VERSIONED-EXHAUST -- Deterministic MVCC retry-exhaustion check
     // -------------------------------------------------------------------------
     // Builds zig/versioned-exhaust.zig as a standalone exe whose root
-    // declares `pub const CLEAR_MVCC_MAX_UPDATE_RETRIES = 50`. The
+    // declares `pub const CLEAR_MVCC_MAX_UPDATE_RETRIES = 1`. The
     // runtime's `@hasDecl(@import("root"), ...)` reads this and lowers
-    // the inner CAS retry cap from 10K to 50, so 8 contending writers
+    // the CAS-attempt budget from 64 to one, so 8 contending writers
     // deterministically hit `error.UpdateRetriesExhausted` -- closing
     // the test gap that the stochastic stress test in
-    // versioned-stress-test.zig left open. Folded into the `hammer`
-    // step alongside the other concurrent stress tests.
+    // versioned-stress-test.zig left open. Folded into both the local
+    // `hammer` umbrella and CI's sharded `test-hammer` step (shard zero).
     const versioned_exhaust_step = b.step("versioned-exhaust", "Run deterministic MVCC retry-exhaustion check");
     const versioned_exhaust_exe = b.addExecutable(.{
         .name = "versioned-exhaust",
@@ -1374,6 +1374,7 @@ pub fn build(b: *std.Build) void {
     versioned_exhaust_step.dependOn(&run_versioned_exhaust.step);
     if (matchesTestFile("versioned-exhaust.zig", test_file_filter)) {
         hammer_step.dependOn(&run_versioned_exhaust.step);
+        if (shard_index == 0) test_hammer_step.dependOn(&run_versioned_exhaust.step);
     }
 
     // -------------------------------------------------------------------------

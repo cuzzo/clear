@@ -1,0 +1,127 @@
+{
+  "schema": "test-miser-ci-suites/v1",
+  "ruby": [
+    {
+      "id": "auto-type",
+      "suite": "ruby:auto-type",
+      "source_root": "gems/auto-type/lib",
+      "test_root": "gems/auto-type/spec",
+      "namespace": "AutoType",
+      "require": "auto_type",
+      "inventory_require": "auto_type",
+      "integration": "rspec",
+      "rust_helpers": ["nil-kill"],
+      "timeout": 15
+    },
+    {
+      "id": "espalier",
+      "suite": "ruby:espalier",
+      "source_root": "gems/espalier/lib",
+      "test_root": "gems/espalier/test",
+      "namespace": "Espalier",
+      "require": "./gems/espalier/script/test_miser_mutant_setup",
+      "inventory_require": "espalier",
+      "integration": "minitest",
+      "rust_helpers": ["fact-mine"],
+      "timeout": 10
+    },
+    {
+      "id": "nil-kill",
+      "suite": "ruby:nil-kill",
+      "source_root": "gems/nil-kill/lib",
+      "test_root": "gems/nil-kill/spec",
+      "namespace": "NilKill",
+      "require": "nil_kill",
+      "inventory_require": "nil_kill",
+      "integration": "rspec",
+      "rust_helpers": ["nil-kill"],
+      "timeout": 30
+    },
+    {
+      "id": "ruby-to-clear",
+      "suite": "ruby:ruby-to-clear",
+      "source_root": "gems/ruby-to-clear/lib",
+      "test_root": "gems/ruby-to-clear/spec",
+      "namespace": "RubyToClear",
+      "require": "ruby_to_clear",
+      "inventory_require": "ruby_to_clear",
+      "integration": "rspec",
+      "rust_helpers": [],
+      "timeout": 20
+    },
+    {
+      "id": "slopcop",
+      "suite": "ruby:slopcop",
+      "source_root": "gems/slopcop/lib",
+      "test_root": "gems/slopcop/test",
+      "namespace": "SlopCop",
+      "require": "./gems/test-miser/script/minitest_suite_setup",
+      "inventory_require": "slopcop",
+      "integration": "minitest",
+      "rust_helpers": ["fact-mine", "decomplex"],
+      "timeout": 15
+    },
+    {
+      "id": "test-miser",
+      "suite": "ruby:test-miser",
+      "source_root": "gems/test-miser/lib",
+      "test_root": "gems/test-miser/test",
+      "namespace": "TestMiser",
+      "require": "./gems/test-miser/script/minitest_suite_setup",
+      "inventory_require": "test_miser",
+      "integration": "minitest",
+      "rust_helpers": [],
+      "timeout": 30
+    }
+  ],
+  "rust": [
+    {
+      "id": "decomplex",
+      "suite": "rust:decomplex",
+      "crate_root": "gems/decomplex",
+      "source_glob": "gems/decomplex/src/**/*.rs",
+      "timeout": 180
+    },
+    {
+      "id": "fact-mine",
+      "suite": "rust:fact-mine",
+      "crate_root": "gems/fact-mine",
+      "source_glob": "gems/fact-mine/src/**/*.rs",
+      "timeout": 300
+    },
+    {
+      "id": "lineage",
+      "suite": "rust:lineage",
+      "crate_root": "gems/lineage",
+      "source_glob": "gems/lineage/src/**/*.rs",
+      "timeout": 300
+    },
+    {
+      "id": "nil-kill",
+      "suite": "rust:nil-kill",
+      "crate_root": "gems/nil-kill",
+      "source_glob": "gems/nil-kill/src/**/*.rs",
+      "timeout": 180
+    },
+    {
+      "id": "sql-cov",
+      "suite": "rust:sql-cov",
+      "crate_root": "gems/sql-cov",
+      "source_glob": "gems/sql-cov/src/**/*.rs",
+      "timeout": 300
+    }
+  ],
+  "go": [
+    {
+      "id": "boobytrap",
+      "suite": "go:boobytrap",
+      "module_root": "gems/boobytrap",
+      "source_glob": "gems/boobytrap/src/*.go",
+      "test_glob": "gems/boobytrap/src/*_test.go",
+      "workers": 4,
+      "enabled": false,
+      "runner": "gremlins-b48a4aad+test-miser",
+      "disabled_reason": "A full Boobytrap run took 14m31s for 994 mutants and left 39 killed mutants without named-test attribution; enable after Gremlins can classify package-level failures without making the audit incomplete."
+    }
+  ]
+}

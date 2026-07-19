@@ -109,6 +109,28 @@ survivors.
 - Ratchet mode fails on new survivors and passes when the same survivor is in
   the reviewed baseline.
 
+## 2026-07-19 Incremental execution
+
+The next execution layer is complete:
+
+- `--since REV` and `--diff-file PATCH` select only mutations on added or
+  modified new-side lines.
+- `zig-v2` structural IDs survive line insertions outside the enclosing
+  function. The old `zig:` ID remains an internal ratchet alias so the reviewed
+  baseline is not invalidated.
+- `--mutation-switching` compiles one source schema and directly records which
+  standard Zig tests evaluate each mutation point.
+- active runs skip tests outside `T(m)` and use `--build-cache DIR` for a
+  persistent content-addressed Zig compiler cache.
+- static initialization, missing test roots, concurrent custom runners, and
+  schema compilation failures all fall back conservatively.
+- mutation discovery excludes `test` declarations; test-body mutants no longer
+  pollute subject results or Test Miser kill sets.
+
+This implementation does not use LLVM source coverage, Kcov, or DWARF. See
+[incremental-switching.md](./incremental-switching.md) for the Mull/Stryker
+design and verification evidence.
+
 ## 2026-06-15 Runtime Run
 
 Final command shape:

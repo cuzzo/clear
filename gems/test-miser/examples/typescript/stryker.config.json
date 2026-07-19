@@ -1,0 +1,10 @@
+{
+  "mutate": ["src/**/*.ts"],
+  "testRunner": "mocha",
+  "coverageAnalysis": "perTest",
+  "disableBail": true,
+  "reporters": ["json"],
+  "jsonReporter": { "fileName": "reports/mutation.json" },
+  "testRunnerNodeArgs": ["--import", "tsx"],
+  "mochaOptions": { "spec": ["test/**/*.test.ts"] }
+}

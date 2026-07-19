@@ -1,0 +1,227 @@
+diff --git a/src/mutmut/__main__.py b/src/mutmut/__main__.py
+index f2fa8db..f20d384 100644
+--- a/src/mutmut/__main__.py
++++ b/src/mutmut/__main__.py
+@@ -442,8 +442,10 @@ class PytestRunner(TestRunner):
+             raise BadTestExecutionCommandsException(params)
+         return exit_code
+ 
+-    def _pytest_args_regular_run(self, tests: Iterable[str]) -> list[str]:
+-        pytest_args = ["-x", "-q", "-p", "no:randomly", "-p", "no:random-order"]
++    def _pytest_args_regular_run(self, tests: Iterable[str], *, run_to_complete: bool = False) -> list[str]:
++        pytest_args = ["-q", "-p", "no:randomly", "-p", "no:random-order"]
++        if not run_to_complete:
++            pytest_args.insert(0, "-x")
+         if tests:
+             pytest_args += list(tests)
+         else:
+@@ -473,8 +475,57 @@ class PytestRunner(TestRunner):
+             return int(self.execute_pytest(self._pytest_args_regular_run(tests), plugins=[stats_collector]))
+ 
+     def run_tests(self, *, mutant_name: str | None, tests: Iterable[str]) -> int:
++        class FailureCollector:
++            def __init__(self) -> None:
++                self.failed: set[str] = set()
++
++            def pytest_runtest_logreport(self, report: Any) -> None:
++                if report.failed:
++                    self.failed.add(strip_prefix(report.nodeid, prefix="mutants/"))
++
++        output = os.environ.get("MUTMUT_TEST_MISER_OUTPUT")
++        collector = FailureCollector() if output and mutant_name else None
+         with change_cwd("mutants"):
+-            return int(self.execute_pytest(self._pytest_args_regular_run(tests)))
++            result = int(
++                self.execute_pytest(
++                    self._pytest_args_regular_run(tests, run_to_complete=collector is not None),
++                    plugins=[collector] if collector else [],
++                )
++            )
++        if collector is not None:
++            spool = Path(output).parent / f".{Path(output).name}.parts"
++            spool.mkdir(parents=True, exist_ok=True)
++            digest = hashlib.sha256(mutant_name.encode()).hexdigest()
++            part = spool / f"{digest}.json"
++            temporary = spool / f".{digest}.{os.getpid()}.tmp"
++            temporary.write_text(json.dumps({"mutant": mutant_name, "killed_by": sorted(collector.failed)}))
++            temporary.replace(part)
++        return result
++
++    def test_miser_inventory(self) -> list[dict[str, Any]]:
++        class TestsCollector:
++            def __init__(self) -> None:
++                self.tests: list[dict[str, Any]] = []
++
++            def pytest_collection_modifyitems(self, items: Any) -> None:
++                for item in items:
++                    path, line, _ = item.location
++                    self.tests.append(
++                        {
++                            "id": item.nodeid,
++                            "name": item.name,
++                            "file": strip_prefix(strip_prefix(path, prefix="mutants/"), prefix="../"),
++                            "line": line + 1,
++                        }
++                    )
++
++        collector = TestsCollector()
++        pytest_args = ["-q", "--collect-only"] + self._pytest_add_cli_args_test_selection
++        with change_cwd("mutants"):
++            exit_code = int(self.execute_pytest(pytest_args, plugins=[collector]))
++        if exit_code != 0:
++            raise CollectTestsFailedException()
++        return collector.tests
+ 
+     def collect_main_test_coverage(self, cov: Coverage) -> int:
+         with change_cwd("mutants"), cov.collect():
+@@ -1351,19 +1402,38 @@ elif "mutmut.__main__" not in sys.modules:
+ 
+ @cli.command()
+ @click.option("--max-children", type=int)
++@click.option("--test-miser-output", type=click.Path(path_type=Path))
+ @click.argument("mutant_names", required=False, nargs=-1)
+-def run(mutant_names: tuple[str, ...] | list[str], *, max_children: int | None) -> None:
++def run(
++    mutant_names: tuple[str, ...] | list[str],
++    *,
++    max_children: int | None,
++    test_miser_output: Path | None,
++) -> None:
+     assert isinstance(mutant_names, (tuple, list)), mutant_names
+-    _run(mutant_names, max_children)
++    _run(mutant_names, max_children, test_miser_output=test_miser_output)
+ 
+ 
+ # separate function, so we can call it directly from the tests
+-def _run(mutant_names: tuple[str, ...] | list[str], max_children: int | None) -> None:
++def _run(
++    mutant_names: tuple[str, ...] | list[str],
++    max_children: int | None,
++    test_miser_output: Path | None = None,
++) -> None:
+     # TODO: run no-ops once in a while to detect if we get false negatives
+     # TODO: we should be able to get information on which tests killed mutants, which means we can get a list of tests and how many mutants each test kills. Those that kill zero mutants are redundant!
+     os.environ["MUTANT_UNDER_TEST"] = "mutant_generation"
+     Config.ensure_loaded()
+ 
++    if test_miser_output is not None:
++        test_miser_output = test_miser_output.absolute()
++        os.environ["MUTMUT_TEST_MISER_OUTPUT"] = str(test_miser_output)
++        spool = test_miser_output.parent / f".{test_miser_output.name}.parts"
++        if spool.exists():
++            for part in spool.iterdir():
++                if part.is_file():
++                    part.unlink()
++
+     if max_children is None:
+         max_children = os.cpu_count() or 4
+ 
+@@ -1401,6 +1471,15 @@ def _run(mutant_names: tuple[str, ...] | list[str], max_children: int | None) ->
+ 
+     mutants, source_file_mutation_data_by_path = collect_source_file_mutation_data(mutant_names=mutant_names)
+ 
++    test_miser_tests: list[dict[str, Any]] = []
++    if test_miser_output is not None:
++        test_miser_tests = runner.test_miser_inventory()
++        # Cached aggregate verdicts have no per-test attribution. An attribution
++        # run therefore retests each selected mutant exactly once.
++        mutants = [(data, name, None) for data, name, _ in mutants]
++        for data, name, _ in mutants:
++            data.exit_code_by_key[name] = None
++
+     _check_test_to_mutant_associations(source_file_mutation_data_by_path)
+ 
+     os.environ["MUTANT_UNDER_TEST"] = ""
+@@ -1531,6 +1610,92 @@ def _run(mutant_names: tuple[str, ...] | list[str], max_children: int | None) ->
+ 
+         print()
+ 
++    if test_miser_output is not None:
++        _write_test_miser_facts(
++            output=test_miser_output,
++            tests=test_miser_tests,
++            mutants=mutants,
++            complete=not mutant_names and all(data.exit_code_by_key[name] is not None for data, name, _ in mutants),
++        )
++        print(f"Test Miser facts written to {test_miser_output}")
++
++
++def _write_test_miser_facts(
++    *,
++    output: Path,
++    tests: list[dict[str, Any]],
++    mutants: list[tuple[SourceFileMutationData, str, int | None]],
++    complete: bool,
++) -> None:
++    spool = output.parent / f".{output.name}.parts"
++    attribution: dict[str, list[str]] = {}
++    if spool.exists():
++        for part in spool.glob("*.json"):
++            payload = json.loads(part.read_text())
++            attribution[payload["mutant"]] = payload["killed_by"]
++
++    rows: list[dict[str, Any]] = []
++    for data, name, _ in mutants:
++        exit_code = data.exit_code_by_key[name]
++        status = status_by_exit_code[exit_code]
++        function = mangled_name_from_mutant_name(name)
++        rows.append(
++            {
++                "id": name,
++                "file": str(data.path),
++                "method": function.rpartition(".")[2],
++                "outcome": {
++                    "survived": "survived",
++                    "killed": "killed",
++                    "timeout": "timeout",
++                    "no tests": "uncovered",
++                }.get(status, status),
++                "covered_by": sorted(mutmut.tests_by_mangled_function_name.get(function, set())),
++                "killed_by": attribution.get(name, []),
++            }
++        )
++
++    subjects: list[dict[str, Any]] = []
++    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
++    for row in rows:
++        grouped[(row["file"], row["method"])].append(row)
++    for (file, method), group in sorted(grouped.items()):
++        killed = sum(row["outcome"] == "killed" for row in group)
++        subjects.append(
++            {
++                "file": file,
++                "method": method,
++                "mutations": len(group),
++                "killed": killed,
++                "alive": sum(row["outcome"] == "survived" for row in group),
++                "kill_rate": round(killed / len(group) * 100, 2),
++                "mutation_kind": "stochastic",
++                "gate_status": "advisory",
++            }
++        )
++
++    attribution_complete = complete and all(
++        row["outcome"] != "killed" or bool(row["killed_by"]) for row in rows
++    )
++    payload = {
++        "schema": "mutant-facts/v1",
++        "source": "mutmut",
++        "language": "python",
++        "mutation_kind": "stochastic",
++        "subjects": subjects,
++        "tests": tests,
++        "mutants": rows,
++        "test_miser": {
++            "complete": complete,
++            "attribution_complete": attribution_complete,
++            "run_to_complete": True,
++        },
++    }
++    output.parent.mkdir(parents=True, exist_ok=True)
++    temporary = output.with_name(f".{output.name}.{os.getpid()}.tmp")
++    temporary.write_text(json.dumps(payload, indent=2) + "\n")
++    temporary.replace(output)
++
+ 
+ def tests_for_mutant_names(mutant_names: tuple[str, ...] | list[str]) -> set[str]:
+     tests = set()

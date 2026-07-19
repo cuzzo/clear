@@ -109,7 +109,10 @@ group :development do
   # Mutation testing: catches tests that execute code without asserting on
   # the observable behavior. CI passes `--usage opensource`.
   gem 'mutant', require: false
+  gem 'mutant-minitest', require: false
   gem 'mutant-rspec', require: false
+
+  gem 'test-miser', path: 'gems/test-miser', require: false
 
   # Automatically run npm install in development mode during bundle install/update
   if defined?(Bundler) && (ARGV.empty? || ARGV.any? { |a| a =~ /\b(install|update)\b/ })

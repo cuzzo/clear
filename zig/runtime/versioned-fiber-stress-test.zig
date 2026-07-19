@@ -207,9 +207,12 @@ fn withMainRuntime(comptime body: fn (*Runtime) anyerror!void) !void {
 
     const Runner = struct {
         rt: *Runtime,
+        failure: ?anyerror = null,
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const self: *@This() = @ptrCast(@alignCast(raw.?));
-            try body(self.rt);
+            body(self.rt) catch |err| {
+                self.failure = err;
+            };
         }
     };
 
@@ -221,6 +224,7 @@ fn withMainRuntime(comptime body: fn (*Runtime) anyerror!void) !void {
         .{ .stack_size = .Large, .pinned = true },
     );
     sched.run();
+    if (runner.failure) |err| return err;
 }
 
 // Higher-thread variant: N worker schedulers + main = N+1 schedulers.
@@ -251,9 +255,12 @@ fn withMainRuntimeN(comptime workers: usize, comptime body: fn (*Runtime) anyerr
 
     const Runner = struct {
         rt: *Runtime,
+        failure: ?anyerror = null,
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const self: *@This() = @ptrCast(@alignCast(raw.?));
-            try body(self.rt);
+            body(self.rt) catch |err| {
+                self.failure = err;
+            };
         }
     };
 
@@ -265,6 +272,7 @@ fn withMainRuntimeN(comptime workers: usize, comptime body: fn (*Runtime) anyerr
         .{ .stack_size = .Large, .pinned = true },
     );
     sched.run();
+    if (runner.failure) |err| return err;
 }
 
 // Single-scheduler shape: NO worker threads. Mirrors the
@@ -289,9 +297,12 @@ fn withMainRuntimeSingle(comptime body: fn (*Runtime) anyerror!void) !void {
 
     const Runner = struct {
         rt: *Runtime,
+        failure: ?anyerror = null,
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const self: *@This() = @ptrCast(@alignCast(raw.?));
-            try body(self.rt);
+            body(self.rt) catch |err| {
+                self.failure = err;
+            };
         }
     };
 
@@ -303,6 +314,7 @@ fn withMainRuntimeSingle(comptime body: fn (*Runtime) anyerror!void) !void {
         .{ .stack_size = .Large, .pinned = true },
     );
     sched.run();
+    if (runner.failure) |err| return err;
 }
 
 // ----------------------------------------------------------------------

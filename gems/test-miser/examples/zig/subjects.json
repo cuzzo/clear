@@ -1,0 +1,12 @@
+{
+  "subjects": [
+    {
+      "source": "src/classifier.zig",
+      "test_commands": [
+        "zig test classifier_test.zig",
+        "zig test smoke_test.zig"
+      ],
+      "timeout_seconds": 30
+    }
+  ]
+}

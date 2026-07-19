@@ -4,27 +4,15 @@ const Ast = std.zig.Ast;
 const Token = std.zig.Token;
 const Allocator = std.mem.Allocator;
 
-pub const MutationKind = enum {
-    bool_literal_flip,
-    comparison_flip,
-    logical_flip,
-    if_condition_negation,
-    while_condition_negation,
-    assertion_weakening,
-    defer_removal,
-    errdefer_removal,
-    try_unwrap_unreachable,
-    catch_fallback_unreachable,
-    cleanup_call_removal,
-    lock_call_removal,
-    atomic_ordering_weakening,
-    error_return_unreachable,
-    bounds_guard_weakening,
+test {
+    _ = selection;
+    _ = instrumentation;
+}
 
-    pub fn label(kind: MutationKind) []const u8 {
-        return @tagName(kind);
-    }
-};
+pub const selection = @import("selection.zig");
+pub const instrumentation = @import("instrumentation.zig");
+
+pub const MutationKind = @import("mutation_kind.zig").MutationKind;
 
 pub const Outcome = enum {
     killed,
@@ -40,6 +28,7 @@ pub const Outcome = enum {
 
 pub const Mutant = struct {
     id: []const u8,
+    legacy_id: []const u8,
     path: []const u8,
     method: []const u8,
     kind: MutationKind,
@@ -52,6 +41,7 @@ pub const Mutant = struct {
 
     pub fn deinit(self: Mutant, allocator: Allocator) void {
         allocator.free(self.id);
+        allocator.free(self.legacy_id);
         allocator.free(self.path);
         allocator.free(self.method);
         allocator.free(self.original);
@@ -64,10 +54,38 @@ pub const TrialResult = struct {
     outcome: Outcome,
     exit_code: i32 = 0,
     artifact_path: ?[]const u8 = null,
+    covered_by: []const []const u8 = &.{},
+    killed_by: []const []const u8 = &.{},
 
     pub fn deinit(self: TrialResult, allocator: Allocator) void {
         if (self.artifact_path) |path| allocator.free(path);
+        if (self.covered_by.len > 0) {
+            for (self.covered_by) |test_id| allocator.free(test_id);
+            allocator.free(self.covered_by);
+        }
+        if (self.killed_by.len > 0) {
+            for (self.killed_by) |test_id| allocator.free(test_id);
+            allocator.free(self.killed_by);
+        }
     }
+};
+
+pub const TestRecord = struct {
+    id: []const u8,
+    name: []const u8,
+    file: []const u8,
+    line: usize,
+
+    pub fn deinit(self: TestRecord, allocator: Allocator) void {
+        allocator.free(self.id);
+        allocator.free(self.name);
+        allocator.free(self.file);
+    }
+};
+
+pub const TestAttribution = struct {
+    tests: []const TestRecord,
+    complete: bool,
 };
 
 pub const RunSummary = struct {
@@ -116,10 +134,37 @@ pub fn discoverFile(allocator: Allocator, path: []const u8, source: [:0]const u8
     var raw_node: u32 = 1;
     while (raw_node < tree.nodes.len) : (raw_node += 1) {
         const node: Ast.Node.Index = @enumFromInt(raw_node);
+        if (insideTestDeclaration(&tree, node)) continue;
         try collector.visitNode(node);
     }
 
     return collector.mutants.toOwnedSlice();
+}
+
+fn insideTestDeclaration(tree: *const Ast, node: Ast.Node.Index) bool {
+    const offset = tree.tokenStart(tree.firstToken(node));
+    var raw_candidate: u32 = 1;
+    while (raw_candidate < tree.nodes.len) : (raw_candidate += 1) {
+        const candidate: Ast.Node.Index = @enumFromInt(raw_candidate);
+        if (tree.nodeTag(candidate) != .test_decl) continue;
+        const first = tree.firstToken(candidate);
+        const last = tree.lastToken(candidate);
+        const start = tree.tokenStart(first);
+        const end = tree.tokenStart(last) + tree.tokenSlice(last).len;
+        if (start <= offset and offset < end) return true;
+    }
+    return false;
+}
+
+fn fullNodeSpan(tree: *const Ast, node: Ast.Node.Index) Ast.Span {
+    const first = tree.firstToken(node);
+    const last = tree.lastToken(node);
+    const main = tree.nodeMainToken(node);
+    return .{
+        .start = tree.tokenStart(first),
+        .end = tree.tokenStart(last) + @as(u32, @intCast(tree.tokenSlice(last).len)),
+        .main = tree.tokenStart(main),
+    };
 }
 
 pub fn applyMutant(allocator: Allocator, source: []const u8, mutant: Mutant) ![]u8 {
@@ -184,6 +229,17 @@ pub fn writeFactsJson(
     results: []const TrialResult,
     hard_gate: bool,
 ) ![]u8 {
+    return writeFactsJsonWithAttribution(allocator, sources, mutants, results, hard_gate, null);
+}
+
+pub fn writeFactsJsonWithAttribution(
+    allocator: Allocator,
+    sources: []const []const u8,
+    mutants: []const Mutant,
+    results: []const TrialResult,
+    hard_gate: bool,
+    attribution: ?TestAttribution,
+) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     errdefer out.deinit();
     const w = &out.writer;
@@ -226,6 +282,20 @@ pub fn writeFactsJson(
         }
     }
     try w.writeAll("\n  ],\n");
+    if (attribution) |data| {
+        try w.writeAll("  \"tests\": [\n");
+        for (data.tests, 0..) |test_record, index| {
+            if (index != 0) try w.writeAll(",\n");
+            try w.writeAll("    { \"id\": ");
+            try writeJsonString(w, test_record.id);
+            try w.writeAll(", \"name\": ");
+            try writeJsonString(w, test_record.name);
+            try w.writeAll(", \"file\": ");
+            try writeJsonString(w, test_record.file);
+            try w.print(", \"line\": {d} }}", .{test_record.line});
+        }
+        try w.writeAll("\n  ],\n");
+    }
     try w.writeAll("  \"mutants\": [\n");
     var mutants_written: usize = 0;
     for (results) |result| {
@@ -252,9 +322,30 @@ pub fn writeFactsJson(
             try w.writeAll(", \"artifact\": ");
             try writeJsonString(w, artifact_path);
         }
+        if (attribution != null) {
+            try w.writeAll(", \"covered_by\": [");
+            for (result.covered_by, 0..) |test_id, coverage_index| {
+                if (coverage_index != 0) try w.writeAll(", ");
+                try writeJsonString(w, test_id);
+            }
+            try w.writeAll("], \"killed_by\": [");
+            for (result.killed_by, 0..) |test_id, killer_index| {
+                if (killer_index != 0) try w.writeAll(", ");
+                try writeJsonString(w, test_id);
+            }
+            try w.writeByte(']');
+        }
         try w.writeAll(" }");
     }
-    try w.writeAll("\n  ]\n");
+    try w.writeAll("\n  ]");
+    if (attribution) |data| {
+        try w.writeAll(",\n  \"test_miser\": { \"complete\": ");
+        try w.writeAll(if (data.complete) "true" else "false");
+        try w.writeAll(", \"attribution_complete\": ");
+        try w.writeAll(if (data.complete) "true" else "false");
+        try w.writeAll(", \"run_to_complete\": true }");
+    }
+    try w.writeByte('\n');
     try w.writeAll("}\n");
 
     return out.toOwnedSlice();
@@ -300,19 +391,19 @@ const Collector = struct {
         const tag = self.tree.nodeTag(node);
         switch (tag) {
             .identifier => try self.maybeBoolLiteral(node),
-            .equal_equal => try self.addTokenReplacement(node, .comparison_flip, "!="),
-            .bang_equal => try self.addTokenReplacement(node, .comparison_flip, "=="),
-            .less_than => try self.addTokenReplacement(node, .comparison_flip, "<="),
-            .less_or_equal => try self.addTokenReplacement(node, .comparison_flip, "<"),
-            .greater_than => try self.addTokenReplacement(node, .comparison_flip, ">="),
-            .greater_or_equal => try self.addTokenReplacement(node, .comparison_flip, ">"),
-            .bool_and => try self.addTokenReplacement(node, .logical_flip, "or"),
-            .bool_or => try self.addTokenReplacement(node, .logical_flip, "and"),
+            .equal_equal => try self.addOperatorReplacement(node, .comparison_flip, "!="),
+            .bang_equal => try self.addOperatorReplacement(node, .comparison_flip, "=="),
+            .less_than => try self.addOperatorReplacement(node, .comparison_flip, "<="),
+            .less_or_equal => try self.addOperatorReplacement(node, .comparison_flip, "<"),
+            .greater_than => try self.addOperatorReplacement(node, .comparison_flip, ">="),
+            .greater_or_equal => try self.addOperatorReplacement(node, .comparison_flip, ">"),
+            .bool_and => try self.addOperatorReplacement(node, .logical_flip, "or"),
+            .bool_or => try self.addOperatorReplacement(node, .logical_flip, "and"),
             .if_simple, .@"if" => try self.addConditionNegation(node, .if_condition_negation),
             .while_simple, .while_cont, .@"while" => try self.addConditionNegation(node, .while_condition_negation),
             .call, .call_comma, .call_one, .call_one_comma => try self.visitCall(node),
-            .@"defer" => try self.addNodeReplacement(node, .defer_removal, "{};"),
-            .@"errdefer" => try self.addNodeReplacement(node, .errdefer_removal, "{};"),
+            .@"defer" => try self.addDeferredExpressionRemoval(node, .defer_removal),
+            .@"errdefer" => try self.addDeferredExpressionRemoval(node, .errdefer_removal),
             .@"try" => try self.addTryUnreachable(node),
             .@"catch" => try self.addCatchUnreachable(node),
             .enum_literal => try self.maybeAtomicOrderingWeakening(node),
@@ -343,6 +434,31 @@ const Collector = struct {
         try self.addMutant(kind, start, start + original.len, replacement);
     }
 
+    fn addOperatorReplacement(self: *Collector, node: Ast.Node.Index, kind: MutationKind, replacement: []const u8) !void {
+        const span = fullNodeSpan(self.tree, node);
+        const token = self.tree.nodeMainToken(node);
+        const operator_start = self.tree.tokenStart(token);
+        const operator_end = operator_start + self.tree.tokenSlice(token).len;
+        if (operator_start < span.start or operator_end > span.end) return error.InvalidMutantSpan;
+
+        var mutated = std.Io.Writer.Allocating.init(self.allocator);
+        defer mutated.deinit();
+        try mutated.writer.writeAll(self.source[span.start..operator_start]);
+        try mutated.writer.writeAll(replacement);
+        try mutated.writer.writeAll(self.source[operator_end..span.end]);
+        const legacy_id = try legacyId(
+            self.allocator,
+            self.path,
+            operator_start,
+            self.source,
+            kind,
+            self.source[operator_start..operator_end],
+            replacement,
+        );
+        defer self.allocator.free(legacy_id);
+        try self.addMutantWithLegacy(kind, span.start, span.end, mutated.written(), legacy_id, operator_start);
+    }
+
     fn addNodeReplacement(self: *Collector, node: Ast.Node.Index, kind: MutationKind, replacement: []const u8) !void {
         const first = self.tree.firstToken(node);
         var last = self.tree.lastToken(node);
@@ -355,6 +471,16 @@ const Collector = struct {
         try self.addMutant(kind, start, end, replacement);
     }
 
+    fn addDeferredExpressionRemoval(self: *Collector, node: Ast.Node.Index, kind: MutationKind) !void {
+        const expression = switch (self.tree.nodeTag(node)) {
+            .@"defer" => self.tree.nodeData(node).node,
+            .@"errdefer" => self.tree.nodeData(node).opt_token_and_node[1],
+            else => unreachable,
+        };
+        const span = fullNodeSpan(self.tree, expression);
+        try self.addMutant(kind, span.start, span.end, "{}");
+    }
+
     fn addConditionNegation(self: *Collector, node: Ast.Node.Index, kind: MutationKind) !void {
         const cond = switch (self.tree.nodeTag(node)) {
             .if_simple => self.tree.ifSimple(node).ast.cond_expr,
@@ -365,7 +491,7 @@ const Collector = struct {
             else => unreachable,
         };
         if (self.tree.nodeTag(cond) == .bool_not) return;
-        const span = self.tree.nodeToSpan(cond);
+        const span = fullNodeSpan(self.tree, cond);
         const original = self.source[span.start..span.end];
         const replacement = try std.fmt.allocPrint(self.allocator, "!({s})", .{original});
         defer self.allocator.free(replacement);
@@ -382,7 +508,7 @@ const Collector = struct {
         if (call.ast.params.len == 0) return;
 
         const param = call.ast.params[0];
-        const span = self.tree.nodeToSpan(param);
+        const span = fullNodeSpan(self.tree, param);
         const original = std.mem.trim(u8, self.source[span.start..span.end], " \t\r\n");
         if (std.mem.eql(u8, original, "true")) return;
         try self.addMutant(.assertion_weakening, span.start, span.end, "true");
@@ -404,28 +530,34 @@ const Collector = struct {
         const selected = kind orelse return;
         if (self.previousTokenIs(node, .keyword_try)) return;
         const span = self.statementSpan(node) orelse return;
-        try self.addMutant(selected, span.start, span.end, "{};");
+        try self.addMutant(selected, span.start, span.end, "{}");
     }
 
     fn addTryUnreachable(self: *Collector, node: Ast.Node.Index) !void {
         const expr = self.tree.nodeData(node).node;
-        const expr_span = self.tree.nodeToSpan(expr);
+        const expr_span = fullNodeSpan(self.tree, expr);
         const original = self.source[expr_span.start..expr_span.end];
         const replacement = try std.fmt.allocPrint(self.allocator, "({s} catch unreachable)", .{original});
         defer self.allocator.free(replacement);
-        const span = self.tree.nodeToSpan(node);
+        const span = fullNodeSpan(self.tree, node);
         try self.addMutant(.try_unwrap_unreachable, span.start, span.end, replacement);
     }
 
     fn addCatchUnreachable(self: *Collector, node: Ast.Node.Index) !void {
         const catch_token = self.tree.nodeMainToken(node);
-        const start = self.tree.tokenStart(catch_token);
-        const span = self.tree.nodeToSpan(node);
-        try self.addMutant(.catch_fallback_unreachable, start, span.end, "catch unreachable");
+        const span = fullNodeSpan(self.tree, node);
+        const catch_start = self.tree.tokenStart(catch_token);
+        const replacement = try std.fmt.allocPrint(
+            self.allocator,
+            "{s}catch unreachable",
+            .{self.source[span.start..catch_start]},
+        );
+        defer self.allocator.free(replacement);
+        try self.addMutant(.catch_fallback_unreachable, span.start, span.end, replacement);
     }
 
     fn maybeAtomicOrderingWeakening(self: *Collector, node: Ast.Node.Index) !void {
-        const span = self.tree.nodeToSpan(node);
+        const span = fullNodeSpan(self.tree, node);
         const original = self.source[span.start..span.end];
         if (!std.mem.eql(u8, original, ".acquire") and
             !std.mem.eql(u8, original, ".release") and
@@ -444,7 +576,7 @@ const Collector = struct {
             try self.addMutant(.error_return_unreachable, span.start, span.end, "unreachable;");
             return;
         }
-        const span = self.tree.nodeToSpan(node);
+        const span = fullNodeSpan(self.tree, node);
         try self.addMutant(.error_return_unreachable, span.start, span.end, "unreachable");
     }
 
@@ -477,12 +609,28 @@ const Collector = struct {
     }
 
     fn addMutant(self: *Collector, kind: MutationKind, start: usize, end: usize, replacement: []const u8) !void {
+        return self.addMutantWithLegacy(kind, start, end, replacement, null, null);
+    }
+
+    fn addMutantWithLegacy(
+        self: *Collector,
+        kind: MutationKind,
+        start: usize,
+        end: usize,
+        replacement: []const u8,
+        supplied_legacy_id: ?[]const u8,
+        supplied_anchor: ?usize,
+    ) !void {
         if (start > end or end > self.source.len) return error.InvalidMutantSpan;
         const original = self.source[start..end];
         if (std.mem.eql(u8, original, replacement)) return;
 
-        const loc = lineColumn(self.source, start);
-        const method = self.methodForOffset(start);
+        const anchor = supplied_anchor orelse start;
+        const loc = lineColumn(self.source, anchor);
+        const function_span = self.functionSpanForOffset(anchor);
+        const method = if (function_span) |span| span.name else "*";
+        const unit_start = if (function_span) |span| span.start else 0;
+        const unit_end = if (function_span) |span| span.end else self.source.len;
         const owned_original = try self.allocator.dupe(u8, original);
         errdefer self.allocator.free(owned_original);
         const owned_replacement = try self.allocator.dupe(u8, replacement);
@@ -491,11 +639,26 @@ const Collector = struct {
         errdefer self.allocator.free(owned_path);
         const owned_method = try self.allocator.dupe(u8, method);
         errdefer self.allocator.free(owned_method);
-        const id = try stableId(self.allocator, self.path, loc.line, loc.column, kind, original, replacement);
+        const id = try stableId(
+            self.allocator,
+            self.path,
+            method,
+            anchor - unit_start,
+            self.source[unit_start..unit_end],
+            kind,
+            original,
+            replacement,
+        );
         errdefer self.allocator.free(id);
+        const legacy_id = if (supplied_legacy_id) |value|
+            try self.allocator.dupe(u8, value)
+        else
+            try legacyId(self.allocator, self.path, start, self.source, kind, original, replacement);
+        errdefer self.allocator.free(legacy_id);
 
         try self.mutants.append(.{
             .id = id,
+            .legacy_id = legacy_id,
             .path = owned_path,
             .method = owned_method,
             .kind = kind,
@@ -537,7 +700,7 @@ const Collector = struct {
         return first > 0 and self.tree.tokenTag(first - 1) == tag;
     }
 
-    fn methodForOffset(self: *const Collector, offset: usize) []const u8 {
+    fn functionSpanForOffset(self: *const Collector, offset: usize) ?FunctionSpan {
         var best: ?FunctionSpan = null;
         for (self.function_spans) |span| {
             if (offset < span.start or offset > span.end) continue;
@@ -545,7 +708,7 @@ const Collector = struct {
                 best = span;
             }
         }
-        return if (best) |span| span.name else "*";
+        return best;
     }
 };
 
@@ -625,8 +788,9 @@ fn lineColumn(source: []const u8, byte_offset: usize) SourceLocation {
 fn stableId(
     allocator: Allocator,
     path: []const u8,
-    line: usize,
-    column: usize,
+    method: []const u8,
+    relative_offset: usize,
+    unit_source: []const u8,
     kind: MutationKind,
     original: []const u8,
     replacement: []const u8,
@@ -634,22 +798,58 @@ fn stableId(
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     hasher.update(path);
     hasher.update(&.{0});
-    const line_text = try std.fmt.allocPrint(allocator, "{d}:{d}:{s}:{s}:{s}", .{
-        line,
-        column,
+    hasher.update(method);
+    hasher.update(&.{0});
+    hasher.update(unit_source);
+    hasher.update(&.{0});
+    const identity = try std.fmt.allocPrint(allocator, "{d}:{s}:{s}:{s}", .{
+        relative_offset,
         kind.label(),
         original,
         replacement,
     });
-    defer allocator.free(line_text);
-    hasher.update(line_text);
+    defer allocator.free(identity);
+    hasher.update(identity);
+    var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+    hasher.final(&digest);
+    const hex = std.fmt.bytesToHex(digest[0..8], .lower);
+    return std.fmt.allocPrint(allocator, "zig-v2:{s}:{s}:{s}:{s}", .{
+        path,
+        method,
+        kind.label(),
+        hex,
+    });
+}
+
+fn legacyId(
+    allocator: Allocator,
+    path: []const u8,
+    start: usize,
+    source: []const u8,
+    kind: MutationKind,
+    original: []const u8,
+    replacement: []const u8,
+) ![]u8 {
+    const loc = lineColumn(source, start);
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    hasher.update(path);
+    hasher.update(&.{0});
+    const identity = try std.fmt.allocPrint(allocator, "{d}:{d}:{s}:{s}:{s}", .{
+        loc.line,
+        loc.column,
+        kind.label(),
+        original,
+        replacement,
+    });
+    defer allocator.free(identity);
+    hasher.update(identity);
     var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
     hasher.final(&digest);
     const hex = std.fmt.bytesToHex(digest[0..8], .lower);
     return std.fmt.allocPrint(allocator, "zig:{s}:{d}:{d}:{s}:{s}", .{
         path,
-        line,
-        column,
+        loc.line,
+        loc.column,
         kind.label(),
         hex,
     });
@@ -749,6 +949,59 @@ test "applies a mutant by source span" {
 
     try std.testing.expect(std.mem.indexOf(u8, mutated, first.replacement) != null);
     try std.testing.expect(!std.mem.eql(u8, mutated, source));
+}
+
+test "does not mutate test code" {
+    const allocator = std.testing.allocator;
+    const source: [:0]const u8 =
+        \\pub fn subject(value: bool) bool { return value == true; }
+        \\test "subject" { try std.testing.expect(subject(true)); }
+        \\
+    ;
+    const mutants = try discoverFile(allocator, "sample.zig", source);
+    defer freeMutants(allocator, mutants);
+    try std.testing.expect(mutants.len > 0);
+    for (mutants) |mutant| try std.testing.expect(mutant.line == 1);
+}
+
+test "mutant identity is stable when lines move outside its function" {
+    const allocator = std.testing.allocator;
+    const original =
+        \\const before = true;
+        \\pub fn selected(value: bool) bool {
+        \\    return value == true;
+        \\}
+        \\
+    ;
+    const moved =
+        \\// unrelated inserted line
+        \\const before = true;
+        \\pub fn selected(value: bool) bool {
+        \\    return value == true;
+        \\}
+        \\
+    ;
+    const original_z = try allocator.dupeZ(u8, original);
+    defer allocator.free(original_z);
+    const moved_z = try allocator.dupeZ(u8, moved);
+    defer allocator.free(moved_z);
+
+    const original_mutants = try discoverFile(allocator, "sample.zig", original_z);
+    defer freeMutants(allocator, original_mutants);
+    const moved_mutants = try discoverFile(allocator, "sample.zig", moved_z);
+    defer freeMutants(allocator, moved_mutants);
+
+    var matched: usize = 0;
+    for (original_mutants) |before| {
+        if (!std.mem.eql(u8, before.method, "selected")) continue;
+        for (moved_mutants) |after| {
+            if (std.mem.eql(u8, before.id, after.id)) {
+                matched += 1;
+                break;
+            }
+        }
+    }
+    try std.testing.expect(matched > 0);
 }
 
 test "writes boobytrap-compatible mutant facts JSON" {

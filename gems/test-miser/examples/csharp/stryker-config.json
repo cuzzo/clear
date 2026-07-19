@@ -1,0 +1,10 @@
+{
+  "stryker-config": {
+    "solution": "TestMiserExample.sln",
+    "project": "Classifier.csproj",
+    "test-projects": ["tests/Classifier.Tests/Classifier.Tests.csproj"],
+    "disable-bail": true,
+    "reporters": ["json", "progress"],
+    "report-file-name": "mutation"
+  }
+}

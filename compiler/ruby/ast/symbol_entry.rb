@@ -26,12 +26,12 @@
 # source can escape. Readers never inspect nil/scalar/hash variants; they ask
 # whether the array is empty and then iterate it.
 require "sorbet-runtime"
-# `type=` calls `Type.new` unconditionally (a hard, non-lazy dependency),
-# so Type must be loaded with this file. type.rb -> function_signature.rb
-# -> intrinsic_emit/function_return; none require scope/symbol_entry, so
-# this is acyclic and also makes FunctionSignature available for
-# `fn_signature`'s typed return. (Scope is the one true cycle — see @scope.)
+# `type=` calls `Type.new` unconditionally (a hard, non-lazy dependency).
+# FunctionSignature is also a hard dependency of the typed SymbolEntry API.
+# Load its implementation here so isolated tooling such as Mutant can evaluate
+# these signatures without relying on a broader compiler require order.
 require_relative "type"
+require_relative "../annotator/helpers/function_signature"
 require_relative "schemas"
 require_relative "async_result_shape"
 

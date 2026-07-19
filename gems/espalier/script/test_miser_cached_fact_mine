@@ -1,0 +1,64 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "digest"
+require "fileutils"
+
+real_binary = ENV.fetch("TEST_MISER_FACT_MINE_REAL_BINARY")
+cache_dir = ENV.fetch("TEST_MISER_FACT_MINE_CACHE_DIR")
+output_index = ARGV.index("--output")
+unless output_index && ARGV[output_index + 1]
+  exec(real_binary, *ARGV)
+end
+
+output_path = ARGV.fetch(output_index + 1)
+scratch_dir = File.expand_path(ENV.fetch("TMPDIR"))
+expanded_output = File.expand_path(output_path)
+unless expanded_output.start_with?("#{scratch_dir}/")
+  warn "refusing fact_mine output outside mutation scratch directory: #{output_path}"
+  exit 1
+end
+canonical_args = ARGV.dup
+canonical_args.slice!(output_index, 2)
+binary_stat = File.stat(real_binary)
+input_fingerprints = canonical_args.filter_map do |argument|
+  next unless File.file?(argument)
+
+  "#{File.expand_path(argument)}\0#{Digest::SHA256.file(argument).hexdigest}"
+end
+key = Digest::SHA256.hexdigest(
+  [real_binary, binary_stat.size, binary_stat.mtime.to_f, *canonical_args, *input_fingerprints].join("\0")
+)
+FileUtils.mkdir_p(cache_dir)
+cache_path = File.join(cache_dir, "#{key}.json")
+lock_path = File.join(cache_dir, "#{key}.lock")
+
+if !File.file?(cache_path) && ENV["TEST_MISER_FACT_MINE_CACHE_WRITE"] != "1"
+  command = ARGV.dup
+  command[output_index + 1] = expanded_output
+  exec(real_binary, *command)
+end
+
+unless File.file?(cache_path)
+  File.open(lock_path, File::RDWR | File::CREAT, 0o644) do |lock|
+    lock.flock(File::LOCK_EX)
+    next if File.file?(cache_path)
+
+    temporary = "#{cache_path}.tmp-#{Process.pid}"
+    command = ARGV.dup
+    command[output_index + 1] = temporary
+    success = system(real_binary, *command)
+    unless success
+      File.delete(temporary) if File.exist?(temporary)
+      exit($?&.exitstatus || 1)
+    end
+    File.rename(temporary, cache_path)
+  end
+end
+
+begin
+  File.delete(expanded_output) if File.exist?(expanded_output)
+  File.link(cache_path, expanded_output)
+rescue Errno::EXDEV
+  FileUtils.cp(cache_path, expanded_output)
+end

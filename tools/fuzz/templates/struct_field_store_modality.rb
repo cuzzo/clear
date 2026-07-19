@@ -140,6 +140,17 @@ STRUCT_FIELD_STORE_CELLS = STRUCT_FIELD_STORE_SHAPE_SPECS.keys.flat_map do |shap
   end
 end
 
+# An @local capability makes the containing struct and its managed field
+# genuinely heap-owned. The shape/modality matrix above mostly exercises
+# ordinary frame-owned struct literals, so it cannot by itself kill a mutation
+# of the heap-field allocator decision.
+STRUCT_FIELD_STORE_CELLS << {
+  shape: :string,
+  modality: :bare,
+  heap_owner: true,
+  expected: :pass,
+}
+
 FuzzGenerator.register(:struct_field_store_modality, cells: STRUCT_FIELD_STORE_CELLS) do |p|
   prelude, ftype, build = STRUCT_FIELD_STORE_SHAPE_SPECS.fetch(p[:shape])
 
@@ -148,6 +159,19 @@ FuzzGenerator.register(:struct_field_store_modality, cells: STRUCT_FIELD_STORE_C
         when :copy then "COPY xs"
         when :bare then "xs"
         end
+
+  if p[:heap_owner]
+    next <<~CHT
+      STRUCT Box { f: #{ftype} }
+      #{prelude}
+      FN main() RETURNS Void ->
+          #{build}
+          MUTABLE b = Box{ f: #{arg} } @local;
+          ASSERT b.f == "hi", "heap struct field retains owned payload";
+          RETURN;
+      END
+    CHT
+  end
 
   <<~CHT
     STRUCT Box { f: #{ftype} }

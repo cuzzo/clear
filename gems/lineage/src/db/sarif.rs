@@ -482,6 +482,45 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn ingests_test_miser_findings_for_unindexed_test_files() {
+        let dir = tempdir().unwrap();
+        let storage = Storage::open_memory().unwrap();
+        let sarif = dir.path().join("test-miser.sarif");
+        fs::write(&sarif, r#"{
+          "version":"2.1.0",
+          "runs":[{
+            "tool":{"driver":{"name":"Test Miser"}},
+            "properties":{"format":"test-miser.report.sarif.v1"},
+            "results":[{
+              "ruleId":"test-miser.zero-kill",
+              "message":{"text":"ExampleTest#test_empty kills no mutants"},
+              "locations":[{"physicalLocation":{
+                "artifactLocation":{"uri":"test/example_test.rb"},
+                "region":{"startLine":12}
+              }}],
+              "properties":{"category":"weak-test","kind":"zero-kill","testName":"ExampleTest#test_empty"}
+            }]
+          }]
+        }"#).unwrap();
+
+        let stats = ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            &[sarif],
+            "test-miser",
+            "abc",
+            Some(20),
+            true,
+        ).unwrap();
+        let finding = storage.sarif_findings_for_path("test/example_test.rb").unwrap();
+
+        assert_eq!(stats.findings, 1);
+        assert_eq!(finding[0].run_format, "test-miser.report.sarif.v1");
+        assert_eq!(finding[0].unit_id, None);
+        assert!(finding[0].properties_json.contains("ExampleTest#test_empty"));
+    }
+
+    #[test]
     fn dead_classification_is_exact_and_does_not_match_deadline() {
         let deadline = serde_json::json!({"ruleId": "slopcop.dark-arm"});
         assert!(is_dark_arm_result(

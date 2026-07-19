@@ -1,7 +1,7 @@
 diff --git a/compiler/ruby/semantic/escape_analysis.rb b/compiler/ruby/semantic/escape_analysis.rb
 --- a/compiler/ruby/semantic/escape_analysis.rb
 +++ b/compiler/ruby/semantic/escape_analysis.rb
-@@ -565,6 +565,7 @@
+@@ -575,6 +575,7 @@
  
    sig { params(expr: NodeValue).returns(T::Boolean) }
    private_class_method def self.mark_expr_identifiers_heap!(expr)

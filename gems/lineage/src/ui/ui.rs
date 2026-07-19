@@ -630,6 +630,7 @@ struct DashboardTemplate<'a> {
     finding_changes: &'a str,
     review_next: &'a str,
     test_next: &'a str,
+    weak_tests: &'a str,
     highest_hazard_files: &'a str,
     highest_risk_units: &'a str,
     highest_architecture_risks: &'a str,
@@ -4334,6 +4335,7 @@ fn render_index_page(
                 queue_page,
             ),
             _ => render_dashboard(
+                storage,
                 &dashboard,
                 &current_directory,
                 &child_directories,
@@ -5103,6 +5105,7 @@ fn line_quality_segments(bar: LineQualityBar) -> LineQualitySegments {
 }
 
 fn render_dashboard(
+    storage: &Storage,
     dashboard: &UiDashboard,
     directory: &str,
     directories: &[UiDirectory],
@@ -5119,6 +5122,7 @@ fn render_dashboard(
     let finding_changes = render_finding_changes_section(dashboard);
     let review_next = render_review_next_section(dashboard, &directory, filter);
     let test_next = render_test_next_section(dashboard, &directory, filter);
+    let weak_tests = render_weak_tests_section(storage, &directory);
     let highest_hazard_files = render_highest_hazard_files_section(dashboard, filter);
     let highest_risk_units = render_dashboard_disclosure(
         "Risky Units",
@@ -5153,6 +5157,7 @@ fn render_dashboard(
             finding_changes: &finding_changes,
             review_next: &review_next,
             test_next: &test_next,
+            weak_tests: &weak_tests,
             highest_hazard_files: &highest_hazard_files,
             highest_risk_units: &highest_risk_units,
             highest_architecture_risks: &highest_architecture_risks,
@@ -5162,6 +5167,77 @@ fn render_dashboard(
         },
         "dashboard template",
     )
+}
+
+fn render_weak_tests_section(storage: &Storage, directory: &str) -> String {
+    let mut rows = Vec::<(String, String, u32, String, i64)>::new();
+    let query = storage.connection().prepare(
+        "SELECT path, message, start_line, properties_json, rule_id \
+         FROM current_sarif_findings \
+         WHERE run_format = 'test-miser.report.sarif.v1' \
+            OR rule_id LIKE 'test-miser.%' \
+         ORDER BY path, start_line, message",
+    );
+    if let Ok(mut statement) = query {
+        if let Ok(mapped) = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, u32>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        }) {
+            for row in mapped.flatten() {
+                let (path, message, line, properties_json, rule_id) = row;
+                if !path_in_directory(&path, directory) {
+                    continue;
+                }
+                let properties: Value = serde_json::from_str(&properties_json).unwrap_or(Value::Null);
+                let name = properties
+                    .get("testName")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&message)
+                    .to_string();
+                let kind = properties
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or_else(|| rule_id.strip_prefix("test-miser.").unwrap_or(&rule_id))
+                    .to_string();
+                let group_size = properties.get("groupSize").and_then(Value::as_i64).unwrap_or(0);
+                rows.push((path, name, line, kind, group_size));
+            }
+        }
+    }
+
+    let body = if rows.is_empty() {
+        "<p class=\"empty-inline\">No weak-test audit candidates are recorded in this scope.</p>".to_string()
+    } else {
+        let mut out = String::from(
+            "<table class=\"weak-tests\"><thead><tr><th>Test</th><th>File</th><th>Line</th><th>Finding</th></tr></thead><tbody>",
+        );
+        for (path, name, line, kind, group_size) in rows {
+            let finding = if kind == "possibly-redundant" && group_size > 1 {
+                format!("POSSIBLY REDUNDANT (group of {group_size})")
+            } else if kind == "zero-kill" {
+                "kills no mutants".to_string()
+            } else {
+                kind
+            };
+            out.push_str("<tr><td>");
+            out.push_str(&html_escape(&name));
+            out.push_str("</td><td><code>");
+            out.push_str(&html_escape(&path));
+            out.push_str("</code></td><td>");
+            out.push_str(&line.to_string());
+            out.push_str("</td><td>");
+            out.push_str(&html_escape(&finding));
+            out.push_str("</td></tr>");
+        }
+        out.push_str("</tbody></table>");
+        out
+    };
+    render_dashboard_disclosure("Weak Tests", false, &body)
 }
 
 fn render_review_next_section(dashboard: &UiDashboard, directory: &str, filter: &str) -> String {
@@ -5543,6 +5619,7 @@ fn dashboard_panel_id(title: &str) -> &'static str {
         "Finding Changes" => "dashboard-panel-finding-changes",
         "Review Next" => "dashboard-panel-review-next",
         "Test Next" => "dashboard-panel-test-next",
+        "Weak Tests" => "dashboard-panel-weak-tests",
         "Hazard Files" => "dashboard-panel-highest-hazard-files",
         "Risky Units" => "dashboard-panel-highest-risk-units",
         "Architectural Risks" => "dashboard-panel-highest-architectural-risks",
@@ -8255,6 +8332,52 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn weak_tests_panel_reads_test_miser_sarif_without_indexed_test_code() {
+        let storage = Storage::open_memory().unwrap();
+        let artifact_id = storage.insert_sarif_artifact(&SarifArtifact {
+            source: "test-miser".into(),
+            tool_name: "Test Miser".into(),
+            run_format: "test-miser.report.sarif.v1".into(),
+            artifact_path: "tmp/test-miser.sarif#run0".into(),
+            artifact_sha256: "weak-tests".into(),
+            commit_hash: "abc".into(),
+            timestamp: 20,
+            payload_json: "{}".into(),
+        }).unwrap();
+        storage.insert_sarif_finding(&SarifFinding {
+            artifact_id,
+            finding_key: "weak-1".into(),
+            source: "test-miser".into(),
+            tool_name: "Test Miser".into(),
+            run_format: "test-miser.report.sarif.v1".into(),
+            commit_hash: "abc".into(),
+            timestamp: 20,
+            rule_id: "test-miser.zero-kill".into(),
+            level: "warning".into(),
+            message: "ExampleTest#test_empty kills no mutants".into(),
+            path: "test/example_test.rb".into(),
+            start_line: 12,
+            start_column: None,
+            end_line: None,
+            end_column: None,
+            category: "weak-test".into(),
+            is_dark_arm: false,
+            unit_id: None,
+            fingerprint: "test-empty".into(),
+            properties_json: r#"{"kind":"zero-kill","testName":"ExampleTest#test_empty"}"#.into(),
+            raw_json: "{}".into(),
+        }).unwrap();
+        storage.refresh_current_sarif_findings_view().unwrap();
+
+        let html = render_weak_tests_section(&storage, "");
+
+        assert!(html.contains("ExampleTest#test_empty"));
+        assert!(html.contains("test/example_test.rb"));
+        assert!(html.contains(">12</td>"));
+        assert!(html.contains("kills no mutants"));
+    }
+
+    #[test]
     fn sarif_staleness_tracks_file_content_instead_of_head_age() {
         let dir = tempdir().unwrap();
         let repo = Repository::init(dir.path()).unwrap();
@@ -9687,6 +9810,7 @@ mod tests {
 
     #[test]
     fn dashboard_renders_collapsible_risks_hazards_first_and_stacked_bars() {
+        let storage = Storage::open_memory().unwrap();
         let dashboard = UiDashboard {
             files: 2,
             tracked_lines: 10,
@@ -9749,6 +9873,7 @@ mod tests {
             commit: "abcdef123456".to_string(),
         };
         let html = render_dashboard(
+            &storage,
             &dashboard,
             "",
             &directories,
@@ -9767,6 +9892,7 @@ mod tests {
         assert!(html.contains("3</strong> new"));
         assert!(html.contains(">Review Next</button>"));
         assert!(html.contains(">Test Next</button>"));
+        assert!(html.contains(">Weak Tests</button>"));
         assert!(!html.contains("<h2>Analyzer and Artifact Health</h2>"));
         assert!(!html.contains("class=\"analyzer-status"));
         assert!(html.contains("class=\"directory-status-cell\""));

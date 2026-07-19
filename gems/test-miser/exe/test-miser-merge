@@ -1,0 +1,33 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+require "optparse"
+require_relative "../lib/test_miser/mutant_collector"
+require_relative "../lib/test_miser/mutant_report_merger"
+
+options = { output: nil }
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: test-miser-merge -o OUTPUT SHARD [...]"
+  opts.on("-o", "--output FILE", "Write the merged Mutation Testing Elements report") do |path|
+    options[:output] = path
+  end
+  opts.on("-h", "--help", "Show this help") { puts opts; exit 0 }
+end
+
+begin
+  parser.parse!
+  unless options[:output] && !ARGV.empty?
+    warn parser
+    exit 1
+  end
+
+  payloads = ARGV.sort.map { |path| JSON.parse(File.read(path)) }
+  output = JSON.pretty_generate(TestMiser::MutantReportMerger.call(payloads))
+  temporary = "#{options[:output]}.tmp-#{Process.pid}"
+  File.write(temporary, "#{output}\n")
+  File.rename(temporary, options[:output])
+rescue TestMiser::CollectionError, JSON::ParserError, Errno::ENOENT, KeyError => error
+  warn "test-miser-merge: #{error.message}"
+  exit 1
+end

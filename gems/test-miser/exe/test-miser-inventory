@@ -1,0 +1,58 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "digest"
+require "json"
+require "optparse"
+require_relative "../lib/test_miser/subject_inventory"
+
+options = { includes: [], requires: [], sources: [], source_globs: [] }
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: test-miser-inventory [options]"
+  opts.on("-I", "--include DIR") { |value| options[:includes] << value }
+  opts.on("-r", "--require LIBRARY") { |value| options[:requires] << value }
+  opts.on("--namespace NAME") { |value| options[:namespace] = value }
+  opts.on("--source FILE") { |value| options[:sources] << value }
+  opts.on("--source-glob GLOB") { |value| options[:source_globs] << value }
+  opts.on("-o", "--output FILE") { |value| options[:output] = value }
+  opts.on("-h", "--help") { puts opts; exit 0 }
+end
+
+begin
+  parser.parse!
+  ruby_mode = options[:namespace] && !options[:includes].empty?
+  source_mode = !options[:sources].empty? || !options[:source_globs].empty?
+  unless options[:output] && (ruby_mode ^ source_mode)
+    warn parser
+    exit 1
+  end
+  payload = if ruby_mode
+    options[:includes].each { |path| $LOAD_PATH.unshift(path) }
+    options[:requires].each { |name| require name }
+    subjects = TestMiser::SubjectInventory.new(
+      namespace: options[:namespace], roots: options[:includes]
+    ).call.map(&:to_h)
+    {
+      "schemaVersion" => "test-miser-subject-inventory/v1",
+      "namespace" => options[:namespace],
+      "fingerprint" => Digest::SHA256.hexdigest(subjects.map { |entry| entry.fetch(:expression) }.join("\0")),
+      "subjects" => subjects
+    }
+  else
+    sources = (options[:sources] + options[:source_globs].flat_map { |glob| Dir.glob(glob) })
+      .select { |path| File.file?(path) }.uniq.sort
+    {
+      "schemaVersion" => "test-miser-component-inventory/v1",
+      "fingerprint" => Digest::SHA256.hexdigest(sources.join("\0")),
+      "subjects" => sources.map { |source| { "source" => source } }
+    }
+  end
+  temporary = "#{options[:output]}.tmp-#{Process.pid}"
+  File.write(temporary, "#{JSON.pretty_generate(payload)}\n")
+  File.rename(temporary, options[:output])
+rescue Errno::ENOENT, NameError => error
+  warn "test-miser-inventory: #{error.message}"
+  exit 1
+ensure
+  File.delete(temporary) if defined?(temporary) && temporary && File.exist?(temporary)
+end

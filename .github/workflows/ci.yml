@@ -138,6 +138,20 @@ jobs:
           FACT_MINE_RUST_BINARY: ./gems/fact-mine/target/release/fact-mine-rust
           NIL_KILL_INFER_RUST_BINARY: ./gems/nil-kill/target/release/nil-kill-infer-rust
 
+  test-miser-checkpoint:
+    name: Test Miser corpus and runner integration
+    needs: changes
+    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - name: Verify runner adapters, dynamic planning, and canonical checkpoints
+        run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/test_miser_test.rb
+
   boobytrap-go-unit:
     name: boobytrap Go tests
     needs: changes
@@ -557,7 +571,7 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - name: Generate lint SARIF
         run: |
-          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
           bundle exec ruby tools/generate_lint_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
@@ -1466,7 +1480,7 @@ jobs:
           path: tmp/zig-special-coverage-artifacts
       - name: Generate SlopCop constraint SARIF
         run: |
-          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
           mkdir -p tmp
           args=()
           while IFS= read -r path; do
@@ -1547,7 +1561,7 @@ jobs:
       - name: Generate Decomplex report
         run: |
           chmod +x tmp/sarif-binaries/decomplex-rust
-          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
           bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
@@ -1617,7 +1631,7 @@ jobs:
           path: tmp/sarif-coverage/lineage-rust-coverage
       - name: Generate Boobytrap report
         run: |
-          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
           coverage_args=()
           while IFS= read -r path; do
             coverage_args+=(--coverage="${path}")
@@ -1698,7 +1712,7 @@ jobs:
           path: tmp/sarif-coverage/lineage-rust-coverage
       - name: Generate SlopCop report
         run: |
-          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
           coverage_args=()
           while IFS= read -r path; do
             coverage_args+=(--coverage="${path}")
@@ -1758,7 +1772,7 @@ jobs:
           FACT_MINE_RUST_BINARY: tmp/sarif-binaries/fact-mine-rust
         run: |
           chmod +x tmp/sarif-binaries/fact-mine-rust
-          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
           bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
@@ -1810,7 +1824,7 @@ jobs:
           FACT_MINE_RUST_BINARY: tmp/sarif-binaries/fact-mine-rust
         run: |
           chmod +x tmp/sarif-binaries/fact-mine-rust
-          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
           bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
@@ -1955,7 +1969,7 @@ jobs:
           path: tmp/zig-coverage-artifacts
       - name: Generate diff coverage bucket markdown
         run: |
-          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}" --depth=1
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
           mkdir -p tmp
           ruby_paths="$(find tmp/ruby-coverage-artifacts -name .resultset.json -type f | sort | paste -sd: -)"
           zig_paths="$(find tmp/zig-coverage-artifacts -name cobertura.xml -type f | sort | paste -sd: -)"
