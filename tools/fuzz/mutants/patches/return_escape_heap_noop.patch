@@ -1,0 +1,11 @@
+diff --git a/compiler/ruby/semantic/escape_analysis.rb b/compiler/ruby/semantic/escape_analysis.rb
+--- a/compiler/ruby/semantic/escape_analysis.rb
++++ b/compiler/ruby/semantic/escape_analysis.rb
+@@ -1093,6 +1093,7 @@
+ 
+   sig { params(fn: AST::FunctionDef, expr: AST::Node, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+   private_class_method def self.owning_return_needs_heap_placement?(fn, expr, schema_lookup)
++    return false # MUTANT: owning returns no longer receive heap placement.
+     return false if borrowed_return?(fn, expr)
+     ti = owning_return_type(fn, expr)
+     return false unless ti

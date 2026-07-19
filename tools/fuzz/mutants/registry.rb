@@ -298,7 +298,7 @@ module FuzzMutants
                    'Returning frame-owned cleanup-bearing values ' \
                    'must still promote or reject before backend emission.',
       invariant: :return_escape_heap_placement,
-      patch: File.join(PATCH_DIR, 'escape_identifier_heap_noop.patch'),
+      patch: File.join(PATCH_DIR, 'return_escape_heap_noop.patch'),
       templates: [:escape_via_return],
       kill: { bucket: :mir_error, min_delta: 1 }
     ),
@@ -417,7 +417,7 @@ module FuzzMutants
                    'stored into heap struct fields. Field stores must preserve ' \
                    'owned child allocation and cleanup facts.',
       invariant: :struct_field_store_heap_placement,
-      patch: File.join(PATCH_DIR, 'escape_identifier_heap_noop.patch'),
+      patch: File.join(PATCH_DIR, 'struct_field_store_heap_noop.patch'),
       templates: [:struct_field_store_modality],
       kill: { bucket: :mir_error, min_delta: 1 }
     ),

@@ -129,7 +129,7 @@ expected hard error is absent.
 | `escape_mechanism_matrix`   | 30           | Direct AST-bound escape mechanisms: return, yield, BG/BG STREAM/DO capture, enclosing assignment, field/index stores, collection/aggregate stores, recursive aggregate returns, TAKES/GIVE, loop carry, and call-return receiver stores. |
 | `takes_move_modality`       | 48           | EVERY :cleanup_value_shapes member passed to a TAKES param via GIVE / bare(implicit) / COPY. Registry-driven (no hand-picked shapes). |
 | `return_value_modality`     | 64              | EVERY :cleanup_value_shapes member returned from direct / branch / OR-fallback / call-forward return contexts. Breadth axis complementing heap_ownership_transfer's depth on list/string. |
-| `struct_field_store_modality` | 54          | EVERY :cleanup_value_shapes member stored into `STRUCT Box { f: T }` via GIVE / COPY / bare. Registry-driven (18 shapes including frame_*). |
+| `struct_field_store_modality` | 55          | EVERY :cleanup_value_shapes member stored into `STRUCT Box { f: T }` via GIVE / COPY / bare, plus a boxed heap-owner placement cell. Registry-driven (18 shapes including frame_*). |
 | `list_append_modality`     | 54           | EVERY :cleanup_value_shapes member appended to `MUTABLE container: T[]@list = []` via GIVE / COPY / bare. Registry-driven; unsupported element shapes are explicit compile-error cells. |
 | `heap_ownership_transfer`   | 89              | ret_form (ident/literal/call/give/or_rescue) x bind_form (bare/or_raise/or_fallback/discard/discard_or_raise/onward) x decl (T/!T) -- the depth axis for :heap_list and :string returns (ported from origin/register-machine #13 manifest). |
 | `bg_capture_typing`         | 20              | Type-inference cells for BG-block captures. |

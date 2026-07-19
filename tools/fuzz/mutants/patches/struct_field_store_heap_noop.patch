@@ -1,0 +1,11 @@
+diff --git a/compiler/ruby/mir/lowering/expressions.rb b/compiler/ruby/mir/lowering/expressions.rb
+--- a/compiler/ruby/mir/lowering/expressions.rb
++++ b/compiler/ruby/mir/lowering/expressions.rb
+@@ -1745,6 +1745,7 @@
+       borrowed_field = T.let(node.borrowed_field_names&.include?(k.to_s) == true, T::Boolean)
+       field_node = borrowed_field && v.is_a?(AST::CopyNode) ? v.value : v
+       field_sink_alloc = aggregate_field_sink_alloc(field_type_input, field_node, struct_alloc)
++      field_sink_alloc = :frame # MUTANT: heap struct fields retain frame-owned payloads.
+       move_mark_field!(field_node)
+       expected_ft = field_type_input ? (field_type_input.is_a?(Type) ? field_type_input : Type.new(field_type_input)) : nil
+       val = with_decl_alloc(field_sink_alloc) do
