@@ -1128,7 +1128,7 @@ RSpec.describe SemanticAnnotator do
         FN project(value: Int64) RETURNS !Int64 -> RETURN value * 2; END
         FN main() RETURNS !Void ->
           items: []Int64 = [1, 2];
-          results = items |> CONCURRENT(workers: 2) SELECT! project(_);
+          results = items |> CONCURRENT(workers: 2) SELECT:! project(_);
           results |> EACH { ASSERT TRY _ > 0; };
           RETURN;
         END

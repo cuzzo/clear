@@ -451,8 +451,8 @@ total = scores |> SUM _.value;
 names = users |> SELECT _.name;
 
 # SELECT effects are explicit per output element.
-loaded: []!User = users |> SELECT! loadUser(_);
-found: []?User = users |> SELECT? findUser(_);
+loaded: []!User = users |> SELECT:! loadUser(_);
+found: []?User = users |> SELECT:? findUser(_);
 
 # WHERE requires a definite synchronous Bool.
 active = users |> WHERE isActive(_) OR_ELSE FALSE;

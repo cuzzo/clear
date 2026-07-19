@@ -440,25 +440,26 @@ module PipeAnalysis
     end
 
     expected_suffix = select_effect_suffix(required)
+    expected_selector = expected_suffix.empty? ? "SELECT" : "SELECT:#{expected_suffix}"
     if declared.nil?
       fixes = [Fix.new(
-        description: fix_description(:INSERT_SELECT_EFFECT_SUFFIX, selector: "SELECT#{expected_suffix}"),
+        description: fix_description(:INSERT_SELECT_EFFECT_ANNOTATION, selector: expected_selector),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: op.token.line,
             col: op.token.column + op.token.text!.length, length: 0),
-          replacement: expected_suffix,
+          replacement: ":#{expected_suffix}",
         )],
       )]
-      fixable!(op, code: :SELECT_EFFECT_SUFFIX_REQUIRED,
-        got: Type.surface_name_type(effect.value_type), selector: "SELECT#{expected_suffix}",
+      fixable!(op, code: :SELECT_EFFECT_ANNOTATION_REQUIRED,
+        got: Type.surface_name_type(effect.value_type), selector: expected_selector,
         category: :type, level: :error, fixes: fixes, raise_in_collector: true)
       return
     end
 
-    error!(op, :SELECT_EFFECT_SUFFIX_MISMATCH,
+    error!(op, :SELECT_EFFECT_ANNOTATION_MISMATCH,
       declared: select_effect_suffix(declared), got: Type.surface_name_type(effect.value_type),
-      expected: expected_suffix.empty? ? "SELECT" : "SELECT#{expected_suffix}")
+      expected: expected_selector)
   end
 
   sig { params(expression: AST::Node).void }

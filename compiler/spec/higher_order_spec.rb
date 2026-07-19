@@ -132,11 +132,11 @@ RSpec.describe SemanticAnnotator do
         CLEAR
       end
 
-      it "requires SELECT!, SELECT?, and SELECT!? for unresolved item effects" do
+      it "requires SELECT:!, SELECT:?, and SELECT:!? for unresolved item effects" do
         {
-          "fallible(_)" => /SELECT!.*consume it inside the SELECT expression/,
-          "optional(_)" => /SELECT\?.*consume it inside the SELECT expression/,
-          "fallibleOptional(_)" => /SELECT!\?.*consume it inside the SELECT expression/,
+          "fallible(_)" => /SELECT:!.*consume it inside the SELECT expression/,
+          "optional(_)" => /SELECT:\?.*consume it inside the SELECT expression/,
+          "fallibleOptional(_)" => /SELECT:!\?.*consume it inside the SELECT expression/,
         }.each do |selector, message|
           source = effect_functions + <<~CLEAR
             FN main() RETURNS !Void ->
@@ -149,13 +149,30 @@ RSpec.describe SemanticAnnotator do
         end
       end
 
+      it "autofixes a missing SELECT effect annotation with the colon spelling" do
+        source = effect_functions + <<~CLEAR
+          FN main() RETURNS !Void ->
+            values: []Int64 = [1, 2];
+            selected = values |> SELECT fallible(_);
+            RETURN;
+          END
+        CLEAR
+
+        FixCollector.enable!
+        expect { run(source) }.to raise_error(CompilerError, /SELECT:!/)
+        finding = FixCollector.drain.find { |item| item.message.include?("SELECT:!") }
+        expect(finding&.fixes&.first&.edits&.first&.replacement).to eq(":!")
+      ensure
+        FixCollector.disable!
+      end
+
       it "preserves the declared item effects in the selected list" do
         tree = run(effect_functions + <<~CLEAR)
           FN main() RETURNS !Void ->
             values: []Int64 = [1, 2];
-            fallibles = values |> SELECT! fallible(_);
-            optionals = values |> SELECT? optional(_);
-            both = values |> SELECT!? fallibleOptional(_);
+            fallibles = values |> SELECT:! fallible(_);
+            optionals = values |> SELECT:? optional(_);
+            both = values |> SELECT:!? fallibleOptional(_);
             RETURN;
           END
         CLEAR
@@ -172,11 +189,39 @@ RSpec.describe SemanticAnnotator do
         source = effect_functions + <<~CLEAR
           FN main() RETURNS !Void ->
             values: []Int64 = [1, 2];
-            selected = values |> SELECT! optional(_);
+            selected = values |> SELECT:! optional(_);
             RETURN;
           END
         CLEAR
-        expect { run(source) }.to raise_error(CompilerError, /SELECT! does not match.*use `SELECT\?`/)
+        expect { run(source) }.to raise_error(CompilerError, /SELECT:! does not match.*use `SELECT:\?`/)
+      end
+
+      it "rejects the legacy SELECT! spelling" do
+        source = effect_functions + <<~CLEAR
+          FN main() RETURNS !Void ->
+            values: []Int64 = [1, 2];
+            selected = values |> SELECT! fallible(_);
+            RETURN;
+          END
+        CLEAR
+        FixCollector.enable!
+        expect { run(source) }.to raise_error(ParserError, /require a colon; use `SELECT:!`/)
+        finding = FixCollector.drain.find { |item| item.message.include?("SELECT:!") }
+        expect(finding&.fixes&.first&.edits&.first&.replacement).to eq(":")
+      ensure
+        FixCollector.disable!
+      end
+
+      it "keeps symbol literals unambiguous after SELECT" do
+        expect {
+          run(<<~CLEAR)
+            FN main() RETURNS !Void ->
+              values: []Int64 = [1, 2];
+              selected = values |> SELECT :constant;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
       end
 
       it "allows TRY, UNWRAP, and OR_ELSE to consume effects inside SELECT" do

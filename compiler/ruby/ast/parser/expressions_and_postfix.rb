@@ -68,12 +68,37 @@ class ClearParser
   sig { returns(AST::SelectOp) }
   def parse_select_op
     token = consume(:KEYWORD, 'SELECT')
+    reject_legacy_select_effect_spelling!
     effect_mode = parse_select_effect_mode
     AST::SelectOp.new(token, parse_expression(1), effect_mode)
   end
 
+  sig { void }
+  def reject_legacy_select_effect_spelling!
+    return unless match?(:CHAR, '!') || match?(:CHAR, '?')
+
+    marker = current.value
+    marker += '?' if marker == '!' && peek.type == :CHAR && peek.value == '?'
+    fix = Fix.new(
+      description: fix_description(:INSERT_SELECT_EFFECT_COLON, selector: "SELECT:#{marker}"),
+      confidence: :auto,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: current.line, col: current.column, length: 0),
+        replacement: ':',
+      )],
+    )
+    fixable!(current, code: :SELECT_EFFECT_COLON_REQUIRED,
+      selector: "SELECT:#{marker}", category: :syntax, level: :error,
+      fixes: [fix], raise_in_collector: true)
+  end
+
   sig { returns(T.nilable(Symbol)) }
   def parse_select_effect_mode
+    return nil unless match?(:CHAR, ':')
+    modifier = peek
+    return nil unless modifier.type == :CHAR && (modifier.value == '!' || modifier.value == '?')
+
+    consume(:CHAR, ':')
     if match?(:CHAR, '!')
       consume(:CHAR, '!')
       if match?(:CHAR, '?')
@@ -82,8 +107,6 @@ class ClearParser
       end
       return :fallible
     end
-    return nil unless match?(:CHAR, '?')
-
     consume(:CHAR, '?')
     :optional
   end

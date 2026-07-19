@@ -95,6 +95,12 @@ module DiagnosticRegistry
       cause: "The parser expected one shape (expression, statement, type, ...) and found a token that doesn't fit. Often comes from a missing keyword, a missed terminator, or a malformed expression.",
       fix_hint: "Read the line where the unexpected token sits and the line above it. The grammar rule the parser was trying to match is usually obvious from context (in a function call, struct literal, type annotation, ...).",
     },
+    SELECT_EFFECT_COLON_REQUIRED: {
+      severity: :error, category: :syntax,
+      template: "SELECT effect annotations require a colon; use `%{selector}`.",
+      summary: "SELECT uses the same `:!`, `:?`, and `:!?` explicit-tense spelling as inferred bindings.",
+      fix_hint: "Insert `:` between SELECT and its effect marker.",
+    },
     INVALID_ASSIGNMENT: {
       severity: :error, category: :syntax,
       template: "Invalid assignment target. You can only SET variables, fields, or indices.",
@@ -1418,16 +1424,16 @@ module DiagnosticRegistry
       summary:  "WHERE filter expressions cannot leave optional, fallible, or asynchronous predicate effects unresolved.",
       fix_hint: "Resolve !Bool with TRY or OR_ELSE, resolve ?Bool with UNWRAP or OR_ELSE, and NEXT asynchronous work before it reaches WHERE.",
     },
-    SELECT_EFFECT_SUFFIX_REQUIRED: {
+    SELECT_EFFECT_ANNOTATION_REQUIRED: {
       severity: :error, category: :type,
       template: "SELECT expression returns %{got}. Preserve that effect explicitly with `%{selector}`, or consume it inside the SELECT expression.",
       summary: "SELECT must not silently propagate fallible or optional element results.",
-      fix_hint: "Use SELECT!, SELECT?, or SELECT!? to retain element effects; use TRY, UNWRAP, or OR_ELSE inside SELECT to consume them.",
+      fix_hint: "Use SELECT:!, SELECT:?, or SELECT:!? to retain element effects; use TRY, UNWRAP, or OR_ELSE inside SELECT to consume them.",
     },
-    SELECT_EFFECT_SUFFIX_MISMATCH: {
+    SELECT_EFFECT_ANNOTATION_MISMATCH: {
       severity: :error, category: :type,
-      template: "SELECT%{declared} does not match selector result %{got}; use `%{expected}`.",
-      summary: "A SELECT effect suffix must exactly describe the unconsumed selector result.",
+      template: "SELECT:%{declared} does not match selector result %{got}; use `%{expected}`.",
+      summary: "A SELECT effect annotation must exactly describe the unconsumed selector result.",
     },
     PIPE_CLAUSE_NEEDS_BOOL: {
       severity: :error, category: :type,
@@ -3561,7 +3567,8 @@ module DiagnosticRegistry
   }.freeze, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
 
   FIX_DESCRIPTIONS = T.let({
-    INSERT_SELECT_EFFECT_SUFFIX: "Change SELECT to %{selector} so the selected element effect is explicit.",
+    INSERT_SELECT_EFFECT_COLON: "Change the legacy SELECT effect spelling to %{selector}.",
+    INSERT_SELECT_EFFECT_ANNOTATION: "Change SELECT to %{selector} so the selected element effect is explicit.",
     ADD_DECL_CAPABILITY_GENERIC: "Add `%{sigil}` to '%{name}' at its declaration (line %{line}).",
     ADD_EFFECTS_REENTRANT: "Add `EFFECTS REENTRANT` so the runtime knows to schedule this fn on a service stack.",
     ADD_STREAM_YIELDS_CONTRACT: "Add `YIELDS %{type}` so the stream's future or union item type is explicit.",

@@ -37,36 +37,36 @@ END
 FN main() RETURNS !Void ->
     values: []Int64 = [1, 2, 3];
 
-    fallibles = values |> SELECT! fallible(_);
-    optionals = values |> SELECT? optional(_);
-    both = values |> SELECT!? fallibleOptional(_);
+    fallibles = values |> SELECT:! fallible(_);
+    optionals = values |> SELECT:? optional(_);
+    both = values |> SELECT:!? fallibleOptional(_);
 
     MUTABLE fallibleSum: Int64 = 0;
     fallibles |> EACH { fallibleSum = fallibleSum + TRY _; };
-    ASSERT fallibleSum == 6, "SELECT! preserves fallible elements";
+    ASSERT fallibleSum == 6, "SELECT:! preserves fallible elements";
 
     MUTABLE optionalSum: Int64 = 0;
     optionals |> EACH { optionalSum = optionalSum + UNWRAP _; };
-    ASSERT optionalSum == 6, "SELECT? preserves optional elements";
+    ASSERT optionalSum == 6, "SELECT:? preserves optional elements";
 
     MUTABLE bothSum: Int64 = 0;
     both |> EACH { bothSum = bothSum + TRY UNWRAP _; };
-    ASSERT bothSum == 6, "SELECT!? preserves both element effects";
+    ASSERT bothSum == 6, "SELECT:!? preserves both element effects";
 
-    preservedFailures = values |> SELECT! failOnTwo(_);
+    preservedFailures = values |> SELECT:! failOnTwo(_);
     MUTABLE preservedFailureSum: Int64 = 0;
     preservedFailures |> EACH { preservedFailureSum = preservedFailureSum + (_ OR_ELSE -1); };
-    ASSERT preservedFailureSum == 3, "SELECT! retains a real callback error";
+    ASSERT preservedFailureSum == 3, "SELECT:! retains a real callback error";
 
-    preservedNils = values |> SELECT? maybeOnTwo(_);
+    preservedNils = values |> SELECT:? maybeOnTwo(_);
     MUTABLE preservedNilSum: Int64 = 0;
     preservedNils |> EACH { preservedNilSum = preservedNilSum + (_ OR_ELSE 0); };
-    ASSERT preservedNilSum == 4, "SELECT? retains a real NIL";
+    ASSERT preservedNilSum == 4, "SELECT:? retains a real NIL";
 
-    preservedBoth = values |> SELECT!? mixedEffects(_);
+    preservedBoth = values |> SELECT:!? mixedEffects(_);
     MUTABLE preservedBothSum: Int64 = 0;
     preservedBoth |> EACH { preservedBothSum = preservedBothSum + (_ OR_ELSE 0); };
-    ASSERT preservedBothSum == 1, "SELECT!? retains error and NIL elements";
+    ASSERT preservedBothSum == 1, "SELECT:!? retains error and NIL elements";
 
     recovered = values |> SELECT fallible(_) OR_ELSE 0;
     ASSERT recovered.length() == 3, "recovered SELECT is definite";
@@ -80,20 +80,20 @@ FN main() RETURNS !Void ->
     filtered = values |> WHERE falliblePredicate(_) OR_ELSE FALSE;
     ASSERT filtered.length() == 3, "WHERE accepts a recovered Bool";
 
-    concurrent = values |> CONCURRENT(workers: 2) SELECT! failOnTwo(_);
+    concurrent = values |> CONCURRENT(workers: 2) SELECT:! failOnTwo(_);
     MUTABLE concurrentSum: Int64 = 0;
     concurrent |> EACH { concurrentSum = concurrentSum + (_ OR_ELSE -1); };
-    ASSERT concurrentSum == 3, "CONCURRENT SELECT! preserves callback errors as values";
+    ASSERT concurrentSum == 3, "CONCURRENT SELECT:! preserves callback errors as values";
 
-    concurrentOptional = values |> CONCURRENT(workers: 2) SELECT? maybeOnTwo(_);
+    concurrentOptional = values |> CONCURRENT(workers: 2) SELECT:? maybeOnTwo(_);
     MUTABLE concurrentOptionalSum: Int64 = 0;
     concurrentOptional |> EACH { concurrentOptionalSum = concurrentOptionalSum + (_ OR_ELSE 0); };
-    ASSERT concurrentOptionalSum == 4, "CONCURRENT SELECT? preserves NIL elements";
+    ASSERT concurrentOptionalSum == 4, "CONCURRENT SELECT:? preserves NIL elements";
 
-    concurrentBoth = values |> CONCURRENT(workers: 2) SELECT!? mixedEffects(_);
+    concurrentBoth = values |> CONCURRENT(workers: 2) SELECT:!? mixedEffects(_);
     MUTABLE concurrentBothSum: Int64 = 0;
     concurrentBoth |> EACH { concurrentBothSum = concurrentBothSum + (_ OR_ELSE 0); };
-    ASSERT concurrentBothSum == 1, "CONCURRENT SELECT!? preserves both effects";
+    ASSERT concurrentBothSum == 1, "CONCURRENT SELECT:!? preserves both effects";
 
     concurrentFutures:~ = values |> CONCURRENT(workers: 2) SELECT later(_);
     concurrentResolved: []Int64 = NEXT concurrentFutures;

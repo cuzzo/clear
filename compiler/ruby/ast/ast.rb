@@ -2878,7 +2878,7 @@ module AST
   SyncPolicyDecl = Struct.new(:token, :handlers) { include Locatable }
 
   # effect_mode is nil, :fallible, :optional, or :fallible_optional. It records
-  # the explicit SELECT!/SELECT?/SELECT!? contract rather than re-deriving the
+  # the explicit SELECT:!/SELECT:?/SELECT:!? contract rather than re-deriving the
   # programmer's intent from the selected expression later in the pipeline.
   SelectOp     = Struct.new(:token, :expression, :effect_mode) { include Locatable; include HasExpression }
   WhereOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }

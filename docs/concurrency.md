@@ -222,7 +222,7 @@ items |> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
 ```ruby clear illustrative
 # Preserve each callback error as an element of the result list.
 fallible_results: []!Result = items
-  |> CONCURRENT(workers: 4) SELECT! risky_fn(_);
+  |> CONCURRENT(workers: 4) SELECT:! risky_fn(_);
 
 # Skip failed items
 results = items
@@ -234,7 +234,7 @@ results = items
 ```
 
 The same SELECT effect contract applies in sequential and concurrent
-pipelines: use `SELECT!`, `SELECT?`, or `SELECT!?` only when the callback leaves
+pipelines: use `SELECT:!`, `SELECT:?`, or `SELECT:!?` only when the callback leaves
 that effect unresolved. A concurrent WHERE callback must still return a
 definite synchronous `Bool`; it never implicitly catches, unwraps, or awaits a
 predicate.

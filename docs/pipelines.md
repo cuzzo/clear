@@ -209,9 +209,9 @@ SELECT never hides unresolved element effects. A selector that returns `!T`,
 `?T`, or `!?T` must declare that the output list retains the effect:
 
 ```ruby clear
-fallible: []!User = ids |> SELECT! loadUser(_);
-optional: []?User = ids |> SELECT? findUser(_);
-both: []!?User = ids |> SELECT!? maybeLoadUser(_);
+fallible: []!User = ids |> SELECT:! loadUser(_);
+optional: []?User = ids |> SELECT:? findUser(_);
+both: []!?User = ids |> SELECT:!? maybeLoadUser(_);
 
 # Consuming the effect inside the expression produces an ordinary list.
 definite: []User = ids |> SELECT loadUser(_) OR_ELSE defaultUser();
