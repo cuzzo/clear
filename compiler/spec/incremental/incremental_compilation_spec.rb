@@ -22,7 +22,9 @@ RSpec.describe "incremental CLEAR compilation" do
     def compile(text, function_counter_seeds: {})
       function_counter_seeds
       @compile_calls += 1
-      raise "candidate failed" if @mode == :candidate_failure && @compile_calls == 2
+      if [:candidate_failure, :reduced_context_failure].include?(@mode) && @compile_calls == 2
+        raise "candidate failed"
+      end
 
       errors = @mode == :new_error && @compile_calls == 2 ? "  NewError = 11," : "  None = 0,"
       FakeCompilation.new(error_name_enum: errors, source: text, function_counter_snapshots: {})
@@ -352,6 +354,18 @@ RSpec.describe "incremental CLEAR compilation" do
     end
   end
 
+  it "fingerprints source-declared C headers without compiling them" do
+    compiler = Incremental::ZigCompiler.new(
+      Incremental::ZigCompilerConfig.new(source_dir: Dir.pwd),
+    )
+    compiler.publish_dependencies!(<<~CLEAR)
+      EXTERN FROM HEADER "missing-incremental-fixture.h" LINK "fixture" ABI C;
+    CLEAR
+    expect(compiler.dependency_paths).to eq([
+      File.expand_path("missing-incremental-fixture.h", Dir.pwd),
+    ])
+  end
+
   it "reuses a caller when the changed callee preserves its interface" do
     compiler = Incremental::ZigCompiler.new(
       Incremental::ZigCompilerConfig.new(source_dir: Dir.pwd),
@@ -401,6 +415,25 @@ RSpec.describe "incremental CLEAR compilation" do
     end
   end
 
+  it "fails closed when a caller-sensitive reduced context cannot be proven" do
+    caller_source = source(main_body: "ASSERT alpha() == 1;")
+    changed_source = source(alpha: "3", main_body: "ASSERT alpha() == 1;")
+
+    failed = Incremental::CompilationSession.new(
+      compiler: FakeIncrementalCompiler.new(:reduced_context_failure),
+      module_path: module_path,
+    )
+    failed.compile(caller_source)
+    expect(failed.compile(changed_source).reason).to eq("reduced semantic context could not be verified")
+
+    mismatch = Incremental::CompilationSession.new(
+      compiler: FakeIncrementalCompiler.new(:normal),
+      module_path: module_path,
+    )
+    mismatch.compile(caller_source)
+    expect(mismatch.compile(changed_source).reason).to eq("reduced semantic context changed function emission")
+  end
+
   it "raises when verification finds a byte mismatch" do
     compiler = FakeIncrementalCompiler.new(:verify_mismatch)
     session = Incremental::CompilationSession.new(
@@ -432,7 +465,7 @@ RSpec.describe "incremental CLEAR compilation" do
     expect(permissive.compile(source).reason).to eq("initial compilation")
   end
 
-  it "mutates fixed-width literals and compares exact output bytes" do
+  it "mutates literals, booleans, and compatible operators and compares exact output bytes" do
     mutations = IncrementalTesting::MutationCatalog.literal_mutations(source, limit: 2)
     expect(mutations.length).to eq(2)
     expect(mutations.first.apply(source)).not_to eq(source)
@@ -448,6 +481,13 @@ RSpec.describe "incremental CLEAR compilation" do
       limit: 1,
     )
     expect(float_mutation.first.replacement).to eq("2.0")
+
+    varied = IncrementalTesting::MutationCatalog.mutations(
+      "FN f() RETURNS Bool -> RETURN 9 + 10 <= 20 AND TRUE; END",
+      limit: 20,
+    )
+    expect(varied.map(&:category)).to include(:literal, :operator, :boolean)
+    expect(varied.any? { |mutation| mutation.replacement.bytesize != mutation.end_offset - mutation.start_offset }).to be(true)
   end
 
   it "runs the differential mutation oracle end to end" do
@@ -481,6 +521,6 @@ RSpec.describe "incremental CLEAR compilation" do
     expect { expect(IncrementalTesting::CLI.run([module_path])).to eq(1) }.to output(/"success": false/).to_stdout
 
     expect { expect(IncrementalTesting::CLI.run([])).to eq(2) }
-      .to output(/missing argument: FILE.clear/).to_stderr
+      .to output(/missing argument: FILE_OR_DIR/).to_stderr
   end
 end

@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "sorbet-runtime"
+require "tmpdir"
 
 require_relative "../../compiler/ruby/incremental"
 require_relative "mutation_catalog"
@@ -41,51 +42,94 @@ module IncrementalTesting
     def run
       source = File.binread(@source_path)
       source_dir = File.dirname(@source_path)
+      Dir.mktmpdir("clear-incremental-oracle") do |cache_dir|
+        cache_path = File.join(cache_dir, "root.clearc")
+        session = incremental_session(source_dir, cache_path)
+        baseline = session.compile(source)
+        clean_baseline = clean_outcome(source, source_dir)
+        baseline_comparison = ResultComparator.compare(baseline.zig, clean_baseline)
+        cases = T.let([
+          CaseResult.new(
+            description: "initial clean compilation",
+            status: baseline.status,
+            equal: baseline_comparison.equal,
+            incremental_digest: baseline_comparison.incremental_digest,
+            clean_digest: baseline_comparison.clean_digest,
+          ),
+        ], T::Array[CaseResult])
+
+        MutationCatalog.mutations(source, limit: @limit).each do |mutation|
+          mutated = mutation.apply(source)
+          # Construct a new session for each revision. This exercises the
+          # portable cache boundary rather than proving only in-memory reuse.
+          session = incremental_session(source_dir, cache_path)
+          incremental, status = incremental_outcome(session, mutated)
+          clean = clean_outcome(mutated, source_dir)
+          comparison = ResultComparator.compare(incremental, clean)
+          cases << CaseResult.new(
+            description: mutation.description,
+            status: status,
+            equal: comparison.equal,
+            incremental_digest: comparison.incremental_digest,
+            clean_digest: comparison.clean_digest,
+          )
+
+          session = incremental_session(source_dir, cache_path)
+          reverted, revert_status = incremental_outcome(session, source)
+          revert_comparison = ResultComparator.compare(reverted, clean_baseline)
+          cases << CaseResult.new(
+            description: "revert #{mutation.description}",
+            status: revert_status,
+            equal: revert_comparison.equal,
+            incremental_digest: revert_comparison.incremental_digest,
+            clean_digest: revert_comparison.clean_digest,
+          )
+        end
+
+        return RunResult.new(source_path: @source_path, cases: cases)
+      end
+    end
+
+    private
+
+    sig { params(source: String, source_dir: String).returns(String) }
+    def clean_outcome(source, source_dir)
       compiler = Incremental::ZigCompiler.new(
         Incremental::ZigCompilerConfig.new(source_dir: source_dir),
       )
-      session = Incremental::CompilationSession.new(
+      compiler.artifact(compiler.compile(source)).render
+    rescue StandardError => error
+      diagnostic_outcome(error)
+    end
+
+    sig { params(source_dir: String, cache_path: String).returns(Incremental::CompilationSession) }
+    def incremental_session(source_dir, cache_path)
+      compiler = Incremental::ZigCompiler.new(
+        Incremental::ZigCompilerConfig.new(source_dir: source_dir),
+      )
+      cache = Incremental::PortableCache.new(
+        path: cache_path,
+        module_path: @source_path,
+        compiler_fingerprint: "differential-oracle-v1",
+      )
+      Incremental::CompilationSession.new(
         compiler: compiler,
         module_path: @source_path,
+        cache: cache,
       )
-      baseline = session.compile(source)
-      clean_baseline = compiler.artifact(compiler.compile(source)).render
-      baseline_comparison = ResultComparator.compare(baseline.zig, clean_baseline)
-      cases = T.let([
-        CaseResult.new(
-          description: "initial clean compilation",
-          status: baseline.status,
-          equal: baseline_comparison.equal,
-          incremental_digest: baseline_comparison.incremental_digest,
-          clean_digest: baseline_comparison.clean_digest,
-        ),
-      ], T::Array[CaseResult])
+    end
 
-      MutationCatalog.literal_mutations(source, limit: @limit).each do |mutation|
-        mutated = mutation.apply(source)
-        incremental = session.compile(mutated)
-        clean = compiler.artifact(compiler.compile(mutated)).render
-        comparison = ResultComparator.compare(incremental.zig, clean)
-        cases << CaseResult.new(
-          description: mutation.description,
-          status: incremental.status,
-          equal: comparison.equal,
-          incremental_digest: comparison.incremental_digest,
-          clean_digest: comparison.clean_digest,
-        )
+    sig { params(session: Incremental::CompilationSession, source: String).returns([String, Symbol]) }
+    def incremental_outcome(session, source)
+      result = session.compile(source)
+      [result.zig, result.status]
+    rescue StandardError => error
+      [diagnostic_outcome(error), :error]
+    end
 
-        reverted = session.compile(source)
-        revert_comparison = ResultComparator.compare(reverted.zig, clean_baseline)
-        cases << CaseResult.new(
-          description: "revert #{mutation.description}",
-          status: reverted.status,
-          equal: revert_comparison.equal,
-          incremental_digest: revert_comparison.incremental_digest,
-          clean_digest: revert_comparison.clean_digest,
-        )
-      end
-
-      RunResult.new(source_path: @source_path, cases: cases)
+    sig { params(error: StandardError).returns(String) }
+    def diagnostic_outcome(error)
+      "ERROR\0#{error.class.name}\0#{error.message}"
     end
   end
 end

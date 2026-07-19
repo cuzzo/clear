@@ -17,6 +17,16 @@ if ENV["COVERAGE"] == "1"
         !file.filename.include?("/tools/incremental-testing/")
     end
   end
+  SimpleCov.formatter SimpleCov::Formatter::HTMLFormatter
+  SimpleCov.at_exit do
+    original_stdout = $stdout
+    begin
+      $stdout = $stderr
+      SimpleCov.result.format!
+    ensure
+      $stdout = original_stdout
+    end
+  end
 end
 
 require_relative "cli"

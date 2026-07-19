@@ -1,8 +1,86 @@
 # Incremental Ruby Compiler Builds
 
-Status: Feasibility assessment
+Status: MVP implemented and measured
 
 Branch baseline: `incremental` from `origin/master` at `466fae2fc`
+
+## Implemented Result (2026-07-19)
+
+The go/no-go prototype is now a production path for both `clear watch` and
+ordinary one-shot `clear build` invocations. The implementation is contained
+primarily in `compiler/ruby/incremental/` (1,148 lines) plus the independent
+differential oracle in `tools/incremental-testing/` (351 Ruby lines).
+
+The shipped path now provides:
+
+- byte-deterministic clean and incremental Zig emission;
+- one persistent frontend session in `clear watch`;
+- content-fingerprinted retention and invalidation of imported modules and C
+  headers;
+- function artifact replacement after normal annotation, MIR lowering,
+  ownership verification, and Zig emission;
+- non-leaf changes compiled with their transitive callee closure;
+- exact MIR generated-name counter seeds captured at every clean function
+  boundary;
+- a reduced-context proof that must reproduce the old function byte-for-byte
+  before caller-sensitive reuse is enabled;
+- conservative clean fallback when a declared/derived contract, global
+  emission contribution, dependency set, or unsupported program surface
+  changes;
+- a versioned, bounded, atomically written MessagePack `.clearc` containing
+  only primitive records, checked emitted fragments, counter seeds, source,
+  and dependency hashes;
+- cross-process `.clearc` reuse for ordinary `clear build`;
+- optional clean-oracle verification through
+  `CLEAR_VERIFY_INCREMENTAL=1`;
+- a sharded directory-aware differential mutation tool that compares clean and
+  incremental diagnostics or exact Zig bytes across edit/revert cycles.
+
+The portable artifact lives at
+`zig/.clear-cache/<canonical-source-hash>/root.clearc`. It never contains Ruby
+`Marshal` data, AST nodes, `Type`, `Scope`, procs, or live annotator state.
+
+### Measured MiniVM results
+
+Measurements used production Sorbet settings and independent clean-output
+oracles.
+
+| Scenario | CLEAR frontend | End-to-end wall | Result |
+| --- | ---: | ---: | --- |
+| Forced clean one-shot build | 14.208s | 18.47s | baseline |
+| Warm watch, isolated `loadRegisterOps` edit | 1.131s | about 1.17s | exact Zig; Zig rebuild 42ms |
+| Warm in-process edit to widely called `readPackedU8` | 1.707s | n/a | exact Zig |
+| Cross-process `.clearc`, `loadRegisterOps` edit | 2.677s | 4.53s | exact Zig |
+| Cross-process `.clearc`, caller-sensitive `readPackedU8` edit | 3.173s | 5.03s | exact Zig |
+
+The warm-watch goal is met with roughly a 12.5x frontend speedup and a complete
+edit-to-native rebuild around 1.2 seconds. The one-shot leaf result is a 5.3x
+frontend speedup and 4.1x wall-clock speedup. It narrowly misses the original
+2-4 second total aspiration because Ruby/compiler startup and the Zig CLI add
+about 1.85 seconds outside the measured incremental frontend.
+
+The mutation integration suite covers 92.63% (691/746) of incremental compiler
+and oracle lines on its small fixture, before targeted unit coverage is merged.
+Run it over a corpus or shard with:
+
+```text
+COVERAGE=1 bundle exec ruby tools/incremental-testing/run.rb \
+  --limit 20 --shard 0/5 examples benchmarks transpile-tests
+```
+
+### Deliberate MVP fallbacks
+
+The implementation still cleanly rebuilds when more than one root function
+changes in one revision; `main` changes; function sets, signatures, call-edge
+sets, or non-function source change; a candidate changes global emission state
+or introduces support/error types; or the reduced semantic context cannot be
+proven equivalent. Those are correctness boundaries, not silent misses.
+
+Further work is worthwhile only if real edit traces show these fallbacks are
+common. The next bounded extension would compute a changed-function closure for
+multi-function edits. Incremental type/protocol/layout edits would require a
+portable semantic interface model and is intentionally not hidden inside this
+MVP.
 
 ## Decision
 
