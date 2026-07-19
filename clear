@@ -251,7 +251,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false, zig_coverage: false, zig_coverage_suite: 'clear-cli', zig_coverage_name: nil, zig_coverage_run_dir: nil, ownership_mode: :default, prepare_only: false)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil, bypass_transpile_cache: false, zig_coverage: false, zig_coverage_suite: 'clear-cli', zig_coverage_name: nil, zig_coverage_run_dir: nil, ownership_mode: :default, prepare_only: false, transpile_runner: nil)
   invocation_cwd = Dir.pwd
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
@@ -354,8 +354,9 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       mode: module_mode ? :test_root : :build_root,
       transpile_flag: transpile_flag,
       source_text: source_text,
-      bypass: bypass_transpile_cache,
-      debug_cache: ENV['CLEAR_DEBUG_CACHE'] == '1'
+      bypass: bypass_transpile_cache || !transpile_runner.nil?,
+      debug_cache: ENV['CLEAR_DEBUG_CACHE'] == '1',
+      runner: transpile_runner
     )
   rescue ClearBuildSupport::BuildError => e
     error e.message
@@ -710,6 +711,37 @@ end
 
 def do_watch_build(source, output:, incremental:, default_stack:, use_c_allocator:, use_debug_allocator:, bypass_transpile_cache:, ownership_mode:)
   source = File.expand_path(source)
+  require_relative 'compiler/ruby/incremental'
+  pkg_paths = begin
+    ClearBuildSupport.collect_package_dependencies(source)
+  rescue ClearBuildSupport::BuildError => e
+    error e.message
+  end
+  watch_compiler = Incremental::WatchCompiler.new(
+    config: Incremental::ZigCompilerConfig.new(
+      source_dir: File.dirname(source),
+      pkg_paths: pkg_paths,
+      use_c_allocator: use_c_allocator,
+      use_debug_allocator: use_debug_allocator,
+      default_stack: default_stack,
+      ownership_mode: ownership_mode
+    ),
+    module_path: source,
+    verify: ENV['CLEAR_VERIFY_INCREMENTAL'] == '1'
+  )
+  transpile_runner = lambda do |_config, _transpile_flag, source_path|
+    timed = watch_compiler.compile_file(source_path)
+    result = timed.result
+    changed = result.changed_function ? " changed=#{result.changed_function}" : ''
+    $stderr.puts format(
+      "\e[90m[clear-incremental] status=%s%s seconds=%.3f reason=%s\e[0m",
+      result.status,
+      changed,
+      timed.elapsed_seconds,
+      result.reason
+    )
+    result.zig
+  end
   context_options = {
     output: output,
     opt_level: 'Debug',
@@ -720,7 +752,8 @@ def do_watch_build(source, output:, incremental:, default_stack:, use_c_allocato
     use_debug_allocator: use_debug_allocator,
     bypass_transpile_cache: bypass_transpile_cache,
     ownership_mode: ownership_mode,
-    prepare_only: true
+    prepare_only: true,
+    transpile_runner: transpile_runner
   }
   context = do_build(source, **context_options)
   build_dir = context[:build_dir]

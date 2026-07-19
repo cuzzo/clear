@@ -186,6 +186,28 @@ RSpec.describe "incremental CLEAR compilation" do
     expect(reverted.zig).to eq(initial.zig)
   end
 
+  it "keeps a timed compilation session alive for watch mode" do
+    Dir.mktmpdir("incremental-watch") do |dir|
+      path = File.join(dir, "main.clear")
+      File.write(path, source)
+      watcher = Incremental::WatchCompiler.new(
+        config: Incremental::ZigCompilerConfig.new(source_dir: dir),
+        module_path: path,
+        verify: true,
+      )
+
+      initial = watcher.compile_file(path)
+      expect(initial.result.status).to eq(:clean)
+      expect(initial.elapsed_seconds).to be >= 0.0
+
+      File.write(path, source(alpha: "3"))
+      changed = watcher.compile_file(path)
+      expect(changed.result.status).to eq(:incremental)
+      expect(changed.result.changed_function).to eq("alpha")
+      expect(changed.elapsed_seconds).to be >= 0.0
+    end
+  end
+
   it "emits deterministic Zig for capability-generated names across clean compilations" do
     %w[40_locked.clear 264_multi_lock_sort.clear 333_with_match_per_arm_dispatch.clear].each do |fixture|
       path = File.expand_path("../../../transpile-tests/#{fixture}", __dir__)
