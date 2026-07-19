@@ -111,6 +111,7 @@ class MIRPass
       body_summaries: @body_summaries,
       schema_lookup: @schema_lookup,
     )
+    apply_program_facts!
     pass_state.mark!(:needs_rt_finalized)
 
     # Phase 3: insert MIR nodes + stamp AST.
@@ -129,19 +130,24 @@ class MIRPass
       transform_function!(@function_plans.fetch(name))
     end
 
-    # MIR escape analysis can discover heap-return provenance after the
-    # annotator created each FunctionSignature. Resync the signature objects
-    # so cross-module imports and later lowering see the same ownership facts
-    # as the FunctionDef.
-    @fn_nodes.each_value do |fn|
-      sig = FunctionSignature.from_function_def(fn)
-      sig.sync_from_function_def!(fn) if sig.is_a?(FunctionSignature)
-    end
     pass_state.mark!(:mir_pass_complete)
     nil
   end
 
   private
+
+  # The one compatibility seam from portable program facts back into the
+  # mutable AST/signature model consumed by the current lowerer.
+  sig { void }
+  def apply_program_facts!
+    @function_plans.each do |name, plan|
+      function = plan.function
+      function.needs_rt = @program_facts.functions.fetch(name).needs_runtime
+      signature = FunctionSignature.from_function_def(function)
+      signature.sync_from_function_def!(function) if signature.is_a?(FunctionSignature)
+    end
+    nil
+  end
 
   sig { params(plan: FunctionMIRPlan).void }
   def transform_function!(plan)
@@ -432,16 +438,12 @@ class MIRPass
     entry = cleanup_entry_for_binding_node(stmt, facts)
     return unless entry.present? && entry.kind != :resource
     lifecycle = entry.lifecycle_plan
-    if lifecycle.nil? && @lifecycle_registry
-      declaration = stmt.symbol&.reg
-      lifecycle = @lifecycle_registry.fetch_binding(declaration || stmt, stmt.full_type!)
-      entry.set_lifecycle_plan!(lifecycle)
-    end
+    raise "missing planned lifecycle for reassignment '#{stmt.name}'" unless lifecycle
     # Allocator provenance is not a destruction contract. Escape analysis may
     # place a bit-copy/no-drop slot on the heap (notably loop-carried
     # String@symbol values), but only the annotation-owned LifecyclePlan may
     # authorize destruction of the overwritten value.
-    return if lifecycle && !lifecycle.needs_drop?
+    return unless lifecycle.needs_drop?
     # A heap-owned binding reassigned in a loop must free the OLD value
     # before storing the new one -- even if the binding is ultimately
     # moved out (only the final value is moved; the intermediates would
@@ -623,6 +625,6 @@ class MIRPass
     end
   end
 
-  private :live_cleanup_entry
+  private :live_cleanup_entry, :alloc_marker
 
 end

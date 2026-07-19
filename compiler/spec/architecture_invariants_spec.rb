@@ -156,6 +156,15 @@ RSpec.describe "architecture invariants: semantic lifecycle authority" do
     expect(plan).to include("class FunctionMIRPlanner")
   end
 
+  it "applies finalized program facts through one explicit compatibility seam" do
+    pass = source("compiler/ruby/mir/mir_pass.rb")
+    finalizer = method_body("compiler/ruby/mir/program_mir_facts.rb", "self.finalize")
+
+    expect(pass).to include("apply_program_facts!")
+    expect(finalizer).not_to include("function.needs_rt =")
+    expect(method_body("compiler/ruby/mir/mir_pass.rb", "stamp_reassign_cleanup!")).not_to include("fetch_binding")
+  end
+
   it "makes COPY and owned-sink materialization consume LifecyclePlan instead of type cleanup predicates" do
     copy = method_body("compiler/ruby/mir/lowering/expressions.rb", "lower_copy")
     sink = method_body("compiler/ruby/mir/mir_lowering.rb", "owned_sink_plan")

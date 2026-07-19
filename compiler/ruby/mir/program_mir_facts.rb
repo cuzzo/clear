@@ -76,9 +76,8 @@ class ProgramMIRFinalizer
 
     functions = T.let({}, ProgramMIRFacts::FunctionMap)
     fn_nodes.sort.each do |name, function|
-      function.needs_rt = needs_runtime.fetch(name, false)
       cleanup = function_plans.fetch(name).cleanup_facts
-      functions[name] = function_facts(name, function.needs_rt == true, cleanup)
+      functions[name] = function_facts(name, needs_runtime.fetch(name, false), cleanup)
     end
     ProgramMIRFacts.new(functions: functions)
   end
