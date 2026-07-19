@@ -277,5 +277,14 @@ RSpec.describe FsmTransform::Liveness do
     it "normalizes raw declaration types into Type facts" do
       expect(FsmTransform::Liveness.send(:stmt_decl_type, bind_decl("n", AST::Literal.new(1, :Int64), full_type: :Int64))).to eq(Type.new(:Int64))
     end
+
+    it "walks identifiers inside lowered MIR statements" do
+      statement = MIR::Set.new(MIR::Ident.new("target"), MIR::Ident.new("source"), false)
+      names = []
+
+      described_class.send(:walk_idents, statement) { |name| names << name }
+
+      expect(names).to contain_exactly("target", "source")
+    end
   end
 end

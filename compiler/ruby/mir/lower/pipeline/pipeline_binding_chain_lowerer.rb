@@ -194,7 +194,9 @@ class PipelineBindingChainLowerer < T::Struct
     case fold
     when AST::SumOp
       expr = visit_placeholder_expr(fold.expression, placeholder)
-      init = [MIR::Let.new(names.accumulator, MIR::Lit.new("0"), true, Type.new("f64"), nil)]
+      result_type = Type.new(smooth_node.full_type!)
+      init_literal = result_type.integer? ? "0" : "0.0"
+      init = [MIR::Let.new(names.accumulator, MIR::Lit.new(init_literal), true, result_type, nil)]
       accum = [MIR::Set.new(MIR::Ident.new(names.accumulator),
         MIR::BinOp.new("+", MIR::Ident.new(names.accumulator), expr))]
       fold_plan(init, wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(names.accumulator))
@@ -223,8 +225,10 @@ class PipelineBindingChainLowerer < T::Struct
       fold_plan(init, wrap_stages(stages, placeholder, accum), [], result)
     when AST::MinOp
       expr = visit_placeholder_expr(fold.expression, placeholder)
+      result_type = Type.new(fold.expression.full_type!)
+      zig_type = result_type.zig_type
       init = [MIR::Let.new(names.accumulator,
-        MIR::TypeSentinel.new(:max, "f64"), true, Type.new("f64"), nil)]
+        MIR::TypeSentinel.new(:max, zig_type), true, result_type, nil)]
       accum = [
         MIR::Let.new(names.value, expr, false, nil, nil),
         MIR::IfStmt.new(
@@ -234,8 +238,11 @@ class PipelineBindingChainLowerer < T::Struct
       fold_plan(init, wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(names.accumulator))
     when AST::MaxOp
       expr = visit_placeholder_expr(fold.expression, placeholder)
+      result_type = Type.new(fold.expression.full_type!)
+      zig_type = result_type.zig_type
+      sentinel = result_type.unsigned_integer? ? MIR::Lit.new("0") : MIR::TypeSentinel.new(:min, zig_type)
       init = [MIR::Let.new(names.accumulator,
-        MIR::TypeSentinel.new(:min, "f64"), true, Type.new("f64"), nil)]
+        sentinel, true, result_type, nil)]
       accum = [
         MIR::Let.new(names.value, expr, false, nil, nil),
         MIR::IfStmt.new(

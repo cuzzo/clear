@@ -116,7 +116,12 @@ def effect_pipeline_body(form)
   when :select_optional_marked then "picked = nums |> SELECT:? optional(_); picked |> EACH { ASSERT UNWRAP _ > 0; };"
   when :select_both_marked then "picked = nums |> SELECT:!? both(_); picked |> EACH { ASSERT TRY UNWRAP _ > 0; };"
   when :select_effect_recovered then "picked = nums |> SELECT fallible(_) OR_ELSE 0; ASSERT picked.length() == 3;"
-  when :select_async_explicit then "picked:~ = nums |> SELECT later(_); resolved: []Int64 = NEXT picked; ASSERT resolved.length() == 3;"
+  when :select_async_explicit then <<~CLEAR.chomp
+    picked:~ = nums |> SELECT:~ later(_);
+    IF NEXT picked EXISTS AS first THEN ASSERT first == 1_i64; ELSE ASSERT FALSE; END
+    IF NEXT picked EXISTS AS second THEN ASSERT second == 2_i64; ELSE ASSERT FALSE; END
+    IF NEXT picked EXISTS AS third THEN ASSERT third == 3_i64; ELSE ASSERT FALSE; END
+  CLEAR
   when :where_fallible then "picked = nums |> WHERE falliblePredicate(_);"
   when :where_optional then "picked = nums |> WHERE optionalPredicate(_);"
   when :where_async then "picked = nums |> WHERE asyncPredicate(_);"
@@ -124,7 +129,12 @@ def effect_pipeline_body(form)
   when :concurrent_select_fallible_marked then "picked = nums |> CONCURRENT(workers: 2) SELECT:! fallible(_); picked |> EACH { ASSERT TRY _ > 0; };"
   when :concurrent_select_optional_marked then "picked = nums |> CONCURRENT(workers: 2) SELECT:? optional(_); picked |> EACH { ASSERT UNWRAP _ > 0; };"
   when :concurrent_select_both_marked then "picked = nums |> CONCURRENT(workers: 2) SELECT:!? both(_); picked |> EACH { ASSERT TRY UNWRAP _ > 0; };"
-  when :concurrent_select_async_explicit then "picked:~ = nums |> CONCURRENT(workers: 2) SELECT later(_); resolved: []Int64 = NEXT picked; ASSERT resolved.length() == 3;"
+  when :concurrent_select_async_explicit then <<~CLEAR.chomp
+    picked:~ = nums |> CONCURRENT(workers: 2) SELECT:~ later(_);
+    IF NEXT picked EXISTS AS first THEN ASSERT first == 1_i64; ELSE ASSERT FALSE; END
+    IF NEXT picked EXISTS AS second THEN ASSERT second == 2_i64; ELSE ASSERT FALSE; END
+    IF NEXT picked EXISTS AS third THEN ASSERT third == 3_i64; ELSE ASSERT FALSE; END
+  CLEAR
   when :concurrent_where_fallible then "picked = nums |> CONCURRENT(workers: 2) WHERE falliblePredicate(_);"
   else raise "unknown effect pipeline form #{form.inspect}"
   end

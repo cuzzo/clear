@@ -107,8 +107,7 @@ if opts[:generate_only]
 end
 
 # ── Runner ──────────────────────────────────────────────────────────────
-# Positive cells are bundled into one Zig test file, mirroring
-# transpile-tests/gen.rb. Negative cells run in parallel through
+# Positive cells are partitioned into parallel Zig test bundles. Negative cells run in parallel through
 # `clear build --no-stack-check`, which catches parser/compiler/MIR/Zig
 # compile-time rejections without running runtime tests.
 
@@ -131,12 +130,12 @@ def ensure_symlink(link_path, target_path)
   File.symlink(target_path, link_path)
 end
 
-def run_pass_bundle(entries, out_dir)
+def run_pass_bundle(entries, out_dir, bundle_name: 'all-fuzz')
   return [[], [], [], []] if entries.empty?
 
   started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   coverage_enabled = ZigCoverageSupport.enabled?
-  build_dir = coverage_enabled ? ZigCoverageSupport::ZIG_DIR : File.join(out_dir, ".bundle-#{$$}")
+  build_dir = coverage_enabled ? ZigCoverageSupport::ZIG_DIR : File.join(out_dir, ".bundle-#{$$}-#{bundle_name}")
   unless coverage_enabled
     FileUtils.rm_rf(build_dir)
     FileUtils.mkdir_p(build_dir)
@@ -146,7 +145,8 @@ def run_pass_bundle(entries, out_dir)
     ensure_symlink(File.join(build_dir, 'testdata'), File.join(LITEDB_ROOT, 'testdata'))
   end
 
-  zig_path = File.join(build_dir, 'all-fuzz.zig')
+  zig_filename = "#{bundle_name}.zig"
+  zig_path = File.join(build_dir, zig_filename)
   generator = TestGenerator.new
   failed_transpile = []
 
@@ -177,7 +177,7 @@ def run_pass_bundle(entries, out_dir)
   return [[], [[zig_path, fmt_out]], [], []] unless fmt_status.success?
 
   zig_args = [
-    'all-fuzz.zig',
+    zig_filename,
     'runtime/switch.S', 'runtime/onRoot.S',
     '-lc'
   ]
@@ -188,14 +188,14 @@ def run_pass_bundle(entries, out_dir)
         build_dir: build_dir,
         args: zig_args,
         suite: 'fuzz',
-        name: 'all-fuzz'
+        name: bundle_name
       )
     else
       Open3.capture2e(zig_exe, 'test', *zig_args, chdir: build_dir)
     end
   elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
   suffix = coverage_enabled ? " under kcov" : ""
-  puts "[fuzz] pass bundle#{suffix}: #{entries.size} cells in #{format('%.2f', elapsed)}s"
+  puts "[fuzz] pass bundle #{bundle_name}#{suffix}: #{entries.size} cells in #{format('%.2f', elapsed)}s"
 
   if !status.success? || out.include?('FAIL')
     return [[], [[zig_path, out]], [], []]
@@ -213,6 +213,50 @@ ensure
     FileUtils.rm_f(zig_path) if zig_path && ENV['FUZZ_KEEP_BUNDLE'] != '1'
   elsif build_dir && ENV['FUZZ_KEEP_BUNDLE'] != '1'
     FileUtils.rm_rf(build_dir)
+  end
+end
+
+def run_parallel_pass_bundles(entries, out_dir, default_workers)
+  return [[], [], [], []] if entries.empty?
+
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  ZigCoverageSupport.clear_run_prefix!('fuzz', 'all-fuzz') if ZigCoverageSupport.enabled?
+  workers = fuzz_worker_count(entries, 'FUZZ_BUNDLE_WORKERS', default_workers)
+  chunks = Array.new(workers) { [] }
+  entries.each_with_index { |entry, index| chunks[index % workers] << entry }
+  readers = []
+  pids = []
+
+  chunks.each_with_index do |chunk, index|
+    reader, writer = IO.pipe
+    pid = Process.fork do
+      reader.close
+      simplecov_child_command!("fuzz-pass-bundle-#{index}")
+      result = run_pass_bundle(chunk, out_dir, bundle_name: "all-fuzz-#{index}")
+      writer.write(Marshal.dump(result))
+      writer.close
+      exit 0
+    rescue StandardError => e
+      result = [[], [[chunk.first.fetch(:path), "parallel fuzz bundle failed: #{e.full_message}"]], [], []]
+      writer.write(Marshal.dump(result))
+      writer.close
+      exit 1
+    end
+    writer.close
+    readers << reader
+    pids << pid
+  end
+  results = readers.map do |reader|
+    Marshal.load(reader.read)
+  ensure
+    reader.close
+  end
+  pids.each { |pid| Process.wait(pid) }
+
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+  puts "[fuzz] parallel pass bundles: #{entries.size} cells with #{workers} workers in #{format('%.2f', elapsed)}s"
+  results.each_with_object([[], [], [], []]) do |result, combined|
+    result.each_with_index { |values, index| combined[index].concat(values) }
   end
 end
 
@@ -332,9 +376,12 @@ def run_negative_builds(entries, out_dir, default_workers)
         path = entry[:path]
         bin = File.join(out_dir, ".neg-#{i}")
         out, status = Open3.capture2e(clear, 'build', path, '-o', bin, '--no-stack-check')
+        code_mismatch = entry[:diagnostic_code_required] &&
+                        !out.match?(/\b#{Regexp.escape(entry.fetch(:error_code).to_s)}\b/)
         mutex.synchronize do
-          if status.success?
-            unexpected_pass << [path, out]
+          if status.success? || code_mismatch
+            detail = code_mismatch ? "#{out}\n[fuzz] expected diagnostic code #{entry[:error_code]}" : out
+            unexpected_pass << [path, detail]
           else
             pass << path
           end
@@ -406,12 +453,20 @@ def run_compile_only_negative_coverage(entries, default_workers)
   results = parallel_compile_entries(entries, workers, 'coverage-negative')
   rejected = results.count { |_entry, error| error }
   emitted = results.length - rejected
-  pass = results.map { |entry, _error| entry[:path] }
+  mismatched = results.filter_map do |entry, error|
+    next unless entry[:diagnostic_code_required] && error
+    next if error.match?(/\b#{Regexp.escape(entry.fetch(:error_code).to_s)}\b/)
+
+    [entry[:path], "#{error}\n[fuzz] expected diagnostic code #{entry[:error_code]}"]
+  end
+  pass = results.filter_map do |entry, error|
+    entry[:path] unless mismatched.any? { |path, _| path == entry[:path] }
+  end
 
   elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
   puts "[fuzz] coverage compile negatives: #{entries.size} cells with #{workers} workers in #{format('%.2f', elapsed)}s " \
        "(#{rejected} rejected by Ruby compile/lower, #{emitted} emitted for downstream gates)"
-  [pass, []]
+  [pass, mismatched]
 end
 
 def coverage_run(emitted, out_dir, default_workers)
@@ -420,7 +475,7 @@ def coverage_run(emitted, out_dir, default_workers)
   mir_negative_entries = emitted.select { |e| e[:kind] == :mir_checker && e[:expected] == :compile_error }
 
   if ZigCoverageSupport.enabled?
-    pass_ok, fails, mir_errors, leaks = run_pass_bundle(pass_entries, out_dir)
+    pass_ok, fails, mir_errors, leaks = run_parallel_pass_bundles(pass_entries, out_dir, default_workers)
   else
     pass_ok, mir_errors, leaks = run_compile_only_positive_coverage(pass_entries, default_workers)
     fails = []
@@ -507,7 +562,17 @@ def run_fail_complete_bundles(entries, out_dir)
   result = FuzzFailComplete.run(entries) do |batch|
     attempts += 1
     puts "[fuzz] fail-complete bundle attempt #{attempts}: #{batch.size} cells"
-    run_pass_bundle(batch, out_dir)
+    batch_result = run_pass_bundle(batch, out_dir)
+    if batch.size == 1
+      # A singleton bundle diagnostic belongs to its sole source cell. Keep
+      # that identity instead of reporting the transient all-fuzz.zig path.
+      batch_result.drop(1).each do |diagnostics|
+        diagnostics.map! do |path, output|
+          File.basename(path) == 'all-fuzz.zig' ? [batch.first.fetch(:path), output] : [path, output]
+        end
+      end
+    end
+    batch_result
   end
   elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
   puts "[fuzz] fail-complete bundles: #{entries.size} cells in #{attempts} " \
@@ -525,7 +590,7 @@ def hybrid_run(emitted, out_dir, default_workers, bisect_positives: false)
     if bisect_positives
       run_fail_complete_bundles(bundled_pass_entries, out_dir)
     else
-      run_pass_bundle(bundled_pass_entries, out_dir)
+      run_parallel_pass_bundles(bundled_pass_entries, out_dir, default_workers)
     end
   iso_ok, iso_fails, iso_mir_errors, iso_leaks = run_positive_files(isolated_pass_entries, out_dir, default_workers)
   negative_ok, unexpected_pass = run_negative_builds(negative_entries, out_dir, default_workers)

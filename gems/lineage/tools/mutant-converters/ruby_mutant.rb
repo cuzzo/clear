@@ -63,7 +63,8 @@ module RubySpecMutants
       '--integration', 'rspec',
       '--jobs', ENV.fetch('MUTANT_JOBS', '32'),
     ])
-    subject.specs.each { |spec| argv.concat(['--integration-argument', spec]) }
+    extra_specs = ENV.fetch('MUTANT_EXTRA_SPECS', '').split(File::PATH_SEPARATOR).reject(&:empty?)
+    (subject.specs + extra_specs).uniq.each { |spec| argv.concat(['--integration-argument', spec]) }
     argv.concat(['--since', since]) if since
     argv << subject.expression
     argv
@@ -192,6 +193,11 @@ module RubySpecMutants
     end
 
     evaluated = evaluate_summary(subject, summary)
+
+    # Full differential experiments can produce many gigabytes of mutation
+    # diffs. The aggregate facts are sufficient for the first pass; rerun only
+    # subjects with a kill delta when individual mutant identities are needed.
+    FileUtils.rm_f(log_path) if ENV['MUTANT_COMPACT_LOGS'] == '1'
 
     status = evaluated.ok ? 'PASS' : 'FAIL'
     gate = subject.hard_gate ? 'hard' : 'advisory'

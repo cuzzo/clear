@@ -43,7 +43,9 @@ module FsmTransform
 
     extend T::Sig
 
-    AstIdentWalkRoot = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody)) }
+    AstIdentWalkRoot = T.type_alias do
+      T.nilable(T.any(AST::Node, AST::RawBody, MIR::Node, T::Array[MIR::Node]))
+    end
     BindingStmt = T.type_alias { T.any(AST::VarDecl, AST::BindExpr, AST::DestructureTarget) }
     DeclTypeCandidate = T.type_alias { T.nilable(Type::TypeInput) }
 
@@ -261,24 +263,38 @@ module FsmTransform
       walk_idents(stmt) { |name| into << name }
     end
 
-    # Recursively walk AST nodes looking for Identifier reads. We only push
-    # AST::Node children from AST structs/arrays so Type objects, tokens, and
-    # other struct-valued metadata never become scanner inputs.
+    # Recursively walk lowered MIR as well as retained AST nodes looking for
+    # identifier reads. FSM segments legitimately contain both forms.
     sig { params(node: AstIdentWalkRoot, block: T.proc.params(name: String).void).void }
     def self.walk_idents(node, &block)
       return if node.nil?
 
-      stack = T.let([], T::Array[AST::Node])
+      stack = T.let([], T::Array[T.any(AST::Node, MIR::Node)])
       case node
       when Array
-        node.reverse_each { |child| stack << child if child.is_a?(AST::Locatable) }
+        node.reverse_each do |child|
+          stack << child if child.is_a?(AST::Locatable) || child.is_a?(MIR::Emittable)
+        end
       when AST::Locatable
+        stack << node
+      when MIR::Emittable
         stack << node
       end
       until stack.empty?
         current = T.must(stack.pop)
         if current.is_a?(AST::Identifier)
           yield current.name
+          next
+        end
+        if current.is_a?(MIR::Ident)
+          yield current.name.to_s
+          next
+        end
+        if current.is_a?(MIR::Emittable)
+          current.child_exprs.reverse_each { |child| stack << child }
+          current.body_slots.reverse_each do |slot|
+            slot.body.reverse_each { |child| stack << child }
+          end
           next
         end
         next unless current.respond_to?(:each_pair)

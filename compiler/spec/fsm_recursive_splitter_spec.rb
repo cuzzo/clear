@@ -129,6 +129,12 @@ RSpec.describe FsmTransform::RecursiveSplitter do
   end
 
   describe "edge guards" do
+    it "returns the value produced inside an alias override scope" do
+      builder = FsmTransform::RecursiveSplitter::Builder.new
+
+      expect(builder.with_alias_overrides({ "alias" => "ctx.value" }) { 17 }).to eq(17)
+    end
+
     it "raises if a reserved builder segment is finalized unfilled" do
       builder = FsmTransform::RecursiveSplitter::Builder.new
       builder.reserve_index

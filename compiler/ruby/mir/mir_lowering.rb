@@ -200,8 +200,9 @@ class MIRLowering
                              ((moved_without_copy && (!ti.string? || !ti.rodata?)) ||
                               same_alloc_verifiable ||
                               same_alloc_transfer_source)
+      owned_value_matches_sink = already_owned_value && (source_alloc.nil? || same_alloc)
       same_alloc_satisfies || owned_parameter || needs_heap_create ||
-	        transfer_without_local_cleanup || already_owned_value
+	        (transfer_without_local_cleanup && same_alloc) || owned_value_matches_sink
 	    end
 
 	    sig { returns(T::Boolean) }
@@ -416,7 +417,10 @@ class MIRLowering
       enum_schemas: input.enum_schemas,
       union_schemas: input.union_schemas,
     )
-    schemas.replace_lookup_proc!(T.must(input.schema_lookup)) if input.schema_lookup
+    if input.schema_lookup
+      external_lookup = T.must(input.schema_lookup)
+      schemas.replace_lookup_proc!(->(name) { schemas.lookup(name) || external_lookup.call(name) })
+    end
     @state = T.let(
       MIRLoweringState.new(
         input: input,
@@ -572,6 +576,11 @@ class MIRLowering
   sig { params(name: String).returns(T::Boolean) }
   def pipeline_guarded_cleanup_name?(name)
     function_state.guarded_cleanup_names[name] == true
+  end
+
+  sig { params(kind: Symbol, dispatch: Symbol, analysis: T.nilable(CapabilityHelper::CaptureAnalysis)).returns(MIR::ExecutionBoundaryFact) }
+  def pipeline_execution_boundary_fact(kind, dispatch, analysis)
+    execution_boundary_fact(kind, dispatch, analysis)
   end
 
   sig { params(name: String).returns(T::Boolean) }
@@ -888,7 +897,7 @@ class MIRLowering
     )
   end
 
-  sig { params(mir: MIR::Orelse, ti: Type, dest_alloc: Symbol).returns(MIR::IfOptional) }
+  sig { params(mir: MIR::Orelse, ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
   def place_owned_orelse_for_destination(mir, ti, dest_alloc)
     tmp_id = lowering_counters.next_tmp_id
     capture = "__or_val_#{tmp_id}"
@@ -896,7 +905,11 @@ class MIRLowering
     right = place_owned_branch_value_for_destination(mir.fallback, ti, dest_alloc)
     out = MIR::IfOptional.new(mir.expr, capture, left, right)
     out.result_type = Type.new(ti)
-    out
+    # `IfOptional` keeps its branches lexically scoped, so the generic hoister
+    # deliberately does not lift it out of a call/return/aggregate position.
+    # Materialize this owned merge here instead: both copied branches now have
+    # one allocator and the block transfers its single owned result outward.
+    owned_branch_result_value(out, ti, dest_alloc)
   end
 
   sig { params(mir: MIR::TryCatch, ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
@@ -1028,15 +1041,83 @@ class MIRLowering
 
   sig { params(mir: MIR::Node, dst_ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
   def place_owned_branch_value_for_destination(mir, dst_ti, dest_alloc)
+    # Nested optional merges have not yet received finalized ownership facts
+    # when destination placement runs. Preserve their branch structure now;
+    # treating the merge as a borrowed DeepCopy source leaves an allocating
+    # Orelse anonymously nested under that copy.
+    return place_owned_orelse_for_destination(mir, dst_ti, dest_alloc) if mir.is_a?(MIR::Orelse)
+    return copy_lazy_owned_branch_for_destination(mir, dst_ti, dest_alloc) if mir.is_a?(MIR::BlockExpr)
+
     owned_alloc = mir_owned_alloc(mir)
-    return transfer_owned_branch_binding(mir, dst_ti, dest_alloc) if owned_alloc == dest_alloc
+    if owned_alloc == dest_alloc
+      return transfer_owned_branch_binding(mir, dst_ti, dest_alloc) if mir.is_a?(MIR::Ident)
+      return owned_branch_result_value(mir, dst_ti, dest_alloc) if mir_allocates?(mir)
+    end
     return place_owned_alloc_mismatch_for_destination(mir, dst_ti, dest_alloc, owned_alloc) if owned_alloc
     return MIR::DupeSlice.new(mir, dest_alloc) if dst_ti.string?
     if dst_ti.any_rc?
       return MIR::RcRetain.new(mir, rc_payload_zig_type(dst_ti), dst_ti.shared? ? "arcRetain" : "rcRetain")
     end
 
+    # Lazy branch blocks cannot be hoisted outside their branch, but a
+    # recursive owned result still needs a named source owner when it is
+    # cloned. Keep both materializations inside a new lazy block: the source
+    # receives normal cleanup and the clone is transferred as the result.
+    return copy_lazy_owned_branch_for_destination(mir, dst_ti, dest_alloc) if mir_allocates?(mir)
+
     MIR::DeepCopy.new(mir, dst_ti.zig_type, nil, :full_value, dest_alloc)
+  end
+
+  sig { params(mir: MIR::Node, type_info: Type, dest_alloc: Symbol).returns(MIR::BlockExpr) }
+  def copy_lazy_owned_branch_for_destination(mir, type_info, dest_alloc)
+    tmp_id = lowering_counters.next_tmp_id
+    label = "__owned_branch_copy_#{tmp_id}"
+    source_name = "__owned_branch_src_#{tmp_id}"
+    copy_name = "__owned_branch_copy_val_#{tmp_id}"
+
+    source_alloc = mir_owned_alloc(mir) || MIR::OwnershipEffect.alloc_of(mir) || dest_alloc
+    source_cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false,
+                                        zig_type: type_info.zig_type)
+    build_drop_entry!(source_cleanup, type_info, nil)
+    source = MIR::BindingMaterialization.new(
+      name: source_name,
+      expr: mir,
+      alloc: source_alloc,
+      type_info: type_info,
+      mutable: false,
+      cleanup_entry: source_cleanup,
+    )
+
+    copied_expr = MIR::DeepCopy.new(
+      MIR::Ident.new(source_name),
+      type_info.zig_type,
+      nil,
+      :full_value,
+      dest_alloc,
+      MIR::DeepCopy.copy_shape_for_zig_type(type_info.zig_type),
+      type_info,
+    )
+    copy_cleanup = CleanupEntry.build(:uniform, alloc: dest_alloc, has_moved_guard: true,
+                                      zig_type: type_info.zig_type)
+    build_drop_entry!(copy_cleanup, type_info, nil)
+    copied = MIR::BindingMaterialization.new(
+      name: copy_name,
+      expr: copied_expr,
+      alloc: dest_alloc,
+      type_info: type_info,
+      mutable: false,
+      cleanup_entry: copy_cleanup,
+      cleanup_mode: :err,
+    )
+
+    body = T.let(source.statements + copied.statements, T::Array[MIR::Stmt])
+    body.concat(ownership_transfer_marks(copy_name, :block_result,
+                                         target_alloc: dest_alloc, move_guarded: true))
+    body << MIR::BreakStmt.new(label, MIR::Ident.new(copy_name))
+    out = MIR::BlockExpr.new(label, body)
+    out.lazy_boundary = true
+    out.result_type = Type.new(type_info)
+    out
   end
 
   # An owned local selected by one branch of OR_ELSE/orelse becomes the
@@ -1582,6 +1663,14 @@ class MIRLowering
   def append_already_finalized_node!(state, node)
     state.out << node
     record_ownership_finalization_node!(state, node) if node.is_a?(MIR::Emittable)
+    # Normalization can replace an aggregate child with a newly hoisted owner
+    # after the aggregate itself received its stable lowering id. Re-scan
+    # transfer contracts on reuse so the refreshed consumption fact is not
+    # mistaken for already-emitted ownership state.
+    append_transfer_marks!(
+      ownership_transfers_for_targets(ownership_transfer_operands_for_node(node, state), state),
+      state,
+    )
     nil
   end
 
@@ -4310,11 +4399,26 @@ class MIRLowering
     # slice via .items; the runtime helper handles both).
     return nil if ti.direct_indexable_collection?
 
-    recv = lower(recv_ast)
+    recv = rc_payload_value(T.cast(lower(recv_ast), MIR::Node), recv_ti)
     recv = hoist_alloc(recv, recv_ast) if mir_allocates?(recv)
     return nil unless ti.string?
 
     MIR::Cast.new(MIR::ListLength.new(recv), "i64", :intCast)
+  end
+
+  # Rc/Arc capability values expose ordinary methods and TAKES boundaries in
+  # terms of their managed payload, not the ref-counting handle.  Keep this
+  # projection structural so every caller (direct intrinsics, method calls and
+  # argument materialization) agrees on the same `ctrl.data` representation.
+  sig { params(value: MIR::Node, type_info: Type).returns(MIR::Node) }
+  def rc_payload_value(value, type_info)
+    return value unless type_info.any_rc?
+    # For `?T@shared` / `!?T@shared`, the ref-counted handle is inside the
+    # optional/error wrapper. Projecting `.ctrl.data` on the wrapper itself
+    # emits invalid Zig (`?*Arc(...).ctrl`). Consumers must first unwrap it.
+    return value if type_info.optional? || type_info.error_union?
+
+    MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(value, "ctrl"), "data"))
   end
 
   sig { params(node: MIR::Node).returns(T.nilable(String)) }

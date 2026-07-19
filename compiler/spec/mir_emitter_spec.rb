@@ -634,6 +634,12 @@ RSpec.describe MIREmitter do
     expect(zig).to include("break :blk tmp;")
   end
 
+  it "parenthesizes a labelled block expression used as a call argument" do
+    block = MIR::BlockExpr.new("arg", [MIR::BreakStmt.new("arg", MIR::Lit.new("1"))])
+
+    expect(e.emit(MIR::Call.new("consume", [block], false))).to eq("consume((arg: {\nbreak :arg 1;\n}))")
+  end
+
   it "emits cast @as" do
     node = MIR::Cast.new(MIR::Ident.new("x"), "usize", :as)
     expect(e.emit(node)).to eq("@as(usize, x)")
@@ -913,7 +919,14 @@ RSpec.describe MIREmitter do
     it "emits passthrough for value types as a comptime-evaluated inline expression" do
       node = MIR::DeepCopy.new(MIR::Ident.new("n"), nil, nil, :passthrough, nil)
       expect(node.copy_shape).to eq(:inferred)
-      expect(e.emit(node)).to eq("(if (comptime @typeInfo(@TypeOf(n)) == .pointer and @typeInfo(@TypeOf(n)).pointer.size == .one) n.* else n)")
+      expect(e.emit(node)).to eq("(if (comptime @typeInfo(@TypeOf(n)) == .pointer and @typeInfo(@TypeOf(n)).pointer.size == .one) (n).* else n)")
+    end
+
+    it "parenthesizes a passthrough source before the dead pointer-deref branch" do
+      source = MIR::ArrayInit.new("i64", "1", [MIR::Lit.new("1")])
+      node = MIR::DeepCopy.new(source, nil, nil, :passthrough, nil)
+
+      expect(e.emit(node)).to include("([1]i64{ 1 }).* else [1]i64{ 1 }")
     end
 
     it "emits pointer-shaped full copies from the explicit MIR shape" do
@@ -1729,6 +1742,7 @@ RSpec.describe MIREmitter do
       expect(e.emit(typed_optional)).to eq("(if (maybe) |value| @as(?i64, value) else @as(?i64, null))")
       owned_slice = e.emit(MIR::OwnedSlice.new(MIR::Ident.new("list"), :heap))
       expect(owned_slice).to include("try __x.toOwnedSlice(rt.heapAlloc())")
+      expect(owned_slice).to include("try rt.heapAlloc().dupe(@typeInfo(@TypeOf(__x)).array.child, __x[0..])")
       expect(owned_slice).to include("break :blk_owned_slice_")
     end
 

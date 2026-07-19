@@ -10,23 +10,22 @@
 # expansion will surface every previously-hidden shape × return-value blind
 # spot the same way takes_move_modality's expansion did (filed #51/#52/#53).
 
+require_relative '../semantic_equivalence'
+
+RETURN_SEMANTIC_SHAPES = {
+  string: [:string, 3],
+  dynamic_array: [:list, 1],
+  hash_map: [:map, 1],
+}.freeze
+
 # Canonical per-shape spec for return. Each block ALWAYS ends with `xs` bound
 # to the value to return. `ptype` is the function's return type.
 #
 # [prelude, return_type, build_block, assert_n]
-RETURN_VALUE_SHAPE_SPECS = {
-  string: [
-    "",
-    "String",
-    "xs: String = COPY \"hi\";",
-    2, # length of "hi"
-  ],
-  dynamic_array: [
-    "",
-    "Int64[]",
-    "MUTABLE xs: Int64[] = [];\n    &xs.append(4_i64);",
-    1,
-  ],
+RETURN_VALUE_SHAPE_SPECS = RETURN_SEMANTIC_SHAPES.transform_values do |value_id, expected_n|
+  value = SemanticEquivalence::VALUES.fetch_id(value_id)
+  [value.setups.join("\n"), value.clear_type, "xs: #{value.clear_type} = #{value.render_literal};", expected_n]
+end.merge(
   heap_list: [
     "",
     "Int64[]@list",
@@ -43,12 +42,6 @@ RETURN_VALUE_SHAPE_SPECS = {
     "STRUCT It { v: Int64 }\n",
     "It[8]@pool",
     "MUTABLE xs: It[8]@pool = [];\n    _ = &xs.insert(It{ v: 4_i64 });",
-    1,
-  ],
-  hash_map: [
-    "",
-    "HashMap<Int64>",
-    "MUTABLE xs: HashMap<Int64> = {};\n    xs[\"k\"] = 4_i64;",
     1,
   ],
   sharded_list: [
@@ -111,7 +104,7 @@ RETURN_VALUE_SHAPE_SPECS = {
     "MUTABLE inner: Int64[]@list = [];\n    &inner.append(5_i64);\n    MUTABLE xs: Int64[][]@list = [];\n    &xs.append(inner);",
     1,
   ],
-}.freeze
+).freeze
 
 # Empirical overrides for cells that fail today. Default = :pass. Every
 # non-passing cell carries its bug task ID inline. Classified by
@@ -156,7 +149,7 @@ FuzzGenerator.register(:return_value_modality, cells: RETURN_VALUE_CELLS) do |p|
 
   expected_n_for_shape =
     case p[:shape]
-    when :string then 2  # "hi".length() == 2
+    when :string then 3  # canonical semantic String payload is "one"
     when :struct_owned_fields then 5  # "hello".length()
     else expected_n
     end

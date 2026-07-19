@@ -180,6 +180,11 @@ class PipelineLoweringBridge
     @lowering.with_fiber_capture_map(new_entries, capture_symbols: capture_symbols, rt_override: rt_override, &blk)
   end
 
+  sig { params(kind: Symbol, dispatch: Symbol, analysis: T.nilable(CapabilityHelper::CaptureAnalysis)).returns(MIR::ExecutionBoundaryFact) }
+  def execution_boundary_fact(kind, dispatch, analysis)
+    @lowering.pipeline_execution_boundary_fact(kind, dispatch, analysis)
+  end
+
   sig do
     type_parameters(:U)
       .params(

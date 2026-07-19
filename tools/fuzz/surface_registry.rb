@@ -502,6 +502,34 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:cleanup_on_all_paths, :error_path_allocator_identity],
     },
 
+    select_tense_assignment_matrix: {
+      escape_sources: [:stream_next],
+      execution_boundaries: [:stream_pipeline, :future_promise],
+      mir_ownership_contracts: [:cleanup_on_all_paths, :move_suppresses_cleanup],
+    },
+
+    # Semantic expression/consumer coverage; managed payloads are observed but
+    # ordinary contexts do not claim a capability surface.
+    semantic_equivalence_matrix: {},
+
+    semantic_gap_matrix: {
+      cleanup_value_shapes: [:string, :dynamic_array, :hash_map, :struct_owned_fields, :nested_container],
+      escape_sinks: [:return_value, :struct_field_store, :list_append, :takes_arg],
+      mir_ownership_contracts: [:promotion_on_escape, :cleanup_on_all_paths, :move_suppresses_cleanup],
+    },
+
+    semantic_full_matrix: {
+      cleanup_value_shapes: [:string, :dynamic_array, :hash_map, :struct_owned_fields, :nested_container],
+      escape_sinks: [:return_value, :struct_field_store, :list_append, :function_arg, :takes_arg, :give_arg],
+      mir_ownership_contracts: [:promotion_on_escape, :cleanup_on_all_paths, :move_suppresses_cleanup, :non_copy_requires_explicit_move_or_copy],
+    },
+
+    semantic_capability_matrix: {
+      cleanup_value_shapes: [:string, :dynamic_array, :hash_map, :struct_owned_fields, :nested_container],
+      storage_capabilities: [:multiowned, :shared],
+      sync_capabilities: [:locked, :write_locked, :versioned],
+    },
+
     pipeline_value_block_matrix: {
       execution_boundaries: [:stream_pipeline],
       mir_ownership_contracts: [:cleanup_on_all_paths],

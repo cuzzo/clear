@@ -683,7 +683,11 @@ module MIRLoweringFunctions
                     false
                   end
     return "CheatLib.Arc(#{type_info.resolved})" if type_info.shared? && type_info.generic_type_parameter?
-    return "anytype" if is_user_struct || polymorphic_generic_struct || type_info.collection? || atomic_sync
+    # Canonical finite stream parameters accept all compatible producers
+    # (range cursors, open generators, and bounded generators). Their shared
+    # NEXT protocol is the ABI; their concrete storage representation is not.
+    return "anytype" if is_user_struct || polymorphic_generic_struct || type_info.collection? ||
+      type_info.canonical_stream? || atomic_sync
 
     base_zig
   end
@@ -1112,14 +1116,46 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(a, context: "call boundary argument")
 
-    moved_arg = a.is_a?(AST::MoveNode) ||
+    moved_arg = a.is_a?(AST::CopyNode) || a.is_a?(AST::CloneNode) ||
+                a.is_a?(AST::MoveNode) ||
                 (AST.moved?(a) &&
                  !a.is_a?(AST::CopyNode) && !a.is_a?(AST::CloneNode) &&
                  !arg.is_a?(MIR::DupeSlice) && !arg.is_a?(MIR::DeepCopy))
+    # See the corresponding TAKES branch below. This must precede the
+    # list-to-slice fast path: an Rc/Arc list is a handle, not an ArrayList,
+    # so `OwnedSlice` cannot consume it directly.
+    if callee_param&.takes && ti.any_rc? && !callee_param_type.any_rc? &&
+       !callee_param_type.generic_type_parameter?
+      sink_alloc = allocator_for_takes_param!(callee_param)
+      payload = rc_payload_value(arg, ti)
+      materialized = MIR::DeepCopy.new(payload, callee_param_type.zig_type, nil, :full_value, sink_alloc)
+      materialized = hoist_alloc(materialized, a, err_cleanup: true)
+      if owned_slice_argument_required?(callee_param, moved_arg, ti, callee_param_type)
+        owned_slice = MIR::OwnedSlice.new(materialized, sink_alloc)
+        return T.cast(with_ownership_consumption(
+          owned_slice,
+          mir_ident_names(materialized),
+          "MIR::OwnedSlice(managed payload)",
+          target_alloc: sink_alloc,
+        ), MIR::OwnedSlice)
+      end
+
+      return MIR::AddressOf.new(materialized) if wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)
+      return materialized
+    end
     if owned_slice_argument_required?(callee_param, moved_arg, ti, callee_param_type)
       sink_alloc = allocator_for_takes_param!(callee_param)
+      owned_slice = MIR::OwnedSlice.new(arg, sink_alloc)
+      # Fixed array literals are copied into the destination allocator by
+      # OwnedSlice; their stack binding is not an ownership source.  Dynamic
+      # owning containers, by contrast, transfer their backing allocation via
+      # toOwnedSlice and must retain the consumption fact.
+      owns_slice_input = ownership_tracked_transfer_type?(ti) ||
+        mir_ident_names(arg).any? { |name| function_state.lowered_alloc_names.include?(name.to_s) }
+      return owned_slice unless owns_slice_input
+
       return T.cast(with_ownership_consumption(
-        MIR::OwnedSlice.new(arg, sink_alloc),
+        owned_slice,
         mir_ident_names(arg),
         "MIR::OwnedSlice",
         target_alloc: sink_alloc,
@@ -1128,8 +1164,38 @@ module MIRLoweringFunctions
 
     if callee_param&.takes
       sink_alloc = allocator_for_takes_param!(callee_param)
+      # Function signatures intentionally expose the payload type, not an
+      # Rc/Arc capability wrapper.  A `GIVE COPY managed` argument therefore
+      # cannot cross this boundary as the wrapper itself: it must materialize
+      # an owned payload for the plain TAKES slot.  The original handle remains
+      # caller-owned and is released by its normal cleanup path after the copy.
       placed = materialize_owned_sink_value(arg, a, sink_alloc, callee_param_type)
       arg = hoist_alloc(placed, a, err_cleanup: true)
+    end
+
+    # An owned OR_ELSE used as a borrowing call argument is evaluated inside
+    # its lazy branch. At this point its ownership effect is not finalized, so
+    # the generic hoister cannot yet see it. Place and bind the merge using the
+    # annotated argument type before it becomes anonymously nested in Call.
+    if callee_param && !callee_param.takes && arg.is_a?(MIR::Orelse) &&
+       (ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) || ti.needs_cleanup?(T.unsafe(mir_schema_lookup)))
+      arg_alloc = placement_for_node(a)
+      placed = place_owned_orelse_for_destination(arg, ti, arg_alloc)
+      arg = hoist_alloc(placed, a, transfer_on_success: false)
+    end
+
+    if callee_param && !callee_param.takes &&
+        (arg.is_a?(MIR::StructInit) || arg.is_a?(MIR::TupleLiteral) || arg.is_a?(MIR::ArrayInit))
+      # A non-TAKES parameter borrows its argument. Fresh composites with
+      # owned children therefore need a caller-side owner that survives the
+      # call and is cleaned afterwards; moving children directly into an
+      # anonymous argument abandons them when the callee only copies/reads it.
+      arg = hoist_alloc(
+        arg,
+        a,
+        transfer_on_success: false,
+        ownership_materialization_alloc: placement_for_node(a),
+      )
     end
 
     if borrowed_array_argument_required?(ti, a, callee_param_type)
@@ -1176,7 +1242,7 @@ module MIRLoweringFunctions
   sig { params(ti: Type, ast_arg: AST::Node, callee_param_type: Type).returns(T::Boolean) }
   def borrowed_array_argument_required?(ti, ast_arg, callee_param_type)
     ti.borrowed_array_argument? && !ast_arg.is_a?(AST::MoveNode) &&
-      !callee_param_type.collection?
+      !callee_param_type.collection? && !callee_param_type.generic_type_parameter?
   end
 
   sig { params(sig: T.nilable(FunctionSignature), ast_args: T::Array[AST::Node]).returns(T.nilable(MIR::CallableContract)) }
@@ -1425,19 +1491,23 @@ module MIRLoweringFunctions
       end
       call.result_type = retained_error ? Type.new(retained_error) : Type.from_node!(node, context: "call result")
     end
-    attach_explicit_move_consumption!(call, ast_args, mir_args, "call explicit move")
+    attach_explicit_move_consumption!(call, ast_args, mir_args, "call explicit move", contract)
     return call unless node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
     return call if owned_return
 
     MIR::DupeSlice.new(call, :heap)
   end
 
-  sig { params(call: MIR::Call, ast_args: T::Array[AST::Node], mir_args: T::Array[MIR::Node], source: String).void }
-  def attach_explicit_move_consumption!(call, ast_args, mir_args, source)
+  sig { params(call: MIR::Call, ast_args: T::Array[AST::Node], mir_args: T::Array[MIR::Node], source: String, contract: T.nilable(MIR::CallableContract)).void }
+  def attach_explicit_move_consumption!(call, ast_args, mir_args, source, contract)
     T.bind(self, MIRLowering) rescue nil
     operands = T.let([], T::Array[MIR::OwnershipOperandFact])
     ast_args.each_with_index do |ast_arg, idx|
       next unless ast_arg.is_a?(AST::MoveNode) || AST.moved?(ast_arg)
+      # `GIVE COPY managed` to a plain TAKES parameter is lowered as a fresh
+      # payload copy, not a transfer of the Rc/Arc wrapper.  Keep the wrapper's
+      # cleanup live so the retained source is released after the call.
+      next if managed_handle_materialized_for_plain_takes?(ast_arg, contract, idx)
       mir_arg = mir_args[idx]
       next unless mir_arg
       operands.concat(ownership_operands_for_lowered_takes_arg(mir_arg, ast_arg, source, :heap))
@@ -1452,6 +1522,18 @@ module MIRLoweringFunctions
       source: source,
       covers_consuming_params: true,
     )
+  end
+
+  sig { params(ast_arg: AST::Node, contract: T.nilable(MIR::CallableContract), idx: Integer).returns(T::Boolean) }
+  def managed_handle_materialized_for_plain_takes?(ast_arg, contract, idx)
+    return false unless contract
+    param = contract.signature.params[idx]
+    return false unless param&.takes
+
+    source = ast_arg.is_a?(AST::MoveNode) ? ast_arg.value : ast_arg
+    source_type = Type.from_node!(source, context: "managed TAKES materialization")
+    source_type.any_rc? && !Type.new(param.type).any_rc? &&
+      !Type.new(param.type).generic_type_parameter?
   end
 
   sig do
@@ -1469,9 +1551,17 @@ module MIRLoweringFunctions
     wants_ptr_mut_value = mutable_callee &&
                           !wants_ptr_mut_list &&
                           !callee_param_type.needs_pointer_passing?
-    wants_ptr_intrinsic = ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
+    # `T` generic parameters are emitted as an anytype value. Passing a
+    # map/list by address here changes the instantiated T to *Map/*List and
+    # breaks value-returning generic functions; their own body decides whether
+    # to borrow or materialize the concrete payload.
+    wants_ptr_intrinsic = ti.is_a?(Type) && Type.new(ti).needs_pointer_passing? &&
+                          !callee_param_type.generic_type_parameter?
+    wants_ptr_protocol_map = !!(callee_sig && callee_param &&
+      protocol_map_signature_param?(callee_sig, callee_param))
     wants_ptr_poly      = universal_poly_arg_needs_addr?(a, callee_sig, idx)
-    !!(wants_ptr_mut_list || wants_ptr_mut_value || wants_ptr_intrinsic || wants_ptr_poly)
+    !!(wants_ptr_mut_list || wants_ptr_mut_value || wants_ptr_intrinsic ||
+      wants_ptr_protocol_map || wants_ptr_poly)
   end
 
   sig { params(a: AST::Node).returns(T::Boolean) }
@@ -1978,8 +2068,8 @@ module MIRLoweringFunctions
       # shared collections (e.g. map.contains?, map.count) get rewritten
       # to operate on `Deref(map.ctrl.data)`, which the bc_emitter doesn't
       # resolve to the underlying MapRef.
-      if receiver_type&.rc_map? && !bc_target?
-        obj_mir = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(obj_mir, "ctrl"), "data"))
+      if receiver_type&.any_rc? && !bc_target?
+        obj_mir = rc_payload_value(T.cast(obj_mir, MIR::Node), receiver_type)
       elsif receiver_type&.frozen?
         # *const T auto-derefs for method calls in Zig — no _root deref needed
       end

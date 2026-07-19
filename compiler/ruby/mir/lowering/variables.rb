@@ -281,8 +281,7 @@ module MIRLoweringVariables
     needs_annotation = ZigTypeMapper::ZIG_PRIMITIVES.include?(zig_type) || ft.fn_type? || ft.error_union? ||
                        (node.value.is_a?(AST::Literal) && node.value.type == :NIL) ||
                        (ft.string? && is_heap)  # ""/literal infers *const [0:0]u8 without annotation
-    annotation_zig = ft.error_union? && zig_type.start_with?("!") ? "anyerror#{zig_type}" : zig_type
-    annotation = needs_annotation ? Type.new(annotation_zig) : nil
+    annotation = needs_annotation ? ft : nil
 
     # Resolve init value - special handling for collection types.
     # Per-declaration storage (set by escape analysis) takes precedence over the

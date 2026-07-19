@@ -255,12 +255,13 @@ RSpec.describe "TRY propagation" do
     expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
   end
 
-  it "materializes finite stream SELECT pipelines before binding" do
+  it "preserves finite stream SELECT pipelines through EACH" do
     source = <<~CLEAR
       FN main() RETURNS Void ->
         stream:~ = BG STREAM { YIELD 9; CLOSE; };
-        selected = stream |> SELECT _ + 1;
-        ASSERT selected.length() == 1;
+        MUTABLE selected = 0;
+        stream |> SELECT _ + 1 |> EACH { selected = _; };
+        ASSERT selected == 10;
         RETURN;
       END
     CLEAR

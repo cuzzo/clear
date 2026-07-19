@@ -19,7 +19,7 @@ module ZigCoverageSupport
   class Error < StandardError; end
 
   TRUTHY = %w[1 true yes on].freeze
-  KCOV_CODECOV_EXCLUDE_PATTERN = "-test.zig,-vopr.zig,-loom.zig,/vopr-,/loom-,/all-tests.zig,/all-fuzz.zig,/._clear_cov_".freeze
+  KCOV_CODECOV_EXCLUDE_PATTERN = "-test.zig,-vopr.zig,-loom.zig,/vopr-,/loom-,/all-tests.zig,/all-fuzz,/._clear_cov_".freeze
   SANITIZER_REMOVALS_FILE = ".zig-coverage-sanitizer-removals.json"
 
   def self.enabled?
@@ -97,6 +97,17 @@ module ZigCoverageSupport
     FileUtils.rm_rf(kcov_dir)
     FileUtils.mkdir_p(kcov_dir)
     kcov_dir
+  end
+
+  def self.clear_run_prefix!(suite, prefix)
+    root = output_root(suite)
+    return unless Dir.exist?(root)
+
+    Dir.children(root).each do |entry|
+      next unless entry == prefix || entry.start_with?("#{prefix}-") || entry == "merged"
+
+      FileUtils.rm_rf(File.join(root, entry))
+    end
   end
 
   def self.merge!(suite)

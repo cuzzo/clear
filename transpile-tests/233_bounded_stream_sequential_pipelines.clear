@@ -38,7 +38,7 @@ FN main() RETURNS Void ->
     s6: ~Int64[3] = [BG { 2; }, BG { 3; }, BG { 4; }];
     # SELECT + SUM: same as WHERE — SELECT strips tenseness, so the
     # SUM folds eagerly to a scalar (no observable lift here).
-    doubled_sum = s6 |> SELECT _ * 2 |> SUM _;
+    doubled_sum = s6 |> SELECT _ * 2 |> SUM _ |> COLLECT;
     ASSERT doubled_sum == 18, "SELECT+SUM: (2+3+4)*2";
 
     # SKIP + EACH

@@ -26,6 +26,8 @@ class FuzzGenerator
   def load_templates!
     Dir[File.expand_path('templates/*.rb', __dir__)].sort.each { |f| require f }
     raise "no templates loaded" if TEMPLATES.empty?
+    require_relative 'semantic_migration'
+    SemanticMigration.adopt!(TEMPLATES)
   end
 
   def full_matrix
@@ -42,7 +44,8 @@ class FuzzGenerator
 
   # Returns a hash:
   #   { source: <text>, expected: :pass | :compile_error,
-  #     kind: :clear | :mir_checker, error_code: Symbol | nil }.
+  #     kind: :clear | :mir_checker, error_code: Symbol | nil,
+  #     diagnostic_code_required: true | false }.
   def emit(tuple)
     t = TEMPLATES.fetch(tuple[:template])
     cell = tuple[:params].dup
@@ -57,6 +60,7 @@ class FuzzGenerator
       expected: expected,
       kind: kind,
       error_code: meta[:error_code],
+      diagnostic_code_required: meta.fetch(:diagnostic_code_required, false),
     }
   end
 end

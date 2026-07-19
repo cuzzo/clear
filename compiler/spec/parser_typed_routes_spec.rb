@@ -33,6 +33,23 @@ RSpec.describe "ClearParser typed rule routes" do
     expect(node.target.base_type).to eq(:Int64)
   end
 
+  it "preserves every legal ordered SELECT modifier contract" do
+    legal = %w[! ? !? ~ ~! ~? ~!? !~ !~! !~? !~!?]
+    legal.each do |order|
+      node = parse_expression("SELECT:#{order} value")
+      expect(node).to be_a(AST::SelectOp)
+      expect(node.modifier_order).to eq(order)
+      expect(node.stream_mode).to eq(order.include?('~'))
+    end
+  end
+
+  it "rejects invalid SELECT wrapper orderings" do
+    %w[?! ?~ !?~ ~?! ~~].each do |order|
+      expect { parse_expression("SELECT:#{order} value") }
+        .to raise_error(ParserError, /Invalid SELECT modifier order/)
+    end
+  end
+
   it "parses every value-wrapper route directly" do
     expected = {
       "MOVE value" => AST::MoveNode,

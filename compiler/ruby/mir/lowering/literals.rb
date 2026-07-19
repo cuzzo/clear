@@ -147,9 +147,14 @@ module MIRLoweringLiterals
         lowered_item = elem_type ? with_expected_type(elem_type) { lower(i) } : lower(i)
         placed_item = elem_type ? place_value_for_destination(lowered_item, i, list_alloc, elem_type) : lowered_item
         item_value = materialize_owned_sink_value(placed_item, i, list_alloc, elem_type)
-        item_alloc = mir_owned_alloc(item_value)
-        item = hoist_alloc(item_value, i, err_cleanup: true)
-        if plan.element_needs_owned_storage && !ast_expr_produces_heap?(i) && item_alloc != list_alloc
+        item_alloc = mir_owned_alloc(item_value) ||
+          (ast_expr_produces_heap?(i) ? :heap : placement_for_node(i))
+        needs_allocator_transport = plan.element_needs_owned_storage && item_alloc && item_alloc != list_alloc
+        # A matching child is transferred into the aggregate, so it needs only
+        # error cleanup before that transfer. A mismatched child is merely read
+        # by DeepCopy and must retain ordinary local cleanup for its source.
+        item = hoist_alloc(item_value, i, err_cleanup: !needs_allocator_transport)
+        if needs_allocator_transport
           hoist_alloc(MIR::DeepCopy.new(item, elem_zig, nil, :full_value, list_alloc), i, err_cleanup: true)
         else
           item
@@ -205,7 +210,10 @@ module MIRLoweringLiterals
   sig { params(node: AST::TupleLit).returns(MIR::TupleLiteral) }
   def lower_tuple_lit(node)
     T.bind(self, MIRLowering) rescue nil
-    tuple_type = node.full_type!(context: "tuple literal lowering")
+    # Contextual tuple typing may refine untyped constructors such as List[]
+    # in an individual field.  Use that destination tuple, not the literal's
+    # pre-coercion Tuple<Any[],...> inference, when lowering child elements.
+    tuple_type = Type.new(node.coerced_type_info || node.full_type!(context: "tuple literal lowering"))
     lower_tuple_items(node.items, tuple_type)
   end
 
@@ -443,7 +451,9 @@ module MIRLoweringLiterals
   def list_literal_plan(node)
     T.bind(self, MIRLowering) rescue nil
     expected_ti = Type.from_node(function_state.current_expected_type)
-    ti = if expected_ti&.collection?
+    expected_owned_list = expected_ti&.collection? ||
+      (expected_ti&.direct_indexable_collection? && expected_ti.dynamic? && !expected_ti.string?)
+    ti = if expected_owned_list
       expected_ti
     else
       node.coerced_type_info || node.full_type!
@@ -451,9 +461,14 @@ module MIRLoweringLiterals
     type_info = Type.new(ti)
     elem_type = type_info.element_type
     elem_ti = elem_type ? Type.new(elem_type) : nil
+    requested_alloc = function_state.current_decl_alloc || alloc_for_node(node)
     ListLiteralPlan.new(
       type_info: type_info,
-      alloc: function_state.current_decl_alloc || alloc_for_node(node),
+      # The aggregate follows its destination. Individual owned children are
+      # transported to this allocator while lowering the item list; promoting
+      # the whole aggregate to match one child is later undone by declaration
+      # hoisting and leaves an incoherent heap child inside a frame aggregate.
+      alloc: requested_alloc,
       element_type: elem_ti,
       element_zig: elem_ti ? transpile_type(elem_ti) : "u8",
       element_needs_owned_storage: elem_ti ? elem_ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) : false,

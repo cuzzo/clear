@@ -47,6 +47,7 @@ class PipelineHost
     @each_idx_counter = T.let(0, Integer)
     @label_state = T.let(PipelineLabelState.new, PipelineLabelState)
     @pipe_temp_counter = T.let(0, Integer)
+    @stream_select_counter = T.let(0, Integer)
     @do_rt_name = T.let(nil, T.nilable(String))
     @materializer = T.let(PipelineMaterializer.new(host: build_materializer_host), PipelineMaterializer)
     @range_lowerer = T.let(PipelineRangeLowerer.new(host: build_range_lowerer_host), PipelineRangeLowerer)
@@ -632,10 +633,61 @@ class PipelineHost
   # Returns nil for non-migrated operators (caller falls back to string path).
   sig { params(node: AST::BinaryOp).returns(PipelineLoweringResult) }
   def lower_pipeline(node)
+    if node.right.is_a?(AST::SelectOp) && Type.new(node.full_type!).canonical_stream_result?
+      return lower_stream_select(PipelineSite.new(list: node.left, options: node), node.right)
+    end
+
     plan = @plan_builder.build(node)
     return nil unless plan
 
-    lower_dispatch_plan(plan)
+    lowered = lower_dispatch_plan(plan)
+    if concurrent_async_stream_select?(node)
+      return lower_concurrent_async_stream_result(node, T.must(lowered))
+    end
+    lowered
+  end
+
+  sig { params(node: AST::BinaryOp).returns(T::Boolean) }
+  def concurrent_async_stream_select?(node)
+    concurrent = node.right
+    return false unless concurrent.is_a?(AST::ConcurrentOp)
+    select = concurrent.op
+    return false unless select.is_a?(AST::SelectOp)
+    return false unless select.modifier_order.to_s.include?('~')
+
+    result_type = Type.new(node.full_type!)
+    result_type.canonical_stream_result? &&
+      (result_type.error_union? ? T.must(result_type.payload_type) : result_type).dynamic_stream?
+  end
+
+  sig do
+    params(
+      node: AST::BinaryOp,
+      promises: T.any(MIR::BgBlock, MIR::BlockExpr, MIR::ForStmt, MIR::ScopeBlock, MIR::ShardConcurrentEach),
+    ).returns(MIR::BlockExpr)
+  end
+  def lower_concurrent_async_stream_result(node, promises)
+    result_type = Type.new(node.full_type!)
+    stream_type = result_type.error_union? ? T.must(result_type.payload_type) : result_type
+    item_type = T.must(stream_type.canonical_stream_item_type)
+    promises_name = "__concurrent_select_promises_#{@stream_select_counter += 1}"
+    call = @lowering_bridge.emit_builtin(:promiseListToStream, [
+      MIR::Ident.new(item_type.nested_zig_type),
+      MIR::AllocatorRef.new(pipeline_result_alloc),
+      MIR::Ident.new(@do_rt_name || "rt"),
+      MIR::Ident.new(promises_name),
+    ])
+    label = next_pipe_label
+    typed_block_expr(label, [
+      MIR::Let.new(promises_name, promises, false, nil, nil),
+      MIR::BreakStmt.new(label, call),
+      *MIR::OwnershipTransferPlan.new(
+        name: promises_name,
+        target: :call,
+        target_alloc: :heap,
+        move_guarded: false,
+      ).marks,
+    ], result_type)
   end
 
   sig { params(plan: PipelineOperationPlan).returns(PipelineLoweringResult) }
@@ -676,6 +728,126 @@ class PipelineHost
   private :lower_execution_plan
 
   private
+
+  sig { params(site: PipelineSite, op: AST::SelectOp).returns(MIR::BgBlock) }
+  def lower_stream_select(site, op)
+    @stream_select_counter += 1
+    id = @stream_select_counter
+    result_type = Type.new(site.options.full_type!)
+    stream_type = result_type.error_union? ? T.must(result_type.payload_type) : result_type
+    item_type = T.must(result_type.canonical_stream_item_type)
+    source_type = Type.new(site.list.full_type!)
+
+    ctx_type = "__SelectStreamCtx#{id}"
+    alloc_var = "__select_stream#{id}_alloc"
+    stream_var = "__select_stream#{id}_stream"
+    ctx_var = "__select_stream#{id}_ctx"
+    label = "__select_stream#{id}"
+    local_stream = "__select_stream#{id}_local"
+
+    analysis = T.cast(op.capture_analysis, T.nilable(CapabilityHelper::CaptureAnalysis))
+    caps = FiberCtxBuilder.build(
+      analysis,
+      body_access_prefix: "ctx",
+      fresh_heap_alloc: alloc_var,
+      fresh_heap_id: 10_000 + id,
+      schema_lookup: ->(name) { pipeline_schema_lookup.call(name) },
+    )
+
+    source_mir = visit_mir(site.list)
+    source_type_zig = if source_mir.is_a?(MIR::Ident)
+      "*@TypeOf(#{source_mir.name})"
+    else
+      "*#{source_type.zig_type}"
+    end
+    capture_fields = [MIR::ContextFieldDecl.new(name: "source", type_zig: source_type_zig)] +
+      caps.specs.map { |spec| MIR::ContextFieldDecl.new(name: spec.name, type_zig: spec.field_type_zig) }
+    capture_inits = [MIR::StructInitField.new(name: :stream_inner,
+      value: MIR::FieldGet.new(MIR::Ident.new(stream_var), "inner")),
+      MIR::StructInitField.new(name: :alloc, value: MIR::Ident.new(alloc_var)),
+      MIR::StructInitField.new(name: :source, value: MIR::AddressOf.new(source_mir))] +
+      caps.specs.map { |spec| MIR::StructInitField.new(name: spec.name, value: spec.init_value_mir) }
+
+    selector_prefix = T.let([], T::Array[MIR::Emittable])
+    selector = with_pipeline_context(placeholder: "__select_item") do
+      with_fiber_capture_map(caps.capture_map,
+        capture_symbols: caps.capture_symbols, rt_override: "__rt") do
+        visit_mir(op.expression)
+      end
+    end
+    if op.modifier_order.to_s.include?('~')
+      outer, = op.modifier_order.to_s.split('~', 2)
+      promise_name = "__select_promise#{id}"
+      selector_prefix << MIR::Let.new(promise_name, selector, false, nil, nil)
+      expression_type = if op.expression.respond_to?(:error_union_type) &&
+                           T.unsafe(op.expression).error_union_type
+        Type.new(T.unsafe(op.expression).error_union_type)
+      else
+        Type.new(op.expression.full_type!)
+      end
+      promise_type = outer == '!' ? T.must(expression_type.payload_type) : expression_type
+      next_contract = MIR::CallableContract.new(
+        MIR::CallableContract.no_ownership(0).signature,
+        MIR::OwnershipContract.consume_operands([
+          MIR::OwnershipOperandFact.owned_binding(
+            promise_name, promise_type, "stream SELECT awaits selector promise", :heap),
+        ]),
+        0,
+      )
+      selector = MIR::MethodCall.new(MIR::Ident.new(promise_name), "next", [], true,
+        next_contract)
+    end
+
+    push = MIR::ExprStmt.new(MIR::MethodCall.new(
+      MIR::Ident.new(local_stream), "push", [selector], true,
+      MIR::CallableContract.no_ownership(1)), false)
+    item_body = [*selector_prefix, push]
+    source_ref = MIR::FieldGet.new(MIR::Ident.new("ctx"), "source")
+    loop = if source_type.array?
+      MIR::ForStmt.new(MIR::ItemsAccess.new(source_ref, true), "__select_item", item_body, nil)
+    else
+      next_method = source_type.inf_stream? || source_type.bounded_stream? ? "nextOrNull" : "next"
+      MIR::WhileStmt.new(MIR::MethodCall.new(source_ref, next_method, [], true,
+        MIR::CallableContract.no_ownership(0)), item_body, "__select_item", nil, nil, nil)
+    end
+
+    stream_zig = if stream_type.inf_stream?
+      "CheatLib.InfStream(#{item_type.nested_zig_type})"
+    elsif stream_type.bounded_stream?
+      "CheatLib.BoundedStream(#{item_type.nested_zig_type}, #{stream_type.stream_capacity})"
+    else
+      "CheatLib.Stream(#{item_type.nested_zig_type})"
+    end
+    task_config = MIR::TaskConfigPlan.new(stack_variant: "Large")
+    spawn_call = MIR::FiberSpawnCall.new(
+      target: :runtime_submit,
+      runtime_name: "rt",
+      ctx_type: ctx_type,
+      ctx_var: ctx_var,
+      task_config: task_config,
+    )
+    plan = MIR::BgStreamPlan.new(
+      id: 10_000 + id,
+      ctx_type: ctx_type,
+      alloc_var: alloc_var,
+      stream_var: stream_var,
+      ctx_var: ctx_var,
+      blk_label: label,
+      stream_zig: stream_zig,
+      local_stream: local_stream,
+      capture_fields: capture_fields,
+      capture_inits: capture_inits,
+      promoted_decls: caps.specs.flat_map(&:setup_mir),
+      capture_cleanups: caps.specs.filter_map { |spec| spec.cleanup_mir_for("ctx") },
+      body: [loop],
+      spawn_call: spawn_call,
+      rt_name: "rt",
+    )
+    bg = MIR::BgBlock.new(plan, analysis&.captures || {}, [loop])
+    bg.result_type = result_type
+    bg.boundary_fact = @lowering_bridge.execution_boundary_fact(:bg_stream, :local, analysis)
+    bg
+  end
 
   ALLOC_REF_DEF = T.let(FunctionSignature.borrowing_intrinsic, FunctionSignature)
 

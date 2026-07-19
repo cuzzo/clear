@@ -73,14 +73,14 @@ class ZigType
 
   sig { returns(String) }
   def fallible_return_type
-    return source if error_union?
+    return source if top_level_error_union?
 
     "!#{source}"
   end
 
   sig { returns(String) }
   def concrete_fallible_return_type
-    return source if @anyerror_union || @explicit_error_set_union
+    return source if top_level_concrete_error_union?
     return "anyerror#{source}" if inferred_error_union?
 
     "anyerror!#{source}"
@@ -93,7 +93,7 @@ class ZigType
 
   sig { returns(String) }
   def anyerror_return_type
-    return source if error_union?
+    return source if top_level_error_union?
 
     "anyerror!#{source}"
   end
@@ -110,5 +110,20 @@ class ZigType
     return T.must(source[1..]) if inferred_error_union?
 
     source
+  end
+
+  private
+
+  # A payload may itself contain an error union, for example
+  # Promise(anyerror!i64). That does not make the enclosing function return
+  # type fallible: an allocation failure still needs an outer `!`.
+  sig { returns(T::Boolean) }
+  def top_level_error_union?
+    inferred_error_union? || top_level_concrete_error_union?
+  end
+
+  sig { returns(T::Boolean) }
+  def top_level_concrete_error_union?
+    source.start_with?("anyerror!") || source.match?(/\Aerror\{[^}]*\}!/)
   end
 end

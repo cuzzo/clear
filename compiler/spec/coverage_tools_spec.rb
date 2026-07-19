@@ -709,6 +709,18 @@ RSpec.describe "coverage gap tools" do
     expect(File.exist?(stale)).to be false
   end
 
+  it "clears stale parallel kcov runs before a fuzz rerun" do
+    root = File.join(@tmp, "coverage-fuzz")
+    %w[all-fuzz all-fuzz-0 all-fuzz-31 merged keep-me].each do |name|
+      FileUtils.mkdir_p(File.join(root, name))
+    end
+    allow(ZigCoverageSupport).to receive(:output_root).with("fuzz").and_return(root)
+
+    ZigCoverageSupport.clear_run_prefix!("fuzz", "all-fuzz")
+
+    expect(Dir.children(root)).to contain_exactly("keep-me")
+  end
+
   it "excludes Zig test, VOPR, and Loom harness files from Codecov kcov reports" do
     pattern = ZigCoverageSupport::KCOV_CODECOV_EXCLUDE_PATTERN
 

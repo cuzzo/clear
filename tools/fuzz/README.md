@@ -26,6 +26,19 @@ UAF / double-free (at runtime via `std.testing.allocator`).
     # CI gate: every registered cell, with no quarantine mechanism
     ruby tools/fuzz/run.rb --matrix --out /tmp/fuzz --clean
 
+    # Deterministic semantic campaign; depth, seed, limit, and shard are stable
+    SEMANTIC_FUZZ_DEPTH=2 SEMANTIC_FUZZ_SEED=42 SEMANTIC_FUZZ_LIMIT=200 \
+      ruby tools/fuzz/run.rb --matrix --templates semantic_equivalence_matrix
+
+    # Inspect/reproduce a derivation, or emit a same-class reduced program
+    ruby tools/fuzz/semantic.rb --depth 2 --seed 42 --json
+    ruby tools/fuzz/semantic.rb --depth 2 --seed 42 --case CASE_ID --json
+    ruby tools/fuzz/semantic.rb --depth 2 --seed 42 --case CASE_ID --shrink
+
+    # Full completion campaign: 1,000 cases for each of seven families.
+    ruby tools/fuzz/semantic_full_cli.rb --depth 3 --target-per-family 1000 --json
+    SEMANTIC_FULL_LIMIT=0 ruby tools/fuzz/run.rb --matrix --templates semantic_full_matrix
+
 ## No quarantine
 
 Every registered fuzz cell runs. There is no quarantine file, skip flag, or
@@ -34,6 +47,23 @@ an active `:compile_error` cell, and a compiler/runtime defect must make CI red.
 
 Exit code is 0 only if every program parses, type-checks, transpiles, runs,
 and reports zero leaks.
+
+## Semantic mutation gate
+
+The differential semantic gate runs the same Ruby mutant set with and without
+the generated end-to-end semantic test. It verifies that the extra example was
+actually selected, rejects both baseline and semantic runs if any result is a
+timeout, compares individual surviving mutant IDs, and writes
+`semantic-mutant-delta/v1` facts.
+
+    bundle exec ruby gems/lineage/tools/mutant-converters/semantic_mutant.rb \
+      --out /tmp/clear-semantic-mutants --timeout 60 --min-new-kills 1
+
+The final paired run selected the same 369 parser mutants on both sides and
+completed with zero timeouts: baseline 86 kills, baseline plus the 148-case
+semantic representative set 136 kills, for 50 stable new mutant kills. The
+ordinary semantic matrix still executes all 390 cases; the bounded mutation set
+keeps hundreds of repeated integration runs below the timeout gate.
 
 ## Mutant Harness
 
@@ -124,6 +154,10 @@ expected hard error is absent.
 | `c_ffi_type_matrix` | 54 | Target-resolved signed/unsigned C aliases across fixed arrays, lists, pools, sets, maps, and streams; foreign pointers require a scoped `WITH UNSAFE VIEW ... LENGTH ...` boundary and reject direct indexing, safe views, legacy method views, invalid lengths, and escaping aliases. |
 | `generic_map_protocol_matrix` | 20 | Static Map bounds and `M::Key`/`M::Value` projections across string/numeric maps, specialization-selected associated-key storage, generic allocator forwarding, cleanup-bearing value copies, value-shaped optional captures, reusable user-protocol declarations/conformances with zero-witness static dispatch (including shared capability wrappers), borrowed-value rejection, nested type syntax, and declaration-time constraint diagnostics. |
 | `generic_shared_map_capability_matrix` | 8 | `SHARED Map` specialization across locked, read/write-locked, versioned, and sharded maps; direct or non-polymorphic access is rejected before Zig. |
+| `select_tense_assignment_matrix` | 56 | Exhaustive `[]T`/`[~]T`/`[~N]T`/`[~INF]T` assignment oracle across 12 ordered SELECT modifier sequences, direct range-to-`~T` function piping, plus forbidden-order and obsolete-stream-syntax negatives. |
+| `semantic_advanced_matrix` | 200 | Independent legality/trace admission for advanced capability, depth, concurrency, effect, generic, and diagnostic workstreams; the PR concurrency lane is deterministically bounded. |
+| `semantic_capability_expansion_matrix` | 0 | Opt-in depth-four capability campaign; set `SEMANTIC_CAPABILITY_EXPANSION=1` to materialize the documented 1,700 cases. |
+| `semantic_capability_transport_matrix` | 20 | Exhaustive direct/nested managed capability transport through COPY, GIVE, and TAKES. |
 | `inherent_method_matrix` | 8 | Owner-scoped METHOD dispatch across concrete/generic owners, method-local binders, same-name methods on distinct owners, static owner functions, and rejected free-function dot syntax. |
 | `ownership_surface_smoke`   | 35           | Global smoke coverage for cleanup shapes, escape sinks, and MIR ownership contracts. |
 | `escape_mechanism_matrix`   | 30           | Direct AST-bound escape mechanisms: return, yield, BG/BG STREAM/DO capture, enclosing assignment, field/index stores, collection/aggregate stores, recursive aggregate returns, TAKES/GIVE, loop carry, and call-return receiver stores. |
@@ -177,6 +211,10 @@ expected hard error is absent.
 | `fsm_edge_matrix`           | 8               | Additional FSM splitter edges around OR fallbacks, nested loop/branch suspension, stream branches, locks before NEXT, and known early-return lowering failures. |
 | `diagnostic_policy_matrix`  | 16              | Policy-heavy front-end diagnostics for reentrancy, hold-lock-across-yield, lock ordering, handlers, and ownership/fixable rejection paths. |
 | `pipeline_source_shape_matrix` | 44           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and observable terminals. |
+| `semantic_equivalence_matrix` | 390           | Recursively derived Int64, Bool, String, struct, list, map, and Tuple equivalences crossed with compatible local, call, aggregate, ownership, and pipeline slots. |
+| `semantic_gap_matrix` | 21                    | Raw positive witnesses for every fixed compiler defect found by the original, capability-expansion, whole-program, and migration-completion campaigns. |
+| `semantic_capability_matrix` | 17             | Closed reviewed capability allowlist across String, struct, list, map, Tuple, synchronized struct, and shared-atomic Int64 payloads. |
+| `semantic_full_matrix` | 250                  | Balanced deterministic CI tier of the 7,000-case full campaign; set `SEMANTIC_FULL_LIMIT=0` for all 1,000 cases per family. |
 | `pipeline_gap_matrix`        | 8            | Focused pipeline operator gaps: TAKE_WHILE, SKIP, WINDOW(time), UNNEST bindings, and CONCURRENT terminals. |
 | `pipeline_value_block_matrix` | 24           | Source-level value blocks plus SELECT:!/:? effect contracts, async selectors, strict WHERE predicates, and concurrent variants. |
 | `call_ownership_contract_matrix` | 73         | Normal calls, TAKES bare/COPY/GIVE, owned/fallible returns, receiver mutation, BG calls, and pipeline call contracts across string/list/struct/union/nested owned shapes. |

@@ -51,7 +51,8 @@ module ErrorHelper
       raise err_class.new(
         source_token,
         T.unsafe(message),
-        diagnostic_source_code
+        diagnostic_source_code,
+        code: code_or_message.is_a?(Symbol) ? code_or_message : nil
       )
   end
 
@@ -201,13 +202,24 @@ end
 class SourceError < StandardError
     extend T::Sig
 
-  attr_reader :token, :original_message, :source_code
+  sig { returns(T.nilable(Lexer::Token)) }
+  attr_reader :token
 
-  sig { params(token: T.nilable(Lexer::Token), message: String, source_code: T.nilable(String)).void }
-  def initialize(token, message, source_code)
+  sig { returns(String) }
+  attr_reader :original_message
+
+  sig { returns(T.nilable(String)) }
+  attr_reader :source_code
+
+  sig { returns(T.nilable(Symbol)) }
+  attr_reader :code
+
+  sig { params(token: T.nilable(Lexer::Token), message: String, source_code: T.nilable(String), code: T.nilable(Symbol)).void }
+  def initialize(token, message, source_code, code: nil)
     @token = T.let(token, T.nilable(Lexer::Token))
     @original_message = message
     @source_code = source_code
+    @code = code
     super(build_message)
   end
 
@@ -221,19 +233,19 @@ class SourceError < StandardError
   def build_message
     # Handle EOF or missing token
     if @token.nil? || @token.type == :EOF
-      return "\n\e[31m[#{error_type}]\e[0m #{@original_message} (at End of File)\n"
+      return "\n\e[31m[#{error_type}]\e[0m#{code_suffix} #{@original_message} (at End of File)\n"
     end
 
     line_num = @token.line
     col_num = @token.column
 
-    return "[#{error_type}] #{@original_message} (Line #{line_num})" if @source_code.nil? || @source_code.empty?
+    return "[#{error_type}]#{code_suffix} #{@original_message} (Line #{line_num})" if @source_code.nil? || @source_code.empty?
 
     lines = @source_code.split("\n")
     raw_line = lines[line_num - 1] || ""
 
     # 1. Header
-    out = "\n\e[31m[#{error_type}]\e[0m #{@original_message}\n"
+    out = "\n\e[31m[#{error_type}]\e[0m#{code_suffix} #{@original_message}\n"
     out += "\e[90mLocation:\e[0m Line #{line_num}, Column #{col_num}\n\n"
 
     # 2. The Code Snippet
@@ -249,6 +261,11 @@ class SourceError < StandardError
     out += "  #{' ' * gutter_width} | \n"
 
     out
+  end
+
+  sig { returns(String) }
+  def code_suffix
+    @code ? " [#{@code}]" : ""
   end
 end
 

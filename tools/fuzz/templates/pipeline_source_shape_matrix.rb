@@ -135,7 +135,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
       <<~CHT
         FN main() RETURNS Void ->
           s: ~?Int64[] = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
-          total = s |> SELECT _ * 2_i64 |> SUM _;
+          total = s |> SELECT _ * 2_i64 |> SUM _ |> COLLECT;
           ASSERT total == 20_i64, "pipeline select sum";
           RETURN;
         END
@@ -153,7 +153,8 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
         when :list_inline then "[1_i64, 2_i64, 3_i64, 4_i64]"
         else "s"
         end
-      total_expr = "#{source_expr} |> SELECT _ * 2_i64 |> SUM _"
+      collect = %i[range_inline range_bound bg_stream_bound].include?(p[:source]) ? " |> COLLECT" : ""
+      total_expr = "#{source_expr} |> SELECT _ * 2_i64 |> SUM _#{collect}"
       <<~CHT
         FN main() RETURNS Void ->
           #{decl}

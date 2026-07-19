@@ -544,6 +544,7 @@ module MIR
       first_active_effect([
         [same_owned_alloc?(left, right), left],
         [owned_cleanup_result?(left, result_type), left],
+        [owned_cleanup_result?(right, result_type), right],
       ])
     end
 
@@ -608,7 +609,11 @@ module MIR
 
     sig { params(result_type: T.nilable(Type)).returns(T::Boolean) }
     private_class_method def self.cleanup_result_type?(result_type)
-      result_type&.needs_cleanup?(nil) == true
+      return false unless result_type
+
+      result_type.needs_cleanup?(nil) ||
+        result_type.recursive_cleanup_shape?(nil) ||
+        result_type.specialization_may_need_cleanup?
     end
 
     sig { params(stmts: T::Array[Emittable], value: OwnershipEffectInput).returns(OwnershipEffect) }
@@ -631,7 +636,12 @@ module MIR
       return none if result_names.empty?
 
       transferred_allocs = stmts.grep(MIR::TransferMark)
-        .select { |stmt| stmt.target == :block_result && result_names.include?(stmt.name.to_s) }
+        # An owned child moved into a composite is part of the block result
+        # when that composite is the break value. Preserve that ownership
+        # effect just as we do for a direct :block_result transfer; otherwise
+        # destination placement deep-copies the composite and abandons the
+        # moved source child on the success path.
+        .select { |stmt| [:block_result, :owned_sink].include?(stmt.target) && result_names.include?(stmt.name.to_s) }
         .filter_map(&:target_alloc)
       effect_when(!transferred_allocs.empty?,
         owned(alloc: unique_symbol_or_nil(transferred_allocs), cleanup_kind: :uniform))
@@ -4021,6 +4031,8 @@ module MIR
       items.each { |item| values << item if item.is_a?(Emittable) }
       compact_child_exprs(values)
     end
+    sig { returns(OwnershipEffect) }
+    def ownership_effect = OwnershipEffect.from_children(child_exprs)
   end
 
   # Function pointer reference.

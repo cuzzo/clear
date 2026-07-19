@@ -183,7 +183,7 @@ RSpec.describe "pipeline legacy matrix" do
     "max" => "out = (1..<4) |> MAX _;",
     "average" => "out = (1..<4) |> AVERAGE _;",
     "where_sum" => "out = (1..<4) |> WHERE _ > 1_i64 |> SUM _;",
-    "select_sum" => "out = (1..<4) |> SELECT _ + 1_i64 |> SUM _;",
+    "select_sum" => "out = (1..<4) |> SELECT _ + 1_i64 |> SUM _ |> COLLECT;",
     "each" => "(1..<4) |> EACH { seen = seen + _; };",
     "concurrent_select" => "out = (1..<4) |> CONCURRENT(workers: 2) SELECT _;",
     "concurrent_where" => "out = (1..<4) |> CONCURRENT(workers: 2) WHERE _ > 1_i64;",

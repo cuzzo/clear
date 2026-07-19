@@ -747,6 +747,9 @@ module MIRHoistLowering
       Type.new(mir.zig_type.to_s.delete_prefix("*").to_sym, layout: :indirect)
     when MIR::ContainerInit
       Type.new(mir.zig_type.to_s, location: alloc)
+    when MIR::StructInit
+      raise "#{context}: allocating anonymous MIR::StructInit has no result type" unless mir.zig_type
+      Type.new(mir.zig_type.to_s, location: alloc)
     when MIR::DeepCopy
       if mir.type_info
         Type.new(T.must(mir.type_info), location: alloc)
@@ -1220,8 +1223,6 @@ module MIRHoistLowering
   def refresh_ownership_consumption_for_replaced_child!(parent, old_child, new_child)
     T.bind(self, MIRLowering) rescue nil
     fact = parent.ownership_consumption
-    return unless fact.is_a?(MIR::OwnershipConsumptionFact)
-
     old_names = mir_ident_names(old_child).map(&:to_s).to_set
     new_names = mir_ident_names(new_child).map(&:to_s)
     # A value-only evaluation temporary is not a new owner. Replacing an
@@ -1230,10 +1231,32 @@ module MIRHoistLowering
     # TransferMark for a name that never had an AllocMark. Standard
     # BindingMaterialization registers real replacement owners before this
     # rewrite and is the only path allowed to retarget provenance.
-    return unless new_names.any? { |name| owned_binding_visible?(name.to_s) }
+    visible_names = new_names.select { |name| owned_binding_visible?(name.to_s) }
+    return if visible_names.empty?
+
+    unless fact.is_a?(MIR::OwnershipConsumptionFact)
+      return unless parent.is_a?(MIR::StructInit) || parent.is_a?(MIR::ArrayInit) || parent.is_a?(MIR::TupleLiteral)
+
+      allocs = visible_names.filter_map { |name| function_state.bindings[name.to_s]&.alloc }.uniq
+      target_alloc = if allocs.one?
+        allocs.first
+      else
+        MIR::OwnershipEffect.alloc_of(old_child) || mir_owned_alloc(new_child) || function_state.current_decl_alloc
+      end
+      parent.ownership_consumption = MIR::OwnershipConsumptionFact.new(
+        operands: visible_names.map { |name|
+          MIR::OwnershipOperandFact.owned_binding(name.to_s, Type.new(:Any), "hoist replacement", target_alloc)
+        },
+        target: :owned_sink,
+        target_alloc: target_alloc,
+        source: T.must(parent.class.name),
+        covers_consuming_params: true,
+      )
+      return
+    end
 
     operands = fact.operands.reject { |operand| operand.name && old_names.include?(operand.name.to_s) }
-    new_names.each do |name|
+    visible_names.each do |name|
       operands << MIR::OwnershipOperandFact.owned_binding(name.to_s, Type.new(:Any), "hoist replacement", fact.target_alloc)
     end
     parent.ownership_consumption = MIR::OwnershipConsumptionFact.new(

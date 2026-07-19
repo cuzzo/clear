@@ -2877,10 +2877,11 @@ module AST
   # WithBlock#lock_error_clause. Policy validation lives in the annotator.
   SyncPolicyDecl = Struct.new(:token, :handlers) { include Locatable }
 
-  # effect_mode is nil, :fallible, :optional, or :fallible_optional. It records
-  # the explicit SELECT:!/SELECT:?/SELECT:!? contract rather than re-deriving the
-  # programmer's intent from the selected expression later in the pipeline.
-  SelectOp     = Struct.new(:token, :expression, :effect_mode) { include Locatable; include HasExpression }
+  # effect_mode is the compatibility classification consumed by existing
+  # lowering. modifier_order preserves the exact SELECT annotation spelling
+  # (`!~`, `~!`, `!~!`, etc.) so wrapper ordering remains a checked language
+  # contract instead of being flattened into a set of effects.
+  SelectOp     = Struct.new(:token, :expression, :effect_mode, :stream_mode, :modifier_order, :capture_analysis) { include Locatable; include HasExpression }
   WhereOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   IndexOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable; include HasExpression }
@@ -3457,6 +3458,10 @@ module AST
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
     attr_accessor :capture_analysis  # CaptureAnalysis: captures, strategies, derived sets, safety flags
     attr_accessor :async_result_shape # AsyncResultShape: single authority for BG's spawned handle.
+    # Contextual payload contract supplied by a directly enclosing declaration
+    # or RETURN.  This distinguishes `~!T` (a promise whose payload is fallible)
+    # from the ordinary `BG { fallibleCall() }` transport-error shorthand.
+    attr_accessor :declared_async_payload
     # FSM Phase A: spawn_form = :fsm or :stackful. Chosen by FsmClassifier based
     # on the BG body's transitive call set. Phase A only records this; Phase B
     # will use it to emit spawnFsmBest / spawnFsmOn instead of spawnBest.
@@ -3483,7 +3488,7 @@ module AST
   ThenChain         = Struct.new(:token, :steps) { include Locatable }
 
   # BgStreamBlock: background generator — spawns a fiber that YIELDs values into a Stream.
-  # body: Array of statements; YIELD expressions push values. Returns ~T[?] (open stream).
+  # body: Array of statements; YIELD expressions push values. Returns [~]T (finite stream).
   # stack_size: :standard (default, 16 KB) | :micro (4 KB) | :large (64 KB) | :xl (256 KB)
   BgStreamBlock     = Struct.new(:token, :body, :deferred_drops, :stack_size) do
     extend T::Sig
@@ -3732,6 +3737,10 @@ module AST
 
   class SelectOp
     extend T::Sig
+    sig { returns(T.untyped) }
+    def capture_analysis; self[:capture_analysis]; end
+    sig { params(value: T.untyped).returns(T.untyped) }
+    def capture_analysis=(value); self[:capture_analysis] = value; end
     sig { returns(AST::Node) }
     def expression; self[:expression]; end
 

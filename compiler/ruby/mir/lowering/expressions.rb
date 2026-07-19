@@ -439,13 +439,19 @@ module MIRLoweringExpressions
   sig { params(node: AST::BinaryOp).returns(BinaryOperandFacts) }
   def binary_operand_facts(node)
     T.bind(self, MIRLowering) rescue nil
+    left_type = Type.from_node!(node.left, context: "binary lhs")
+    right_type = Type.from_node!(node.right, context: "binary rhs")
+    left = T.cast(lower(node.left), MIR::Node)
+    right = T.cast(lower(node.right), MIR::Node)
+    left = rc_payload_value(left, left_type) if left_type.any_rc? && !bc_target?
+    right = rc_payload_value(right, right_type) if right_type.any_rc? && !bc_target?
     BinaryOperandFacts.new(
       node: node,
       op: node.op,
-      left: T.cast(lower(node.left), MIR::Node),
-      right: T.cast(lower(node.right), MIR::Node),
-      left_type: Type.from_node!(node.left, context: "binary lhs"),
-      right_type: Type.from_node!(node.right, context: "binary rhs"),
+      left: left,
+      right: right,
+      left_type: left_type,
+      right_type: right_type,
       int_arithmetic: binary_int_arithmetic_facts(node),
       left_unit_variant: unit_variant_access(node.left),
       right_unit_variant: unit_variant_access(node.right),
@@ -1068,7 +1074,21 @@ module MIRLoweringExpressions
 
     # Optional orelse
     out = MIR::Orelse.new(left, right)
-    out.result_type = Type.from_node!(node, context: "optional OR_ELSE result")
+    result_type = Type.from_node!(node, context: "optional OR_ELSE result")
+    out.result_type = result_type
+    # An owned optional payload cannot be returned as the raw success-arm
+    # borrow while the fallback arm yields a fresh allocation. The enclosing
+    # access/call hoister gives the merged result one cleanup allocator, so
+    # converge both branches here and make that ownership claim true.
+    left_named_owner = node.left.is_a?(AST::Identifier) && node.left.symbol &&
+      !T.must(node.left.symbol).rodata_provenance? && !T.must(node.left.symbol).borrow_provenance?
+    if ownership_bearing_type?(result_type) && left_named_owner
+      return place_owned_orelse_for_destination(
+        out,
+        result_type,
+        function_state.current_decl_alloc || :heap,
+      )
+    end
     out
   end
 
@@ -1121,6 +1141,15 @@ module MIRLoweringExpressions
     # to honor that to keep emitting `catch fallback` (error union)
     # rather than `orelse fallback` (optional).
     has_error_union = node.left.respond_to?(:error_union_type) && node.left.error_union_type
+    can_fail = node.left.respond_to?(:can_fail) && node.left.can_fail
+    # Allocation FAULT is surface-exempt (the declared return type stays T),
+    # but its lowered call is still an error union. Consult the matched
+    # signature so `allocatingCall() OR_ELSE fallback` lowers through `catch`
+    # rather than Zig optional `orelse`.
+    if node.left.is_a?(AST::FuncCall) || node.left.is_a?(AST::MethodCall)
+      signature = matched_call_signature(node.left)
+      can_fail ||= signature&.alloc_fault == true || signature&.can_fail == true
+    end
     effective_left = if has_error_union
                        Type.new(T.cast(node.left.error_union_type, Type::TypeInput))
                      else
@@ -1136,10 +1165,11 @@ module MIRLoweringExpressions
       (node.left.is_a?(AST::BinaryOp) && node.left.smooth?) ||
       (pipeline_host.respond_to?(:pipeline_context_active?) && pipeline_host.pipeline_context_active?)
     fault_recoverable = !pipeline_manages_recovery && !left_type.future? && !left_type.stream? &&
-      node.left.respond_to?(:can_fail) && T.unsafe(node.left).can_fail == true
+      can_fail == true
     OrElseFacts.new(
       left_is_error: left_type.error_union? || !!has_error_union || fault_recoverable,
-      left_success_optional: effective_left.error_union? && effective_left.success_type.optional?,
+      left_success_optional: !!((effective_left.error_union? && effective_left.success_type.optional?) ||
+        (fault_recoverable && left_type.optional?)),
       line: node.token&.line || 0,
       target: lowering_target
     )
@@ -1474,7 +1504,7 @@ module MIRLoweringExpressions
     ti = plan.type_info
     return rank_index_value(target, ti, T.must(plan.rank_indices)) if ti.rank?
 
-    if ti.rc_map? && !bc_target?
+    if ti.any_rc? && !bc_target?
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
 
@@ -1786,7 +1816,7 @@ module MIRLoweringExpressions
           aggregate_dynamic_slice_field_value(lower(field_node), expected_ft, true, field_sink_alloc, field_node)
         elsif rc_retain_needed?(field_node)
           hoist_alloc(make_rc_retain(T.cast(field_node, AST::Identifier)), field_node, err_cleanup: true)
-        elsif field_node.is_a?(AST::CopyNode) && expected_ft&.collection?
+        elsif field_node.is_a?(AST::CopyNode) && expected_ft&.collection? && !expected_ft.any_rc?
           hoist_alloc(MIR::DeepCopy.new(lower(field_node.value), expected_ft.zig_type, nil, :full_value, field_sink_alloc),
             field_node, err_cleanup: true)
         else
@@ -1843,12 +1873,38 @@ module MIRLoweringExpressions
       node.name.to_s
     end
 
-    init = T.cast(with_ownership_consumption(
-      MIR::StructInit.new(type_name, fields),
-      fields.flat_map { |field| field[:alloc].is_a?(Symbol) ? mir_ident_names(field[:value]) : [] },
-      "MIR::StructInit",
-      target_alloc: struct_alloc,
-    ), MIR::StructInit)
+    field_operands = fields.flat_map do |field|
+      field_ast = literal_fields.find { |name, _| name.to_s == field[:name].to_s }&.last
+      next [] unless field_ast
+      raw_field_type = field_types[field[:name].to_s]
+      next [] if raw_field_type.is_a?(Schemas::InlineStructVariant)
+      actual_type = if field_ast.is_a?(AST::Identifier)
+        function_state.binding_types[field_ast.name.to_s] ||
+          (field_ast.symbol&.type if field_ast.symbol&.type.is_a?(Type))
+      end
+      actual_type ||= Type.from_node!(field_ast, context: "struct field payload ownership")
+      if node.borrowed_field_names&.include?(field[:name].to_s)
+        next [MIR::OwnershipOperandFact.non_owning(actual_type, "MIR::StructInit borrowed field")]
+      end
+      ownership_operands_for_sink_value(
+        field[:value],
+        field_ast,
+        actual_type,
+        "MIR::StructInit",
+        struct_alloc,
+        require_visible_owned: false,
+      )
+    end
+    init = MIR::StructInit.new(type_name, fields)
+    unless field_operands.empty?
+      init.ownership_consumption = MIR::OwnershipConsumptionFact.new(
+        operands: field_operands,
+        target: :owned_sink,
+        target_alloc: struct_alloc,
+        source: "MIR::StructInit",
+        covers_consuming_params: true,
+      )
+    end
 
     # Struct literals remain value-shaped. Heap/frame placement is a storage
     # decision for the owning binding or wrapper; it must not change `T` into
@@ -1950,17 +2006,46 @@ module MIRLoweringExpressions
       { name: k.to_s, value: val, alloc: field_sink_alloc }
     }
 
-    inner = T.cast(with_ownership_consumption(
-      MIR::StructInit.new(variant_struct_name, field_values),
-      field_values.flat_map { |field| field[:alloc].is_a?(Symbol) ? mir_ident_names(field[:value]) : [] },
-      "MIR::StructInit",
-      target_alloc: variant_alloc,
-    ), MIR::StructInit)
+    field_operands = field_values.flat_map do |field|
+      field_ast = node.fields.find { |name, _| name.to_s == field[:name].to_s }&.last
+      next [] unless field_ast
+      # Generic union schemas retain their projected type parameter here (T/E).
+      # Ownership, however, belongs to the concrete constructor argument.  A
+      # Result<Float64, Bool>.Ok payload must not manufacture a transfer for a
+      # primitive parameter merely because unconcretized T is conservatively
+      # droppable; a String instantiation still correctly transfers.
+      symbol_type = if field_ast.is_a?(AST::Identifier)
+        function_state.binding_types[field_ast.name.to_s] ||
+          (field_ast.symbol&.type if field_ast.symbol&.type.is_a?(Type))
+      end
+      field_type = symbol_type || Type.from_node!(field_ast, context: "union variant payload ownership")
+      ownership_operands_for_sink_value(
+        field[:value],
+        field_ast,
+        field_type,
+        "MIR::StructInit",
+        variant_alloc,
+        require_visible_owned: false,
+      )
+    end
+    inner = MIR::StructInit.new(variant_struct_name, field_values)
+    unless field_operands.empty?
+      inner.ownership_consumption = MIR::OwnershipConsumptionFact.new(
+        operands: field_operands,
+        target: :owned_sink,
+        target_alloc: variant_alloc,
+        source: "MIR::StructInit",
+        covers_consuming_params: true,
+      )
+    end
     result = T.cast(with_ownership_consumption(
       MIR::StructInit.new(node.union_name.to_s, [
         { name: node.variant_name.to_s, value: inner }
       ]),
-      mir_ident_names(inner),
+      # `inner` already owns any droppable constructor arguments.  Wrapping
+      # that rvalue in the tagged union does not consume those source bindings
+      # a second time.
+      [],
       "MIR::StructInit",
       target_alloc: variant_alloc,
     ), MIR::StructInit)
@@ -2173,8 +2258,14 @@ module MIRLoweringExpressions
 
     left  = cond.left
     right = cond.right
-    left_mir = hoist_alloc(lower(left), left)
-    right_mir = hoist_alloc(lower(right), right)
+    left_type = type_info_for(left)
+    right_type = type_info_for(right)
+    left_mir = T.cast(lower(left), MIR::Node)
+    right_mir = T.cast(lower(right), MIR::Node)
+    left_mir = rc_payload_value(left_mir, left_type) if left_type.any_rc? && !bc_target?
+    right_mir = rc_payload_value(right_mir, right_type) if right_type.any_rc? && !bc_target?
+    left_mir = hoist_alloc(left_mir, left)
+    right_mir = hoist_alloc(right_mir, right)
 
     helper, extra_args = pick_equality_helper(left, right)
     return nil unless helper
@@ -2287,14 +2378,27 @@ module MIRLoweringExpressions
     function_state.current_sink_type = T.let(function_state.current_sink_type, T.nilable(Type))
     function_state.current_expected_type = T.let(function_state.current_expected_type, T.nilable(Type))
     source = lower(node.value)
-    source = hoist_alloc(source, node.value) if mir_allocates?(source)
+    # COPY of a freshly constructed rvalue has no independently observable
+    # source owner. Transfer the constructor result directly; cloning it would
+    # first move owned children into a temporary aggregate and then abandon
+    # that aggregate after the clone succeeds.
+    if fresh_copy_constructor?(node.value)
+      return source
+    end
     # A payload-free union constructor (for example `Value.Nil`) is already a
     # fresh value and contains no storage to duplicate. Auto-COPY may wrap it
     # when it appears as an owned fallback; lowering that wrapper as a full
     # union clone manufactures a heap allocation with no consumer.
     return source if unit_union_variant_constructor?(node.value)
 
-    ti = copy_source_type_info(node.value)
+    source_ti = copy_source_type_info(node.value)
+    # Assignment compatibility can coerce COPY's result representation (for
+    # example a fixed `T[N]` literal into a dynamic `T[]` list). The source is
+    # lowered in that destination context, so lifecycle selection must use the
+    # same coerced representation. Treating the original fixed array as a
+    # bit-copy after it has lowered to an ArrayList aliases its allocation and
+    # emits two cleanups for the same buffer.
+    ti = node.coerced_type_info ? Type.new(T.must(node.coerced_type_info)) : source_ti
     lifecycle = lifecycle_registry.fetch(ti)
     sink_type = function_state.current_sink_type || function_state.current_expected_type
     dst_ti = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : ti
@@ -2302,6 +2406,17 @@ module MIRLoweringExpressions
     # directly; otherwise the active sink allocator flows through
     # with_decl_alloc. Only a context-free explicit COPY defaults to heap.
     alloc = function_state.current_decl_alloc || node.alloc || :heap
+
+    # Ownership facts for an OR_ELSE merge are finalized after expression
+    # lowering, too late for the early mir_allocates? probe above. COPY must
+    # first give that lazy merge a named owner; otherwise DeepCopy receives an
+    # anonymous allocating Orelse as its source.
+    if source.is_a?(MIR::Orelse) && lifecycle.needs_drop?
+      source = place_owned_orelse_for_destination(source, source_ti, alloc)
+      source = hoist_alloc(source, node.value, transfer_on_success: false)
+    elsif mir_allocates?(source)
+      source = hoist_alloc(source, node.value)
+    end
 
     case lifecycle.copy_strategy
     when :bit_copy
@@ -2378,6 +2493,15 @@ module MIRLoweringExpressions
     return sym_type if sym_type.is_a?(Type) && !sym_type.untyped?
 
     Type.from_node!(source, context: "COPY value")
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def fresh_copy_constructor?(node)
+    value = T.let(node, AST::Node)
+    value = value.value while value.is_a?(AST::CopyNode) || value.is_a?(AST::CloneNode)
+    value.is_a?(AST::TupleLit) || value.is_a?(AST::ListLit) ||
+      value.is_a?(AST::HashLit) || value.is_a?(AST::StructLit) ||
+      value.is_a?(AST::UnionVariantLit)
   end
 
   sig { params(source: AST::Node, source_type: Type, dest_type: Type).returns(String) }
@@ -2515,9 +2639,25 @@ module MIRLoweringExpressions
       node_value = lower(node.value)
       return node_create_mir(T.cast(node_value, MIR::Node), node.full_type!, node.value)
     end
+    inner_type = node.value.full_type!
     inner = with_decl_alloc(:heap) do
-      value = lower(node.value)
-      place_value_for_destination(value, node.value, :heap, node.value.full_type!)
+      # A capability wrapper is the boundary that creates the Rc/Arc/sync
+      # representation. Its value must therefore be lowered against the raw
+      # inner type, not an enclosing declaration's wrapped destination type.
+      # In particular, COPY inside `value @multiowned/@shared` must clone the
+      # raw aggregate before CapWrap creates the reference-counted handle.
+      with_sink_type(inner_type) do
+        with_expected_type(inner_type) do
+          value = lower(node.value)
+          place_value_for_destination(value, node.value, :heap, inner_type)
+        end
+      end
+    end
+    # Rc/Arc owns and eventually cleans its payload. A String literal (or
+    # another rodata String expression) is only a borrowed slice, so storing
+    # it directly in the control block would later attempt to free rodata.
+    if inner_type.string? && inner_type.rodata? && !MIR::OwnershipEffect.of(inner).produces_owned
+      inner = MIR::DupeSlice.new(inner, :heap)
     end
     base_type = node.value.resolved_type.to_s
     zig_base = transpile_type(base_type)
@@ -2627,6 +2767,7 @@ module MIRLoweringExpressions
   private :field_access_plan
   private :float_coercion?
   private :float_literal_text
+  private :fresh_copy_constructor?
   private :index_access_plan
   private :index_access_value
   private :index_collection_value

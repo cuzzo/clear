@@ -1554,7 +1554,7 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::ForStmt)
       zig = emit(result)
       expect(zig).to include("for")
-      expect(zig).to include("|item|")
+      expect(zig).to include("|_|")
     end
 
     it "lowers pass statement" do
@@ -1775,7 +1775,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::DeepCopy)
       expect(result.strategy).to eq(:passthrough)
-      expect(emit(result)).to eq("(if (comptime @typeInfo(@TypeOf(x)) == .pointer and @typeInfo(@TypeOf(x)).pointer.size == .one) x.* else x)")
+      expect(emit(result)).to eq("(if (comptime @typeInfo(@TypeOf(x)) == .pointer and @typeInfo(@TypeOf(x)).pointer.size == .one) (x).* else x)")
     end
 
     it "uses symbol type information when COPY source has not been stamped" do
@@ -1802,6 +1802,25 @@ RSpec.describe MIRLowering do
       expect(result.strategy).to eq(:full_value)
       expect(result.zig_type).to eq("*CheatLib.Locked(Counter)")
       expect(emit(result)).to include("try CheatLib.dupeValue(@TypeOf(c), __copy_src, rt.heapAlloc())")
+    end
+
+    it "copies the raw value before creating a reference-counted capability wrapper" do
+      raw_type = Type.new(:StringMap)
+      source = make_id("values", full_type: raw_type)
+      copy = AST::CopyNode.new(tok, source)
+      copy.full_type = raw_type
+      wrapped_type = Type.new(:StringMap, ownership: :multiowned)
+      wrapper = AST::CapabilityWrap.new(tok, copy, :multiowned, nil, nil)
+      wrapper.full_type = wrapped_type
+
+      low = lowering
+      result = low.send(:with_expected_type, wrapped_type) { low.lower(wrapper) }
+
+      expect(result).to be_a(MIR::CapWrap)
+      expect(result.inner).to be_a(MIR::DeepCopy)
+      expect(result.inner.zig_type.to_s).not_to include("CheatLib.Rc")
+      expect(result.own_fn).to eq("rcCreate")
+      expect(emit(result)).not_to include("dupeValue(CheatLib.Rc")
     end
 
     it "emits cleanup for declarations initialized from COPY of sync values" do

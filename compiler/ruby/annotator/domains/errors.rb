@@ -394,6 +394,9 @@ module Annotator
 
         value = T.must(raw_value)
         return_payload = expected.plain_return_payload_type || expected
+        if value.is_a?(AST::BgBlock) && return_payload.single_future?
+          T.unsafe(value).declared_async_payload = Type.new(return_payload.tense_type)
+        end
         if value.is_a?(AST::ListLit) && (return_payload.collection? || return_payload.tuple?)
           value.coerced_type = return_payload
         elsif value.is_a?(AST::HashLit) && return_payload.map?
@@ -601,11 +604,23 @@ module Annotator
         end
         visit(node.right)
 
+        t_right_type = node.right.full_type!(context: "OR_ELSE right")
 
         # Calls retain an explicit `error_union_type` after their success
         # payload is stamped. Recoverability is a source-level fact, not the
         # broad `can_fail` effect (which also includes allocations).
-        t_left_type = recoverable_result_type(node.left, context: "OR_ELSE left")
+        # Bare NIL gets its optional payload from the fallback. This context
+        # has to be applied at the OR_ELSE boundary: visiting NIL alone can
+        # only stamp the sentinel :NIL type, and rejecting that sentinel here
+        # breaks nested/contextual forms such as `NIL OR_ELSE value`.
+        bare_nil = node.left.is_a?(AST::Literal) && node.left.type == :NIL
+        t_left_type = if bare_nil && t_right_type.resolved != :NoReturn
+          contextual = Type.optional_of(t_right_type)
+          stamp_type!(node.left, contextual)
+          contextual
+        else
+          recoverable_result_type(node.left, context: "OR_ELSE left")
+        end
         unless t_left_type
           left_value_type = Type.new(node.left.full_type!(context: "OR_ELSE left"))
           if fault_recoverable_result?(node.left)
@@ -631,8 +646,6 @@ module Annotator
             t_left_type = left_value_type
           end
         end
-        t_right_type = node.right.full_type!(context: "OR_ELSE right")
-
         # Validate before handling special recovery forms as well. Otherwise
         # `definite() OR_ELSE RAISE` would silently bypass the ordinary
         # fallback check merely because its right side returns early below.

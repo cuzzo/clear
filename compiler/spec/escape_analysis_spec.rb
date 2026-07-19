@@ -688,6 +688,29 @@ RSpec.describe EscapeAnalysis do
     expect(result.placements.placements.map(&:reason)).to include(:recursive_aggregate_owner)
   end
 
+  it "promotes an aggregate owner that retains a heap-managed field" do
+    source_type = Type.new(:SemanticBox)
+    source = id("source", type: source_type, storage: :heap)
+    source.symbol.storage = :heap
+    copied = AST::CopyNode.new(tok, source)
+    copied.full_type = source_type
+    aggregate = AST::StructLit.new(tok, "Holder", { "value" => copied }, :stack, nil)
+    holder_type = Type.new(:Holder)
+    aggregate.full_type = holder_type
+    holder = AST::VarDecl.new(tok, "holder", holder_type, aggregate, false)
+    entry = SymbolEntry.new(reg: holder, type: holder_type, mutable: false, storage: :frame)
+    holder.symbol = entry
+    holder.full_type = holder_type
+    analyzed_fn = fn([holder])
+
+    result = EscapeAnalysis.apply_with_facts!({ "main" => analyzed_fn }, nil, {
+      "main" => body_summary(name: "main", binding_nodes: [holder]),
+    })
+
+    expect(entry.storage).to eq(:heap)
+    expect(result.placements.placements.map(&:reason)).to include(:recursive_aggregate_owner)
+  end
+
   it "uses schema lookup when deciding owning return placement" do
     schema_lookup = proc do |name|
       name == :Box ? Schemas::StructSchema.new(fields: { "field" => Type.new(:String) }) : nil

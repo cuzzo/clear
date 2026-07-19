@@ -68,6 +68,8 @@ module PipeAnalysis
     const :value_type, Type
     const :asynchronous, T::Boolean
     const :required_mode, T.nilable(Symbol)
+    const :required_order, String
+    const :leaf_type, Type
 
     sig { returns(T::Boolean) }
     def fallible?
@@ -349,9 +351,21 @@ module PipeAnalysis
       # Declare '_' with the specific item type
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
 
-      # Analyze the Body (e.g., _["count"])
-      with_soa_tracking(node, item_type) do
-        annotate_pipeline_expression!(node.right, node.right.expression)
+      # A stream-producing SELECT executes its projection in the generated
+      # producer fiber. Record the same capture facts used by BG STREAM and
+      # CONCURRENT callbacks so outer values are transported safely.
+      if node.right.is_a?(AST::SelectOp) && (source.stream? || node.right.stream_mode)
+        analysis = with_fiber_capture_analysis(is_parallel: false) do
+          with_soa_tracking(node, item_type) do
+            annotate_pipeline_expression!(node.right, node.right.expression)
+          end
+        end
+        node.right.capture_analysis =
+          validate_capture_analysis!(node.right, analysis, false, false) || analysis
+      else
+        with_soa_tracking(node, item_type) do
+          annotate_pipeline_expression!(node.right, node.right.expression)
+        end
       end
 
       selector_effect = selector_effect_fact(node.right.expression)
@@ -368,13 +382,12 @@ module PipeAnalysis
     case node.right
     when AST::SelectOp
       effect = T.must(selector_effect)
-      result_base = effect.value_type
-      result_type = if source.inf_stream?
-        Type.new(StreamTypeExpression.new(cardinality: :INF, item: result_base.shape.expression))
+      result_type = if source.stream? || node.right.stream_mode
+        select_stream_result_type(lhs_type, source, effect, node.right.modifier_order.to_s)
       elsif effect.asynchronous
-        Type.promise_list_of(result_base)
+        Type.promise_list_of(effect.leaf_type)
       else
-        Type.array_of(result_base)
+        Type.array_of(effect.value_type)
       end
       stamp_type!(node, result_type)
     when AST::WhereOp
@@ -402,6 +415,38 @@ module PipeAnalysis
     nil
   end
 
+  sig do
+    params(source_type: Type, source: PipelineSourceFact, effect: SelectorEffectFact, order: String)
+      .returns(Type)
+  end
+  def select_stream_result_type(source_type, source, effect, order)
+    prefix, suffix = if order.include?('~')
+      order.split('~', 2)
+    else
+      ['', order]
+    end
+    item = select_apply_wrapper_order(effect.leaf_type.shape.expression, suffix.to_s)
+    cardinality = if source.stream? && source_type.shape.expression.is_a?(StreamTypeExpression)
+      T.cast(source_type.shape.expression, StreamTypeExpression).cardinality
+    else
+      :FINITE
+    end
+    stream = StreamTypeExpression.new(cardinality: cardinality, item: item)
+    Type.new(select_apply_wrapper_order(stream, prefix.to_s))
+  end
+
+  sig { params(expression: TypeExpression, order: String).returns(TypeExpression) }
+  def select_apply_wrapper_order(expression, order)
+    order.reverse.each_char.reduce(expression) do |inner, marker|
+      case marker
+      when '!' then FallibleTypeExpression.new(inner: inner)
+      when '?' then OptionalTypeExpression.new(inner: inner)
+      when '~' then FutureTypeExpression.new(inner: inner)
+      else Kernel.raise "unknown SELECT wrapper #{marker.inspect}"
+      end
+    end
+  end
+
   sig { params(expression: AST::Node).returns(SelectorEffectFact) }
   def selector_effect_fact(expression)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
@@ -409,11 +454,11 @@ module PipeAnalysis
     expression_type = expression.full_type!(context: "pipeline selector expression")
     recoverable = recoverable_result_type(expression, context: "pipeline selector recovery")
     wrapped = recoverable || expression_type
-    asynchronous = wrapped.future?
-    value_type = asynchronous ? wrapped.tense_type : wrapped
-    fallible = value_type.error_union?
-    success = fallible ? value_type.success_type : value_type
-    optional = success.optional?
+    required_order, leaf_type = selector_wrapper_order(wrapped)
+    asynchronous = required_order.include?('~')
+    value_type = wrapped
+    fallible = required_order.include?('!')
+    optional = required_order.include?('?')
     required_mode = if fallible && optional
       :fallible_optional
     elsif fallible
@@ -425,30 +470,47 @@ module PipeAnalysis
       value_type: value_type,
       asynchronous: asynchronous,
       required_mode: required_mode,
+      required_order: required_order,
+      leaf_type: leaf_type,
     )
+  end
+
+  sig { params(type: Type).returns([String, Type]) }
+  def selector_wrapper_order(type)
+    if type.error_union?
+      order, leaf = selector_wrapper_order(type.success_type)
+      ["!#{order}", leaf]
+    elsif type.optional?
+      order, leaf = selector_wrapper_order(T.must(type.wrapped_type))
+      ["?#{order}", leaf]
+    elsif type.future?
+      order, leaf = selector_wrapper_order(type.tense_type)
+      ["~#{order}", leaf]
+    else
+      ['', type]
+    end
   end
 
   sig { params(op: AST::SelectOp, effect: SelectorEffectFact).void }
   def validate_select_effect_contract!(op, effect)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-    declared = op.effect_mode
-    required = effect.required_mode
-    if declared == required
+    declared_order = op.modifier_order.to_s
+    required_order = effect.required_order
+    if declared_order == required_order
       retain_select_error_channel!(op.expression) if effect.fallible?
       return
     end
 
-    expected_suffix = select_effect_suffix(required)
-    expected_selector = expected_suffix.empty? ? "SELECT" : "SELECT:#{expected_suffix}"
-    if declared.nil?
+    expected_selector = required_order.empty? ? "SELECT" : "SELECT:#{required_order}"
+    if declared_order.empty?
       fixes = [Fix.new(
         description: fix_description(:INSERT_SELECT_EFFECT_ANNOTATION, selector: expected_selector),
         confidence: :auto,
         edits: [Edit.new(
           span: Span.new(file: nil, line: op.token.line,
             col: op.token.column + op.token.text!.length, length: 0),
-          replacement: ":#{expected_suffix}",
+          replacement: ":#{required_order}",
         )],
       )]
       fixable!(op, code: :SELECT_EFFECT_ANNOTATION_REQUIRED,
@@ -458,7 +520,7 @@ module PipeAnalysis
     end
 
     error!(op, :SELECT_EFFECT_ANNOTATION_MISMATCH,
-      declared: select_effect_suffix(declared), got: Type.surface_name_type(effect.value_type),
+      declared: declared_order, got: Type.surface_name_type(effect.value_type),
       expected: expected_selector)
   end
 
@@ -1808,7 +1870,7 @@ module PipeAnalysis
   def analyze_concurrent_bounded_select_family_op(node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     lhs_type = node.left.full_type!(context: "pipeline left")
-    item_type = lhs_type.stream_element_type.resolved
+    item_type = T.must(lhs_type.stream_element_type)
     is_parallel = concurrent_parallel_enabled?(node.right.options)
 
     analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do
@@ -1836,7 +1898,7 @@ module PipeAnalysis
   def analyze_concurrent_bounded_each_op(node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     lhs_type = node.left.full_type!(context: "pipeline left")
-    item_type = lhs_type.stream_element_type.resolved
+    item_type = T.must(lhs_type.stream_element_type)
     is_parallel = concurrent_parallel_enabled?(node.right.options)
 
     analysis = with_fiber_capture_analysis(is_parallel: is_parallel) do

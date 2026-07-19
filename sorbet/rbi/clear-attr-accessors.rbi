@@ -54,6 +54,10 @@ class AST::BgBlock
   sig { params(value: T.untyped).returns(T.untyped) }
   def computed_stack_tier=(value); end
   sig { returns(T.untyped) }
+  def declared_async_payload; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def declared_async_payload=(value); end
+  sig { returns(T.untyped) }
   def fsm_ineligible_reason; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def fsm_ineligible_reason=(value); end
@@ -802,6 +806,10 @@ class BgBlock
   def computed_stack_tier; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def computed_stack_tier=(value); end
+  sig { returns(T.untyped) }
+  def declared_async_payload; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def declared_async_payload=(value); end
   sig { returns(T.untyped) }
   def fsm_ineligible_reason; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1689,6 +1697,8 @@ class SemanticAnnotator
 end
 
 class SourceError
+  sig { returns(T.untyped) }
+  def code; end
   sig { returns(T.untyped) }
   def original_message; end
   sig { returns(T.untyped) }

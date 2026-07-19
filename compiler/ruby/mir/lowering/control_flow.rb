@@ -693,9 +693,19 @@ module MIRLoweringControlFlow
       else
         var
       end
+      capture = "_" unless mir_references_identifier?(body, var)
       loop_stmt = MIR::ForStmt.new(iter, capture, body, nil, mark_per_iter, tight)
     end
     loop_stmt
+  end
+
+  sig { params(root: T.any(MIR::Node, T::Array[MIR::Node]), name: String).returns(T::Boolean) }
+  def mir_references_identifier?(root, name)
+    found = T.let(false, T::Boolean)
+    MIR.each_node(root) do |candidate|
+      found = true if candidate.is_a?(MIR::Ident) && candidate.name == name
+    end
+    found
   end
 
   sig { params(mir: MIR::Node).returns(T::Boolean) }
@@ -1135,9 +1145,33 @@ module MIRLoweringControlFlow
 
   sig { params(node: AST::ReturnNode, value: T.nilable(MIR::Node)).returns(T.nilable(MIR::Node)) }
   def finalize_return_value(node, value)
+    value = generic_parameter_return_copy(node, value)
     value = return_payload_pointer_value(node, value)
     value = heap_carry_return_value(node, value)
     heap_carry_recursive_param_value(node, value)
+  end
+
+  # A generic parameter is emitted as an `anytype` value. Returning a local
+  # parameter verbatim aliases owned payloads (notably String slices), leaving
+  # both the parameter path and the caller result to clean the same allocation.
+  # Materialize a fresh value at the generic boundary; `dupeValue(T, ...)`
+  # selects the correct copy behavior after Zig instantiation.
+  sig { params(node: AST::ReturnNode, value: T.nilable(MIR::Node)).returns(T.nilable(MIR::Node)) }
+  def generic_parameter_return_copy(node, value)
+    T.bind(self, MIRLowering) rescue nil
+    return value unless node.value && value.is_a?(MIR::Ident)
+    return value unless current_function_param_name?(value.name)
+    return value unless current_function_has_rt?
+    # A TAKES parameter already transfers its unique ownership into the
+    # function. Returning that same binding transfers it to the caller; making
+    # another value here both adds an unnecessary allocation-fault channel and
+    # leaves the original payload on the guarded-cleanup path.
+    return value if current_function_takes_param_name?(value.name)
+
+    ret_type = Type.from_node!(node.value, context: "generic parameter return")
+    return value unless ret_type.generic_type_parameter?
+
+    MIR::DeepCopy.new(value, ret_type.zig_type, nil, :full_value, :heap)
   end
 
   sig { params(node: AST::ReturnNode, value: T.nilable(MIR::Node)).returns(T.nilable(MIR::Node)) }
@@ -1467,6 +1501,19 @@ module MIRLoweringControlFlow
     is_heap = (ast_node.is_a?(AST::Locatable) && ast_node.heap_storage?) || ti.heap?
     return false if is_heap  # already handled by mir_allocates?
     !!(union_schemas.key?(ti.resolved) && ownership_bearing_type?(ti))
+  end
+
+  # A tuple literal can own managed fields without being an allocation MIR
+  # node itself.  When such a literal is passed to a borrowing parameter, its
+  # child temporaries are transferred into the aggregate during lowering.  A
+  # named aggregate lifetime is therefore required so those fields are
+  # released after the call.
+  sig { params(expr: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
+  def aggregate_temporary_needs_hoist?(expr, ast_node)
+    T.bind(self, MIRLowering) rescue nil
+    return false unless expr.is_a?(MIR::TupleLiteral) && ast_node.is_a?(AST::TupleLit)
+
+    ownership_bearing_type?(ast_node.full_type!(context: "aggregate argument hoist"))
   end
 
   # Detect call-site auto-borrow for universal polymorphism. Plain T args

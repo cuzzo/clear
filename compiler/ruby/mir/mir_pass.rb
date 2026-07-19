@@ -188,9 +188,26 @@ class MIRPass
       next unless fn.body
       cleanup_facts = @cleanup_plans[fn.name.to_s]&.facts ||
         CleanupClassifier::FrozenCleanupFacts.from_bindings(@cleanup_bindings[fn.name.to_s] || {})
+      # A direct `RETURN param` generic identity function is pure for scalar
+      # instantiations but needs an allocator to copy owned instantiations.
+      # Its generic placeholder can otherwise look cleanup-bearing before a
+      # concrete call is known, so decide this narrow shape from call sites.
+      if generic_direct_parameter_return?(fn)
+        # A TAKES generic still emits a guarded cleanup for the not-moved path.
+        # Even when every current call instantiates it with a scalar, that
+        # cleanup is compiled in the generic body and therefore needs `rt`.
+        fn.needs_rt = params_need_runtime_cleanup?(fn.params) ||
+          generic_return_needs_runtime?(fn)
+        next
+      end
+      if generic_projection_return?(fn)
+        fn.needs_rt = false
+        next
+      end
       if finalized_runtime_input?(fn) ||
          params_need_runtime_cleanup?(fn.params) ||
-         runtime_cleanup_facts?(cleanup_facts)
+         runtime_cleanup_facts?(cleanup_facts) ||
+         generic_return_needs_runtime?(fn)
         fn.needs_rt = true
         next
       end
@@ -235,6 +252,61 @@ class MIRPass
       !fn.thunk_plan.nil? ||
       !fn.mutual_thunk_plan.nil? ||
       recursion_yield_needed?(fn)
+  end
+
+  sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
+  def generic_return_needs_runtime?(fn)
+    return false unless generic_direct_parameter_return?(fn)
+    returned = generic_returned_parameter_name(fn)
+    return false unless returned
+    index = fn.params.index { |param| param.name.to_s == returned }
+    return false unless index
+
+    # Keep scalar-only generic functions on the original pure ABI. Runtime
+    # threading is needed only when a concrete call instantiates the returned
+    # T with an owned cleanup-bearing payload.
+    @fn_nodes.each_value.any? do |caller|
+      next false unless caller.body
+      needs_runtime = T.let(false, T::Boolean)
+      AST.each_locatable(caller.body) do |node|
+        next unless node.is_a?(AST::FuncCall) && node.name.to_s == fn.name.to_s
+        arg = node.args[index]
+        next unless arg
+        ti = arg.full_type!(context: "generic return instantiation").success_type
+        needs_runtime ||= ti.string? || ti.collection_value? || ti.recursive_cleanup_shape?(T.unsafe(@schema_lookup))
+      end
+      needs_runtime
+    end
+  end
+
+  sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
+  def generic_direct_parameter_return?(fn)
+    !generic_returned_parameter_name(fn).nil?
+  end
+
+  sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
+  def generic_projection_return?(fn)
+    ret = fn.return_type
+    return false unless ret.is_a?(Type) && ret.generic_type_parameter?
+    returns = T.let([], T::Array[AST::ReturnNode])
+    AST.each_locatable(fn.body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
+    return false unless returns.length == 1
+
+    T.must(returns.first).value.is_a?(AST::GetField)
+  end
+
+  sig { params(fn: AST::FunctionDef).returns(T.nilable(String)) }
+  def generic_returned_parameter_name(fn)
+    ret = fn.return_type
+    return nil unless ret.is_a?(Type) && ret.generic_type_parameter?
+    returns = T.let([], T::Array[AST::ReturnNode])
+    AST.each_locatable(fn.body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
+    return nil unless returns.length == 1
+    value = T.must(returns.first).value
+    return nil unless value.is_a?(AST::Identifier)
+    return nil unless fn.params.any? { |param| param.name.to_s == value.name.to_s }
+
+    value.name.to_s
   end
 
   sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
@@ -287,11 +359,23 @@ class MIRPass
       indexed_assignment_lowers_through_runtime?(node)
     when AST::CopyNode, AST::CloneNode
       copy_node_lowers_through_runtime?(node)
+    when AST::BinaryOp
+      owned_or_else_lowers_through_runtime?(node)
     when AST::WithBlock
       with_block_lowers_through_runtime?(node)
     else
       false
     end
+  end
+
+  sig { params(node: AST::BinaryOp).returns(T::Boolean) }
+  def owned_or_else_lowers_through_runtime?(node)
+    return false unless node.op == :OR_ELSE || node.op == :OR
+
+    ti = Type.from_node!(node, context: "owned OR runtime requirement").success_type
+    ti.string? || ti.heap_ptr? || ti.collection_value? || ti.collection? ||
+      ti.needs_cleanup?(T.unsafe(@schema_lookup)) ||
+      ti.recursive_cleanup_shape?(T.unsafe(@schema_lookup))
   end
 
   sig { params(node: T.any(AST::CopyNode, AST::CloneNode)).returns(T::Boolean) }
@@ -367,6 +451,10 @@ class MIRPass
     node = unwrap_return_expr(expr)
     return true if node.is_a?(AST::CopyNode)
     ti = node.is_a?(AST::Locatable) ? node.full_type!(context: "return allocator expression").success_type : nil
+    # Generic return payloads are materialized with `dupeValue(T, ...)` by
+    # lowering. Their concrete cleanup shape is unknown here, so conservatively
+    # thread the runtime through the generic boundary.
+    return true if ti&.generic_type_parameter?
     return false if ti&.any_rc? || ti&.any_sync?
 
     if node.is_a?(AST::Identifier)

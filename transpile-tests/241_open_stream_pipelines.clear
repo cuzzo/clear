@@ -35,10 +35,11 @@ FN main() RETURNS Void ->
         YIELD 4;
         YIELD 5;
     };
-    doubled = gen2 |> SELECT _ * 2;
-    ASSERT doubled.length() == 5, "open stream SELECT: 5 items";
+    doubled:~ = gen2 |> SELECT _ * 2;
+    MUTABLE count2: Int64 = 0;
     MUTABLE sum2: Int64 = 0;
-    doubled |> EACH { sum2 = sum2 + _; };
+    doubled |> EACH { count2 = count2 + 1; sum2 = sum2 + _; };
+    ASSERT count2 == 5, "open stream SELECT: 5 items";
     ASSERT sum2 == 30, "open stream SELECT: 2+4+6+8+10=30";
 
     # -------------------------------------------------------

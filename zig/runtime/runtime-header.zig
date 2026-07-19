@@ -173,6 +173,78 @@ pub const CheatLib = struct {
         }.cleanupValue);
     }
 
+    /// Turn the materialized Promise list produced by CONCURRENT SELECT:~
+    /// into the finite stream promised by its CLEAR type.  The concurrent
+    /// workers have already launched every selector before this producer is
+    /// submitted, so resolving in source order preserves both concurrency and
+    /// deterministic SELECT ordering.
+    pub fn promiseListToStream(
+        comptime T: type,
+        alloc: std.mem.Allocator,
+        rt: *Runtime,
+        promises: anytype,
+    ) !Stream(T) {
+        const StreamT = Stream(T);
+        const PromiseListT = @TypeOf(promises);
+        const Ctx = struct {
+            alloc: std.mem.Allocator,
+            stream_inner: *StreamT.Inner,
+            promises: PromiseListT,
+
+            fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                _ = raw_rt;
+                const ctx: *@This() = @ptrCast(@alignCast(raw_args.?));
+                defer ctx.alloc.destroy(ctx);
+                defer ctx.promises.deinit(ctx.alloc);
+
+                var producer = StreamT{ .inner = ctx.stream_inner, .alloc = ctx.alloc };
+                defer producer.close();
+
+                // A linear Promise has no cancelling destructor.  Always drain
+                // every selector, retaining the first failure for the stream and
+                // cleaning successful values that can no longer be published.
+                var first_error: ?anyerror = null;
+                for (ctx.promises.items) |promise| {
+                    const value = promise.next() catch |err| {
+                        if (first_error == null) first_error = err;
+                        continue;
+                    };
+                    if (first_error != null) {
+                        var discarded = value;
+                        cleanup(T, ctx.alloc, &discarded);
+                        continue;
+                    }
+                    producer.push(value) catch |err| {
+                        var discarded = value;
+                        cleanup(T, ctx.alloc, &discarded);
+                        first_error = err;
+                    };
+                }
+                if (first_error) |err| producer.setError(err);
+            }
+        };
+
+        var stream = try StreamT.spawnNew(alloc, rt.getSched());
+        errdefer {
+            stream.close();
+            stream.deinit();
+        }
+        const ctx = try alloc.create(Ctx);
+        errdefer alloc.destroy(ctx);
+        ctx.* = .{
+            .alloc = alloc,
+            .stream_inner = stream.inner,
+            .promises = promises,
+        };
+        try rt.getSched().submitSpawn(
+            @intFromPtr(&Runtime.entryWrapper),
+            @as(TaskFn, @ptrCast(&Ctx.run)),
+            ctx,
+            .{ .stack_size = .Large },
+        );
+        return stream;
+    }
+
     pub fn concurrentBoundedSelect(
         comptime T: type,
         comptime R: type,
@@ -3709,6 +3781,16 @@ pub const CheatLib = struct {
             return;
         }
 
+        // Error unions own their success payload exactly like optionals own
+        // their present payload. Errors themselves carry no owned storage.
+        if (comptime @typeInfo(T) == .error_union) {
+            const PayloadT = @typeInfo(T).error_union.payload;
+            if (comptime needsCleanup(PayloadT)) {
+                if (ptr.*) |*payload| cleanup(PayloadT, alloc, payload) else |_| {}
+            }
+            return;
+        }
+
         // Inline lock-wrapper values (not the ordinary heap `*Locked(T)`
         // binding form) appear as Arc payloads for `@shared:locked` and
         // `@shared:writeLocked`. Their mutex/rw fields contain runtime
@@ -4072,7 +4154,22 @@ pub const CheatLib = struct {
 
         if (info == .optional) {
             const ChildT = info.optional.child;
-            return if (value) |payload| try dupeValue(ChildT, payload, alloc) else null;
+            // Destination-directed copies can promote a concrete child value
+            // into an optional (for example, COPY "key" into ?String).  The
+            // source is therefore not necessarily optional even though T is.
+            if (comptime @TypeOf(value) == @TypeOf(null)) return null;
+            if (comptime @typeInfo(@TypeOf(value)) == .optional) {
+                return if (value) |payload| try dupeValue(ChildT, payload, alloc) else null;
+            }
+            if (comptime @typeInfo(@TypeOf(value)) == .array) {
+                return try dupeValue(ChildT, @as(ChildT, &value), alloc);
+            }
+            return try dupeValue(ChildT, @as(ChildT, value), alloc);
+        }
+
+        if (info == .error_union) {
+            const PayloadT = info.error_union.payload;
+            return if (value) |payload| try dupeValue(PayloadT, payload, alloc) else |err| err;
         }
 
         if (info == .@"union" and info.@"union".tag_type != null) {
@@ -4413,6 +4510,7 @@ pub const CheatLib = struct {
         if (FT == []const u8 or FT == []u8) return true;
         const ft_info = @typeInfo(FT);
         if (ft_info == .optional) return needsCleanup(ft_info.optional.child);
+        if (ft_info == .error_union) return needsCleanup(ft_info.error_union.payload);
         if (refInnerType(FT) != null) return true;
         if (isArrayList(FT)) return true;
         if (isStringMap(FT)) return true;

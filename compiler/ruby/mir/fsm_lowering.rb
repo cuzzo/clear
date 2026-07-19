@@ -110,7 +110,13 @@ module FsmLowering
       result_mir = T.let([], T::Array[MIR::Emittable])
       if last_step
         expr_type = last_step.expr.full_type!
-        expr_t = expr_type.is_a?(Type) ? expr_type : Type.new(expr_type)
+        retained_error = if last_step.expr.respond_to?(:retain_error_channel) &&
+                            T.unsafe(last_step.expr).retain_error_channel == true &&
+                            last_step.expr.respond_to?(:error_union_type)
+          T.unsafe(last_step.expr).error_union_type
+        end
+        expr_t = retained_error ? Type.new(retained_error) :
+          (expr_type.is_a?(Type) ? expr_type : Type.new(expr_type))
         result_alloc = escaping_value_alloc(expr_t)
         raw_last_mir = with_decl_alloc(result_alloc) { lower(last_step.expr) }
         last_mir = T.let(raw_last_mir.is_a?(MIR::Emittable) ? raw_last_mir : nil, T.nilable(MIR::Node))
@@ -206,6 +212,11 @@ module FsmLowering
 
   sig { params(value: MIR::Node, result_type: Type).returns(MIR::Node) }
   def coerce_fsm_result_value(value, result_type)
+    # Wrapper-bearing payloads (notably `~!T`) are values in their own right.
+    # Type's numeric predicates intentionally look through wrappers for source
+    # compatibility, but doing that here casts an error union as its scalar
+    # success arm and destroys the Promise payload ABI.
+    return value if result_type.error_union? || result_type.optional?
     return value unless result_type.integer?
     return value if value.is_a?(MIR::Cast)
 

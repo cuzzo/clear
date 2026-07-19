@@ -42,6 +42,7 @@ end
 class PipelineLazyRangePrefix < T::Struct
   extend T::Sig
 
+  const :range_mark, T.nilable(MIR::AllocMark), default: nil
   const :range_let, T.nilable(MIR::Let)
   const :source_name, String
   const :outer_stmts, T::Array[MIR::Emittable]
@@ -55,6 +56,8 @@ class PipelineLazyRangePrefix < T::Struct
   sig { returns(T::Array[MIR::Emittable]) }
   def setup_stmts
     stmts = T.let([], T::Array[MIR::Emittable])
+    source_mark = range_mark
+    stmts << source_mark if source_mark
     source_setup = range_let
     stmts << source_setup if source_setup
     stmts.concat(outer_stmts)
@@ -402,10 +405,13 @@ class PipelineRangeLowerer
       end
       MIR::Let.new("__range_src", source_mir, true, nil, "_ = &__range_src;")
     end
+    range_mark = if range_let && source_alloc
+      MIR::AllocMark.new("__range_src", source_alloc, source_ti, :heap)
+    end
 
     next_method = (source_ti.bounded_stream? || source_ti.inf_stream?) ? "nextOrNull" : "next"
 
-    PipelineLazyRangePrefix.new(range_let: range_let, source_name: source_name,
+    PipelineLazyRangePrefix.new(range_mark: range_mark, range_let: range_let, source_name: source_name,
       outer_stmts: outer_stmts, stage_stmts: stage_stmts,
       item_var: item_var, initial_capture: initial_capture, item_used: item_used,
       elem_zig: elem_zig, next_method: next_method)

@@ -111,7 +111,7 @@ FuzzGenerator.register(:generic_map_protocol_matrix, cells: GENERIC_MAP_PROTOCOL
           METHOD bad(self) RETURNS ?Int64 -> RETURN self.entries[TRUE]; END
         }
       CLEAR
-      error_code: :TYPE_MISMATCH_ASSIGN,
+      error_code: :GENERIC_MAP_KEY_MISMATCH,
     }
   when :optional_capture_method_boundary
     <<~CLEAR
