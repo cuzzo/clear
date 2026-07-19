@@ -140,10 +140,10 @@ STRUCT_FIELD_STORE_CELLS = STRUCT_FIELD_STORE_SHAPE_SPECS.keys.flat_map do |shap
   end
 end
 
-# A boxed return makes the containing struct and its managed field genuinely
-# heap-owned. The shape/modality matrix above mostly exercises ordinary
-# frame-owned struct literals, so it cannot by itself kill a mutation of the
-# heap-field allocator decision.
+# An @local capability makes the containing struct and its managed field
+# genuinely heap-owned. The shape/modality matrix above mostly exercises
+# ordinary frame-owned struct literals, so it cannot by itself kill a mutation
+# of the heap-field allocator decision.
 STRUCT_FIELD_STORE_CELLS << {
   shape: :string,
   modality: :bare,
@@ -164,14 +164,10 @@ FuzzGenerator.register(:struct_field_store_modality, cells: STRUCT_FIELD_STORE_C
     next <<~CHT
       STRUCT Box { f: #{ftype} }
       #{prelude}
-      FN make() RETURNS !Box @boxed ->
-          #{build}
-          RETURN Box{ f: #{arg} };
-      END
-
       FN main() RETURNS Void ->
-          b = make();
-          ASSERT b.f == "hi", "boxed struct field retains owned payload";
+          #{build}
+          MUTABLE b = Box{ f: #{arg} } @local;
+          ASSERT b.f == "hi", "heap struct field retains owned payload";
           RETURN;
       END
     CHT
