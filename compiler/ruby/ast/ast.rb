@@ -20,6 +20,11 @@ module AST
   module CaptureAnalysisValue
   end
 
+  # Load-order-safe protocol for immutable tense plans attached by annotation
+  # and consumed by MIR. The concrete planner lives outside the syntax layer.
+  module TensePlanValue
+  end
+
   RawBody = T.type_alias { T::Array[AST::Node] }
   HashLitPairs = T.type_alias { T::Hash[AST::Node, AST::Node] }
   BgNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock) }
@@ -2881,7 +2886,23 @@ module AST
   # lowering. modifier_order preserves the exact SELECT annotation spelling
   # (`!~`, `~!`, `!~!`, etc.) so wrapper ordering remains a checked language
   # contract instead of being flattened into a set of effects.
-  SelectOp     = Struct.new(:token, :expression, :effect_mode, :stream_mode, :modifier_order, :capture_analysis) { include Locatable; include HasExpression }
+  SelectOp = Struct.new(:token, :expression, :effect_mode, :stream_mode, :modifier_order, :capture_analysis) do
+    extend T::Sig
+    include Locatable
+    include HasExpression
+
+    sig { returns(T.nilable(AST::TensePlanValue)) }
+    def tense_plan
+      @tense_plan = T.let(nil, T.nilable(AST::TensePlanValue)) unless defined?(@tense_plan)
+      @tense_plan
+    end
+
+    sig { params(value: AST::TensePlanValue).returns(AST::TensePlanValue) }
+    def tense_plan=(value)
+      @tense_plan = value
+      value
+    end
+  end
   WhereOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   IndexOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable; include HasExpression }

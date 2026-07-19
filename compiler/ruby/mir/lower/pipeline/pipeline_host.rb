@@ -19,6 +19,7 @@ require_relative "./pipeline_each_lowerer"
 require_relative "./pipeline_placeholder_usage"
 require_relative "../../fiber_ctx_builder"
 require_relative "../../placement"
+require_relative "../../../semantic/tense_operation_plan"
 
 # MIR pipeline lowering host. It owns cross-operator pipeline context and
 # delegates operator families to typed lowerers that emit structural MIR.
@@ -653,7 +654,7 @@ class PipelineHost
     return false unless concurrent.is_a?(AST::ConcurrentOp)
     select = concurrent.op
     return false unless select.is_a?(AST::SelectOp)
-    return false unless select.modifier_order.to_s.include?('~')
+    return false unless select_tense_plan(select).asynchronous?
 
     result_type = Type.new(node.full_type!)
     result_type.canonical_stream_result? &&
@@ -775,8 +776,8 @@ class PipelineHost
         visit_mir(op.expression)
       end
     end
-    if op.modifier_order.to_s.include?('~')
-      outer, = op.modifier_order.to_s.split('~', 2)
+    tense_plan = select_tense_plan(op)
+    if tense_plan.asynchronous?
       promise_name = "__select_promise#{id}"
       selector_prefix << MIR::Let.new(promise_name, selector, false, nil, nil)
       expression_type = if op.expression.respond_to?(:error_union_type) &&
@@ -785,7 +786,10 @@ class PipelineHost
       else
         Type.new(op.expression.full_type!)
       end
-      promise_type = outer == '!' ? T.must(expression_type.payload_type) : expression_type
+      outer_fallible = tense_plan.envelope.split_future.outer.any? do |layer|
+        layer.kind == TenseLayerKind::Fallible
+      end
+      promise_type = outer_fallible ? T.must(expression_type.payload_type) : expression_type
       next_contract = MIR::CallableContract.new(
         MIR::CallableContract.no_ownership(0).signature,
         MIR::OwnershipContract.consume_operands([
@@ -847,6 +851,14 @@ class PipelineHost
     bg.result_type = result_type
     bg.boundary_fact = @lowering_bridge.execution_boundary_fact(:bg_stream, :local, analysis)
     bg
+  end
+
+  sig { params(op: AST::SelectOp).returns(TenseSelectorPlan) }
+  def select_tense_plan(op)
+    plan = op.tense_plan
+    raise "SELECT reached MIR without an annotation-produced tense plan" unless plan
+
+    T.cast(plan, TenseSelectorPlan)
   end
 
   ALLOC_REF_DEF = T.let(FunctionSignature.borrowing_intrinsic, FunctionSignature)

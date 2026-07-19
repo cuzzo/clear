@@ -341,10 +341,6 @@ class TypeShape < T::Struct
 
   sig { params(core_str: String, auto: T::Boolean).returns(TypeShape) }
   def self.from_core(core_str, auto: false)
-    if core_str.start_with?("!~")
-      raise "Invalid type '#{core_str}': !~T (error union of tense) is not allowed - use ~!T instead"
-    end
-
     key = T.let("#{auto}:#{core_str}", String)
     cached = CORE_CACHE[key]
     return cached if cached
@@ -1258,24 +1254,7 @@ class Type
     wrapped = Type.new(wrapped_type)
     return wrapped if wrapped.optional?
 
-    wrapped_surface = surface_name_type(wrapped)
-    wrapped_type_raw = T.let(nil, T.nilable(Symbol))
-    wrapped_function_type_raw = T.let(nil, T.nilable(FunctionType))
-    if wrapped.fn_type?
-      wrapped_function_type_raw = T.must(wrapped.function_type)
-    else
-      wrapped_type_raw = wrapped_surface.to_sym
-    end
-
-    t = Type.new("?#{wrapped_surface}")
-    t.replace_shape!(
-      TypeShape.from_raw(
-        raw: t.raw,
-        optional: true,
-        wrapped_type_raw: wrapped_type_raw,
-        wrapped_function_type_raw: wrapped_function_type_raw
-      )
-    )
+    t = Type.new(OptionalTypeExpression.new(inner: wrapped.shape.expression))
     t.merge_capabilities_from!(wrapped, include_affine_ownership: true)
     t.copy_placement_from!(wrapped, preserve_existing: false)
     t

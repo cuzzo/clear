@@ -170,7 +170,9 @@ RSpec.describe TypeExpressionParser do
     expect { expression("~~Int64") }.to raise_error(ArgumentError, /double future/)
     expect { expression("!!Int64") }.to raise_error(ArgumentError, /double fallible/)
     expect { expression("??Int64") }.to raise_error(ArgumentError, /double optional/)
-    expect { expression("!~Int64") }.to raise_error(ArgumentError, /~!T/)
+    expect(TypeExpressionPrinter.inline(expression("!~Int64"))).to eq("!~Int64")
+    expect(TypeExpressionPrinter.inline(expression("!~!Int64"))).to eq("!~!Int64")
+    expect { expression("?~Int64") }.to raise_error(ArgumentError, /unsupported tense order/)
     expect { expression("HashMap<A,B,C>") }.to raise_error(ArgumentError, /one or two/)
   end
 
@@ -409,7 +411,7 @@ RSpec.describe TypeShape do
 
   it "keeps String-keyed maps non-numeric and rejects fallible futures" do
     expect(described_class.from_core("HashMap<String>").numeric_map?).to be(false)
-    expect { described_class.from_core("!~Int64") }.to raise_error(/~!T/)
+    expect(described_class.from_core("!~Int64").expression).to be_a(FallibleTypeExpression)
   end
 
   it "does not mistake a leading Zig builtin marker for CLEAR capabilities" do
