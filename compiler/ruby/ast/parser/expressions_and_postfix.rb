@@ -30,7 +30,7 @@ class ClearParser
     when :parse_next_expr then parse_next_expr
     when :parse_sigil_construct then parse_sigil_construct
     when :parse_require_expression then AST::Require.new(consume(:KEYWORD, 'REQUIRE'), consume(:STRING).text!)
-    when :parse_select_op then AST::SelectOp.new(consume(:KEYWORD, 'SELECT'), parse_expression(1))
+    when :parse_select_op then parse_select_op
     when :parse_where_op then AST::WhereOp.new(consume(:KEYWORD, 'WHERE'), parse_expression(1))
     when :parse_index_op then AST::IndexOp.new(consume(:KEYWORD, 'INDEX'), parse_expression(1))
     when :parse_reduce_op then parse_reduce_op
@@ -63,6 +63,29 @@ class ClearParser
       raise "Unknown primary parser action #{rule.action}"
     end
     T.must(result)
+  end
+
+  sig { returns(AST::SelectOp) }
+  def parse_select_op
+    token = consume(:KEYWORD, 'SELECT')
+    effect_mode = parse_select_effect_mode
+    AST::SelectOp.new(token, parse_expression(1), effect_mode)
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def parse_select_effect_mode
+    if match?(:CHAR, '!')
+      consume(:CHAR, '!')
+      if match?(:CHAR, '?')
+        consume(:CHAR, '?')
+        return :fallible_optional
+      end
+      return :fallible
+    end
+    return nil unless match?(:CHAR, '?')
+
+    consume(:CHAR, '?')
+    :optional
   end
 
   sig { returns(AST::Cast) }
@@ -984,9 +1007,7 @@ class ClearParser
   sig { params(parent_token: Lexer::Token).returns(ConcurrentPipelineOp) }
   def parse_concurrent_inner_op(parent_token)
     if match?(:KEYWORD, 'SELECT')
-      consume(:KEYWORD, 'SELECT')
-      expr = parse_expression(1)  # stop before |> for chaining
-      AST::SelectOp.new(previous, expr)
+      parse_select_op
     elsif match?(:KEYWORD, 'WHERE')
       consume(:KEYWORD, 'WHERE')
       expr = parse_expression(1)

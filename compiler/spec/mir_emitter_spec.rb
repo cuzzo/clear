@@ -336,6 +336,21 @@ RSpec.describe MIREmitter do
     expect(zig).to include("pub fn fetch(rt: *Runtime) ![]const u8")
   end
 
+  it "uses a synthesized function's Runtime parameter for allocator cleanup" do
+    cleanup = CleanupEntry.from(kind: :uniform, alloc: :heap, has_moved_guard: false)
+    node = MIR::FnDef.new(
+      "apply",
+      [MIR::Param.new("__rt", "*Runtime")],
+      "void",
+      [MIR::ErrCleanup.new("owned", cleanup)],
+      nil, true, nil
+    )
+
+    zig = e.emit(node)
+    expect(zig).to include("__rt.heapAlloc(), &owned")
+    expect(zig).not_to match(/(?<!_)rt\.heapAlloc\(\), &owned/)
+  end
+
   it "emits comptime params" do
     node = MIR::FnDef.new(
       "make",

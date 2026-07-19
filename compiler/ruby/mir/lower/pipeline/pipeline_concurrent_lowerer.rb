@@ -647,7 +647,11 @@ class PipelineConcurrentLowerer < T::Struct
     ret_type = Type.new(return_type)
     body.concat(callback_body(conc_op, body_kind, ret_type, capture_map, capture_symbols))
 
-    fn = MIR::FnDef.new("apply", params, ret_type.zig_type, body, nil, true, nil)
+    # The ordinary callback ABI adds an outer error channel for worker/runtime
+    # failures. When R itself is an explicitly preserved !T value, adding that
+    # channel would produce invalid `!!T` Zig and erase the value/error
+    # distinction; the preserving runtime helper treats R as data instead.
+    fn = MIR::FnDef.new("apply", params, ret_type.zig_type, body, nil, !ret_type.error_union?, nil)
     callback_record(id, ctx_name, fields, fn, specs)
   end
 
@@ -697,14 +701,14 @@ class PipelineConcurrentLowerer < T::Struct
   sig { params(lhs: AST::Identifier, conc_op: AST::ConcurrentOp, inner: AST::SelectOp).returns(MIR::BlockExpr) }
   def lower_concurrent_bounded_select(lhs, conc_op, inner)
     item_t = T.must(lhs.full_type!.stream_element_type)
-    result_t = Type.new(inner.expression.full_type!)
+    result_t = concurrent_select_result_type(inner)
     invoke = bounded_expr_invocation(conc_op, item_t, result_t)
     source = bounded_stream_items_setup(lhs, invoke.id)
     source_move = bounded_stream_source_move(lhs)
 
-    call = self.emit_builtin.call(:concurrentBoundedSelect, [
+    call = self.emit_builtin.call(concurrent_select_builtin(:concurrentBoundedSelect, inner), [
       MIR::Ident.new(item_t.zig_type),
-      MIR::Ident.new(result_t.zig_type),
+      MIR::Ident.new(result_t.nested_zig_type),
       MIR::Lit.new(lhs.full_type!.stream_capacity.to_s),
       *invoke.bounded_allocating_args(source.pointer, self.pipeline_result_alloc.call),
     ])
@@ -934,15 +938,15 @@ class PipelineConcurrentLowerer < T::Struct
   def lower_concurrent_stream_select(lhs, conc_op, inner)
     lhs_ti = lhs.full_type!
     item_t = stream_concurrent_element_type(lhs_ti)
-    result_t = Type.new(inner.expression.full_type!)
+    result_t = concurrent_select_result_type(inner)
     invoke = bounded_expr_invocation(conc_op, item_t, result_t)
     source = stream_concurrent_source_setup_mir(lhs, invoke.id)
     n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
     capacity = stream_concurrent_capacity_mir(conc_op, n_workers_mir)
 
-    call = self.emit_builtin.call(:concurrentStreamSelect, [
+    call = self.emit_builtin.call(concurrent_select_builtin(:concurrentStreamSelect, inner), [
       MIR::Ident.new(item_t.zig_type),
-      MIR::Ident.new(result_t.zig_type),
+      MIR::Ident.new(result_t.nested_zig_type),
       *invoke.stream_allocating_args(
         source.pointer,
         capacity,
@@ -1032,13 +1036,13 @@ class PipelineConcurrentLowerer < T::Struct
   sig { params(lhs: AST::Node, conc_op: AST::ConcurrentOp, inner: AST::SelectOp).returns(MIR::BlockExpr) }
   def lower_concurrent_list_select(lhs, conc_op, inner)
     item_t = concurrent_list_item_type(lhs)
-    result_t = Type.new(inner.expression.full_type!)
+    result_t = concurrent_select_result_type(inner)
     invoke = bounded_expr_invocation(conc_op, item_t, result_t)
     setup_stmts = self.source_setup.call(lhs)
 
-    call = self.emit_builtin.call(:concurrentListSelect, [
+    call = self.emit_builtin.call(concurrent_select_builtin(:concurrentListSelect, inner), [
       MIR::Ident.new(item_t.zig_type),
-      MIR::Ident.new(result_t.zig_type),
+      MIR::Ident.new(result_t.nested_zig_type),
       *invoke.bounded_allocating_args(MIR::Ident.new("pipe_items"), self.pipeline_result_alloc.call),
     ])
 
@@ -1047,6 +1051,24 @@ class PipelineConcurrentLowerer < T::Struct
       before_context: setup_stmts,
       after_context: [MIR::BreakStmt.new(label, call)],
     ), Type.from_node!(conc_op, context: "list concurrent SELECT result"))
+  end
+
+  sig { params(inner: AST::SelectOp).returns(Type) }
+  def concurrent_select_result_type(inner)
+    expression = inner.expression
+    if (inner.effect_mode == :fallible || inner.effect_mode == :fallible_optional) &&
+       expression.respond_to?(:error_union_type) && T.unsafe(expression).error_union_type
+      return Type.new(T.unsafe(expression).error_union_type)
+    end
+
+    expression.full_type!(context: "CONCURRENT SELECT result")
+  end
+
+  sig { params(base: Symbol, inner: AST::SelectOp).returns(Symbol) }
+  def concurrent_select_builtin(base, inner)
+    return base unless inner.effect_mode == :fallible || inner.effect_mode == :fallible_optional
+
+    "#{base}PreservingErrors".to_sym
   end
 
   sig { params(lhs: AST::Node, conc_op: AST::ConcurrentOp, inner: AST::WhereOp).returns(MIR::BlockExpr) }

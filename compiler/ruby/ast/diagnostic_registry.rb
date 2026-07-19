@@ -1414,8 +1414,20 @@ module DiagnosticRegistry
     # got-type goes in a third arg (empty when the type is unavailable).
     WHERE_NEEDS_BOOL: {
       severity: :error, category: :type,
-      template: "WHERE clause must evaluate to Bool",
-      summary:  "WHERE filter expression's type must be Bool.",
+      template: "WHERE clause must evaluate to a definite synchronous Bool, got %{got}",
+      summary:  "WHERE filter expressions cannot leave optional, fallible, or asynchronous predicate effects unresolved.",
+      fix_hint: "Resolve !Bool with TRY or OR_ELSE, resolve ?Bool with UNWRAP or OR_ELSE, and NEXT asynchronous work before it reaches WHERE.",
+    },
+    SELECT_EFFECT_SUFFIX_REQUIRED: {
+      severity: :error, category: :type,
+      template: "SELECT expression returns %{got}. Preserve that effect explicitly with `%{selector}`, or consume it inside the SELECT expression.",
+      summary: "SELECT must not silently propagate fallible or optional element results.",
+      fix_hint: "Use SELECT!, SELECT?, or SELECT!? to retain element effects; use TRY, UNWRAP, or OR_ELSE inside SELECT to consume them.",
+    },
+    SELECT_EFFECT_SUFFIX_MISMATCH: {
+      severity: :error, category: :type,
+      template: "SELECT%{declared} does not match selector result %{got}; use `%{expected}`.",
+      summary: "A SELECT effect suffix must exactly describe the unconsumed selector result.",
     },
     PIPE_CLAUSE_NEEDS_BOOL: {
       severity: :error, category: :type,
@@ -3549,6 +3561,7 @@ module DiagnosticRegistry
   }.freeze, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
 
   FIX_DESCRIPTIONS = T.let({
+    INSERT_SELECT_EFFECT_SUFFIX: "Change SELECT to %{selector} so the selected element effect is explicit.",
     ADD_DECL_CAPABILITY_GENERIC: "Add `%{sigil}` to '%{name}' at its declaration (line %{line}).",
     ADD_EFFECTS_REENTRANT: "Add `EFFECTS REENTRANT` so the runtime knows to schedule this fn on a service stack.",
     ADD_STREAM_YIELDS_CONTRACT: "Add `YIELDS %{type}` so the stream's future or union item type is explicit.",

@@ -1107,7 +1107,50 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-      }.to raise_error(CompilerError, /WHERE clause must evaluate to Bool/)
+      }.to raise_error(CompilerError, /WHERE clause must evaluate to a definite synchronous Bool/)
+    end
+
+    it "rejects unresolved WHERE effects under CONCURRENT" do
+      expect {
+        run(<<~CLEAR)
+          FN predicate(value: Int64) RETURNS !Bool -> RETURN value > 0; END
+          FN main() RETURNS !Void ->
+            items: []Int64 = [1, 2];
+            result = items |> CONCURRENT WHERE predicate(_);
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /definite synchronous Bool/)
+    end
+
+    it "preserves fallible SELECT elements under CONCURRENT" do
+      out = transpile_fn(<<~CLEAR)
+        FN project(value: Int64) RETURNS !Int64 -> RETURN value * 2; END
+        FN main() RETURNS !Void ->
+          items: []Int64 = [1, 2];
+          results = items |> CONCURRENT(workers: 2) SELECT! project(_);
+          results |> EACH { ASSERT TRY _ > 0; };
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("CheatLib.concurrentListSelectPreservingErrors")
+      expect(out).to include("fn apply(__rt: *Runtime, raw_ctx: ?*anyopaque, __item: i64) !i64")
+      expect(out).not_to include(") !!i64")
+    end
+
+    it "transfers asynchronous SELECT callback results through the synthesized function boundary" do
+      out = transpile_fn(<<~CLEAR)
+        FN later(value: Int64) RETURNS ~Int64 -> RETURN BG { value * 2; }; END
+        FN main() RETURNS !Void ->
+          items: []Int64 = [1, 2];
+          pending:~ = items |> CONCURRENT(workers: 2) SELECT later(_);
+          resolved: []Int64 = NEXT pending;
+          ASSERT resolved.length() == 2;
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("CheatLib.concurrentListSelect")
+      expect(out).to include("CheatLib.Promise(i64)")
     end
 
     # -------------------------------------------------------------------------

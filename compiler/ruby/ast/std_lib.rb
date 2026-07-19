@@ -1679,6 +1679,12 @@ BUILTIN_OPS = T.let({
     bc: true,
     allocates: true
   },
+  concurrentBoundedSelectPreservingErrors: {
+    zig: "try CheatLib.concurrentBoundedSelectPreservingErrors({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})",
+    bc: true,
+    bc_op: :concurrentBoundedSelect,
+    allocates: true
+  },
   concurrentBoundedWhere: {
     zig: "try CheatLib.concurrentBoundedWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
     bc: true,
@@ -1694,6 +1700,12 @@ BUILTIN_OPS = T.let({
     bc: true,
     allocates: true
   },
+  concurrentStreamSelectPreservingErrors: {
+    zig: "try CheatLib.concurrentStreamSelectPreservingErrors({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12})",
+    bc: true,
+    bc_op: :concurrentStreamSelect,
+    allocates: true
+  },
   concurrentStreamWhere: {
     zig: "try CheatLib.concurrentStreamWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})",
     bc: true,
@@ -1706,6 +1718,12 @@ BUILTIN_OPS = T.let({
   },
   concurrentListSelect: {
     zig: "try CheatLib.concurrentListSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
+    allocates: true
+  },
+  concurrentListSelectPreservingErrors: {
+    zig: "try CheatLib.concurrentListSelectPreservingErrors({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
+    bc: true,
+    bc_op: :concurrentListSelect,
     allocates: true
   },
   concurrentListWhere: {

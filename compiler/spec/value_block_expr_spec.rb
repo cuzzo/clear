@@ -170,7 +170,7 @@ RSpec.describe "Clear value block expressions" do
           RETURN;
         END
       CLEAR
-    }.to raise_error(CompilerError, /WHERE clause must evaluate to Bool/)
+    }.to raise_error(CompilerError, /WHERE clause must evaluate to a definite synchronous Bool/)
   end
 
   it "covers nested and compound brace disambiguation after a top-level colon" do

@@ -1870,7 +1870,12 @@ class MIREmitter
     all_params = [comptime, params].reject(&:empty?).join(", ")
 
     ret = node.can_fail ? "!#{node.ret_type}" : node.ret_type
-    body = emit_body(node.body)
+    runtime_param = node.params.find { |param| param.zig_type == "*Runtime" }
+    body = if runtime_param
+      emit_body_with_runtime(node.body, runtime_param.name)
+    else
+      emit_body(node.body)
+    end
 
     "#{vis}fn #{node.name}(#{all_params}) #{ret} {\n#{body}\n}"
   end

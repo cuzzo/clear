@@ -199,7 +199,36 @@ pub const CheatLib = struct {
             fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
                 cleanup(R, alloc_, ptr);
             }
-        }.cleanupResult, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
+        }.cleanupResult, false, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
+    }
+
+    pub fn concurrentBoundedSelectPreservingErrors(
+        comptime T: type,
+        comptime R: type,
+        comptime N: usize,
+        comptime mapFn: fn (*Runtime, ?*anyopaque, T) R,
+        alloc: std.mem.Allocator,
+        rt: *Runtime,
+        items: anytype,
+        workers: usize,
+        batch: usize,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !std.ArrayListUnmanaged(R) {
+        return streams.concurrentBoundedSelect(fp.WaitGroup, T, R, N, mapFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, struct {
+            fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
+                cleanup(R, alloc_, ptr);
+            }
+        }.cleanupResult, true, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentBoundedWhere(
@@ -283,7 +312,37 @@ pub const CheatLib = struct {
             fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
                 cleanup(R, alloc_, ptr);
             }
-        }.cleanupResult, is_inf, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx);
+        }.cleanupResult, is_inf, false, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx);
+    }
+
+    pub fn concurrentStreamSelectPreservingErrors(
+        comptime T: type,
+        comptime R: type,
+        comptime mapFn: fn (*Runtime, ?*anyopaque, T) R,
+        comptime is_inf: bool,
+        alloc: std.mem.Allocator,
+        rt: *Runtime,
+        src: anytype,
+        workers: usize,
+        capacity: usize,
+        batch: usize,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !std.ArrayListUnmanaged(R) {
+        return streams.concurrentStreamSelect(fp.WaitGroup, BoundedChannel(T), T, R, mapFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, struct {
+            fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
+                cleanup(R, alloc_, ptr);
+            }
+        }.cleanupResult, is_inf, true, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentStreamWhere(
@@ -368,7 +427,35 @@ pub const CheatLib = struct {
             fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
                 cleanup(R, alloc_, ptr);
             }
-        }.cleanupResult, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
+        }.cleanupResult, false, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
+    }
+
+    pub fn concurrentListSelectPreservingErrors(
+        comptime T: type,
+        comptime R: type,
+        comptime mapFn: fn (*Runtime, ?*anyopaque, T) R,
+        alloc: std.mem.Allocator,
+        rt: *Runtime,
+        items: []const T,
+        workers: usize,
+        batch: usize,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !std.ArrayListUnmanaged(R) {
+        return streams.concurrentListSelect(fp.WaitGroup, T, R, mapFn, struct {
+            fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.localSpawn, struct {
+            fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+            }
+        }.parallelSpawn, struct {
+            fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
+                cleanup(R, alloc_, ptr);
+            }
+        }.cleanupResult, true, alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx);
     }
 
     pub fn concurrentListWhere(

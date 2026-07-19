@@ -1418,7 +1418,11 @@ module MIRLoweringFunctions
     call = MIR::Call.new(callee, args, can_fail, owned_return, contract)
     call.never_success = call_never_returns_success?(node)
     if node.respond_to?(:full_type!)
-      call.result_type = Type.from_node!(node, context: "call result")
+      retained_error = if node.respond_to?(:retain_error_channel) && T.unsafe(node).retain_error_channel == true &&
+                          node.respond_to?(:error_union_type)
+        T.unsafe(node).error_union_type
+      end
+      call.result_type = retained_error ? Type.new(retained_error) : Type.from_node!(node, context: "call result")
     end
     attach_explicit_move_consumption!(call, ast_args, mir_args, "call explicit move")
     return call unless node.respond_to?(:heap_dupe_result) && node.heap_dupe_result

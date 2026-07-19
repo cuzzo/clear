@@ -178,7 +178,7 @@ expected hard error is absent.
 | `diagnostic_policy_matrix`  | 16              | Policy-heavy front-end diagnostics for reentrancy, hold-lock-across-yield, lock ordering, handlers, and ownership/fixable rejection paths. |
 | `pipeline_source_shape_matrix` | 44           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and observable terminals. |
 | `pipeline_gap_matrix`        | 8            | Focused pipeline operator gaps: TAKE_WHILE, SKIP, WINDOW(time), UNNEST bindings, and CONCURRENT terminals. |
-| `pipeline_value_block_matrix` | 7            | Source-level value blocks in SELECT, WHERE, ORDER_BY, and lambda positions, including missing-result and bad-predicate rejection cells. |
+| `pipeline_value_block_matrix` | 24           | Source-level value blocks plus SELECT !/? effect contracts, async selectors, strict WHERE predicates, and concurrent variants. |
 | `call_ownership_contract_matrix` | 73         | Normal calls, TAKES bare/COPY/GIVE, owned/fallible returns, receiver mutation, BG calls, and pipeline call contracts across string/list/struct/union/nested owned shapes. |
 | `collection_iteration_storage_matrix` | 43    | Collection iteration/storage across arrays, lists, sets, maps, pools, nested and SOA containers. |
 | `mir_checker_negative_matrix` | 47            | Generated malformed-MIR cells for fail-closed ownership verification: double release/finalizer, implicit move, UAF after transfer, unverifiable joins, aggregate allocator mismatch, return allocator invariants, MIR call contracts, InlineZig/RawZig allocator contracts, invalid allocator facts, missing cleanup finalizers, borrowed capture cleanup, structural Rc/Arc copies, unhoisted allocs, COPY_CLEANUP, and INDIRECT_DOUBLE_BOX. |
@@ -195,7 +195,7 @@ expected hard error is absent.
 | `lowering_boundary_matrix`   | 28           | MIR lowering boundary coverage for call contracts, WITH variants, BG/DO/NEXT, and pipeline terminals. |
 | `test_framework_matrix`      | 6            | TEST/WHEN/TEST THAT grammar through hooks, LET bindings, stubs, pending tests, benchmark, smash, and profile forms. |
 | `extern_boundary_matrix`     | 6            | Negative extern declaration/call boundaries for free functions, trampolines, extern methods/resources, generic comptime calls, and tight-loop rejection. |
-| `curated_gap_corpus`         | 489          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
+| `curated_gap_corpus`         | 490          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
 | `tense_predicate_matrix`     | 11           | Postfix tense predicates, stacked refinement, readiness polling, and ambiguous optional-Boolean rejection. |
 | `next_tense_matrix`          | 9            | NEXT across future/stream values and their fallible/optional tense permutations, including invalid redundant and missing unwraps. |
 

@@ -117,7 +117,7 @@ class PipelineListLowerer < T::Struct
   def lower_select(site, expr_node)
     list_node = site.list
     smooth_node = site.options
-    res_type = expr_node.full_type!
+    res_type = select_result_type(expr_node)
     res_zig = self.transpile_type.call(res_type)
     alloc = self.pipeline_alloc.call(smooth_node)
     expr_mir = visit_pipeline_expr_mir(list_node, expr_node)
@@ -128,11 +128,21 @@ class PipelineListLowerer < T::Struct
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("val", expr_mir, false, nil, nil),
           self.append_owned_value_stmt.call("res_list", alloc,
-            self.borrowed_pipeline_value.call(MIR::Ident.new("val"), Type.new(res_type), alloc)),
+            self.borrowed_pipeline_value.call(MIR::Ident.new("val"), res_type, alloc)),
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list")),
       ]
     end)
+  end
+
+  sig { params(expr_node: AST::Node).returns(Type) }
+  def select_result_type(expr_node)
+    retained_error = if expr_node.respond_to?(:retain_error_channel) &&
+                        T.unsafe(expr_node).retain_error_channel == true &&
+                        expr_node.respond_to?(:error_union_type)
+      T.unsafe(expr_node).error_union_type
+    end
+    retained_error ? Type.new(retained_error) : expr_node.full_type!(context: "SELECT result")
   end
 
   sig { params(site: PipelineSite, limit_node: AST::LimitOp).returns(MIR::BlockExpr) }

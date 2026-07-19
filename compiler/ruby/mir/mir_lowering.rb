@@ -781,7 +781,7 @@ class MIRLowering
     return DestinationPlacementPlan.new(action: :owned_orelse, type_info: ti, dest_alloc: dest_alloc) if owned_or_destination?(mir, ast_node, ti, MIR::Orelse)
     return DestinationPlacementPlan.new(action: :owned_try_catch, type_info: ti, dest_alloc: dest_alloc) if owned_or_destination?(mir, ast_node, ti, MIR::TryCatch)
     source_alloc = mir_owned_alloc(mir)
-    return destination_keep_plan(dest_alloc) if heap_owned_async_boundary_destination?(mir, ast_node, dest_alloc, ti)
+    return destination_keep_plan(dest_alloc) if heap_owned_future_handle_destination?(mir, ast_node, dest_alloc, ti)
     if source_alloc && source_alloc != dest_alloc && ownership_bearing_type?(ti)
       return DestinationPlacementPlan.new(action: :owned_alloc_mismatch, type_info: ti, dest_alloc: dest_alloc, source_alloc: source_alloc)
     end
@@ -868,9 +868,8 @@ class MIRLowering
   end
 
   sig { params(mir: MIR::Node, ast_node: AST::Node, dest_alloc: Symbol, type_info: Type).returns(T::Boolean) }
-  def heap_owned_async_boundary_destination?(mir, ast_node, dest_alloc, type_info)
+  def heap_owned_future_handle_destination?(mir, ast_node, dest_alloc, type_info)
     return false unless MIR::Placement.frame?(dest_alloc)
-    return false unless ast_node.is_a?(AST::BgBlock)
 
     source_type = Type.from_node!(ast_node, context: "async boundary destination")
     return false unless type_info.single_future? || source_type.single_future?
@@ -2265,7 +2264,32 @@ class MIRLowering
 
   sig { params(node: MIR::Node, emitted: T::Array[MIR::Node], remaining: T::Array[MIR::Node]).returns(T::Array[MIR::Stmt]) }
   def pre_terminator_transfer_marks(node, emitted, remaining)
-    []
+    return [] unless node.is_a?(MIR::ReturnStmt)
+    value = node.value
+    return [] unless value.is_a?(MIR::Ident)
+
+    name = value.name.to_s
+    return [] if transfer_mark_present?(emitted, name) || transfer_mark_present?(remaining, name)
+
+    # Ordinary AST returns acquire their transfer plan in lower_return. Some
+    # compiler-synthesized function boundaries (for example CONCURRENT SELECT
+    # callbacks) are built directly in MIR. If normalization hoists their
+    # returned owned expression, the explicit ErrCleanup is the authoritative
+    # fact that success hands the value to the caller. Complete that existing
+    # lifecycle plan here instead of re-deriving ownership from the value type.
+    cleanup = emitted.reverse.find do |stmt|
+      stmt.is_a?(MIR::ErrCleanup) && stmt.name.to_s == name
+    end
+    return [] unless cleanup
+    return [] unless emitted.any? { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == name }
+
+    T.cast(cleanup, MIR::ErrCleanup).cleanup_entry.mark_moved_guard!
+    MIR::OwnershipTransferPlan.new(
+      name: name,
+      target: :return,
+      target_alloc: nil,
+      move_guarded: true,
+    ).marks
   end
 
   sig do

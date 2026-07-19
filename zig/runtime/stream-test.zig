@@ -130,12 +130,40 @@ const BoundedErrorState = struct {
     err: ?anyerror = null,
 };
 
+const PreservedSelectResult = anyerror!i64;
+
+const BoundedPreservedErrorState = struct {
+    items: [4]CheatLib.Promise(i64),
+    results: ?std.ArrayListUnmanaged(PreservedSelectResult) = null,
+};
+
+const TestSelectStream = struct {
+    items: []const i64,
+    next_index: usize = 0,
+
+    fn next(self: *@This()) !?i64 {
+        if (self.next_index >= self.items.len) return null;
+        defer self.next_index += 1;
+        return self.items[self.next_index];
+    }
+};
+
+const StreamPreservedErrorState = struct {
+    source: TestSelectStream,
+    results: ?std.ArrayListUnmanaged(PreservedSelectResult) = null,
+};
+
 fn boundedAccumulate(_: *Runtime, raw_args: ?*anyopaque, value: i64) anyerror!void {
     const state = @as(*BoundedEachState, @ptrCast(@alignCast(raw_args.?)));
     _ = state.total.fetchAdd(value, .seq_cst);
 }
 
 fn boundedMapErrorOnThree(_: *Runtime, _: ?*anyopaque, value: i64) anyerror!i64 {
+    if (value == 3) return error.IntentionalBoundedSelect;
+    return value;
+}
+
+fn preserveMapErrorOnThree(_: *Runtime, _: ?*anyopaque, value: i64) PreservedSelectResult {
     if (value == 3) return error.IntentionalBoundedSelect;
     return value;
 }
@@ -245,6 +273,43 @@ fn boundedSelectErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void
         return;
     };
     result.deinit(rt.heapAlloc());
+}
+
+fn boundedSelectPreservedErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*BoundedPreservedErrorState, @ptrCast(@alignCast(raw_args.?)));
+    state.results = try CheatLib.concurrentBoundedSelectPreservingErrors(
+        i64,
+        PreservedSelectResult,
+        4,
+        preserveMapErrorOnThree,
+        rt.heapAlloc(),
+        rt,
+        &state.items,
+        2,
+        3,
+        false,
+        .{},
+        null,
+    );
+}
+
+fn streamSelectPreservedErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*StreamPreservedErrorState, @ptrCast(@alignCast(raw_args.?)));
+    state.results = try CheatLib.concurrentStreamSelectPreservingErrors(
+        i64,
+        PreservedSelectResult,
+        preserveMapErrorOnThree,
+        false,
+        rt.heapAlloc(),
+        rt,
+        &state.source,
+        2,
+        4,
+        2,
+        false,
+        .{},
+        null,
+    );
 }
 
 fn boundedWhereErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
@@ -1415,6 +1480,83 @@ test "concurrentBoundedSelect returns all mapped items in source order" {
     try std.testing.expectEqual(@as(i64, 4), result.items[1]);
     try std.testing.expectEqual(@as(i64, 6), result.items[2]);
     try std.testing.expectEqual(@as(i64, 8), result.items[3]);
+}
+
+test "concurrentBoundedSelectPreservingErrors retains callback errors as elements" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    defer fp.global_registry.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 4 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    var state = BoundedPreservedErrorState{ .items = try makeBoundedPromiseItems(&rt, .{ 1, 2, 3, 4 }) };
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&boundedSelectPreservedErrorConsumer)),
+        &state,
+        .{ .stack_size = test_stack_size },
+    );
+    sched.run();
+
+    var result = state.results.?;
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 4), result.items.len);
+    try std.testing.expectEqual(@as(i64, 1), try result.items[0]);
+    try std.testing.expectEqual(@as(i64, 2), try result.items[1]);
+    try std.testing.expectError(error.IntentionalBoundedSelect, result.items[2]);
+    try std.testing.expectEqual(@as(i64, 4), try result.items[3]);
+}
+
+test "concurrentStreamSelectPreservingErrors retains callback errors as elements" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    defer fp.global_registry.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 4 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    const values = [_]i64{ 1, 2, 3, 4 };
+    var state = StreamPreservedErrorState{ .source = .{ .items = &values } };
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&streamSelectPreservedErrorConsumer)),
+        &state,
+        .{ .stack_size = test_stack_size },
+    );
+    sched.run();
+
+    var result = state.results.?;
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 4), result.items.len);
+    var definite_count: usize = 0;
+    var saw_preserved_error = false;
+    for (result.items) |item| {
+        if (item) |_| {
+            definite_count += 1;
+        } else |err| {
+            try std.testing.expectEqual(error.IntentionalBoundedSelect, err);
+            saw_preserved_error = true;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 3), definite_count);
+    try std.testing.expect(saw_preserved_error);
 }
 
 test "concurrentBoundedWhere filters items and preserves source order" {

@@ -1215,6 +1215,20 @@ class Type
     )
   end
 
+  # A dynamically-sized collection of asynchronous handles. Keep the future
+  # outside the linear collection in the semantic tree so `name:~` and NEXT
+  # can distinguish a promise list from an ordinary `[]~T` list of values.
+  sig { params(element_type: TypeInput).returns(Type) }
+  def self.promise_list_of(element_type)
+    list = array_of(element_type)
+    Type.new(
+      FutureTypeExpression.new(
+        inner: list.shape.expression,
+        capabilities: TypeCapabilities.new(ownership: :affine, collection: :list),
+      )
+    )
+  end
+
   sig { params(element_type: TypeInput, capacity: T.nilable(Integer)).returns(Type) }
   def self.set_of(element_type, capacity: nil)
     element = from_input(element_type)

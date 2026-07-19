@@ -62,6 +62,19 @@ module PipeAnalysis
     end
   end
 
+  class SelectorEffectFact < T::Struct
+    extend T::Sig
+
+    const :value_type, Type
+    const :asynchronous, T::Boolean
+    const :required_mode, T.nilable(Symbol)
+
+    sig { returns(T::Boolean) }
+    def fallible?
+      required_mode == :fallible || required_mode == :fallible_optional
+    end
+  end
+
   # =========================================================
   # SMOOTH OPERATOR (|>)
   # =========================================================
@@ -329,6 +342,8 @@ module PipeAnalysis
     require_array_input!(node, "SELECT", allow_range: is_stream, allow_stream: is_stream)
     item_type = source.item_type
 
+    selector_effect = T.let(nil, T.nilable(SelectorEffectFact))
+
     # Create a temporary Scope for the body
     with_new_scope do
       # Declare '_' with the specific item type
@@ -339,8 +354,11 @@ module PipeAnalysis
         annotate_pipeline_expression!(node.right, node.right.expression)
       end
 
-      if node.right.is_a?(AST::WhereOp) && node.right.expression.resolved_type != :Bool
-        error!(node.right, :WHERE_NEEDS_BOOL)
+      selector_effect = selector_effect_fact(node.right.expression)
+      if node.right.is_a?(AST::WhereOp)
+        validate_where_effect_contract!(node.right, selector_effect)
+      elsif node.right.is_a?(AST::SelectOp)
+        validate_select_effect_contract!(node.right, selector_effect)
       end
     end
 
@@ -349,9 +367,12 @@ module PipeAnalysis
     # can see the source is still infinite; LIMIT will convert to T[].
     case node.right
     when AST::SelectOp
-      result_base = node.right.expression.full_type!(context: "pipeline op expression")
+      effect = T.must(selector_effect)
+      result_base = effect.value_type
       result_type = if source.inf_stream?
-        Type.new("~#{Type.surface_name_type(result_base)}[INF]")
+        Type.new(StreamTypeExpression.new(cardinality: :INF, item: result_base.shape.expression))
+      elsif effect.asynchronous
+        Type.promise_list_of(result_base)
       else
         Type.array_of(result_base)
       end
@@ -369,13 +390,99 @@ module PipeAnalysis
       stamp_type!(node.right, node.right.expression.resolved_type)
     end
 
-    node.storage = :frame
+    # Promise-list SELECT results own heap-backed fiber handles. Keep their
+    # aggregate in the heap ownership domain so each transferred child and its
+    # container have one coherent cleanup allocator.
+    node.storage = node.full_type!(context: "pipeline result storage").promise_list? ? :heap : :frame
 
     # WHERE/SELECT/ORDER_BY allocate intermediate ArrayListUnmanaged at the
     # transpiler level via rt.frameAlloc(). InfStream results are not materialized;
     # only count frame allocation for finite (list-producing) results.
-    current_fn_ctx&.record_frame_use! unless source.inf_stream?
+    current_fn_ctx&.record_frame_use! unless source.inf_stream? || node.storage == :heap
     nil
+  end
+
+  sig { params(expression: AST::Node).returns(SelectorEffectFact) }
+  def selector_effect_fact(expression)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+    expression_type = expression.full_type!(context: "pipeline selector expression")
+    recoverable = recoverable_result_type(expression, context: "pipeline selector recovery")
+    wrapped = recoverable || expression_type
+    asynchronous = wrapped.future?
+    value_type = asynchronous ? wrapped.tense_type : wrapped
+    fallible = value_type.error_union?
+    success = fallible ? value_type.success_type : value_type
+    optional = success.optional?
+    required_mode = if fallible && optional
+      :fallible_optional
+    elsif fallible
+      :fallible
+    elsif optional
+      :optional
+    end
+    SelectorEffectFact.new(
+      value_type: value_type,
+      asynchronous: asynchronous,
+      required_mode: required_mode,
+    )
+  end
+
+  sig { params(op: AST::SelectOp, effect: SelectorEffectFact).void }
+  def validate_select_effect_contract!(op, effect)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+    declared = op.effect_mode
+    required = effect.required_mode
+    if declared == required
+      retain_select_error_channel!(op.expression) if effect.fallible?
+      return
+    end
+
+    expected_suffix = select_effect_suffix(required)
+    if declared.nil?
+      fixes = [Fix.new(
+        description: fix_description(:INSERT_SELECT_EFFECT_SUFFIX, selector: "SELECT#{expected_suffix}"),
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: op.token.line,
+            col: op.token.column + op.token.text!.length, length: 0),
+          replacement: expected_suffix,
+        )],
+      )]
+      fixable!(op, code: :SELECT_EFFECT_SUFFIX_REQUIRED,
+        got: Type.surface_name_type(effect.value_type), selector: "SELECT#{expected_suffix}",
+        category: :type, level: :error, fixes: fixes, raise_in_collector: true)
+      return
+    end
+
+    error!(op, :SELECT_EFFECT_SUFFIX_MISMATCH,
+      declared: select_effect_suffix(declared), got: Type.surface_name_type(effect.value_type),
+      expected: expected_suffix.empty? ? "SELECT" : "SELECT#{expected_suffix}")
+  end
+
+  sig { params(expression: AST::Node).void }
+  def retain_select_error_channel!(expression)
+    T.unsafe(expression).retain_error_channel = true if expression.respond_to?(:retain_error_channel=)
+  end
+
+  sig { params(mode: T.nilable(Symbol)).returns(String) }
+  def select_effect_suffix(mode)
+    case mode
+    when :fallible then "!"
+    when :optional then "?"
+    when :fallible_optional then "!?"
+    else ""
+    end
+  end
+
+  sig { params(op: AST::WhereOp, effect: SelectorEffectFact).void }
+  def validate_where_effect_contract!(op, effect)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+    return if !effect.asynchronous && effect.required_mode.nil? && effect.value_type.resolved == :Bool
+
+    error!(op, :WHERE_NEEDS_BOOL, got: Type.surface_name_type(effect.value_type))
   end
 
   sig { params(node: AST::BinaryOp).returns(T.nilable(Integer)) }
@@ -1783,16 +1890,16 @@ module PipeAnalysis
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     op = node.right.op
     return unless op.is_a?(AST::WhereOp)
-    return if op.expression.resolved_type == :Bool
-
-    error!(op, :WHERE_NEEDS_BOOL)
+    validate_where_effect_contract!(op, selector_effect_fact(op.expression))
   end
 
   sig { params(node: AST::BinaryOp, item_type: Type).returns(Type) }
   def concurrent_select_family_result_type(node, item_type)
     op = node.right.op
     if op.is_a?(AST::SelectOp)
-      return Type.array_of(op.expression.full_type!(context: "concurrent op expression"))
+      effect = selector_effect_fact(op.expression)
+      validate_select_effect_contract!(op, effect)
+      return effect.asynchronous ? Type.promise_list_of(effect.value_type) : Type.array_of(effect.value_type)
     end
     return Type.array_of(item_type) if op.is_a?(AST::WhereOp)
 

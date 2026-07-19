@@ -122,6 +122,117 @@ RSpec.describe SemanticAnnotator do
         expect { run(code) }.to raise_error(/Cannot SELECT from non-list type/)
       end
     end
+
+    context "effect-preserving SELECT suffixes" do
+      let(:effect_functions) do
+        <<~CLEAR
+          FN fallible(x: Int64) RETURNS !Int64 -> RETURN x; END
+          FN optional(x: Int64) RETURNS ?Int64 -> RETURN x; END
+          FN fallibleOptional(x: Int64) RETURNS !?Int64 -> RETURN x; END
+        CLEAR
+      end
+
+      it "requires SELECT!, SELECT?, and SELECT!? for unresolved item effects" do
+        {
+          "fallible(_)" => /SELECT!.*consume it inside the SELECT expression/,
+          "optional(_)" => /SELECT\?.*consume it inside the SELECT expression/,
+          "fallibleOptional(_)" => /SELECT!\?.*consume it inside the SELECT expression/,
+        }.each do |selector, message|
+          source = effect_functions + <<~CLEAR
+            FN main() RETURNS !Void ->
+              values: []Int64 = [1, 2];
+              selected = values |> SELECT #{selector};
+              RETURN;
+            END
+          CLEAR
+          expect { run(source) }.to raise_error(CompilerError, message)
+        end
+      end
+
+      it "preserves the declared item effects in the selected list" do
+        tree = run(effect_functions + <<~CLEAR)
+          FN main() RETURNS !Void ->
+            values: []Int64 = [1, 2];
+            fallibles = values |> SELECT! fallible(_);
+            optionals = values |> SELECT? optional(_);
+            both = values |> SELECT!? fallibleOptional(_);
+            RETURN;
+          END
+        CLEAR
+        fn = tree.statements.find { |node| node.is_a?(AST::FunctionDef) && node.name == "main" }
+        bindings = fn.body.grep(AST::BindExpr).to_h { |binding| [binding.name, binding.full_type] }
+        expect(bindings.fetch("fallibles").element_type&.error_union?).to be true
+        expect(bindings.fetch("optionals").element_type&.optional?).to be true
+        both_element = bindings.fetch("both").element_type
+        expect(both_element&.error_union?).to be true
+        expect(both_element&.success_type&.optional?).to be true
+      end
+
+      it "rejects a suffix that does not exactly match the selector effect" do
+        source = effect_functions + <<~CLEAR
+          FN main() RETURNS !Void ->
+            values: []Int64 = [1, 2];
+            selected = values |> SELECT! optional(_);
+            RETURN;
+          END
+        CLEAR
+        expect { run(source) }.to raise_error(CompilerError, /SELECT! does not match.*use `SELECT\?`/)
+      end
+
+      it "allows TRY, UNWRAP, and OR_ELSE to consume effects inside SELECT" do
+        expect {
+          run(effect_functions + <<~CLEAR)
+            FN main() RETURNS !Void ->
+              values: []Int64 = [1, 2];
+              definite1 = values |> SELECT TRY fallible(_);
+              definite2 = values |> SELECT UNWRAP optional(_);
+              definite3 = values |> SELECT fallible(_) OR_ELSE 0;
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+    end
+  end
+
+  describe "WHERE predicate effects" do
+    let(:predicate_functions) do
+      <<~CLEAR
+        FN falliblePredicate(x: Int64) RETURNS !Bool -> RETURN x > 0; END
+        FN optionalPredicate(x: Int64) RETURNS ?Bool -> RETURN x > 0; END
+        FN fallibleOptionalPredicate(x: Int64) RETURNS !?Bool -> RETURN x > 0; END
+        FN asyncPredicate(x: Int64) RETURNS ~Bool -> RETURN BG { x > 0; }; END
+      CLEAR
+    end
+
+    it "rejects fallible, optional, combined, and asynchronous Bool predicates" do
+      %w[falliblePredicate optionalPredicate fallibleOptionalPredicate asyncPredicate].each do |name|
+        source = predicate_functions + <<~CLEAR
+          FN main() RETURNS !Void ->
+            values: []Int64 = [1, 2];
+            selected = values |> WHERE #{name}(_);
+            RETURN;
+          END
+        CLEAR
+        expect { run(source) }.to raise_error(
+          CompilerError, /WHERE clause must evaluate to a definite synchronous Bool/
+        )
+      end
+    end
+
+    it "allows predicate effects that are explicitly consumed before WHERE sees them" do
+      expect {
+        run(predicate_functions + <<~CLEAR)
+          FN main() RETURNS !Void ->
+            values: []Int64 = [1, 2];
+            first = values |> WHERE TRY falliblePredicate(_);
+            second = values |> WHERE optionalPredicate(_) OR_ELSE FALSE;
+            third = values |> WHERE UNWRAP optionalPredicate(_);
+            RETURN;
+          END
+        CLEAR
+      }.not_to raise_error
+    end
   end
 
   # ============================================================================

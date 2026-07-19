@@ -2877,7 +2877,10 @@ module AST
   # WithBlock#lock_error_clause. Policy validation lives in the annotator.
   SyncPolicyDecl = Struct.new(:token, :handlers) { include Locatable }
 
-  SelectOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  # effect_mode is nil, :fallible, :optional, or :fallible_optional. It records
+  # the explicit SELECT!/SELECT?/SELECT!? contract rather than re-deriving the
+  # programmer's intent from the selected expression later in the pipeline.
+  SelectOp     = Struct.new(:token, :expression, :effect_mode) { include Locatable; include HasExpression }
   WhereOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   IndexOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable; include HasExpression }
@@ -3722,6 +3725,9 @@ module AST
     extend T::Sig
     sig { returns(AST::Node) }
     def expression; self[:expression]; end
+
+    sig { returns(T.nilable(Symbol)) }
+    def effect_mode; self[:effect_mode]; end
   end
   class WhereOp
     extend T::Sig
