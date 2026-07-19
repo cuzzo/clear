@@ -141,7 +141,7 @@ const TestSelectStream = struct {
     items: []const i64,
     next_index: usize = 0,
 
-    fn next(self: *@This()) !?i64 {
+    pub fn next(self: *@This()) !?i64 {
         if (self.next_index >= self.items.len) return null;
         defer self.next_index += 1;
         return self.items[self.next_index];

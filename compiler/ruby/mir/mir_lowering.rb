@@ -1029,7 +1029,7 @@ class MIRLowering
   sig { params(mir: MIR::Node, dst_ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
   def place_owned_branch_value_for_destination(mir, dst_ti, dest_alloc)
     owned_alloc = mir_owned_alloc(mir)
-    return mir if owned_alloc == dest_alloc
+    return transfer_owned_branch_binding(mir, dst_ti, dest_alloc) if owned_alloc == dest_alloc
     return place_owned_alloc_mismatch_for_destination(mir, dst_ti, dest_alloc, owned_alloc) if owned_alloc
     return MIR::DupeSlice.new(mir, dest_alloc) if dst_ti.string?
     if dst_ti.any_rc?
@@ -1037,6 +1037,35 @@ class MIRLowering
     end
 
     MIR::DeepCopy.new(mir, dst_ti.zig_type, nil, :full_value, dest_alloc)
+  end
+
+  # An owned local selected by one branch of OR_ELSE/orelse becomes the
+  # destination's owner only on that branch. Keep the transfer marker inside
+  # the branch so the local is still cleaned when the other branch wins.
+  # Binding lifecycle metadata is authoritative here; physical MIR shape is
+  # not sufficient to decide whether an identifier owns cleanup.
+  sig { params(mir: MIR::Node, type_info: Type, dest_alloc: Symbol).returns(MIR::Node) }
+  def transfer_owned_branch_binding(mir, type_info, dest_alloc)
+    return mir unless mir.is_a?(MIR::Ident)
+
+    name = mir.name.to_s
+    entry = function_state.bindings[name] || CleanupEntry::NONE
+    plan = entry.lifecycle_plan
+    return mir unless entry.present? && plan&.needs_drop?
+
+    entry.mark_moved_guard!
+    mark_guarded_cleanup_name!(name)
+    label = "__owned_branch_transfer_#{lowering_counters.next_tmp_id}"
+    body = ownership_transfer_marks(
+      name,
+      :block_result,
+      target_alloc: dest_alloc,
+      move_guarded: true,
+    )
+    body << MIR::BreakStmt.new(label, mir)
+    result = MIR::BlockExpr.new(label, body)
+    result.result_type = Type.new(type_info)
+    result
   end
 
   sig { params(mir: MIR::Node, ast_node: AST::Node).returns(MIR::Node) }

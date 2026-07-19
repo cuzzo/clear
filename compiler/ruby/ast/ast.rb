@@ -2949,6 +2949,15 @@ module AST
     # ruby-to-clear: skip
     sig { returns(T.nilable(String)) }
     def name; target.respond_to?(:name) ? target.name : nil end
+
+    # The postfix `?` spelling is also the marker used to continue a safe
+    # navigation chain. Prefix `UNWRAP` is a definite-value operation and
+    # must not silently turn a following field, index, or method access back
+    # into an optional result.
+    sig { returns(T::Boolean) }
+    def safe_navigation?
+      token.type == :CHAR && token.value == '?'
+    end
   end
   # Explicit call-site mutation marker. It never denotes a first-class
   # reference: call annotation consumes it and records the marker on the

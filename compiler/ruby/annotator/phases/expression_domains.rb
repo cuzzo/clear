@@ -648,7 +648,7 @@ module Annotator
         end
 
         visit_IntrinsicFunc(node, ufcs_args, matched_def: matched_def)
-        navigation = node.object.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+        navigation = node.object.is_a?(AST::OptionalUnwrap) && node.object.safe_navigation? || implicit_safe_nav
         if navigation
           result = node.full_type!(context: "safe-navigation intrinsic method result")
           unless result.optional?

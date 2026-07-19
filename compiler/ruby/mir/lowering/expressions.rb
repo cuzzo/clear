@@ -1165,8 +1165,9 @@ module MIRLoweringExpressions
     # Safe field access on any ?T: expr?.field
     # Always generate safe navigation so nil propagates instead of panicking.
     implicit_safe_nav = target_node.respond_to?(:safe_nav_chain) && target_node.safe_nav_chain == true
-    if target_node.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
-      inner_ast = target_node.is_a?(AST::OptionalUnwrap) ? target_node.target : target_node
+    explicit_safe_nav = target_node.is_a?(AST::OptionalUnwrap) && target_node.safe_navigation?
+    if explicit_safe_nav || implicit_safe_nav
+      inner_ast = explicit_safe_nav ? target_node.target : target_node
       inner_mir = T.cast(lower(inner_ast), MIR::Node)
       inner_type = Type.from_node!(inner_ast, context: "optional @node field target")
       if inner_type.node_reference?
@@ -1432,8 +1433,9 @@ module MIRLoweringExpressions
     target_node = node.target
     target_ast = T.cast(target_node, AST::Node)
     implicit_safe_nav = target_node.respond_to?(:safe_nav_chain) && target_node.safe_nav_chain == true
-    optional = target_node.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
-    source_ast = target_node.is_a?(AST::OptionalUnwrap) ? target_node.target : target_node
+    explicit_safe_nav = target_node.is_a?(AST::OptionalUnwrap) && target_node.safe_navigation?
+    optional = explicit_safe_nav || implicit_safe_nav
+    source_ast = explicit_safe_nav ? target_node.target : target_node
     optional_source = optional ? T.cast(lower(source_ast), MIR::Node) : nil
     target = optional ? MIR::Ident.new("_r") : T.cast(lower(target_node), MIR::Node)
     target_type = Type.from_node!(target_node, context: "index target")

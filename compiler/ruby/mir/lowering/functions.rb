@@ -1596,7 +1596,7 @@ module MIRLoweringFunctions
 
     # Intrinsic pattern: already resolved by annotator
     if node.zig_pattern
-      return lower_safe_nav_method_call(node) if node.object.is_a?(AST::OptionalUnwrap) ||
+      return lower_safe_nav_method_call(node) if (node.object.is_a?(AST::OptionalUnwrap) && node.object.safe_navigation?) ||
         (node.object.respond_to?(:safe_nav_chain) && node.object.safe_nav_chain == true)
       return lower_intrinsic(node)
     end

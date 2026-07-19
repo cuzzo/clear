@@ -30,8 +30,8 @@ FN debugPause(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE poo
         writeFile("/tmp/_debug_resp.txt", inspectResult);
     ELSE
         # Build call stack string
-        stackStr = envGet(envId, "__dbg_stack", &pool);
-        stackDisplay = getStr(stackStr);
+        stackStr = TRY envGet(envId, "__dbg_stack", &pool);
+        stackDisplay = TRY getStr(stackStr);
 
         # Write break info
         MUTABLE breakInfo = COPY reason;
@@ -41,8 +41,8 @@ FN debugPause(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE poo
         writeFile("/tmp/_debug_break.txt", breakInfo);
     END
 
-    stackStr2 = envGet(envId, "__dbg_stack", &pool);
-    stackDisplay2 = getStr(stackStr2);
+    stackStr2 = TRY envGet(envId, "__dbg_stack", &pool);
+    stackDisplay2 = TRY getStr(stackStr2);
 
     MUTABLE debugAction: Int64 = 0;
     MUTABLE debugActive = TRUE;
@@ -70,10 +70,11 @@ FN debugPause(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE poo
                 }
                 debugAction = 4; debugActive = FALSE;
             ELSE_IF cmdRaw == ":l" OR cmdRaw == ":locals" THEN
-                localsStr = envGet(envId, "__dbg_locals", &pool);
+                localsStr = TRY envGet(envId, "__dbg_locals", &pool);
+                localsValue = TRY getStr(localsStr);
                 MUTABLE localDump = "";
-                IF getStr(localsStr).length() > 0 THEN
-                    localDump = getStr(localsStr);
+                IF localsValue.length() > 0 THEN
+                    localDump = localsValue;
                 ELSE
                     localDump = "(no tracked locals)";
                 END

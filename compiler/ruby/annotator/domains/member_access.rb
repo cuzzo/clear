@@ -76,7 +76,7 @@ module Annotator
           # Registry-driven: type and ownership from INDEX_OPS
           result_type = IntrinsicRegistry.to_return_def(op[:return_type])
                                         .resolve(target_type_info, [])
-          navigation = node.target.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+          navigation = node.target.is_a?(AST::OptionalUnwrap) && node.target.safe_navigation? || implicit_safe_nav
           if navigation && !result_type.optional?
             result_type = Type.optional_of(result_type)
             node.safe_nav_chain = true
@@ -154,7 +154,7 @@ module Annotator
               index: position, count: T.must(target_type.fixed_position_count), type: Type.surface_name(target_type))
           end
           field_type = T.must(position_type)
-          navigation = node.target.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+          navigation = node.target.is_a?(AST::OptionalUnwrap) && node.target.safe_navigation? || implicit_safe_nav
           field_type = Type.optional_of(field_type) if navigation && !field_type.optional?
           node.tuple_position = position
           node.safe_nav_chain = true if implicit_safe_nav
@@ -243,7 +243,7 @@ module Annotator
             field_type.strip_layout!
           end
         end
-        navigation = node.target.is_a?(AST::OptionalUnwrap) || implicit_safe_nav
+        navigation = node.target.is_a?(AST::OptionalUnwrap) && node.target.safe_navigation? || implicit_safe_nav
         if navigation && !field_type.optional?
           field_type = Type.optional_of(field_type)
           node.safe_nav_chain = true

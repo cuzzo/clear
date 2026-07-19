@@ -180,7 +180,7 @@ FN loadProgram(path: String) RETURNS !Program ->
   MUTABLE params: Int64 = 0;
   MUTABLE codesLen: Int64 = 0;
   WHILE p < procCount DO
-    header = UNWRAP (UNWRAP lines[pos]).split(" ");
+    header = (UNWRAP lines[pos]).split(" ");
     IF header.length() < 4 THEN RAISE "vm: bad PROC header"; END
     IF header[0] != "PROC" THEN RAISE "vm: bad PROC header"; END
     params   = parseInt(header[1]);

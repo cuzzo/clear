@@ -63,7 +63,7 @@ FN main() RETURNS Void ->
 END
 
 # Spawn writer - measure per-write latency
-writer = BG {
+writer:~ = BG {
   @parallel ->
     MUTABLE maxWaitMs = 0;
     MUTABLE totalWaitMs = 0;

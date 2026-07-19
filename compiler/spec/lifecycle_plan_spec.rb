@@ -133,6 +133,37 @@ RSpec.describe Semantic::LifecyclePlan do
     expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
   end
 
+  it "transfers an owned OR_ELSE fallback only inside the selected branch" do
+    source = <<~CLEAR
+      FN makeList() RETURNS []@sharded(2) Int64 ->
+        MUTABLE values: []@sharded(2) Int64 = [];
+        &values.append(4);
+        RETURN values;
+      END
+
+      FN maybeList(flag: Bool) RETURNS ![]@sharded(2) Int64 ->
+        IF flag THEN RETURN makeList(); END
+        RAISE "missing";
+      END
+
+      FN choose() RETURNS []@sharded(2) Int64 ->
+        MUTABLE fallback: []@sharded(2) Int64 = [];
+        &fallback.append(4);
+        RETURN maybeList(FALSE) OR_ELSE fallback;
+      END
+
+      FN main() RETURNS Void ->
+        values = choose();
+        ASSERT values.length() == 1;
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new.transpile(source)
+    expect(zig).to include("var fallback_moved = false;")
+    expect(zig).to include("catch __owned_branch_")
+    expect(zig).to match(/fallback_moved = true;\n\s*break :__owned_branch_transfer_\d+ fallback;/)
+  end
+
 
   it "does not synthesize reassignment cleanup for optional interned symbols" do
     source = <<~CLEAR

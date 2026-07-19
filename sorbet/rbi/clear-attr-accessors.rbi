@@ -849,6 +849,10 @@ end
 
 class BinaryOp
   sig { returns(T.untyped) }
+  def error_union_type; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def error_union_type=(value); end
+  sig { returns(T.untyped) }
   def observable_dest; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def observable_dest=(value); end

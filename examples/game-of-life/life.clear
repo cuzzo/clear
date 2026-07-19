@@ -14,7 +14,7 @@ FN readGrid(path: String) RETURNS ![]Cell ->
   MUTABLE cells: []Cell = [];
   MUTABLE i = 0;
   WHILE i < lines.length() DO
-    line = UNWRAP (UNWRAP lines[i]).trim();
+    line = (UNWRAP lines[i]).trim();
     IF line.any?() THEN
       &cells.append(TRY parseCell(line));
     END

@@ -65,6 +65,18 @@ RSpec.describe "TRY propagation" do
     expect(zig).to include("CheatLib.toInt")
   end
 
+  it "keeps prefix UNWRAP definite through a following method call" do
+    source = <<~CLEAR
+      FN parseFirst(parts: []String) RETURNS !Int64 ->
+        RETURN TRY (UNWRAP parts[0]).toInt();
+      END
+    CLEAR
+
+    zig = ZigTranspiler.new.transpile(source)
+    expect(zig).to include("try CheatLib.toInt(CheatLib.getAtOpt(parts, 0).?)")
+    expect(zig).not_to include("|_snav_")
+  end
+
   it "uses the same recoverable-result fact for IS_OK and OR_ELSE" do
     source = <<~CLEAR
       FN main() RETURNS Int64 ->
