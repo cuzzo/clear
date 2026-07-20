@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "language_provider"
+require_relative "fact_mine_provider_helper"
 
 module SlopCop
   module Constraints
@@ -60,6 +61,15 @@ module SlopCop
               "text" => "A changed C# unsafe, native-memory, pointer, or Marshal site was not reached by unsafe coverage evidence."
             },
             "defaultConfiguration" => { "level" => "warning" }
+          },
+          {
+            "id" => "slopcop-csharp-metaprogramming-uncovered",
+            "name" => "C# metaprogramming coverage missing",
+            "shortDescription" => { "text" => "C# reflection or callback site lacks test-tracing coverage evidence" },
+            "fullDescription" => {
+              "text" => "A changed C# reflection, dynamic, or callback invocation site was not reached by test-tracing coverage evidence."
+            },
+            "defaultConfiguration" => { "level" => "warning" }
           }
         ]
       end
@@ -69,7 +79,16 @@ module SlopCop
       end
 
       def scan_hazards(repo:, paths: nil)
-        LanguageProvider.scan_hazards(self, repo: repo, paths: paths)
+        hazards = LanguageProvider.scan_hazards(self, repo: repo, paths: paths)
+        cb_hazards = FactMineProviderHelper.scan_hazards_via_fact_mine(
+          paths,
+          repo: repo,
+          language_extension: ".cs",
+          hazard_type_filter: ["csharp_callback_invocation", "csharp_metaprogramming"],
+          required_evidence: "nil-kill",
+          label: "C# metaprogramming or callback site"
+        )
+        (hazards + cb_hazards).uniq { |h| [h[:path], h[:line], h[:hazard_type]] }.sort_by { |h| [h[:path], h[:line]] }
       end
 
       def source_path?(path)
@@ -77,6 +96,8 @@ module SlopCop
       end
 
       def rule_id_for(required_evidence)
+        return "slopcop-csharp-metaprogramming-uncovered" if required_evidence == "nil-kill"
+
         required_evidence == "concurrency" ? "slopcop-csharp-concurrency-uncovered" : "slopcop-csharp-unsafe-uncovered"
       end
 

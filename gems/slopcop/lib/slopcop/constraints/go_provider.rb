@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "finding"
+require_relative "fact_mine_provider_helper"
 
 module SlopCop
   module Constraints
@@ -26,12 +27,34 @@ module SlopCop
               "text" => "A changed Go channel or wait-group site was not reached by concurrency coverage."
             },
             "defaultConfiguration" => { "level" => "warning" }
+          },
+          {
+            "id" => "slopcop-go-callback-uncovered",
+            "name" => "Go callback coverage missing",
+            "shortDescription" => { "text" => "Go callback invocation lacks test-tracing coverage evidence" },
+            "fullDescription" => {
+              "text" => "A changed Go callback or function-value invocation site was not reached by test-tracing coverage evidence."
+            },
+            "defaultConfiguration" => { "level" => "warning" }
           }
         ]
       end
 
       def findings(repo:, additions:, evidence:)
         repo = File.expand_path(repo)
+        cb_paths = additions.keys.select { |path| source_path?(path) }
+        cb_sites = if cb_paths.empty?
+          {}
+        else
+          FactMineProviderHelper.scan_hazards_via_fact_mine(
+            cb_paths,
+            repo: repo,
+            language_extension: ".go",
+            hazard_type_filter: "go_callback_invocation",
+            required_evidence: "nil-kill",
+            label: "Go callback invocation site"
+          ).group_by { |site| [site[:path], site[:line]] }
+        end
         additions.each_with_object([]) do |(path, lines), out|
           next unless source_path?(path)
 
@@ -39,7 +62,8 @@ module SlopCop
             source = source_line(repo, path, line)
             next if source.empty?
 
-            scan_line(path, line, source).each do |hazard|
+            line_hazards = scan_line(path, line, source) + Array(cb_sites[[path, line]])
+            line_hazards.each do |hazard|
               next if covered?(evidence, hazard)
 
               out << Finding.new(
@@ -68,13 +92,27 @@ module SlopCop
                 else
                   Dir.chdir(repo) { Dir["**/*.go"] }.select { |path| source_path?(path) }
                 end
-        files.flat_map do |path|
+        hazards = files.flat_map do |path|
           File.readlines(File.join(repo, path)).each_with_index.flat_map do |source, index|
             scan_line(path, index + 1, source).map do |hazard|
               hazard.merge(path: path, line: index + 1, source: source.strip)
             end
           end
-        end.sort_by { |site| [site[:path], site[:line], site[:hazard_type]] }
+        end
+        cb_hazards = if files.empty?
+          []
+        else
+          FactMineProviderHelper.scan_hazards_via_fact_mine(
+            files,
+            repo: repo,
+            language_extension: ".go",
+            hazard_type_filter: "go_callback_invocation",
+            required_evidence: "nil-kill",
+            label: "Go callback invocation site"
+          )
+        end
+        (hazards + cb_hazards).uniq { |h| [h[:path], h[:line], h[:hazard_type]] }
+                              .sort_by { |site| [site[:path], site[:line], site[:hazard_type]] }
       end
 
       def scan_line(path, line, source)
@@ -98,6 +136,8 @@ module SlopCop
       end
 
       def rule_id_for(required_evidence)
+        return "slopcop-go-callback-uncovered" if required_evidence == "nil-kill"
+
         required_evidence == "race" ? "slopcop-go-race-uncovered" : "slopcop-go-concurrency-uncovered"
       end
 

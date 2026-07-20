@@ -110,6 +110,56 @@ class ConstraintsSystemsProviderTest < Minitest::Test
     end
   end
 
+  def test_systems_providers_surface_fact_mine_callback_hazards
+    with_file("src/handler.c", <<~C) do |dir, path|
+      struct Handler {
+          void (*cb)(void);
+      };
+      void run(struct Handler *h) {
+          h->cb();
+      }
+    C
+      hazards = SlopCop::Constraints::CProvider.scan_hazards(repo: dir, paths: [path])
+      cb = hazards.find { |hazard| hazard[:hazard_type] == "c_callback_invocation" }
+
+      refute_nil cb
+      assert_equal 5, cb[:line]
+      assert_equal "nil-kill", cb[:required_evidence]
+      assert_equal "slopcop-c-callback-uncovered", SlopCop::Constraints::CProvider.rule_id_for("nil-kill")
+
+      findings = SlopCop::Constraints::CProvider.findings(
+        repo: dir,
+        additions: { path => [5] },
+        evidence: SlopCop::Constraints::Evidence.from_specs([], repo: dir)
+      )
+      assert(findings.any? { |finding| finding.rule_id == "slopcop-c-callback-uncovered" })
+    end
+  end
+
+  def test_go_provider_surfaces_fact_mine_callback_alias_hazard
+    with_file("src/dispatch.go", <<~GO) do |dir, path|
+      package main
+
+      func run(cb func()) {
+          myCb := cb
+          myCb()
+      }
+    GO
+      hazards = SlopCop::Constraints::GoProvider.scan_hazards(repo: dir, paths: [path])
+      cb = hazards.find { |hazard| hazard[:hazard_type] == "go_callback_invocation" }
+
+      refute_nil cb
+      assert_equal 5, cb[:line]
+
+      findings = SlopCop::Constraints::GoProvider.findings(
+        repo: dir,
+        additions: { path => [5] },
+        evidence: SlopCop::Constraints::Evidence.from_specs([], repo: dir)
+      )
+      assert(findings.any? { |finding| finding.rule_id == "slopcop-go-callback-uncovered" })
+    end
+  end
+
   def test_comment_and_string_hazards_are_ignored
     with_file("src/runtime.c", <<~C) do |dir, path|
       void run(void) {

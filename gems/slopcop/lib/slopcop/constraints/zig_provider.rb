@@ -3,6 +3,8 @@
 require "set"
 
 require_relative "finding"
+require_relative "language_provider"
+require_relative "fact_mine_provider_helper"
 
 repo_tools = File.expand_path("../../../../../tools", __dir__)
 require File.join(repo_tools, "loom_atomic_coverage")
@@ -44,6 +46,15 @@ module SlopCop
               "text" => "A changed Zig wait-loop marker has no matching HAMMER-COVERS marker, or a changed HAMMER-COVERS marker has no source wait-loop marker."
             },
             "defaultConfiguration" => { "level" => "warning" }
+          },
+          {
+            "id" => "slopcop-zig-callback-uncovered",
+            "name" => "Zig callback coverage missing",
+            "shortDescription" => { "text" => "Zig callback invocation lacks test-tracing coverage evidence" },
+            "fullDescription" => {
+              "text" => "A changed Zig callback or function-pointer invocation site was not reached by test-tracing coverage evidence."
+            },
+            "defaultConfiguration" => { "level" => "warning" }
           }
         ]
       end
@@ -51,6 +62,7 @@ module SlopCop
       def findings(repo:, additions:, evidence:)
         repo = File.expand_path(repo)
         wait_indexes = nil
+        cb_sites = callback_sites_by_location(repo, additions.keys.select { |path| source_path?(path) })
         additions.each_with_object([]) do |(path, lines), out|
           next unless source_path?(path)
 
@@ -60,9 +72,44 @@ module SlopCop
 
             add_loom_finding(out, evidence, path, line, source)
             add_vopr_finding(out, evidence, path, line, source)
+            add_callback_finding(out, evidence, cb_sites, path, line)
             wait_indexes = add_wait_loop_finding(out, repo, wait_indexes, path, line, source)
           end
         end
+      end
+
+      def callback_sites_by_location(repo, paths)
+        return {} if paths.empty?
+
+        callback_hazards(repo, paths).to_h { |site| [[site[:path], site[:line]], site] }
+      end
+
+      def add_callback_finding(out, evidence, cb_sites, path, line)
+        site = cb_sites[[path, line]]
+        return unless site
+        return if LanguageProvider.covered?(evidence, site)
+
+        out << Finding.new(
+          path: path,
+          line: line,
+          rule_id: "slopcop-zig-callback-uncovered",
+          message: "changed #{site[:label]} has no #{site[:required_evidence]} coverage evidence",
+          source: site[:source],
+          hazard_type: site[:hazard_type],
+          required_evidence: site[:required_evidence],
+          severity: "warning"
+        )
+      end
+
+      def callback_hazards(repo, paths)
+        FactMineProviderHelper.scan_hazards_via_fact_mine(
+          paths,
+          repo: repo,
+          language_extension: ".zig",
+          hazard_type_filter: "zig_callback_invocation",
+          required_evidence: "nil-kill",
+          label: "Zig callback invocation site"
+        )
       end
 
       def source_path?(path)
@@ -73,6 +120,14 @@ module SlopCop
         repo = File.expand_path(repo)
         scope = Array(paths)
         scope = SCOPE_PREFIXES if scope.empty?
+        cb_paths = scope.flat_map do |entry|
+          if entry.end_with?(".zig")
+            [entry]
+          else
+            Dir.chdir(repo) { Dir[File.join(entry, "**/*.zig")] }
+          end
+        end
+        cb_sites = cb_paths.empty? ? [] : callback_hazards(repo, cb_paths)
         loom_sites = LoomAtomicCoverage.scan_atomic_sites(scope, repo).map do |site|
           hazard_site(site, "zig_loom_atomic", "loom")
         end
@@ -92,7 +147,9 @@ module SlopCop
             "hammer"
           )
         end
-        (loom_sites + vopr_sites + wait_sites).sort_by { |site| [site[:path], site[:line], site[:hazard_type]] }
+        (loom_sites + vopr_sites + wait_sites + cb_sites)
+          .uniq { |site| [site[:path], site[:line], site[:hazard_type]] }
+          .sort_by { |site| [site[:path], site[:line], site[:hazard_type]] }
       end
 
       def add_loom_finding(out, evidence, path, line, source)

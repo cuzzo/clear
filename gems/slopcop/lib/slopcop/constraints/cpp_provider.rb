@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "language_provider"
+require_relative "fact_mine_provider_helper"
 
 module SlopCop
   module Constraints
@@ -57,7 +58,18 @@ module SlopCop
         evidence_rule("tsan", "C++ TSan coverage missing", "C++ shared-concurrency site lacks TSan coverage evidence") +
           evidence_rule("asan", "C++ ASan coverage missing", "C++ raw-memory site lacks ASan coverage evidence") +
           evidence_rule("lsan", "C++ LSan coverage missing", "C++ allocation/lifetime site lacks LSan coverage evidence") +
-          evidence_rule("ubsan", "C++ UBSan coverage missing", "C++ undefined-behavior site lacks UBSan coverage evidence")
+          evidence_rule("ubsan", "C++ UBSan coverage missing", "C++ undefined-behavior site lacks UBSan coverage evidence") +
+          [
+            {
+              "id" => "slopcop-cpp-callback-uncovered",
+              "name" => "C++ callback coverage missing",
+              "shortDescription" => { "text" => "C++ function-pointer invocation lacks test-tracing coverage evidence" },
+              "fullDescription" => {
+                "text" => "A changed C++ function-pointer or callable invocation site was not reached by test-tracing coverage evidence."
+              },
+              "defaultConfiguration" => { "level" => "warning" }
+            }
+          ]
       end
 
       def evidence_rule(evidence, name, short)
@@ -79,7 +91,16 @@ module SlopCop
       end
 
       def scan_hazards(repo:, paths: nil)
-        LanguageProvider.scan_hazards(self, repo: repo, paths: paths)
+        hazards = LanguageProvider.scan_hazards(self, repo: repo, paths: paths)
+        cb_hazards = FactMineProviderHelper.scan_hazards_via_fact_mine(
+          paths,
+          repo: repo,
+          language_extension: EXTENSIONS,
+          hazard_type_filter: "cpp_callback_invocation",
+          required_evidence: "nil-kill",
+          label: "C++ function-pointer invocation site"
+        )
+        (hazards + cb_hazards).uniq { |h| [h[:path], h[:line], h[:hazard_type]] }.sort_by { |h| [h[:path], h[:line]] }
       end
 
       def source_path?(path)
@@ -88,6 +109,8 @@ module SlopCop
       end
 
       def rule_id_for(required_evidence)
+        return "slopcop-cpp-callback-uncovered" if required_evidence == "nil-kill"
+
         "slopcop-cpp-#{required_evidence}-uncovered"
       end
 

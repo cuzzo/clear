@@ -11,12 +11,13 @@ module SlopCop
 
       def scan_hazards_via_fact_mine(paths, repo:, language_extension:, hazard_type_filter:, required_evidence:, label:)
         repo = File.expand_path(repo)
+        extensions = Array(language_extension)
         files = if paths && !Array(paths).empty?
                   Array(paths).map { |f| File.expand_path(f, repo) }
                 else
-                  Dir.chdir(repo) { Dir["**/*#{language_extension}"] }.map { |f| File.expand_path(f, repo) }
+                  extensions.flat_map { |ext| Dir.chdir(repo) { Dir["**/*#{ext}"] } }.map { |f| File.expand_path(f, repo) }
                 end
-        files = files.select { |f| f.end_with?(language_extension) && File.file?(f) }
+        files = files.select { |f| extensions.any? { |ext| f.end_with?(ext) } && File.file?(f) }
 
         return [] if files.empty?
 
