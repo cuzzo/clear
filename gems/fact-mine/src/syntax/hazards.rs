@@ -125,6 +125,38 @@ pub(crate) fn extract_hazards(
     sites
 }
 
+fn is_callback_type_or_name(name: &str, type_str: Option<&str>) -> bool {
+    let check_str = |s: &str| {
+        let s_lower = s.to_lowercase();
+        s_lower.contains("callback")
+            || s_lower.contains("listener")
+            || s_lower.contains("handler")
+            || s_lower.contains("observer")
+            || s_lower.contains("executor")
+            || s_lower.contains("consumer")
+            || s_lower.contains("supplier")
+            || s_lower.contains("predicate")
+            || s_lower.contains("runnable")
+            || s_lower.contains("callable")
+            || s_lower.contains("func")
+            || s_lower.contains("fn")
+            || s_lower.contains("->")
+            || s_lower.contains("=>")
+            || s_lower == "cb"
+            || s_lower == "fp"
+    };
+
+    if check_str(name) {
+        return true;
+    }
+    if let Some(t) = type_str {
+        if check_str(t) {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn detect_and_append_callback_hazards(document: &mut Document) {
     let mut callback_hazards = Vec::new();
     
@@ -174,7 +206,15 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
             {
                 // Dynamic callback method dispatchers
                 let is_invoker = matches!(call.message.as_str(), "call" | "invoke" | "apply" | "run" | "perform");
-                if is_invoker {
+                
+                let param_type = document.method_param_types
+                    .get(&call.function)
+                    .and_then(|params| params.get(&call.receiver))
+                    .map(|s| s.as_str());
+                    
+                let is_callback_type = is_callback_type_or_name(&call.receiver, param_type);
+                
+                if is_invoker || is_callback_type {
                     is_callback = true;
                 }
             }
@@ -558,9 +598,10 @@ local mt = {
         assert_eq!(php_neg.len(), 0);
 
         // 6. Java
-        let java_pos = check("class Foo {\n  void test(Runnable cb) {\n    cb.run();\n  }\n}", ".java", Language::Java);
-        assert_eq!(java_pos.len(), 1);
+        let java_pos = check("class Foo {\n  void test(Runnable cb, MyListener listener) {\n    cb.run();\n    listener.onEvent();\n  }\n}", ".java", Language::Java);
+        assert_eq!(java_pos.len(), 2);
         assert_eq!(java_pos[0].hazard_type, "java_callback_invocation");
+        assert_eq!(java_pos[1].hazard_type, "java_callback_invocation");
         let java_neg = check("class Foo {\n  void test(User user) {\n    user.getName();\n  }\n}", ".java", Language::Java);
         assert_eq!(java_neg.len(), 0);
 
