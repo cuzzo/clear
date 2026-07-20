@@ -182,15 +182,24 @@ pub fn ingest_architecture_json(
     let timestamp = storage.commit_timestamp(commit).ok().flatten().unwrap_or_else(crate::hazard::now_timestamp);
 
     let mut deactivated_languages = std::collections::HashSet::new();
+    let mut corpus_languages_set = std::collections::HashSet::new();
 
     if complete {
         if let Some(langs) = document.pointer("/corpus/languages").and_then(Value::as_array) {
             for lang_val in langs {
                 if let Some(lang_str) = lang_val.as_str() {
-                    if !lang_str.is_empty() && deactivated_languages.insert(lang_str.to_string()) {
-                        storage.deactivate_active_hazards(lang_str)?;
+                    if !lang_str.is_empty() {
+                        corpus_languages_set.insert(lang_str.to_string());
                     }
                 }
+            }
+        }
+    }
+
+    if complete && !corpus_languages_set.is_empty() {
+        for lang in &corpus_languages_set {
+            if deactivated_languages.insert(lang.clone()) {
+                storage.deactivate_active_hazards(lang)?;
             }
         }
     }
@@ -234,7 +243,7 @@ pub fn ingest_architecture_json(
             }
         };
 
-        if complete && !provider.is_empty() && deactivated_languages.insert(provider.clone()) {
+        if complete && corpus_languages_set.is_empty() && !provider.is_empty() && deactivated_languages.insert(provider.clone()) {
             storage.deactivate_active_hazards(&provider)?;
         }
 

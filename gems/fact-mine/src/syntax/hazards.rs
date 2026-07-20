@@ -1,5 +1,5 @@
 use std::sync::OnceLock;
-use crate::syntax::{HazardSite, Language, Document};
+use crate::syntax::{HazardSite, Language, Document, FunctionDef};
 use crate::syntax::parser_grammar::grammar_for_language;
 use tree_sitter::{Node, Query, QueryCursor};
 use streaming_iterator::StreamingIterator;
@@ -219,6 +219,22 @@ fn is_callback_type_or_name(name: &str, type_str: Option<&str>, language: Langua
 }
 
 pub fn detect_and_append_callback_hazards(document: &mut Document) {
+    let get_locals = |doc: &Document, enclosing: &FunctionDef| -> Option<std::collections::BTreeMap<String, String>> {
+        let key = crate::syntax::normalized_behavior::method_parameter_type_key(&enclosing.owner, &enclosing.name, enclosing.line);
+        if let Some(locals) = doc.method_local_types.get(&key) {
+            return Some(locals.clone());
+        }
+        doc.method_local_types.get(&enclosing.name).cloned()
+    };
+
+    let get_params = |doc: &Document, enclosing: &FunctionDef| -> Option<std::collections::BTreeMap<String, String>> {
+        let key = crate::syntax::normalized_behavior::method_parameter_type_key(&enclosing.owner, &enclosing.name, enclosing.line);
+        if let Some(params) = doc.method_param_types.get(&key) {
+            return Some(params.clone());
+        }
+        doc.method_param_types.get(&enclosing.name).cloned()
+    };
+
     let mut callback_hazards = Vec::new();
     
     let mut fn_map = std::collections::HashMap::new();
@@ -245,11 +261,9 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                 if call.receiver.is_empty() {
                     is_var_call = true;
                 } else {
-                    let param_type = document.method_param_types
-                        .get(&call.function)
-                        .and_then(|params| params.get(&call.message))
-                        .map(|s| s.as_str());
-                    let is_cb = is_callback_type_or_name(&call.message, param_type, document.language)
+                    let param_type = get_params(document, enclosing_fn)
+                        .and_then(|params| params.get(&call.message).cloned());
+                    let is_cb = is_callback_type_or_name(&call.message, param_type.as_deref(), document.language)
                         || is_cb_name(&call.message)
                         || matches!(
                             call.message.as_str(),
@@ -264,7 +278,7 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                 }
             }
             if !is_var_call {
-                if let Some(locals) = document.method_local_types.get(&call.function) {
+                if let Some(locals) = get_locals(document, enclosing_fn) {
                     if let Some(t) = locals.get(&call.message) {
                         if is_cb_type(t) {
                             is_var_call = true;
@@ -286,11 +300,30 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                 is_callback = true;
             }
         } else {
-            // E.g., cb.call() or listener.onEvent()
-            if call.receiver != "self" && call.receiver != "this" 
-                && (enclosing_fn.params.contains(&call.receiver) 
-                    || enclosing_fn.callback_params.contains(&call.receiver)) 
-            {
+            let mut is_cb_receiver = false;
+            if call.receiver != "self" && call.receiver != "this" {
+                if enclosing_fn.params.contains(&call.receiver) 
+                    || enclosing_fn.callback_params.contains(&call.receiver)
+                {
+                    is_cb_receiver = true;
+                } else if let Some(locals) = get_locals(document, enclosing_fn) {
+                    if let Some(t) = locals.get(&call.receiver) {
+                        if is_cb_type(t) {
+                            is_cb_receiver = true;
+                        }
+                    }
+                } else {
+                    let is_complex = call.receiver.contains('*')
+                        || call.receiver.contains("->")
+                        || (call.receiver.contains('.') && !call.receiver.starts_with("this."))
+                        || call.receiver.contains('[');
+                    if is_complex {
+                        is_cb_receiver = true;
+                    }
+                }
+            }
+
+            if is_cb_receiver {
                 let is_dispatch_name = matches!(
                     call.message.as_str(),
                     "call"
@@ -315,11 +348,13 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                 let is_invoker = matches!(call.message.as_str(), "call" | "invoke" | "apply" | "run" | "perform");
 
                 let is_cb = if supports_interfaces(document.language) {
-                    let param_type = document.method_param_types
-                        .get(&call.function)
-                        .and_then(|params| params.get(&call.receiver))
-                        .map(|s| s.as_str());
-                    let is_callback_type = is_callback_type_or_name(&call.receiver, param_type, document.language);
+                    let type_str = get_params(document, enclosing_fn)
+                        .and_then(|params| params.get(&call.receiver).cloned())
+                        .or_else(|| {
+                            get_locals(document, enclosing_fn)
+                                .and_then(|locals| locals.get(&call.receiver).cloned())
+                        });
+                    let is_callback_type = is_callback_type_or_name(&call.receiver, type_str.as_deref(), document.language);
                     is_dispatch_name && is_callback_type
                 } else {
                     is_invoker || (is_dispatch_name && is_cb_name(&call.receiver))
@@ -779,5 +814,144 @@ local mt = {
         assert_eq!(zig_pos[0].hazard_type, "zig_callback_invocation");
         let zig_neg = check("fn helper() void {}\nfn test() void {\n  helper();\n}", ".zig", Language::Zig);
         assert_eq!(zig_neg.len(), 0);
+    }
+
+    #[test]
+    fn test_additional_precision_and_composition_edge_cases() {
+        let check_all = |code: &str, suffix: &str, language: Language| -> Vec<HazardSite> {
+            let mut file = tempfile::Builder::new().suffix(suffix).tempfile().unwrap();
+            std::io::Write::write_all(file.as_file_mut(), code.as_bytes()).unwrap();
+            let document = crate::syntax::parse_file(file.path().to_path_buf(), language).unwrap();
+            document.hazard_sites
+        };
+
+        // 1. Go WaitGroup positive and near-miss
+        let go_hazards = check_all("
+            package main
+            func main() {
+                var wg sync.WaitGroup
+                wg.Wait()
+                var d Door
+                d.Wait()
+            }
+        ", ".go", Language::Go);
+        let wg_hazards: Vec<_> = go_hazards.iter().filter(|h| h.hazard_type == "go_concurrency_waitgroup").collect();
+        assert_eq!(wg_hazards.len(), 1);
+        assert_eq!(wg_hazards[0].snippet, "wg.Wait()");
+
+        // 2. Rust Mutex positive and near-miss
+        let rust_hazards = check_all("
+            fn main() {
+                let lock = mutex.lock().unwrap();
+                let key = door.lock();
+            }
+        ", ".rs", Language::Rust);
+        let loom_hazards: Vec<_> = rust_hazards.iter().filter(|h| h.hazard_type == "rust_loom_concurrency").collect();
+        assert_eq!(loom_hazards.len(), 1);
+        assert!(loom_hazards[0].snippet.contains("mutex.lock()"));
+
+        // 3. Kotlin Reflection call vs normal function call
+        let kt_hazards = check_all("
+            fun test() {
+                val res = method.call()
+            }
+            fun call() {}
+        ", ".kt", Language::Kotlin);
+        let kt_metaprog: Vec<_> = kt_hazards.iter().filter(|h| h.hazard_type == "kotlin_metaprogramming").collect();
+        assert_eq!(kt_metaprog.len(), 1);
+
+        // 4. Java Real Class.forName vs shadowed class Class
+        let java_hazards = check_all("
+            class Demo {
+                void test() {
+                    Class.forName(\"Foo\");
+                    Class c = new Class();
+                    c.forName(\"Bar\");
+                }
+            }
+            class Class {
+                void forName(String s) {}
+            }
+        ", ".java", Language::Java);
+        let java_metaprog: Vec<_> = java_hazards.iter().filter(|h| h.hazard_type == "java_metaprogramming").collect();
+        assert_eq!(java_metaprog.len(), 1);
+        assert_eq!(java_metaprog[0].snippet, "Class.forName(\"Foo\");");
+
+        // 5. C# Reflection type matching vs containing type
+        let cs_hazards = check_all("
+            class Demo {
+                void Test() {
+                    typeof(Foo).GetMethod(\"Bar\");
+                    TypeHelper typeHelper = new TypeHelper();
+                    typeHelper.GetMethod(\"Bar\");
+                }
+            }
+            class TypeHelper {
+                public void GetMethod(string s) {}
+            }
+        ", ".cs", Language::CSharp);
+        let cs_metaprog: Vec<_> = cs_hazards.iter().filter(|h| h.hazard_type == "csharp_metaprogramming").collect();
+        assert_eq!(cs_metaprog.len(), 1);
+
+        // 6. Callback compositions: neutral name, aliasing, hops, multiline, struct function pointers
+        let compositions_code = "
+            class Demo {
+                void test(Runnable cb, MyListener listener) {
+                    // Callback type with neutral parameter name
+                    cb.run();
+
+                    // Typed callable local with neutral name
+                    Runnable r2 = cb;
+                    r2.run();
+
+                    // Callback aliasing and multiple assignment hops
+                    Runnable r3 = r2;
+                    r3.run();
+
+                    // Same method name in two different owners
+                    listener.onEvent();
+
+                    // Multiline call
+                    r3.run(
+                    );
+
+                    // Two hazards on one line
+                    cb.run(); r2.run();
+                }
+            }
+            interface MyListener {
+                void onEvent();
+            }
+        ";
+        let doc_hazards = check_all(compositions_code, ".java", Language::Java);
+        
+        let mut file = tempfile::Builder::new().suffix(".java").tempfile().unwrap();
+        std::io::Write::write_all(file.as_file_mut(), compositions_code.as_bytes()).unwrap();
+        let doc = crate::syntax::parse_file(file.path().to_path_buf(), Language::Java).unwrap();
+        let java_callbacks: Vec<_> = doc.hazard_sites.iter().filter(|h| h.hazard_type == "java_callback_invocation").collect();
+        assert!(java_callbacks.len() >= 6);
+
+        // 7. C struct function-pointer members / complex targets
+        let mut c_file = tempfile::Builder::new().suffix(".c").tempfile().unwrap();
+        std::io::Write::write_all(c_file.as_file_mut(), "
+            struct Handler {
+                void (*cb)(void);
+            };
+            void test(struct Handler* h) {
+                (*h->cb)();
+            }
+        ".as_bytes()).unwrap();
+        let c_doc = crate::syntax::parse_file(c_file.path().to_path_buf(), Language::C).unwrap();
+        let c_callbacks: Vec<_> = c_doc.hazard_sites.iter().filter(|h| h.hazard_type == "c_callback_invocation").collect();
+        assert_eq!(c_callbacks.len(), 1);
+
+        // 8. C++ functor / std::function policy test
+        let cpp_compositions = check_all("
+            void test(std::function<void()> cb) {
+                cb();
+            }
+        ", ".cpp", Language::Cpp);
+        let cpp_callbacks: Vec<_> = cpp_compositions.iter().filter(|h| h.hazard_type == "cpp_callback_invocation").collect();
+        assert_eq!(cpp_callbacks.len(), 1);
     }
 }
