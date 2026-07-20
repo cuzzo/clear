@@ -61,6 +61,18 @@ RSpec.describe "predicate library — numeric" do
       expect { transpile(src) }.not_to raise_error
     end
 
+    it "compiles Int64.bitLength() as a constant-time numeric method" do
+      zig = transpile(<<~CLEAR)
+        FN main() RETURNS Void ->
+          ASSERT 255.bitLength() == 8;
+          ASSERT (-2).bitLength() == 1;
+          RETURN;
+        END
+      CLEAR
+
+      expect(zig).to include("@clz")
+    end
+
     it "compiles .zero?() / .positive?() on unsigned widths" do
       # Numeric autocast funnels these through the Int64 overload; the
       # emitted Zig (`val == 0`, `val > 0`) is valid for unsigned types.

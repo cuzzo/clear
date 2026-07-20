@@ -34,13 +34,23 @@ class ModuleImporter
   sig { returns(T::Hash[T.untyped, T.untyped]) }
   attr_reader :module_cache
 
-  sig { params(base_dir: String, pkg_paths: T::Hash[String, String], use_mir: T::Boolean, stdlib_root: String).void }
-  def initialize(base_dir: Dir.pwd, pkg_paths: {}, use_mir: false, stdlib_root: STDLIB_ROOT)
+  sig do
+    params(
+      base_dir: String,
+      pkg_paths: T::Hash[String, String],
+      use_mir: T::Boolean,
+      stdlib_root: String,
+      inline_packages: T::Set[String],
+    ).void
+  end
+  def initialize(base_dir: Dir.pwd, pkg_paths: {}, use_mir: false, stdlib_root: STDLIB_ROOT,
+                 inline_packages: Set.new)
     @base_dir     = T.let(File.expand_path(base_dir), String)
     @module_cache = T.let({}, T::Hash[T.untyped, T.untyped])  # abs_path => CompiledModule
     @compiling    = T.let(Set.new, T::Set[T.untyped])  # abs_paths currently being compiled (cycle detection)
     # pkg_paths: { "name" => "/abs/path/to/lib.clear" } -- registered package sources.
     @pkg_paths    = T.let(pkg_paths.transform_keys(&:to_s), T::Hash[T.untyped, T.untyped])
+    @inline_packages = T.let(inline_packages.map(&:to_s).to_set, T::Set[String])
     @stdlib_root  = T.let(stdlib_root, String)
   end
 
@@ -77,6 +87,8 @@ class ModuleImporter
   # so an outer `build.zig` can orchestrate per-package compilation.
   sig { params(pkg_name: String).returns(T.nilable(T::Boolean)) }
   def stdlib_package?(pkg_name)
+    return true if @inline_packages.include?(pkg_name.to_s)
+
     !@pkg_paths.key?(pkg_name.to_s) && !resolve_stdlib_package(pkg_name).nil?
   end
 
