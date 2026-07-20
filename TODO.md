@@ -19,7 +19,7 @@
  - [x] Syntax maturity cleanup / sweep
  - [x] Comment Cleansing
 
-## v0.1 (Target = July 17)
+## v0.1-alpha (Target = August 2)
 
  - [x] IMMUTABLE Stream Observables (only the stream can mutate the underlying data)
  - [x] Finite State Machines
@@ -37,18 +37,21 @@
  - [x] Loom Coverage Detection and *near* 100% coverage of Atomic Operations
  - [x] VOPR Coverage Detection and *near* 100% coverage of non-deterministic operations
  - [x] Full Fuzz Testing for Gated Acccess, Execution Boundary Crossing, Escape Analysis, FSM Transformation.
+ - [x] Incremental Compilation
+ - [x] Zig 0.16.0 style streaming IO
+ - [x] VM supporting the vast majority of the language, near Python/Ruby non-JIT speed
+ - [ ] F# style Measures
+ - [ ] GDATs
  - [ ] LEND keyword (attach lifetimes to functions / execution boundaries you LEND to)
  - [ ] Examples: mal v5, brnfk, are we fast yet, 1brc, NN, cache, sqlite
 
 Milestone: A working CLEAR VM with debugger & time travel, that supports a decent chunk of the language (including concurrency).
 
- ## v0.2 (Target = Sept 1)
- - [ ] Zig 0.16.0 style streaming IO (in progress)
+ ## v0.1 (Target = Oct 4)
  - [ ] Design by Contract v2: PRE { } Comptime
  - [ ] Cancelable fibers
  - [ ] Built-in support for fiber RACEs
  - [ ] STRICT mode compilation
- - [ ] VM supporting the vast majority of the language, near Python/Ruby non-JIT speed
  - [ ] An RSpec like testing framework as the first standard library module
  - [ ] A statistical benchmarking & profiling framework like Go/Rust
  - [ ] `./clear fix` fixes *most* errors that *can* be fixed.
