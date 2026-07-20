@@ -1,0 +1,68 @@
+# frozen_string_literal: true
+
+require "json"
+require "fileutils"
+require "minitest/autorun"
+require "tmpdir"
+
+require_relative "../lib/slopcop"
+
+class ConstraintsDynamicProviderTest < Minitest::Test
+  def test_dynamic_providers_are_registered
+    assert_same SlopCop::Constraints::RubyProvider, SlopCop::Constraints.providers.fetch("ruby")
+    assert_same SlopCop::Constraints::PythonProvider, SlopCop::Constraints.providers.fetch("python")
+    assert_same SlopCop::Constraints::JavascriptProvider, SlopCop::Constraints.providers.fetch("javascript")
+    assert_same SlopCop::Constraints::TypescriptProvider, SlopCop::Constraints.providers.fetch("typescript")
+    assert_same SlopCop::Constraints::LuaProvider, SlopCop::Constraints.providers.fetch("lua")
+  end
+
+  def test_ruby_provider_finds_metaprogramming_hazard
+    with_file("test.rb", <<~RB) do |dir, path|
+      class Foo
+        def perform
+          send(:run)
+          $1
+        end
+      end
+    RB
+      hazards = SlopCop::Constraints::RubyProvider.scan_hazards(repo: dir, paths: [path])
+      types = hazards.map { |h| h[:hazard_type] }
+
+      assert_includes types, "ruby_metaprogramming"
+      assert_equal 2, hazards.size
+      
+      # Test coverage findings
+      # Write empty/no coverage evidence
+      evidence = SlopCop::Constraints::Evidence.from_specs([], repo: dir)
+      findings = SlopCop::Constraints::RubyProvider.findings(repo: dir, additions: { path => [3] }, evidence: evidence)
+      assert_equal 1, findings.size
+      assert_equal "slopcop-ruby-metaprogramming-uncovered", findings.first.rule_id
+      assert_equal 3, findings.first.line
+    end
+  end
+
+  def test_javascript_provider_finds_metaprogramming_hazard
+    with_file("test.js", <<~JS) do |dir, path|
+      eval("1+1");
+      const p = new Proxy({}, {});
+      RegExp.$1;
+    JS
+      hazards = SlopCop::Constraints::JavascriptProvider.scan_hazards(repo: dir, paths: [path])
+      types = hazards.map { |h| h[:hazard_type] }
+
+      assert_includes types, "javascript_metaprogramming"
+      assert_equal 3, hazards.size
+    end
+  end
+
+  private
+
+  def with_file(name, contents)
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, name)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, contents)
+      yield dir, name
+    end
+  end
+end
