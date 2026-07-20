@@ -532,7 +532,7 @@ module AST
   # wrappers preserve borrow provenance.
   sig { params(node: AST::Node).returns(T.nilable(AST::Node)) }
   def self.borrow_transparent_operand(node)
-    return node.target if node.is_a?(AST::OptionalUnwrap)
+    return node.target if node.is_a?(AST::OptionalUnwrap) || node.is_a?(AST::TenseNavigation)
     return node.right if node.is_a?(AST::UnaryOp) && node.op == :TRY
     return node.left if node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_ELSE)
 
@@ -671,13 +671,14 @@ module AST
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.recovery_wrapper?(node)
     (node.is_a?(AST::UnaryOp) && node.op == :TRY) ||
-      node.is_a?(AST::OptionalUnwrap)
+      node.is_a?(AST::OptionalUnwrap) || node.is_a?(AST::TenseNavigation)
   end
 
   sig { params(node: AST::Node).returns(AST::Node) }
   def self.recovery_payload(node)
     return node.right if node.is_a?(AST::UnaryOp) && node.op == :TRY
     return node.target if node.is_a?(AST::OptionalUnwrap)
+    return node.target if node.is_a?(AST::TenseNavigation)
 
     node
   end
@@ -816,6 +817,8 @@ module AST
     case node
     when CopyNode, CloneNode, FreezeNode
       skip_copy ? [] : [node.value].compact
+    when TenseNavigation
+      [node.target].compact
     when MoveNode, ShareNode, CapabilityWrap, Cast, MutableBorrow, ReturnNode, Assignment, VarDecl, BindExpr,
          DestructuringAssignment
       child = node.is_a?(MutableBorrow) ? node.target : node.value
@@ -2996,6 +2999,23 @@ module AST
     sig { returns(T::Boolean) }
     def safe_navigation?
       token.type == :CHAR && token.value == '?'
+    end
+  end
+  # An exact ordered tense map such as `value~?.field`. Annotation resolves
+  # the member against the payload while retaining the receiver envelope for
+  # the authoritative tense planner and MIR handoff.
+  TenseNavigation = Struct.new(:token, :target, :markers) do
+    extend T::Sig
+    include Locatable
+
+    sig { returns(T.nilable(String)) }
+    def name
+      target.respond_to?(:name) ? T.unsafe(target).name : nil
+    end
+
+    sig { returns(T::Boolean) }
+    def safe_navigation?
+      markers.include?("?")
     end
   end
   # Explicit call-site mutation marker. It never denotes a first-class

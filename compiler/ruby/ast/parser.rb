@@ -385,6 +385,8 @@ class ClearParser
     rule(:CHAR, '.', action: :parse_dot_suffix),
     rule(:CHAR, '(', action: :parse_func_call_suffix),
     rule(:CHAR, '?', action: :parse_optional_unwrap_suffix),
+    rule(:CHAR, '!', action: :parse_tense_navigation_suffix),
+    rule(:CHAR, '~', action: :parse_tense_navigation_suffix),
     rule(:KEYWORD, 'EXISTS', action: :parse_exists_suffix),
     rule(:KEYWORD, 'IS_OK', action: :parse_is_ok_suffix),
     rule(:KEYWORD, 'IS_READY', action: :parse_is_ready_suffix),

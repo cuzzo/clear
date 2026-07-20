@@ -249,6 +249,7 @@ class PipelineRewriter
       op = AST::BinaryOp.new(rhs.token, source.dup, :OR_ELSE, rhs.default_expr.dup)
       AST.stamp_synthetic_type!(op, node.full_type!, context: "synthetic AST type")
       op.storage   = node.storage
+      op.tense_plan = T.must(node.tense_plan)
       return op
     end
 

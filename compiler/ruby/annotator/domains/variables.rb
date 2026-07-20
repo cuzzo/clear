@@ -472,6 +472,13 @@ module Annotator
       def visit_declaration_value!(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
+        declared = node.type
+        if node.value.is_a?(AST::BgBlock) && declared&.single_future?
+          payload = declared.tense_type
+          if payload && !payload.dynamic? && !payload.auto? && !%i[Auto Any].include?(payload.resolved)
+            T.unsafe(node.value).declared_async_payload = payload
+          end
+        end
         # Fixed-array list literals must be storage-stamped before visiting so
         # downstream list analysis sees the intended stack placement.
         if node.value.is_a?(AST::ListLit) && node.type&.fixed?
@@ -1168,6 +1175,11 @@ module Annotator
         # diagnostic used for reads.
         field_node.is_assignment_lhs = true
         visit(field_node)
+
+        navigation = field_node.target
+        if navigation.is_a?(AST::TenseNavigation) && navigation.markers.include?("~")
+          error!(assignment_node, :TENSE_NAVIGATION_MUTATION, markers: navigation.markers)
+        end
 
         # AtomicPtr publishes whole-T snapshots; only the WITH SNAPSHOT MUTABLE
         # alias can accept field assignments.

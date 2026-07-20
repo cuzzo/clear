@@ -80,6 +80,7 @@ RSpec.describe FsmTransform::Emit do
       is_void: true,
       ctx_type: "__BgCtx1",
       promise_zig: "CheatHeader.Promise(void)",
+      async_result_shape: AsyncResultShape.promise(Type.new(:Void)),
       capture_fields: [],
       blk_label: "__bg1",
       rt_name: "rt",
@@ -107,6 +108,7 @@ RSpec.describe FsmTransform::Emit do
       blk_label: raw.fetch(:blk_label),
       ctx_type: raw.fetch(:ctx_type),
       promise_zig: raw.fetch(:promise_zig),
+      async_result_shape: raw.fetch(:async_result_shape),
       capture_fields: FsmTransform.coerce_context_fields(raw.fetch(:capture_fields)),
       alloc_var: raw.fetch(:alloc_var),
       promise_var: raw.fetch(:promise_var),
@@ -354,7 +356,8 @@ RSpec.describe FsmTransform::Emit do
           yield
         end
 
-        def lower_finalized_fsm_step_mir(_stmts, no_result:, ctx_id: nil)
+        def lower_finalized_fsm_step_mir(_stmts, no_result:, ctx_id: nil, async_result_shape: nil)
+          _ = async_result_shape
           [MIR::ExprStmt.new(MIR::Lit.new("work()"), false)]
         end
 
@@ -471,7 +474,8 @@ RSpec.describe FsmTransform::Emit do
           yield
         end
 
-        def lower_finalized_fsm_step_mir(stmts, no_result:, ctx_id: nil)
+        def lower_finalized_fsm_step_mir(stmts, no_result:, ctx_id: nil, async_result_shape: nil)
+          _ = async_result_shape
           @calls << { stmts: stmts, no_result: no_result, ctx_id: ctx_id }
           [MIR::ExprStmt.new(MIR::Lit.new("loweredResult()"), false)]
         end

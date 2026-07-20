@@ -421,4 +421,14 @@ RSpec.describe TypeShape do
     expect(type.ownership).to eq(:affine)
     expect(type.any_sync?).to be(false)
   end
+
+  it "retains every tense layer while extracting a linear item envelope" do
+    envelope = TypeExpressionTree.linear_item_envelope(TypeExpressionParser.parse("~!?String[]"))
+    parenthesized = TypeExpressionTree.linear_item_envelope(TypeExpressionParser.parse("~?(String[])"))
+
+    expect(TypeExpressionPrinter.semantic(T.must(envelope))).to eq("~!?String")
+    expect(TypeExpressionPrinter.semantic(T.must(parenthesized))).to eq("~?String")
+    expect(TypeExpressionTree.linear_item_envelope(TypeExpressionParser.parse("?String"))).to be_nil
+    expect(TypeExpressionTree.linear_item_envelope(TypeExpressionParser.parse("String"))).to be_nil
+  end
 end

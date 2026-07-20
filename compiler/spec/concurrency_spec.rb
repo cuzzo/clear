@@ -1748,8 +1748,8 @@ RSpec.describe SemanticAnnotator do
         expect(Type.new(:"~Void").zig_type).to eq("CheatLib.Promise(void)")
       end
 
-      it "emits a concrete error-set Promise payload for ~!Float64" do
-        expect(Type.new(:"~!Float64").zig_type).to eq("CheatLib.Promise(anyerror!f64)")
+      it "emits a boxed fallible Promise payload for ~!Float64" do
+        expect(Type.new(:"~!Float64").zig_type).to eq("CheatLib.Promise(CheatLib.AsyncFallible(f64))")
       end
     end
 

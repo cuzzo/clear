@@ -2911,7 +2911,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(capability_transition(unknown_cap).sync_constrained?).to be(false)
   end
 
-  it "strips BG error-union result types and rejects arena parallel blocks" do
+  it "preserves BG error-union result types and rejects arena parallel blocks" do
     ann = quiet_annotator
     analysis = ann.send(:new_capture_analysis)
     ann.define_singleton_method(:visit) { |_node| nil }
@@ -2926,7 +2926,7 @@ RSpec.describe "annotator branch gap burndown" do
 
     ann.send(:visit_BgBlock, bg)
 
-    expect(bg.full_type!.to_s).to eq("~String")
+    expect(bg.full_type!.to_s).to eq("~!String")
     expect(bg.pinned).to eq(true)
     expect(direct_errors(ann).map { |err| err[1] }).to include(:BG_ARENA_AND_PARALLEL)
   end

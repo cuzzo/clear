@@ -15,6 +15,7 @@ module MIRLoweringConcurrency
       Integer,
       Symbol,
       T::Boolean,
+      AsyncResultShape,
       T::Hash[String, Type],
       T::Hash[String, Schemas::ResourceClosePlan],
       T::Set[String],
@@ -123,6 +124,7 @@ module MIRLoweringConcurrency
       result[:blk_label] = names.blk_label
       result[:ctx_type] = names.ctx_type
       result[:promise_zig] = types.promise_zig
+      result[:async_result_shape] = types.async_shape
       result[:id] = names.id
       result[:bg_rt] = names.bg_rt
       result[:capture_fields] = capture.capture_fields
@@ -956,8 +958,10 @@ module MIRLoweringConcurrency
     last_mir = hoist_alloc(last_mir, step.expr, err_cleanup: true) if mir_allocates?(last_mir)
     last_pending = flush_pending
     result_target = MIR::FieldGet.new(MIR::FieldGet.new(MIR::Ident.new("__ctx_#{id}"), "inner"), "result")
+    shape = AsyncResultShape.promise(inner_t)
+    stored_value = async_payload_storage_value(last_mir, shape)
     produced = last_pending + ownership_marks_for_transferred_temp(last_mir, target_alloc: :heap) +
-      [MIR::Set.new(result_target, last_mir)]
+      [MIR::Set.new(result_target, stored_value)]
     body_mir.concat(guard_bg_shared_node_statement(step.expr, produced))
     nil
   end
@@ -1271,17 +1275,23 @@ module MIRLoweringConcurrency
     async_shape = node.expr.is_a?(AST::Identifier) ? node.expr.symbol&.async_result_shape : nil
     tense_plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
     scalar_future = async_shape&.promise? || promise_type.single_future? || promise_type.shared_promise?
+    if scalar_future && async_shape.nil?
+      async_shape = AsyncResultShape.promise(
+        promise_type.tense_type,
+        shared: promise_type.shared_promise?,
+      )
+    end
     if scalar_future && (!tense_plan || tense_plan.operation != TenseOperationKind::Next)
       raise "scalar NEXT lowering requires its annotation-produced TenseOperationPlan"
     end
-    source_kind = if tense_plan
+    source_kind = if promise_type.promise_list? && async_shape.nil?
+      :promise_list
+    elsif tense_plan
       case tense_plan.backend_form
       when TenseBackendForm::SharedPromiseNext then :shared_promise
       when TenseBackendForm::ObservableStringNext then :observable_string
       else :plain
       end
-    elsif promise_type.promise_list?
-      :promise_list
     elsif promise_type.observable_array_future?
       :observable_list
     elsif promise_type.observable? && observable_next_string?(promise_type)
@@ -1322,8 +1332,9 @@ module MIRLoweringConcurrency
 
     if plan.promise_list?
       # NEXT on ~T[]@list: iterate the promise list, await each promise, collect results.
-      # alloc_sym determines whether results are heap- or frame-allocated (caller passes
-      # decl_alloc from the enclosing VarDecl so the allocator matches the cleanup plan).
+      # alloc_sym determines whether results are heap- or frame-allocated. The
+      # emitter relocates ownership-bearing Promise payloads from their BG heap
+      # allocator into this aggregate allocator before appending them.
       promise_list_inner = plan.inner
 
       # In BC the BG runtime spawns real fibers via BG_SPAWN and stashes
@@ -1338,17 +1349,17 @@ module MIRLoweringConcurrency
         return call
       end
 
-      elem_zig = T.must(promise_type.tense_type.element_type).zig_type
+      item_shape = AsyncResultShape.promise_list_item(promise_type)
       tmp_id = lowering_counters.next_tmp_id
       promise_list_label = "__next_all_#{tmp_id}"
       results_var = "__next_results_#{tmp_id}"
       return MIR::NextPromiseList.new(
-        promise_list_inner,
-        elem_zig,
-        promise_list_label,
-        results_var,
-        alloc_sym,
-        Type.new(result_t),
+        list_expr: promise_list_inner,
+        async_shape: item_shape,
+        label: promise_list_label,
+        results_var: results_var,
+        alloc: alloc_sym,
+        result_type: result_t,
       )
     end
 
@@ -1399,8 +1410,20 @@ module MIRLoweringConcurrency
       return block
     end
 
-    MIR::MethodCall.new(receiver, result_t.stream_step? ? "nextStep" : "next", [], true, MIR::CallableContract.no_ownership(0),
-      plan.result_alloc)
+    next_method = result_t.stream_step? ? "nextStep" : "next"
+    boxed_fallible = !bc_target? && plan.async_result_shape&.boxes_fallible_payload? == true
+    call = MIR::MethodCall.new(
+      receiver,
+      next_method,
+      [],
+      !boxed_fallible,
+      MIR::CallableContract.no_ownership(0),
+      plan.result_alloc,
+    )
+    return call unless boxed_fallible
+
+    unwrapped_transport = MIR::TryExpr.new(call)
+    MIR::AsyncPayloadTake.new(source: unwrapped_transport, result_type: Type.new(result_t))
   end
 
   private :boundary_capture_requires_pinned?,

@@ -181,6 +181,253 @@ RSpec.describe TenseOperationPlanner do
     expect { described_class.exists(Type.new("~?Int64")) }.to raise_error(ArgumentError, /immediately available/)
   end
 
+  it "maps every valid ordered receiver envelope without flattening it" do
+    TenseOperationPlanner::NAVIGATION_MARKERS.each do |order|
+      source = Type.new(expression_for(order))
+      plan = described_class.navigate(source, Type.new(:String), markers: order)
+
+      expect(plan.operation).to eq(TenseOperationKind::Navigate)
+      expect(TenseEnvelope.from_type(plan.result_type).order).to eq(order)
+      expect(TenseEnvelope.from_type(plan.result_type).payload_type.resolved).to eq(:String)
+      expect(plan.navigation_layers.map(&:marker).join).to eq(order)
+      expect(plan.backend_form).to eq(order.include?("~") ? TenseBackendForm::FutureMap : TenseBackendForm::DirectMap)
+      expect(plan.suspends).to be(false)
+    end
+  end
+
+  it "normalizes immediate mapped effects while preserving the future boundary" do
+    {
+      ["?", "!"] => "!?",
+      ["!", "?"] => "!?",
+      ["!?", "!?"] => "!?",
+      ["~?", "!"] => "~!?",
+      ["!~?", "!?"] => "!~!?",
+      ["!", "~"] => "!~",
+    }.each do |(receiver_order, member_order), expected|
+      plan = described_class.navigate(
+        Type.new(expression_for(receiver_order)),
+        Type.new(expression_for(member_order, NamedTypeExpression.new(name: :String))),
+        markers: receiver_order,
+      )
+      expect(TenseEnvelope.from_type(plan.result_type).order).to eq(expected)
+    end
+  end
+
+  it "makes future handle ownership explicit and rejects ambiguous navigation" do
+    affine = described_class.navigate(Type.new("~Int64"), Type.new(:String), markers: "~")
+    shared = described_class.navigate(
+      Type.new("~Int64", ownership: :shared), Type.new(:String), markers: "~", shared: true,
+    )
+
+    expect(affine.handle_use).to eq(TenseHandleUse::Consume)
+    expect(shared.handle_use).to eq(TenseHandleUse::SharedRead)
+    expect { described_class.navigate(Type.new("!?Int64"), Type.new(:String), markers: "?!") }.to(
+      raise_error(ArgumentError, /must match receiver tense order/),
+    )
+    expect { described_class.navigate(Type.new("~Int64"), Type.new("~String"), markers: "~") }.to(
+      raise_error(ArgumentError, /nested future/),
+    )
+    expect { described_class.navigate(Type.new("~Int64[]"), Type.new(:String), markers: "~") }.to(
+      raise_error(ArgumentError, /streams require SELECT/),
+    )
+  end
+
+
+  it "keeps navigation node names and direct borrowed payloads structural" do
+    token = Lexer::Token.new(:VAR_ID, "value", 1, 1)
+    unnamed = AST::TenseNavigation.new(token, AST::Literal.new(token, :INT64, 1, nil), "!")
+    expect(unnamed.name).to be_nil
+
+    target = AST::Identifier.new(token, "foreign")
+    target.full_type = Type.new("!?[]@c Int64")
+    target.container_borrow = true
+    navigation = AST::TenseNavigation.new(token, target, "!?")
+    member = AST::Identifier.new(token, "mapped")
+    annotator = Annotator::Phases::TypeAnalysisSession.new(source_code: "")
+
+    result = annotator.send(:publish_tense_navigation_plan!, member, navigation, Type.new(:Int64))
+    expect(Type.surface_name(result)).to eq("!?Int64")
+    expect(member.container_borrow).to be(true)
+  end
+
+  it "preserves unexpected planner failures at the annotation handoff" do
+    token = Lexer::Token.new(:VAR_ID, "stream", 1, 1)
+    target = AST::Identifier.new(token, "stream")
+    target.full_type = Type.new("~Int64[]")
+    navigation = AST::TenseNavigation.new(token, target, "~")
+    member = AST::Identifier.new(token, "mapped")
+
+    expect {
+      Annotator::Phases::TypeAnalysisSession.new(source_code: "").send(
+        :publish_tense_navigation_plan!, member, navigation, Type.new(:Int64),
+      )
+    }.to raise_error(ArgumentError, /streams require SELECT/)
+  end
+
+  it "parses ordered navigation as one transparent receiver boundary" do
+    source = <<~CLEAR
+      STRUCT User { name: String }
+      FN main(value: !~?User) ->
+        name: !~?String = value!~?.name;
+      END
+    CLEAR
+    ast = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    main = T.cast(ast.statements.last, AST::FunctionDef)
+    field = T.cast(T.cast(main.body.first, AST::BindExpr).value, AST::GetField)
+    navigation = T.cast(field.target, AST::TenseNavigation)
+
+    expect(navigation.markers).to eq("!~?")
+    expect(navigation.target).to be_a(AST::Identifier)
+    expect(field.field).to eq("name")
+  end
+
+  it "parses every valid navigation marker in the independently specified order table" do
+    markers = SelectTenseSemantics::VALID_ORDERS.reject { |order| order.empty? || order == "?" }
+    params = markers.each_with_index.map { |order, index| "v#{index}: #{order}User" }.join(", ")
+    body = markers.each_with_index.map do |order, index|
+      "mapped#{index}: #{order}String = v#{index}#{order}.name;"
+    end.join("\n")
+    source = <<~CLEAR
+      STRUCT User { name: String }
+      FN main(#{params}) ->
+        #{body}
+      END
+    CLEAR
+
+    main = T.cast(ClearParser.new(Lexer.new(source).tokenize, source).parse.statements.last, AST::FunctionDef)
+    parsed = main.body.map do |statement|
+      field = T.cast(T.cast(statement, AST::BindExpr).value, AST::GetField)
+      T.cast(field.target, AST::TenseNavigation).markers
+    end
+    expect(parsed).to eq(markers)
+  end
+
+  it "retains the established optional safe-navigation node for mutable access paths" do
+    source = "STRUCT User { name: String } FN main(v: ?User) -> x = v?.name; END"
+    main = T.cast(ClearParser.new(Lexer.new(source).tokenize, source).parse.statements.last, AST::FunctionDef)
+    field = T.cast(T.cast(main.body.first, AST::BindExpr).value, AST::GetField)
+
+    expect(field.target).to be_a(AST::OptionalUnwrap)
+    expect(T.cast(field.target, AST::OptionalUnwrap).safe_navigation?).to be(true)
+  end
+
+  it "preserves immediate payload capabilities without leaking future-handle capabilities" do
+    immediate = described_class.navigation_payload(Type.new("?User", ownership: :multiowned))
+    future = described_class.navigation_payload(Type.new("~User", ownership: :shared))
+
+    expect(immediate.ownership).to eq(:multiowned)
+    expect(future.ownership).to eq(:affine)
+    expect(future.resolved).to eq(:User)
+  end
+
+  it "emits stable diagnostics for invalid, skipped, stream, and nested-future navigation" do
+    malformed = "STRUCT User { name: String } FN main(v: !?User) -> x = v?!.name; END"
+    expect do
+      ClearParser.new(Lexer.new(malformed).tokenize, malformed).parse
+    end.to raise_error(ParserError) { |error| expect(error.code).to eq(:TENSE_NAVIGATION_ORDER) }
+
+    skipped = "STRUCT User { name: String } FN main(v: !?User) -> x:!?String = v!.name; END"
+    expect do
+      annotated_function(skipped, "main")
+    end.to raise_error(CompilerError) do |error|
+      expect(error.code).to eq(:TENSE_NAVIGATION_MISMATCH)
+      expect(error.original_message).to include("use `!?.`")
+    end
+
+    stream = <<~CLEAR
+      STRUCT User { name: String }
+      FN main(v: [~]User) -> x = v~.name; END
+    CLEAR
+    expect { annotated_function(stream, "main") }.to raise_error(CompilerError) do |error|
+      expect(error.code).to eq(:TENSE_NAVIGATION_STREAM)
+    end
+
+    nested = <<~CLEAR
+      STRUCT User { id: Int64 }
+      IMPLEMENTATION User {
+        METHOD later(self) RETURNS ~Int64 -> RETURN BG { self.id; }; END
+      }
+      FN main(v: ~User) -> x: ~Int64 = v~.later(); END
+    CLEAR
+    expect { annotated_function(nested, "main") }.to raise_error(CompilerError) do |error|
+      expect(error.code).to eq(:TENSE_NAVIGATION_NESTED_FUTURE)
+    end
+
+    mutation = <<~CLEAR
+      STRUCT Counter { value: Int64 }
+      FN main(v: ~Counter) -> v~.value = 2; END
+    CLEAR
+    expect { annotated_function(mutation, "main") }.to raise_error(CompilerError) do |error|
+      expect(error.code).to eq(:TENSE_NAVIGATION_MUTATION)
+      expect(error.original_message).to include("cannot mutate an unresolved future payload")
+    end
+
+    token = Lexer::Token.new(:VAR_ID, "future", 1, 1)
+    target = AST::Identifier.new(token, "future")
+    target.full_type = Type.new("~Counter")
+    navigation = AST::TenseNavigation.new(token, target, "~")
+    method = AST::MethodCall.new(token, navigation, "update", [])
+    method.full_type = Type.new(:Void)
+    method.mutates_receiver = true
+    expect {
+      Annotator::Phases::TypeAnalysisSession.new(source_code: "").send(
+        :finalize_tense_navigation_method!, method,
+      )
+    }.to raise_error(CompilerError) do |error|
+      expect(error.code).to eq(:TENSE_NAVIGATION_MUTATION)
+    end
+  end
+
+  it "keeps postfix optional unwrap distinct from future tense navigation" do
+    source = <<~CLEAR
+      STRUCT User { name: String }
+      FN main(user: ?User) ->
+        definite = user?;
+        maybeName = user?.name;
+      END
+    CLEAR
+    ast = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    main = T.cast(ast.statements.last, AST::FunctionDef)
+    definite = T.cast(main.body[0], AST::BindExpr).value
+    maybe_field = T.cast(T.cast(main.body[1], AST::BindExpr).value, AST::GetField)
+
+    expect(definite).to be_a(AST::OptionalUnwrap)
+    expect(maybe_field.target).to be_a(AST::OptionalUnwrap)
+    expect(T.cast(maybe_field.target, AST::OptionalUnwrap).safe_navigation?).to be(true)
+  end
+
+  it "annotates field navigation through ordered layers with one immutable plan" do
+    source = <<~CLEAR
+      STRUCT User { name: String }
+      FN main(value: ~?User) RETURNS ~?String ->
+        RETURN value~?.name;
+      END
+    CLEAR
+    main = annotated_function(source, "main")
+    field = T.cast(T.cast(main.body.first, AST::ReturnNode).value, AST::GetField)
+    plan = T.cast(field.tense_plan, TenseOperationPlan)
+
+    expect(Type.surface_name(field.full_type!(context: "test field"))).to eq("~?String")
+    expect(plan.backend_form).to eq(TenseBackendForm::FutureMap)
+    expect(plan.handle_use).to eq(TenseHandleUse::Consume)
+  end
+
+  it "applies the same navigation plan to extern methods" do
+    source = <<~CLEAR
+      EXTERN STRUCT Handle {} FROM "native";
+      EXTERN FN Handle.id(self: Handle) RETURNS Int64 FROM "native";
+      FN main(value: ~Handle) RETURNS ~Int64 ->
+        RETURN value~.id();
+      END
+    CLEAR
+    main = annotated_function(source, "main")
+    method = T.cast(T.cast(main.body.first, AST::ReturnNode).value, AST::MethodCall)
+    plan = T.cast(method.tense_plan, TenseOperationPlan)
+
+    expect(plan.backend_form).to eq(TenseBackendForm::FutureMap)
+    expect(Type.surface_name(method.full_type!(context: "test extern method"))).to eq("~Int64")
+  end
+
   it "plans value and control-flow recovery without conflating absence and failure" do
     value = described_class.or_else(Type.new("!?Int64"), Type.new(:Int64))
     raise_plan = described_class.or_else(

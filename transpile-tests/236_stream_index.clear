@@ -3,7 +3,7 @@
 
 STRUCT Item { category: String, score: Int64 }
 
-FN makeItem(cat: String, s: Int64) RETURNS !Item ->
+FN makeItem(cat: String, s: Int64) RETURNS Item ->
     RETURN Item{ category: COPY cat, score: s };
 END
 

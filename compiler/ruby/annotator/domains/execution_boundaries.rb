@@ -803,31 +803,19 @@ module Annotator
           full_analysis = with_fiber_capture_analysis(is_parallel: node.parallel, mark_moves: true) do
             node.body.each do |expr|
               visit(expr)
-              last_type = T.cast(expr, AST::Locatable).full_type!(context: "BG body expression")
+              last_type = recoverable_result_type(expr, context: "BG body expression") ||
+                T.cast(expr, AST::Locatable).full_type!(context: "BG body expression")
             end
           end
         end
         analysis_result = T.must(full_analysis)
-        # Strip leading `!` from the body's last-expression type: a BG fiber
-        # catches its body's errors internally and surfaces them via the
-        # Promise's join boundary, not via the surface success type. So
-        # `BG { napFor(50); }` (where napFor is `!Void`) is `~Void`, not
-        # `~!Void` -- the latter would force callers to write `~!Void[]@list`
-        # and break the Zig codegen, which expects `Promise(T)` where `T`
-        # is the success type.
-        # A contextual `~!T` contract is different: `!T` is deliberately the
-        # Promise payload and must survive the join boundary.  Mark the final
-        # call so lowering stores the error union as a value instead of applying
-        # the usual implicit `try` used for fiber transport failures.
+        # A source-declared failure produced by the body belongs inside the
+        # future: BG { !T } is ~!T and NEXT exposes !T. Scheduler/allocation
+        # transport failures remain the Promise's separate backend channel.
         declared_payload = T.cast(T.unsafe(node).declared_async_payload, T.nilable(Type))
-        preserve_payload_error = declared_payload&.error_union? == true
-        last_type_str = last_type.to_s
-        if last_type_str.start_with?('!') && !preserve_payload_error
-          last_type = Type.new(T.must(last_type_str[1..]).to_sym)
-        end
-        if preserve_payload_error && node.body.last&.respond_to?(:retain_error_channel=)
+        last_type = T.must(declared_payload) if declared_payload
+        if last_type.error_union? && node.body.last&.respond_to?(:retain_error_channel=)
           T.unsafe(node.body.last).retain_error_channel = true
-          last_type = T.must(declared_payload)
         end
         payload_type = owned_async_payload_type(last_type)
         T.unsafe(node).async_result_shape = AsyncResultShape.promise(payload_type)
@@ -959,8 +947,9 @@ module Annotator
           if expr.is_a?(AST::Identifier)
             og_set_moved(expr.name, at_token: expr.token, action: :next)
           end
-          elem_sym = T.must(promise_type.tense_type.element_type).to_sym
-          stamp_type!(node, Type.new(:"#{elem_sym}[]", collection: :list))
+          plan = TenseOperationPlanner.next_value(promise_type)
+          node.tense_plan = plan
+          stamp_type!(node, plan.result_type)
         elsif promise_type.observable_array_future?
           # NEXT on ~T[]@set:observable: wait for the producer fiber, then
           # take an owned `T[]` snapshot via `materializeNext(alloc)`. The

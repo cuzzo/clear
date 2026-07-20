@@ -86,18 +86,39 @@ RSpec.describe MIREmitter do
 
   it "emits promise-list NEXT await-all expressions" do
     node = MIR::NextPromiseList.new(
-      MIR::Ident.new("futures"),
-      "i64",
-      "__next_all_1",
-      "__next_results_1",
-      :frame,
-      Type.new(:"Int64[]"),
+      list_expr: MIR::Ident.new("futures"),
+      async_shape: AsyncResultShape.promise(Type.new(:Int64)),
+      label: "__next_all_1",
+      results_var: "__next_results_1",
+      alloc: :frame,
+      result_type: Type.new(:"Int64[]"),
     )
     zig = e.emit(node)
     expect(zig).to include("var __next_results_1 = std.ArrayListUnmanaged(i64).empty")
     expect(zig).to include("for (futures.items) |__p|")
-    expect(zig).to include("try __next_results_1.append(rt.frameAlloc(), try __p.next())")
+    expect(zig).to include("var __value = try __p.next()")
+    expect(zig).to include("CheatLib.dupeValue(@TypeOf(__value), __value, rt.frameAlloc())")
+    expect(zig).to include("CheatLib.cleanup(@TypeOf(__value), __p.alloc, &__value)")
+    expect(zig).to include("try __next_results_1.append(rt.frameAlloc(), __placed)")
     expect(zig).to include("break :__next_all_1 __next_results_1;")
+  end
+
+  it "retains a promise-list payload failure while cleaning partial results" do
+    node = MIR::NextPromiseList.new(
+      list_expr: MIR::Ident.new("futures"),
+      async_shape: AsyncResultShape.promise(Type.new("!String")),
+      label: "__next_all_2",
+      results_var: "__next_results_2",
+      alloc: :frame,
+      result_type: Type.new(:"!String[]", collection: :list),
+    )
+    zig = e.emit(node)
+
+    expect(zig).to include("const __resolved = try __p.next()")
+    expect(zig).to include("var __value = __resolved.value catch |__err|")
+    expect(zig).to include("CheatLib.cleanup(@TypeOf(__next_results_2), rt.frameAlloc(), &__next_results_2)")
+    expect(zig).to include("break :__next_all_2 __err")
+    expect(zig).to include("errdefer CheatLib.cleanup(@TypeOf(__placed), rt.frameAlloc(), &__placed)")
   end
 
   # =========================================================================
@@ -1787,6 +1808,12 @@ RSpec.describe MIREmitter do
 
     it "reports unknown structural nodes with their class" do
       expect { e.emit(Object.new) }.to raise_error(/MIREmitter: unknown node type Object/)
+    end
+
+    it "rejects an invalid immediate tense-map layer" do
+      expect {
+        e.send(:emit_direct_tense_layers, ["~"], ["value"], "source", "mapped", "tense")
+      }.to raise_error(/unsupported immediate tense-map layer/)
     end
   end
 end

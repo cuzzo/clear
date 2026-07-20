@@ -624,6 +624,13 @@ class MIRLowering
     plan.place(self, mir, ast_node)
   end
 
+  sig { params(value: MIR::Node, shape: AsyncResultShape).returns(MIR::Node) }
+  def async_payload_storage_value(value, shape)
+    return value unless shape.boxes_fallible_payload?
+
+    MIR::StructInit.new(nil, [MIR::StructInitField.new(name: "value", value: value)])
+  end
+
   sig { params(value: MIR::Node, destination: Type, source_node: AST::Node).returns(MIR::MethodCall) }
   def node_create_mir(value, destination, source_node)
     payload = T.must(destination.node_payload_type)
@@ -1081,7 +1088,15 @@ class MIRLowering
     # receives normal cleanup and the clone is transferred as the result.
     return copy_lazy_owned_branch_for_destination(mir, dst_ti, dest_alloc) if mir_allocates?(mir)
 
-    MIR::DeepCopy.new(mir, dst_ti.zig_type, nil, :full_value, dest_alloc)
+    MIR::DeepCopy.new(
+      mir,
+      dst_ti.zig_type,
+      nil,
+      :full_value,
+      dest_alloc,
+      MIR::DeepCopy.copy_shape_for_zig_type(dst_ti.zig_type),
+      dst_ti,
+    )
   end
 
   sig { params(mir: MIR::Node, type_info: Type, dest_alloc: Symbol).returns(MIR::BlockExpr) }

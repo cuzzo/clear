@@ -13,7 +13,7 @@ RSpec.describe SemanticAdvanced do
     expect(registry.report.fetch(:workstreams).keys).to match_array(described_class::WORKSTREAMS)
     expect(registry.report.fetch(:rejected)).to be_positive
     expect(registry.report.fetch(:depth_cases)).to eq(18)
-    expect(registry.report.fetch(:gaps)).to eq(discovered: 12, fixed: 12, expected: 0, outstanding: 0)
+    expect(registry.report.fetch(:gaps)).to eq(discovered: 13, fixed: 13, expected: 0, outstanding: 0)
   end
 
   it 'renders every registry entry through its declared requirement owner' do

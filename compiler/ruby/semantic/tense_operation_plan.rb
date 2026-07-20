@@ -247,6 +247,11 @@ class TenseOperationPlan < T::Struct
       operation == TenseOperationKind::OrElseBreak ||
       operation == TenseOperationKind::OrElsePrune
   end
+
+  sig { returns(T::Boolean) }
+  def owns_result?
+    backend_form == TenseBackendForm::FutureMap
+  end
 end
 
 class TenseJoinPlan < T::Struct
@@ -310,6 +315,11 @@ end
 class TenseOperationPlanner
   extend T::Sig
 
+  NAVIGATION_MARKERS = T.let(
+    TypeExpression::VALID_TENSE_ORDERS.reject(&:empty?).freeze,
+    T::Array[String],
+  )
+
   sig { params(type: Type).returns(TenseSelectorPlan) }
   def self.selector(type)
     TenseSelectorPlan.new(value_type: type, envelope: TenseEnvelope.from_type(type))
@@ -369,7 +379,7 @@ class TenseOperationPlanner
       raise ArgumentError, "NEXT requires an outer future layer, got #{envelope.order.inspect}"
     end
     result = envelope.without_layer(0)
-    preserve_value_metadata!(result, type)
+    result.copy_placement_from!(type)
     backend = if type.observable? && envelope.payload_type.string?
       TenseBackendForm::ObservableStringNext
     elsif shared
@@ -411,6 +421,58 @@ class TenseOperationPlanner
       TenseOperationKind::Exists, type, Type.new(:Bool), TenseBackendForm::OptionalTest,
       preserved: envelope.layers,
       refinement: envelope.without_layer(optional_index),
+    )
+  end
+
+  sig { params(type: Type).returns(Type) }
+  def self.navigation_payload(type)
+    envelope = TenseEnvelope.from_type(type)
+    payload = envelope.payload_type
+    unless envelope.asynchronous?
+      payload.merge_capabilities_from!(type, include_affine_ownership: true)
+      payload.copy_placement_from!(type)
+    end
+    payload
+  end
+
+  sig do
+    params(
+      receiver_type: Type,
+      mapped_type: Type,
+      markers: String,
+      shared: T::Boolean,
+    ).returns(TenseOperationPlan)
+  end
+  def self.navigate(receiver_type, mapped_type, markers:, shared: false)
+    receiver = TenseEnvelope.from_type(receiver_type)
+    unless NAVIGATION_MARKERS.include?(markers) && receiver.order == markers
+      raise ArgumentError,
+        "navigation marker #{markers.inspect} must match receiver tense order #{receiver.order.inspect}"
+    end
+    if receiver_type.canonical_stream_result? || receiver_type.stream?
+      raise ArgumentError, "navigation maps one future value; streams require SELECT"
+    end
+
+    mapped = TenseEnvelope.from_type(mapped_type)
+    if receiver.asynchronous? && mapped.asynchronous?
+      raise ArgumentError, "future navigation cannot implicitly create a nested future"
+    end
+
+    combined = normalize_navigation_layers(receiver.layers + mapped.layers)
+    result = Type.new(TenseEnvelope.wrap_layers(mapped.payload_expression, combined))
+    preserve_value_metadata!(result, mapped_type)
+    operation_plan(
+      TenseOperationKind::Navigate,
+      receiver_type,
+      result,
+      receiver.asynchronous? ? TenseBackendForm::FutureMap : TenseBackendForm::DirectMap,
+      preserved: combined,
+      navigation: receiver.layers,
+      handle_use: if receiver.asynchronous?
+        shared ? TenseHandleUse::SharedRead : TenseHandleUse::Consume
+      else
+        TenseHandleUse::None
+      end,
     )
   end
 
@@ -495,6 +557,7 @@ class TenseOperationPlanner
       backend: TenseBackendForm,
       consumed: T::Array[TenseLayer],
       preserved: T::Array[TenseLayer],
+      navigation: T::Array[TenseLayer],
       propagation: TensePropagation,
       recovery: TenseRecovery,
       handle_use: TenseHandleUse,
@@ -510,6 +573,7 @@ class TenseOperationPlanner
     backend,
     consumed: [],
     preserved: [],
+    navigation: [],
     propagation: TensePropagation::None,
     recovery: TenseRecovery::None,
     handle_use: TenseHandleUse::None,
@@ -524,6 +588,7 @@ class TenseOperationPlanner
       backend_form: backend,
       consumed_layers: consumed.freeze,
       preserved_layers: preserved.freeze,
+      navigation_layers: navigation.freeze,
       propagation: propagation,
       recovery: recovery,
       handle_use: handle_use,
@@ -533,6 +598,35 @@ class TenseOperationPlanner
     )
   end
   private_class_method :operation_plan
+
+  sig { params(layers: T::Array[TenseLayer]).returns(T::Array[TenseLayer]) }
+  def self.normalize_navigation_layers(layers)
+    future_count = layers.count { |layer| layer.kind == TenseLayerKind::Future }
+    raise ArgumentError, "navigation cannot contain more than one future boundary" if future_count > 1
+
+    result = T.let([], T::Array[TenseLayer])
+    segment = T.let([], T::Array[TenseLayer])
+    layers.each do |layer|
+      if layer.kind == TenseLayerKind::Future
+        result.concat(normalize_immediate_navigation_segment(segment))
+        result << layer
+        segment = []
+      else
+        segment << layer
+      end
+    end
+    result.concat(normalize_immediate_navigation_segment(segment))
+    result.freeze
+  end
+  private_class_method :normalize_navigation_layers
+
+  sig { params(layers: T::Array[TenseLayer]).returns(T::Array[TenseLayer]) }
+  def self.normalize_immediate_navigation_segment(layers)
+    fallible = layers.find { |layer| layer.kind == TenseLayerKind::Fallible }
+    optional = layers.find { |layer| layer.kind == TenseLayerKind::Optional }
+    [fallible, optional].compact
+  end
+  private_class_method :normalize_immediate_navigation_segment
 
   sig { params(result: Type, source: Type).void }
   def self.preserve_value_metadata!(result, source)

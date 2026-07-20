@@ -881,6 +881,7 @@ private
     when AST::Placeholder then visit_Placeholder(node)
     when AST::CapabilityWrap then visit_CapabilityWrap(node)
     when AST::OptionalUnwrap then visit_OptionalUnwrap(node)
+    when AST::TenseNavigation then visit_TenseNavigation(node)
     when AST::MutableBorrow then visit_MutableBorrow(node)
     when AST::FuncCall then visit_FuncCall(node)
     when AST::MethodCall then visit_MethodCall(node)

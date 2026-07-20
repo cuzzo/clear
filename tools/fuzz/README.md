@@ -155,7 +155,7 @@ expected hard error is absent.
 | `generic_map_protocol_matrix` | 20 | Static Map bounds and `M::Key`/`M::Value` projections across string/numeric maps, specialization-selected associated-key storage, generic allocator forwarding, cleanup-bearing value copies, value-shaped optional captures, reusable user-protocol declarations/conformances with zero-witness static dispatch (including shared capability wrappers), borrowed-value rejection, nested type syntax, and declaration-time constraint diagnostics. |
 | `generic_shared_map_capability_matrix` | 8 | `SHARED Map` specialization across locked, read/write-locked, versioned, and sharded maps; direct or non-polymorphic access is rejected before Zig. |
 | `select_tense_assignment_matrix` | 56 | Exhaustive `[]T`/`[~]T`/`[~N]T`/`[~INF]T` assignment oracle across 12 ordered SELECT modifier sequences, direct range-to-`~T` function piping, plus forbidden-order and obsolete-stream-syntax negatives. |
-| `semantic_advanced_matrix` | 200 | Independent legality/trace admission for advanced capability, depth, concurrency, effect, generic, and diagnostic workstreams; the PR concurrency lane is deterministically bounded. |
+| `semantic_advanced_matrix` | 201 | Independent legality/trace admission for advanced capability, depth, concurrency, effect, generic, and diagnostic workstreams; the PR concurrency lane is deterministically bounded. |
 | `semantic_capability_expansion_matrix` | 0 | Opt-in depth-four capability campaign; set `SEMANTIC_CAPABILITY_EXPANSION=1` to materialize the documented 1,700 cases. |
 | `semantic_capability_transport_matrix` | 20 | Exhaustive direct/nested managed capability transport through COPY, GIVE, and TAKES. |
 | `inherent_method_matrix` | 8 | Owner-scoped METHOD dispatch across concrete/generic owners, method-local binders, same-name methods on distinct owners, static owner functions, and rejected free-function dot syntax. |
@@ -233,10 +233,10 @@ expected hard error is absent.
 | `lowering_boundary_matrix`   | 28           | MIR lowering boundary coverage for call contracts, WITH variants, BG/DO/NEXT, and pipeline terminals. |
 | `test_framework_matrix`      | 6            | TEST/WHEN/TEST THAT grammar through hooks, LET bindings, stubs, pending tests, benchmark, smash, and profile forms. |
 | `extern_boundary_matrix`     | 6            | Negative extern declaration/call boundaries for free functions, trampolines, extern methods/resources, generic comptime calls, and tight-loop rejection. |
-| `curated_gap_corpus`         | 491          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
+| `curated_gap_corpus`         | 493          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
 | `tense_predicate_matrix`     | 11           | Postfix tense predicates, stacked refinement, readiness polling, and ambiguous optional-Boolean rejection. |
 | `next_tense_matrix`          | 9            | NEXT across future/stream values and their fallible/optional tense permutations, including invalid redundant and missing unwraps. |
-| `tense_operation_plan_matrix` | 8           | Executable annotation-to-MIR handoff coverage for TRY, UNWRAP, OR_ELSE, tense predicates, and scalar NEXT. |
+| `tense_operation_plan_matrix` | 34          | Executable annotation-to-MIR handoff coverage for TRY, UNWRAP, OR_ELSE, tense predicates, ordered tense navigation, scalar NEXT, and fallible promise-list aggregation. |
 
 ### `stream_into_boundary` matrix
 

@@ -2537,6 +2537,11 @@ class Type
     # 1. Any
     return true if any? || other_type.any?
 
+    # Collection predicates intentionally look through a fallible wrapper so
+    # callers can inspect its payload shape. Assignment compatibility must not:
+    # a plain array/map destination cannot silently erase a source `!` layer.
+    return false if other_type.error_union? && !error_union?
+
     # Once a destination declares T@node, assigning a plain T value inserts
     # it into the compiler-inferred NodeStore. Existing handles pass through.
     if node_reference?
@@ -5352,7 +5357,10 @@ class Type
       return "*CheatLib.obs.#{observable_wrapper_zig(tense_type)}"
     end
     if promise_list?
-      elem_zig = T.must(tense_type.element_type).nested_zig_type(is_param: is_param, is_field: is_field)
+      payload = tense_type
+      item_expression = T.must(TypeExpressionTree.linear_item_envelope(payload.shape.expression))
+      item_type = Type.from_child_expression(item_expression)
+      elem_zig = TypeZigRenderer.render_async_payload(item_type, is_param: is_param, is_field: is_field)
       return "std.ArrayListUnmanaged(CheatLib.Promise(#{elem_zig}))"
     end
     if canonical_stream?
@@ -5378,7 +5386,8 @@ class Type
              end
     end
     if shared_promise?
-      return "CheatLib.SharedPromise(#{tense_type.nested_zig_type(is_param: is_param, is_field: is_field)})"
+      payload = tense_type
+      return "CheatLib.SharedPromise(#{TypeZigRenderer.render_async_payload(payload, is_param: is_param, is_field: is_field)})"
     end
     if split_open_stream?
       elem_zig = T.must(open_stream_element_type).nested_zig_type(is_param: is_param, is_field: is_field)
@@ -5393,7 +5402,8 @@ class Type
       return "CheatLib.InfStream(#{elem_zig})"
     end
 
-    "CheatLib.Promise(#{tense_type.nested_zig_type(is_param: is_param, is_field: is_field)})"
+    payload = tense_type
+    "CheatLib.Promise(#{TypeZigRenderer.render_async_payload(payload, is_param: is_param, is_field: is_field)})"
   end
 
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(T.nilable(String)) }

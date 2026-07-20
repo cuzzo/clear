@@ -154,6 +154,10 @@ module Annotator
               index: position, count: T.must(target_type.fixed_position_count), type: Type.surface_name(target_type))
           end
           field_type = T.must(position_type)
+          if node.target.is_a?(AST::TenseNavigation)
+            field_type = publish_tense_navigation_plan!(node, node.target, field_type)
+            node.safe_nav_chain = true if node.target.safe_navigation?
+          end
           navigation = node.target.is_a?(AST::OptionalUnwrap) && node.target.safe_navigation? || implicit_safe_nav
           field_type = Type.optional_of(field_type) if navigation && !field_type.optional?
           node.tuple_position = position
@@ -242,6 +246,10 @@ module Annotator
             field_type = field_type.dup
             field_type.strip_layout!
           end
+        end
+        if node.target.is_a?(AST::TenseNavigation)
+          field_type = publish_tense_navigation_plan!(node, node.target, field_type)
+          node.safe_nav_chain = true if node.target.safe_navigation?
         end
         navigation = node.target.is_a?(AST::OptionalUnwrap) && node.target.safe_navigation? || implicit_safe_nav
         if navigation && !field_type.optional?

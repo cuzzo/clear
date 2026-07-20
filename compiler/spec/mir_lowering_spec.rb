@@ -376,6 +376,7 @@ RSpec.describe MIRLowering do
       fake.define_singleton_method(:lower) { |_node| lowered }
       fake.define_singleton_method(:place_value_for_destination) { |mir, _node, _alloc, _type| mir }
       fake.define_singleton_method(:mir_allocates?) { |_mir| false }
+      fake.define_singleton_method(:async_payload_storage_value) { |mir, _shape| mir }
       fake.define_singleton_method(:flush_pending) { [] }
       fake.define_singleton_method(:ownership_marks_for_transferred_temp) { |_mir, target_alloc:| [] }
 
@@ -5016,5 +5017,34 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
 
     expect(facts.map { |fact| [fact.name, fact.target_alloc, fact.move_guarded] })
       .to eq([["owned_renamed", :heap, true]])
+  end
+
+
+  it "requires annotation plans before lowering tense navigation" do
+    l = lowering
+    target = AST::Identifier.new(tok, "future")
+    target.full_type = Type.new("~Int64")
+    navigation = AST::TenseNavigation.new(tok, target, "~")
+    member = AST::GetField.new(tok, navigation, "value")
+
+    expect {
+      l.send(:lower_tense_navigation, member, navigation) { |_receiver| MIR::Lit.new("1") }
+    }.to raise_error(/requires its annotation-produced TenseOperationPlan/)
+  end
+
+  it "derives resource cleanup entries from the annotation lifecycle plan" do
+    l = lowering
+    close_plan = Schemas::ResourceClosePlan.method("close")
+    lifecycle = Semantic::LifecyclePlan.new(
+      type_key: "Handle",
+      drop_strategy: :resource_close,
+      copy_strategy: :forbidden,
+      resource_close_plan: close_plan,
+    )
+
+    entry = l.send(:tense_map_cleanup_entry, Type.new(:Handle), lifecycle)
+    expect(entry.kind).to eq(:resource)
+    expect(entry.resource_close_plan).to equal(close_plan)
+    expect(entry.lifecycle_plan).to equal(lifecycle)
   end
 end

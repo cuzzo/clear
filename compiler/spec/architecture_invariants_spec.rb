@@ -1387,4 +1387,21 @@ RSpec.describe "architecture invariants: closed placement pipeline" do
       "FSM/thunk transforms must produce typed facts or structural MIR, not direct ownership markers:\n" \
       "#{offenders.join("\n")}"
   end
+
+  it "keeps tense algebra planning out of MIR and backend phases" do
+    offenders = (Dir[File.join(ARCH_ROOT, "compiler/ruby/mir/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "compiler/ruby/backends/**/*.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("TenseOperationPlanner.")
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR and emitters must consume annotation-produced TenseOperationPlan facts, not re-plan tense algebra:\n" \
+      "#{offenders.join("\n")}"
+  end
 end

@@ -1,0 +1,30 @@
+# Aggregate NEXT shares the scalar tense plan but retains its specialized
+# await-all materialization and partial-result cleanup.
+
+FN promiseListValue() RETURNS !String ->
+    RETURN COPY "ok";
+END
+
+FN promiseListFailure() RETURNS !String ->
+    RAISE Input, PromiseListFailure, "expected";
+    RETURN COPY "unreachable";
+END
+
+FN main() RETURNS !Void ->
+    MUTABLE futures: ~!String[]@list = [];
+    &futures.append(BG { promiseListValue(); });
+    &futures.append(BG { promiseListValue(); });
+
+    retained:! = NEXT futures;
+    values = TRY retained;
+    ASSERT values.length() == 2;
+    ASSERT values[0] == "ok";
+    ASSERT values[1] == "ok";
+
+    MUTABLE failing: ~!String[]@list = [];
+    &failing.append(BG { promiseListValue(); });
+    &failing.append(BG { promiseListFailure(); });
+    failure:! = NEXT failing;
+    ASSERT !(failure IS_OK), "aggregate NEXT retains an element failure";
+    RETURN;
+END

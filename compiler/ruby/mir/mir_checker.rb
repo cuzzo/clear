@@ -131,6 +131,7 @@ class MIRChecker
 
   AUDITED_EMITTABLE_NODE_TYPES = T.let([
     MIR::AddressOf, MIR::AllocMark, MIR::AllocSlice, MIR::AllocatorRef, MIR::ArrayDefaultInit,
+    MIR::AsyncPayloadTake,
     MIR::ArrayInit, MIR::AssertRaisesCheck, MIR::AssertStmt, MIR::BatchWindowFlush,
     MIR::BatchWindowPush, MIR::BgBlock, MIR::BinOp, MIR::BlockExpr, MIR::BreakExpr,
     MIR::BreakStmt, MIR::Call, MIR::CapWrap, MIR::CapabilityLockAddress,

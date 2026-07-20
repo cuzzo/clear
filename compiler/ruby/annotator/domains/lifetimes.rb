@@ -615,7 +615,7 @@ module Annotator
             og_drop(name)
           when :affine
             t = Type.new(info.type)
-            if t.single_future?
+            if t.single_future? && ownership_graph.live?(name)
               error!(node, :PROMISE_NOT_CONSUMED, name: name)
             end
             drops << deferred_drop_for(name, info)

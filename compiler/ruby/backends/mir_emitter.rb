@@ -146,6 +146,8 @@ class MIREmitter
     when MIR::ScopeBlock        then emit_scope_block(node)
     when MIR::Pipeline         then emit(node.inner)
     when MIR::BgBlock          then emit_bg_block(node)
+    when MIR::DirectTenseMap   then emit_direct_tense_map(node)
+    when MIR::AsyncPayloadTake then "#{paren_if_try(T.must(emit(node.source)))}.value"
     when MIR::ShardConcurrentEach then emit_shard_concurrent_each(node)
     when MIR::DoBlock          then emit_do_block(node)
     when MIR::CatchWrapper     then emit_catch_wrapper(node)
@@ -250,7 +252,8 @@ class MIREmitter
     when MIR::ConstCast        then "@constCast(#{emit(node.expr)})"
     when MIR::DefaultStreamCapacity then emit_default_stream_capacity(node)
     when MIR::NextPromiseList  then emit_next_promise_list(node)
-    when MIR::OptionalUnwrap, MIR::ForeignOwnedUnwrap then "#{emit(node.expr)}.?"
+    when MIR::OptionalUnwrap, MIR::ForeignOwnedUnwrap
+      "#{paren_if_try(T.must(emit(node.expr)))}.?"
     when MIR::CFunctionAdapter then emit_c_function_adapter(node)
     when MIR::ForeignSliceView then "#{emit(node.pointer)}[0..@intCast(#{emit(node.count)})]"
     when MIR::AllocatorRef     then emit_allocator_ref(node)
@@ -289,9 +292,90 @@ class MIREmitter
     plan = node.code
     return emit_bg_stackful_plan(plan) if plan.is_a?(MIR::BgStackfulPlan)
     return emit_bg_stream_plan(plan) if plan.is_a?(MIR::BgStreamPlan)
+    return emit_future_map_plan(plan) if plan.is_a?(MIR::FutureMapPlan)
     return emit_fsm_bg_body(T.cast(plan, T.any(MIR::FsmIoBody, MIR::FsmB1Body, MIR::FsmGenericBody))) if fsm_bg_body_plan?(plan)
 
     raise "MIR::BgBlock must carry a structural emission plan, got #{plan.class}"
+  end
+
+  sig { params(plan: MIR::DirectTenseMap).returns(String) }
+  def emit_direct_tense_map(plan)
+    emit_direct_tense_layers(
+      plan.layers,
+      plan.bindings,
+      T.must(emit(plan.source)),
+      T.must(emit(plan.mapped)),
+      plan.label,
+    )
+  end
+
+  sig do
+    params(
+      layers: T::Array[String],
+      bindings: T::Array[String],
+      source: String,
+      mapped: String,
+      label: String,
+    ).returns(String)
+  end
+  def emit_direct_tense_layers(layers, bindings, source, mapped, label)
+    return mapped if layers.empty?
+
+    layer = T.must(layers.first)
+    binding = T.must(bindings.first)
+    tail = emit_direct_tense_layers(layers.drop(1), bindings.drop(1), binding, mapped, label)
+    case layer
+    when "!"
+      <<~ZIG.chomp
+        #{label}: {
+            const #{binding} = #{source} catch |__tense_err| break :#{label} __tense_err;
+            break :#{label} #{tail};
+        }
+      ZIG
+    when "?"
+      "if (#{source}) |#{binding}| #{tail} else null"
+    else
+      raise "unsupported immediate tense-map layer #{layer.inspect}"
+    end
+  end
+
+  sig { params(plan: MIR::FutureMapPlan).returns(String) }
+  def emit_future_map_plan(plan)
+    source = T.must(emit(plan.source))
+    source_init = plan.source_shared ? "(#{source}).retain()" : source
+    run_body = emit_body_with_runtime(plan.run_body, plan.raw_rt).gsub("\n", "\n                  ")
+    spawn_call = emit_fiber_spawn_call(plan.spawn_call).gsub("\n", "\n          ")
+    profile_comment = emit_profile_task_site(plan.profile_site)
+    <<~ZIG.chomp
+      #{plan.blk_label}: {
+          #{profile_comment}
+          const #{plan.ctx_type} = struct {
+              inner: *#{plan.promise_zig}.Inner,
+              alloc: std.mem.Allocator,
+              #{plan.source_field}: @TypeOf(#{source}),
+              fn run(__raw_rt_map#{plan.id}: *anyopaque, __raw_args_map#{plan.id}: ?*anyopaque) anyerror!void {
+                  const #{plan.raw_rt} = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_map#{plan.id})));
+                  _ = &#{plan.raw_rt};
+                  const __ctx_map#{plan.id} = @as(*@This(), @ptrCast(@alignCast(__raw_args_map#{plan.id}.?)));
+                  defer __ctx_map#{plan.id}.alloc.destroy(__ctx_map#{plan.id});
+                  defer __ctx_map#{plan.id}.inner.wg.done();
+                  errdefer |fiber_err| __ctx_map#{plan.id}.inner.result = fiber_err;
+                  #{run_body}
+              }
+          };
+          const #{plan.alloc_var} = #{plan.rt_name}.heapAlloc();
+          const #{plan.promise_var} = try #{plan.promise_zig}.spawn(#{plan.alloc_var}, #{plan.rt_name}.getSched());
+          const #{plan.ctx_var} = try #{plan.alloc_var}.create(#{plan.ctx_type});
+          errdefer #{plan.alloc_var}.destroy(#{plan.ctx_var});
+          #{plan.ctx_var}.* = .{
+              .inner = #{plan.promise_var}.inner,
+              .alloc = #{plan.alloc_var},
+              .#{plan.source_field} = #{source_init},
+          };
+          #{spawn_call}
+          break :#{plan.blk_label} #{plan.promise_var};
+      }
+    ZIG
   end
 
   sig { params(plan: MIR::BgStackfulPlan).returns(String) }
@@ -2739,11 +2823,16 @@ class MIREmitter
       "(if (comptime @typeInfo(@TypeOf(#{src})) == .pointer and " \
         "@typeInfo(@TypeOf(#{src})).pointer.size == .one) (#{src}).* else #{src})"
     when :full_value
-      type_arg = node.copy_shape == :pointer ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(#{src})")
+      storage_zig_type = if node.type_info&.error_union?
+        node.type_info.nested_zig_type
+      else
+        node.zig_type
+      end
+      type_arg = node.copy_shape == :pointer ? "@TypeOf(#{src})" : (storage_zig_type || "@TypeOf(#{src})")
       if node.copy_shape == :slice
         "#{bc}: { const __copy_src = #{src}; break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); }"
       else
-        pointer_type_arg = node.copy_shape == :pointer ? "@TypeOf(#{src})" : (node.zig_type || "@TypeOf(__copy_src)")
+        pointer_type_arg = node.copy_shape == :pointer ? "@TypeOf(#{src})" : (storage_zig_type || "@TypeOf(__copy_src)")
         pointer_value = node.copy_shape == :value ? "__copy_src.*" : "__copy_src"
         "#{bc}: { const __copy_src = #{src}; if (comptime @typeInfo(@TypeOf(__copy_src)) == .pointer and @typeInfo(@TypeOf(__copy_src)).pointer.size == .one) { break :#{bc} try CheatLib.dupeValue(#{pointer_type_arg}, #{pointer_value}, #{alloc}); } else { break :#{bc} try CheatLib.dupeValue(#{type_arg}, __copy_src, #{alloc}); } }"
       end
@@ -2886,7 +2975,7 @@ class MIREmitter
 
   sig { params(node: MIR::MethodCall).returns(String) }
   def emit_method_call(node)
-    recv = emit(node.receiver)
+    recv = paren_if_try(T.must(emit(node.receiver)))
     args = node.args.map { |a| emit_call_argument(a) }.join(", ")
     call = "#{recv}.#{node.method}(#{args})"
     node.try_wrap ? "try #{call}" : call
@@ -2995,11 +3084,31 @@ class MIREmitter
   def emit_next_promise_list(node)
     list_expr = paren_if_try(T.must(emit(node.list_expr)))
     alloc = alloc_zig(node.alloc)
+    resolved_value = if node.async_shape.boxes_fallible_payload?
+      <<~ZIG.rstrip
+        const __resolved = try __p.next();
+                var __value = __resolved.value catch |__err| {
+                    CheatLib.cleanup(@TypeOf(#{node.results_var}), #{alloc}, &#{node.results_var});
+                    break :#{node.label} __err;
+                };
+      ZIG
+    else
+      "var __value = try __p.next();"
+    end
     <<~ZIG.rstrip
       #{node.label}: {
           var #{node.results_var} = std.ArrayListUnmanaged(#{node.elem_zig}).empty;
+          errdefer CheatLib.cleanup(@TypeOf(#{node.results_var}), #{alloc}, &#{node.results_var});
           for (#{list_expr}.items) |__p| {
-              try #{node.results_var}.append(#{alloc}, try __p.next());
+              #{resolved_value}
+              defer if (comptime CheatLib.needsCleanup(@TypeOf(__value)))
+                  CheatLib.cleanup(@TypeOf(__value), __p.alloc, &__value);
+              const __placed = if (comptime CheatLib.needsCleanup(@TypeOf(__value)))
+                  try CheatLib.dupeValue(@TypeOf(__value), __value, #{alloc})
+              else
+                  __value;
+              errdefer CheatLib.cleanup(@TypeOf(__placed), #{alloc}, &__placed);
+              try #{node.results_var}.append(#{alloc}, __placed);
           }
           break :#{node.label} #{node.results_var};
       }

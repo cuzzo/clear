@@ -719,9 +719,18 @@ module PipeAnalysis
     # RECOVER(default): replace error with default value in pipeline
     visit(node.right.default_expr)
     lhs_type = node.left.full_type!(context: "pipeline left")
-    lhs_t = lhs_type ? Type.new(lhs_type) : nil
+    lhs_t = recoverable_result_type(node.left, context: "RECOVER input") ||
+      Type.new(lhs_type)
     if lhs_t&.error_union?
-      stamp_type!(node, T.must(lhs_t.payload_type).resolved)
+      fallback_type = node.right.default_expr.full_type!(context: "RECOVER fallback")
+      plan = TenseOperationPlanner.or_else(
+        lhs_t,
+        fallback_type,
+        operation: TenseOperationKind::OrElseValue,
+        recovery: TenseRecovery::Fallback,
+      )
+      node.tense_plan = plan
+      stamp_type!(node, plan.result_type)
     else
       stamp_type!(node, lhs_type)
     end

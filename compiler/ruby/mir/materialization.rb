@@ -80,6 +80,7 @@ module MIR
     const :cleanup_entry, T.nilable(CleanupEntry), default: nil
     const :cleanup_mode, Symbol, default: :normal
     const :scope, T.nilable(Symbol), default: nil
+    const :ownership_tracked, T::Boolean, default: true
 
     sig { returns(MIR::AllocMark) }
     def alloc_mark
@@ -101,6 +102,8 @@ module MIR
 
     sig { returns(MaterializationPacket) }
     def packet
+      return MaterializationPacket.value_only(let_node) unless ownership_tracked
+
       MaterializationPacket.owned(alloc_mark, let_node, cleanup_stmt)
     end
 

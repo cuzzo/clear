@@ -537,6 +537,70 @@ module Annotator
         result
       end
 
+      sig { params(node: AST::TenseNavigation).returns(Type) }
+      def visit_TenseNavigation(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        visit(node.target)
+        if node.markers.start_with?("!") && node.target.respond_to?(:retain_error_channel=)
+          T.unsafe(node.target).retain_error_channel = true
+        end
+        receiver_type = recoverable_result_type(node.target, context: "tense navigation receiver") ||
+          node.target.full_type!(context: "tense navigation receiver")
+        if receiver_type.canonical_stream_result? || receiver_type.stream?
+          error!(node, :TENSE_NAVIGATION_STREAM,
+            markers: node.markers, type: Type.surface_name(receiver_type))
+        end
+        envelope = TenseEnvelope.from_type(receiver_type)
+        if envelope.order != node.markers
+          expected = envelope.order.empty? ? "plain `.`" : envelope.order
+          error!(node, :TENSE_NAVIGATION_MISMATCH,
+            markers: node.markers, type: Type.surface_name(receiver_type), expected: expected)
+        end
+
+        payload = TenseOperationPlanner.navigation_payload(receiver_type)
+        stamp_type!(node, payload)
+        node.storage = node.target.storage
+        node.container_borrow = true if AST.container_borrow?(node.target)
+        payload
+      end
+
+      sig do
+        params(
+          member: AST::Node,
+          navigation: AST::TenseNavigation,
+          mapped_type: Type,
+        ).returns(Type)
+      end
+      def publish_tense_navigation_plan!(member, navigation, mapped_type)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        receiver_type = recoverable_result_type(navigation.target, context: "tense navigation receiver") ||
+          navigation.target.full_type!(context: "tense navigation receiver")
+        plan = begin
+          TenseOperationPlanner.navigate(
+            receiver_type,
+            mapped_type,
+            markers: navigation.markers,
+            shared: receiver_type.shared?,
+          )
+        rescue ArgumentError => error
+          if error.message.include?("nested future")
+            error!(member, :TENSE_NAVIGATION_NESTED_FUTURE, type: Type.surface_name(mapped_type))
+          end
+          raise
+        end
+        member.tense_plan = plan
+        if plan.consumes_handle?
+          root = AST.root_identifier(navigation.target)
+          og_set_moved(root.name, at_token: root.token, action: :next) if root.is_a?(AST::Identifier)
+        elsif plan.backend_form == TenseBackendForm::DirectMap && AST.container_borrow?(navigation.target)
+          member.container_borrow = true
+        end
+        plan.result_type
+      end
+      private :publish_tense_navigation_plan!
+
       # Returns the Type of the last value-producing expression in a branch body,
       # or nil if the branch doesn't end with a usable expression.
       # Used to determine whether an IF/MATCH node can be promoted to expression mode.

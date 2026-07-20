@@ -775,7 +775,10 @@ module FsmTransform
             lowering_api.with_fiber_capture_map(eff_capture_map, rt_override: bg_rt) do
               if want_result
                 lowering_api.lower_finalized_fsm_step_mir(
-                  ast_stmts, no_result: false, ctx_id: id,
+                  ast_stmts,
+                  no_result: false,
+                  ctx_id: id,
+                  async_result_shape: ctx.async_result_shape,
                 )
               else
                 lowering_api.lower_finalized_fsm_step_mir(ast_stmts, no_result: true)

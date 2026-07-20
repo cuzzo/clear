@@ -105,6 +105,12 @@ module SemanticAdvanced
       summary: 'The parser rejects ?[~]T and obsolete ~T[?], while retaining [~]?T for optional stream items.',
       witness: 'ok: [~]?Int64 = source; bad_outer: ?[~]Int64 = DEFAULT; bad_legacy: ~Int64[?] = DEFAULT;'
     ).freeze,
+    Gap.new(
+      id: :tense_operation_semantic_handoff,
+      status: :fixed,
+      summary: 'TRY, UNWRAP, NEXT, predicates, recovery, and ordered navigation now publish one immutable semantic plan consumed by MIR.',
+      witness: 'mapped: !~!?String = source!~!?.name;'
+    ).freeze,
   ].freeze
   SELECT_LOWERING_FIXED_GAPS = [
     Gap.new(
@@ -429,6 +435,7 @@ module SemanticAdvanced
     deep_cases(depth_seeds).each { |item| entries << item }
     scheduled_concurrency_cases.each { |item| entries << item }
     effect_state_machine_cases.each { |item| entries << item }
+    entries << tense_operation_handoff_entry
     generic_monomorph_cases.each { |item| entries << item }
     entries
   end
@@ -597,6 +604,27 @@ module SemanticAdvanced
       [[:deposit, 2], [:withdraw, 3], [:withdraw, 9]],
     ]
     traces.map.with_index { |events, index| effect_state_machine_entry(events, index) }
+  end
+
+  def tense_operation_handoff_entry
+    source = <<~CLEAR
+      STRUCT AdvancedTenseValue { name: String }
+      FN advancedTenseSource() RETURNS ~!AdvancedTenseValue ->
+        RETURN BG { AdvancedTenseValue{ name: COPY "planned" }; };
+      END
+      FN main() RETURNS !Void ->
+        mapped: ~!String = advancedTenseSource()~!.name;
+        ASSERT TRY (NEXT mapped) == "planned";
+        RETURN;
+      END
+    CLEAR
+    Entry.new(
+      id: 'advanced-effects-tense-operation-handoff', workstream: :effects,
+      expected: :pass, template: :semantic_advanced_inline, params: { source: source },
+      trace: Trace.new(value: :planned, state: :clean,
+                       events: %i[spawn map join observe cleanup], outcome: :return),
+      error_code: nil, provenance: :tense_operation_handoff,
+    ).freeze
   end
 
   def effect_state_machine_entry(events, index)

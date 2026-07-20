@@ -198,6 +198,9 @@ RSpec.describe Type, "ownership and cleanup contracts" do
       expect(Type.new(:"HashMap<Any>").accepts?(Type.new(:"HashMap<String>"))).to eq(true)
       expect(Type.new(:String).accepts?(Type.new(:Bool))).to eq(false)
       expect(Type.array_of(:String, capacity: 2).accepts?(Type.array_of(:String, capacity: 3))).to eq(false)
+      expect(Type.new("String[]").accepts?(Type.new("!String[]"))).to eq(false)
+      expect(Type.new("HashMap<Symbol,String>").accepts?(Type.new("!HashMap<Symbol,String>"))).to eq(false)
+      expect(Type.new("?String").accepts?(Type.new("!?String"))).to eq(false)
     end
   end
 end

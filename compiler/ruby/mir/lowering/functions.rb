@@ -1658,6 +1658,10 @@ module MIRLoweringFunctions
   sig { params(node: AST::MethodCall).returns(MIR::Node) }
   def lower_method_call(node)
     T.bind(self, MIRLowering) rescue nil
+    if node.object.is_a?(AST::TenseNavigation)
+      return lower_tense_navigation_method(node, node.object)
+    end
+
     # Stub interception: a UFCS call `x.query(args)` lowers to `query(x, args)`,
     # so STUB query intercepts must apply here too. Inherent-method resolution
     # mangles `name` for Zig dispatch while preserving the declared spelling in
@@ -1732,6 +1736,30 @@ module MIRLoweringFunctions
       [node.object] + node.args,
       [obj_mir] + args_mir,
     )
+  end
+
+  sig { params(node: AST::MethodCall, navigation: AST::TenseNavigation).returns(MIR::Node) }
+  def lower_tense_navigation_method(node, navigation)
+    T.bind(self, MIRLowering)
+
+    lower_tense_navigation(node, navigation) do |receiver|
+      synthetic_receiver = AST::Identifier.new(navigation.token, receiver)
+      AST.stamp_synthetic_type!(
+        synthetic_receiver,
+        navigation.full_type!(context: "tense navigation payload"),
+        context: "synthetic tense navigation receiver",
+      )
+      synthetic = node.dup
+      synthetic.object = synthetic_receiver
+      plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
+      raise "tense navigation method lowering requires its annotation plan" unless plan
+      AST.stamp_synthetic_type!(
+        synthetic,
+        TenseEnvelope.from_type(plan.result_type).payload_type,
+        context: "synthetic tense navigation method result",
+      )
+      lower_method_call(synthetic)
+    end
   end
 
   sig { params(node: AST::MethodCall).returns(MIR::Node) }

@@ -656,10 +656,17 @@ class Annotator::Phases::CapabilityAuditReport
   def checked_functions; end
   sig { returns(Integer) }
   def checked_with_sites; end
+  sig { returns(Annotator::Phases::DerivedProgramFacts) }
+  def derived_program; end
   sig { returns(Annotator::Phases::TypedProgramFacts) }
   def typed_program; end
   sig { returns(Integer) }
   def violation_count; end
+end
+
+class Annotator::Phases::DerivedProgramFacts
+  sig { returns(Annotator::Phases::DerivedProgramFacts::FunctionMap) }
+  def functions; end
 end
 
 class Annotator::Phases::ResolutionFacts
@@ -699,6 +706,8 @@ class Annotator::Phases::TypedProgramFacts
   def body_summaries; end
   sig { returns(Semantic::LifecycleRegistry) }
   def lifecycle_registry; end
+  sig { returns(Annotator::Phases::TypedProgramFacts::LocalFacts) }
+  def local_function_facts; end
   sig { returns(OwnershipGraph) }
   def ownership_graph; end
   sig { returns(Annotator::Phases::ResolutionFacts) }
@@ -1345,6 +1354,35 @@ class IfStmt
   def comptime=(value); end
 end
 
+class Incremental::DependencySnapshot
+  sig { returns(T::Array[Incremental::DependencyFingerprint]) }
+  def entries; end
+end
+
+class Incremental::ProgramArtifact
+  sig { returns(T.untyped) }
+  def error_name_enum; end
+  sig { returns(T.untyped) }
+  def final_state; end
+  sig { returns(T.untyped) }
+  def footer; end
+  sig { returns(T::Array[Incremental::EmittedItem]) }
+  def items; end
+end
+
+class Incremental::SourceCatalog
+  sig { returns(T::Array[Incremental::FunctionItem]) }
+  def functions; end
+  sig { returns(T.untyped) }
+  def module_path; end
+  sig { returns(T::Set[String]) }
+  def non_function_calls; end
+  sig { returns(T.untyped) }
+  def non_function_fingerprint; end
+  sig { returns(T.untyped) }
+  def source; end
+end
+
 class IsA
   sig { returns(T.untyped) }
   def runtime_indirect_payload_as; end
@@ -1481,12 +1519,10 @@ class MIRLoweringSchemas
 end
 
 class MIRPass
-  sig { returns(T::Hash[String, T::Hash[String, CleanupEntry]]) }
-  def cleanup_bindings; end
-  sig { returns(T::Hash[String, CleanupClassifier::CleanupClassificationPlan]) }
-  def cleanup_plans; end
   sig { returns(EscapeAnalysis::EscapePlacementFacts) }
   def escape_placement_facts; end
+  sig { returns(ProgramMIRFacts) }
+  def program_facts; end
 end
 
 class MIRPassState
@@ -1607,6 +1643,11 @@ class Program
   def sync_policy; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def sync_policy=(value); end
+end
+
+class ProgramMIRFacts
+  sig { returns(ProgramMIRFacts::FunctionMap) }
+  def functions; end
 end
 
 class Schemas::EnumSchema
