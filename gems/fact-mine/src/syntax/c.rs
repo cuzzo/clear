@@ -242,6 +242,27 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
             .unwrap_or_else(|| pattern.to_string())
     }
 
+    fn parameter_name_from_signature(&self, param: &str) -> Option<String> {
+        if let Some(start) = param.find("(*") {
+            if let Some(end) = param[start..].find(')') {
+                let inner = &param[start + 2..start + end];
+                let name = inner.trim_start_matches('*').trim();
+                if !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                    return Some(name.to_string());
+                }
+            }
+        }
+        let text = param.trim();
+        if text.is_empty() {
+            return None;
+        }
+        let text = text.split('=').next().unwrap_or(text).trim();
+        text.split(|ch: char| !(ch == '_' || ch == '?' || ch.is_ascii_alphanumeric()))
+            .filter(|part| !part.is_empty())
+            .next_back()
+            .map(|part| part.trim_end_matches('?').to_string())
+    }
+
     fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
         nil_guard_from_predicates(message, subject, C_NIL_PREDICATES, C_NON_NIL_PREDICATES)
     }

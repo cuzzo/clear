@@ -96,7 +96,7 @@ fn parse_normalized_file(
     let mut path_condition_sites = facts.path_condition_sites;
     path_condition_sites.extend(metadata.path_condition_sites);
 
-    let document = Document {
+    let mut document = Document {
         file: parsed.file.to_string_lossy().to_string(),
         language,
         source_digest: format!("sha256:{:x}", Sha256::digest(parsed.source.as_bytes())),
@@ -154,6 +154,7 @@ fn parse_normalized_file(
         state_param_origins: Vec::new(),
         hazard_sites: facts.hazard_sites,
     };
+    crate::syntax::hazards::detect_and_append_callback_hazards(&mut document);
     profile_parse_phase(
         profile,
         file_label,

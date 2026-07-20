@@ -1,5 +1,5 @@
 use std::sync::OnceLock;
-use crate::syntax::{HazardSite, Language};
+use crate::syntax::{HazardSite, Language, Document};
 use crate::syntax::parser_grammar::grammar_for_language;
 use tree_sitter::{Node, Query, QueryCursor};
 use streaming_iterator::StreamingIterator;
@@ -123,6 +123,87 @@ pub(crate) fn extract_hazards(
     
     sites.sort_by_key(|s| (s.line, s.start_column, s.end_line, s.end_column, s.hazard_type.clone()));
     sites
+}
+
+pub fn detect_and_append_callback_hazards(document: &mut Document) {
+    let mut callback_hazards = Vec::new();
+    
+    let mut fn_map = std::collections::HashMap::new();
+    for f in &document.function_defs {
+        fn_map.insert((f.owner.clone(), f.name.clone()), f);
+    }
+    
+    for call in &document.call_sites {
+        let enclosing_fn = match fn_map.get(&(call.owner.clone(), call.function.clone())) {
+            Some(f) => f,
+            None => continue,
+        };
+        
+        let mut is_callback = false;
+        
+        if call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this" {
+            // E.g., cb() or fp()
+            if enclosing_fn.params.contains(&call.message) 
+                || enclosing_fn.callback_params.contains(&call.message) 
+            {
+                is_callback = true;
+            }
+            
+            if !is_callback {
+                if let Some(locals) = document.method_local_types.get(&call.function) {
+                    if let Some(t) = locals.get(&call.message) {
+                        let t_lower = t.to_lowercase();
+                        if t_lower.contains("func") || t_lower.contains("fn") || t_lower.contains("->") || t_lower.contains("function") {
+                            is_callback = true;
+                        }
+                    }
+                }
+            }
+        } else {
+            // E.g., cb.call() or arr[10]()
+            let is_complex_receiver = call.receiver.contains('[') 
+                || call.receiver.contains('(')
+                || call.receiver.contains('*')
+                || call.receiver.contains("->")
+                || (document.language == Language::Php && call.receiver.starts_with('$'));
+                
+            if is_complex_receiver {
+                is_callback = true;
+            } else if enclosing_fn.params.contains(&call.receiver) 
+                || enclosing_fn.callback_params.contains(&call.receiver) 
+            {
+                // Dynamic callback method dispatchers
+                let is_invoker = matches!(call.message.as_str(), "call" | "invoke" | "apply" | "run" | "perform");
+                if is_invoker {
+                    is_callback = true;
+                }
+            }
+        }
+        
+        if is_callback {
+            let snippet = if call.receiver.is_empty() {
+                format!("{}(...)", call.message)
+            } else {
+                format!("{}.{}(...)", call.receiver, call.message)
+            };
+            
+            let hazard_type = format!("{}_callback_invocation", document.language.as_str());
+            
+            callback_hazards.push(HazardSite {
+                path: call.file.clone(),
+                line: call.line as u32,
+                snippet,
+                hazard_type,
+                required_evidence: "".to_string(),
+                start_column: Some(call.span[1] as u32),
+                end_line: Some(call.span[2] as u32),
+                end_column: Some(call.span[3] as u32),
+            });
+        }
+    }
+    
+    document.hazard_sites.extend(callback_hazards);
+    document.hazard_sites.sort_by_key(|s| (s.line, s.start_column, s.end_line, s.end_column, s.hazard_type.clone()));
 }
 
 #[cfg(test)]
@@ -430,5 +511,92 @@ local mt = {
         let hazards = extract_hazards("test.swift", tree.root_node(), code, Language::Swift);
         assert_eq!(hazards.len(), 2);
         assert!(hazards.iter().all(|h| h.hazard_type == "swift_metaprogramming"));
+     }
+
+    #[test]
+    fn test_callback_invocation_hazards_all_languages() {
+        let check = |code: &str, suffix: &str, language: Language| -> Vec<HazardSite> {
+            let mut file = tempfile::Builder::new().suffix(suffix).tempfile().unwrap();
+            std::io::Write::write_all(file.as_file_mut(), code.as_bytes()).unwrap();
+            let document = crate::syntax::parse_file(file.path().to_path_buf(), language).unwrap();
+            document.hazard_sites.into_iter().filter(|h| h.hazard_type.ends_with("_callback_invocation")).collect()
+        };
+
+        // 1. Ruby
+        let rb_pos = check("def test(cb)\n  cb.call\nend", ".rb", Language::Ruby);
+        assert_eq!(rb_pos.len(), 1);
+        assert_eq!(rb_pos[0].hazard_type, "ruby_callback_invocation");
+        let rb_neg = check("def test(user)\n  user.to_s\nend", ".rb", Language::Ruby);
+        assert_eq!(rb_neg.len(), 0);
+
+        // 2. Python
+        let py_pos = check("def test(cb):\n    cb()\n", ".py", Language::Python);
+        assert_eq!(py_pos.len(), 1);
+        assert_eq!(py_pos[0].hazard_type, "python_callback_invocation");
+        let py_neg = check("def test(user):\n    user.get_name()\n", ".py", Language::Python);
+        assert_eq!(py_neg.len(), 0);
+
+        // 3. Go
+        let go_pos = check("package main\nfunc test(cb func()) {\n  cb()\n}", ".go", Language::Go);
+        assert_eq!(go_pos.len(), 1);
+        assert_eq!(go_pos[0].hazard_type, "go_callback_invocation");
+        let go_neg = check("package main\nfunc helper() {}\nfunc test() {\n  helper()\n}", ".go", Language::Go);
+        assert_eq!(go_neg.len(), 0);
+
+        // 4. Rust
+        let rust_pos = check("fn test(cb: fn()) {\n  cb();\n}", ".rs", Language::Rust);
+        assert_eq!(rust_pos.len(), 1);
+        assert_eq!(rust_pos[0].hazard_type, "rust_callback_invocation");
+        let rust_neg = check("fn helper() {}\nfn test() {\n  helper();\n}", ".rs", Language::Rust);
+        assert_eq!(rust_neg.len(), 0);
+
+        // 5. PHP
+        let php_pos = check("<?php function test($cb) {\n  $cb();\n}", ".php", Language::Php);
+        assert_eq!(php_pos.len(), 1);
+        assert_eq!(php_pos[0].hazard_type, "php_callback_invocation");
+        let php_neg = check("<?php function helper() {}\nfunction test() {\n  helper();\n}", ".php", Language::Php);
+        assert_eq!(php_neg.len(), 0);
+
+        // 6. Java
+        let java_pos = check("class Foo {\n  void test(Runnable cb) {\n    cb.run();\n  }\n}", ".java", Language::Java);
+        assert_eq!(java_pos.len(), 1);
+        assert_eq!(java_pos[0].hazard_type, "java_callback_invocation");
+        let java_neg = check("class Foo {\n  void test(User user) {\n    user.getName();\n  }\n}", ".java", Language::Java);
+        assert_eq!(java_neg.len(), 0);
+
+        // 7. Kotlin
+        let kt_pos = check("fun test(cb: () -> Unit) {\n  cb()\n}", ".kt", Language::Kotlin);
+        assert_eq!(kt_pos.len(), 1);
+        assert_eq!(kt_pos[0].hazard_type, "kotlin_callback_invocation");
+        let kt_neg = check("fun test(user: User) {\n  user.getName()\n}", ".kt", Language::Kotlin);
+        assert_eq!(kt_neg.len(), 0);
+
+        // 8. Swift
+        let swift_pos = check("func test(cb: () -> Void) {\n  cb()\n}", ".swift", Language::Swift);
+        assert_eq!(swift_pos.len(), 1);
+        assert_eq!(swift_pos[0].hazard_type, "swift_callback_invocation");
+        let swift_neg = check("func test(user: User) {\n  user.getName()\n}", ".swift", Language::Swift);
+        assert_eq!(swift_neg.len(), 0);
+
+        // 9. JavaScript
+        let js_pos = check("function test(cb) {\n  cb();\n}", ".js", Language::JavaScript);
+        assert_eq!(js_pos.len(), 1);
+        assert_eq!(js_pos[0].hazard_type, "javascript_callback_invocation");
+        let js_neg = check("function test(user) {\n  user.getName();\n}", ".js", Language::JavaScript);
+        assert_eq!(js_neg.len(), 0);
+
+        // 10. Lua
+        let lua_pos = check("function test(cb)\n  cb()\nend", ".lua", Language::Lua);
+        assert_eq!(lua_pos.len(), 1);
+        assert_eq!(lua_pos[0].hazard_type, "lua_callback_invocation");
+        let lua_neg = check("function test(user)\n  user.getName()\nend", ".lua", Language::Lua);
+        assert_eq!(lua_neg.len(), 0);
+
+        // 11. C
+        let c_pos = check("void test(void (*cb)(void)) {\n  cb();\n}", ".c", Language::C);
+        assert_eq!(c_pos.len(), 1);
+        assert_eq!(c_pos[0].hazard_type, "c_callback_invocation");
+        let c_neg = check("void helper() {}\nvoid test() {\n  helper();\n}", ".c", Language::C);
+        assert_eq!(c_neg.len(), 0);
     }
 }
