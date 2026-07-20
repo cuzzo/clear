@@ -779,7 +779,6 @@ class PipelineHost
     tense_plan = select_tense_plan(op)
     if tense_plan.asynchronous?
       promise_name = "__select_promise#{id}"
-      selector_prefix << MIR::Let.new(promise_name, selector, false, nil, nil)
       expression_type = if op.expression.respond_to?(:error_union_type) &&
                            T.unsafe(op.expression).error_union_type
         Type.new(T.unsafe(op.expression).error_union_type)
@@ -789,7 +788,14 @@ class PipelineHost
       outer_fallible = tense_plan.envelope.split_future.outer.any? do |layer|
         layer.kind == TenseLayerKind::Fallible
       end
+      # Creating any Promise can fail operationally even when that allocation
+      # failure is not a source-level outer `!`. Resolve the handle before
+      # invoking Promise#next; leaving it on the temporary asks Zig for
+      # `.next()` on `!Promise(T)`.
+      promise_value = MIR::TryExpr.new(selector)
+      selector_prefix << MIR::Let.new(promise_name, promise_value, false, nil, nil)
       promise_type = outer_fallible ? T.must(expression_type.payload_type) : expression_type
+      async_shape = AsyncResultShape.promise(promise_type.tense_type)
       next_contract = MIR::CallableContract.new(
         MIR::CallableContract.no_ownership(0).signature,
         MIR::OwnershipContract.consume_operands([
@@ -798,8 +804,17 @@ class PipelineHost
         ]),
         0,
       )
-      selector = MIR::MethodCall.new(MIR::Ident.new(promise_name), "next", [], true,
-        next_contract)
+      next_call = MIR::MethodCall.new(
+        MIR::Ident.new(promise_name), "next", [], !async_shape.boxes_fallible_payload?, next_contract,
+      )
+      selector = if async_shape.boxes_fallible_payload?
+        MIR::AsyncPayloadTake.new(
+          source: MIR::TryExpr.new(next_call),
+          result_type: Type.new(async_shape.payload_type),
+        )
+      else
+        next_call
+      end
     end
 
     push = MIR::ExprStmt.new(MIR::MethodCall.new(

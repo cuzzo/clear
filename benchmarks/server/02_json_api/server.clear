@@ -104,7 +104,7 @@ FN main() RETURNS Void ->
   # which corrupts epoll fd registration.
   MUTABLE cache: {String}@sharded(32):locked Int64 = {};
 
-  MUTABLE tasks: ~Void[]@list = [];
+  MUTABLE tasks: ~!Void[]@list = [];
   WHILE TRUE DO
     client = TRY server.accept();
     &tasks.append(

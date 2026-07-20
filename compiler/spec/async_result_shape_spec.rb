@@ -55,6 +55,22 @@ RSpec.describe "AsyncResultShape" do
     expect(out).to include(".next()).value")
   end
 
+  it "retains a fallible Void payload instead of discarding its error union" do
+    src = <<~CLEAR
+      FN risky() RETURNS !Void -> RETURN; END
+      FN main() RETURNS !Void ->
+        pending:~ = BG { risky(); };
+        TRY (NEXT pending);
+        RETURN;
+      END
+    CLEAR
+
+    out = ZigTranspiler.new.transpile(src)
+    expect(out).to include("CheatLib.Promise(CheatLib.AsyncFallible(void))")
+    expect(out).to include("inner.result = .{ .value = risky(")
+    expect(out).to include(".next()).value")
+  end
+
   it "lowers BG returning a list as Promise<List<T>>, not list-of-promises" do
     src = <<~CLEAR
       FN main() RETURNS Void ->

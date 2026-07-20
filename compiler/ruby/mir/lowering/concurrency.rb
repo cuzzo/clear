@@ -591,7 +591,10 @@ module MIRLoweringConcurrency
       inner_type: inner_t,
       inner_zig: inner_zig,
       promise_zig: async_shape.handle_zig_type,
-      is_void: inner_zig == "void",
+      # A declared `~!Void` still has a source-visible result: the retained
+      # failure channel.  Treating it as an ordinary `~Void` statement drops
+      # that channel and emits an ignored Zig error union in the worker body.
+      is_void: inner_zig == "void" && !async_shape.boxes_fallible_payload?,
     )
   end
 

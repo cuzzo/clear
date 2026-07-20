@@ -151,7 +151,7 @@ FN main() RETURNS Void ->
   server = TRY TCPServer::listen(6390);
   print("CLEAR kvstore listening on port 6390");
 
-  MUTABLE tasks: ~Void[]@list = [];
+  MUTABLE tasks: ~!Void[]@list = [];
   WHILE TRUE DO
     client = TRY server.accept();
     &tasks.append(

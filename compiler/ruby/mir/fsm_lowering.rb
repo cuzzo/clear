@@ -155,7 +155,9 @@ module FsmLowering
         result_mir.concat(last_pending)
 
         last_is_assign = last_step.expr.is_a?(AST::Assignment)
-        is_step_void = ast_void_type?(expr_type)
+        # `!Void` is not a discardable Void step at an async boundary: the
+        # promise must retain its failure channel in AsyncFallible(void).
+        is_step_void = ast_void_type?(expr_type) && !expr_t.error_union?
 
         if last_mir && (last_is_assign || is_step_void)
           stmt_mir = wrap_step_as_stmt(AST::ThenStep.new(expr: last_step.expr, binding: nil), last_mir)
