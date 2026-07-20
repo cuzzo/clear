@@ -683,6 +683,16 @@ module MIRLoweringFunctions
                     false
                   end
     return "CheatLib.Arc(#{type_info.resolved})" if type_info.shared? && type_info.generic_type_parameter?
+    # TAKES transfers an Rc/Arc collection through a temporary pointer. The
+    # callee reads the wrapper once (`param.*`) and marks the transfer moved;
+    # it never mutates the wrapper slot itself. Give that boundary one
+    # concrete const-pointer ABI so callers with `*T` and `*const T` coerce to
+    # the same type. Leaving it as `anytype` specializes the entire callee for
+    # that incidental constness difference, which is catastrophic for large
+    # generated functions such as the register VM interpreter.
+    if param.takes && type_info.any_rc? && type_info.collection?
+      return "*const #{base_zig}"
+    end
     # Canonical finite stream parameters accept all compatible producers
     # (range cursors, open generators, and bounded generators). Their shared
     # NEXT protocol is the ABI; their concrete storage representation is not.

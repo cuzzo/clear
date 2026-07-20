@@ -1497,6 +1497,42 @@ RSpec.describe MIRLowering do
           stmt.body.method == "restoreLoopMark"
       })
     end
+
+    it "moves the pointee of a pointer-passed TAKES Arc parameter" do
+      src = <<~CLEAR
+        FN retainCount(TAKES map: {String}@shared:sharded(32) String) RETURNS !Int64 ->
+          owned: {String}@shared:sharded(32) String = GIVE map;
+          retained: {String}@shared:sharded(32) String = CLONE owned;
+          RETURN retained.count();
+        END
+
+        FN main() RETURNS !Int64 ->
+          MUTABLE map: {String}@shared:sharded(32) String = {};
+          RETURN retainCount(CLONE map);
+        END
+      CLEAR
+      importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+      result = CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd)
+      low = lowering(
+        struct_schemas: result.struct_schemas,
+        enum_schemas: result.enum_schemas,
+        union_schemas: result.union_schemas,
+        fn_sigs: result.fn_sigs,
+        moved_guard_info: result.moved_guard_info,
+        importer: importer,
+        source_dir: Dir.pwd
+      )
+
+      zig = MIREmitter.new.emit(low.lower_program(result.ast))
+      retain_zig = zig[/fn retainCount.*?(?=fn clearMain)/m]
+
+      expect(retain_zig).to include(
+        "fn retainCount(rt: *Runtime, map: *const CheatLib.Arc(CheatLib.PartitionedStringMap([]const u8, 32)))",
+      )
+      expect(retain_zig).to include("var owned = map.*;")
+      expect(retain_zig).to include("arcRetain(CheatLib.PartitionedStringMap([]const u8, 32), owned)")
+      expect(retain_zig).not_to include("arcRetain(CheatLib.PartitionedStringMap([]const u8, 32), map)")
+    end
   end
 
   describe "intrinsic receiver allocation lowering" do
