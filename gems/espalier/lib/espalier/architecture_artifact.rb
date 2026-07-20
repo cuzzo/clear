@@ -85,7 +85,8 @@ module Espalier
         },
         "nodes" => nodes.sort_by { |node| [node["kind"], node["path"].to_s, node["start_line"].to_i, node["id"]] },
         "edges" => edges.sort_by { |edge| [edge["source"], edge["target"], edge["kind"], edge["id"]] },
-        "pressure" => pressure.sort_by { |row| [-row["score"], row["node_id"]] }
+        "pressure" => pressure.sort_by { |row| [-row["score"], row["node_id"]] },
+        "hazards" => Array(evidence.dig("facts", "hazards")).sort_by { |h| [h["path"].to_s, h["line"].to_i, h["hazard_type"].to_s] }
       }
     end
 

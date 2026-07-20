@@ -77,6 +77,12 @@ fn parse_normalized_file(
     let mut facts =
         passes::StatelessSyntaxPass::normalized(&parsed.file, &lines, &normalized_root, behavior)
             .run();
+    facts.hazard_sites = crate::syntax::hazards::extract_hazards(
+        &parsed.file.to_string_lossy(),
+        parsed.tree.root_node(),
+        &parsed.source,
+        language,
+    );
     let metadata = passes::StatefulSyntaxPass::new(
         &parsed.file,
         &parsed.source,
@@ -146,6 +152,7 @@ fn parse_normalized_file(
         method_param_types: metadata.syntax.method_param_types,
         method_local_types: metadata.syntax.method_local_types,
         state_param_origins: Vec::new(),
+        hazard_sites: facts.hazard_sites,
     };
     profile_parse_phase(
         profile,

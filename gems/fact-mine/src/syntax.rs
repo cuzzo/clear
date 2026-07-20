@@ -7,6 +7,7 @@ pub(crate) mod cpp;
 pub(crate) mod csharp;
 pub(crate) mod effects;
 pub(crate) mod go;
+pub(crate) mod hazards;
 pub(crate) mod java;
 pub(crate) mod javascript;
 pub(crate) mod kotlin;
@@ -322,6 +323,18 @@ pub struct Document {
     pub method_local_types: BTreeMap<String, BTreeMap<String, String>>,
     #[serde(default)]
     pub state_param_origins: Vec<StateParamOrigin>,
+    #[serde(default)]
+    pub hazard_sites: Vec<HazardSite>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HazardSite {
+    pub path: String,
+    pub line: u32,
+    #[serde(rename = "source")]
+    pub snippet: String,
+    pub hazard_type: String,
+    pub required_evidence: String,
 }
 
 /// Minimal, adapter-proven facts needed to canonicalize source symbols.

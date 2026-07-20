@@ -467,26 +467,6 @@ if options[:coverage]
 end
 
 langs = source_languages(repo)
-if options[:hazards]
-  provider_by_lang = {
-    zig: "zig",
-    go: "go",
-    rust: "rust",
-    c: "c",
-    cpp: "cpp",
-    csharp: "csharp",
-  }
-  threads = []
-  provider_by_lang.each do |lang, provider|
-    next unless langs.include?(lang)
-
-    threads << Thread.new do
-      cmd = [lineage_bin, "ingest-hazards", "--db", db, "--repo", repo, "--provider", provider, "--commit", commit]
-      run_command("hazards-#{provider}", cmd, chdir: repo, log_dir: log_dir, optional: true)
-    end
-  end
-  threads.each(&:value)
-end
 
 sarif_threads = []
 

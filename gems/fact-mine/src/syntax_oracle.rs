@@ -155,6 +155,13 @@ fn project_document_with_metadata(document: &Document, metadata: &SyntaxFactMeta
             "line": site.line,
             "span": site.span,
         })).collect()),
+        "hazard_sites": sorted(document.hazard_sites.iter().map(|site| json!({
+            "path": site.path,
+            "line": site.line,
+            "source": site.snippet,
+            "hazard_type": site.hazard_type,
+            "required_evidence": site.required_evidence,
+        })).collect()),
         "control_flow_nodes": sorted(syntax::cfg::projection::project_nodes(&document.control_flow_nodes)),
         "control_flow_edges": sorted(syntax::cfg::projection::project_edges(&document.control_flow_edges)),
         "control_flow_metrics": sorted(document.control_flow_metrics.iter().map(|metric| json!({
@@ -497,6 +504,7 @@ mod tests {
             method_param_types: BTreeMap::new(),
             method_local_types: BTreeMap::new(),
             state_param_origins: Vec::new(),
+            hazard_sites: Vec::new(),
         };
         let projected = project_document(&doc);
         assert_eq!(projected["file"], "gems/fact-mine/examples/test.rb");
@@ -572,6 +580,7 @@ mod tests {
             .collect(),
             method_local_types: BTreeMap::new(),
             state_param_origins: Vec::new(),
+            hazard_sites: Vec::new(),
         };
 
         let metadata = SyntaxFactMetadata::from_documents(&[doc.clone()]);

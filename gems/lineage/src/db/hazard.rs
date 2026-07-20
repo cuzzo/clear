@@ -564,7 +564,7 @@ fn site(
 
 
 
-fn unit_for_site(blob: &BlobFile, units: &[LogicalUnit], line: u32) -> LogicalUnit {
+pub fn unit_for_site(blob: &BlobFile, units: &[LogicalUnit], line: u32) -> LogicalUnit {
     units
         .iter()
         .find(|unit| unit.start_line <= line && line <= unit.end_line)
@@ -589,7 +589,7 @@ fn rel_path(repo: &Path, path: &Path) -> Result<String> {
     Ok(rel.to_string_lossy().replace('\\', "/"))
 }
 
-fn now_timestamp() -> i64 {
+pub fn now_timestamp() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs() as i64)

@@ -129,6 +129,8 @@ pub struct ProfileOutput {
     pub struct_field_hash_shapes: BTreeMap<String, serde_json::Value>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub struct_field_array_shapes: BTreeMap<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hazard_sites: Vec<syntax::HazardSite>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -984,6 +986,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         tuple_arrays,
         struct_field_hash_shapes: struct_field_hash_shapes_out,
         struct_field_array_shapes: struct_field_array_shapes_out,
+        hazard_sites: document.hazard_sites.clone(),
     }
 }
 
@@ -1033,11 +1036,13 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut tuple_arrays = Vec::new();
     let mut struct_field_hash_shapes = BTreeMap::new();
     let mut struct_field_array_shapes = BTreeMap::new();
+    let mut hazard_sites = Vec::new();
     let mut raw_parser_call_sites = 0usize;
     let mut raw_calls_not_normalized = 0usize;
     let mut normalized_calls_without_raw_span = 0usize;
 
     for output in outputs {
+        hazard_sites.extend(output.hazard_sites);
         raw_parser_call_sites += output.call_resolution_coverage.raw_parser_call_sites;
         raw_calls_not_normalized += output.call_resolution_coverage.raw_calls_not_normalized;
         normalized_calls_without_raw_span += output
@@ -1175,6 +1180,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         tuple_arrays,
         struct_field_hash_shapes,
         struct_field_array_shapes,
+        hazard_sites,
     }
 }
 
@@ -5913,6 +5919,7 @@ pub(crate) mod tests {
             type_alias_lines: Default::default(),
             method_param_types: Default::default(),
             method_local_types: Default::default(),
+            hazard_sites: vec![],
         }
     }
 

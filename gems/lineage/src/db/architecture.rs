@@ -1,7 +1,12 @@
 use crate::storage::Storage;
+use crate::extract::{BoundaryExtractor, HeuristicExtractor};
+use crate::model::{BlobFile, LogicalUnit, HazardEvent};
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
 const DELETE_SNAPSHOT_SQL: &str = include_str!("../../sql/architecture/delete_snapshot.sql");
 const INSERT_ARTIFACT_SQL: &str = include_str!("../../sql/architecture/insert_artifact.sql");
@@ -172,6 +177,68 @@ pub fn ingest_architecture_json(
         )?;
     }
     tx.commit()?;
+
+    let mut file_cache: HashMap<String, (BlobFile, Vec<LogicalUnit>)> = HashMap::new();
+    let extractor = HeuristicExtractor::default();
+    let repo_path = Path::new(&root);
+    let timestamp = storage.commit_timestamp(commit).ok().flatten().unwrap_or_else(crate::hazard::now_timestamp);
+
+    for hazard in document
+        .get("hazards")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let path = text(hazard, "path");
+        let line = integer(hazard, "line") as u32;
+
+        if !file_cache.contains_key(&path) {
+            if let Ok(contents) = fs::read_to_string(repo_path.join(&path)) {
+                let blob = BlobFile {
+                    path: path.clone(),
+                    contents,
+                };
+                let units = extractor.extract_units(&blob);
+                file_cache.insert(path.clone(), (blob, units));
+            }
+        }
+
+        let mut symbol = None;
+        let mut resolved_id = path.clone();
+
+        if let Some((blob, units)) = file_cache.get(&path) {
+            let unit = crate::hazard::unit_for_site(blob, units, line);
+            resolved_id = storage
+                .resolve_unit_id(&unit.id, &unit.path, &unit.name)?
+                .unwrap_or_else(|| unit.id.clone());
+            symbol = Some(unit.name);
+        }
+
+        let provider = text(hazard, "provider");
+        let hazard_type = text(hazard, "hazard_type");
+        let required_evidence = text(hazard, "required_evidence");
+        let source = text(hazard, "source");
+
+        storage.insert_hazard_event(&HazardEvent {
+            unit_id: resolved_id,
+            language: provider.clone(),
+            hazard_type,
+            required_evidence,
+            path: path.clone(),
+            line,
+            symbol,
+            source: source.clone(),
+            detected_at_hash: commit.to_string(),
+            is_active: true,
+            payload_json: json!({
+                "provider": provider,
+                "source": source,
+                "timestamp": timestamp
+            })
+            .to_string(),
+        })?;
+    }
+
     Ok(stats)
 }
 

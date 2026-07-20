@@ -5,7 +5,7 @@ use super::{
     },
     BranchArm, BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, FunctionDef,
     OwnerDef, PathConditionSite, PredicateAlias, RawNode, SemanticEffectSite, StateDeclaration,
-    StateRead, StateWrite,
+    StateRead, StateWrite, HazardSite,
 };
 use crate::ast::{self, Child, Node, Span};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -28,6 +28,7 @@ pub(crate) struct NormalizedFacts {
     pub(crate) predicate_aliases: Vec<PredicateAlias>,
     pub(crate) comparison_uses: Vec<ComparisonUse>,
     pub(crate) path_condition_sites: Vec<PathConditionSite>,
+    pub(crate) hazard_sites: Vec<HazardSite>,
 }
 
 pub(crate) fn extract(
