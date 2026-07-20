@@ -349,7 +349,7 @@
           "span": [
             41,
             2,
-            54,
+            56,
             3
           ],
           "visibility": "private"
@@ -370,20 +370,20 @@
           "visibility": "public"
         },
         {
-          "line": 56,
+          "line": 58,
           "name": "ready",
           "owner": "JavaScriptSyntaxFactsCore",
           "params": [],
           "span": [
-            56,
-            2,
             58,
+            2,
+            60,
             3
           ],
           "visibility": "public"
         },
         {
-          "line": 61,
+          "line": 63,
           "name": "normalizeValue",
           "owner": "core",
           "params": [
@@ -392,9 +392,9 @@
             "rest"
           ],
           "span": [
-            61,
-            7,
             63,
+            7,
+            65,
             1
           ],
           "visibility": "public"
@@ -409,7 +409,7 @@
           "span": [
             1,
             7,
-            59,
+            61,
             1
           ]
         }
@@ -417,13 +417,13 @@
       "predicate_bodies": [
         {
           "body": "input ?? defaultValue",
-          "line": 61,
+          "line": 63,
           "name": "normalizeValue",
           "owner": "core",
           "span": [
-            61,
-            7,
             63,
+            7,
+            65,
             1
           ]
         }
@@ -495,13 +495,13 @@
         {
           "field": "#status",
           "function": "#audit",
-          "line": 53,
+          "line": 55,
           "owner": "JavaScriptSyntaxFactsCore",
           "receiver": "self",
           "span": [
-            53,
+            55,
             11,
-            53,
+            55,
             23
           ]
         },
@@ -534,13 +534,13 @@
         {
           "field": "count",
           "function": "ready",
-          "line": 57,
+          "line": 59,
           "owner": "JavaScriptSyntaxFactsCore",
           "receiver": "self",
           "span": [
-            57,
+            59,
             11,
-            57,
+            59,
             21
           ]
         },

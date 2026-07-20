@@ -62,6 +62,8 @@ export class TypeScriptSyntaxFactsCore {
       console.error(e);
     } finally {
       this.count = 0;
+      RegExp.$1;
+      RegExp.$2;
     }
     return this.status;
   }

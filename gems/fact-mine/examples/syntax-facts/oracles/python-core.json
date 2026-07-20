@@ -180,9 +180,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -200,9 +198,7 @@
           ]
         },
         {
-          "arguments": [
-
-          ],
+          "arguments": [],
           "block": false,
           "conditional": false,
           "control": "always",
@@ -244,9 +240,7 @@
           ]
         }
       ],
-      "dispatch_sites": [
-
-      ],
+      "dispatch_sites": [],
       "file": "gems/fact-mine/examples/syntax-facts/python/core.py",
       "functions": [
         {
@@ -367,9 +361,7 @@
           ]
         }
       ],
-      "predicate_bodies": [
-
-      ],
+      "predicate_bodies": [],
       "semantic_effects": [
         {
           "detail": "op-assign",
