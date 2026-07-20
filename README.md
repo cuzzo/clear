@@ -122,10 +122,10 @@ CLEAR lowers to Zig, which has native access to the entire C library.
 
 In addition, Zig supports compiling *to* any target *from* any machine. I.e. you can compile for a Mac architecture from your Linux workstation.
 
-It also has exceptionally fast *debug* build times.
+It also has exceptionally fast *incremental* and *debug* build times.
 
 > [!NOTE]
-> CLEAR will self-host by v0.2.  CLEAR's v0.1 compiler currently adds on substantial time to Zig's compilation.
+> CLEAR will self-host by v0.2.  CLEAR's v0.1 compiler currently adds on substantial time to Zig's compilation for *cold* builds.  CLEAR has incremental builds and typically outperforms Rust for incremental builds (active development).
 
 ## BUILDING & TESTING
 
