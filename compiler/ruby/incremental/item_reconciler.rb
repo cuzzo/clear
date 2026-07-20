@@ -62,9 +62,9 @@ module Incremental
         ).returns(T::Boolean)
       end
       def line_layout_equal?(previous, current, old_item, new_item)
-        previous.source.count("\n") == current.source.count("\n") &&
+        !!(previous.source.count("\n") == current.source.count("\n") &&
           old_item.start_line == new_item.start_line &&
-          old_item.end_line == new_item.end_line
+          old_item.end_line == new_item.end_line)
       end
     end
   end
