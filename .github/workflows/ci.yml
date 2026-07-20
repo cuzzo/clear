@@ -1499,13 +1499,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  zig-constraint-sarif:
-    name: Zig constraint coverage SARIF
+  slopcop-constraint-sarif:
+    name: SlopCop constraint coverage SARIF
     runs-on: ubuntu-latest
     needs:
       - changes
       - zig-special-coverage
-    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.changes.outputs.run_zig == 'true' && needs.zig-special-coverage.result == 'success' }}
+      - sarif-rust-binaries
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && (needs.zig-special-coverage.result == 'success' || needs.zig-special-coverage.result == 'skipped') && needs.sarif-rust-binaries.result == 'success' }}
     permissions:
       contents: read
       security-events: write
@@ -1517,39 +1518,48 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
       - name: Download specialized Zig coverage artifacts
+        if: ${{ needs.zig-special-coverage.result == 'success' }}
         uses: actions/download-artifact@v4
         with:
           pattern: zig-coverage-*
           path: tmp/zig-special-coverage-artifacts
       - name: Generate SlopCop constraint SARIF
         run: |
+          chmod +x tmp/sarif-binaries/fact-mine-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
           mkdir -p tmp
           args=()
-          while IFS= read -r path; do
-            args+=(--coverage="loom:${path}")
-          done < <(find tmp/zig-special-coverage-artifacts -path '*zig-coverage-loom-*/*cobertura.xml' -type f | sort)
-          while IFS= read -r path; do
-            args+=(--coverage="vopr:${path}")
-          done < <(find tmp/zig-special-coverage-artifacts -path '*zig-coverage-vopr-*/*cobertura.xml' -type f | sort)
-          bundle exec ruby gems/slopcop/exe/slopcop constraints \
+          if [ -d tmp/zig-special-coverage-artifacts ]; then
+            while IFS= read -r path; do
+              args+=(--coverage="loom:${path}")
+            done < <(find tmp/zig-special-coverage-artifacts -path '*zig-coverage-loom-*/*cobertura.xml' -type f | sort)
+            while IFS= read -r path; do
+              args+=(--coverage="vopr:${path}")
+            done < <(find tmp/zig-special-coverage-artifacts -path '*zig-coverage-vopr-*/*cobertura.xml' -type f | sort)
+          fi
+          FACT_MINE_RUST_BINARY=tmp/sarif-binaries/fact-mine-rust bundle exec ruby gems/slopcop/exe/slopcop constraints \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
             "${args[@]}" \
-            --sarif=tmp/slopcop-zig-constraints.sarif \
-            --markdown=tmp/slopcop-zig-constraints.md
+            --sarif=tmp/slopcop-constraints.sarif \
+            --markdown=tmp/slopcop-constraints.md
       - name: Upload SlopCop constraint SARIF
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: tmp/slopcop-zig-constraints.sarif
+          sarif_file: tmp/slopcop-constraints.sarif
+          category: slopcop-constraints
       - uses: actions/upload-artifact@v4
         with:
-          name: slopcop-zig-constraints
+          name: slopcop-constraints
           path: |
-            tmp/slopcop-zig-constraints.sarif
-            tmp/slopcop-zig-constraints.md
+            tmp/slopcop-constraints.sarif
+            tmp/slopcop-constraints.md
           if-no-files-found: error
           retention-days: 7
 
@@ -1621,51 +1631,6 @@ jobs:
         with:
           name: decomplex-sarif
           path: tmp/decomplex-sarif
-          if-no-files-found: error
-          retention-days: 7
-
-  metaprogramming-constraint-sarif:
-    name: Metaprogramming constraint SARIF
-    runs-on: ubuntu-latest
-    needs: [changes, sarif-rust-binaries]
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: ${{ env.RUBY_VERSION }}
-          bundler-cache: true
-      - uses: actions/download-artifact@v4
-        with:
-          name: sarif-rust-binaries
-          path: tmp/sarif-binaries
-      - name: Generate SlopCop metaprogramming constraint SARIF
-        run: |
-          chmod +x tmp/sarif-binaries/fact-mine-rust
-          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          FACT_MINE_RUST_BINARY=tmp/sarif-binaries/fact-mine-rust bundle exec ruby gems/slopcop/exe/slopcop constraints \
-            --repo=. \
-            --base="origin/${{ github.event.pull_request.base.ref }}" \
-            --head=HEAD \
-            --language=ruby,python,javascript,typescript,lua \
-            --sarif=tmp/slopcop-metaprogramming-constraints.sarif \
-            --markdown=tmp/slopcop-metaprogramming-constraints.md
-      - name: Upload SlopCop metaprogramming constraint SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/slopcop-metaprogramming-constraints.sarif
-          category: metaprogramming-constraints
-      - uses: actions/upload-artifact@v4
-        with:
-          name: slopcop-metaprogramming-constraints
-          path: |
-            tmp/slopcop-metaprogramming-constraints.sarif
-            tmp/slopcop-metaprogramming-constraints.md
           if-no-files-found: error
           retention-days: 7
 

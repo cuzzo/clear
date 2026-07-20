@@ -178,7 +178,7 @@ def run_constraints(args)
     base: nil,
     head: "HEAD",
     coverage: [],
-    languages: ["zig"],
+    languages: nil,
     sarif: nil,
     json: nil,
     markdown: nil,
