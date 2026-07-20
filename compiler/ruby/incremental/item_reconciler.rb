@@ -33,7 +33,6 @@ module Incremental
       new_item = T.must(new_items[name])
       return fallback("main function changed") if name == "main"
       return fallback("function interface changed") unless old_item.interface_fingerprint == new_item.interface_fingerprint
-      return fallback("source line layout changed") unless line_layout_equal?(previous, current, old_item, new_item)
       return fallback("function call dependencies changed") unless old_item.called_functions == new_item.called_functions
 
       Reconciliation.new(
@@ -53,19 +52,6 @@ module Incremental
         Reconciliation.new(fast_path: false, reason: reason)
       end
 
-      sig do
-        params(
-          previous: SourceCatalog,
-          current: SourceCatalog,
-          old_item: FunctionItem,
-          new_item: FunctionItem,
-        ).returns(T::Boolean)
-      end
-      def line_layout_equal?(previous, current, old_item, new_item)
-        !!(previous.source.count("\n") == current.source.count("\n") &&
-          old_item.start_line == new_item.start_line &&
-          old_item.end_line == new_item.end_line)
-      end
     end
   end
 end

@@ -94,10 +94,22 @@ module Incremental
       @items.filter_map { |item| item.code if item.kind == :support }.to_set
     end
 
-    sig { params(replacement: EmittedItem).returns(ProgramArtifact) }
-    def replace_function(replacement)
+    sig do
+      params(
+        replacement: EmittedItem,
+        shift_source_lines_after: T.nilable(Integer),
+        source_line_delta: Integer,
+        relocatable_function_names: T::Set[String],
+      ).returns(ProgramArtifact)
+    end
+    def replace_function(
+      replacement,
+      shift_source_lines_after: nil,
+      source_line_delta: 0,
+      relocatable_function_names: Set.new
+    )
       replaced = T.let(false, T::Boolean)
-      next_items = @items.map do |item|
+      next_items = @items.each_with_index.map do |item, index|
         if item.kind == :function && item.name == replacement.name
           raise ArgumentError, "duplicate function artifact #{replacement.name}" if replaced
 
@@ -111,6 +123,8 @@ module Incremental
             state_before: item.state_before,
             state_after: item.state_after,
           )
+        elsif root_function_artifact?(item, index, relocatable_function_names)
+          relocate_source_lines(item, after: shift_source_lines_after, by: source_line_delta)
         else
           item
         end
@@ -169,6 +183,50 @@ module Incremental
           [:support, node.respond_to?(:name) ? T.unsafe(node).name.to_s : nil]
         end
       end
+    end
+
+    private
+
+    sig { params(item: EmittedItem, index: Integer, names: T::Set[String]).returns(T::Boolean) }
+    def root_function_artifact?(item, index, names)
+      return names.include?(item.name.to_s) if item.kind == :function
+      return false unless item.kind == :comment
+
+      following = @items[index + 1]
+      following&.kind == :function && names.include?(following.name.to_s)
+    end
+
+    sig { params(item: EmittedItem, after: T.nilable(Integer), by: Integer).returns(EmittedItem) }
+    def relocate_source_lines(item, after:, by:)
+      return item unless after && !by.zero?
+
+      relocated = item.code.gsub(/^([ \t]*\/\/ CLR:)(\d+)([ \t]*)$/) do
+        line = Regexp.last_match(2).to_i
+        line > after ? "#{Regexp.last_match(1)}#{line + by}#{Regexp.last_match(3)}" : Regexp.last_match(0)
+      end
+      relocated = relocated.gsub(/(\.setError\([^\n]*,\s*)(\d+)(\);)/) do
+        line = Regexp.last_match(2).to_i
+        line > after ? "#{Regexp.last_match(1)}#{line + by}#{Regexp.last_match(3)}" : Regexp.last_match(0)
+      end
+      relocated = relocated.gsub(/(CLEAR_PROFILE_TASK_SITE[^\n]*\bline=)(\d+)/) do
+        line = Regexp.last_match(2).to_i
+        line > after ? "#{Regexp.last_match(1)}#{line + by}" : Regexp.last_match(0)
+      end
+      relocated = relocated.gsub(/(\.clear_line\s*=\s*)(\d+)/) do
+        line = Regexp.last_match(2).to_i
+        line > after ? "#{Regexp.last_match(1)}#{line + by}" : Regexp.last_match(0)
+      end
+      return item if relocated == item.code
+
+      EmittedItem.new(
+        key: item.key,
+        kind: item.kind,
+        name: item.name,
+        code: relocated,
+        contract_fingerprint: item.contract_fingerprint,
+        state_before: item.state_before,
+        state_after: item.state_after,
+      )
     end
   end
 end

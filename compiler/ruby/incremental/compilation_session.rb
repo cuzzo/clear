@@ -148,7 +148,14 @@ module Incremental
         return clean_compile(source, reason: "function introduced program-level Zig support")
       end
 
-      artifact = previous.artifact.replace_function(replacement)
+      old_item = T.must(previous.catalog.fetch(changed_name))
+      new_item = T.must(current.fetch(changed_name))
+      artifact = previous.artifact.replace_function(
+        replacement,
+        shift_source_lines_after: old_item.end_line,
+        source_line_delta: new_item.end_line - old_item.end_line,
+        relocatable_function_names: emitted_root_function_names(previous.catalog),
+      )
       zig = artifact.render
       verify_clean!(source, zig) if @verify
       @snapshot = CompilationSnapshot.new(
@@ -206,6 +213,23 @@ module Incremental
         left.deep_copy_counter == right.deep_copy_counter &&
         left.items_block_counter == right.items_block_counter &&
         left.owned_slice_counter == right.owned_slice_counter
+    end
+
+    sig { params(catalog: SourceCatalog).returns(T::Set[String]) }
+    def emitted_root_function_names(catalog)
+      catalog.functions.each_with_object(T.let(Set.new, T::Set[String])) do |item, names|
+        source_name = item.name
+        zig_name = if source_name == Compiler::Entrypoint::NAME
+          Compiler::Entrypoint::ZIG_NAME
+        elsif source_name.end_with?("!", "?")
+          T.must(source_name[0...-1])
+        else
+          source_name
+        end
+        names.add(zig_name)
+        names.add("__#{zig_name}_body")
+        names.add("__#{zig_name}_post_body")
+      end
     end
 
     sig { void }

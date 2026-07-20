@@ -172,6 +172,7 @@ module MIRLoweringFunctions
     const :return_type, Type
     const :heap_carry_return, T::Boolean
     const :has_catch, T::Boolean
+    const :source_start_line, Integer, default: 1
   end
 
   class FunctionState < T::Struct
@@ -582,6 +583,7 @@ module MIRLoweringFunctions
       return_type: return_type_info,
       heap_carry_return: node.respond_to?(:heap_carry_return) && node.heap_carry_return == true,
       has_catch: has_catch,
+      source_start_line: node.source_range.start_line,
     )
   end
 
