@@ -14,6 +14,8 @@ const PYTHON_HAZARDS: &str = include_str!("python_hazards.scm");
 const JAVASCRIPT_HAZARDS: &str = include_str!("javascript_hazards.scm");
 const TYPESCRIPT_HAZARDS: &str = include_str!("typescript_hazards.scm");
 const LUA_HAZARDS: &str = include_str!("lua_hazards.scm");
+const JAVA_HAZARDS: &str = include_str!("java_hazards.scm");
+const PHP_HAZARDS: &str = include_str!("php_hazards.scm");
 
 pub fn extract_hazards(
     file_path: &str,
@@ -34,6 +36,8 @@ pub fn extract_hazards(
         Language::JavaScript => JAVASCRIPT_HAZARDS,
         Language::TypeScript => TYPESCRIPT_HAZARDS,
         Language::Lua => LUA_HAZARDS,
+        Language::Java => JAVA_HAZARDS,
+        Language::Php => PHP_HAZARDS,
         _ => return Vec::new(),
     };
 
@@ -309,5 +313,62 @@ local mt = {
         assert!(snippets.contains(&"__index = function(t, k) return rawget(t, k) end,"));
         assert!(snippets.contains(&"__newindex = function(t, k, v) rawset(t, k, v) end,"));
         assert!(snippets.contains(&"__call = function() end"));
+    }
+
+    #[test]
+    fn test_extract_hazards_java() {
+        let code = "
+            class Foo {
+                void test() throws Exception {
+                    Class.forName(\"Bar\");
+                    Foo.class.getMethod(\"test\");
+                }
+            }
+        ";
+        let mut parser = Parser::new();
+        parser.set_language(&grammar_for_language(Language::Java)).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        
+        let hazards = extract_hazards("test.java", tree.root_node(), code, Language::Java);
+        assert_eq!(hazards.len(), 2);
+        assert!(hazards.iter().all(|h| h.hazard_type == "java_metaprogramming"));
+    }
+
+    #[test]
+    fn test_extract_hazards_php() {
+        let code = "<?php
+            eval('1+1');
+            $f = 'bar';
+            $$f = 1;
+            class B {
+                function __get($name) {}
+            }
+        ";
+        let mut parser = Parser::new();
+        parser.set_language(&grammar_for_language(Language::Php)).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        
+        let hazards = extract_hazards("test.php", tree.root_node(), code, Language::Php);
+        assert_eq!(hazards.len(), 3);
+        assert!(hazards.iter().all(|h| h.hazard_type == "php_metaprogramming"));
+    }
+
+    #[test]
+    fn test_extract_hazards_csharp_metaprogramming() {
+        let code = "
+            class Foo {
+                void Test() {
+                    System.Type.GetType(\"Bar\");
+                    dynamic x = 1;
+                }
+            }
+        ";
+        let mut parser = Parser::new();
+        parser.set_language(&grammar_for_language(Language::CSharp)).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        
+        let hazards = extract_hazards("test.cs", tree.root_node(), code, Language::CSharp);
+        let metaprog_hazards: Vec<_> = hazards.iter().filter(|h| h.hazard_type == "csharp_metaprogramming").collect();
+        assert_eq!(metaprog_hazards.len(), 2);
     }
 }

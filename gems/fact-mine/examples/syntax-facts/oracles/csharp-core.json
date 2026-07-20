@@ -55,6 +55,26 @@
         },
         {
           "arguments": [
+            "\"Bar\""
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "MetaprogrammingDemo",
+          "line": 69,
+          "message": "GetType",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "System.Type",
+          "safe_navigation": false,
+          "span": [
+            69,
+            8,
+            69,
+            34
+          ]
+        },
+        {
+          "arguments": [
             "\"not ready\""
           ],
           "block": false,
@@ -323,6 +343,19 @@
             5
           ],
           "visibility": "private"
+        },
+        {
+          "line": 67,
+          "name": "MetaprogrammingDemo",
+          "owner": "CSharpSyntaxFactsCore",
+          "params": [],
+          "span": [
+            67,
+            4,
+            71,
+            5
+          ],
+          "visibility": "private"
         }
       ],
       "language": "csharp",
@@ -334,7 +367,7 @@
           "span": [
             4,
             0,
-            66,
+            72,
             1
           ]
         }
@@ -363,6 +396,18 @@
             12,
             44,
             42
+          ]
+        },
+        {
+          "detail": "GetType",
+          "function": "MetaprogrammingDemo",
+          "kind": "metaprogramming",
+          "line": 69,
+          "span": [
+            69,
+            8,
+            69,
+            34
           ]
         }
       ],

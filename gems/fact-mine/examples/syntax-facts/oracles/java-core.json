@@ -40,6 +40,26 @@
         },
         {
           "arguments": [
+            "\"Bar\""
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "metaprogrammingDemo",
+          "line": 54,
+          "message": "forName",
+          "owner": "JavaSyntaxFactsCore",
+          "receiver": "Class",
+          "safe_navigation": false,
+          "span": [
+            54,
+            4,
+            54,
+            24
+          ]
+        },
+        {
+          "arguments": [
             "\"not ready\""
           ],
           "block": false,
@@ -56,6 +76,26 @@
             6,
             33,
             37
+          ]
+        },
+        {
+          "arguments": [
+            "\"ready\""
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "metaprogrammingDemo",
+          "line": 55,
+          "message": "getMethod",
+          "owner": "JavaSyntaxFactsCore",
+          "receiver": "this.getClass()",
+          "safe_navigation": false,
+          "span": [
+            55,
+            4,
+            55,
+            38
           ]
         },
         {
@@ -195,6 +235,24 @@
             4,
             46,
             22
+          ]
+        },
+        {
+          "arguments": [],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "metaprogrammingDemo",
+          "line": 55,
+          "message": "getClass",
+          "owner": "JavaSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            55,
+            4,
+            55,
+            19
           ]
         },
         {
@@ -400,6 +458,19 @@
             3
           ],
           "visibility": "public"
+        },
+        {
+          "line": 53,
+          "name": "metaprogrammingDemo",
+          "owner": "JavaSyntaxFactsCore",
+          "params": [],
+          "span": [
+            53,
+            2,
+            56,
+            3
+          ],
+          "visibility": "public"
         }
       ],
       "language": "java",
@@ -411,7 +482,7 @@
           "span": [
             3,
             0,
-            52,
+            57,
             1
           ]
         }
@@ -428,6 +499,30 @@
             4,
             15,
             26
+          ]
+        },
+        {
+          "detail": "forName",
+          "function": "metaprogrammingDemo",
+          "kind": "dynamic_dispatch",
+          "line": 54,
+          "span": [
+            54,
+            4,
+            54,
+            24
+          ]
+        },
+        {
+          "detail": "getMethod",
+          "function": "metaprogrammingDemo",
+          "kind": "dynamic_dispatch",
+          "line": 55,
+          "span": [
+            55,
+            4,
+            55,
+            38
           ]
         }
       ],

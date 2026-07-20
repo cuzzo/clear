@@ -49,5 +49,10 @@ class JavaSyntaxFactsCore {
   boolean ready() {
     return this.count > 0;
   }
+
+  void metaprogrammingDemo() throws Exception {
+    Class.forName("Bar");
+    this.getClass().getMethod("ready");
+  }
 }
 

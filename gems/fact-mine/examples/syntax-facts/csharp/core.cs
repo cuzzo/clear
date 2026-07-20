@@ -63,5 +63,11 @@ class CSharpSyntaxFactsCore
     {
         return count > 0;
     }
+
+    private void MetaprogrammingDemo()
+    {
+        System.Type.GetType("Bar");
+        dynamic x = 1;
+    }
 }
 

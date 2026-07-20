@@ -42,3 +42,15 @@
   (prefix_unary_expression) @hazard.csharp_unsafe_memory
   (#match? @hazard.csharp_unsafe_memory "^\\*")
 )
+
+(
+  (invocation_expression
+    function: (member_access_expression
+      name: (identifier) @method_name)) @hazard.csharp_metaprogramming
+  (#match? @method_name "^(Load|LoadFrom|LoadFile|GetType|GetMethod|GetMethods|GetField|GetFields|GetProperty|GetProperties|GetConstructor|GetConstructors|Invoke|GetValue|SetValue|CreateInstance)$")
+)
+
+(
+  (identifier) @hazard.csharp_metaprogramming
+  (#eq? @hazard.csharp_metaprogramming "dynamic")
+)

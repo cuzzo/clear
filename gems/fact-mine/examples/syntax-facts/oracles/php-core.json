@@ -35,6 +35,26 @@
       "calls": [
         {
           "arguments": [
+            "'1+1'"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "metaprogrammingDemo",
+          "line": 62,
+          "message": "eval",
+          "owner": "PhpSyntaxFactsCore",
+          "receiver": "self",
+          "safe_navigation": false,
+          "span": [
+            62,
+            8,
+            62,
+            19
+          ]
+        },
+        {
+          "arguments": [
             "\"busy\""
           ],
           "block": false,
@@ -309,6 +329,34 @@
           "visibility": "public"
         },
         {
+          "line": 60,
+          "name": "metaprogrammingDemo",
+          "owner": "PhpSyntaxFactsCore",
+          "params": [],
+          "span": [
+            60,
+            4,
+            66,
+            5
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 68,
+          "name": "__get",
+          "owner": "PhpSyntaxFactsCore",
+          "params": [
+            "name"
+          ],
+          "span": [
+            68,
+            4,
+            71,
+            5
+          ],
+          "visibility": "public"
+        },
+        {
           "line": 9,
           "name": "__construct",
           "owner": "PhpSyntaxFactsCore",
@@ -334,13 +382,38 @@
           "span": [
             3,
             0,
-            59,
+            72,
             1
           ]
         }
       ],
-      "predicate_bodies": [],
+      "predicate_bodies": [
+        {
+          "body": "null",
+          "line": 68,
+          "name": "__get",
+          "owner": "PhpSyntaxFactsCore",
+          "span": [
+            68,
+            4,
+            71,
+            5
+          ]
+        }
+      ],
       "semantic_effects": [
+        {
+          "detail": "eval",
+          "function": "metaprogrammingDemo",
+          "kind": "metaprogramming",
+          "line": 62,
+          "span": [
+            62,
+            8,
+            62,
+            19
+          ]
+        },
         {
           "detail": "print",
           "function": "audit",
@@ -430,6 +503,19 @@
             16,
             24,
             38
+          ]
+        },
+        {
+          "field": "eval",
+          "function": "metaprogrammingDemo",
+          "line": 62,
+          "owner": "PhpSyntaxFactsCore",
+          "receiver": "self",
+          "span": [
+            62,
+            8,
+            62,
+            19
           ]
         },
         {
