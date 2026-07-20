@@ -10,6 +10,7 @@ const GO_HAZARDS: &str = include_str!("go_hazards.scm");
 const RUST_HAZARDS: &str = include_str!("rust_hazards.scm");
 const ZIG_HAZARDS: &str = include_str!("zig_hazards.scm");
 const RUBY_HAZARDS: &str = include_str!("ruby_hazards.scm");
+const PYTHON_HAZARDS: &str = include_str!("python_hazards.scm");
 
 pub fn extract_hazards(
     file_path: &str,
@@ -26,6 +27,7 @@ pub fn extract_hazards(
         Language::Rust => RUST_HAZARDS,
         Language::Zig => ZIG_HAZARDS,
         Language::Ruby => RUBY_HAZARDS,
+        Language::Python => PYTHON_HAZARDS,
         _ => return Vec::new(),
     };
 
@@ -164,5 +166,36 @@ mod tests {
         assert!(snippets.contains(&"instance_variable_get(:@x)"));
         assert!(snippets.contains(&"const_get(:BAR)"));
         assert!(snippets.contains(&"def method_missing(m, *args)"));
+    }
+
+    #[test]
+    fn test_extract_hazards_python() {
+        let code = "
+class Foo:
+    def __getattr__(self, name):
+        return getattr(self, '_' + name)
+    def test(self):
+        setattr(self, 'x', 1)
+        eval('1 + 1')
+        exec('import os')
+        type('Bar', (), {})
+        type(self)
+        ";
+        let mut parser = Parser::new();
+        parser.set_language(&grammar_for_language(Language::Python)).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        
+        let hazards = extract_hazards("test.py", tree.root_node(), code, Language::Python);
+        assert_eq!(hazards.len(), 6);
+        assert!(hazards.iter().all(|h| h.hazard_type == "python_metaprogramming"));
+        
+        let snippets: Vec<&str> = hazards.iter().map(|h| h.snippet.as_str()).collect();
+        assert!(snippets.contains(&"def __getattr__(self, name):"));
+        assert!(snippets.contains(&"return getattr(self, '_' + name)"));
+        assert!(snippets.contains(&"setattr(self, 'x', 1)"));
+        assert!(snippets.contains(&"eval('1 + 1')"));
+        assert!(snippets.contains(&"exec('import os')"));
+        assert!(snippets.contains(&"type('Bar', (), {})"));
+        assert!(!snippets.contains(&"type(self)"));
     }
 }
