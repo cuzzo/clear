@@ -135,12 +135,9 @@ module SlopCop
       end
 
       def add_asan_site(sites, path, line, source, code)
-        if LanguageProvider.any_include?(code, ASAN_NEEDLES)
-          sites << LanguageProvider.hazard(path, line, source, "c_asan_raw_memory_api", "asan", "C raw-memory or unchecked buffer API")
-        end
-        if pointer_hazard?(code)
-          sites << LanguageProvider.hazard(path, line, source, "c_asan_pointer", "asan", "C pointer dereference/arithmetic site")
-        end
+        return unless LanguageProvider.any_include?(code, ASAN_NEEDLES)
+
+        sites << LanguageProvider.hazard(path, line, source, "c_asan_raw_memory_api", "asan", "C raw-memory or unchecked buffer API")
       end
 
       def add_lsan_site(sites, path, line, source, code)
@@ -158,19 +155,15 @@ module SlopCop
         end
       end
 
-      def pointer_hazard?(code)
-        code.include?("->") ||
-          code.match?(/\A\s*\*\s*[A-Za-z_][A-Za-z0-9_]*/) ||
-          code.match?(/(?:=\s*|return\s+|\(|,|\[)\*\s*[A-Za-z_][A-Za-z0-9_]*/)
-      end
-
       def arithmetic_ub_site?(code)
         code.match?(%r{[A-Za-z0-9_\])]\s*(?:/|%)\s*[A-Za-z_(]}) ||
           code.match?(/[A-Za-z0-9_\])]\s*(?:<<|>>)\s*[A-Za-z_(]/)
       end
 
+      # Only pointer-target casts carry alignment/strict-aliasing UB; value
+      # casts like (int)x are not sanitizer-relevant hazards.
       def cast_ub_site?(code)
-        code.match?(/\([A-Za-z_][A-Za-z0-9_\s]*(?:\*|intptr_t|uintptr_t|size_t|ssize_t|int|long|short|char)[A-Za-z0-9_\s\*]*\)\s*[A-Za-z_(&*]/)
+        code.match?(/\([A-Za-z_][A-Za-z0-9_\s]*(?:\*|intptr_t|uintptr_t)[A-Za-z0-9_\s\*]*\)\s*[A-Za-z_(&*]/)
       end
     end
   end

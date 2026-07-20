@@ -110,6 +110,38 @@ class ConstraintsSystemsProviderTest < Minitest::Test
     end
   end
 
+  def test_plain_pointer_use_literal_arithmetic_and_value_casts_are_not_hazards
+    with_file("src/plain.c", <<~C) do |dir, path|
+      int scale(struct Cfg *cfg, int n) {
+          int half = n / 2;
+          int mask = n << 3;
+          int total = (int)cfg->count;
+          return half + mask + total + *cfg->values;
+      }
+    C
+      hazards = SlopCop::Constraints::CProvider.scan_file(path, File.read(File.join(dir, path)))
+      types = hazards.map { |hazard| hazard[:hazard_type] }
+
+      refute_includes types, "c_asan_pointer"
+      refute_includes types, "c_ubsan_arithmetic"
+      refute_includes types, "c_ubsan_cast"
+    end
+
+    with_file("src/plain.cpp", <<~CPP) do |dir, path|
+      int scale(Cfg *cfg, int n) {
+          int checked = static_cast<int>(n);
+          return checked + cfg->count + n / 2;
+      }
+    CPP
+      hazards = SlopCop::Constraints::CppProvider.scan_file(path, File.read(File.join(dir, path)))
+      types = hazards.map { |hazard| hazard[:hazard_type] }
+
+      refute_includes types, "cpp_asan_pointer_or_cast"
+      refute_includes types, "cpp_ubsan_cast"
+      refute_includes types, "cpp_ubsan_arithmetic"
+    end
+  end
+
   def test_systems_providers_surface_fact_mine_callback_hazards
     with_file("src/handler.c", <<~C) do |dir, path|
       struct Handler {

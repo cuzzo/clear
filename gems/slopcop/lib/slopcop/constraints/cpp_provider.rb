@@ -155,16 +155,13 @@ module SlopCop
         if arithmetic_ub_site?(code)
           sites << LanguageProvider.hazard(path, line, source, "cpp_ubsan_arithmetic", "ubsan", "C++ divide/modulo/shift arithmetic site")
         end
-        if code.match?(/\b(?:reinterpret_cast|const_cast|static_cast)\s*</)
+        if code.match?(/\b(?:reinterpret_cast|const_cast)\s*</)
           sites << LanguageProvider.hazard(path, line, source, "cpp_ubsan_cast", "ubsan", "C++ cast site")
         end
       end
 
       def pointer_or_cast_hazard?(code)
-        code.include?("->") ||
-          code.match?(/\b(?:reinterpret_cast|const_cast)\s*</) ||
-          code.match?(/\A\s*\*\s*[A-Za-z_][A-Za-z0-9_]*/) ||
-          code.match?(/(?:=\s*|return\s+|\(|,|\[)\*\s*[A-Za-z_][A-Za-z0-9_]*/)
+        code.match?(/\b(?:reinterpret_cast|const_cast)\s*</)
       end
 
       def arithmetic_ub_site?(code)

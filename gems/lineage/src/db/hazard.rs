@@ -349,15 +349,19 @@ fn excluded_zig_file(path: &str) -> bool {
         || matches!(name, "all-tests.zig" | "all-fuzz.zig" | "size_check.zig" | "runtime-header.zig")
 }
 
-const GO_HAZARDS: &str = include_str!("queries/go/hazards.scm");
-const RUST_HAZARDS: &str = include_str!("queries/rust/hazards.scm");
-const ZIG_HAZARDS: &str = include_str!("queries/zig/hazards.scm");
-const C_HAZARDS: &str = include_str!("queries/c/hazards.scm");
-const CPP_HAZARDS: &str = include_str!("queries/cpp/hazards.scm");
-const CSHARP_HAZARDS: &str = include_str!("queries/csharp/hazards.scm");
+// FactMine owns the hazard query definitions; include them directly so the
+// two scanners can never drift apart.
+const GO_HAZARDS: &str = include_str!("../../../fact-mine/src/syntax/go_hazards.scm");
+const RUST_HAZARDS: &str = include_str!("../../../fact-mine/src/syntax/rust_hazards.scm");
+const ZIG_HAZARDS: &str = include_str!("../../../fact-mine/src/syntax/zig_hazards.scm");
+const C_HAZARDS: &str = include_str!("../../../fact-mine/src/syntax/c_hazards.scm");
+const CPP_HAZARDS: &str = include_str!("../../../fact-mine/src/syntax/cpp_hazards.scm");
+const CSHARP_HAZARDS: &str = include_str!("../../../fact-mine/src/syntax/csharp_hazards.scm");
 
 fn evidence_for_hazard(hazard_type: &str) -> &'static str {
-    if hazard_type.contains("concurrency") || hazard_type.contains("channel") || hazard_type.contains("waitgroup") || hazard_type.contains("sync") {
+    if hazard_type.contains("callback") || hazard_type.contains("metaprogramming") {
+        "nil-kill"
+    } else if hazard_type.contains("concurrency") || hazard_type.contains("channel") || hazard_type.contains("waitgroup") || hazard_type.contains("sync") {
         "concurrency"
     } else if hazard_type.contains("race") || hazard_type.contains("lock") {
         "race"
@@ -869,7 +873,7 @@ mod tests {
             
             fn normal_fn() {
                 unsafe {
-                    let val = *raw_ptr; // unsafe operation inside unsafe block
+                    let val = raw_ptr.read(); // unsafe operation inside unsafe block
                     if val > 0 {
                         let nested = 42;
                     }
