@@ -3,7 +3,7 @@
     {
       "code": "[[name, node], current]",
       "line": 9,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "size": 0,
       "tuple_types": [
         "T::Array[T.untyped]",
@@ -14,7 +14,7 @@
     {
       "code": "params(name: String, node: Integer)",
       "line": 6,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "size": 0,
       "tuple_types": [
         "T.untyped",
@@ -24,7 +24,7 @@
     {
       "code": "consume(:CHAR, \">\")",
       "line": 8,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "size": 0,
       "tuple_types": [
         "Symbol",
@@ -34,7 +34,7 @@
     {
       "code": "[[name, node], current]",
       "line": 9,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "size": 0,
       "tuple_types": [
         "T::Array[T.untyped]",
@@ -44,7 +44,7 @@
     {
       "code": "[name, node]",
       "line": 9,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "size": 0,
       "tuple_types": [
         "T.untyped",
@@ -54,7 +54,7 @@
     {
       "code": "params(kind: Symbol, text: String)",
       "line": 12,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "size": 0,
       "tuple_types": [
         "T.untyped",
@@ -106,7 +106,7 @@
       "line": 4,
       "message": "extend",
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -130,7 +130,7 @@
       "line": 6,
       "message": "sig",
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -154,7 +154,7 @@
       "line": 6,
       "message": "params",
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -181,7 +181,7 @@
       "line": 6,
       "message": "[]",
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "T::Array",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
@@ -204,7 +204,7 @@
       "line": 6,
       "message": "returns",
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "params(name: String, node: Integer)",
       "receiver_binding_kind": "unbound",
       "receiver_call_span": [
@@ -234,7 +234,7 @@
       "line": 8,
       "message": "consume",
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -258,7 +258,7 @@
       "line": 9,
       "message": "current",
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -282,7 +282,7 @@
       "line": 12,
       "message": "sig",
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -306,7 +306,7 @@
       "line": 12,
       "message": "params",
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -329,7 +329,7 @@
       "line": 12,
       "message": "void",
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "params(kind: Symbol, text: String)",
       "receiver_binding_kind": "unbound",
       "receiver_call_span": [
@@ -414,7 +414,7 @@
         "name",
         "node"
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "recursion": {
         "calls": 0,
         "halving_calls": 0,
@@ -427,7 +427,7 @@
         {
           "id": "param:TupleArrayEvidence#build:name",
           "name": "name",
-          "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+          "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
           "source_kind": "parameter",
           "span": [
             7,
@@ -439,7 +439,7 @@
         {
           "id": "param:TupleArrayEvidence#build:node",
           "name": "node",
-          "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+          "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
           "source_kind": "parameter",
           "span": [
             7,
@@ -469,14 +469,14 @@
         "data": "String",
         "kind": "Primitive"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000build\u00007\u0000sorbet\u0000param:name",
+      "id": "ruby\u0000examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000build\u00007\u0000sorbet\u0000param:name",
       "language": "ruby",
       "line": 7,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "slot": "param:name",
       "union_width": 0,
       "unknown_leaves": 0
@@ -489,14 +489,14 @@
         "data": "Integer",
         "kind": "Primitive"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000build\u00007\u0000sorbet\u0000param:node",
+      "id": "ruby\u0000examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000build\u00007\u0000sorbet\u0000param:node",
       "language": "ruby",
       "line": 7,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "slot": "param:node",
       "union_width": 0,
       "unknown_leaves": 0
@@ -511,14 +511,14 @@
         },
         "kind": "Array"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000build\u00007\u0000sorbet\u0000return",
+      "id": "ruby\u0000examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000build\u00007\u0000sorbet\u0000return",
       "language": "ruby",
       "line": 7,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "slot": "return",
       "union_width": 0,
       "unknown_leaves": 1
@@ -531,14 +531,14 @@
         "data": "Symbol",
         "kind": "Primitive"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000consume\u000013\u0000sorbet\u0000param:kind",
+      "id": "ruby\u0000examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000consume\u000013\u0000sorbet\u0000param:kind",
       "language": "ruby",
       "line": 13,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "slot": "param:kind",
       "union_width": 0,
       "unknown_leaves": 0
@@ -551,14 +551,14 @@
         "data": "String",
         "kind": "Primitive"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000consume\u000013\u0000sorbet\u0000param:text",
+      "id": "ruby\u0000examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000consume\u000013\u0000sorbet\u0000param:text",
       "language": "ruby",
       "line": 13,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "slot": "param:text",
       "union_width": 0,
       "unknown_leaves": 0
@@ -568,7 +568,7 @@
   "flow_local_types": [
     {
       "complete": true,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
       "line": 9,
       "name": "name",
@@ -596,7 +596,7 @@
     },
     {
       "complete": true,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
       "line": 9,
       "name": "node",
@@ -628,28 +628,28 @@
       "code": "name: String",
       "escapes_collection": true,
       "line": 6,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "reason": "array_literal"
     },
     {
       "code": "node: Integer",
       "escapes_collection": true,
       "line": 6,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "reason": "array_literal"
     },
     {
       "code": "kind: Symbol",
       "escapes_collection": true,
       "line": 12,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "reason": "array_literal"
     },
     {
       "code": "text: String",
       "escapes_collection": true,
       "line": 12,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "reason": "array_literal"
     }
   ],
@@ -675,7 +675,7 @@
         "name",
         "node"
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "raw_source": "def build(name, node)\n    consume(:CHAR, \">\")\n    [[name, node], current]\n  end",
       "signature": "sig { params(name: String, node: Integer).returns(T::Array[T.untyped]) }",
       "source": {
@@ -712,7 +712,7 @@
         "kind",
         "text"
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "raw_source": "def consume(kind, text); end",
       "signature": "sig { params(kind: Symbol, text: String).void }",
       "source": {
@@ -738,7 +738,7 @@
       "language": "ruby",
       "line": 3,
       "name": "TupleArrayEvidence",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "span": [
         3,
         0,
@@ -757,7 +757,7 @@
       "hash_shape": null,
       "line": 4,
       "origin_kind": "unknown",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": null,
       "slot": "0",
       "source_method": null,
@@ -775,7 +775,7 @@
       "hash_shape": null,
       "line": 6,
       "origin_kind": "untyped_return",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": null,
       "slot": "0",
       "source_method": "sig",
@@ -791,7 +791,7 @@
       "hash_shape": null,
       "line": 6,
       "origin_kind": "untyped_return",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "params(name: String, node: Integer)",
       "slot": "0",
       "source_method": "[]",
@@ -807,7 +807,7 @@
       "hash_shape": null,
       "line": 6,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": null,
       "slot": "name",
       "source_method": null,
@@ -826,7 +826,7 @@
       "hash_shape": null,
       "line": 6,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": null,
       "slot": "node",
       "source_method": null,
@@ -845,7 +845,7 @@
       "hash_shape": null,
       "line": 6,
       "origin_kind": "untyped_return",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "T::Array",
       "slot": "0",
       "source_method": "untyped",
@@ -861,7 +861,7 @@
       "hash_shape": null,
       "line": 6,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "T",
       "slot": "0",
       "source_method": null,
@@ -882,7 +882,7 @@
       "hash_shape": null,
       "line": 8,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": null,
       "slot": "0",
       "source_method": null,
@@ -901,7 +901,7 @@
       "hash_shape": null,
       "line": 8,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": null,
       "slot": "1",
       "source_method": null,
@@ -920,7 +920,7 @@
       "hash_shape": null,
       "line": 9,
       "origin_kind": "untyped_return",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": null,
       "slot": "0",
       "source_method": "current",
@@ -936,7 +936,7 @@
       "hash_shape": null,
       "line": 12,
       "origin_kind": "untyped_return",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": null,
       "slot": "0",
       "source_method": "sig",
@@ -952,7 +952,7 @@
       "hash_shape": null,
       "line": 12,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": "params(kind: Symbol, text: String)",
       "slot": "0",
       "source_method": null,
@@ -973,7 +973,7 @@
       "hash_shape": null,
       "line": 12,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": null,
       "slot": "kind",
       "source_method": null,
@@ -992,7 +992,7 @@
       "hash_shape": null,
       "line": 12,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "receiver": null,
       "slot": "text",
       "source_method": null,
@@ -1011,7 +1011,7 @@
       "handler_line": null,
       "line": 4,
       "name": "extend",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "sig",
@@ -1020,7 +1020,7 @@
       "handler_line": null,
       "line": 6,
       "name": "sig",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "params(name: String, node: Integer).returns(T::Array[T.untyped])",
@@ -1029,7 +1029,7 @@
       "handler_line": null,
       "line": 6,
       "name": "returns",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "params(name: String, node: Integer)",
@@ -1038,7 +1038,7 @@
       "handler_line": null,
       "line": 6,
       "name": "params",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "T::Array[T.untyped]",
@@ -1047,7 +1047,7 @@
       "handler_line": null,
       "line": 6,
       "name": "[]",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "T.untyped",
@@ -1056,7 +1056,7 @@
       "handler_line": null,
       "line": 6,
       "name": "untyped",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "consume(:CHAR, \">\")",
@@ -1065,7 +1065,7 @@
       "handler_line": null,
       "line": 8,
       "name": "consume",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "current",
@@ -1074,7 +1074,7 @@
       "handler_line": null,
       "line": 9,
       "name": "current",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "sig",
@@ -1083,7 +1083,7 @@
       "handler_line": null,
       "line": 12,
       "name": "sig",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "params(kind: Symbol, text: String).void",
@@ -1092,7 +1092,7 @@
       "handler_line": null,
       "line": 12,
       "name": "void",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "params(kind: Symbol, text: String)",
@@ -1101,7 +1101,7 @@
       "handler_line": null,
       "line": 12,
       "name": "params",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     }
   ],
   "return_origins": [
@@ -1126,7 +1126,7 @@
       "kind": "instance",
       "line": 7,
       "method": "build",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "return_syntax": "implicit",
       "sources": [
         {
@@ -1148,7 +1148,7 @@
     {
       "array_element_shape": null,
       "blockers": [
-        "unknown return expression ARGS at /home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:13"
+        "unknown return expression ARGS at examples/profile/ruby_tuple_arrays_nil_kill.rb:13"
       ],
       "candidate_type": {
         "kind": "Untyped"
@@ -1162,7 +1162,7 @@
       "kind": "instance",
       "line": 13,
       "method": "consume",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "return_syntax": "implicit",
       "sources": [
         {
@@ -1182,7 +1182,7 @@
       "handler_line": null,
       "line": 4,
       "name": "extend",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "sig",
@@ -1191,7 +1191,7 @@
       "handler_line": null,
       "line": 6,
       "name": "sig",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "params(name: String, node: Integer).returns(T::Array[T.untyped])",
@@ -1200,7 +1200,7 @@
       "handler_line": null,
       "line": 6,
       "name": "returns",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "params(name: String, node: Integer)",
@@ -1209,7 +1209,7 @@
       "handler_line": null,
       "line": 6,
       "name": "params",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "T::Array[T.untyped]",
@@ -1218,7 +1218,7 @@
       "handler_line": null,
       "line": 6,
       "name": "[]",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "T.untyped",
@@ -1227,7 +1227,7 @@
       "handler_line": null,
       "line": 6,
       "name": "untyped",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "consume(:CHAR, \">\")",
@@ -1236,7 +1236,7 @@
       "handler_line": null,
       "line": 8,
       "name": "consume",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "current",
@@ -1245,7 +1245,7 @@
       "handler_line": null,
       "line": 9,
       "name": "current",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "sig",
@@ -1254,7 +1254,7 @@
       "handler_line": null,
       "line": 12,
       "name": "sig",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "params(kind: Symbol, text: String).void",
@@ -1263,7 +1263,7 @@
       "handler_line": null,
       "line": 12,
       "name": "void",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     },
     {
       "code": "params(kind: Symbol, text: String)",
@@ -1272,7 +1272,7 @@
       "handler_line": null,
       "line": 12,
       "name": "params",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb"
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb"
     }
   ],
   "signatures": {
@@ -1287,7 +1287,7 @@
       "code": "[[name, node], current]",
       "confidence": "review",
       "line": 9,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "size": 2,
       "types": [
         {
@@ -1305,7 +1305,7 @@
       "code": "[name, node]",
       "confidence": "high",
       "line": 9,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "size": 2,
       "types": [
         {
@@ -1321,7 +1321,7 @@
   ],
   "type_definitions": [
     {
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000build\u00007\u0000sorbet",
+      "id": "ruby\u0000examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000build\u00007\u0000sorbet",
       "kind": "method_signature",
       "language": "ruby",
       "line": 7,
@@ -1343,7 +1343,7 @@
           }
         }
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "return_type": {
         "data": {
           "kind": "Untyped"
@@ -1354,7 +1354,7 @@
       "type_system": "sorbet"
     },
     {
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000consume\u000013\u0000sorbet",
+      "id": "ruby\u0000examples/profile/ruby_tuple_arrays_nil_kill.rb\u0000TupleArrayEvidence\u0000method_signature\u0000consume\u000013\u0000sorbet",
       "kind": "method_signature",
       "language": "ruby",
       "line": 13,
@@ -1376,7 +1376,7 @@
           }
         }
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "signature": "sig { params(kind: Symbol, text: String).void }",
       "type_system": "sorbet"
     }
@@ -1385,9 +1385,9 @@
     {
       "candidate": false,
       "candidate_kind": "parameter",
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
-      "id": "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:name",
+      "id": "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:name",
       "kind": "definition",
       "line": 7,
       "name": "name",
@@ -1404,9 +1404,9 @@
     {
       "candidate": false,
       "candidate_kind": "parameter",
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
-      "id": "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:node",
+      "id": "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:node",
       "kind": "definition",
       "line": 7,
       "name": "node",
@@ -1423,9 +1423,9 @@
     {
       "candidate": false,
       "candidate_kind": "parameter",
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "consume",
-      "id": "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#consume:entry:0:13:2:place:TupleArrayEvidence#consume:local:kind",
+      "id": "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#consume:entry:0:13:2:place:TupleArrayEvidence#consume:local:kind",
       "kind": "definition",
       "line": 13,
       "name": "kind",
@@ -1442,9 +1442,9 @@
     {
       "candidate": false,
       "candidate_kind": "parameter",
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "consume",
-      "id": "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#consume:entry:0:13:2:place:TupleArrayEvidence#consume:local:text",
+      "id": "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#consume:entry:0:13:2:place:TupleArrayEvidence#consume:local:text",
       "kind": "definition",
       "line": 13,
       "name": "text",
@@ -1461,15 +1461,15 @@
     {
       "candidate": false,
       "candidate_kind": null,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
-      "id": "type-read:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:stmt:2:9:4:place:TupleArrayEvidence#build:local:name",
+      "id": "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:stmt:2:9:4:place:TupleArrayEvidence#build:local:name",
       "kind": "flow_read",
       "line": 9,
       "name": "name",
       "owner": "TupleArrayEvidence",
       "requirements": [
-        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:name"
+        "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:name"
       ],
       "resolved": true,
       "span": [
@@ -1485,15 +1485,15 @@
     {
       "candidate": false,
       "candidate_kind": null,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
-      "id": "type-read:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:stmt:2:9:4:place:TupleArrayEvidence#build:local:node",
+      "id": "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:stmt:2:9:4:place:TupleArrayEvidence#build:local:node",
       "kind": "flow_read",
       "line": 9,
       "name": "node",
       "owner": "TupleArrayEvidence",
       "requirements": [
-        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:node"
+        "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:node"
       ],
       "resolved": true,
       "span": [

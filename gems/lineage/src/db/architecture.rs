@@ -183,6 +183,18 @@ pub fn ingest_architecture_json(
 
     let mut deactivated_languages = std::collections::HashSet::new();
 
+    if complete {
+        if let Some(nodes) = document.get("nodes").and_then(Value::as_array) {
+            for node in nodes {
+                if let Some(lang_val) = node.get("language").and_then(Value::as_str) {
+                    if !lang_val.is_empty() && deactivated_languages.insert(lang_val.to_string()) {
+                        storage.deactivate_active_hazards(lang_val)?;
+                    }
+                }
+            }
+        }
+    }
+
     for hazard in document
         .get("hazards")
         .and_then(Value::as_array)
@@ -198,29 +210,25 @@ pub fn ingest_architecture_json(
         let provider = {
             let p = text(hazard, "provider");
             if p.is_empty() {
-                if let Some(lang) = hazard_type.split('_').next() {
-                    lang.to_string()
-                } else {
-                    let ext = Path::new(&path).extension().and_then(|e| e.to_str()).unwrap_or("");
-                    match ext {
-                        "rs" => "rust",
-                        "go" => "go",
-                        "zig" => "zig",
-                        "rb" => "ruby",
-                        "py" => "python",
-                        "js" => "javascript",
-                        "ts" => "typescript",
-                        "lua" => "lua",
-                        "java" => "java",
-                        "php" => "php",
-                        "kt" => "kotlin",
-                        "swift" => "swift",
-                        "c" => "c",
-                        "cpp" => "cpp",
-                        "cs" => "csharp",
-                        _ => "",
-                    }.to_string()
-                }
+                let ext = Path::new(&path).extension().and_then(|e| e.to_str()).unwrap_or("");
+                match ext {
+                    "rs" => "rust",
+                    "go" => "go",
+                    "zig" => "zig",
+                    "rb" => "ruby",
+                    "py" => "python",
+                    "js" => "javascript",
+                    "ts" => "typescript",
+                    "lua" => "lua",
+                    "java" => "java",
+                    "php" => "php",
+                    "kt" => "kotlin",
+                    "swift" => "swift",
+                    "c" => "c",
+                    "cpp" => "cpp",
+                    "cs" => "csharp",
+                    _ => "",
+                }.to_string()
             } else {
                 p
             }
@@ -230,18 +238,14 @@ pub fn ingest_architecture_json(
             storage.deactivate_active_hazards(&provider)?;
         }
 
-        let mut required_evidence = text(hazard, "required_evidence");
-        if required_evidence.is_empty() {
-            if hazard_type.contains("_vopr_") {
-                required_evidence = "vopr".to_string();
-            } else if hazard_type.contains("_loom_") {
-                required_evidence = "loom".to_string();
-            } else if hazard_type.contains("_wait_loop") {
-                required_evidence = "hammer".to_string();
-            } else if hazard_type.contains("_metaprogramming") {
-                required_evidence = "nil-kill".to_string();
+        let required_evidence = {
+            let req = text(hazard, "required_evidence");
+            if req.is_empty() {
+                "nil-kill".to_string()
+            } else {
+                req
             }
-        }
+        };
 
         if !file_cache.contains_key(&path) {
             if let Ok(contents) = fs::read_to_string(repo_path.join(&path)) {
@@ -568,5 +572,105 @@ mod tests {
 
         // Verify the hazard was ingested
         assert_eq!(storage.count_rows("unit_hazards").unwrap(), 1);
+
+        // Verify correct provider and required_evidence are stored
+        let mut stmt = storage.connection().prepare("SELECT language, required_evidence, is_active FROM unit_hazards").unwrap();
+        let mut rows = stmt.query(params![]).unwrap();
+        let row = rows.next().unwrap().unwrap();
+        let language: String = row.get(0).unwrap();
+        let req_ev: String = row.get(1).unwrap();
+        let is_active: i32 = row.get(2).unwrap();
+        assert_eq!(language, "ruby");
+        assert_eq!(req_ev, "nil-kill");
+        assert_eq!(is_active, 1);
+
+        // 1. Verify reimport with zero hazards in a complete scan deactivates old hazards
+        let payload_empty_hazards = json!({
+            "schema_version": 1,
+            "kind": "espalier.architecture.v1",
+            "analyzer": {"name": "espalier", "version": "test"},
+            "generated_at": "2026-07-11T00:00:00Z",
+            "corpus": {"commit": "def", "root": dir.path().to_str().unwrap(), "complete": true},
+            "nodes": [
+                {"id":"owner:1","kind":"owner","name":"Demo","owner":"Demo","path":"demo.rb","start_line":1,"language":"ruby"},
+            ],
+            "edges": [],
+            "pressure": [],
+            "hazards": []
+        }).to_string();
+
+        ingest_architecture_json(&storage, &payload_empty_hazards).unwrap();
+        // Since it was complete scan and contained language: ruby in nodes, old ruby hazard is deactivated!
+        let is_active_after_empty: i32 = storage.connection().query_row(
+            "SELECT is_active FROM unit_hazards WHERE language = 'ruby'",
+            params![],
+            |r| r.get(0)
+        ).unwrap();
+        assert_eq!(is_active_after_empty, 0);
+
+        // 2. Verify replacement rather than duplication (we insert a new hazard, it is active, old remains inactive)
+        let payload_new_hazard = json!({
+            "schema_version": 1,
+            "kind": "espalier.architecture.v1",
+            "analyzer": {"name": "espalier", "version": "test"},
+            "generated_at": "2026-07-11T00:00:00Z",
+            "corpus": {"commit": "ghi", "root": dir.path().to_str().unwrap(), "complete": true},
+            "nodes": [
+                {"id":"owner:1","kind":"owner","name":"Demo","owner":"Demo","path":"demo.rb","start_line":1,"language":"ruby"},
+            ],
+            "edges": [],
+            "pressure": [],
+            "hazards": [
+                {
+                    "path": "demo.rb",
+                    "line": 4,
+                    "hazard_type": "ruby_metaprogramming",
+                    "source": "eval('x = 2')",
+                    "provider": "ruby",
+                    "required_evidence": "nil-kill"
+                }
+            ]
+        }).to_string();
+
+        ingest_architecture_json(&storage, &payload_new_hazard).unwrap();
+        let active_count: i32 = storage.connection().query_row(
+            "SELECT COUNT(*) FROM unit_hazards WHERE language = 'ruby' AND is_active = 1",
+            params![],
+            |r| r.get(0)
+        ).unwrap();
+        assert_eq!(active_count, 1); // Only the new one is active!
+        
+        let total_count: i32 = storage.connection().query_row(
+            "SELECT COUNT(*) FROM unit_hazards WHERE language = 'ruby'",
+            params![],
+            |r| r.get(0)
+        ).unwrap();
+        assert_eq!(total_count, 2); // 2 rows exist total (old deactivated one and new active one)
+
+        // 3. Verify rollback on insertion failure
+        let payload_broken = json!({
+            "schema_version": 1,
+            "kind": "espalier.architecture.v1",
+            "analyzer": {"name": "espalier", "version": "test"},
+            "generated_at": "2026-07-11T00:00:00Z",
+            "corpus": {"commit": "broken", "root": dir.path().to_str().unwrap(), "complete": true},
+            "nodes": [
+                // Duplicate IDs to trigger constraint violation
+                {"id":"owner:1","kind":"owner","name":"Demo","owner":"Demo","path":"demo.rb","start_line":1,"language":"ruby"},
+                {"id":"owner:1","kind":"owner","name":"Demo","owner":"Demo","path":"demo.rb","start_line":1,"language":"ruby"}
+            ],
+            "edges": [],
+            "pressure": [],
+            "hazards": []
+        }).to_string();
+
+        assert!(ingest_architecture_json(&storage, &payload_broken).is_err());
+        // Verify no changes committed - active count is still 1!
+        let active_count_after_fail: i32 = storage.connection().query_row(
+            "SELECT COUNT(*) FROM unit_hazards WHERE language = 'ruby' AND is_active = 1",
+            params![],
+            |r| r.get(0)
+        ).unwrap();
+        assert_eq!(active_count_after_fail, 1);
     }
 }

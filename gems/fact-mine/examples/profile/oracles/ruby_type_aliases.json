@@ -3,7 +3,7 @@
     {
       "code": "T.any(Schemas::EnumSchema, Schemas::StructSchema)",
       "line": 6,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "size": 0,
       "tuple_types": [
         "Schemas::EnumSchema",
@@ -44,7 +44,7 @@
       "line": 4,
       "message": "type_alias",
       "owner": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "receiver": "T",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
@@ -71,7 +71,7 @@
       "line": 4,
       "message": "[]",
       "owner": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "receiver": "T::Array",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
@@ -94,7 +94,7 @@
       "line": 5,
       "message": "type_alias",
       "owner": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "receiver": "T",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
@@ -121,7 +121,7 @@
       "line": 6,
       "message": "any",
       "owner": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "receiver": "T",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
@@ -142,7 +142,7 @@
       "origin": {
         "kind": "hash literal"
       },
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb"
+      "path": "examples/profile/ruby_type_aliases.rb"
     }
   ],
   "declaration_type_pressures": [
@@ -157,14 +157,14 @@
         },
         "kind": "Array"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00004\u0000sorbet\u0000alias_target",
+      "id": "ruby\u0000examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00004\u0000sorbet\u0000alias_target",
       "language": "ruby",
       "line": 4,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "slot": "alias_target",
       "union_width": 0,
       "unknown_leaves": 0
@@ -186,14 +186,14 @@
         ],
         "kind": "Union"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00005\u0000sorbet\u0000alias_target",
+      "id": "ruby\u0000examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00005\u0000sorbet\u0000alias_target",
       "language": "ruby",
       "line": 5,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "slot": "alias_target",
       "union_width": 2,
       "unknown_leaves": 0
@@ -210,7 +210,7 @@
       "language": "ruby",
       "line": 3,
       "name": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "span": [
         3,
         0,
@@ -225,25 +225,25 @@
   "state_types": {},
   "type_definitions": [
     {
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00004\u0000sorbet",
+      "id": "ruby\u0000examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00004\u0000sorbet",
       "kind": "type_alias",
       "language": "ruby",
       "line": 4,
       "name": "RawBody",
       "owner": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "source": "syntax",
       "target": "T::Array[AST::Node]",
       "type_system": "sorbet"
     },
     {
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00005\u0000sorbet",
+      "id": "ruby\u0000examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00005\u0000sorbet",
       "kind": "type_alias",
       "language": "ruby",
       "line": 5,
       "name": "ScopeType",
       "owner": "Demo",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "source": "syntax",
       "target": "T.any(Schemas::EnumSchema, Schemas::StructSchema)",
       "type_system": "sorbet"

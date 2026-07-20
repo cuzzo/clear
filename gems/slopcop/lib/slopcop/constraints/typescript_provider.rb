@@ -33,7 +33,7 @@ module SlopCop
           paths,
           repo: repo,
           language_extension: ".ts",
-          hazard_type_filter: "typescript_metaprogramming",
+          hazard_type_filter: ["typescript_metaprogramming", "typescript_callback_invocation"],
           required_evidence: "nil-kill",
           label: "TypeScript metaprogramming site"
         )

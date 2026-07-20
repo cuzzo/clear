@@ -511,15 +511,8 @@ fn tree_sitter_candidates(
     }
 
     let query_str = adapter.query_str();
-    let query = match tree_sitter::Query::new(&adapter.language(), query_str) {
-        Ok(q) => q,
-        Err(e) => {
-            if std::env::var("LINEAGE_DEBUG_EXTRACT").is_ok() {
-                eprintln!("Failed to compile query for {extension}: {e:?}");
-            }
-            return None;
-        }
-    };
+    let query = tree_sitter::Query::new(&adapter.language(), query_str)
+        .unwrap_or_else(|e| panic!("Failed to compile query for {extension}: {e:?}"));
 
     let mut cursor = tree_sitter::QueryCursor::new();
     let mut candidates = Vec::new();

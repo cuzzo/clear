@@ -34,7 +34,7 @@
       "line": 2,
       "message": "attr_accessor",
       "owner": "Calculator",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -92,7 +92,7 @@
       "parameters": [
         "value"
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "recursion": {
         "calls": 0,
         "halving_calls": 0,
@@ -105,7 +105,7 @@
         {
           "id": "param:Calculator#add:value",
           "name": "value",
-          "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+          "path": "examples/profile/ruby_calculator.rb",
           "source_kind": "parameter",
           "span": [
             4,
@@ -117,7 +117,7 @@
         {
           "id": "state:Calculator:@total",
           "name": "@total",
-          "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+          "path": "examples/profile/ruby_calculator.rb",
           "source_kind": "state",
           "span": [
             5,
@@ -159,7 +159,7 @@
       "name": "total",
       "owner": "Calculator",
       "owner_id": "owner:c89bc43899119c68",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "source": "syntax",
       "span": [
         5,
@@ -173,7 +173,7 @@
   "flow_local_types": [
     {
       "complete": false,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "file": "examples/profile/ruby_calculator.rb",
       "function": "add",
       "line": 5,
       "name": "@total",
@@ -192,7 +192,7 @@
     },
     {
       "complete": false,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "file": "examples/profile/ruby_calculator.rb",
       "function": "add",
       "line": 5,
       "name": "value",
@@ -213,7 +213,7 @@
     },
     {
       "complete": false,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "file": "examples/profile/ruby_calculator.rb",
       "function": "result",
       "line": 9,
       "name": "@total",
@@ -255,7 +255,7 @@
       "params": [
         "value"
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "raw_source": "def add(value)\n    @total = (@total || 0) + value\n  end",
       "signature": "",
       "source": {},
@@ -284,7 +284,7 @@
       "owner": "Calculator",
       "owner_id": "owner:c89bc43899119c68",
       "params": [],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "raw_source": "def result\n    @total\n  end",
       "signature": "",
       "source": {},
@@ -305,7 +305,7 @@
       "language": "ruby",
       "line": 1,
       "name": "Calculator",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "span": [
         1,
         0,
@@ -326,7 +326,7 @@
       "kind": "reads",
       "line": 5,
       "owner": "Calculator",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "receiver": "self",
       "span": [
         5,
@@ -346,7 +346,7 @@
       "kind": "reads",
       "line": 9,
       "owner": "Calculator",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "receiver": "self",
       "span": [
         9,
@@ -366,7 +366,7 @@
       "kind": "writes",
       "line": 5,
       "owner": "Calculator",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "receiver": "self",
       "span": [
         5,
@@ -386,7 +386,7 @@
       "line": 5,
       "owner": "Calculator",
       "param": "value",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "span": [
         5,
         4,

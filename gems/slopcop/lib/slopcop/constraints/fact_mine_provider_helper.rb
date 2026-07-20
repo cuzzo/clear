@@ -57,7 +57,14 @@ module SlopCop
         
         hazard_sites.select do |site|
           site_abs_path = File.expand_path(site["path"], repo)
-          abs_files.include?(site_abs_path) && site["hazard_type"] == hazard_type_filter
+          match_hazard = if hazard_type_filter.is_a?(Regexp)
+                           site["hazard_type"] =~ hazard_type_filter
+                         elsif hazard_type_filter.is_a?(Array)
+                           hazard_type_filter.include?(site["hazard_type"])
+                         else
+                           site["hazard_type"] == hazard_type_filter
+                         end
+          abs_files.include?(site_abs_path) && match_hazard
         end.map do |site|
           {
             path: Pathname.new(File.expand_path(site["path"], repo)).relative_path_from(Pathname.new(repo)).to_s,

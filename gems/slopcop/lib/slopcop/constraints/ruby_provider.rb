@@ -33,7 +33,7 @@ module SlopCop
           paths,
           repo: repo,
           language_extension: ".rb",
-          hazard_type_filter: "ruby_metaprogramming",
+          hazard_type_filter: ["ruby_metaprogramming", "ruby_callback_invocation"],
           required_evidence: "nil-kill",
           label: "Ruby metaprogramming site"
         )

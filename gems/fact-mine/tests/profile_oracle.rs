@@ -1464,9 +1464,11 @@ fn profile_oracle_matches_ruby_output() -> Result<()> {
             Profile::Espalier
         };
         let actual = profile::extract(&document, selected_profile);
-        let actual_json = serde_json::to_value(&actual)?;
+        let mut actual_json = serde_json::to_value(&actual)?;
+        normalize_paths_in_json(&mut actual_json);
 
-        let expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
+        let mut expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
+        normalize_paths_in_json(&mut expected);
 
         let normalized = normalize_for_oracle(&actual_json, &expected);
         let expected_normalized = normalize_for_oracle(&expected, &expected);
@@ -1486,6 +1488,56 @@ fn profile_oracle_matches_ruby_output() -> Result<()> {
     Ok(())
 }
 
+fn strip_absolute_prefix(s: &str) -> String {
+    let target = "examples/profile/";
+    if let Some(idx) = s.find(target) {
+        if idx == 0 {
+            return s.to_string();
+        }
+        let mut start_idx = 0;
+        for (i, c) in s[..idx].char_indices().rev() {
+            if c == '\0' || c == '"' || c == '\'' || c == ' ' {
+                start_idx = i + 1;
+                break;
+            }
+        }
+        let mut result = s[..start_idx].to_string();
+        result.push_str(&s[idx..]);
+        if result.len() < s.len() {
+            strip_absolute_prefix(&result)
+        } else {
+            result
+        }
+    } else {
+        s.to_string()
+    }
+}
+
+fn normalize_paths_in_json(v: &mut Value) {
+    match v {
+        Value::Object(map) => {
+            for (key, val) in map.iter_mut() {
+                if key == "path" || key == "file" || key == "id" {
+                    if let Value::String(s) = val {
+                        *val = Value::String(strip_absolute_prefix(s));
+                    }
+                } else {
+                    normalize_paths_in_json(val);
+                }
+            }
+        }
+        Value::Array(arr) => {
+            for val in arr {
+                normalize_paths_in_json(val);
+            }
+        }
+        Value::String(s) => {
+            *s = strip_absolute_prefix(s);
+        }
+        _ => {}
+    }
+}
+
 /// Normalize a profile JSON value to match oracle expectations.
 /// Only compares keys present in expected; sorts arrays for determinism.
 fn normalize_for_oracle(value: &Value, expected: &Value) -> Value {
@@ -1495,12 +1547,9 @@ fn normalize_for_oracle(value: &Value, expected: &Value) -> Value {
             for key in expected_map.keys() {
                 if let Some(actual_val) = actual_map.get(key) {
                     let mut normalized = normalize_for_oracle(actual_val, &expected_map[key]);
-                    // Normalize paths to be relative (strip absolute prefixes)
-                    if key == "path" || key == "id" {
+                    if key == "path" || key == "id" || key == "file" {
                         if let Value::String(path) = &normalized {
-                            if let Some(idx) = path.find("examples/profile/") {
-                                normalized = Value::String(path[idx..].to_string());
-                            }
+                            normalized = Value::String(strip_absolute_prefix(path));
                         }
                     }
                     out.insert(key.clone(), normalized);

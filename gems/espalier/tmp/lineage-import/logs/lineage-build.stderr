@@ -1,4 +1,0 @@
-Error: open git repository /home/yahn/cheat/gems/espalier
-
-Caused by:
-    could not find repository at '/home/yahn/cheat/gems/espalier'; class=Repository (6); code=NotFound (-3)

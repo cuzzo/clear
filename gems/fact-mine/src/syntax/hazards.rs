@@ -26,7 +26,9 @@ fn get_cached_query(language: Language) -> Option<&'static Query> {
             static CACHE: OnceLock<Option<Query>> = OnceLock::new();
             CACHE.get_or_init(|| {
                 let grammar = grammar_for_language($lang);
-                Query::new(&grammar, $query_str).ok()
+                let q = Query::new(&grammar, $query_str)
+                    .unwrap_or_else(|e| panic!("Failed to compile bundled tree-sitter query for {:?}: {}", $lang, e));
+                Some(q)
             }).as_ref()
         }};
     }
@@ -113,6 +115,7 @@ pub(crate) fn extract_hazards(
                     snippet: line_text,
                     hazard_type,
                     required_evidence,
+                    provider: language.as_str().to_string(),
                     start_column: Some(start_col),
                     end_line: Some(end_line),
                     end_column: Some(end_col),
@@ -125,8 +128,47 @@ pub(crate) fn extract_hazards(
     sites
 }
 
-fn is_callback_type_or_name(name: &str, type_str: Option<&str>) -> bool {
-    let check_str = |s: &str| {
+fn supports_interfaces(language: Language) -> bool {
+    matches!(
+        language,
+        Language::Java
+            | Language::Kotlin
+            | Language::TypeScript
+            | Language::CSharp
+            | Language::Go
+            | Language::Rust
+            | Language::Swift
+    )
+}
+
+fn is_cb_name(s: &str) -> bool {
+    let s_lower = s.to_lowercase();
+    s_lower == "cb"
+        || s_lower == "fp"
+        || s_lower == "fn"
+        || s_lower == "func"
+        || s_lower.ends_with("_cb")
+        || s_lower.ends_with("_fp")
+        || s_lower.ends_with("_fn")
+        || s_lower.ends_with("_func")
+        || s_lower.contains("callback")
+        || s_lower.contains("listener")
+        || s_lower.contains("handler")
+        || s_lower.contains("observer")
+        || s_lower.contains("executor")
+        || s_lower.contains("consumer")
+        || s_lower.contains("supplier")
+        || s_lower.contains("predicate")
+        || s_lower.contains("runnable")
+        || s_lower.contains("callable")
+}
+
+fn is_callback_type_or_name(name: &str, type_str: Option<&str>, language: Language) -> bool {
+    if !supports_interfaces(language) {
+        return false;
+    }
+
+    let is_cb_type = |s: &str| {
         let s_lower = s.to_lowercase();
         s_lower.contains("callback")
             || s_lower.contains("listener")
@@ -138,19 +180,22 @@ fn is_callback_type_or_name(name: &str, type_str: Option<&str>) -> bool {
             || s_lower.contains("predicate")
             || s_lower.contains("runnable")
             || s_lower.contains("callable")
-            || s_lower.contains("func")
-            || s_lower.contains("fn")
+            || s_lower == "fn"
+            || s_lower == "func"
+            || s_lower == "function"
+            || s_lower.starts_with("fn(")
+            || s_lower.starts_with("fn ")
+            || s_lower.ends_with("_fn")
+            || s_lower.ends_with("_func")
             || s_lower.contains("->")
             || s_lower.contains("=>")
-            || s_lower == "cb"
-            || s_lower == "fp"
     };
 
-    if check_str(name) {
+    if is_cb_name(name) {
         return true;
     }
     if let Some(t) = type_str {
-        if check_str(t) {
+        if is_cb_type(t) {
             return true;
         }
     }
@@ -173,48 +218,111 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
         
         let mut is_callback = false;
         
-        if call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this" {
-            // E.g., cb() or fp()
+        let is_direct = call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this";
+
+        if is_direct {
+            // E.g., cb(), fp(), arr[10](), (*fp)()
+            let mut is_var_call = false;
             if enclosing_fn.params.contains(&call.message) 
                 || enclosing_fn.callback_params.contains(&call.message) 
             {
-                is_callback = true;
+                if call.receiver.is_empty() {
+                    is_var_call = true;
+                } else {
+                    let param_type = document.method_param_types
+                        .get(&call.function)
+                        .and_then(|params| params.get(&call.message))
+                        .map(|s| s.as_str());
+                    let is_cb = is_callback_type_or_name(&call.message, param_type, document.language)
+                        || matches!(
+                            call.message.as_str(),
+                            "cb" | "fp"
+                                | "fn"
+                                | "func"
+                                | "blk"
+                                | "block"
+                                | "work"
+                                | "mapper"
+                                | "runner"
+                                | "scenario"
+                                | "handler"
+                                | "listener"
+                                | "on_skip"
+                                | "error_handler"
+                                | "warn_handler"
+                                | "sig_lookup"
+                                | "schema_lookup"
+                                | "project"
+                        );
+                    if is_cb {
+                        is_var_call = true;
+                    }
+                }
             }
-            
-            if !is_callback {
+            if !is_var_call {
                 if let Some(locals) = document.method_local_types.get(&call.function) {
                     if let Some(t) = locals.get(&call.message) {
                         let t_lower = t.to_lowercase();
                         if t_lower.contains("func") || t_lower.contains("fn") || t_lower.contains("->") || t_lower.contains("function") {
-                            is_callback = true;
+                            is_var_call = true;
                         }
                     }
                 }
             }
-        } else {
-            // E.g., cb.call() or arr[10]()
-            let is_complex_receiver = call.receiver.contains('[') 
-                || call.receiver.contains('(')
-                || call.receiver.contains('*')
-                || call.receiver.contains("->")
-                || (document.language == Language::Php && call.receiver.starts_with('$'));
-                
-            if is_complex_receiver {
+            if !is_var_call {
+                let is_complex_target = (call.message.contains('[') && call.message != "[]")
+                    || call.message.contains('(')
+                    || call.message.contains('*')
+                    || call.message.contains("->")
+                    || (document.language == Language::Php && call.message.starts_with('$'));
+                if is_complex_target {
+                    is_var_call = true;
+                }
+            }
+            if is_var_call {
                 is_callback = true;
-            } else if enclosing_fn.params.contains(&call.receiver) 
-                || enclosing_fn.callback_params.contains(&call.receiver) 
+            }
+        } else {
+            // E.g., cb.call() or listener.onEvent()
+            if call.receiver != "self" && call.receiver != "this" 
+                && (enclosing_fn.params.contains(&call.receiver) 
+                    || enclosing_fn.callback_params.contains(&call.receiver)) 
             {
-                // Dynamic callback method dispatchers
+                let is_dispatch_name = matches!(
+                    call.message.as_str(),
+                    "call"
+                        | "invoke"
+                        | "apply"
+                        | "run"
+                        | "perform"
+                        | "execute"
+                        | "accept"
+                        | "get"
+                        | "callback"
+                        | "handle"
+                        | "dispatch"
+                        | "trigger"
+                        | "fire"
+                        | "notify"
+                        | "emit"
+                ) || call.message.starts_with("on_")
+                  || (call.message.starts_with("on")
+                      && call.message.chars().nth(2).map_or(false, |c| c.is_ascii_uppercase()));
+
                 let is_invoker = matches!(call.message.as_str(), "call" | "invoke" | "apply" | "run" | "perform");
-                
-                let param_type = document.method_param_types
-                    .get(&call.function)
-                    .and_then(|params| params.get(&call.receiver))
-                    .map(|s| s.as_str());
-                    
-                let is_callback_type = is_callback_type_or_name(&call.receiver, param_type);
-                
-                if is_invoker || is_callback_type {
+
+                let is_cb = if supports_interfaces(document.language) {
+                    let param_type = document.method_param_types
+                        .get(&call.function)
+                        .and_then(|params| params.get(&call.receiver))
+                        .map(|s| s.as_str());
+                    let is_callback_type = is_callback_type_or_name(&call.receiver, param_type, document.language);
+                    is_dispatch_name && is_callback_type
+                } else {
+                    is_invoker || (is_dispatch_name && is_cb_name(&call.receiver))
+                };
+
+                if is_cb {
                     is_callback = true;
                 }
             }
@@ -234,7 +342,8 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                 line: call.line as u32,
                 snippet,
                 hazard_type,
-                required_evidence: "".to_string(),
+                required_evidence: "nil-kill".to_string(),
+                provider: document.language.as_str().to_string(),
                 start_column: Some(call.span[1] as u32),
                 end_line: Some(call.span[2] as u32),
                 end_column: Some(call.span[3] as u32),
@@ -639,5 +748,33 @@ local mt = {
         assert_eq!(c_pos[0].hazard_type, "c_callback_invocation");
         let c_neg = check("void helper() {}\nvoid test() {\n  helper();\n}", ".c", Language::C);
         assert_eq!(c_neg.len(), 0);
+
+        // 12. C++
+        let cpp_pos = check("void test(std::function<void()> cb) {\n  cb();\n}", ".cpp", Language::Cpp);
+        assert_eq!(cpp_pos.len(), 1);
+        assert_eq!(cpp_pos[0].hazard_type, "cpp_callback_invocation");
+        let cpp_neg = check("void helper() {}\nvoid test() {\n  helper();\n}", ".cpp", Language::Cpp);
+        assert_eq!(cpp_neg.len(), 0);
+
+        // 13. C#
+        let csharp_pos = check("class Foo {\n  void Test(Action cb) {\n    cb();\n  }\n}", ".cs", Language::CSharp);
+        assert_eq!(csharp_pos.len(), 1);
+        assert_eq!(csharp_pos[0].hazard_type, "csharp_callback_invocation");
+        let csharp_neg = check("class Foo {\n  void Helper() {}\n  void Test() {\n    Helper();\n  }\n}", ".cs", Language::CSharp);
+        assert_eq!(csharp_neg.len(), 0);
+
+        // 14. TypeScript
+        let ts_pos = check("function test(cb: () => void) {\n  cb();\n}", ".ts", Language::TypeScript);
+        assert_eq!(ts_pos.len(), 1);
+        assert_eq!(ts_pos[0].hazard_type, "typescript_callback_invocation");
+        let ts_neg = check("function test(user: User) {\n  user.getName();\n}", ".ts", Language::TypeScript);
+        assert_eq!(ts_neg.len(), 0);
+
+        // 15. Zig
+        let zig_pos = check("fn test(cb: fn() void) void {\n  cb();\n}", ".zig", Language::Zig);
+        assert_eq!(zig_pos.len(), 1);
+        assert_eq!(zig_pos[0].hazard_type, "zig_callback_invocation");
+        let zig_neg = check("fn helper() void {}\nfn test() void {\n  helper();\n}", ".zig", Language::Zig);
+        assert_eq!(zig_neg.len(), 0);
     }
 }

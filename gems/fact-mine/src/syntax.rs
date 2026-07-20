@@ -335,6 +335,8 @@ pub struct HazardSite {
     pub snippet: String,
     pub hazard_type: String,
     pub required_evidence: String,
+    #[serde(default)]
+    pub provider: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_column: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

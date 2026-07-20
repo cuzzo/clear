@@ -3,7 +3,7 @@
     {
       "code": "params(\n      node: AST::MatchStatement,\n      facts: MatchLoweringFacts,\n      arms: T::Array[UnionMatchArmPlan],\n    )",
       "line": 5,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "size": 0,
       "tuple_types": [
         "T.untyped",
@@ -14,7 +14,7 @@
     {
       "code": "T.bind(self, MIRLowering)",
       "line": 12,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "size": 0,
       "tuple_types": [
         "T.untyped",
@@ -56,7 +56,7 @@
       "line": 2,
       "message": "extend",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -80,7 +80,7 @@
       "line": 4,
       "message": "sig",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -107,7 +107,7 @@
       "line": 8,
       "message": "[]",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "T::Array",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
@@ -131,7 +131,7 @@
       "line": 5,
       "message": "params",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -154,7 +154,7 @@
       "line": 5,
       "message": "returns",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "params( node: AST::MatchStatement, facts: MatchLoweringFacts, arms: T::Array[UnionMatchArmPlan], )",
       "receiver_binding_kind": "unbound",
       "receiver_call_span": [
@@ -187,7 +187,7 @@
       "line": 12,
       "message": "bind",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "T",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
@@ -211,7 +211,7 @@
       "line": 13,
       "message": "union_schemas",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -234,7 +234,7 @@
       "line": 13,
       "message": "expr_type_sym",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "facts",
       "receiver_binding_kind": "parameter",
       "receiver_kind": "value",
@@ -260,7 +260,7 @@
       "line": 13,
       "message": "[]",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "union_schemas",
       "receiver_binding_kind": "unbound",
       "receiver_call_span": [
@@ -289,7 +289,7 @@
       "line": 14,
       "message": "variants",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "schema",
       "receiver_binding_kind": "unbound",
       "receiver_definition_call_spans": [
@@ -320,7 +320,7 @@
       "line": 14,
       "message": "keys",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "schema&.variants",
       "receiver_binding_kind": "unbound",
       "receiver_call_span": [
@@ -349,7 +349,7 @@
       "line": 14,
       "message": "map",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "schema&.variants&.keys",
       "receiver_binding_kind": "unbound",
       "receiver_call_span": [
@@ -378,7 +378,7 @@
       "line": 14,
       "message": "sort",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "schema&.variants&.keys&.map(&:to_s)",
       "receiver_binding_kind": "unbound",
       "receiver_call_span": [
@@ -408,7 +408,7 @@
       "line": 18,
       "message": "sig",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -432,7 +432,7 @@
       "line": 18,
       "message": "params",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
@@ -455,7 +455,7 @@
       "line": 18,
       "message": "returns",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "params(required: String)",
       "receiver_binding_kind": "unbound",
       "receiver_call_span": [
@@ -484,7 +484,7 @@
       "line": 20,
       "message": "nil?",
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "required",
       "receiver_binding_kind": "parameter",
       "receiver_kind": "value",
@@ -514,9 +514,9 @@
         "code": "union_schemas",
         "kind": "forwarded return",
         "line": 13,
-        "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+        "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
       },
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "union_schemas",
       "receiver_type": null,
       "status": "unknown receiver type"
@@ -647,7 +647,7 @@
         "facts",
         "node"
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "recursion": {
         "calls": 0,
         "halving_calls": 0,
@@ -660,7 +660,7 @@
         {
           "id": "param:MIRLoweringControlFlow#union_match_default_body:arms",
           "name": "arms",
-          "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+          "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
           "source_kind": "parameter",
           "span": [
             11,
@@ -672,7 +672,7 @@
         {
           "id": "param:MIRLoweringControlFlow#union_match_default_body:facts",
           "name": "facts",
-          "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+          "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
           "source_kind": "parameter",
           "span": [
             11,
@@ -684,7 +684,7 @@
         {
           "id": "param:MIRLoweringControlFlow#union_match_default_body:node",
           "name": "node",
-          "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+          "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
           "source_kind": "parameter",
           "span": [
             11,
@@ -745,7 +745,7 @@
       "parameters": [
         "required"
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "recursion": {
         "calls": 0,
         "halving_calls": 0,
@@ -758,7 +758,7 @@
         {
           "id": "param:MIRLoweringControlFlow#missing?:required",
           "name": "required",
-          "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+          "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
           "source_kind": "parameter",
           "span": [
             19,
@@ -784,7 +784,7 @@
       "code": "required.nil?",
       "kind": "nil_check",
       "line": 20,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "reason": "required is provably non-nil; .nil? is always false"
     }
   ],
@@ -797,14 +797,14 @@
         "data": "String",
         "kind": "Primitive"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000missing?\u000019\u0000sorbet\u0000param:required",
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000missing?\u000019\u0000sorbet\u0000param:required",
       "language": "ruby",
       "line": 19,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "slot": "param:required",
       "union_width": 0,
       "unknown_leaves": 0
@@ -817,14 +817,14 @@
         "data": "T::Boolean",
         "kind": "Primitive"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000missing?\u000019\u0000sorbet\u0000return",
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000missing?\u000019\u0000sorbet\u0000return",
       "language": "ruby",
       "line": 19,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "slot": "return",
       "union_width": 0,
       "unknown_leaves": 0
@@ -840,14 +840,14 @@
         },
         "kind": "Array"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet\u0000param:arms",
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet\u0000param:arms",
       "language": "ruby",
       "line": 11,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "slot": "param:arms",
       "union_width": 0,
       "unknown_leaves": 0
@@ -860,14 +860,14 @@
         "data": "MatchLoweringFacts",
         "kind": "Primitive"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet\u0000param:facts",
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet\u0000param:facts",
       "language": "ruby",
       "line": 11,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "slot": "param:facts",
       "union_width": 0,
       "unknown_leaves": 0
@@ -880,14 +880,14 @@
         "data": "AST::MatchStatement",
         "kind": "Primitive"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet\u0000param:node",
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet\u0000param:node",
       "language": "ruby",
       "line": 11,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "slot": "param:node",
       "union_width": 0,
       "unknown_leaves": 0
@@ -899,14 +899,14 @@
       "declared_type": {
         "kind": "Untyped"
       },
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet\u0000return",
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet\u0000return",
       "language": "ruby",
       "line": 11,
       "nested_union_width": 0,
       "nilable": false,
       "nilable_collection": false,
       "owner": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "slot": "return",
       "union_width": 0,
       "unknown_leaves": 1
@@ -916,7 +916,7 @@
   "flow_local_types": [
     {
       "complete": true,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "missing?",
       "line": 20,
       "name": "required",
@@ -944,7 +944,7 @@
     },
     {
       "complete": true,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
       "line": 13,
       "name": "facts",
@@ -972,7 +972,7 @@
     },
     {
       "complete": false,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
       "line": 14,
       "name": "schema",
@@ -993,7 +993,7 @@
     },
     {
       "complete": false,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
       "line": 15,
       "name": "all_variants",
@@ -1018,28 +1018,28 @@
       "code": "node: AST::MatchStatement",
       "escapes_collection": true,
       "line": 6,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "reason": "array_literal"
     },
     {
       "code": "facts: MatchLoweringFacts",
       "escapes_collection": true,
       "line": 7,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "reason": "array_literal"
     },
     {
       "code": "arms: T::Array[UnionMatchArmPlan]",
       "escapes_collection": true,
       "line": 8,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "reason": "array_literal"
     },
     {
       "code": "required: String",
       "escapes_collection": true,
       "line": 18,
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "reason": "array_literal"
     }
   ],
@@ -1070,7 +1070,7 @@
         "facts",
         "arms"
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "raw_source": "def union_match_default_body(node, facts, arms)\n    T.bind(self, MIRLowering) rescue nil\n    schema = union_schemas[facts.expr_type_sym]\n    all_variants = schema&.variants&.keys&.map(&:to_s)&.sort || []\n    all_variants\n  end",
       "signature": "sig do params( node: AST::MatchStatement, facts: MatchLoweringFacts, arms: T::Array[UnionMatchArmPlan], ).returns(T.untyped) end",
       "source": {
@@ -1106,7 +1106,7 @@
       "params": [
         "required"
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "raw_source": "def missing?(required)\n    required.nil?\n  end",
       "signature": "sig { params(required: String).returns(T::Boolean) }",
       "source": {
@@ -1132,7 +1132,7 @@
       "language": "ruby",
       "line": 1,
       "name": "MIRLoweringControlFlow",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "span": [
         1,
         0,
@@ -1151,7 +1151,7 @@
       "hash_shape": null,
       "line": 2,
       "origin_kind": "unknown",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": null,
       "slot": "0",
       "source_method": null,
@@ -1169,7 +1169,7 @@
       "hash_shape": null,
       "line": 4,
       "origin_kind": "untyped_return",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": null,
       "slot": "0",
       "source_method": "sig",
@@ -1185,7 +1185,7 @@
       "hash_shape": null,
       "line": 5,
       "origin_kind": "untyped_return",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "params(\n      node: AST::MatchStatement,\n      facts: MatchLoweringFacts,\n      arms: T::Array[UnionMatchArmPlan],\n    )",
       "slot": "0",
       "source_method": "untyped",
@@ -1201,7 +1201,7 @@
       "hash_shape": null,
       "line": 5,
       "origin_kind": "unknown",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": null,
       "slot": "node",
       "source_method": null,
@@ -1219,7 +1219,7 @@
       "hash_shape": null,
       "line": 5,
       "origin_kind": "unknown",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": null,
       "slot": "facts",
       "source_method": null,
@@ -1237,7 +1237,7 @@
       "hash_shape": null,
       "line": 5,
       "origin_kind": "untyped_return",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": null,
       "slot": "arms",
       "source_method": "[]",
@@ -1253,7 +1253,7 @@
       "hash_shape": null,
       "line": 8,
       "origin_kind": "unknown",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "T::Array",
       "slot": "0",
       "source_method": null,
@@ -1271,7 +1271,7 @@
       "hash_shape": null,
       "line": 9,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "T",
       "slot": "0",
       "source_method": null,
@@ -1292,7 +1292,7 @@
       "hash_shape": null,
       "line": 12,
       "origin_kind": "unknown",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "T",
       "slot": "0",
       "source_method": null,
@@ -1310,7 +1310,7 @@
       "hash_shape": null,
       "line": 12,
       "origin_kind": "unknown",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "T",
       "slot": "1",
       "source_method": null,
@@ -1328,7 +1328,7 @@
       "hash_shape": null,
       "line": 13,
       "origin_kind": "untyped_return",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "union_schemas",
       "slot": "0",
       "source_method": "expr_type_sym",
@@ -1344,7 +1344,7 @@
       "hash_shape": null,
       "line": 13,
       "origin_kind": "untyped_return",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": null,
       "slot": "0",
       "source_method": "union_schemas",
@@ -1360,7 +1360,7 @@
       "hash_shape": null,
       "line": 13,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "facts",
       "slot": "0",
       "source_method": null,
@@ -1381,7 +1381,7 @@
       "hash_shape": null,
       "line": 14,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "schema&.variants&.keys&.map(&:to_s)",
       "slot": "0",
       "source_method": null,
@@ -1402,7 +1402,7 @@
       "hash_shape": null,
       "line": 14,
       "origin_kind": "unknown",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "schema&.variants&.keys",
       "slot": "0",
       "source_method": null,
@@ -1421,7 +1421,7 @@
       "hash_shape": null,
       "line": 14,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "schema&.variants",
       "slot": "0",
       "source_method": null,
@@ -1442,7 +1442,7 @@
       "hash_shape": null,
       "line": 14,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "schema",
       "slot": "0",
       "source_method": null,
@@ -1463,7 +1463,7 @@
       "hash_shape": null,
       "line": 18,
       "origin_kind": "untyped_return",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": null,
       "slot": "0",
       "source_method": "sig",
@@ -1479,7 +1479,7 @@
       "hash_shape": null,
       "line": 18,
       "origin_kind": "unknown",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "params(required: String)",
       "slot": "0",
       "source_method": null,
@@ -1497,7 +1497,7 @@
       "hash_shape": null,
       "line": 18,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": null,
       "slot": "required",
       "source_method": null,
@@ -1516,7 +1516,7 @@
       "hash_shape": null,
       "line": 20,
       "origin_kind": "static",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "receiver": "required",
       "slot": "0",
       "source_method": null,
@@ -1537,7 +1537,7 @@
       "handler_line": null,
       "line": 2,
       "name": "extend",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "sig",
@@ -1546,7 +1546,7 @@
       "handler_line": null,
       "line": 4,
       "name": "sig",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "params(",
@@ -1555,7 +1555,7 @@
       "handler_line": null,
       "line": 5,
       "name": "returns",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "params(",
@@ -1564,7 +1564,7 @@
       "handler_line": null,
       "line": 5,
       "name": "params",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "T::Array[UnionMatchArmPlan]",
@@ -1573,7 +1573,7 @@
       "handler_line": null,
       "line": 8,
       "name": "[]",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "(T.untyped)",
@@ -1582,7 +1582,7 @@
       "handler_line": null,
       "line": 9,
       "name": "untyped",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "union_schemas[facts.expr_type_sym]",
@@ -1591,7 +1591,7 @@
       "handler_line": null,
       "line": 13,
       "name": "[]",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "union_schemas",
@@ -1600,7 +1600,7 @@
       "handler_line": null,
       "line": 13,
       "name": "union_schemas",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "facts.expr_type_sym",
@@ -1609,7 +1609,7 @@
       "handler_line": null,
       "line": 13,
       "name": "expr_type_sym",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "schema&.variants&.keys&.map(&:to_s)&.sort",
@@ -1618,7 +1618,7 @@
       "handler_line": null,
       "line": 14,
       "name": "sort",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "schema&.variants&.keys&.map(&:to_s)",
@@ -1627,7 +1627,7 @@
       "handler_line": null,
       "line": 14,
       "name": "map",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "schema&.variants&.keys",
@@ -1636,7 +1636,7 @@
       "handler_line": null,
       "line": 14,
       "name": "keys",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "schema&.variants",
@@ -1645,7 +1645,7 @@
       "handler_line": null,
       "line": 14,
       "name": "variants",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "sig",
@@ -1654,7 +1654,7 @@
       "handler_line": null,
       "line": 18,
       "name": "sig",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "params(required: String).returns(T::Boolean)",
@@ -1663,7 +1663,7 @@
       "handler_line": null,
       "line": 18,
       "name": "returns",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "params(required: String)",
@@ -1672,7 +1672,7 @@
       "handler_line": null,
       "line": 18,
       "name": "params",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "required.nil?",
@@ -1681,7 +1681,7 @@
       "handler_line": null,
       "line": 20,
       "name": "nil?",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     }
   ],
   "return_origins": [
@@ -1703,7 +1703,7 @@
       "kind": "instance",
       "line": 11,
       "method": "union_match_default_body",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "return_syntax": "implicit",
       "sources": [
         {
@@ -1736,7 +1736,7 @@
       "kind": "instance",
       "line": 19,
       "method": "missing?",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "return_syntax": "implicit",
       "sources": [
         {
@@ -1761,7 +1761,7 @@
       "handler_line": null,
       "line": 2,
       "name": "extend",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "sig",
@@ -1770,7 +1770,7 @@
       "handler_line": null,
       "line": 4,
       "name": "sig",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "params(",
@@ -1779,7 +1779,7 @@
       "handler_line": null,
       "line": 5,
       "name": "returns",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "params(",
@@ -1788,7 +1788,7 @@
       "handler_line": null,
       "line": 5,
       "name": "params",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "T::Array[UnionMatchArmPlan]",
@@ -1797,7 +1797,7 @@
       "handler_line": null,
       "line": 8,
       "name": "[]",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "(T.untyped)",
@@ -1806,7 +1806,7 @@
       "handler_line": null,
       "line": 9,
       "name": "untyped",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "union_schemas[facts.expr_type_sym]",
@@ -1815,7 +1815,7 @@
       "handler_line": null,
       "line": 13,
       "name": "[]",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "union_schemas",
@@ -1824,7 +1824,7 @@
       "handler_line": null,
       "line": 13,
       "name": "union_schemas",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "facts.expr_type_sym",
@@ -1833,7 +1833,7 @@
       "handler_line": null,
       "line": 13,
       "name": "expr_type_sym",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "schema&.variants&.keys&.map(&:to_s)&.sort",
@@ -1842,7 +1842,7 @@
       "handler_line": null,
       "line": 14,
       "name": "sort",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "schema&.variants&.keys&.map(&:to_s)",
@@ -1851,7 +1851,7 @@
       "handler_line": null,
       "line": 14,
       "name": "map",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "schema&.variants&.keys",
@@ -1860,7 +1860,7 @@
       "handler_line": null,
       "line": 14,
       "name": "keys",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "schema&.variants",
@@ -1869,7 +1869,7 @@
       "handler_line": null,
       "line": 14,
       "name": "variants",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "sig",
@@ -1878,7 +1878,7 @@
       "handler_line": null,
       "line": 18,
       "name": "sig",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "params(required: String).returns(T::Boolean)",
@@ -1887,7 +1887,7 @@
       "handler_line": null,
       "line": 18,
       "name": "returns",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "params(required: String)",
@@ -1896,7 +1896,7 @@
       "handler_line": null,
       "line": 18,
       "name": "params",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     },
     {
       "code": "required.nil?",
@@ -1905,7 +1905,7 @@
       "handler_line": null,
       "line": 20,
       "name": "nil?",
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb"
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
     }
   ],
   "signatures": {
@@ -1917,7 +1917,7 @@
   "state_types": {},
   "type_definitions": [
     {
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet",
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet",
       "kind": "method_signature",
       "language": "ruby",
       "line": 11,
@@ -1949,7 +1949,7 @@
           }
         }
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "return_type": {
         "kind": "Untyped"
       },
@@ -1957,7 +1957,7 @@
       "type_system": "sorbet"
     },
     {
-      "id": "ruby\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000missing?\u000019\u0000sorbet",
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000missing?\u000019\u0000sorbet",
       "kind": "method_signature",
       "language": "ruby",
       "line": 19,
@@ -1972,7 +1972,7 @@
           }
         }
       ],
-      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "return_dispatch_owner": "T::Boolean",
       "return_type": {
         "data": "T::Boolean",
@@ -1986,9 +1986,9 @@
     {
       "candidate": false,
       "candidate_kind": "parameter",
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "missing?",
-      "id": "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required",
+      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required",
       "kind": "definition",
       "line": 19,
       "name": "required",
@@ -2005,9 +2005,9 @@
     {
       "candidate": false,
       "candidate_kind": "parameter",
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:arms",
+      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:arms",
       "kind": "definition",
       "line": 11,
       "name": "arms",
@@ -2024,9 +2024,9 @@
     {
       "candidate": false,
       "candidate_kind": "parameter",
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts",
+      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts",
       "kind": "definition",
       "line": 11,
       "name": "facts",
@@ -2043,9 +2043,9 @@
     {
       "candidate": false,
       "candidate_kind": "parameter",
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:node",
+      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:node",
       "kind": "definition",
       "line": 11,
       "name": "node",
@@ -2062,9 +2062,9 @@
     {
       "candidate": true,
       "candidate_kind": "local",
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema",
+      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema",
       "kind": "definition",
       "line": 13,
       "name": "schema",
@@ -2081,9 +2081,9 @@
     {
       "candidate": true,
       "candidate_kind": "local",
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants",
+      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants",
       "kind": "definition",
       "line": 14,
       "name": "all_variants",
@@ -2100,15 +2100,15 @@
     {
       "candidate": false,
       "candidate_kind": null,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "missing?",
-      "id": "type-read:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:stmt:1:20:4:place:MIRLoweringControlFlow#missing?:local:required",
+      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:stmt:1:20:4:place:MIRLoweringControlFlow#missing?:local:required",
       "kind": "flow_read",
       "line": 20,
       "name": "required",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required"
+        "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required"
       ],
       "resolved": true,
       "span": [
@@ -2124,15 +2124,15 @@
     {
       "candidate": false,
       "candidate_kind": null,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "type-read:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:facts",
+      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:facts",
       "kind": "flow_read",
       "line": 13,
       "name": "facts",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts"
+        "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts"
       ],
       "resolved": true,
       "span": [
@@ -2148,15 +2148,15 @@
     {
       "candidate": false,
       "candidate_kind": null,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "type-read:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema",
+      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema",
       "kind": "flow_read",
       "line": 14,
       "name": "schema",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema"
+        "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema"
       ],
       "resolved": false,
       "span": [
@@ -2170,15 +2170,15 @@
     {
       "candidate": false,
       "candidate_kind": null,
-      "file": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "type-read:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:4:15:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants",
+      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:4:15:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants",
       "kind": "flow_read",
       "line": 15,
       "name": "all_variants",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants"
+        "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants"
       ],
       "resolved": false,
       "span": [
