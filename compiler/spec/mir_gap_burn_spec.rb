@@ -3303,9 +3303,20 @@ RSpec.describe "MIR gap-burn characterization" do
     plan = low.send(:field_access_plan, AST::GetField.new(tok, result_value, "Ok"), MIR::Ident.new("result"))
     expect(plan.value).to be_a(MIR::UnionVariantGet)
 
-    [AST::OrElseExit.new(tok, :Runtime, nil, nil), AST::OrElsePass.new(tok), AST::OrElseBreak.new(tok)].each do |right|
-      node = AST::BinaryOp.new(tok, id("plain", type: :Int64), :OR_ELSE, right)
-      node.full_type = Type.new(:Int64)
+    [
+      [AST::OrElseExit.new(tok, :Runtime, nil, nil), TenseOperationKind::OrElseExit, TenseRecovery::Exit],
+      [AST::OrElsePass.new(tok), TenseOperationKind::OrElsePass, TenseRecovery::Pass],
+      [AST::OrElseBreak.new(tok), TenseOperationKind::OrElseBreak, TenseRecovery::Break],
+    ].each do |right, operation, recovery|
+      left = id("plain", type: Type.new("?Int64"))
+      node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
+      node.full_type = Type.new("?Int64")
+      node.tense_plan = TenseOperationPlanner.or_else(
+        Type.new("?Int64"),
+        Type.new(:NoReturn),
+        operation: operation,
+        recovery: recovery,
+      )
       expect(low.send(:lower_or_else, node)).to be_a(MIR::Ident)
     end
 
@@ -3700,6 +3711,7 @@ RSpec.describe "MIR gap-burn characterization" do
     observable_source = id("running", type: Type.new(:"~String", observable: true))
     next_node = AST::NextExpr.new(tok, observable_source)
     next_node.full_type = Type.new(:String)
+    next_node.tense_plan = TenseOperationPlanner.next_value(Type.new(:"~String", observable: true))
     lowered_next = low.send(:lower_next_expr, next_node, :frame)
     expect(lowered_next).to be_a(MIR::BlockExpr)
     expect(lowered_next.label).to start_with("__obs_next_string_")

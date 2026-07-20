@@ -1700,6 +1700,11 @@ module PipeAnalysis
           mod_name = modifier.is_a?(AST::OrElsePrune) ? "OR_ELSE PRUNE" : "OR_ELSE RAISE"
           error!(modifier, :MODIFIER_NEEDS_ERROR_UNION, name: mod_name, got: inner_expr.left.resolved_type)
         end
+        # The concurrent callback itself is the propagation boundary. Keep
+        # the call's error channel as the callback result so the runtime helper
+        # can collect/propagate it; emitting an inner `try` is redundant and
+        # obscures which layer owns failure handling.
+        inner_expr.retain_error_channel = true if modifier.is_a?(AST::OrElseRaise)
       end
     end
 

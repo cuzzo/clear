@@ -695,7 +695,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.define_singleton_method(:visit) { |_node| nil }
 
     left = AST::Identifier.new(token, "value")
-    left.full_type = Type.new(:Int64)
+    left.full_type = Type.new("!Int64")
     exit_right = AST::OrElseExit.new(token(:OR_ELSE, "OR_ELSE"), nil, nil, nil)
     exit_right.full_type = Type.new(:NoReturn)
     exit_expr = AST::BinaryOp.new(token(:OR_ELSE, "OR_ELSE"), left, :OR_ELSE, exit_right)

@@ -684,17 +684,17 @@ module Annotator
           error!(node, :BG_STREAM_NO_YIELD)
         end
 
-        inferred_join = Type.join_async_results(yield_types)
+        inferred_join = TenseOperationPlanner.join_async_results(yield_types)
         if node.declared_yield_type.nil? && !inferred_join.success?
           surfaces = yield_types.map { |type| Type.surface_name(type) }.uniq
           error!(node, :BG_STREAM_INCONSISTENT_YIELD,
             types: surfaces.join(', '), union_shape: "Union<#{surfaces.join(', ')}>")
-        elsif node.declared_yield_type.nil? && inferred_join.type &&
-              stream_yields_contract_required?(T.must(inferred_join.type))
-          emit_missing_stream_yields_contract!(node, T.must(inferred_join.type))
+        elsif node.declared_yield_type.nil? && inferred_join.result_type &&
+              stream_yields_contract_required?(T.must(inferred_join.result_type))
+          emit_missing_stream_yields_contract!(node, T.must(inferred_join.result_type))
         end
 
-        element_type = node.declared_yield_type || inferred_join.type || Type.new(:Any)
+        element_type = node.declared_yield_type || inferred_join.result_type || Type.new(:Any)
         stamp_type!(node, Type.new(StreamTypeExpression.new(
           cardinality: :FINITE,
           item: element_type.shape.expression,
@@ -946,8 +946,13 @@ module Annotator
           if expr.is_a?(AST::Identifier) && !async_shape.shared_promise?
             og_set_moved(expr.name, at_token: expr.token, action: :next)
           end
-          stamp_type!(node, async_shape.payload_type)
-          node.storage = :heap if async_next_result_requires_heap?(async_shape.payload_type)
+          result_type = publish_scalar_next_plan(
+            node,
+            promise_type,
+            shared: async_shape.shared_promise? || promise_type.shared_promise?,
+          ).result_type
+          stamp_type!(node, result_type)
+          node.storage = :heap if async_next_result_requires_heap?(result_type)
         elsif promise_type.promise_list?
           # NEXT on ~T[]@list: await all promises, return T[]@list.
           # The promise list is linearly consumed — each inner promise is freed by its next() call.
@@ -993,7 +998,7 @@ module Annotator
         elsif promise_type.shared_promise?
           # NEXT on ~T@shared: returns T, idempotent — same handle can be NEXT'd again.
           # Does NOT mark as moved; multiple consumers may hold their own handles.
-          stamp_type!(node, promise_type.tense_type.to_sym)
+          stamp_type!(node, publish_scalar_next_plan(node, promise_type, shared: true).result_type)
         elsif promise_type.split_open_stream? || promise_type.open_stream?
           # NEXT on open streams returns ?T — null signals stream exhaustion.
           # Split stream handles advance independently through shared memoized sequence state.
@@ -1009,10 +1014,17 @@ module Annotator
           if expr.is_a?(AST::Identifier)
             og_set_moved(expr.name, at_token: expr.token, action: :next)
           end
-          stamp_type!(node, promise_type.tense_type.to_sym)
+          stamp_type!(node, publish_scalar_next_plan(node, promise_type, shared: false).result_type)
         end
 
         nil
+      end
+
+      sig { params(node: AST::NextExpr, promise_type: Type, shared: T::Boolean).returns(TenseOperationPlan) }
+      def publish_scalar_next_plan(node, promise_type, shared:)
+        plan = TenseOperationPlanner.next_value(promise_type, shared: shared)
+        node.tense_plan = plan
+        plan
       end
 
       sig { params(type_info: Type).returns(T::Boolean) }
@@ -1039,6 +1051,7 @@ module Annotator
         :validate_lock_error_clause!
       private :async_next_result_requires_heap?
       private :owned_async_payload_type
+      private :publish_scalar_next_plan
   private :cap_admits_atomic?
   private :field_name_for_msg
   private :resolve_error_selectors!

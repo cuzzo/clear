@@ -97,12 +97,14 @@ module Annotator
           unless Type.new(operand_type).optional? || Type.new(operand_type).stream_step?
             error!(node, :EXISTS_REQUIRES_OPTIONAL, got: operand_type)
           end
+          node.tense_plan = TenseOperationPlanner.exists(Type.new(operand_type)) unless Type.new(operand_type).stream_step?
           stamp_type!(node, :Bool)
         when :IS_OK
           operand_type = recoverable_result_type(node.right, context: "IS_OK operand")
           unless operand_type
             error!(node, :IS_OK_REQUIRES_FALLIBLE, got: node.right.full_type!(context: "IS_OK operand"))
           end
+          node.tense_plan = TenseOperationPlanner.is_ok(T.must(operand_type))
           stamp_type!(node, :Bool)
         when :IS_READY
           operand_type = node.right.full_type!(context: "IS_READY operand")
@@ -114,13 +116,15 @@ module Annotator
         when :TRY
           declared = recoverable_result_type(node.right, context: "TRY operand")
           raw_type = Type.new(node.right.full_type!(context: "TRY operand"))
-          if declared
-            stamp_type!(node, declared.success_type)
-          elsif raw_type.optional?
-            stamp_type!(node, T.must(raw_type.wrapped_type))
-          else
+          plan_input = declared || raw_type
+          begin
+            plan = TenseOperationPlanner.try_value(plan_input)
+          rescue ArgumentError
             error!(node, :UNWRAP_NON_OPTIONAL, got: raw_type)
           end
+          plan = T.must(plan)
+          node.tense_plan = plan
+          stamp_type!(node, plan.result_type)
           # TRY changes the control-flow channel, not where the successful
           # payload lives. Keep allocator/borrow provenance transparent so
           # escape analysis and cleanup planning see the original value.
@@ -510,18 +514,20 @@ module Annotator
           error!(node, :UNWRAP_NON_OPTIONAL, got: node.target.resolved_type)
         end
 
-        # The result type is the wrapped type (without the ?)
-        # Preserve ownership/sync so Rc/Arc auto-deref works on the unwrapped value.
-        unwrapped = type.wrapped_type
-        result = Type.new(T.must(unwrapped))
-        result.merge_capabilities_from!(type, include_affine_ownership: true)
+        recoverable = recoverable_result_type(node.target, context: "optional unwrap target")
+        plan_input = recoverable&.optional? ? T.must(recoverable) : type
+        plan = TenseOperationPlanner.unwrap(plan_input)
+        node.tense_plan = plan
+        # The result type is the wrapped type (without the ?). The planner
+        # preserves any outer fallible layer and all layer capabilities.
+        result = plan.result_type
         stamp_type!(node, result)
         # UNWRAP proves presence without copying or relocating the payload.
         node.storage = node.target.storage
         # `UNWRAP` removes the optional payload layer, not an outer failure
         # channel. This lets `TRY UNWRAP value` compose as !?T -> T.
-        if recoverable_result_type(node.target, context: "optional unwrap target")
-          T.unsafe(node).error_union_type = Type.error_union_of(result)
+        if result.error_union?
+          T.unsafe(node).error_union_type = result
           node.can_fail = true if node.respond_to?(:can_fail=)
         end
         # A nullable foreign pointer remains a borrow after the null check.

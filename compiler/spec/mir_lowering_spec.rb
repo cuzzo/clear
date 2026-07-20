@@ -106,6 +106,27 @@ RSpec.describe MIRLowering do
     node
   end
 
+  def stamp_or_else_plan(node)
+    stored = node.left.respond_to?(:error_union_type) ? T.unsafe(node.left).error_union_type : nil
+    left_type = stored ? Type.new(stored) : node.left.full_type!
+    operation, recovery = case node.right
+                          when AST::OrElseRaise then [TenseOperationKind::OrElseRaise, TenseRecovery::Raise]
+                          when AST::OrElseExit then [TenseOperationKind::OrElseExit, TenseRecovery::Exit]
+                          when AST::OrElsePass then [TenseOperationKind::OrElsePass, TenseRecovery::Pass]
+                          when AST::OrElseBreak then [TenseOperationKind::OrElseBreak, TenseRecovery::Break]
+                          when AST::OrElsePrune then [TenseOperationKind::OrElsePrune, TenseRecovery::Prune]
+                          else [TenseOperationKind::OrElseValue, TenseRecovery::Fallback]
+                          end
+    fallback_type = recovery == TenseRecovery::Fallback ? node.right.full_type! : Type.new(:NoReturn)
+    node.tense_plan = TenseOperationPlanner.or_else(
+      left_type,
+      fallback_type,
+      operation: operation,
+      recovery: recovery,
+    )
+    node
+  end
+
   def compile_first_assignment(src, target: :zig)
     importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
     result = CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd)
@@ -662,6 +683,28 @@ RSpec.describe MIRLowering do
       node.full_type = :Number
       result = lowering.lower(node)
       expect(emit(result)).to eq("-5.0")
+    end
+
+    it "rejects tense operations whose annotation plan is missing or inconsistent" do
+      fallible = make_id("fallible", full_type: :"!Int64")
+      missing_try = AST::UnaryOp.new(tok, :TRY, fallible)
+      missing_try.full_type = :Int64
+      expect { lowering.lower(missing_try) }.to raise_error(RuntimeError, /TRY lowering requires/)
+
+      invalid_try = AST::UnaryOp.new(tok, :TRY, fallible)
+      invalid_try.full_type = :Int64
+      invalid_try.tense_plan = TenseOperationPlan.new(
+        operation: TenseOperationKind::Try,
+        input_type: Type.new(:"!Int64"),
+        result_type: Type.new(:Int64),
+        backend_form: TenseBackendForm::DirectMap,
+      )
+      expect { lowering.lower(invalid_try) }.to raise_error(RuntimeError, /unsupported tense backend/)
+
+      optional = make_id("optional", full_type: :"?Int64")
+      missing_exists = AST::UnaryOp.new(tok, :EXISTS, optional)
+      missing_exists.full_type = :Bool
+      expect { lowering.lower(missing_exists) }.to raise_error(RuntimeError, /exists lowering requires/)
     end
   end
 
@@ -2185,9 +2228,10 @@ RSpec.describe MIRLowering do
 
   describe "optional unwrap" do
     it "lowers optional unwrap" do
-      inner = make_id("maybe_val", full_type: :Int64)
+      inner = make_id("maybe_val", full_type: :"?Int64")
       node = AST::OptionalUnwrap.new(tok, inner)
       node.full_type = :Int64
+      node.tense_plan = TenseOperationPlanner.unwrap(inner.full_type!)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::OptionalUnwrap)
       expect(emit(result)).to eq("maybe_val.?")
@@ -3626,10 +3670,22 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "NextExpr lowering" do
+    it "rejects scalar NEXT when annotation did not publish its operation plan" do
+      inner = make_id("promise", full_type: :"~Int64")
+      node = AST::NextExpr.new(tok, inner)
+      node.full_type = :Int64
+
+      expect { lowering.lower(node) }.to raise_error(
+        RuntimeError,
+        /scalar NEXT lowering requires its annotation-produced TenseOperationPlan/,
+      )
+    end
+
     it "lowers NEXT expression" do
       inner = make_id("promise", full_type: :"~Int64")
       node = AST::NextExpr.new(tok, inner)
       node.full_type = :Int64
+      node.tense_plan = TenseOperationPlanner.next_value(Type.new(:"~Int64"))
 
       result = lowering.lower(node)
       expect(result).to be_a(MIR::MethodCall)
@@ -3818,6 +3874,7 @@ RSpec.describe MIRLowering do
       exit = AST::OrElseExit.new(tok, :Input, "ParseErr", make_lit(:STRING, "bad", full_type: :String))
       node = AST::BinaryOp.new(tok, call, :OR_ELSE, exit)
       node.full_type = :Int64
+      stamp_or_else_plan(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -3836,13 +3893,24 @@ RSpec.describe MIRLowering do
       fallback = make_lit(:INT64, 0, full_type: :Int64)
       error_node = AST::BinaryOp.new(tok, fallible, :OR_ELSE, fallback)
       error_node.full_type = :Int64
+      stamp_or_else_plan(error_node)
 
       maybe = make_id("maybe", full_type: :"?Int64")
       optional_node = AST::BinaryOp.new(tok, maybe, :OR_ELSE, fallback)
       optional_node.full_type = :Int64
+      stamp_or_else_plan(optional_node)
 
       expect(lowering.lower(error_node)).to be_a(MIR::TryCatch)
       expect(lowering.lower(optional_node)).to be_a(MIR::Orelse)
+    end
+
+    it "rejects OR_ELSE lowering without its annotation plan" do
+      optional = make_id("maybe", full_type: :"?Int64")
+      fallback = make_lit(:INT64, 0, full_type: :Int64)
+      node = AST::BinaryOp.new(tok, optional, :OR_ELSE, fallback)
+      node.full_type = :Int64
+
+      expect { lowering.lower(node) }.to raise_error(RuntimeError, /OR_ELSE lowering requires/)
     end
 
     it "uses structural OR_ELSE PASS defaults instead of Zig-spelled literals" do
@@ -3899,6 +3967,7 @@ RSpec.describe MIRLowering do
       fallible.can_fail = true
       node = AST::BinaryOp.new(tok, fallible, :OR_ELSE, AST::OrElseBreak.new(tok))
       node.full_type = :Int64
+      stamp_or_else_plan(node)
 
       result = lowering.lower(node)
 
@@ -4585,6 +4654,7 @@ RSpec.describe MIRLowering do
       right = AST::OrElseRaise.new(tok)
       node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
+      stamp_or_else_plan(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -4592,11 +4662,12 @@ RSpec.describe MIRLowering do
       expect(zig).to include("getData")
     end
 
-    it "lowers OR_ELSE RAISE with non-error to passthrough" do
-      left = make_id("x", full_type: :Number)
+    it "lowers OR_ELSE RAISE with an optional-only value to passthrough" do
+      left = make_id("x", full_type: :"?Number")
       right = AST::OrElseRaise.new(tok)
       node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
-      node.full_type = :Number
+      node.full_type = :"?Number"
+      stamp_or_else_plan(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -4608,6 +4679,7 @@ RSpec.describe MIRLowering do
       right = AST::OrElsePass.new(tok)
       node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
+      stamp_or_else_plan(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -4619,6 +4691,7 @@ RSpec.describe MIRLowering do
       right = AST::OrElseBreak.new(tok)
       node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
+      stamp_or_else_plan(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -4631,6 +4704,7 @@ RSpec.describe MIRLowering do
       right = AST::OrElseExit.new(tok, msg)
       node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
+      stamp_or_else_plan(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -4644,6 +4718,7 @@ RSpec.describe MIRLowering do
       right.coerced_type = nil
       node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
+      stamp_or_else_plan(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -4657,6 +4732,7 @@ RSpec.describe MIRLowering do
       right.coerced_type = nil
       node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
+      stamp_or_else_plan(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -4669,6 +4745,7 @@ RSpec.describe MIRLowering do
       right = AST::OrElsePrune.new(tok)
       node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
       node.full_type = :Number
+      stamp_or_else_plan(node)
 
       result = lowering.lower(node)
       zig = emit(result)
@@ -4698,6 +4775,7 @@ RSpec.describe MIRLowering do
 
         node = AST::BinaryOp.new(tok, left, :OR_ELSE, struct_lit)
         node.full_type = :Node
+        stamp_or_else_plan(node)
 
         l = lowering(struct_schemas: { Node: Schemas::StructSchema.new(fields: { "label" => Type.new(:String) }) })
         result = l.lower(node)
@@ -4715,6 +4793,7 @@ RSpec.describe MIRLowering do
 
         node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
         node.full_type = :String
+        stamp_or_else_plan(node)
 
         l = lowering
         result = l.lower(node)

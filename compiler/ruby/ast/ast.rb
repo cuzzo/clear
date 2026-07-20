@@ -117,6 +117,11 @@ module AST
     dst.var_used = src.var_used unless src.var_used.nil?
     dst.slot_size = src.slot_size unless src.slot_size.nil?
     dst.container_borrow = src.container_borrow unless src.container_borrow.nil?
+    dst.tense_plan = T.must(src.tense_plan) if src.tense_plan
+    if src.respond_to?(:retain_error_channel) && dst.respond_to?(:retain_error_channel=)
+      retained = T.unsafe(src).retain_error_channel
+      T.unsafe(dst).retain_error_channel = retained unless retained.nil?
+    end
   end
   private_class_method :copy_pipeline_base_metadata!
 
@@ -1027,6 +1032,21 @@ module AST
   # ruby-to-clear: no-expand
   module Locatable
       extend T::Sig
+
+    # Immutable semantic operation plan published by annotation and consumed
+    # by MIR lowering. Keeping this on every locatable node avoids a parallel
+    # family of per-node flags while retaining a strongly typed phase handoff.
+    sig { returns(T.nilable(AST::TensePlanValue)) }
+    def tense_plan
+      @tense_plan = T.let(nil, T.nilable(AST::TensePlanValue)) unless defined?(@tense_plan)
+      @tense_plan
+    end
+
+    sig { params(value: AST::TensePlanValue).returns(AST::TensePlanValue) }
+    def tense_plan=(value)
+      @tense_plan = value
+      value
+    end
 
     sig { returns(Integer) }
     def line; token.line; end
@@ -2260,6 +2280,15 @@ module AST
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
     attr_accessor :or_fallback_dupe  # true when OR_ELSE fallback struct needs string-field heap dupe
     attr_accessor :error_union_type # recoverable result preserved through pipeline composition
+    sig { returns(T.nilable(T::Boolean)) }
+    def retain_error_channel
+      @retain_error_channel = T.let(nil, T.nilable(T::Boolean)) unless defined?(@retain_error_channel)
+      @retain_error_channel
+    end
+    sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    def retain_error_channel=(value)
+      @retain_error_channel = value
+    end
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
     # outer scope. The lowering's `descend` helper consults this and wraps
     # the field's emission in MIR::BlockExpr when the field actually emitted
@@ -2890,18 +2919,6 @@ module AST
     extend T::Sig
     include Locatable
     include HasExpression
-
-    sig { returns(T.nilable(AST::TensePlanValue)) }
-    def tense_plan
-      @tense_plan = T.let(nil, T.nilable(AST::TensePlanValue)) unless defined?(@tense_plan)
-      @tense_plan
-    end
-
-    sig { params(value: AST::TensePlanValue).returns(AST::TensePlanValue) }
-    def tense_plan=(value)
-      @tense_plan = value
-      value
-    end
   end
   WhereOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   IndexOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }

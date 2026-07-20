@@ -1,0 +1,26 @@
+# End-to-end coverage for annotation-produced tense operation plans. Each
+# operation below crosses the parser, annotator, MIR handoff, and Zig runtime.
+
+FN recover(mode: Int64) RETURNS !?Int64 ->
+    IF mode == 0 THEN RAISE Input, MissingValue, "missing"; END
+    IF mode == 1 THEN RETURN NIL; END
+    RETURN 42;
+END
+
+FN main() RETURNS !Void ->
+    optional:? = TRY recover(2);
+    ASSERT optional EXISTS, "TRY preserves inner optionality";
+    ASSERT UNWRAP optional == 42, "UNWRAP consumes optionality";
+
+    ASSERT recover(2) IS_OK, "IS_OK observes the fallible boundary";
+    ASSERT !(recover(0) IS_OK), "IS_OK observes failure";
+
+    raised:? = recover(1) OR_ELSE RAISE;
+    ASSERT !(raised EXISTS), "OR_ELSE RAISE preserves optionality";
+    ASSERT recover(0) OR_ELSE 7 == 7, "OR_ELSE value recovers failure";
+    ASSERT recover(1) OR_ELSE 8 == 8, "OR_ELSE value recovers absence";
+
+    future:~ = BG { 11; };
+    ASSERT (NEXT future) == 11, "NEXT consumes an affine future";
+    RETURN;
+END

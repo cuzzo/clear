@@ -20,6 +20,7 @@ require_relative "placement"
 require_relative "materialization"
 require_relative "../semantic/capture_strategy"
 require_relative "../semantic/ownership_transport"
+require_relative "../semantic/tense_operation_plan"
 require_relative "fiber_ctx_builder"
 require_relative "../ast/ast"
 require_relative "../ast/type"
@@ -1363,12 +1364,7 @@ class MIRLowering
     when AST::StringConcat      then lower_string_concat(node)
     when AST::BlockExpr         then lower_block_expr(node)
     when AST::RangeLit          then lower_range_lit(node)
-    when AST::OptionalUnwrap
-      target = lower(node.target)
-      target = strip_try(target) if node.respond_to?(:error_union_type) && T.unsafe(node).error_union_type
-      owns_foreign_resource = node.target.is_a?(AST::Identifier) &&
-        node.target.symbol&.foreign_out_owner == true
-      owns_foreign_resource ? MIR::ForeignOwnedUnwrap.new(target) : MIR::OptionalUnwrap.new(target)
+    when AST::OptionalUnwrap    then lower_optional_unwrap(node)
     when AST::Assert            then lower_assert(node)
     when AST::Raise             then lower_raise(node)
     when AST::Cast              then lower_cast(node)

@@ -336,26 +336,49 @@ module MIRLoweringExpressions
       if Type.from_node!(node.right).stream_step?
         MIR::MethodCall.new(right, "isItem", [], false, MIR::CallableContract.no_ownership(0))
       else
+        require_tense_operation_plan!(node, TenseOperationKind::Exists, TenseBackendForm::OptionalTest)
         MIR::BinOp.new("!=", right, MIR::Lit.new("null"))
       end
-    when :IS_OK then MIR::FallibleOk.new(strip_try(right))
+    when :IS_OK
+      require_tense_operation_plan!(node, TenseOperationKind::IsOk, TenseBackendForm::FallibleTest)
+      MIR::FallibleOk.new(strip_try(right))
     when :IS_READY then MIR::FutureReady.new(right)
     when :TRY
-      declared = if node.right.respond_to?(:error_union_type) && T.unsafe(node.right).error_union_type
-        error_type = T.unsafe(node.right).error_union_type
-        error_type.is_a?(Type) ? error_type : Type.new(error_type)
-      else
-        Type.from_node!(node.right, context: "TRY lowering operand")
+      plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
+      unless plan && plan.operation == TenseOperationKind::Try
+        raise "TRY lowering requires its annotation-produced TenseOperationPlan"
       end
-      if declared.error_union?
+      if plan.backend_form == TenseBackendForm::ZigTry
         MIR::TryExpr.new(strip_try(right))
-      else
+      elsif plan.backend_form == TenseBackendForm::OptionalTry
         MIR::TryOptional.new(right)
+      else
+        raise "TRY lowering received unsupported tense backend #{plan.backend_form.serialize}"
       end
     when :SUB, "-" then MIR::UnaryOp.new("-", right)
     when :BITWISE_NOT, "~" then MIR::UnaryOp.new("~", right)
     else raise "MIRLowering: unknown unary op #{node.op}"
     end
+  end
+
+  sig { params(node: AST::Locatable, operation: TenseOperationKind, backend: TenseBackendForm).returns(TenseOperationPlan) }
+  def require_tense_operation_plan!(node, operation, backend)
+    plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
+    unless plan && plan.operation == operation && plan.backend_form == backend
+      Kernel.raise "#{operation.serialize} lowering requires its annotation-produced TenseOperationPlan"
+    end
+    plan
+  end
+
+  sig { params(node: AST::OptionalUnwrap).returns(MIR::Node) }
+  def lower_optional_unwrap(node)
+    T.bind(self, MIRLowering) rescue nil
+    require_tense_operation_plan!(node, TenseOperationKind::Unwrap, TenseBackendForm::OptionalUnwrap)
+    target = T.cast(lower(node.target), MIR::Node)
+    target = strip_try(target) if node.respond_to?(:error_union_type) && T.unsafe(node).error_union_type
+    owns_foreign_resource = node.target.is_a?(AST::Identifier) &&
+      node.target.symbol&.foreign_out_owner == true
+    owns_foreign_resource ? MIR::ForeignOwnedUnwrap.new(target) : MIR::OptionalUnwrap.new(target)
   end
 
   sig { params(node: AST::BinaryOp).returns(MIR::Node) }
@@ -985,6 +1008,7 @@ module MIRLoweringExpressions
       # Extern trampolines already propagate errors internally (if frame.err |e| return e).
       # Wrapping in TryExpr produces invalid `try { block }` — Zig's try takes an expression.
       return left if left.is_a?(MIR::ExternTrampoline)
+      return strip_try(left) if node.retain_error_channel == true
       return MIR::TryExpr.new(strip_try(left)) if facts.left_is_error
       return left
     end
@@ -1134,42 +1158,15 @@ module MIRLoweringExpressions
   sig { params(node: AST::BinaryOp).returns(OrElseFacts) }
   def or_else_facts(node)
     T.bind(self, MIRLowering) rescue nil
-    left_type = Type.from_node!(node.left, context: "OR/OR_ELSE left")
-    # CLEAR's auto-propagate strips `!T` from a fallible call's
-    # full_type (so `x = call()` is x: T at the binding level). The
-    # original `!T` is stashed on `error_union_type`. OR_ELSE needs
-    # to honor that to keep emitting `catch fallback` (error union)
-    # rather than `orelse fallback` (optional).
-    has_error_union = node.left.respond_to?(:error_union_type) && node.left.error_union_type
-    can_fail = node.left.respond_to?(:can_fail) && node.left.can_fail
-    # Allocation FAULT is surface-exempt (the declared return type stays T),
-    # but its lowered call is still an error union. Consult the matched
-    # signature so `allocatingCall() OR_ELSE fallback` lowers through `catch`
-    # rather than Zig optional `orelse`.
-    if node.left.is_a?(AST::FuncCall) || node.left.is_a?(AST::MethodCall)
-      signature = matched_call_signature(node.left)
-      can_fail ||= signature&.alloc_fault == true || signature&.can_fail == true
+    plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
+    unless plan&.recovery_operation?
+      raise "OR_ELSE lowering requires its annotation-produced TenseOperationPlan at line #{node.token&.line || 0}"
     end
-    effective_left = if has_error_union
-                       Type.new(T.cast(node.left.error_union_type, Type::TypeInput))
-                     else
-                       left_type
-                     end
-    # Annotation permits OR_ELSE to recover both a source-visible !T and an
-    # implementation fault from a checked allocating intrinsic. Allocation
-    # faults deliberately do not change the CLEAR expression's ordinary type,
-    # but they still travel through Zig's error channel. Lowering must consume
-    # that channel here instead of leaving the intrinsic's implicit `try` in
-    # place and silently propagating past the fallback.
-    pipeline_manages_recovery =
-      (node.left.is_a?(AST::BinaryOp) && node.left.smooth?) ||
-      (pipeline_host.respond_to?(:pipeline_context_active?) && pipeline_host.pipeline_context_active?)
-    fault_recoverable = !pipeline_manages_recovery && !left_type.future? && !left_type.stream? &&
-      can_fail == true
+    left_is_error = plan.backend_form == TenseBackendForm::ZigCatch
+    left_success_optional = left_is_error && plan.input_type.success_type.optional?
     OrElseFacts.new(
-      left_is_error: left_type.error_union? || !!has_error_union || fault_recoverable,
-      left_success_optional: !!((effective_left.error_union? && effective_left.success_type.optional?) ||
-        (fault_recoverable && left_type.optional?)),
+      left_is_error: left_is_error,
+      left_success_optional: left_success_optional,
       line: node.token&.line || 0,
       target: lowering_target
     )
@@ -2780,6 +2777,7 @@ module MIRLoweringExpressions
   private :lower_identifier
   private :lower_lazy_boolean_op
   private :lower_or_else
+  private :lower_optional_unwrap
   private :lower_recover_smooth
   private :lower_smooth
   private :lower_smooth_call_rhs
@@ -2797,6 +2795,7 @@ module MIRLoweringExpressions
   private :or_else_facts
   private :pick_equality_helper
   private :recursive_field_copy_required?
+  private :require_tense_operation_plan!
   private :signed_integer_modulo?
   private :slice_element_zig_type
   private :smooth_collect_block

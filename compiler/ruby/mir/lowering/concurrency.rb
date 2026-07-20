@@ -1269,8 +1269,17 @@ module MIRLoweringConcurrency
     promise_type = Type.new(node.expr.full_type!)
     result_type = node.full_type!(context: "NEXT result")
     async_shape = node.expr.is_a?(AST::Identifier) ? node.expr.symbol&.async_result_shape : nil
-    source_kind = if async_shape&.promise?
-      async_shape.shared_promise? ? :shared_promise : :plain
+    tense_plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
+    scalar_future = async_shape&.promise? || promise_type.single_future? || promise_type.shared_promise?
+    if scalar_future && (!tense_plan || tense_plan.operation != TenseOperationKind::Next)
+      raise "scalar NEXT lowering requires its annotation-produced TenseOperationPlan"
+    end
+    source_kind = if tense_plan
+      case tense_plan.backend_form
+      when TenseBackendForm::SharedPromiseNext then :shared_promise
+      when TenseBackendForm::ObservableStringNext then :observable_string
+      else :plain
+      end
     elsif promise_type.promise_list?
       :promise_list
     elsif promise_type.observable_array_future?

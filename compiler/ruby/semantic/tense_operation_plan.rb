@@ -13,6 +13,72 @@ class TenseLayerKind < T::Enum
   end
 end
 
+class TenseOperationKind < T::Enum
+  enums do
+    Try = new(:try)
+    Unwrap = new(:unwrap)
+    Next = new(:next)
+    OrElseValue = new(:or_else_value)
+    OrElseRaise = new(:or_else_raise)
+    OrElseExit = new(:or_else_exit)
+    OrElsePass = new(:or_else_pass)
+    OrElseBreak = new(:or_else_break)
+    OrElsePrune = new(:or_else_prune)
+    IsOk = new(:is_ok)
+    Exists = new(:exists)
+    Navigate = new(:navigate)
+    AsyncJoin = new(:async_join)
+    Select = new(:select)
+  end
+end
+
+class TenseBackendForm < T::Enum
+  enums do
+    ZigTry = new(:zig_try)
+    OptionalTry = new(:optional_try)
+    OptionalUnwrap = new(:optional_unwrap)
+    PromiseNext = new(:promise_next)
+    SharedPromiseNext = new(:shared_promise_next)
+    ObservableStringNext = new(:observable_string_next)
+    ZigCatch = new(:zig_catch)
+    ZigOptionalFallback = new(:zig_optional_fallback)
+    FallibleTest = new(:fallible_test)
+    OptionalTest = new(:optional_test)
+    DirectMap = new(:direct_map)
+    FutureMap = new(:future_map)
+    AsyncJoin = new(:async_join)
+    Select = new(:select)
+  end
+end
+
+class TensePropagation < T::Enum
+  enums do
+    None = new(:none)
+    Failure = new(:failure)
+    AbsenceAsFailure = new(:absence_as_failure)
+  end
+end
+
+class TenseRecovery < T::Enum
+  enums do
+    None = new(:none)
+    Fallback = new(:fallback)
+    Raise = new(:raise)
+    Exit = new(:exit)
+    Pass = new(:pass)
+    Break = new(:break)
+    Prune = new(:prune)
+  end
+end
+
+class TenseHandleUse < T::Enum
+  enums do
+    None = new(:none)
+    Consume = new(:consume)
+    SharedRead = new(:shared_read)
+  end
+end
+
 class TenseLayer < T::Struct
   extend T::Sig
 
@@ -136,6 +202,64 @@ class TenseEnvelope < T::Struct
   def self.wrap_layers(payload, selected_layers)
     selected_layers.reverse_each.reduce(payload) { |inner, layer| layer.wrap(inner) }
   end
+
+  sig { params(kind: TenseLayerKind).returns(T.nilable(Integer)) }
+  def layer_index(kind)
+    layers.index { |layer| layer.kind == kind }
+  end
+
+  sig { params(index: Integer).returns(Type) }
+  def without_layer(index)
+    retained = layers.each_with_index.filter_map { |layer, layer_index| layer unless layer_index == index }
+    Type.new(TenseEnvelope.wrap_layers(payload_expression, retained))
+  end
+end
+
+class TenseOperationPlan < T::Struct
+  extend T::Sig
+  include AST::TensePlanValue
+
+  const :operation, TenseOperationKind
+  const :input_type, Type
+  const :result_type, Type
+  const :backend_form, TenseBackendForm
+  const :consumed_layers, T::Array[TenseLayer], factory: -> { [] }
+  const :preserved_layers, T::Array[TenseLayer], factory: -> { [] }
+  const :navigation_layers, T::Array[TenseLayer], factory: -> { [] }
+  const :propagation, TensePropagation, default: TensePropagation::None
+  const :recovery, TenseRecovery, default: TenseRecovery::None
+  const :handle_use, TenseHandleUse, default: TenseHandleUse::None
+  const :suspends, T::Boolean, default: false
+  const :may_terminate_current_flow, T::Boolean, default: false
+  const :refinement_type, T.nilable(Type), default: nil
+
+  sig { returns(T::Boolean) }
+  def consumes_handle?
+    handle_use == TenseHandleUse::Consume
+  end
+
+  sig { returns(T::Boolean) }
+  def recovery_operation?
+    operation == TenseOperationKind::OrElseValue ||
+      operation == TenseOperationKind::OrElseRaise ||
+      operation == TenseOperationKind::OrElseExit ||
+      operation == TenseOperationKind::OrElsePass ||
+      operation == TenseOperationKind::OrElseBreak ||
+      operation == TenseOperationKind::OrElsePrune
+  end
+end
+
+class TenseJoinPlan < T::Struct
+  extend T::Sig
+  include AST::TensePlanValue
+
+  const :result_type, T.nilable(Type), default: nil
+  const :reason, T.nilable(Symbol), default: nil
+
+  sig { returns(T::Boolean) }
+  def success?
+    !result_type.nil?
+  end
 end
 
 class TenseSelectorPlan < T::Struct
@@ -190,4 +314,230 @@ class TenseOperationPlanner
   def self.selector(type)
     TenseSelectorPlan.new(value_type: type, envelope: TenseEnvelope.from_type(type))
   end
+
+  sig { params(type: Type).returns(TenseOperationPlan) }
+  def self.try_value(type)
+    envelope = TenseEnvelope.from_type(type)
+    first = envelope.layers.first
+    if first&.kind == TenseLayerKind::Fallible
+      result = envelope.without_layer(0)
+      preserve_value_metadata!(result, type)
+      return operation_plan(
+        TenseOperationKind::Try, type, result, TenseBackendForm::ZigTry,
+        consumed: [T.must(first)], preserved: envelope.layers.drop(1),
+        propagation: TensePropagation::Failure,
+        may_terminate: true,
+      )
+    end
+    if first&.kind == TenseLayerKind::Optional
+      result = envelope.without_layer(0)
+      preserve_value_metadata!(result, type)
+      return operation_plan(
+        TenseOperationKind::Try, type, result, TenseBackendForm::OptionalTry,
+        consumed: [T.must(first)], preserved: envelope.layers.drop(1),
+        propagation: TensePropagation::AbsenceAsFailure,
+        may_terminate: true,
+      )
+    end
+
+    raise ArgumentError, "TRY requires an outer fallible or optional layer, got #{envelope.order.inspect}"
+  end
+
+  sig { params(type: Type).returns(TenseOperationPlan) }
+  def self.unwrap(type)
+    envelope = TenseEnvelope.from_type(type)
+    optional_index = envelope.layer_index(TenseLayerKind::Optional)
+    if optional_index.nil? || envelope.layers.take(optional_index).any? { |layer| layer.kind == TenseLayerKind::Future }
+      raise ArgumentError, "UNWRAP requires an immediately available optional layer, got #{envelope.order.inspect}"
+    end
+    index = optional_index
+    consumed = T.must(envelope.layers[index])
+    result = envelope.without_layer(index)
+    result.merge_capabilities_from!(type, include_affine_ownership: true)
+    result.copy_placement_from!(type)
+    operation_plan(
+      TenseOperationKind::Unwrap, type, result, TenseBackendForm::OptionalUnwrap,
+      consumed: [consumed], preserved: envelope.layers.each_with_index.filter_map { |layer, i| layer unless i == index },
+    )
+  end
+
+  sig { params(type: Type, shared: T::Boolean).returns(TenseOperationPlan) }
+  def self.next_value(type, shared: false)
+    envelope = TenseEnvelope.from_type(type)
+    first = envelope.layers.first
+    unless first&.kind == TenseLayerKind::Future
+      raise ArgumentError, "NEXT requires an outer future layer, got #{envelope.order.inspect}"
+    end
+    result = envelope.without_layer(0)
+    preserve_value_metadata!(result, type)
+    backend = if type.observable? && envelope.payload_type.string?
+      TenseBackendForm::ObservableStringNext
+    elsif shared
+      TenseBackendForm::SharedPromiseNext
+    else
+      TenseBackendForm::PromiseNext
+    end
+    operation_plan(
+      TenseOperationKind::Next, type, result,
+      backend,
+      consumed: [T.must(first)], preserved: envelope.layers.drop(1),
+      handle_use: shared ? TenseHandleUse::SharedRead : TenseHandleUse::Consume,
+      suspends: true,
+    )
+  end
+
+  sig { params(type: Type).returns(TenseOperationPlan) }
+  def self.is_ok(type)
+    envelope = TenseEnvelope.from_type(type)
+    first = envelope.layers.first
+    unless first&.kind == TenseLayerKind::Fallible
+      raise ArgumentError, "IS_OK requires an outer fallible layer, got #{envelope.order.inspect}"
+    end
+    operation_plan(
+      TenseOperationKind::IsOk, type, Type.new(:Bool), TenseBackendForm::FallibleTest,
+      preserved: envelope.layers,
+      refinement: envelope.without_layer(0),
+    )
+  end
+
+  sig { params(type: Type).returns(TenseOperationPlan) }
+  def self.exists(type)
+    envelope = TenseEnvelope.from_type(type)
+    optional_index = envelope.layer_index(TenseLayerKind::Optional)
+    if optional_index.nil? || envelope.layers.take(optional_index).any? { |layer| layer.kind == TenseLayerKind::Future }
+      raise ArgumentError, "EXISTS requires an immediately available optional layer, got #{envelope.order.inspect}"
+    end
+    operation_plan(
+      TenseOperationKind::Exists, type, Type.new(:Bool), TenseBackendForm::OptionalTest,
+      preserved: envelope.layers,
+      refinement: envelope.without_layer(optional_index),
+    )
+  end
+
+  sig do
+    params(
+      type: Type,
+      fallback_type: Type,
+      operation: TenseOperationKind,
+      recovery: TenseRecovery,
+    ).returns(TenseOperationPlan)
+  end
+  def self.or_else(type, fallback_type, operation: TenseOperationKind::OrElseValue, recovery: TenseRecovery::Fallback)
+    envelope = TenseEnvelope.from_type(type)
+    recoverable = envelope.layers.take_while { |layer| layer.kind != TenseLayerKind::Future }
+    available = recoverable.select { |layer| layer.kind == TenseLayerKind::Fallible || layer.kind == TenseLayerKind::Optional }
+    raise ArgumentError, "OR_ELSE requires a recoverable outer layer, got #{envelope.order.inspect}" if available.empty?
+
+    handled = if recovery == TenseRecovery::Fallback
+      available
+    else
+      available.select { |layer| layer.kind == TenseLayerKind::Fallible }
+    end
+
+    remaining = envelope.layers.drop(handled.length)
+    result = Type.new(TenseEnvelope.wrap_layers(envelope.payload_expression, remaining))
+    if recovery == TenseRecovery::Fallback && fallback_type.resolved != :NoReturn &&
+       !result.accepts?(fallback_type) && !fallback_type.accepts?(result)
+      raise ArgumentError, "OR_ELSE fallback #{fallback_type.resolved} does not match #{result.resolved}"
+    end
+    backend = available.any? { |layer| layer.kind == TenseLayerKind::Fallible } ?
+      TenseBackendForm::ZigCatch : TenseBackendForm::ZigOptionalFallback
+    operation_plan(
+      operation, type, result, backend,
+      consumed: handled, preserved: remaining,
+      recovery: recovery,
+      may_terminate: fallback_type.resolved == :NoReturn,
+    )
+  end
+
+  sig { params(types: T::Array[Type]).returns(TenseJoinPlan) }
+  def self.join_async_results(types)
+    live_types = types.reject { |type| type.resolved == :Never }
+    return TenseJoinPlan.new(reason: :empty) if live_types.empty?
+
+    saw_nil = live_types.any? { |type| type.resolved == :NIL }
+    envelopes = live_types.reject { |type| type.resolved == :NIL }.map { |type| TenseEnvelope.from_type(type) }
+    return TenseJoinPlan.new(result_type: Type.new(:NIL)) if envelopes.empty?
+
+    future_states = envelopes.map(&:asynchronous?).uniq
+    return TenseJoinPlan.new(reason: :future_mismatch) if future_states.length > 1
+    future = future_states.first == true
+    return TenseJoinPlan.new(reason: :future_mismatch) if saw_nil && future
+
+    payload_keys = envelopes.map { |envelope| envelope.payload_type.semantic_type_key }.uniq
+    return TenseJoinPlan.new(reason: :payload_mismatch) if payload_keys.length > 1
+
+    first = T.must(envelopes.first)
+    payload = Type.copy_type(first.payload_type)
+    layers = T.let([], T::Array[TenseLayer])
+    if future
+      future_layer = T.must(first.layers.find { |layer| layer.kind == TenseLayerKind::Future })
+      layers << future_layer
+    end
+    if envelopes.any?(&:fallible?)
+      fallible_layer = T.must(envelopes.flat_map(&:layers).find { |layer| layer.kind == TenseLayerKind::Fallible })
+      layers << fallible_layer
+    end
+    if saw_nil || envelopes.any?(&:optional?)
+      optional_layer = envelopes.flat_map(&:layers).find { |layer| layer.kind == TenseLayerKind::Optional }
+      layers << (optional_layer || TenseLayer.new(kind: TenseLayerKind::Optional, capabilities: TypeCapabilities.new))
+    end
+    joined = Type.new(TenseEnvelope.wrap_layers(payload.shape.expression, layers))
+    joined.merge_capabilities_from!(payload, include_affine_ownership: true)
+    TenseJoinPlan.new(result_type: joined)
+  end
+
+  sig do
+    params(
+      operation: TenseOperationKind,
+      input: Type,
+      result: Type,
+      backend: TenseBackendForm,
+      consumed: T::Array[TenseLayer],
+      preserved: T::Array[TenseLayer],
+      propagation: TensePropagation,
+      recovery: TenseRecovery,
+      handle_use: TenseHandleUse,
+      suspends: T::Boolean,
+      may_terminate: T::Boolean,
+      refinement: T.nilable(Type),
+    ).returns(TenseOperationPlan)
+  end
+  def self.operation_plan(
+    operation,
+    input,
+    result,
+    backend,
+    consumed: [],
+    preserved: [],
+    propagation: TensePropagation::None,
+    recovery: TenseRecovery::None,
+    handle_use: TenseHandleUse::None,
+    suspends: false,
+    may_terminate: false,
+    refinement: nil
+  )
+    TenseOperationPlan.new(
+      operation: operation,
+      input_type: input,
+      result_type: result,
+      backend_form: backend,
+      consumed_layers: consumed.freeze,
+      preserved_layers: preserved.freeze,
+      propagation: propagation,
+      recovery: recovery,
+      handle_use: handle_use,
+      suspends: suspends,
+      may_terminate_current_flow: may_terminate,
+      refinement_type: refinement,
+    )
+  end
+  private_class_method :operation_plan
+
+  sig { params(result: Type, source: Type).void }
+  def self.preserve_value_metadata!(result, source)
+    result.merge_capabilities_from!(source, include_affine_ownership: true)
+    result.copy_placement_from!(source)
+  end
+  private_class_method :preserve_value_metadata!
 end
