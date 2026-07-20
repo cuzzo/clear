@@ -11,12 +11,15 @@ To understand the gaps, it helps to review what the detector **does** catch:
 2. **Explicit Callback Dispatches on Parameters**: `cb.call()` or `listener.onEvent()` where the receiver is a parameter, and the call is either a standard invoker (`call`, `invoke`, `apply`, `run`, `perform`) or the parameter's name/type matches callback heuristics.
 3. **Local Variable Function Invocations**: Local variables with explicit function types (e.g., containing `fn`, `func`, `->`, or `function`).
 4. **Complex Targets**: Direct invocations of complex expressions (containing `[`, `(`, `*`, `->`) such as `arr[10]()`, `(*fp)()`, and parenthesized expressions `(foo.bar.baz)()`.
+5. **DFG-Backed Aliases** (resolves gap 3 below): locals whose value is reachable from a parameter or a typed callable through the local dataflow graph's direct assignment edges (`NodeEffect.write_sources`, closed to a fixpoint per function in `compute_callback_origins`). `my_cb := cb; my_cb()` is caught in every language that publishes CFG effects. Receiver dispatches (`x.call()`) additionally require type evidence or an invoker/dispatch name; bare "the receiver expression looks complex" is no longer treated as evidence, which removed the dominant false-positive class (`Command.new(argv).run`).
+6. **C Member Calls** (resolves gap 1 for C): `h->cb()` / `s.cb()` and `(*fp)()` are matched structurally in `c_hazards.scm` - C has no methods, so a call through a field or parenthesized pointer deref is always a function-pointer invocation.
 
 ---
 
 ## Known Gaps
 
 ### 1. Unparenthesized Nested Callback Members (`foo.bar.baz()`)
+* **Status**: **Resolved for C** (structural query in `c_hazards.scm`; every C member call is a function-pointer call). Still open for OOP languages, where resolving the leaf field's type is required.
 * **Description**: A callback is stored as a nested member of a struct, class, or object, and is called directly as a member method.
 * **Examples**:
   * **C**: `foo.bar.baz()` (where `baz` is a function pointer member).
@@ -61,6 +64,7 @@ To understand the gaps, it helps to review what the detector **does** catch:
 ---
 
 ### 3. Local Variable Aliasing and Untyped Assignments
+* **Status**: **Resolved**. `compute_callback_origins` in `hazards.rs` traces call targets/receivers back to parameters and typed callables over the local DFG's `write_sources` edges (multi-hop, per function). Aliases through direct assignments are detected; aliases through calls or compound expressions remain out of scope by design (`write_sources` intentionally excludes them).
 * **Description**: A callback parameter or function pointer is assigned to a local variable (potentially through multiple hops or intermediate functions) before being called.
 * **Examples**:
   ```go

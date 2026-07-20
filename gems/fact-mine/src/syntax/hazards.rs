@@ -196,8 +196,11 @@ fn is_cb_type(s: &str) -> bool {
         || s_lower == "function"
         || s_lower.starts_with("fn(")
         || s_lower.starts_with("fn ")
+        || s_lower.starts_with("func(")
+        || s_lower.starts_with("func ")
         || s_lower.ends_with("_fn")
         || s_lower.ends_with("_func")
+        || s_lower.contains("(*)")
         || s_lower.contains("->")
         || s_lower.contains("=>")
 }
@@ -218,50 +221,187 @@ fn is_callback_type_or_name(name: &str, type_str: Option<&str>, language: Langua
     false
 }
 
-pub fn detect_and_append_callback_hazards(document: &mut Document) {
-    let get_locals = |doc: &Document, enclosing: &FunctionDef| -> Option<std::collections::BTreeMap<String, String>> {
-        let key = crate::syntax::normalized_behavior::method_parameter_type_key(&enclosing.owner, &enclosing.name, enclosing.line);
-        if let Some(locals) = doc.method_local_types.get(&key) {
-            return Some(locals.clone());
-        }
-        doc.method_local_types.get(&enclosing.name).cloned()
-    };
+/// Per-function value-origin sets derived from the local dataflow facts.
+///
+/// `param_derived` holds every local name whose value is reachable from a
+/// parameter through direct `target = source` assignment edges. Calling such a
+/// value is a function-pointer/callback invocation: the callable was supplied
+/// by the caller.
+///
+/// `callable_typed` holds every local name proven to hold a callable by type
+/// evidence (declared parameter/local types, adapter callback params, or
+/// flow-propagated `declared:` hints), closed over the same assignment edges.
+#[derive(Default)]
+struct CallbackOrigins {
+    param_derived: std::collections::HashSet<String>,
+    callable_typed: std::collections::HashSet<String>,
+}
 
-    let get_params = |doc: &Document, enclosing: &FunctionDef| -> Option<std::collections::BTreeMap<String, String>> {
-        let key = crate::syntax::normalized_behavior::method_parameter_type_key(&enclosing.owner, &enclosing.name, enclosing.line);
-        if let Some(params) = doc.method_param_types.get(&key) {
-            return Some(params.clone());
+fn place_name_from_id(place_id: &str) -> Option<&str> {
+    place_id.rsplit(':').next().filter(|name| !name.is_empty())
+}
+
+/// The CFG layer names file-level scopes "(top-level)" while the syntax layer
+/// uses the file stem as the owner. Collapse both spellings so per-function
+/// facts from the two layers join on one key.
+fn canonical_owner(owner: &str, file_stem: &str) -> String {
+    if owner == "(top-level)" || owner == file_stem {
+        String::new()
+    } else {
+        owner.to_string()
+    }
+}
+
+fn declared_hint_type(hint: &str) -> &str {
+    hint.strip_prefix("declared:").unwrap_or(hint)
+}
+
+fn method_type_map<'a>(
+    map: &'a std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    enclosing: &FunctionDef,
+) -> Option<&'a std::collections::BTreeMap<String, String>> {
+    let key = crate::syntax::normalized_behavior::method_parameter_type_key(
+        &enclosing.owner,
+        &enclosing.name,
+        enclosing.line,
+    );
+    map.get(&key).or_else(|| map.get(&enclosing.name))
+}
+
+fn compute_callback_origins(
+    document: &Document,
+) -> std::collections::HashMap<(String, String), CallbackOrigins> {
+    let file_stem = std::path::Path::new(&document.file)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("")
+        .to_string();
+    let mut origins: std::collections::HashMap<(String, String), CallbackOrigins> =
+        std::collections::HashMap::new();
+
+    for f in &document.function_defs {
+        let entry = origins
+            .entry((canonical_owner(&f.owner, &file_stem), f.name.clone()))
+            .or_default();
+        for p in &f.params {
+            entry.param_derived.insert(p.clone());
         }
-        doc.method_param_types.get(&enclosing.name).cloned()
-    };
+        for p in &f.callback_params {
+            entry.param_derived.insert(p.clone());
+            entry.callable_typed.insert(p.clone());
+        }
+        for map in [
+            method_type_map(&document.method_param_types, f),
+            method_type_map(&document.method_local_types, f),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            for (name, type_str) in map {
+                if is_cb_type(type_str) {
+                    entry.callable_typed.insert(name.clone());
+                }
+            }
+        }
+    }
+
+    for fact in &document.flow_types {
+        if fact.types.iter().any(|t| is_cb_type(declared_hint_type(t))) {
+            if let Some(name) = place_name_from_id(&fact.place_id) {
+                origins
+                    .entry((canonical_owner(&fact.owner, &file_stem), fact.function.clone()))
+                    .or_default()
+                    .callable_typed
+                    .insert(name.to_string());
+            }
+        }
+    }
+    for effect in &document.node_effects {
+        for (place_id, hint) in &effect.write_type_hints {
+            if is_cb_type(declared_hint_type(hint)) {
+                if let Some(name) = place_name_from_id(place_id) {
+                    origins
+                        .entry((canonical_owner(&effect.owner, &file_stem), effect.function.clone()))
+                        .or_default()
+                        .callable_typed
+                        .insert(name.to_string());
+                }
+            }
+        }
+    }
+
+    loop {
+        let mut changed = false;
+        for effect in &document.node_effects {
+            let key = (canonical_owner(&effect.owner, &file_stem), effect.function.clone());
+            let Some(entry) = origins.get_mut(&key) else {
+                continue;
+            };
+            for (target, source) in &effect.write_sources {
+                let (Some(target_name), Some(source_name)) =
+                    (place_name_from_id(target), place_name_from_id(source))
+                else {
+                    continue;
+                };
+                if entry.param_derived.contains(source_name)
+                    && entry.param_derived.insert(target_name.to_string())
+                {
+                    changed = true;
+                }
+                if entry.callable_typed.contains(source_name)
+                    && entry.callable_typed.insert(target_name.to_string())
+                {
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    origins
+}
+
+pub fn detect_and_append_callback_hazards(document: &mut Document) {
+    let file_stem = std::path::Path::new(&document.file)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("")
+        .to_string();
+    let origins = compute_callback_origins(document);
+    let empty_origins = CallbackOrigins::default();
 
     let mut callback_hazards = Vec::new();
-    
+
     let mut fn_map = std::collections::HashMap::new();
     for f in &document.function_defs {
         fn_map.insert((f.owner.clone(), f.name.clone()), f);
     }
-    
+
     for call in &document.call_sites {
         let enclosing_fn = match fn_map.get(&(call.owner.clone(), call.function.clone())) {
             Some(f) => f,
             None => continue,
         };
-        
+        let origin = origins
+            .get(&(canonical_owner(&call.owner, &file_stem), call.function.clone()))
+            .unwrap_or(&empty_origins);
+
         let mut is_callback = false;
-        
+
         let is_direct = call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this";
 
         if is_direct {
             // E.g., cb(), fp(), arr[10](), (*fp)()
             let mut is_var_call = false;
-            if enclosing_fn.params.contains(&call.message) 
-                || enclosing_fn.callback_params.contains(&call.message) 
+            if enclosing_fn.params.contains(&call.message)
+                || enclosing_fn.callback_params.contains(&call.message)
             {
                 if call.receiver.is_empty() {
                     is_var_call = true;
                 } else {
-                    let param_type = get_params(document, enclosing_fn)
+                    let param_type = method_type_map(&document.method_param_types, enclosing_fn)
                         .and_then(|params| params.get(&call.message).cloned());
                     let is_cb = is_callback_type_or_name(&call.message, param_type.as_deref(), document.language)
                         || is_cb_name(&call.message)
@@ -277,14 +417,13 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                     }
                 }
             }
-            if !is_var_call {
-                if let Some(locals) = get_locals(document, enclosing_fn) {
-                    if let Some(t) = locals.get(&call.message) {
-                        if is_cb_type(t) {
-                            is_var_call = true;
-                        }
-                    }
-                }
+            if !is_var_call
+                && (origin.param_derived.contains(&call.message)
+                    || origin.callable_typed.contains(&call.message))
+                && !fn_map.contains_key(&(call.owner.clone(), call.message.clone()))
+            {
+                // Aliased or typed callable local: my_cb = cb; my_cb()
+                is_var_call = true;
             }
             if !is_var_call {
                 let is_complex_target = (call.message.contains('[') && call.message != "[]")
@@ -302,24 +441,12 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
         } else {
             let mut is_cb_receiver = false;
             if call.receiver != "self" && call.receiver != "this" {
-                if enclosing_fn.params.contains(&call.receiver) 
+                if enclosing_fn.params.contains(&call.receiver)
                     || enclosing_fn.callback_params.contains(&call.receiver)
+                    || origin.param_derived.contains(&call.receiver)
+                    || origin.callable_typed.contains(&call.receiver)
                 {
                     is_cb_receiver = true;
-                } else if let Some(locals) = get_locals(document, enclosing_fn) {
-                    if let Some(t) = locals.get(&call.receiver) {
-                        if is_cb_type(t) {
-                            is_cb_receiver = true;
-                        }
-                    }
-                } else {
-                    let is_complex = call.receiver.contains('*')
-                        || call.receiver.contains("->")
-                        || (call.receiver.contains('.') && !call.receiver.starts_with("this."))
-                        || call.receiver.contains('[');
-                    if is_complex {
-                        is_cb_receiver = true;
-                    }
                 }
             }
 
@@ -348,16 +475,20 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                 let is_invoker = matches!(call.message.as_str(), "call" | "invoke" | "apply" | "run" | "perform");
 
                 let is_cb = if supports_interfaces(document.language) {
-                    let type_str = get_params(document, enclosing_fn)
+                    let type_str = method_type_map(&document.method_param_types, enclosing_fn)
                         .and_then(|params| params.get(&call.receiver).cloned())
                         .or_else(|| {
-                            get_locals(document, enclosing_fn)
+                            method_type_map(&document.method_local_types, enclosing_fn)
                                 .and_then(|locals| locals.get(&call.receiver).cloned())
                         });
-                    let is_callback_type = is_callback_type_or_name(&call.receiver, type_str.as_deref(), document.language);
+                    let is_callback_type = is_callback_type_or_name(&call.receiver, type_str.as_deref(), document.language)
+                        || origin.callable_typed.contains(&call.receiver);
                     is_dispatch_name && is_callback_type
                 } else {
-                    is_invoker || (is_dispatch_name && is_cb_name(&call.receiver))
+                    is_invoker
+                        || (is_dispatch_name
+                            && (is_cb_name(&call.receiver)
+                                || origin.callable_typed.contains(&call.receiver)))
                 };
 
                 if is_cb {
@@ -954,4 +1085,77 @@ local mt = {
         let cpp_callbacks: Vec<_> = cpp_compositions.iter().filter(|h| h.hazard_type == "cpp_callback_invocation").collect();
         assert_eq!(cpp_callbacks.len(), 1);
     }
+
+    #[test]
+    fn test_dfg_backed_callback_aliasing_and_precision() {
+        let check = |code: &str, suffix: &str, language: Language| -> Vec<HazardSite> {
+            let mut file = tempfile::Builder::new().suffix(suffix).tempfile().unwrap();
+            std::io::Write::write_all(file.as_file_mut(), code.as_bytes()).unwrap();
+            let document = crate::syntax::parse_file(file.path().to_path_buf(), language).unwrap();
+            document
+                .hazard_sites
+                .into_iter()
+                .filter(|h| h.hazard_type.ends_with("_callback_invocation"))
+                .collect()
+        };
+
+        // Gap 3 (fp-hazard-gaps.md): parameter aliased through a local, then invoked.
+        let go_alias = check(
+            "package main\nfunc test(cb func()) {\n  my_cb := cb\n  my_cb()\n}",
+            ".go",
+            Language::Go,
+        );
+        assert_eq!(go_alias.len(), 1);
+        assert_eq!(go_alias[0].line, 4);
+
+        let rb_alias = check(
+            "def test(cb)\n  my_cb = cb\n  my_cb.call\nend",
+            ".rb",
+            Language::Ruby,
+        );
+        assert_eq!(rb_alias.len(), 1);
+        assert_eq!(rb_alias[0].line, 3);
+
+        let py_alias = check(
+            "def test(cb):\n    f = cb\n    f()\n",
+            ".py",
+            Language::Python,
+        );
+        assert_eq!(py_alias.len(), 1);
+        assert_eq!(py_alias[0].line, 3);
+
+        // Aliasing a local bound to a named function is NOT caller-supplied: stay quiet.
+        let go_local_fn = check(
+            "package main\nfunc helper() {}\nfunc test() {\n  f := helper\n  f()\n}",
+            ".go",
+            Language::Go,
+        );
+        assert_eq!(go_local_fn.len(), 0);
+
+        // Static dispatch on a constructed receiver must NOT be flagged
+        // (the shape that produced false positives on real code).
+        let rb_new_run = check(
+            "class Runner\n  def dispatch\n    Command.new(@argv).run\n  end\nend",
+            ".rb",
+            Language::Ruby,
+        );
+        assert_eq!(rb_new_run.len(), 0);
+
+        let rb_chain = check(
+            "class Runner\n  def dispatch(config)\n    config.value.call_count\n  end\nend",
+            ".rb",
+            Language::Ruby,
+        );
+        assert_eq!(rb_chain.len(), 0);
+
+        // Gap 1 (fp-hazard-gaps.md): C member calls always dispatch through a
+        // function-pointer field.
+        let c_member = check(
+            "struct Handler {\n  void (*cb)(void);\n};\nvoid test(struct Handler* h) {\n  h->cb();\n}",
+            ".c",
+            Language::C,
+        );
+        assert_eq!(c_member.len(), 1);
+    }
+
 }

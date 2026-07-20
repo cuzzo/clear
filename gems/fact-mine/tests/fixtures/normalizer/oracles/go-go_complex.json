@@ -339,13 +339,28 @@
                                       "children": [
                                         {
                                           "Node": {
-                                            "children": [],
+                                            "children": [
+                                              {
+                                                "String": "i"
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [],
+                                                  "first_column": 13,
+                                                  "first_lineno": 13,
+                                                  "last_column": 14,
+                                                  "last_lineno": 13,
+                                                  "text": "0",
+                                                  "type": "INT_LITERAL"
+                                                }
+                                              }
+                                            ],
                                             "first_column": 8,
                                             "first_lineno": 13,
-                                            "last_column": 9,
+                                            "last_column": 14,
                                             "last_lineno": 13,
-                                            "text": "i",
-                                            "type": "EXPRESSION_LIST"
+                                            "text": "i := 0",
+                                            "type": "LASGN"
                                           }
                                         },
                                         {

@@ -300,7 +300,22 @@ impl<'source> TreeSitterNormalizer<'source> {
             .check_node_role(node, "expression_list")
         {
             if self.single_short_var_lhs(node) {
-                return Some(self.wrap(&kind_type(node.kind()), Vec::new(), node));
+                // `x := expr` declares a local: expose the write and its value
+                // source so dataflow facts see the binding.
+                let target = self.named_children(node).into_iter().next()?;
+                let right = node
+                    .next_named_sibling()
+                    .map(|rhs| {
+                        let named = self.named_children(rhs);
+                        if named.len() == 1 { named[0] } else { rhs }
+                    })
+                    .and_then(|child| self.normalize_node(child));
+                let source = node.parent().unwrap_or(node);
+                return Some(self.wrap(
+                    "LASGN",
+                    vec![Child::String(self.target_name(target)), optional_node(right)],
+                    source,
+                ));
             }
         }
         if self.call_node(node) {

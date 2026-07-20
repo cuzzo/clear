@@ -27,3 +27,9 @@
 )
 
 (cast_expression) @hazard.c_ubsan_cast
+
+(call_expression
+  function: (field_expression)) @hazard.c_callback_invocation
+
+(call_expression
+  function: (parenthesized_expression (pointer_expression))) @hazard.c_callback_invocation
