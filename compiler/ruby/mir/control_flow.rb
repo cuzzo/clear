@@ -27,6 +27,7 @@ require_relative "cleanup_entry"
 require_relative "placement"
 require_relative "../semantic/local_binding_facts"
 require_relative "../semantic/ownership_identity"
+require_relative "../semantic/ownership_transport"
 require_relative "../semantic/lifecycle_plan"
 
 ControlFlowNodeInput = T.type_alias { T.nilable(T.any(AST::Node, AST::RawBody)) }

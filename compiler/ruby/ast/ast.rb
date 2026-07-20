@@ -20,6 +20,11 @@ module AST
   module CaptureAnalysisValue
   end
 
+  # Load-order-safe protocol for immutable tense plans attached by annotation
+  # and consumed by MIR. The concrete planner lives outside the syntax layer.
+  module TensePlanValue
+  end
+
   RawBody = T.type_alias { T::Array[AST::Node] }
   HashLitPairs = T.type_alias { T::Hash[AST::Node, AST::Node] }
   BgNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock) }
@@ -112,6 +117,11 @@ module AST
     dst.var_used = src.var_used unless src.var_used.nil?
     dst.slot_size = src.slot_size unless src.slot_size.nil?
     dst.container_borrow = src.container_borrow unless src.container_borrow.nil?
+    dst.tense_plan = T.must(src.tense_plan) if src.tense_plan
+    if src.respond_to?(:retain_error_channel) && dst.respond_to?(:retain_error_channel=)
+      retained = T.unsafe(src).retain_error_channel
+      T.unsafe(dst).retain_error_channel = retained unless retained.nil?
+    end
   end
   private_class_method :copy_pipeline_base_metadata!
 
@@ -522,7 +532,7 @@ module AST
   # wrappers preserve borrow provenance.
   sig { params(node: AST::Node).returns(T.nilable(AST::Node)) }
   def self.borrow_transparent_operand(node)
-    return node.target if node.is_a?(AST::OptionalUnwrap)
+    return node.target if node.is_a?(AST::OptionalUnwrap) || node.is_a?(AST::TenseNavigation)
     return node.right if node.is_a?(AST::UnaryOp) && node.op == :TRY
     return node.left if node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_ELSE)
 
@@ -661,13 +671,14 @@ module AST
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.recovery_wrapper?(node)
     (node.is_a?(AST::UnaryOp) && node.op == :TRY) ||
-      node.is_a?(AST::OptionalUnwrap)
+      node.is_a?(AST::OptionalUnwrap) || node.is_a?(AST::TenseNavigation)
   end
 
   sig { params(node: AST::Node).returns(AST::Node) }
   def self.recovery_payload(node)
     return node.right if node.is_a?(AST::UnaryOp) && node.op == :TRY
     return node.target if node.is_a?(AST::OptionalUnwrap)
+    return node.target if node.is_a?(AST::TenseNavigation)
 
     node
   end
@@ -806,6 +817,8 @@ module AST
     case node
     when CopyNode, CloneNode, FreezeNode
       skip_copy ? [] : [node.value].compact
+    when TenseNavigation
+      [node.target].compact
     when MoveNode, ShareNode, CapabilityWrap, Cast, MutableBorrow, ReturnNode, Assignment, VarDecl, BindExpr,
          DestructuringAssignment
       child = node.is_a?(MutableBorrow) ? node.target : node.value
@@ -1022,6 +1035,21 @@ module AST
   # ruby-to-clear: no-expand
   module Locatable
       extend T::Sig
+
+    # Immutable semantic operation plan published by annotation and consumed
+    # by MIR lowering. Keeping this on every locatable node avoids a parallel
+    # family of per-node flags while retaining a strongly typed phase handoff.
+    sig { returns(T.nilable(AST::TensePlanValue)) }
+    def tense_plan
+      @tense_plan = T.let(nil, T.nilable(AST::TensePlanValue)) unless defined?(@tense_plan)
+      @tense_plan
+    end
+
+    sig { params(value: AST::TensePlanValue).returns(AST::TensePlanValue) }
+    def tense_plan=(value)
+      @tense_plan = value
+      value
+    end
 
     sig { returns(Integer) }
     def line; token.line; end
@@ -2255,6 +2283,15 @@ module AST
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
     attr_accessor :or_fallback_dupe  # true when OR_ELSE fallback struct needs string-field heap dupe
     attr_accessor :error_union_type # recoverable result preserved through pipeline composition
+    sig { returns(T.nilable(T::Boolean)) }
+    def retain_error_channel
+      @retain_error_channel = T.let(nil, T.nilable(T::Boolean)) unless defined?(@retain_error_channel)
+      @retain_error_channel
+    end
+    sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    def retain_error_channel=(value)
+      @retain_error_channel = value
+    end
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
     # outer scope. The lowering's `descend` helper consults this and wraps
     # the field's emission in MIR::BlockExpr when the field actually emitted
@@ -2881,7 +2918,11 @@ module AST
   # lowering. modifier_order preserves the exact SELECT annotation spelling
   # (`!~`, `~!`, `!~!`, etc.) so wrapper ordering remains a checked language
   # contract instead of being flattened into a set of effects.
-  SelectOp     = Struct.new(:token, :expression, :effect_mode, :stream_mode, :modifier_order, :capture_analysis) { include Locatable; include HasExpression }
+  SelectOp = Struct.new(:token, :expression, :effect_mode, :stream_mode, :modifier_order, :capture_analysis) do
+    extend T::Sig
+    include Locatable
+    include HasExpression
+  end
   WhereOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   IndexOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
   ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable; include HasExpression }
@@ -2958,6 +2999,23 @@ module AST
     sig { returns(T::Boolean) }
     def safe_navigation?
       token.type == :CHAR && token.value == '?'
+    end
+  end
+  # An exact ordered tense map such as `value~?.field`. Annotation resolves
+  # the member against the payload while retaining the receiver envelope for
+  # the authoritative tense planner and MIR handoff.
+  TenseNavigation = Struct.new(:token, :target, :markers) do
+    extend T::Sig
+    include Locatable
+
+    sig { returns(T.nilable(String)) }
+    def name
+      target.respond_to?(:name) ? T.unsafe(target).name : nil
+    end
+
+    sig { returns(T::Boolean) }
+    def safe_navigation?
+      markers.include?("?")
     end
   end
   # Explicit call-site mutation marker. It never denotes a first-class

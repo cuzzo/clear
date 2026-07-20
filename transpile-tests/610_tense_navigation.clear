@@ -1,0 +1,106 @@
+# Ordered tense navigation maps a member without silently consuming, skipping,
+# or reordering any !, ~, or ? layer.
+
+STRUCT NavUser {
+    name: String
+}
+
+IMPLEMENTATION NavUser {
+    METHOD score(self) RETURNS Int64 -> RETURN self.name.length(); END
+}
+
+FN optionalUser(present: Bool) RETURNS ?NavUser ->
+    IF present THEN RETURN NavUser{ name: COPY "Optional" }; END
+    RETURN NIL;
+END
+
+FN riskyUser() RETURNS !NavUser ->
+    RETURN NavUser{ name: COPY "Fallible" };
+END
+
+FN maybeUser(present: Bool) RETURNS !?NavUser ->
+    IF present THEN RETURN NavUser{ name: COPY "Ada" }; END
+    RETURN NIL;
+END
+
+FN mapMaybeUser(TAKES value: ~?NavUser) RETURNS ~?String ->
+    RETURN value~?.name;
+END
+
+FN laterUser() RETURNS ~NavUser ->
+    RETURN BG {
+        @xl -> NavUser{ name: COPY "Grace" };
+    };
+END
+FN laterOptionalUser() RETURNS ~?NavUser ->
+    RETURN BG { optionalUser(TRUE); };
+END
+
+FN laterRiskyUser() RETURNS ~!NavUser ->
+    RETURN BG { riskyUser(); };
+END
+
+FN laterMaybeUser() RETURNS ~!?NavUser ->
+    RETURN BG { maybeUser(TRUE); };
+END
+
+FN laterTuple() RETURNS ~Tuple<String,Int64> ->
+    RETURN BG { Tuple{COPY "Tuple", 7}; };
+END
+
+FN startUser() RETURNS !~NavUser -> RETURN BG { NavUser{ name: COPY "Start" }; }; END
+FN startRiskyUser() RETURNS !~!NavUser -> RETURN BG { riskyUser(); }; END
+FN startOptionalUser() RETURNS !~?NavUser -> RETURN BG { optionalUser(TRUE); }; END
+FN startMaybeUser() RETURNS !~!?NavUser -> RETURN BG { maybeUser(TRUE); }; END
+
+
+FN main() RETURNS !Void ->
+    optional: ?String = optionalUser(TRUE)?.name;
+    ASSERT UNWRAP optional == "Optional";
+
+    fallible: !String = riskyUser()!.name;
+    ASSERT TRY fallible == "Fallible";
+
+    direct: !?String = maybeUser(TRUE)!?.name;
+    ASSERT TRY UNWRAP direct == "Ada";
+
+    future: ~String = laterUser()~.name;
+    ASSERT (NEXT future) == "Grace";
+
+    futureFallible: ~!String = laterRiskyUser()~!.name;
+    ASSERT TRY (NEXT futureFallible) == "Fallible";
+
+    futureOptional: ~?String = laterOptionalUser()~?.name;
+    ASSERT UNWRAP (NEXT futureOptional) == "Optional";
+
+    futureMaybe: ~!?String = laterMaybeUser()~!?.name;
+    ASSERT TRY UNWRAP (NEXT futureMaybe) == "Ada";
+
+    outer: !~String = startUser()!~.name;
+    ASSERT (NEXT (TRY outer)) == "Start";
+
+    outerFallible: !~!String = startRiskyUser()!~!.name;
+    ASSERT TRY (NEXT (TRY outerFallible)) == "Fallible";
+
+    outerOptional: !~?String = startOptionalUser()!~?.name;
+    ASSERT UNWRAP (NEXT (TRY outerOptional)) == "Optional";
+
+    outerMaybe: !~!?String = startMaybeUser()!~!?.name;
+    ASSERT TRY UNWRAP (NEXT (TRY outerMaybe)) == "Ada";
+
+    sharedSource: ~NavUser@shared = BG { NavUser{ name: COPY "Shared" }; };
+    sharedFirst: ~String@shared = sharedSource~.name;
+    sharedSecond: ~Int64@shared = sharedSource~.name~.length();
+    ASSERT (NEXT sharedFirst) == "Shared";
+    ASSERT (NEXT sharedSecond) == 6;
+
+    lengthFuture: ~Int64 = laterUser()~.name~.length();
+    ASSERT (NEXT lengthFuture) == 5;
+
+    scoreFuture: ~Int64 = laterUser()~.score();
+    ASSERT (NEXT scoreFuture) == 5;
+
+    tupleName: ~String = laterTuple()~._0;
+    ASSERT (NEXT tupleName) == "Tuple";
+    RETURN;
+END

@@ -136,6 +136,37 @@ RSpec.describe "architecture invariants: semantic lifecycle authority" do
     end
   end
 
+  it "indexes binding lifecycle plans by semantic place rather than Ruby object identity" do
+    registry = source("compiler/ruby/semantic/lifecycle_plan.rb")
+
+    expect(registry).to include("semantic_place_id")
+    expect(registry).not_to include("binding_plans[node.object_id]")
+    expect(method_body("compiler/ruby/semantic/lifecycle_plan.rb", "fetch_binding")).not_to include("object_id")
+  end
+
+  it "gives whole-program MIR planning one authoritative product" do
+    pass = source("compiler/ruby/mir/mir_pass.rb")
+    plan = source("compiler/ruby/mir/mir_planning.rb")
+
+    expect(pass).to include("planning = MIRPlanner.plan_all!")
+    expect(pass).not_to include("@cleanup_plans")
+    expect(pass).not_to include("@cleanup_bindings")
+    expect(pass).not_to include("@planning_result")
+    expect(pass).not_to include("ownership_preparation_plan")
+    expect(plan).to include("class MIRPlanningResult")
+    expect(plan).to include("class MIRPlanner")
+    expect(plan).not_to include("class FunctionMIRPlan")
+  end
+
+  it "applies finalized program facts through one explicit compatibility seam" do
+    pass = source("compiler/ruby/mir/mir_pass.rb")
+    finalizer = method_body("compiler/ruby/mir/program_mir_facts.rb", "self.finalize")
+
+    expect(pass).to include("apply_program_facts!")
+    expect(finalizer).not_to include("function.needs_rt =")
+    expect(method_body("compiler/ruby/mir/mir_pass.rb", "stamp_reassign_cleanup!")).not_to include("fetch_binding")
+  end
+
   it "makes COPY and owned-sink materialization consume LifecyclePlan instead of type cleanup predicates" do
     copy = method_body("compiler/ruby/mir/lowering/expressions.rb", "lower_copy")
     sink = method_body("compiler/ruby/mir/mir_lowering.rb", "owned_sink_plan")
@@ -298,15 +329,20 @@ RSpec.describe "architecture invariants: MIR pass order" do
 
   it "runs MIR placement before cleanup classification, loop analysis, and lowering stamps" do
     expect_order(
+      "compiler/ruby/mir/mir_planning.rb",
+      "EscapeAnalysis.apply_with_facts!",
+      "BgCaptureClassifier.classify_all!",
+      "CleanupClassifier.classify_plan",
+      "LoopFrameAnalysis.analyze!",
+    )
+    expect_order(
       "compiler/ruby/mir/mir_pass.rb",
       "pass_state.require!(:premir_type_checked",
-      "EscapeAnalysis.apply_with_facts!",
+      "MIRPlanner.plan_all!",
       "pass_state.mark!(:escape_analyzed)",
-      "CleanupClassifier.classify",
       "pass_state.mark!(:cleanup_classified)",
-      "LoopFrameAnalysis.analyze!",
       "pass_state.mark!(:loop_frame_analyzed)",
-      "finalize_needs_rt!",
+      "ProgramMIRFinalizer.finalize",
       "pass_state.mark!(:needs_rt_finalized)",
       "transform_function!",
       "pass_state.mark!(:mir_pass_complete)",
@@ -1349,6 +1385,23 @@ RSpec.describe "architecture invariants: closed placement pipeline" do
 
     expect(offenders).to be_empty,
       "FSM/thunk transforms must produce typed facts or structural MIR, not direct ownership markers:\n" \
+      "#{offenders.join("\n")}"
+  end
+
+  it "keeps tense algebra planning out of MIR and backend phases" do
+    offenders = (Dir[File.join(ARCH_ROOT, "compiler/ruby/mir/**/*.rb")] +
+                 Dir[File.join(ARCH_ROOT, "compiler/ruby/backends/**/*.rb")]).sort.flat_map do |path|
+      rel = path.sub(ARCH_ROOT + "/", "")
+      File.readlines(path).each_with_index.filter_map do |line, idx|
+        next if line.strip.start_with?("#")
+        next unless line.include?("TenseOperationPlanner.")
+
+        "#{rel}:#{idx + 1}: #{line.strip}"
+      end
+    end
+
+    expect(offenders).to be_empty,
+      "MIR and emitters must consume annotation-produced TenseOperationPlan facts, not re-plan tense algebra:\n" \
       "#{offenders.join("\n")}"
   end
 end

@@ -1054,7 +1054,6 @@ RSpec.describe "MIR gap-burn characterization" do
   end
 
   it "covers missing runtime metadata paths for MIR pass and InlineBc emission" do
-    pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
     plain_call = AST::FuncCall.new(tok, "plain", [])
     plain_sig = FunctionSignature.intrinsic_signature
     plain_call.matched_signature = plain_sig
@@ -1063,9 +1062,9 @@ RSpec.describe "MIR gap-burn characterization" do
     runtime_call.matched_signature = runtime_sig
     missing_call = AST::FuncCall.new(tok, "missing", [])
 
-    expect(pass.send(:ast_call_needs_rt?, missing_call)).to be(false)
-    expect(pass.send(:ast_call_needs_rt?, plain_call)).to be(false)
-    expect(pass.send(:ast_call_needs_rt?, runtime_call)).to be(true)
+    expect(ProgramMIRFinalizer.send(:ast_call_needs_runtime?, missing_call, {})).to be(false)
+    expect(ProgramMIRFinalizer.send(:ast_call_needs_runtime?, plain_call, {})).to be(false)
+    expect(ProgramMIRFinalizer.send(:ast_call_needs_runtime?, runtime_call, {})).to be(true)
     expect { MIREmitter.new.emit(MIR::InlineBc.new(:missing, [], nil)) }
       .to raise_error(/emit_inline_bc_as_zig: node has no stdlib_def/)
   end
@@ -1171,25 +1170,23 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(dataflow.send(:stmt_moves_name?, call, "captured")).to eq(true)
   end
 
-  it "builds typed MIR ownership preparation plans before mutating function bodies" do
+  it "publishes one typed whole-program MIR planning result" do
     main_fn = fn([])
     fallible_fn = fn([])
     fallible_fn.name = "fallible"
     fallible_fn.can_fail = true
-    pass = MIRPass.new(fn_nodes: { "main" => main_fn, "fallible" => fallible_fn }, schema_lookup: ->(_name) { nil })
-
     entry = CleanupEntry.build(:uniform, alloc: :heap)
-    pass.cleanup_bindings["main"] = { "owned" => entry }
-    plan = pass.send(:ownership_preparation_plan, main_fn)
+    main_cleanup = CleanupClassifier::CleanupClassificationPlan.from_bindings("main", "owned" => entry)
+    empty_cleanup = CleanupClassifier::CleanupClassificationPlan.from_bindings("fallible", {})
+    plan = MIRPlanningResult.new(
+      cleanup_plans: { "main" => main_cleanup, "fallible" => empty_cleanup },
+      escape_placements: EscapeAnalysis::EscapePlacementFacts.new,
+      can_fail_functions: Set["fallible"],
+    )
 
-    expect(plan.function).to eq(main_fn)
-    expect(plan.bindings).to eq("owned" => entry)
-    expect(plan.cleanup_facts.entry_for("owned")).to eq(entry)
-    expect(plan.cleanup_bindings?).to eq(true)
-    expect(plan.can_fail_fns).to eq(Set["fallible"])
-
-    empty = pass.send(:ownership_preparation_plan, fallible_fn)
-    expect(empty.cleanup_bindings?).to eq(false)
+    expect(plan.cleanup_plan_for("main").facts.entry_for("owned")).to eq(entry)
+    expect(plan.cleanup_plan_for("fallible")).to be_empty
+    expect(plan.can_fail_functions).to eq(Set["fallible"])
   end
 
   it "single-sources MIR result types for hoist cleanup planning" do
@@ -1210,45 +1207,45 @@ RSpec.describe "MIR gap-burn characterization" do
     pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
 
     bg = AST::BgBlock.new(tok, [], nil, nil, false, false, nil, false)
-    expect(pass.send(:ast_node_lowers_through_runtime?, bg)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:ast_node_lowers_through_runtime?, bg, {}, ->(_name) { nil })).to eq(true)
 
     snapshot_with = AST::WithBlock.new(tok, [], [], nil)
     snapshot_with.snapshot_mode = :transaction
-    expect(pass.send(:with_block_lowers_through_runtime?, snapshot_with)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:with_block_lowers_through_runtime?, snapshot_with)).to eq(true)
 
     view_with = AST::WithBlock.new(tok, [], [], nil)
     view_with.view_kind = :materialized_view
-    expect(pass.send(:with_block_lowers_through_runtime?, view_with)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:with_block_lowers_through_runtime?, view_with)).to eq(true)
 
     poly_with = AST::WithBlock.new(tok, [], [], nil)
     poly_with.universal_poly = true
-    expect(pass.send(:with_block_lowers_through_runtime?, poly_with)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:with_block_lowers_through_runtime?, poly_with)).to eq(true)
 
     plain_with = AST::WithBlock.new(tok, [], [], nil)
-    expect(pass.send(:with_block_lowers_through_runtime?, plain_with)).to eq(false)
+    expect(ProgramMIRFinalizer.send(:with_block_lowers_through_runtime?, plain_with)).to eq(false)
 
     raise_with = AST::WithBlock.new(tok, [], [], nil)
     raise_with.lock_error_clause = AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Raise, retries: nil, token: tok)
-    expect(pass.send(:with_block_lowers_through_runtime?, raise_with)).to eq(true)
-    expect(pass.send(:ast_node_lowers_through_runtime?, raise_with)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:with_block_lowers_through_runtime?, raise_with)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:ast_node_lowers_through_runtime?, raise_with, {}, ->(_name) { nil })).to eq(true)
 
     bubble_clause = AST::ErrorClause.new(selectors: [], action: AST::ErrorActionKind::Pass, retries: nil, token: tok)
     bubble_clause.bubble_types = [:Timeout]
     bubble_with = AST::WithBlock.new(tok, [], [], nil)
     bubble_with.lock_error_clause = bubble_clause
-    expect(pass.send(:with_block_lowers_through_runtime?, bubble_with)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:with_block_lowers_through_runtime?, bubble_with)).to eq(true)
 
     moved_return = AST::MoveNode.new(tok, id("returned", type: :String))
-    expect(pass.send(:unwrap_return_expr, moved_return).name).to eq("returned")
+    expect(ProgramMIRFinalizer.send(:unwrap_return_expr, moved_return).name).to eq("returned")
     rescued_return = AST::BinaryOp.new(tok, id("fallible", type: :String), :OR_ELSE, lit("fallback"))
-    expect(pass.send(:unwrap_return_expr, rescued_return).name).to eq("fallible")
+    expect(ProgramMIRFinalizer.send(:unwrap_return_expr, rescued_return).name).to eq("fallible")
 
     guarded = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false)
     guarded.set_lifecycle_plan!(Semantic::LifecyclePlanner.plan(Type.new(:String), ->(_name) { nil }))
     borrow_fn = fn([id("body", type: :String)])
-    pass.cleanup_bindings[borrow_fn.name] = { "body" => guarded }
+    borrow_plan = CleanupClassifier::CleanupClassificationPlan.from_bindings(borrow_fn.name, "body" => guarded)
     allow(BorrowChecker).to receive(:check).and_return(["borrowed move"])
-    expect { pass.send(:transform_function!, borrow_fn) }.to raise_error(/\[Borrow Error\] borrowed move/)
+    expect { pass.send(:transform_function!, borrow_fn, borrow_plan, Set.new) }.to raise_error(/\[Borrow Error\] borrowed move/)
 
     captured_bg = AST::BgBlock.new(tok, [AST::PassStmt.new(tok)], nil, nil, false, false, nil, false)
     captured_bg.capture_analysis = double(captures: { "outer" => true })
@@ -1590,17 +1587,16 @@ RSpec.describe "MIR gap-burn characterization" do
   end
 
   it "finalizes rt for heap-carrying string payload alias returns" do
-    pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
     alias_fn = fn([AST::ReturnNode.new(tok, id("payload", type: Type.new(:String)))], return_type: Type.new(:String))
     alias_fn.heap_carry_return = true
 
-    expect(pass.send(:return_path_needs_allocator?, alias_fn)).to eq(true)
+    expect(ProgramMIRFinalizer.send(:return_path_needs_allocator?, alias_fn, ->(_name) { nil })).to eq(true)
 
     taken = param("owned", type: Type.new(:String), takes: true)
     transfer_fn = fn([AST::ReturnNode.new(tok, id("owned", type: Type.new(:String)))], params: [taken], return_type: Type.new(:String))
     transfer_fn.heap_carry_return = true
 
-    expect(pass.send(:return_path_needs_allocator?, transfer_fn)).to eq(false)
+    expect(ProgramMIRFinalizer.send(:return_path_needs_allocator?, transfer_fn, ->(_name) { nil })).to eq(false)
   end
 
   it "treats heap-carry return signatures as owned despite return lifetime metadata" do
@@ -3307,9 +3303,20 @@ RSpec.describe "MIR gap-burn characterization" do
     plan = low.send(:field_access_plan, AST::GetField.new(tok, result_value, "Ok"), MIR::Ident.new("result"))
     expect(plan.value).to be_a(MIR::UnionVariantGet)
 
-    [AST::OrElseExit.new(tok, :Runtime, nil, nil), AST::OrElsePass.new(tok), AST::OrElseBreak.new(tok)].each do |right|
-      node = AST::BinaryOp.new(tok, id("plain", type: :Int64), :OR_ELSE, right)
-      node.full_type = Type.new(:Int64)
+    [
+      [AST::OrElseExit.new(tok, :Runtime, nil, nil), TenseOperationKind::OrElseExit, TenseRecovery::Exit],
+      [AST::OrElsePass.new(tok), TenseOperationKind::OrElsePass, TenseRecovery::Pass],
+      [AST::OrElseBreak.new(tok), TenseOperationKind::OrElseBreak, TenseRecovery::Break],
+    ].each do |right, operation, recovery|
+      left = id("plain", type: Type.new("?Int64"))
+      node = AST::BinaryOp.new(tok, left, :OR_ELSE, right)
+      node.full_type = Type.new("?Int64")
+      node.tense_plan = TenseOperationPlanner.or_else(
+        Type.new("?Int64"),
+        Type.new(:NoReturn),
+        operation: operation,
+        recovery: recovery,
+      )
       expect(low.send(:lower_or_else, node)).to be_a(MIR::Ident)
     end
 
@@ -3704,6 +3711,7 @@ RSpec.describe "MIR gap-burn characterization" do
     observable_source = id("running", type: Type.new(:"~String", observable: true))
     next_node = AST::NextExpr.new(tok, observable_source)
     next_node.full_type = Type.new(:String)
+    next_node.tense_plan = TenseOperationPlanner.next_value(Type.new(:"~String", observable: true))
     lowered_next = low.send(:lower_next_expr, next_node, :frame)
     expect(lowered_next).to be_a(MIR::BlockExpr)
     expect(lowered_next.label).to start_with("__obs_next_string_")

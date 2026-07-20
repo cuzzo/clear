@@ -127,6 +127,40 @@ module Annotator
       const :suspend_points, T::Array[Semantic::SuspendPointFact], factory: -> { [] }
     end
 
+    # AST-independent product of one typed body traversal. Source-oriented
+    # facts remain in FunctionBodySummary for diagnostics during the migration;
+    # graph propagation, invalidation, and worker scheduling use this record.
+    class LocalFunctionFacts < T::Struct
+      extend T::Sig
+
+      const :name, String
+      const :definition_id, Integer
+      const :body_id, Integer
+      const :callees, T::Array[String]
+      const :propagating_callees, T::Array[String]
+      const :has_function_pointer_call, T::Boolean
+      const :raises_directly, T::Boolean
+      const :local_count, Integer
+      const :call_site_count, Integer
+      const :suspend_kinds, T::Array[String]
+
+      sig { params(summary: FunctionBodySummary).returns(LocalFunctionFacts) }
+      def self.from_summary(summary)
+        new(
+          name: summary.name,
+          definition_id: summary.definition_id.value,
+          body_id: summary.body_id.value,
+          callees: summary.callees.to_a.sort.freeze,
+          propagating_callees: summary.propagating_callees.to_a.sort.freeze,
+          has_function_pointer_call: summary.has_fnptr_call,
+          raises_directly: summary.raises_directly,
+          local_count: summary.local_facts.length,
+          call_site_count: summary.call_site_facts.length,
+          suspend_kinds: summary.suspend_points.map { |point| point.kind.to_s }.sort.freeze
+        ).freeze
+      end
+    end
+
     module BodyAnalysis
       extend T::Sig
 
@@ -145,7 +179,7 @@ module Annotator
       sig { returns(T::Hash[String, T::Set[String]]) }
       def function_call_graph
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
-        semantic_function_registry.call_graph
+        function_body_summaries.transform_values(&:callees)
       end
 
       sig { returns(T::Array[BodyFactFrame]) }
@@ -157,6 +191,15 @@ module Annotator
       sig { params(identity: Semantic::BodyIdentity, block: T.proc.void).returns(BodyScanSummary) }
       def with_body_fact_frame(identity, &block)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        if identity.body_id == Semantic::UNASSIGNED_BODY_ID
+          ordinal = phase_traversal_state.next_synthetic_body_ordinal
+          phase_traversal_state.next_synthetic_body_ordinal -= 1
+          identity = Semantic::BodyIdentity.new(
+            definition_id: Semantic::DefId.new(value: ordinal),
+            body_id: Semantic::BodyId.new(value: ordinal),
+          )
+        end
 
         frame = BodyFactFrame.for_identity(identity)
         body_fact_frames << frame
@@ -331,6 +374,23 @@ module Annotator
         summary
       end
 
+      sig { params(frame: BodyFactFrame, node: BindingNode, name: String).void }
+      def record_local_binding_fact!(frame, node, name)
+        summary = frame.summary
+        frame.next_local_ordinal += 1
+        frame.next_place_ordinal += 1
+        body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
+        place_id = body_id_base + frame.next_place_ordinal
+        summary.local_facts << Semantic::LocalFact.new(
+          id: Semantic::LocalId.new(value: body_id_base + frame.next_local_ordinal),
+          place_id: Semantic::PlaceId.new(value: place_id),
+          name: name,
+        )
+        symbol = T.unsafe(node).respond_to?(:symbol) ? T.unsafe(node).symbol : nil
+        symbol.adopt_semantic_place_id!(place_id) if symbol.is_a?(SymbolEntry)
+      end
+      private :record_local_binding_fact!
+
       sig { params(node: AST::Node).void }
       def record_body_fact_node!(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
@@ -372,27 +432,13 @@ module Annotator
             summary.return_nodes << node
           when AST::VarDecl
             summary.binding_nodes << node
-            frame.next_local_ordinal += 1
-            frame.next_place_ordinal += 1
-            var_body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
-            summary.local_facts << Semantic::LocalFact.new(
-              id: Semantic::LocalId.new(value: var_body_id_base + frame.next_local_ordinal),
-              place_id: Semantic::PlaceId.new(value: var_body_id_base + frame.next_place_ordinal),
-              name: node.name.to_s
-            )
+            record_local_binding_fact!(frame, node, node.name.to_s)
           when AST::BindExpr
             if node.mode == :assign
               summary.assignment_nodes << node
             else
               summary.binding_nodes << node
-              frame.next_local_ordinal += 1
-              frame.next_place_ordinal += 1
-              bind_body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
-              summary.local_facts << Semantic::LocalFact.new(
-                id: Semantic::LocalId.new(value: bind_body_id_base + frame.next_local_ordinal),
-                place_id: Semantic::PlaceId.new(value: bind_body_id_base + frame.next_place_ordinal),
-                name: node.name.to_s
-              )
+              record_local_binding_fact!(frame, node, node.name.to_s)
             end
           when AST::Assignment
             summary.assignment_nodes << node
@@ -401,14 +447,7 @@ module Annotator
             node.targets.each do |target|
               next if target.name == "_"
               summary.binding_nodes << target
-              frame.next_local_ordinal += 1
-              frame.next_place_ordinal += 1
-              destructure_body_id_base = summary.body_id.value * Semantic::BODY_ID_STRIDE
-              summary.local_facts << Semantic::LocalFact.new(
-                id: Semantic::LocalId.new(value: destructure_body_id_base + frame.next_local_ordinal),
-                place_id: Semantic::PlaceId.new(value: destructure_body_id_base + frame.next_place_ordinal),
-                name: target.name.to_s
-              )
+              record_local_binding_fact!(frame, target, target.name.to_s)
             end
           when AST::Identifier
             summary.references_snapshot = true if node.name == "snapshot"

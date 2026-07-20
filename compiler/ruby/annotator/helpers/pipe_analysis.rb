@@ -2,6 +2,7 @@
 require "sorbet-runtime"
 require_relative "../../ast/ast"
 require_relative "../../ast/type"
+require_relative "../../semantic/tense_operation_plan"
 require 'set'
 
 module PipeAnalysis
@@ -65,15 +66,36 @@ module PipeAnalysis
   class SelectorEffectFact < T::Struct
     extend T::Sig
 
-    const :value_type, Type
-    const :asynchronous, T::Boolean
-    const :required_mode, T.nilable(Symbol)
-    const :required_order, String
-    const :leaf_type, Type
+    const :plan, TenseSelectorPlan
+
+    sig { returns(Type) }
+    def value_type
+      plan.value_type
+    end
+
+    sig { returns(T::Boolean) }
+    def asynchronous
+      plan.asynchronous?
+    end
+
+    sig { returns(T.nilable(Symbol)) }
+    def required_mode
+      plan.required_mode
+    end
+
+    sig { returns(String) }
+    def required_order
+      plan.required_order
+    end
+
+    sig { returns(Type) }
+    def leaf_type
+      plan.leaf_type
+    end
 
     sig { returns(T::Boolean) }
     def fallible?
-      required_mode == :fallible || required_mode == :fallible_optional
+      plan.fallible?
     end
   end
 
@@ -383,7 +405,7 @@ module PipeAnalysis
     when AST::SelectOp
       effect = T.must(selector_effect)
       result_type = if source.stream? || node.right.stream_mode
-        select_stream_result_type(lhs_type, source, effect, node.right.modifier_order.to_s)
+        select_stream_result_type(lhs_type, source, effect)
       elsif effect.asynchronous
         Type.promise_list_of(effect.leaf_type)
       else
@@ -416,35 +438,16 @@ module PipeAnalysis
   end
 
   sig do
-    params(source_type: Type, source: PipelineSourceFact, effect: SelectorEffectFact, order: String)
+    params(source_type: Type, source: PipelineSourceFact, effect: SelectorEffectFact)
       .returns(Type)
   end
-  def select_stream_result_type(source_type, source, effect, order)
-    prefix, suffix = if order.include?('~')
-      order.split('~', 2)
-    else
-      ['', order]
-    end
-    item = select_apply_wrapper_order(effect.leaf_type.shape.expression, suffix.to_s)
+  def select_stream_result_type(source_type, source, effect)
     cardinality = if source.stream? && source_type.shape.expression.is_a?(StreamTypeExpression)
       T.cast(source_type.shape.expression, StreamTypeExpression).cardinality
     else
       :FINITE
     end
-    stream = StreamTypeExpression.new(cardinality: cardinality, item: item)
-    Type.new(select_apply_wrapper_order(stream, prefix.to_s))
-  end
-
-  sig { params(expression: TypeExpression, order: String).returns(TypeExpression) }
-  def select_apply_wrapper_order(expression, order)
-    order.reverse.each_char.reduce(expression) do |inner, marker|
-      case marker
-      when '!' then FallibleTypeExpression.new(inner: inner)
-      when '?' then OptionalTypeExpression.new(inner: inner)
-      when '~' then FutureTypeExpression.new(inner: inner)
-      else Kernel.raise "unknown SELECT wrapper #{marker.inspect}"
-      end
-    end
+    effect.plan.stream_result_type(cardinality)
   end
 
   sig { params(expression: AST::Node).returns(SelectorEffectFact) }
@@ -454,47 +457,14 @@ module PipeAnalysis
     expression_type = expression.full_type!(context: "pipeline selector expression")
     recoverable = recoverable_result_type(expression, context: "pipeline selector recovery")
     wrapped = recoverable || expression_type
-    required_order, leaf_type = selector_wrapper_order(wrapped)
-    asynchronous = required_order.include?('~')
-    value_type = wrapped
-    fallible = required_order.include?('!')
-    optional = required_order.include?('?')
-    required_mode = if fallible && optional
-      :fallible_optional
-    elsif fallible
-      :fallible
-    elsif optional
-      :optional
-    end
-    SelectorEffectFact.new(
-      value_type: value_type,
-      asynchronous: asynchronous,
-      required_mode: required_mode,
-      required_order: required_order,
-      leaf_type: leaf_type,
-    )
-  end
-
-  sig { params(type: Type).returns([String, Type]) }
-  def selector_wrapper_order(type)
-    if type.error_union?
-      order, leaf = selector_wrapper_order(type.success_type)
-      ["!#{order}", leaf]
-    elsif type.optional?
-      order, leaf = selector_wrapper_order(T.must(type.wrapped_type))
-      ["?#{order}", leaf]
-    elsif type.future?
-      order, leaf = selector_wrapper_order(type.tense_type)
-      ["~#{order}", leaf]
-    else
-      ['', type]
-    end
+    SelectorEffectFact.new(plan: TenseOperationPlanner.selector(wrapped))
   end
 
   sig { params(op: AST::SelectOp, effect: SelectorEffectFact).void }
   def validate_select_effect_contract!(op, effect)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
+    op.tense_plan = effect.plan
     declared_order = op.modifier_order.to_s
     required_order = effect.required_order
     if declared_order == required_order
@@ -749,9 +719,18 @@ module PipeAnalysis
     # RECOVER(default): replace error with default value in pipeline
     visit(node.right.default_expr)
     lhs_type = node.left.full_type!(context: "pipeline left")
-    lhs_t = lhs_type ? Type.new(lhs_type) : nil
+    lhs_t = recoverable_result_type(node.left, context: "RECOVER input") ||
+      Type.new(lhs_type)
     if lhs_t&.error_union?
-      stamp_type!(node, T.must(lhs_t.payload_type).resolved)
+      fallback_type = node.right.default_expr.full_type!(context: "RECOVER fallback")
+      plan = TenseOperationPlanner.or_else(
+        lhs_t,
+        fallback_type,
+        operation: TenseOperationKind::OrElseValue,
+        recovery: TenseRecovery::Fallback,
+      )
+      node.tense_plan = plan
+      stamp_type!(node, plan.result_type)
     else
       stamp_type!(node, lhs_type)
     end
@@ -1730,6 +1709,11 @@ module PipeAnalysis
           mod_name = modifier.is_a?(AST::OrElsePrune) ? "OR_ELSE PRUNE" : "OR_ELSE RAISE"
           error!(modifier, :MODIFIER_NEEDS_ERROR_UNION, name: mod_name, got: inner_expr.left.resolved_type)
         end
+        # The concurrent callback itself is the propagation boundary. Keep
+        # the call's error channel as the callback result so the runtime helper
+        # can collect/propagate it; emitting an inner `try` is redundant and
+        # obscures which layer owns failure handling.
+        inner_expr.retain_error_channel = true if modifier.is_a?(AST::OrElseRaise)
       end
     end
 

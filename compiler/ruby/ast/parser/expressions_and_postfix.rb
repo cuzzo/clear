@@ -222,6 +222,7 @@ class ClearParser
     when :parse_dot_suffix then parse_dot_suffix(lhs)
     when :parse_func_call_suffix then parse_func_call_suffix(lhs)
     when :parse_optional_unwrap_suffix then parse_optional_unwrap_suffix(lhs)
+    when :parse_tense_navigation_suffix then parse_tense_navigation_suffix(lhs)
     when :parse_exists_suffix then parse_exists_suffix(lhs)
     when :parse_is_ok_suffix then parse_is_ok_suffix(lhs)
     when :parse_is_ready_suffix then parse_is_ready_suffix(lhs)
@@ -239,6 +240,8 @@ class ClearParser
       !conditional_binding_suffix?
     when :parse_inline_union_variant_suffix
       !match_destructure_brace? && AST.inline_union_constructor_target?(lhs)
+    when :parse_tense_navigation_suffix
+      !tense_navigation_marker_run.nil?
     else
       true
     end
@@ -369,10 +372,45 @@ class ClearParser
     AST::OptionalUnwrap.new(token, parse_unary)
   end
 
-  sig { params(lhs: AST::Node).returns(AST::OptionalUnwrap) }
+  sig { params(lhs: AST::Node).returns(AST::Node) }
   def parse_optional_unwrap_suffix(lhs)
+    marker_run = tense_navigation_marker_run
+    if marker_run == "?"
+      q_token = consume(:CHAR, '?')
+      return AST::OptionalUnwrap.new(q_token, lhs)
+    end
+    return parse_tense_navigation_suffix(lhs) if marker_run
+
     q_token = consume(:CHAR, '?')
     AST::OptionalUnwrap.new(q_token, lhs)
+  end
+
+  sig { params(lhs: AST::Node).returns(AST::Node) }
+  def parse_tense_navigation_suffix(lhs)
+    token = current
+    markers = T.must(tense_navigation_marker_run)
+    unless TypeExpression::VALID_TENSE_ORDERS.include?(markers) && !markers.empty?
+      error!(token, :TENSE_NAVIGATION_ORDER, markers: markers)
+    end
+    markers.each_char { |marker| consume(:CHAR, marker) }
+    AST::TenseNavigation.new(token, lhs, markers)
+  end
+
+  sig { returns(T.nilable(String)) }
+  def tense_navigation_marker_run
+    offset = T.let(0, Integer)
+    markers = +""
+    loop do
+      token = peek_at(offset)
+      break if token.nil? || token.type != :CHAR || !%w[! ? ~].include?(token.value)
+
+      markers << token.value
+      offset += 1
+    end
+    dot = peek_at(offset)
+    return nil if markers.empty? || dot.nil? || dot.type != :CHAR || dot.value != "."
+
+    markers
   end
 
   sig { params(lhs: AST::Node).returns(AST::CapabilityWrap) }
@@ -736,7 +774,7 @@ class ClearParser
     end
 
     wrapped = T.let(case node
-    when AST::GetField, AST::GetIndex, AST::OptionalUnwrap
+    when AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::TenseNavigation
       node.target
     end, T.nilable(AST::Node))
     return false if wrapped.nil?

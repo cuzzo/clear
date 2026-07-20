@@ -167,6 +167,16 @@ pub fn bind(comptime deps: type) type {
         try map.put(bucket_alloc, key_copy, value);
     }
 
+    // A Promise's own transport failure must remain distinct from a declared
+    // fallible payload. Zig flattens `anyerror!(anyerror!T)`, so the compiler
+    // stores `~!T` as `Promise(AsyncFallible(T))` and unwraps `.value` only
+    // after the Promise transport boundary has succeeded.
+    pub fn AsyncFallible(comptime T: type) type {
+        return struct {
+            value: anyerror!T,
+        };
+    }
+
     // -----------------------------------------------------------------------
     // StringMap(V) — thin wrapper around StringHashMapUnmanaged(V) that
     // provides the same .put()/.get()/.remove()/.contains() API as
@@ -782,21 +792,25 @@ pub fn bind(comptime deps: type) type {
                 return Self{ .inner = inner, .alloc = alloc, .resolved = null };
             }
 
-            /// Block until the BG fiber delivers its result, then return it.
-            /// Idempotent: once resolved, subsequent calls return the cached value
-            /// without touching the Inner (which may already have been freed).
+            /// Block until the BG fiber delivers its result, then return an
+            /// independently owned copy. Each handle keeps its own canonical
+            /// cached value, so repeated NEXT calls and retained handles never
+            /// alias owned fields such as strings or collections.
             /// Decrements the ref_count on the first call; frees Inner at zero.
             pub fn next(self: *Self) anyerror!T {
-                if (self.resolved) |val| return val;
+                if (self.resolved) |val| return dupeValue(T, val, self.alloc);
                 self.inner.wg.wait();
-                const val = try self.inner.result;
-                self.resolved = val;
+                const shared_value = try self.inner.result;
+                const cached = try dupeValue(T, shared_value, self.alloc);
+                errdefer cleanup(T, self.alloc, &cached);
+                self.resolved = cached;
                 const prev = self.inner.ref_count.fetchSub(1, .release);
                 if (prev == 1) {
                     _ = self.inner.ref_count.load(.acquire);
+                    cleanup(anyerror!T, self.alloc, &self.inner.result);
                     self.alloc.destroy(self.inner);
                 }
-                return val;
+                return dupeValue(T, cached, self.alloc);
             }
 
             pub fn isReady(self: *const Self) bool {
@@ -816,10 +830,15 @@ pub fn bind(comptime deps: type) type {
             /// decremented). Required so CheatLib.cleanup can teardown a
             /// SharedPromise binding uniformly via struct-with-deinit.
             pub fn deinit(self: *Self) void {
-                if (self.resolved != null) return; // already consumed
+                if (self.resolved) |*value| {
+                    cleanup(T, self.alloc, value);
+                    self.resolved = null;
+                    return;
+                }
                 const prev = self.inner.ref_count.fetchSub(1, .release);
                 if (prev == 1) {
                     _ = self.inner.ref_count.load(.acquire);
+                    cleanup(anyerror!T, self.alloc, &self.inner.result);
                     self.alloc.destroy(self.inner);
                 }
             }

@@ -10,6 +10,17 @@ require_relative "zig_type"
 class TypeZigRenderer
   extend T::Sig
 
+  sig { params(type: Type, is_param: T::Boolean, is_field: T::Boolean).returns(String) }
+  def self.render_async_payload(type, is_param: false, is_field: false)
+    unless type.error_union?
+      return render(type, is_param: is_param, is_field: is_field, nested: true)
+    end
+
+    payload = type.error_union_payload_with_outer_capabilities
+    rendered_payload = render(payload, is_param: is_param, is_field: is_field, nested: true)
+    "CheatLib.AsyncFallible(#{rendered_payload})"
+  end
+
   sig { params(type: Type, is_param: T::Boolean, is_field: T::Boolean, nested: T::Boolean).returns(String) }
   def self.render(type, is_param: false, is_field: false, nested: false)
     # Zig needs an explicit error set before an optional payload. Its shorthand
@@ -18,7 +29,10 @@ class TypeZigRenderer
       payload = type.error_union_payload_with_outer_capabilities
       return "anyerror!#{render(payload, is_param: is_param, is_field: is_field, nested: true)}"
     end
-    if nested && type.error_union?
+    # Inferred error sets (`!T`) are legal only in function return position.
+    # Parameters, fields, and every recursively nested position need an
+    # explicit error set.
+    if (nested || is_param || is_field) && type.error_union?
       payload = type.error_union_payload_with_outer_capabilities
       return "anyerror!#{render(payload, is_param: is_param, is_field: is_field, nested: true)}"
     end

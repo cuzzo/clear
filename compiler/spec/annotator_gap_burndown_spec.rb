@@ -312,6 +312,28 @@ RSpec.describe "annotator branch gap burndown" do
         ann.send(:record_function_body_summary!, summary)
       end
     end
+    republish_audit_facts(ann) if ann.is_a?(Annotator::Phases::CapabilityAuditSession)
+  end
+
+  def republish_audit_facts(ann)
+    context = ann.instance_variable_get(:@context)
+    previous = context.typed_program
+    summaries = previous.resolution.function_registry.body_summaries
+    typed_program = Annotator::Phases::TypedProgramFacts.new(
+      resolution: previous.resolution,
+      body_summaries: summaries,
+      typed_node_count: previous.typed_node_count,
+      unresolved_node_count: previous.unresolved_node_count,
+      ownership_graph: previous.ownership_graph,
+      lifecycle_registry: previous.lifecycle_registry
+    )
+    ann.instance_variable_set(:@context, Annotator::Phases::CapabilityAuditSession::Context.new(
+      typed_program: typed_program,
+      inputs: context.inputs,
+      source_code: context.source_code,
+      language_mode: context.language_mode,
+      strict_test: context.strict_test
+    ))
   end
 
   def empty_body_summary
@@ -673,7 +695,7 @@ RSpec.describe "annotator branch gap burndown" do
     ann.define_singleton_method(:visit) { |_node| nil }
 
     left = AST::Identifier.new(token, "value")
-    left.full_type = Type.new(:Int64)
+    left.full_type = Type.new("!Int64")
     exit_right = AST::OrElseExit.new(token(:OR_ELSE, "OR_ELSE"), nil, nil, nil)
     exit_right.full_type = Type.new(:NoReturn)
     exit_expr = AST::BinaryOp.new(token(:OR_ELSE, "OR_ELSE"), left, :OR_ELSE, exit_right)
@@ -2889,7 +2911,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(capability_transition(unknown_cap).sync_constrained?).to be(false)
   end
 
-  it "strips BG error-union result types and rejects arena parallel blocks" do
+  it "preserves BG error-union result types and rejects arena parallel blocks" do
     ann = quiet_annotator
     analysis = ann.send(:new_capture_analysis)
     ann.define_singleton_method(:visit) { |_node| nil }
@@ -2904,7 +2926,7 @@ RSpec.describe "annotator branch gap burndown" do
 
     ann.send(:visit_BgBlock, bg)
 
-    expect(bg.full_type!.to_s).to eq("~String")
+    expect(bg.full_type!.to_s).to eq("~!String")
     expect(bg.pinned).to eq(true)
     expect(direct_errors(ann).map { |err| err[1] }).to include(:BG_ARENA_AND_PARALLEL)
   end
@@ -3935,8 +3957,11 @@ RSpec.describe "annotator branch gap burndown" do
     expect(summary.assignment_nodes).to eq([bind, assign])
     expect(summary.escape_nodes).to include(decl, bind, assign)
     expect(summary.local_facts.map(&:name)).to eq(["created"])
-    expect(summary.local_facts.map { |fact| fact.id.value }).to all(be > 0)
-    expect(summary.local_facts.map { |fact| fact.place_id.value }).to all(be > 0)
+    # Zero alone is the unassigned sentinel. Synthetic bodies deliberately use
+    # the negative ID namespace so their deterministic places cannot collide
+    # with source definitions assigned from the positive namespace.
+    expect(summary.local_facts.map { |fact| fact.id.value }).to all(satisfy { |id| id != 0 })
+    expect(summary.local_facts.map { |fact| fact.place_id.value }).to all(satisfy { |id| id != 0 })
   end
 
   it "treats callees without effect sets as non-suspending body-scan calls" do

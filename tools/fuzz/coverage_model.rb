@@ -122,6 +122,9 @@ module FuzzCoverageModel
     tense_predicate_matrix: profile(
       failure_proves: 'EXISTS, IS_OK, IS_READY, optional Boolean ambiguity, and left-to-right stacked-tense refinement preserve their type and binding contracts.'
     ),
+    tense_operation_plan_matrix: profile(
+      failure_proves: 'TRY, UNWRAP, OR_ELSE, EXISTS, IS_OK, and scalar NEXT retain one annotation-owned semantic plan through MIR lowering.'
+    ),
     cleanup_classifier_shapes: profile(
       failure_proves: 'CleanupClassifier recognizes ownership-bearing struct, union, option, capability, and pipeline shapes.'
     ),

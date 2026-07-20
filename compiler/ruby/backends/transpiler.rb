@@ -41,6 +41,18 @@ class ZigTranspiler
   EnumSchemaMap = T.type_alias { T::Hash[Symbol, T::Array[String]] }
   ModuleTypeDefs = T.type_alias { T::Array[MIR::Node] }
 
+  # Checked MIR plus the program-level rendering inputs.  Keeping this as an
+  # explicit boundary lets clean and incremental coordinators consume the same
+  # lowering/checking path; neither caller is allowed to manufacture checked
+  # MIR or infer ownership facts from emitted Zig.
+  class MIRCompilation < T::Struct
+    const :frontend, CompilerFrontend::Result
+    const :program, MIR::Program
+    const :error_name_enum, String
+    const :main_stack_variant, String
+    const :function_counter_snapshots, T::Hash[String, MIRLoweringCounterSnapshot], factory: -> { {} }
+  end
+
   attr_reader :struct_schemas, :union_schemas, :enum_schemas, :module_type_defs
 
   sig { params(importer: T.nilable(ModuleImporter), source_dir: T.nilable(String)).void }
@@ -69,6 +81,27 @@ class ZigTranspiler
   # MIR pipeline: front-end -> MIRLowering -> MIREmitter -> Zig output.
   sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String), ownership_mode: Symbol).returns(T.nilable(String)) }
   def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil, ownership_mode: :default)
+    compilation = compile_mir_program(
+      cheat_code,
+      source_dir: source_dir,
+      pkg_paths: pkg_paths,
+      use_c_allocator: use_c_allocator,
+      use_debug_allocator: use_debug_allocator,
+      test_mode: test_mode,
+      strict_test: strict_test,
+      exact_tiers: exact_tiers,
+      main_tier: main_tier,
+      default_stack: default_stack,
+      ownership_mode: ownership_mode,
+    )
+    render_mir_program(compilation)
+  end
+
+  # Compile through the ownership checker but do not render Zig.  This is a
+  # general compiler phase boundary, not an incremental mode: every consumer
+  # receives the same checked MIR::Program.
+  sig { params(cheat_code: String, source_dir: String, pkg_paths: T::Hash[String, String], use_c_allocator: T::Boolean, use_debug_allocator: T::Boolean, test_mode: T::Boolean, strict_test: T::Boolean, exact_tiers: T::Hash[Integer, Symbol], main_tier: T.nilable(Symbol), default_stack: T.nilable(String), ownership_mode: Symbol, function_counter_seeds: T::Hash[String, MIRLoweringCounterSnapshot]).returns(MIRCompilation) }
+  def compile_mir_program(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: {}, main_tier: nil, default_stack: nil, ownership_mode: :default, function_counter_seeds: {})
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
     @default_stack_size = default_stack unless default_stack.nil?
@@ -101,7 +134,8 @@ class ZigTranspiler
       moved_guard_info: compiled.moved_guard_info,
       importer: @importer,
       source_dir: @source_dir,
-      debug_mode: @default_stack_size == "Large"
+      debug_mode: @default_stack_size == "Large",
+      function_counter_seeds: function_counter_seeds,
     ))
 
     needs_c_alloc = use_c_allocator
@@ -114,17 +148,27 @@ class ZigTranspiler
       raise "MIR ownership verification failed (post-lowering):\n\n#{mir_errors.join("\n")}"
     end
 
-    emitter = MIREmitter.new
-    body = emitter.emit(program)
     error_name_enum = emit_error_name_enum
 
     main_variant = main_stack_variant(compiled.fn_nodes["main"], override: main_tier)
-    footer = File.read(File.expand_path('../../../zig/runtime/runtime-footer.zig', __dir__))
-    footer = footer.gsub('.{ .stack_size = .Large, .pinned = true }',
-                         ".{ .stack_size = .#{main_variant}, .pinned = true }")
+
+    MIRCompilation.new(
+      frontend: compiled,
+      program: T.must(program),
+      error_name_enum: error_name_enum,
+      main_stack_variant: main_variant,
+      function_counter_snapshots: lowering.function_counter_snapshots,
+    )
+  end
+
+  sig { params(compilation: MIRCompilation).returns(String) }
+  def render_mir_program(compilation)
+    emitter = MIREmitter.new
+    body = T.must(emitter.emit(compilation.program))
+    footer = runtime_footer(compilation.main_stack_variant)
 
     <<~ZIG
-      #{error_name_enum}
+      #{compilation.error_name_enum}
 
       #{body}
 
@@ -133,6 +177,13 @@ class ZigTranspiler
       // -------------------------------------------------------------------------
       #{footer}
     ZIG
+  end
+
+  sig { params(stack_variant: String).returns(String) }
+  def runtime_footer(stack_variant)
+    footer = File.read(File.expand_path('../../../zig/runtime/runtime-footer.zig', __dir__))
+    footer.gsub('.{ .stack_size = .Large, .pinned = true }',
+                ".{ .stack_size = .#{stack_variant}, .pinned = true }")
   end
 
   # Emit the per-program ErrorName enum. Populated from AST::ERROR_TYPES

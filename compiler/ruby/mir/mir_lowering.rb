@@ -19,6 +19,8 @@ require_relative "../semantic/pass_state"
 require_relative "placement"
 require_relative "materialization"
 require_relative "../semantic/capture_strategy"
+require_relative "../semantic/ownership_transport"
+require_relative "../semantic/tense_operation_plan"
 require_relative "fiber_ctx_builder"
 require_relative "../ast/ast"
 require_relative "../ast/type"
@@ -543,6 +545,20 @@ class MIRLowering
     lowering_state.counters
   end
 
+  sig { returns(T::Hash[String, MIRLoweringCounterSnapshot]) }
+  def function_counter_snapshots
+    program_state.function_counter_snapshots
+  end
+
+  # Stable source identity for generated local names. Ruby object_id is useful
+  # for in-memory identity maps, but embedding it in Zig makes clean builds
+  # nondeterministic and prevents checked incremental artifact reuse.
+  sig { params(node: AST::Locatable).returns(String) }
+  def stable_node_suffix(node)
+    range = node.source_range
+    "#{range.start_line}_#{range.start_column}_#{range.end_line}_#{range.end_column}"
+  end
+
   sig { returns(MIRLoweringFunctions::FunctionState) }
   def function_state
     lowering_state.function_state
@@ -606,6 +622,13 @@ class MIRLowering
   def place_value_for_destination(mir, ast_node, dest_alloc, dest_type = nil)
     plan = destination_placement_plan(mir, ast_node, dest_alloc, dest_type)
     plan.place(self, mir, ast_node)
+  end
+
+  sig { params(value: MIR::Node, shape: AsyncResultShape).returns(MIR::Node) }
+  def async_payload_storage_value(value, shape)
+    return value unless shape.boxes_fallible_payload?
+
+    MIR::StructInit.new(nil, [MIR::StructInitField.new(name: "value", value: value)])
   end
 
   sig { params(value: MIR::Node, destination: Type, source_node: AST::Node).returns(MIR::MethodCall) }
@@ -1065,7 +1088,15 @@ class MIRLowering
     # receives normal cleanup and the clone is transferred as the result.
     return copy_lazy_owned_branch_for_destination(mir, dst_ti, dest_alloc) if mir_allocates?(mir)
 
-    MIR::DeepCopy.new(mir, dst_ti.zig_type, nil, :full_value, dest_alloc)
+    MIR::DeepCopy.new(
+      mir,
+      dst_ti.zig_type,
+      nil,
+      :full_value,
+      dest_alloc,
+      MIR::DeepCopy.copy_shape_for_zig_type(dst_ti.zig_type),
+      dst_ti,
+    )
   end
 
   sig { params(mir: MIR::Node, type_info: Type, dest_alloc: Symbol).returns(MIR::BlockExpr) }
@@ -1348,12 +1379,7 @@ class MIRLowering
     when AST::StringConcat      then lower_string_concat(node)
     when AST::BlockExpr         then lower_block_expr(node)
     when AST::RangeLit          then lower_range_lit(node)
-    when AST::OptionalUnwrap
-      target = lower(node.target)
-      target = strip_try(target) if node.respond_to?(:error_union_type) && T.unsafe(node).error_union_type
-      owns_foreign_resource = node.target.is_a?(AST::Identifier) &&
-        node.target.symbol&.foreign_out_owner == true
-      owns_foreign_resource ? MIR::ForeignOwnedUnwrap.new(target) : MIR::OptionalUnwrap.new(target)
+    when AST::OptionalUnwrap    then lower_optional_unwrap(node)
     when AST::Assert            then lower_assert(node)
     when AST::Raise             then lower_raise(node)
     when AST::Cast              then lower_cast(node)
@@ -3065,6 +3091,11 @@ class MIRLowering
 
     # Lower each statement, adding source line comments
     node.statements.each do |stmt|
+      if stmt.is_a?(AST::FunctionDef)
+        seed = lowering_input.function_counter_seeds[stmt.name]
+        lowering_counters.restore!(seed) if seed
+        program_state.function_counter_snapshots[stmt.name] = lowering_counters.snapshot
+      end
       append_lowered_items!(LoweredItemTarget.new(items: items, line: stmt.token&.line), lower(stmt))
     end
 

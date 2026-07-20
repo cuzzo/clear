@@ -58,7 +58,7 @@ RSpec.describe Annotator::FunctionRegistry do
     expect(registry.synthetic_definitions).to eq([])
   end
 
-  it "records body summaries and exposes derived call graph facts" do
+  it "records body summaries without becoming the call-graph authority" do
     registry = described_class.new
     summary = body_summary(
       "caller",
@@ -70,11 +70,5 @@ RSpec.describe Annotator::FunctionRegistry do
 
     expect(registry.record_body_summary!(summary)).to eq(summary)
     expect(registry.body_summaries).to eq("caller" => summary)
-    expect(registry.call_graph).to eq("caller" => Set["callee"])
-    expect(registry.propagating_callees).to eq("caller" => Set["fallible"])
-    expect(registry.fnptr_call?("caller")).to be(true)
-    expect(registry.fnptr_call?("missing")).to be(false)
-    expect(registry.raises_directly?("caller")).to be(true)
-    expect(registry.raises_directly?("missing")).to be(false)
   end
 end

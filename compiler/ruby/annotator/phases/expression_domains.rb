@@ -89,6 +89,7 @@ module Annotator
         reject_direct_observable_method_access!(node)
 
         if resolve_protocol_method_call!(node)
+          finalize_tense_navigation_method!(node)
           return
         end
 
@@ -103,20 +104,24 @@ module Annotator
           end
           reject_mutating_borrowed_receiver!(node)
           record_predicate_call_site!(node)
+          finalize_tense_navigation_method!(node)
           return
         end
 
         if resolve_extern_method_call!(node)
           reject_mutating_borrowed_receiver!(node)
+          finalize_tense_navigation_method!(node)
           return
         end
         if resolve_inherent_method_call!(node)
           reject_mutating_borrowed_receiver!(node)
+          finalize_tense_navigation_method!(node)
           return
         end
         if resolve_intrinsic_method_call!(node)
           validate_indirect_collection_insertion!(node)
           reject_mutating_borrowed_receiver!(node)
+          finalize_tense_navigation_method!(node)
           return
         end
 
@@ -126,6 +131,23 @@ module Annotator
         error!(node, :UNKNOWN_INHERENT_METHOD,
           name: node.name, type: Type.surface_name(node.object.full_type!(context: "method receiver")))
       end
+
+      sig { params(node: AST::MethodCall).void }
+      def finalize_tense_navigation_method!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        return unless node.object.is_a?(AST::TenseNavigation)
+
+        if node.object.markers.include?("~") && node.mutates_receiver
+          error!(node, :TENSE_NAVIGATION_MUTATION, markers: node.object.markers)
+        end
+
+        mapped_type = recoverable_result_type(node, context: "tense navigation method result") ||
+          node.full_type!(context: "tense navigation method result")
+        result = publish_tense_navigation_plan!(node, node.object, mapped_type)
+        stamp_type!(node, result)
+        node.safe_nav_chain = true if node.object.safe_navigation?
+      end
+      private :finalize_tense_navigation_method!
 
       sig { params(node: T.any(AST::FuncCall, AST::MethodCall, AST::StaticCall)).void }
       def normalize_explicit_mutable_arguments!(node)

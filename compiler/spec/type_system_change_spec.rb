@@ -93,28 +93,28 @@ RSpec.describe "type-system change contracts" do
   end
 
   it "joins optional and fallible envelopes only for the same payload" do
-    left = Type.join_async_results([Type.new(:Int64), Type.new(:NIL)])
-    right = Type.join_async_results([Type.new("!Int64"), Type.new("?Int64")])
+    left = TenseOperationPlanner.join_async_results([Type.new(:Int64), Type.new(:NIL)])
+    right = TenseOperationPlanner.join_async_results([Type.new("!Int64"), Type.new("?Int64")])
 
-    expect(Type.surface_name(T.must(left.type))).to eq("?Int64")
-    expect(Type.surface_name(T.must(right.type))).to eq("!?Int64")
+    expect(Type.surface_name(T.must(left.result_type))).to eq("?Int64")
+    expect(Type.surface_name(T.must(right.result_type))).to eq("!?Int64")
   end
 
   it "keeps the join commutative associative and idempotent" do
     values = [Type.new(:Int64), Type.new("?Int64"), Type.new("!Int64")]
-    forward = T.must(Type.join_async_results(values).type)
-    reverse = T.must(Type.join_async_results(values.reverse).type)
-    duplicate = T.must(Type.join_async_results(values + [Type.new(:Int64)]).type)
-    left_pair = T.must(Type.join_async_results(values.first(2)).type)
-    associated = T.must(Type.join_async_results([left_pair, values.last]).type)
+    forward = T.must(TenseOperationPlanner.join_async_results(values).result_type)
+    reverse = T.must(TenseOperationPlanner.join_async_results(values.reverse).result_type)
+    duplicate = T.must(TenseOperationPlanner.join_async_results(values + [Type.new(:Int64)]).result_type)
+    left_pair = T.must(TenseOperationPlanner.join_async_results(values.first(2)).result_type)
+    associated = T.must(TenseOperationPlanner.join_async_results([left_pair, values.last]).result_type)
 
     expect([reverse, duplicate, associated].map { |type| Type.surface_name(type) })
       .to all(eq(Type.surface_name(forward)))
   end
 
   it "rejects unrelated payloads and future-state mixing" do
-    payload_conflict = Type.join_async_results([Type.new(:Int64), Type.new(:String)])
-    future_conflict = Type.join_async_results([Type.new(:Int64), Type.new("~Int64")])
+    payload_conflict = TenseOperationPlanner.join_async_results([Type.new(:Int64), Type.new(:String)])
+    future_conflict = TenseOperationPlanner.join_async_results([Type.new(:Int64), Type.new("~Int64")])
 
     expect(payload_conflict.reason).to eq(:payload_mismatch)
     expect(future_conflict.reason).to eq(:future_mismatch)

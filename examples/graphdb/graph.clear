@@ -256,9 +256,9 @@ FN main() RETURNS Void ->
   p1:~ = BG {addNode(&cNodes, "x", "Xena");};
   p2:~ = BG {addNode(&cNodes, "y", "Yara");};
   p3:~ = BG {addNode(&cNodes, "z", "Zane");};
-  NEXT p1;
-  NEXT p2;
-  NEXT p3;
+  TRY (NEXT p1);
+  TRY (NEXT p2);
+  TRY (NEXT p3);
 
   ASSERT getLabel(cNodes, "x") == "Xena", "concurrent: x is Xena";
   ASSERT getLabel(cNodes, "y") == "Yara", "concurrent: y is Yara";
@@ -268,9 +268,9 @@ FN main() RETURNS Void ->
   p4:~ = BG {addEdge(&cNodes, "x", "y", 1.0);};
   p5:~ = BG {addEdge(&cNodes, "x", "z", 2.0);};
   p6:~ = BG {addEdge(&cNodes, "y", "z", 3.0);};
-  NEXT p4;
-  NEXT p5;
-  NEXT p6;
+  TRY (NEXT p4);
+  TRY (NEXT p5);
+  TRY (NEXT p6);
 
   # Verify edges
   xNeighbors = TRY neighbors(cNodes, "x");

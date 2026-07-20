@@ -18,6 +18,8 @@ require_relative "control_flow"
 require_relative "../semantic/pass_state"
 require_relative "placement"
 require_relative "../semantic/lifecycle_plan"
+require_relative "mir_planning"
+require_relative "program_mir_facts"
 
 class MIRPass
     extend T::Sig
@@ -38,34 +40,11 @@ class MIRPass
     end
   end
 
-  class OwnershipPreparationPlan < T::Struct
-    extend T::Sig
-
-    const :function, AST::FunctionDef
-    const :cleanup_facts, CleanupClassifier::FrozenCleanupFacts
-    const :can_fail_fns, T::Set[String]
-
-    sig { returns(T::Hash[String, CleanupEntry]) }
-    def bindings
-      cleanup_facts.bindings
-    end
-
-    sig { returns(T::Boolean) }
-    def cleanup_bindings?
-      !cleanup_facts.empty?
-    end
-  end
-
-  # cleanup_bindings: { fn_name => { var_name => entry_hash } }
-  # Exposed for specs that test classification directly.
-  sig { returns(T::Hash[String, T::Hash[String, CleanupEntry]]) }
-  attr_reader :cleanup_bindings
-
-  sig { returns(T::Hash[String, CleanupClassifier::CleanupClassificationPlan]) }
-  attr_reader :cleanup_plans
-
   sig { returns(EscapeAnalysis::EscapePlacementFacts) }
   attr_reader :escape_placement_facts
+
+  sig { returns(ProgramMIRFacts) }
+  attr_reader :program_facts
 
   sig { params(fn_nodes: FnNodes, schema_lookup: Type::SchemaLookup, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry), body_summaries: T::Hash[String, Annotator::Phases::FunctionBodySummary], hoist_bindings: T.nilable(HoistBindings)).void }
   def initialize(fn_nodes:, schema_lookup:, lifecycle_registry: nil, body_summaries: {}, hoist_bindings: nil)
@@ -74,18 +53,9 @@ class MIRPass
     @lifecycle_registry = T.let(lifecycle_registry, T.nilable(Semantic::LifecycleRegistry))
     @body_summaries = T.let(body_summaries, T::Hash[String, Annotator::Phases::FunctionBodySummary])
     @hoist_bindings = T.let(hoist_bindings || {}, HoistBindings)
-    @cleanup_bindings = T.let({}, T::Hash[String, T::Hash[String, CleanupEntry]])
-    @cleanup_plans = T.let({}, T::Hash[String, CleanupClassifier::CleanupClassificationPlan])
     @escape_placement_facts = T.let(EscapeAnalysis::EscapePlacementFacts.new, EscapeAnalysis::EscapePlacementFacts)
-    @can_fail_fns = T.let(self.class.fallible_function_names(fn_nodes), T::Set[String])
+    @program_facts = T.let(ProgramMIRFacts.empty, ProgramMIRFacts)
     @current_transform_fn = T.let(nil, T.nilable(AST::FunctionDef))
-  end
-
-  sig { params(fn_nodes: FnNodes).returns(T::Set[String]) }
-  def self.fallible_function_names(fn_nodes)
-    fn_nodes.each_with_object(Set.new) do |(name, fn), names|
-      names << name if fn.can_fail
-    end
   end
 
   sig { params(facts: CleanupClassifier::FrozenCleanupFacts, name: T.any(String, Symbol, CleanupClassifier::PlaceId)).returns(CleanupEntry) }
@@ -110,9 +80,14 @@ class MIRPass
 
     # Escape analysis writes final SymbolEntry#storage and now also returns the
     # typed placement table explaining which phase forced each heap placement.
-    escape_result = EscapeAnalysis.apply_with_facts!(@fn_nodes, @schema_lookup, @body_summaries, @hoist_bindings)
-    @escape_placement_facts = escape_result.placements
-    BgCaptureClassifier.classify_all!(@fn_nodes, schema_lookup: @schema_lookup)
+    planning = MIRPlanner.plan_all!(
+      fn_nodes: @fn_nodes,
+      schema_lookup: @schema_lookup,
+      lifecycle_registry: @lifecycle_registry,
+      body_summaries: @body_summaries,
+      hoist_bindings: @hoist_bindings,
+    )
+    @escape_placement_facts = planning.escape_placements
     pass_state.mark!(:escape_analyzed)
 
     # SYNC propagation ran inside EscapeAnalysis.apply! above (single-pass
@@ -122,31 +97,26 @@ class MIRPass
     # lowering and cleanup only read that fact.
 
     # Phase 2.5: classify cleanup bindings (uses finalized provenance from Phase 2).
-    @fn_nodes.each do |name, fn|
-      cleanup_plan = CleanupClassifier.classify_plan(
-        fn,
-        schema_lookup: @schema_lookup,
-        lifecycle_registry: @lifecycle_registry,
-      )
-      @cleanup_plans[name] = cleanup_plan
-      @cleanup_bindings[name] = cleanup_plan.bindings
-    end
     pass_state.mark!(:cleanup_classified)
-
-    LoopFrameAnalysis.analyze!(@fn_nodes, @schema_lookup, @lifecycle_registry)
     pass_state.mark!(:loop_frame_analyzed)
 
     # needs_rt finalization must run after placement and cleanup
     # classification. That is the point where the compiler knows whether a
     # function actually needs an allocator for a heap/frame binding or cleanup.
     # Propagate to callers so runtime threading is decided once from final data.
-    finalize_needs_rt!
+    @program_facts = ProgramMIRFinalizer.finalize(
+      fn_nodes: @fn_nodes,
+      cleanup_plans: planning.cleanup_plans,
+      body_summaries: @body_summaries,
+      schema_lookup: @schema_lookup,
+    )
+    apply_program_facts!
     pass_state.mark!(:needs_rt_finalized)
 
     # Phase 3: insert MIR nodes + stamp AST.
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
-      transform_function!(stmt)
+      transform_function!(stmt, planning.cleanup_plan_for(stmt.name.to_s), planning.can_fail_functions)
     end
 
     # Synthetic test-body wrappers live in @fn_nodes but never appear
@@ -156,350 +126,49 @@ class MIRPass
     @fn_nodes.each do |name, fn|
       next unless name.is_a?(String) && name.start_with?("__test_body_")
       next unless fn&.body
-      transform_function!(fn)
+      transform_function!(fn, planning.cleanup_plan_for(name), planning.can_fail_functions)
     end
 
-    # MIR escape analysis can discover heap-return provenance after the
-    # annotator created each FunctionSignature. Resync the signature objects
-    # so cross-module imports and later lowering see the same ownership facts
-    # as the FunctionDef.
-    @fn_nodes.each_value do |fn|
-      sig = FunctionSignature.from_function_def(fn)
-      sig.sync_from_function_def!(fn) if sig.is_a?(FunctionSignature)
-    end
     pass_state.mark!(:mir_pass_complete)
     nil
   end
 
   private
 
-  # Finalize needs_rt after escape analysis and cleanup classification. The
-  # annotator's compute_needs_rt! ran before placement was decided, so it could
-  # not see a function that owns an allocator-backed binding. Any function with
-  # a heap/frame cleanup binding or heap-placed local allocates via `rt`;
-  # propagate to callers, which must thread rt to pass it.
+  # The one compatibility seam from portable program facts back into the
+  # mutable AST/signature model consumed by the current lowerer.
   sig { void }
-  def finalize_needs_rt!
-    @fn_nodes.each_value do |fn|
-      fn.needs_rt = false if fn.body
+  def apply_program_facts!
+    @fn_nodes.each do |name, function|
+      function.needs_rt = @program_facts.functions.fetch(name).needs_runtime
+      signature = FunctionSignature.from_function_def(function)
+      signature.sync_from_function_def!(function) if signature.is_a?(FunctionSignature)
     end
-
-    @fn_nodes.each do |_name, fn|
-      next unless fn.body
-      cleanup_facts = @cleanup_plans[fn.name.to_s]&.facts ||
-        CleanupClassifier::FrozenCleanupFacts.from_bindings(@cleanup_bindings[fn.name.to_s] || {})
-      # A direct `RETURN param` generic identity function is pure for scalar
-      # instantiations but needs an allocator to copy owned instantiations.
-      # Its generic placeholder can otherwise look cleanup-bearing before a
-      # concrete call is known, so decide this narrow shape from call sites.
-      if generic_direct_parameter_return?(fn)
-        # A TAKES generic still emits a guarded cleanup for the not-moved path.
-        # Even when every current call instantiates it with a scalar, that
-        # cleanup is compiled in the generic body and therefore needs `rt`.
-        fn.needs_rt = params_need_runtime_cleanup?(fn.params) ||
-          generic_return_needs_runtime?(fn)
-        next
-      end
-      if generic_projection_return?(fn)
-        fn.needs_rt = false
-        next
-      end
-      if finalized_runtime_input?(fn) ||
-         params_need_runtime_cleanup?(fn.params) ||
-         runtime_cleanup_facts?(cleanup_facts) ||
-         generic_return_needs_runtime?(fn)
-        fn.needs_rt = true
-        next
-      end
-      AST.each_locatable(fn.body) do |n|
-        if ast_node_needs_runtime?(n)
-          fn.needs_rt = true
-        end
-      end
-      next if fn.needs_rt
-      if return_path_needs_allocator?(fn)
-        fn.needs_rt = true
-      end
-    end
-    callees = T.let({}, T::Hash[String, T::Set[String]])
-    @fn_nodes.each do |name, fn|
-      next unless fn.body
-      cs = T.let(Set.new, T::Set[String])
-      collect_callees(fn.body, cs)
-      callees[name] = cs
-    end
-    changed = T.let(true, T::Boolean)
-    while changed
-      changed = false
-      @fn_nodes.each do |name, fn|
-        next unless fn.body && !fn.needs_rt
-        if callees[name]&.any? { |c| @fn_nodes[c]&.needs_rt }
-          fn.needs_rt = true
-          changed = true
-        end
-      end
-    end
+    nil
   end
 
-  sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
-  def finalized_runtime_input?(fn)
-      fn.name.to_s == Compiler::Entrypoint::NAME ||
-      !fn.conformance_protocol.nil? ||
-      fn.uses_rt == true ||
-      function_error_context?(fn) ||
-      fn.uses_alloc == true ||
-      fn.fn_value_ref == true ||
-      !fn.thunk_plan.nil? ||
-      !fn.mutual_thunk_plan.nil? ||
-      recursion_yield_needed?(fn)
+  sig do
+    params(
+      function: AST::FunctionDef,
+      cleanup_plan: CleanupClassifier::CleanupClassificationPlan,
+      can_fail_functions: T::Set[String],
+    ).void
   end
-
-  sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
-  def generic_return_needs_runtime?(fn)
-    return false unless generic_direct_parameter_return?(fn)
-    returned = generic_returned_parameter_name(fn)
-    return false unless returned
-    index = fn.params.index { |param| param.name.to_s == returned }
-    return false unless index
-
-    # Keep scalar-only generic functions on the original pure ABI. Runtime
-    # threading is needed only when a concrete call instantiates the returned
-    # T with an owned cleanup-bearing payload.
-    @fn_nodes.each_value.any? do |caller|
-      next false unless caller.body
-      needs_runtime = T.let(false, T::Boolean)
-      AST.each_locatable(caller.body) do |node|
-        next unless node.is_a?(AST::FuncCall) && node.name.to_s == fn.name.to_s
-        arg = node.args[index]
-        next unless arg
-        ti = arg.full_type!(context: "generic return instantiation").success_type
-        needs_runtime ||= ti.string? || ti.collection_value? || ti.recursive_cleanup_shape?(T.unsafe(@schema_lookup))
-      end
-      needs_runtime
-    end
-  end
-
-  sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
-  def generic_direct_parameter_return?(fn)
-    !generic_returned_parameter_name(fn).nil?
-  end
-
-  sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
-  def generic_projection_return?(fn)
-    ret = fn.return_type
-    return false unless ret.is_a?(Type) && ret.generic_type_parameter?
-    returns = T.let([], T::Array[AST::ReturnNode])
-    AST.each_locatable(fn.body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
-    return false unless returns.length == 1
-
-    T.must(returns.first).value.is_a?(AST::GetField)
-  end
-
-  sig { params(fn: AST::FunctionDef).returns(T.nilable(String)) }
-  def generic_returned_parameter_name(fn)
-    ret = fn.return_type
-    return nil unless ret.is_a?(Type) && ret.generic_type_parameter?
-    returns = T.let([], T::Array[AST::ReturnNode])
-    AST.each_locatable(fn.body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
-    return nil unless returns.length == 1
-    value = T.must(returns.first).value
-    return nil unless value.is_a?(AST::Identifier)
-    return nil unless fn.params.any? { |param| param.name.to_s == value.name.to_s }
-
-    value.name.to_s
-  end
-
-  sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
-  def function_error_context?(fn)
-    pre = fn.respond_to?(:pre_clauses) ? fn.pre_clauses : nil
-    return true if pre.respond_to?(:any?) && pre.any?
-    return true if fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
-    fn.default_catch.is_a?(Array) && fn.default_catch.any?
-  end
-
-  sig { params(params: T::Array[AST::Param]).returns(T::Boolean) }
-  def params_need_runtime_cleanup?(params)
-    params.any? do |param|
-      next false unless param.takes
-      ti = param.type
-      next true if ti.any?
-      next false if ti.primitive? || ti.id_handle?
-      true
-    end
-  end
-
-  sig { params(facts: CleanupClassifier::FrozenCleanupFacts).returns(T::Boolean) }
-  def runtime_cleanup_facts?(facts)
-    found = T.let(false, T::Boolean)
-    facts.each_entry do |_place, entry|
-      found = true if [:heap, :frame].include?(entry.alloc)
-    end
-    found
-  end
-
-  sig { params(node: AstCall).returns(T::Boolean) }
-  def ast_call_needs_rt?(node)
-    return false if @fn_nodes.key?(node.name.to_s)
-
-    sig = node.respond_to?(:matched_signature) ? FunctionSignature.unwrap(node.matched_signature) : nil
-    return false unless sig
-    return true if sig.needs_rt == true
-
-    sig.emits_allocating? == true
-  end
-
-  sig { params(node: AST::Node).returns(T::Boolean) }
-  def ast_node_lowers_through_runtime?(node)
-    case node
-    when AST::FuncCall, AST::MethodCall
-      ast_call_needs_rt?(node)
-    when AST::BgBlock, AST::BgStreamBlock
-      true
-    when AST::Assignment
-      indexed_assignment_lowers_through_runtime?(node)
-    when AST::CopyNode, AST::CloneNode
-      copy_node_lowers_through_runtime?(node)
-    when AST::BinaryOp
-      owned_or_else_lowers_through_runtime?(node)
-    when AST::WithBlock
-      with_block_lowers_through_runtime?(node)
-    else
-      false
-    end
-  end
-
-  sig { params(node: AST::BinaryOp).returns(T::Boolean) }
-  def owned_or_else_lowers_through_runtime?(node)
-    return false unless node.op == :OR_ELSE || node.op == :OR
-
-    ti = Type.from_node!(node, context: "owned OR runtime requirement").success_type
-    ti.string? || ti.heap_ptr? || ti.collection_value? || ti.collection? ||
-      ti.needs_cleanup?(T.unsafe(@schema_lookup)) ||
-      ti.recursive_cleanup_shape?(T.unsafe(@schema_lookup))
-  end
-
-  sig { params(node: T.any(AST::CopyNode, AST::CloneNode)).returns(T::Boolean) }
-  def copy_node_lowers_through_runtime?(node)
-    ti = Type.from_node!(node, context: "COPY runtime requirement").success_type
-    return false if ti.primitive? || ti.symbol? || ti.id_handle?
-
-    ti.string? ||
-      ti.heap_ptr? ||
-      ti.collection_value? ||
-      ti.collection? ||
-      ti.any_sync? ||
-      ti.optional? && ti.needs_cleanup?(T.unsafe(@schema_lookup)) ||
-      ti.needs_cleanup?(T.unsafe(@schema_lookup)) ||
-      ti.recursive_cleanup_shape?(T.unsafe(@schema_lookup))
-  end
-
-  sig { params(node: AST::Assignment).returns(T::Boolean) }
-  def indexed_assignment_lowers_through_runtime?(node)
-    return false unless node.name.is_a?(AST::GetIndex)
-    target_node = node.name.target
-    return false unless target_node.is_a?(AST::Locatable)
-    return true if node.name.protocol_operation == :map_put
-    ti = target_node.full_type!(context: "indexed assignment target")
-    return false if ti.fixed? && !ti.string? && !ti.collection?
-
-    kind = ti.dispatch_key
-    !!(kind && INDEX_OPS.dig(kind, :set))
-  end
-
-  sig { params(node: AST::WithBlock).returns(T::Boolean) }
-  def with_block_lowers_through_runtime?(node)
-    return true if node.snapshot_mode == :transaction
-    return true if node.view_kind == :materialized_view
-    return true if node.universal_poly
-
-    clause = node.lock_error_clause
-    return false unless clause
-    action_raises = [AST::ErrorActionKind::Raise, AST::ErrorActionKind::Exit].include?(clause.action)
-    has_bubble = clause.bubble_types.any?
-    action_raises || has_bubble
-  end
-
-  sig { params(fn_node: AST::FunctionDef).returns(T::Boolean) }
-  def recursion_yield_needed?(fn_node)
-    AST.recursion_yield_needed?(fn_node)
-  end
-
-  sig { params(node: T.any(AST::Node, AST::RawBody), acc: T::Set[String]).void }
-  def collect_callees(node, acc)
-    AST.each_locatable(node) do |child|
-      case child
-      when AST::FuncCall, AST::MethodCall
-        acc << child.name.to_s if child.name
-      end
-    end
-  end
-
-  sig { params(fn: AST::FunctionDef).returns(T::Boolean) }
-  def return_path_needs_allocator?(fn)
-    return false unless fn.heap_carry_return
-    found = T.let(false, T::Boolean)
-    AST.each_locatable(fn.body) do |node|
-      next if found
-      next unless node.is_a?(AST::ReturnNode) && node.value
-      found = return_expr_needs_allocator?(fn, node.value)
-    end
-    found
-  end
-
-  sig { params(fn: AST::FunctionDef, expr: AST::Node).returns(T::Boolean) }
-  def return_expr_needs_allocator?(fn, expr)
-    node = unwrap_return_expr(expr)
-    return true if node.is_a?(AST::CopyNode)
-    ti = node.is_a?(AST::Locatable) ? node.full_type!(context: "return allocator expression").success_type : nil
-    # Generic return payloads are materialized with `dupeValue(T, ...)` by
-    # lowering. Their concrete cleanup shape is unknown here, so conservatively
-    # thread the runtime through the generic boundary.
-    return true if ti&.generic_type_parameter?
-    return false if ti&.any_rc? || ti&.any_sync?
-
-    if node.is_a?(AST::Identifier)
-      return false if fn.params.any? { |param| param.name.to_s == node.name.to_s && param.takes }
-      return !!(ti&.string? || ti&.recursive_cleanup_shape?(T.unsafe(@schema_lookup)))
-    end
-
-    return true if node.is_a?(AST::StringConcat)
-    return true if node.is_a?(AST::BinaryOp) && node.string_concat == true
-    !!(ti && !node.is_a?(AST::Literal) &&
-       (ti.string? || ti.heap_ptr? || ti.collection_value? ||
-        ti.collection? || ti.needs_cleanup?(T.unsafe(@schema_lookup)) ||
-        ti.recursive_cleanup_shape?(T.unsafe(@schema_lookup))))
-  end
-
-  sig { params(expr: AST::Node).returns(AST::Node) }
-  def unwrap_return_expr(expr)
-    case expr
-    when AST::MoveNode, AST::Cast, AST::FreezeNode
-      unwrap_return_expr(expr.value)
-    when AST::BinaryOp
-      expr.op == :OR_ELSE ? unwrap_return_expr(expr.left) : expr
-    else
-      expr
-    end
-  end
-
-  sig { params(fn: AST::FunctionDef).void }
-  def transform_function!(fn)
-    plan = ownership_preparation_plan(fn)
-    cleanup_facts = plan.cleanup_facts
-    function = plan.function
+  def transform_function!(function, cleanup_plan, can_fail_functions)
+    cleanup_facts = cleanup_plan.facts
     CleanupClassifier.stamp_field_pre_cleanups!(
       function.body,
       cleanup_facts,
       schema_lookup: @schema_lookup,
       lifecycle_registry: @lifecycle_registry,
     )
-    return unless plan.cleanup_bindings?
+    return if cleanup_plan.empty?
 
     bc_errors = BorrowChecker.check(function, schema_lookup: @schema_lookup)
     raise "[Borrow Error] #{bc_errors.first}" unless bc_errors.empty?
 
     pre_mark_bg_resource_captures!(function, cleanup_facts)
-    dataflow = OwnershipDataflow.analyze(function, can_fail_fns: plan.can_fail_fns, schema_lookup: @schema_lookup)
+    dataflow = OwnershipDataflow.analyze(function, can_fail_fns: can_fail_functions, schema_lookup: @schema_lookup)
     dataflow.cleanup_decisions!(function, cleanup_facts)
     mark_returned_cleanup_bindings!(function, cleanup_facts)
     function.cleanup_bindings = cleanup_facts.bindings
@@ -508,18 +177,6 @@ class MIRPass
     @current_transform_fn = nil
     stamp_moved_guard_info!(function, cleanup_facts)
     nil
-  end
-
-  sig { params(fn: AST::FunctionDef).returns(OwnershipPreparationPlan) }
-  def ownership_preparation_plan(fn)
-    name = fn.name.to_s
-    cleanup_facts = @cleanup_plans[name]&.facts ||
-      CleanupClassifier::FrozenCleanupFacts.from_bindings(@cleanup_bindings[name] || {})
-    OwnershipPreparationPlan.new(
-      function: fn,
-      cleanup_facts: cleanup_facts,
-      can_fail_fns: @can_fail_fns,
-    )
   end
 
   # Pre-mark bindings that are captured by BG blocks as needing moved guards.
@@ -776,11 +433,6 @@ class MIRPass
     false
   end
 
-  sig { params(node: AST::Locatable).returns(T::Boolean) }
-  def ast_node_needs_runtime?(node)
-    AST.declaration_with_heap_symbol?(node) || ast_node_lowers_through_runtime?(node)
-  end
-
   # Stamp reassign_cleanup on BindExpr :assign nodes that overwrite non-Copy variables.
   sig { params(stmt: AST::Node, facts: CleanupClassifier::FrozenCleanupFacts).void }
   def stamp_reassign_cleanup!(stmt, facts)
@@ -789,16 +441,12 @@ class MIRPass
     entry = cleanup_entry_for_binding_node(stmt, facts)
     return unless entry.present? && entry.kind != :resource
     lifecycle = entry.lifecycle_plan
-    if lifecycle.nil? && @lifecycle_registry
-      declaration = stmt.symbol&.reg
-      lifecycle = @lifecycle_registry.fetch_binding(declaration || stmt, stmt.full_type!)
-      entry.set_lifecycle_plan!(lifecycle)
-    end
+    raise "missing planned lifecycle for reassignment '#{stmt.name}'" unless lifecycle
     # Allocator provenance is not a destruction contract. Escape analysis may
     # place a bit-copy/no-drop slot on the heap (notably loop-carried
     # String@symbol values), but only the annotation-owned LifecyclePlan may
     # authorize destruction of the overwritten value.
-    return if lifecycle && !lifecycle.needs_drop?
+    return unless lifecycle.needs_drop?
     # A heap-owned binding reassigned in a loop must free the OLD value
     # before storing the new one -- even if the binding is ultimately
     # moved out (only the final value is moved; the intermediates would
@@ -980,6 +628,6 @@ class MIRPass
     end
   end
 
-  private :live_cleanup_entry
+  private :live_cleanup_entry, :alloc_marker
 
 end

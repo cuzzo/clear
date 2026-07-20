@@ -396,6 +396,17 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         expect { run(src) }.to raise_error(SourceError, /mixed promise types/)
       end
+
+      it "rejects erasing a fallible payload from a bounded stream declaration" do
+        src = <<~CLEAR
+          FN makeItem() RETURNS !String -> RETURN COPY "ok"; END
+          FN f() RETURNS Void ->
+            s: ~String[1] = [BG { makeItem(); }];
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /Type Mismatch.*~!String\[1\].*~String\[1\]/)
+      end
     end
 
     # ------------------------------------------------------------------

@@ -42,6 +42,7 @@ RSpec.describe FsmTransform::Emit do
       blk_label: "__bg1",
       ctx_type: "__BgCtx1",
       promise_zig: "CheatHeader.Promise(void)",
+      async_result_shape: AsyncResultShape.promise(Type.new(:Void)),
       capture_fields: [],
       alloc_var: "__alloc_1",
       promise_var: "__promise_1",
@@ -74,6 +75,7 @@ RSpec.describe FsmTransform::Emit do
       blk_label: raw.fetch(:blk_label),
       ctx_type: raw.fetch(:ctx_type),
       promise_zig: raw.fetch(:promise_zig),
+      async_result_shape: raw.fetch(:async_result_shape),
       capture_fields: FsmTransform.coerce_context_fields(raw.fetch(:capture_fields)),
       alloc_var: raw.fetch(:alloc_var),
       promise_var: raw.fetch(:promise_var),
@@ -726,7 +728,8 @@ RSpec.describe FsmTransform::Emit do
         yield
       end
 
-      def lower_finalized_fsm_step_mir(ast_stmts, no_result:, ctx_id: nil)
+      def lower_finalized_fsm_step_mir(ast_stmts, no_result:, ctx_id: nil, async_result_shape: nil)
+        _ = async_result_shape
         @lower_calls << [ast_stmts.map(&:class), ast_stmts.map(&:name), no_result, ctx_id]
         @last_facts = [
           MIR::FsmResultTransferFact.new(name: "fact_only", target_alloc: :frame, move_guarded: false),
@@ -924,7 +927,8 @@ RSpec.describe FsmTransform::Emit do
         yield
       end
 
-      def lower_finalized_fsm_step_mir(_ast_stmts, no_result:, ctx_id: nil)
+      def lower_finalized_fsm_step_mir(_ast_stmts, no_result:, ctx_id: nil, async_result_shape: nil)
+        _ = async_result_shape
         _ = no_result
         _ = ctx_id
         nil
@@ -984,7 +988,8 @@ RSpec.describe FsmTransform::Emit do
         MIR::Ident.new("future")
       end
 
-      def lower_finalized_fsm_step_mir(ast_stmts, no_result:, ctx_id: nil)
+      def lower_finalized_fsm_step_mir(ast_stmts, no_result:, ctx_id: nil, async_result_shape: nil)
+        _ = async_result_shape
         @last_facts = []
         [
           MIR::ExprStmt.new(
@@ -1061,6 +1066,7 @@ RSpec.describe FsmTransform::Emit do
       blk_label: "__bg4",
       ctx_type: "__BgCtx4",
       promise_zig: "CheatHeader.Promise(void)",
+      async_result_shape: AsyncResultShape.promise(Type.new(:Void)),
       capture_fields: [],
       alloc_var: "__alloc_4",
       promise_var: "__promise_4",

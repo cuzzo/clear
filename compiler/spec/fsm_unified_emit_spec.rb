@@ -76,6 +76,7 @@ RSpec.describe FsmTransform::Emit do
       blk_label: "__bg0",
       ctx_type: "__BgCtx0",
       promise_zig: "CheatLib.Promise(i64)",
+      async_result_shape: AsyncResultShape.promise(Type.new(:Int64)),
       capture_fields: [],
       alloc_var: "__bg0_alloc",
       promise_var: "__bg0_promise",

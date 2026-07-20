@@ -212,8 +212,7 @@ RSpec.describe "the intrinsic generic Map protocol" do
     expect(concrete.name.protocol_operation).to be_nil
     expect(generic.name.protocol_operation).to eq(:map_put)
 
-    pass = MIRPass.new(fn_nodes: {}, schema_lookup: ->(_name) { nil })
-    expect(pass.send(:indexed_assignment_lowers_through_runtime?, generic)).to be(true)
+    expect(ProgramMIRFinalizer.send(:indexed_assignment_lowers_through_runtime?, generic)).to be(true)
   end
 
   it "fails closed for impossible protocol MIR identifiers" do

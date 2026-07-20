@@ -80,8 +80,15 @@ module FsmLowering
   # typed MIR::Set assignment to ctx.inner.result. The strip-try
   # rewrite is applied to the lowered MIR via the existing
   # `strip_try` helper.
-  sig { params(stmts: T::Array[AST::Node], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T::Array[MIR::Emittable]) }
-  def lower_step_stmts(stmts, no_result:, ctx_id: nil)
+  sig do
+    params(
+      stmts: T::Array[AST::Node],
+      no_result: T::Boolean,
+      ctx_id: T.nilable(Integer),
+      async_result_shape: T.nilable(AsyncResultShape),
+    ).returns(T::Array[MIR::Emittable])
+  end
+  def lower_step_stmts(stmts, no_result:, ctx_id: nil, async_result_shape: nil)
     T.bind(self, MIRLowering) rescue {}
     flat_steps = T.let([], T::Array[AST::ThenStep])
     stmts.each do |stmt|
@@ -135,12 +142,22 @@ module FsmLowering
           result_alloc,
           result_destination_type,
         ) if last_mir
-        last_mir = hoist_alloc(last_mir, last_step.expr, err_cleanup: true) if last_mir && mir_allocates?(last_mir)
+        if last_mir && (mir_allocates?(last_mir) ||
+            lifecycle_registry.fetch(result_destination_type).needs_drop?)
+          last_mir = hoist_alloc(
+            last_mir,
+            last_step.expr,
+            err_cleanup: true,
+            ownership_materialization_alloc: result_alloc,
+          )
+        end
         last_pending = flush_pending
         result_mir.concat(last_pending)
 
         last_is_assign = last_step.expr.is_a?(AST::Assignment)
-        is_step_void = ast_void_type?(expr_type)
+        # `!Void` is not a discardable Void step at an async boundary: the
+        # promise must retain its failure channel in AsyncFallible(void).
+        is_step_void = ast_void_type?(expr_type) && !expr_t.error_union?
 
         if last_mir && (last_is_assign || is_step_void)
           stmt_mir = wrap_step_as_stmt(AST::ThenStep.new(expr: last_step.expr, binding: nil), last_mir)
@@ -164,6 +181,10 @@ module FsmLowering
           # the consumer (NEXT) owns and frees it. No per-promise
           # allocator, no dupe.
           result_value = coerce_fsm_result_value(strip_try(last_mir), expr_t)
+          result_value = async_payload_storage_value(
+            result_value,
+            async_result_shape || AsyncResultShape.promise(result_destination_type),
+          )
           result_set = MIR::Set.new(target, result_value, false)
           transfer_facts = fsm_result_transfer_facts(
             last_mir,
@@ -391,11 +412,23 @@ module FsmLowering
     MIR::ExprStmt.new(mir, !is_void_step)
   end
 
-  sig { params(stmts: T::Array[AST::Node], no_result: T::Boolean, ctx_id: T.nilable(Integer)).returns(T::Array[MIR::Node]) }
-  def lower_finalized_fsm_step_mir(stmts, no_result:, ctx_id: nil)
+  sig do
+    params(
+      stmts: T::Array[AST::Node],
+      no_result: T::Boolean,
+      ctx_id: T.nilable(Integer),
+      async_result_shape: T.nilable(AsyncResultShape),
+    ).returns(T::Array[MIR::Node])
+  end
+  def lower_finalized_fsm_step_mir(stmts, no_result:, ctx_id: nil, async_result_shape: nil)
     T.bind(self, MIRLowering) rescue {}
     capture_state.last_fsm_result_transfer_facts = []
-    result = lower_step_stmts(stmts, no_result: no_result, ctx_id: ctx_id)
+    result = lower_step_stmts(
+      stmts,
+      no_result: no_result,
+      ctx_id: ctx_id,
+      async_result_shape: async_result_shape,
+    )
     inherited_allocs = capture_state.current_fsm_inherited_alloc_names
     inherited_guards = capture_state.current_fsm_inherited_guarded_names
     append_ownership_transfers_for_mir_body(result, inherited_allocs, inherited_guards)

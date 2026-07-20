@@ -1265,6 +1265,7 @@ pub const CheatLib = struct {
     pub const RwLocked = DataStructures.RwLocked;
     pub const rwLockedCreate = DataStructures.rwLockedCreate;
     pub const rwLockedDestroy = DataStructures.rwLockedDestroy;
+    pub const AsyncFallible = DataStructures.AsyncFallible;
     pub const Promise = DataStructures.Promise;
     pub const SharedPromise = DataStructures.SharedPromise;
     pub const BoundedStream = DataStructures.BoundedStream;

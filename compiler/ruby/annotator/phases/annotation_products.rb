@@ -12,6 +12,7 @@ require_relative "body_analysis"
 require_relative "conformance_registration"
 require_relative "declaration_index"
 require_relative "implementation_registration"
+require_relative "derived_program_facts"
 
 module Annotator
   module Phases
@@ -57,7 +58,6 @@ module Annotator
       attr_reader :type_names
       sig { returns(T::Array[String]) }
       attr_reader :function_names
-
       sig do
         params(
           program: AST::Program,
@@ -90,11 +90,14 @@ module Annotator
       extend T::Sig
 
       BodySummaries = T.type_alias { T::Hash[String, FunctionBodySummary] }
+      LocalFacts = T.type_alias { T::Hash[String, LocalFunctionFacts] }
 
       sig { returns(ResolutionFacts) }
       attr_reader :resolution
       sig { returns(BodySummaries) }
       attr_reader :body_summaries
+      sig { returns(LocalFacts) }
+      attr_reader :local_function_facts
       sig { returns(Integer) }
       attr_reader :typed_node_count
       sig { returns(Integer) }
@@ -111,14 +114,17 @@ module Annotator
           typed_node_count: Integer,
           unresolved_node_count: Integer,
           ownership_graph: OwnershipGraph,
-          lifecycle_registry: Semantic::LifecycleRegistry
+          lifecycle_registry: Semantic::LifecycleRegistry,
+          local_function_facts: T.nilable(LocalFacts)
         ).void
       end
-      def initialize(resolution:, body_summaries:, typed_node_count:, unresolved_node_count:, ownership_graph:, lifecycle_registry: Semantic::LifecycleRegistry.empty)
+      def initialize(resolution:, body_summaries:, typed_node_count:, unresolved_node_count:, ownership_graph:, lifecycle_registry: Semantic::LifecycleRegistry.empty, local_function_facts: nil)
         raise "typed program cannot publish unresolved nodes" unless unresolved_node_count.zero?
 
         @resolution = T.let(resolution, ResolutionFacts)
         @body_summaries = T.let(body_summaries.dup.freeze, BodySummaries)
+        facts = local_function_facts || body_summaries.transform_values { |summary| LocalFunctionFacts.from_summary(summary) }
+        @local_function_facts = T.let(facts.sort.to_h.freeze, LocalFacts)
         @typed_node_count = T.let(typed_node_count, Integer)
         @unresolved_node_count = T.let(unresolved_node_count, Integer)
         @ownership_graph = T.let(ownership_graph, OwnershipGraph)
@@ -139,6 +145,8 @@ module Annotator
 
       sig { returns(TypedProgramFacts) }
       attr_reader :typed_program
+      sig { returns(DerivedProgramFacts) }
+      attr_reader :derived_program
       sig { returns(T::Array[String]) }
       attr_reader :checked_functions
       sig { returns(Integer) }
@@ -147,14 +155,16 @@ module Annotator
       sig do
         params(
           typed_program: TypedProgramFacts,
+          derived_program: DerivedProgramFacts,
           checked_functions: T::Array[String],
           checked_call_sites: Integer,
           checked_with_sites: Integer,
           violation_count: Integer
         ).void
       end
-      def initialize(typed_program:, checked_functions:, checked_call_sites:, checked_with_sites:, violation_count:)
+      def initialize(typed_program:, derived_program:, checked_functions:, checked_call_sites:, checked_with_sites:, violation_count:)
         @typed_program = T.let(typed_program, TypedProgramFacts)
+        @derived_program = T.let(derived_program, DerivedProgramFacts)
         @checked_functions = T.let(checked_functions.dup.freeze, T::Array[String])
         @checked_call_sites = T.let(checked_call_sites, Integer)
         @checked_with_sites = T.let(checked_with_sites, Integer)

@@ -336,26 +336,49 @@ module MIRLoweringExpressions
       if Type.from_node!(node.right).stream_step?
         MIR::MethodCall.new(right, "isItem", [], false, MIR::CallableContract.no_ownership(0))
       else
+        require_tense_operation_plan!(node, TenseOperationKind::Exists, TenseBackendForm::OptionalTest)
         MIR::BinOp.new("!=", right, MIR::Lit.new("null"))
       end
-    when :IS_OK then MIR::FallibleOk.new(strip_try(right))
+    when :IS_OK
+      require_tense_operation_plan!(node, TenseOperationKind::IsOk, TenseBackendForm::FallibleTest)
+      MIR::FallibleOk.new(strip_try(right))
     when :IS_READY then MIR::FutureReady.new(right)
     when :TRY
-      declared = if node.right.respond_to?(:error_union_type) && T.unsafe(node.right).error_union_type
-        error_type = T.unsafe(node.right).error_union_type
-        error_type.is_a?(Type) ? error_type : Type.new(error_type)
-      else
-        Type.from_node!(node.right, context: "TRY lowering operand")
+      plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
+      unless plan && plan.operation == TenseOperationKind::Try
+        raise "TRY lowering requires its annotation-produced TenseOperationPlan"
       end
-      if declared.error_union?
+      if plan.backend_form == TenseBackendForm::ZigTry
         MIR::TryExpr.new(strip_try(right))
-      else
+      elsif plan.backend_form == TenseBackendForm::OptionalTry
         MIR::TryOptional.new(right)
+      else
+        raise "TRY lowering received unsupported tense backend #{plan.backend_form.serialize}"
       end
     when :SUB, "-" then MIR::UnaryOp.new("-", right)
     when :BITWISE_NOT, "~" then MIR::UnaryOp.new("~", right)
     else raise "MIRLowering: unknown unary op #{node.op}"
     end
+  end
+
+  sig { params(node: AST::Locatable, operation: TenseOperationKind, backend: TenseBackendForm).returns(TenseOperationPlan) }
+  def require_tense_operation_plan!(node, operation, backend)
+    plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
+    unless plan && plan.operation == operation && plan.backend_form == backend
+      Kernel.raise "#{operation.serialize} lowering requires its annotation-produced TenseOperationPlan"
+    end
+    plan
+  end
+
+  sig { params(node: AST::OptionalUnwrap).returns(MIR::Node) }
+  def lower_optional_unwrap(node)
+    T.bind(self, MIRLowering) rescue nil
+    require_tense_operation_plan!(node, TenseOperationKind::Unwrap, TenseBackendForm::OptionalUnwrap)
+    target = T.cast(lower(node.target), MIR::Node)
+    target = strip_try(target) if node.respond_to?(:error_union_type) && T.unsafe(node).error_union_type
+    owns_foreign_resource = node.target.is_a?(AST::Identifier) &&
+      node.target.symbol&.foreign_out_owner == true
+    owns_foreign_resource ? MIR::ForeignOwnedUnwrap.new(target) : MIR::OptionalUnwrap.new(target)
   end
 
   sig { params(node: AST::BinaryOp).returns(MIR::Node) }
@@ -985,6 +1008,7 @@ module MIRLoweringExpressions
       # Extern trampolines already propagate errors internally (if frame.err |e| return e).
       # Wrapping in TryExpr produces invalid `try { block }` — Zig's try takes an expression.
       return left if left.is_a?(MIR::ExternTrampoline)
+      return strip_try(left) if node.retain_error_channel == true
       return MIR::TryExpr.new(strip_try(left)) if facts.left_is_error
       return left
     end
@@ -1134,42 +1158,15 @@ module MIRLoweringExpressions
   sig { params(node: AST::BinaryOp).returns(OrElseFacts) }
   def or_else_facts(node)
     T.bind(self, MIRLowering) rescue nil
-    left_type = Type.from_node!(node.left, context: "OR/OR_ELSE left")
-    # CLEAR's auto-propagate strips `!T` from a fallible call's
-    # full_type (so `x = call()` is x: T at the binding level). The
-    # original `!T` is stashed on `error_union_type`. OR_ELSE needs
-    # to honor that to keep emitting `catch fallback` (error union)
-    # rather than `orelse fallback` (optional).
-    has_error_union = node.left.respond_to?(:error_union_type) && node.left.error_union_type
-    can_fail = node.left.respond_to?(:can_fail) && node.left.can_fail
-    # Allocation FAULT is surface-exempt (the declared return type stays T),
-    # but its lowered call is still an error union. Consult the matched
-    # signature so `allocatingCall() OR_ELSE fallback` lowers through `catch`
-    # rather than Zig optional `orelse`.
-    if node.left.is_a?(AST::FuncCall) || node.left.is_a?(AST::MethodCall)
-      signature = matched_call_signature(node.left)
-      can_fail ||= signature&.alloc_fault == true || signature&.can_fail == true
+    plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
+    unless plan&.recovery_operation?
+      raise "OR_ELSE lowering requires its annotation-produced TenseOperationPlan at line #{node.token&.line || 0}"
     end
-    effective_left = if has_error_union
-                       Type.new(T.cast(node.left.error_union_type, Type::TypeInput))
-                     else
-                       left_type
-                     end
-    # Annotation permits OR_ELSE to recover both a source-visible !T and an
-    # implementation fault from a checked allocating intrinsic. Allocation
-    # faults deliberately do not change the CLEAR expression's ordinary type,
-    # but they still travel through Zig's error channel. Lowering must consume
-    # that channel here instead of leaving the intrinsic's implicit `try` in
-    # place and silently propagating past the fallback.
-    pipeline_manages_recovery =
-      (node.left.is_a?(AST::BinaryOp) && node.left.smooth?) ||
-      (pipeline_host.respond_to?(:pipeline_context_active?) && pipeline_host.pipeline_context_active?)
-    fault_recoverable = !pipeline_manages_recovery && !left_type.future? && !left_type.stream? &&
-      can_fail == true
+    left_is_error = plan.backend_form == TenseBackendForm::ZigCatch
+    left_success_optional = left_is_error && plan.input_type.success_type.optional?
     OrElseFacts.new(
-      left_is_error: left_type.error_union? || !!has_error_union || fault_recoverable,
-      left_success_optional: !!((effective_left.error_union? && effective_left.success_type.optional?) ||
-        (fault_recoverable && left_type.optional?)),
+      left_is_error: left_is_error,
+      left_success_optional: left_success_optional,
       line: node.token&.line || 0,
       target: lowering_target
     )
@@ -1190,6 +1187,10 @@ module MIRLoweringExpressions
     T.bind(self, MIRLowering) rescue nil
     constructor = unit_variant_constructor(node)
     return constructor if constructor
+
+    if node.target.is_a?(AST::TenseNavigation)
+      return lower_tense_navigation_field(node, node.target)
+    end
 
     target_node = node.target
     # Safe field access on any ?T: expr?.field
@@ -1246,6 +1247,281 @@ module MIRLoweringExpressions
       target = MIR::OptionalUnwrap.new(resolved)
     end
     field_access_plan(node, T.cast(target, MIR::Node)).value
+  end
+
+  sig { params(node: AST::GetField, navigation: AST::TenseNavigation).returns(MIR::Node) }
+  def lower_tense_navigation_field(node, navigation)
+    lower_tense_navigation(node, navigation) do |receiver|
+      field_access_plan(node, MIR::Ident.new(receiver)).value
+    end
+  end
+
+  sig do
+    params(
+      node: AST::Node,
+      navigation: AST::TenseNavigation,
+      mapper: T.proc.params(receiver: String).returns(MIR::Node),
+    ).returns(MIR::Node)
+  end
+  def lower_tense_navigation(node, navigation, &mapper)
+    T.bind(self, MIRLowering)
+
+    plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
+    unless plan&.operation == TenseOperationKind::Navigate
+      raise "tense navigation lowering requires its annotation-produced TenseOperationPlan"
+    end
+    plan = T.must(plan)
+    source = T.cast(lower(navigation.target), MIR::Node)
+    future_map = plan.owns_result?
+    source_prefix, normalized_source = normalize_allocating_used_expr(
+      source,
+      transfer_on_success: future_map && plan.consumes_handle?,
+    )
+    function_state.pending_stmts.concat(source_prefix)
+    source = normalized_source
+    split = TenseEnvelope.from_type(plan.input_type).split_future
+    id = lowering_counters.next_background_block_id
+    raw_id = id.value
+    outer_bindings = tense_map_bindings(raw_id, "outer", split.outer.length)
+    source_for_future = outer_bindings.empty? ? source : MIR::Ident.new(T.must(outer_bindings.last))
+
+    mapped = if plan.owns_result?
+      lower_future_tense_map(node, plan, source_for_future, split.inner, raw_id, &mapper)
+    else
+      bindings = tense_map_bindings(raw_id, "direct", plan.navigation_layers.length)
+      value = mapper.call(T.must(bindings.last))
+      return direct_tense_map(source, value, plan.navigation_layers, bindings, raw_id, plan.result_type)
+    end
+
+    return mapped if split.outer.empty?
+
+    outer = direct_tense_map(
+      source,
+      mapped,
+      split.outer,
+      outer_bindings,
+      raw_id,
+      plan.result_type,
+    )
+    if plan.consumes_handle? && source.is_a?(MIR::Ident)
+      with_ownership_consumption(
+        outer, [source.name], "tense navigation future capture", :capture, target_alloc: :heap,
+      )
+    end
+    outer
+  end
+
+  sig do
+    params(
+      node: AST::Node,
+      operation: TenseOperationPlan,
+      source: MIR::Node,
+      inner_layers: T::Array[TenseLayer],
+      id: Integer,
+      mapper: T.proc.params(receiver: String).returns(MIR::Node),
+    ).returns(MIR::BgBlock)
+  end
+  def lower_future_tense_map(node, operation, source, inner_layers, id, &mapper)
+    T.bind(self, MIRLowering)
+
+    source_value = "__tense_value#{id}"
+    inner_bindings = tense_map_bindings(id, "inner", inner_layers.length)
+    mapped_root = inner_bindings.empty? ? source_value : T.must(inner_bindings.last)
+    result_envelope = TenseEnvelope.from_type(operation.result_type)
+    result_split = result_envelope.split_future
+    inner_result_expression = TenseEnvelope.wrap_layers(
+      result_envelope.payload_expression,
+      result_split.inner,
+    )
+    inner_result_type = Type.from_child_expression(inner_result_expression)
+    future_layer = T.must(result_envelope.layers.find { |layer| layer.kind == TenseLayerKind::Future })
+    future_type = Type.new(future_layer.wrap(inner_result_expression))
+    shared_result = future_layer.capabilities.ownership == :shared
+    result_shape = AsyncResultShape.promise(inner_result_type, shared: shared_result)
+    promise_zig = result_shape.handle_zig_type
+    names = bg_lowering_names(MIRLoweringGeneratedId.new(kind: MIRLoweringCounterKind::BackgroundBlock, value: id))
+    source_envelope = TenseEnvelope.from_type(operation.input_type)
+    source_split = source_envelope.split_future
+    source_result_type = Type.new(TenseEnvelope.wrap_layers(source_envelope.payload_expression, source_split.inner))
+    run_body = with_bg_fiber_body_context(Set.new) do
+      with_runtime_binding_name(names.bg_rt) do
+        source_receiver = MIR::FieldGet.new(MIR::Ident.new("__ctx_map#{id}"), "source")
+        source_guard = if operation.handle_use == TenseHandleUse::SharedRead
+          MIR::DeferStmt.new(MIR::MethodCall.new(
+            source_receiver,
+            "deinit",
+            [],
+            false,
+            MIR::CallableContract.no_ownership(0),
+          ))
+        end
+        source_shape = AsyncResultShape.promise(
+          source_result_type,
+          shared: operation.handle_use == TenseHandleUse::SharedRead,
+        )
+        source_lifecycle = lifecycle_registry.fetch(source_result_type)
+        next_call = MIR::MethodCall.new(
+          source_receiver,
+          "next",
+          [],
+          !source_shape.boxes_fallible_payload?,
+          MIR::CallableContract.no_ownership(0),
+          source_lifecycle.needs_drop? ? :heap : nil,
+        )
+        next_call.result_type = Type.new(source_result_type)
+        next_value = if source_shape.boxes_fallible_payload?
+          MIR::AsyncPayloadTake.new(
+            source: MIR::TryExpr.new(next_call),
+            result_type: Type.new(source_result_type),
+          )
+        else
+          next_call
+        end
+        source_cleanup = if source_lifecycle.needs_drop?
+          tense_map_cleanup_entry(source_result_type, source_lifecycle)
+        end
+        source_binding = MIR::BindingMaterialization.new(
+          name: source_value,
+          expr: next_value,
+          alloc: :heap,
+          type_info: source_result_type,
+          mutable: false,
+          cleanup_entry: source_cleanup,
+          scope: :function,
+          ownership_tracked: source_lifecycle.needs_drop?,
+        )
+        body = T.let([], T::Array[MIR::Node])
+        body << source_guard if source_guard
+        body.concat(source_binding.statements)
+        mapped_value = with_decl_alloc(:heap) { mapper.call(mapped_root) }
+        inner_map = if inner_layers.empty?
+          mapped_value
+        else
+          direct_tense_map(
+            MIR::Ident.new(source_value), mapped_value, inner_layers, inner_bindings,
+            id, inner_result_type, label_suffix: "inner",
+          )
+        end
+        placed = place_value_for_destination(inner_map, node, :heap, inner_result_type)
+        result_lifecycle = lifecycle_registry.fetch(inner_result_type)
+        if mir_allocates?(placed) || placed.is_a?(MIR::Call) || placed.is_a?(MIR::MethodCall)
+          if result_lifecycle.needs_drop?
+            placed = hoist_alloc(placed, node, err_cleanup: true)
+          elsif placed.expr?
+            # A lifecycle-trivial mapped call still needs a stable value before
+            # it is written into the async result. Keep this normalization local
+            # to future mapping: general MIR call hoisting changes evaluation
+            # barriers for unrelated registry and allocator operations.
+            function_state.pending_stmts.concat(normalize_allocating_result_expr!(placed))
+            value_prefix, normalized_value = hoist_normalized_value_expr(placed)
+            function_state.pending_stmts.concat(value_prefix)
+            placed = normalized_value
+          end
+        end
+        body.concat(flush_pending)
+        result_target = MIR::FieldGet.new(
+          MIR::FieldGet.new(MIR::Ident.new("__ctx_map#{id}"), "inner"),
+          "result",
+        )
+        body.concat(ownership_marks_for_transferred_temp(placed, target_alloc: :heap))
+        body << MIR::Set.new(result_target, async_payload_storage_value(placed, result_shape))
+        finalized_boundary_body_for_emit(body)
+      end
+    end
+    task = task_config_plan(nil, nil)
+    site_id = id + 1
+    profiled = profiled_task_config_plan(task, site_id, :local)
+    spawn = fiber_spawn_call_plan(runtime_binding_name, names.ctx_type, names.ctx_var, profiled, :local)
+    profile = MIR::ProfileTaskSite.new(
+      site_id: site_id,
+      line: node.token&.line || 0,
+      column: node.token&.column || 0,
+      dispatch: :local,
+      form: :stack,
+    )
+    structural = MIR::FutureMapPlan.new(
+      id: id,
+      ctx_type: names.ctx_type,
+      ctx_var: names.ctx_var,
+      alloc_var: names.alloc_var,
+      promise_var: names.promise_var,
+      blk_label: names.blk_label,
+      raw_rt: names.bg_rt,
+      rt_name: runtime_binding_name,
+      source: source,
+      source_field: "source",
+      source_shared: operation.handle_use == TenseHandleUse::SharedRead,
+      run_body: run_body,
+      promise_zig: promise_zig,
+      spawn_call: spawn,
+      profile_site: profile,
+      result_type: future_type,
+    )
+    bg = MIR::BgBlock.new(structural, {}, run_body)
+    bg.result_type = future_type
+    bg.boundary_fact = execution_boundary_fact(:bg, :local, nil)
+    if operation.consumes_handle? && source.is_a?(MIR::Ident)
+      with_ownership_consumption(
+        bg,
+        [source.name],
+        "tense future-map capture",
+        :capture,
+        target_alloc: :heap,
+      )
+    end
+    bg
+  end
+
+  sig do
+    params(
+      type_info: Type,
+      lifecycle: Semantic::LifecyclePlan,
+    ).returns(CleanupEntry)
+  end
+  def tense_map_cleanup_entry(type_info, lifecycle)
+    entry = if lifecycle.drop_strategy == :resource_close
+      CleanupEntry.build(
+        :resource,
+        alloc: :heap,
+        has_moved_guard: false,
+        resource_close_plan: T.must(lifecycle.resource_close_plan),
+      )
+    else
+      CleanupEntry.build(
+        :uniform,
+        alloc: :heap,
+        has_moved_guard: false,
+        zig_type: type_info.zig_type,
+      )
+    end
+    entry.set_lifecycle_plan!(lifecycle)
+  end
+  private :tense_map_cleanup_entry
+  sig { params(id: Integer, segment: String, count: Integer).returns(T::Array[String]) }
+  def tense_map_bindings(id, segment, count)
+    Array.new(count) { |index| "__tense_#{segment}#{id}_#{index}" }
+  end
+
+  sig do
+    params(
+      source: MIR::Emittable,
+      mapped: MIR::Emittable,
+      layers: T::Array[TenseLayer],
+      bindings: T::Array[String],
+      id: Integer,
+      result_type: Type,
+      label_suffix: String,
+    ).returns(MIR::DirectTenseMap)
+  end
+  def direct_tense_map(source, mapped, layers, bindings, id, result_type, label_suffix: "outer")
+    MIR::DirectTenseMap.new(
+      source: source,
+      mapped: mapped,
+      layers: layers.map(&:marker),
+      bindings: bindings,
+      label: "__tense_#{label_suffix}_#{id}",
+      result_type: result_type,
+    )
   end
 
   sig { params(node: AST::GetField).returns(T.nilable(MIR::StructInit)) }
@@ -2780,6 +3056,7 @@ module MIRLoweringExpressions
   private :lower_identifier
   private :lower_lazy_boolean_op
   private :lower_or_else
+  private :lower_optional_unwrap
   private :lower_recover_smooth
   private :lower_smooth
   private :lower_smooth_call_rhs
@@ -2797,6 +3074,7 @@ module MIRLoweringExpressions
   private :or_else_facts
   private :pick_equality_helper
   private :recursive_field_copy_required?
+  private :require_tense_operation_plan!
   private :signed_integer_modulo?
   private :slice_element_zig_type
   private :smooth_collect_block

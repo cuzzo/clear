@@ -216,7 +216,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
     <<~CHT
       STRUCT Item { category: String, score: Int64 }
 
-      FN makeItem(cat: String, score: Int64) RETURNS !Item ->
+      FN makeItem(cat: String, score: Int64) RETURNS Item ->
         RETURN Item{ category: COPY cat, score: score };
       END
 

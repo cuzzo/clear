@@ -52,6 +52,27 @@ RSpec.describe Annotator::Phases::TypeAnalysisPhase do
     expect(T.must(typed_program).typed_node_count).to be > 0
     expect(T.must(typed_program).unresolved_node_count).to eq(0)
     expect(T.must(typed_program).body_summaries.keys).to include("identity")
+    local = T.must(typed_program).local_function_facts.fetch("identity")
+    expect(local.name).to eq("identity")
+    expect(local.local_count).to be >= 1
+    expect(local).to be_frozen
+  end
+
+  it "publishes order-stable AST-independent local call facts" do
+    source = <<~CLEAR
+      FN leaf(value: Int64) RETURNS Int64 -> RETURN value; END
+      FN root(value: Int64) RETURNS Int64 -> RETURN leaf(value); END
+    CLEAR
+    ast = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    annotator = SemanticAnnotator.new(source_code: source)
+
+    annotator.annotate!(ast)
+    facts = T.must(annotator.annotation_products.typed_program).local_function_facts
+
+    expect(facts.keys).to eq(["leaf", "root"])
+    expect(facts.fetch("root").callees).to eq(["leaf"])
+    expect(facts.fetch("root").call_site_count).to eq(1)
+    expect(facts.values.flat_map(&:suspend_kinds)).to be_empty
   end
 
   it "rejects a mutating method call while its receiver is restricted" do

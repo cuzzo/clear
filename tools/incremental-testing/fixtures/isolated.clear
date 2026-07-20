@@ -1,0 +1,15 @@
+FN isolatedNumber() RETURNS Int64 ->
+  RETURN 10;
+END
+
+FN isolatedText() RETURNS String ->
+  RETURN "ok";
+END
+
+FN isolatedFloat() RETURNS Float64 ->
+  RETURN 1.0;
+END
+
+FN main() RETURNS Void ->
+  print("incremental fixture");
+END

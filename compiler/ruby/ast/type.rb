@@ -341,10 +341,6 @@ class TypeShape < T::Struct
 
   sig { params(core_str: String, auto: T::Boolean).returns(TypeShape) }
   def self.from_core(core_str, auto: false)
-    if core_str.start_with?("!~")
-      raise "Invalid type '#{core_str}': !~T (error union of tense) is not allowed - use ~!T instead"
-    end
-
     key = T.let("#{auto}:#{core_str}", String)
     cached = CORE_CACHE[key]
     return cached if cached
@@ -614,25 +610,6 @@ end
 class Type
   extend T::Sig
 
-  class AsyncJoinResult < T::Struct
-    extend T::Sig
-
-    const :type, T.nilable(Type), default: nil
-    const :reason, T.nilable(Symbol), default: nil
-
-    sig { returns(T::Boolean) }
-    def success?
-      !type.nil?
-    end
-  end
-
-  class AsyncJoinEnvelope < T::Struct
-    const :payload, Type
-    const :optional, T::Boolean, default: false
-    const :fallible, T::Boolean, default: false
-    const :future, T::Boolean, default: false
-  end
-
   # ruby-to-clear: pub
   TypeInput = T.type_alias { T.any(FunctionType, Type, Symbol, String) }
   ConstructionInput = T.type_alias { T.any(TypeInput, TypeExpression) }
@@ -731,53 +708,6 @@ class Type
   def self.from_child_expression(expression)
     Type.new(expression)
   end
-
-  sig { params(types: T::Array[Type]).returns(AsyncJoinResult) }
-  def self.join_async_results(types)
-    live_types = types.reject { |type| type.resolved == :Never }
-    return AsyncJoinResult.new(reason: :empty) if live_types.empty?
-
-    saw_nil = live_types.any? { |type| type.resolved == :NIL }
-    envelopes = live_types.reject { |type| type.resolved == :NIL }.map do |type|
-      async_join_envelope(type)
-    end
-    return AsyncJoinResult.new(type: Type.new(:NIL)) if envelopes.empty?
-
-    future_states = envelopes.map { |envelope| envelope.future }.uniq
-    return AsyncJoinResult.new(reason: :future_mismatch) if future_states.length > 1
-    future = future_states.first == true
-    return AsyncJoinResult.new(reason: :future_mismatch) if saw_nil && future
-
-    payload_keys = envelopes.map { |envelope| envelope.payload.semantic_type_key }.uniq
-    return AsyncJoinResult.new(reason: :payload_mismatch) if payload_keys.length > 1
-
-    first_envelope = T.must(envelopes.first)
-    payload = copy_type(first_envelope.payload)
-    expression = payload.shape.expression
-    optional = saw_nil || envelopes.any? { |envelope| envelope.optional }
-    fallible = envelopes.any? { |envelope| envelope.fallible }
-    expression = OptionalTypeExpression.new(inner: expression) if optional
-    expression = FallibleTypeExpression.new(inner: expression) if fallible
-    expression = FutureTypeExpression.new(inner: expression) if future
-    joined = Type.new(expression)
-    joined.merge_capabilities_from!(payload, include_affine_ownership: true)
-    AsyncJoinResult.new(type: joined)
-  end
-
-  sig { params(type: Type).returns(AsyncJoinEnvelope) }
-  def self.async_join_envelope(type)
-    outer = type.shape.expression
-    future = outer.is_a?(FutureTypeExpression)
-    after_future = outer.is_a?(FutureTypeExpression) ? outer.inner : outer
-    fallible = after_future.is_a?(FallibleTypeExpression)
-    after_fallible = after_future.is_a?(FallibleTypeExpression) ? after_future.inner : after_future
-    optional = after_fallible.is_a?(OptionalTypeExpression)
-    payload_expression = after_fallible.is_a?(OptionalTypeExpression) ? after_fallible.inner : after_fallible
-    payload = Type.from_child_expression(payload_expression)
-    payload.merge_capabilities_from!(type, include_affine_ownership: true)
-    AsyncJoinEnvelope.new(payload: payload, optional: optional, fallible: fallible, future: future)
-  end
-  private_class_method :async_join_envelope
 
   # ruby-to-clear: skip
   sig { params(value: BasicObject).returns(T::Boolean) }
@@ -1258,24 +1188,7 @@ class Type
     wrapped = Type.new(wrapped_type)
     return wrapped if wrapped.optional?
 
-    wrapped_surface = surface_name_type(wrapped)
-    wrapped_type_raw = T.let(nil, T.nilable(Symbol))
-    wrapped_function_type_raw = T.let(nil, T.nilable(FunctionType))
-    if wrapped.fn_type?
-      wrapped_function_type_raw = T.must(wrapped.function_type)
-    else
-      wrapped_type_raw = wrapped_surface.to_sym
-    end
-
-    t = Type.new("?#{wrapped_surface}")
-    t.replace_shape!(
-      TypeShape.from_raw(
-        raw: t.raw,
-        optional: true,
-        wrapped_type_raw: wrapped_type_raw,
-        wrapped_function_type_raw: wrapped_function_type_raw
-      )
-    )
+    t = Type.new(OptionalTypeExpression.new(inner: wrapped.shape.expression))
     t.merge_capabilities_from!(wrapped, include_affine_ownership: true)
     t.copy_placement_from!(wrapped, preserve_existing: false)
     t
@@ -2623,6 +2536,11 @@ class Type
 
     # 1. Any
     return true if any? || other_type.any?
+
+    # Collection predicates intentionally look through a fallible wrapper so
+    # callers can inspect its payload shape. Assignment compatibility must not:
+    # a plain array/map destination cannot silently erase a source `!` layer.
+    return false if other_type.error_union? && !error_union?
 
     # Once a destination declares T@node, assigning a plain T value inserts
     # it into the compiler-inferred NodeStore. Existing handles pass through.
@@ -5439,7 +5357,10 @@ class Type
       return "*CheatLib.obs.#{observable_wrapper_zig(tense_type)}"
     end
     if promise_list?
-      elem_zig = T.must(tense_type.element_type).nested_zig_type(is_param: is_param, is_field: is_field)
+      payload = tense_type
+      item_expression = T.must(TypeExpressionTree.linear_item_envelope(payload.shape.expression))
+      item_type = Type.from_child_expression(item_expression)
+      elem_zig = TypeZigRenderer.render_async_payload(item_type, is_param: is_param, is_field: is_field)
       return "std.ArrayListUnmanaged(CheatLib.Promise(#{elem_zig}))"
     end
     if canonical_stream?
@@ -5465,7 +5386,8 @@ class Type
              end
     end
     if shared_promise?
-      return "CheatLib.SharedPromise(#{tense_type.nested_zig_type(is_param: is_param, is_field: is_field)})"
+      payload = tense_type
+      return "CheatLib.SharedPromise(#{TypeZigRenderer.render_async_payload(payload, is_param: is_param, is_field: is_field)})"
     end
     if split_open_stream?
       elem_zig = T.must(open_stream_element_type).nested_zig_type(is_param: is_param, is_field: is_field)
@@ -5480,7 +5402,8 @@ class Type
       return "CheatLib.InfStream(#{elem_zig})"
     end
 
-    "CheatLib.Promise(#{tense_type.nested_zig_type(is_param: is_param, is_field: is_field)})"
+    payload = tense_type
+    "CheatLib.Promise(#{TypeZigRenderer.render_async_payload(payload, is_param: is_param, is_field: is_field)})"
   end
 
   sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(T.nilable(String)) }

@@ -1375,7 +1375,7 @@ module MIRHoistLowering
       CleanupEntry.build(:frozen, alloc: :heap, has_moved_guard: false, fixed_alloc: true)
     when MIR::Cast, MIR::TryExpr, MIR::TryOptional, MIR::OptionalUnwrap
       hoist_cleanup_entry(mir.expr, ast_node)
-    when MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr,
+    when MIR::AsyncPayloadTake, MIR::DirectTenseMap, MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr,
          MIR::Pipeline,
          MIR::InlineBc, MIR::RegistryCall, MIR::IndexedStore, MIR::ExternTrampoline, MIR::BgBlock
       cleanup_entry_for_owned_result(ast_node, alloc: alloc) ||

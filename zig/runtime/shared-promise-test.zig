@@ -79,6 +79,25 @@ test "SharedPromise with bool type caches correctly" {
     try std.testing.expect(v2 == true);
 }
 
+test "SharedPromise cached owned values return independent copies and clean once" {
+    const allocator = std.testing.allocator;
+    var sp: CheatLib.SharedPromise([]const u8) = undefined;
+    sp.alloc = allocator;
+    sp.resolved = try allocator.dupe(u8, "owned");
+
+    const first = try sp.next();
+    defer allocator.free(first);
+    const second = try sp.next();
+    defer allocator.free(second);
+
+    try std.testing.expectEqualStrings("owned", first);
+    try std.testing.expectEqualStrings("owned", second);
+    try std.testing.expect(first.ptr != second.ptr);
+    try std.testing.expect(first.ptr != sp.resolved.?.ptr);
+    sp.deinit();
+    try std.testing.expect(sp.resolved == null);
+}
+
 // ---------------------------------------------------------------------------
 // Ref-count semantics (direct struct manipulation — no scheduler)
 // ---------------------------------------------------------------------------

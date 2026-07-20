@@ -1487,6 +1487,8 @@ module FunctionAnalysis
   sig { params(node: AST::Node).returns(T::Boolean) }
   def return_is_borrow?(node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
+    return false if plan&.owns_result?
     if node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
       return call_returns_borrowed_view?(node)
     end

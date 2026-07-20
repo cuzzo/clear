@@ -589,7 +589,7 @@ module Annotator
       # =========================================================
       # OR_ELSE / RESCUE
       # =========================================================
-      sig { params(node: AST::BinaryOp).returns(T.nilable(Symbol)) }
+      sig { params(node: AST::BinaryOp).returns(Type) }
       def visit_OrElse(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
@@ -653,96 +653,51 @@ module Annotator
           error!(node, :OR_ELSE_NEEDS_RECOVERABLE_LEFT, got: type_display(t_left_type))
         end
 
-        # Handle OR_ELSE EXIT "msg": set error context + propagate (same as OR_ELSE RAISE for types)
-        if node.right.is_a?(AST::OrElseExit)
-          if t_left_type.error_union?
-            stamp_type!(node, t_left_type.payload_type)
-          else
-            stamp_type!(node, t_left_type)
-          end
-          return
-        end
-
-        # Handle OR_ELSE RAISE: bubble up error (Zig's try)
-        if node.right.is_a?(AST::OrElseRaise)
-          if t_left_type.error_union?
-            # Unwrap to payload type - error will be propagated
-            stamp_type!(node, t_left_type.payload_type)
-          else
-            # OR_ELSE RAISE on non-error type just passes through
-            stamp_type!(node, t_left_type)
-          end
-          return
-        end
-
-        # Handle OR_ELSE PASS: ignore error, use undefined/default
-        if node.right.is_a?(AST::OrElsePass)
-          if t_left_type.error_union?
-            # Unwrap to payload type - error will be ignored
-            stamp_type!(node, t_left_type.payload_type)
-          else
-            stamp_type!(node, t_left_type)
-          end
-          return
-        end
-
-        # Handle OR_ELSE BREAK: error-to-break coercion (valid only inside loops)
         if node.right.is_a?(AST::OrElseBreak)
           if current_loop_depth <= 0
             error!(node, :OR_BREAK_OUTSIDE_WHILE)
           end
-          if t_left_type.error_union?
-            stamp_type!(node, t_left_type.payload_type)
-          else
-            stamp_type!(node, t_left_type)
-          end
-          return
         end
 
-        # Handle OR_ELSE PRUNE: discard error, skip item (used in CONCURRENT SELECT/WHERE)
-        if node.right.is_a?(AST::OrElsePrune)
-          if t_left_type.error_union?
-            # Unwrap to payload type - error causes item to be skipped
-            stamp_type!(node, t_left_type.payload_type)
-          else
-            stamp_type!(node, t_left_type)
-          end
-          return
+        operation, recovery = or_else_operation(node.right)
+        begin
+          plan = TenseOperationPlanner.or_else(
+            t_left_type,
+            t_right_type,
+            operation: operation,
+            recovery: recovery,
+          )
+        rescue ArgumentError
+          expected = t_left_type.value_payload_type
+          error!(node, :TYPE_MISMATCH_IN_OR, expected: expected.resolved, got: t_right_type.resolved)
+          # Fix-collection mode records the diagnostic and continues. Publish
+          # the plan the corrected fallback would use so later phases never
+          # need a nullable compatibility path.
+          plan = TenseOperationPlanner.or_else(
+            t_left_type,
+            expected,
+            operation: operation,
+            recovery: recovery,
+          )
         end
-
-        # A value fallback handles every immediately-resolved absence layer.
-        # In particular, !?T OR_ELSE T collapses both failure and NIL with
-        # the same fallback. Temporal (~) layers are never crossed here.
-        if t_left_type.error_union?
-          payload_type = t_left_type.value_payload_type
-
-          # Type check: RHS must be compatible with payload type
-          unless t_right_type.resolved == :NoReturn || payload_type.accepts?(t_right_type) || t_right_type.accepts?(payload_type)
-            error!(node, :TYPE_MISMATCH_IN_OR, expected: payload_type.resolved, got: t_right_type.resolved)
-          end
-
-          coerce_empty_collection_fallback!(node.right, payload_type)
-          # Result is the payload type (error is handled)
-          stamp_type!(node, payload_type)
-          return
-        end
-
-        # Handle optional types: ?T OR_ELSE default -> T
-        if t_left_type.optional?
-          wrapped = T.must(t_left_type.wrapped_type)
-          unless t_right_type.resolved == :NoReturn || wrapped.accepts?(t_right_type) || t_right_type.accepts?(wrapped)
-            error!(node, :TYPE_MISMATCH_IN_OR, expected: wrapped.resolved, got: t_right_type.resolved)
-          end
-          coerce_empty_collection_fallback!(node.right, wrapped)
-          stamp_type!(node, wrapped)
-          return
-        end
-
-        # OR_ELSE is recovery syntax, not a general branch or anonymous
-        # union constructor. A definite value has no error/absence path on
-        # which the fallback could run, regardless of the RHS type.
-        error!(node, :OR_ELSE_NEEDS_RECOVERABLE_LEFT, got: type_display(t_left_type))
+        plan = T.must(plan)
+        node.tense_plan = plan
+        coerce_empty_collection_fallback!(node.right, plan.result_type) if recovery == TenseRecovery::Fallback
+        stamp_type!(node, plan.result_type)
       end
+
+      sig { params(node: AST::Node).returns([TenseOperationKind, TenseRecovery]) }
+      def or_else_operation(node)
+        case node
+        when AST::OrElseRaise then [TenseOperationKind::OrElseRaise, TenseRecovery::Raise]
+        when AST::OrElseExit then [TenseOperationKind::OrElseExit, TenseRecovery::Exit]
+        when AST::OrElsePass then [TenseOperationKind::OrElsePass, TenseRecovery::Pass]
+        when AST::OrElseBreak then [TenseOperationKind::OrElseBreak, TenseRecovery::Break]
+        when AST::OrElsePrune then [TenseOperationKind::OrElsePrune, TenseRecovery::Prune]
+        else [TenseOperationKind::OrElseValue, TenseRecovery::Fallback]
+        end
+      end
+      private :or_else_operation
 
       # An empty collection fallback (`expr OR []` / `OR {}`) is visited
       # with no expected-type context, so visit_ListLit types it `Any[]`

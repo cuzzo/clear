@@ -15,6 +15,7 @@ module FsmTransform
       Integer,
       Symbol,
       T::Boolean,
+      AsyncResultShape,
       CapturedMap,
       T::Hash[String, Schemas::ResourceClosePlan],
       T::Set[String],
@@ -38,6 +39,7 @@ module FsmTransform
       const :blk_label, String
       const :ctx_type, String
       const :promise_zig, String
+      const :async_result_shape, AsyncResultShape
       const :capture_fields, T::Array[MIR::ContextFieldDecl]
       const :alloc_var, String
       const :promise_var, String
@@ -69,6 +71,7 @@ module FsmTransform
           blk_label: blk_label,
           ctx_type: ctx_type,
           promise_zig: promise_zig,
+          async_result_shape: async_result_shape,
           capture_fields: capture_fields,
           alloc_var: alloc_var,
           promise_var: promise_var,

@@ -142,6 +142,7 @@ module FsmTransform
       blk_label: T.cast(raw_ctx.fetch(:blk_label), String),
       ctx_type: T.cast(raw_ctx.fetch(:ctx_type), String),
       promise_zig: T.cast(raw_ctx.fetch(:promise_zig), String),
+      async_result_shape: T.cast(raw_ctx.fetch(:async_result_shape), AsyncResultShape),
       capture_fields: coerce_context_fields(raw_ctx.fetch(:capture_fields)),
       alloc_var: T.cast(raw_ctx.fetch(:alloc_var), String),
       promise_var: T.cast(raw_ctx.fetch(:promise_var), String),

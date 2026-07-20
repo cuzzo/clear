@@ -487,7 +487,7 @@ module MIR
   DeferBody = T.type_alias { T.any(Emittable, T::Array[Emittable]) }
   DeferBodyInput = T.type_alias { T.any(DeferBody, String) }
   FsmBody = T.type_alias { T.any(MIR::FsmIoBody, MIR::FsmB1Body, MIR::FsmGenericBody) }
-  BgBlockPlan = T.type_alias { T.any(MIR::BgStackfulPlan, MIR::BgStreamPlan, FsmBody) }
+  BgBlockPlan = T.type_alias { T.any(MIR::BgStackfulPlan, MIR::BgStreamPlan, MIR::FutureMapPlan, FsmBody) }
   NamedMirField = T.type_alias { T::Hash[Symbol, T.any(String, Symbol, Emittable)] }
 
   class OwnershipEffect
@@ -2118,6 +2118,86 @@ module MIR
     const :run_body, T::Array[MIR::Node]
   end
 
+  # Structural plan for ordered direct navigation (`!.`, `!?.`). Each entry
+  # in +layers+ binds the successful value to the same-position name in
+  # +bindings+ before evaluating +mapped+. The emitter owns only syntax;
+  # annotation has already validated and normalized the tense algebra.
+  class DirectTenseMap < T::Struct
+    extend T::Sig
+    include Expr
+
+    const :source, MIR::Emittable
+    const :mapped, MIR::Emittable
+    const :layers, T::Array[String]
+    const :bindings, T::Array[String]
+    const :label, String
+    const :result_type, Type
+
+    sig { returns(T::Array[MIR::Emittable]) }
+    def child_exprs
+      [source, mapped]
+    end
+
+    sig { returns(T::Array[MIR::Emittable]) }
+    def owned_position_source_exprs
+      [mapped]
+    end
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.of(mapped)
+    end
+  end
+
+  # Moves the sole value field out of the backend-only AsyncFallible wrapper.
+  # The wrapper has no independent lifecycle after this expression; ownership
+  # of its payload is transferred to the result and materialized once by the
+  # ordinary hoist/lifecycle path.
+  class AsyncPayloadTake < T::Struct
+    extend T::Sig
+    include Expr
+
+    const :source, MIR::Emittable
+    const :result_type, Type
+
+    sig { returns(T::Array[MIR::Emittable]) }
+    def child_exprs
+      [source]
+    end
+
+    sig { returns(T::Array[MIR::Emittable]) }
+    def owned_position_source_exprs
+      [source]
+    end
+
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.of(source)
+    end
+  end
+
+  # A `~.` map is the ordinary Promise/Fiber boundary expressed as a compact
+  # immutable plan. It deliberately reuses FiberSpawnCall and Promise rather
+  # than introducing a second scheduler or callback runtime.
+  class FutureMapPlan < T::Struct
+    const :id, Integer
+    const :ctx_type, String
+    const :ctx_var, String
+    const :alloc_var, String
+    const :promise_var, String
+    const :blk_label, String
+    const :raw_rt, String
+    const :rt_name, String
+    const :source, MIR::Emittable
+    const :source_field, String
+    const :source_shared, T::Boolean
+    const :run_body, T::Array[MIR::Node]
+    const :promise_zig, String
+    const :spawn_call, FiberSpawnCall
+    const :profile_site, ProfileTaskSite
+    const :result_type, Type
+  end
+
   class BgStreamPlan < T::Struct
     const :id, Integer
     const :ctx_type, String
@@ -2796,6 +2876,7 @@ module MIR
   def self.structural_bg_block_plan?(plan)
     plan.is_a?(MIR::BgStackfulPlan) ||
       plan.is_a?(MIR::BgStreamPlan) ||
+      plan.is_a?(MIR::FutureMapPlan) ||
       plan.is_a?(MIR::FsmIoBody) ||
       plan.is_a?(MIR::FsmB1Body) ||
       plan.is_a?(MIR::FsmGenericBody)
@@ -4510,23 +4591,25 @@ module MIR
 
   # NEXT on a promise list (~T[]@list): await each promise into a new
   # ArrayListUnmanaged(T) owned by `alloc`.
-  NextPromiseList = Struct.new(:list_expr, :elem_zig, :label, :results_var, :alloc) do
+  class NextPromiseList < T::Struct
     extend T::Sig
     include Expr
 
-    sig { params(list_expr: Emittable, elem_zig: String, label: String, results_var: String, alloc: Symbol, result_type: Type).void }
-    def initialize(list_expr, elem_zig, label, results_var, alloc, result_type)
-      super(list_expr, elem_zig, label, results_var, alloc)
-      @result_type = T.let(result_type, Type)
-    end
-
-    sig { returns(Type) }
-    def result_type
-      @result_type
-    end
+    const :list_expr, Emittable
+    const :async_shape, AsyncResultShape
+    const :label, String
+    const :results_var, String
+    const :alloc, Symbol
+    const :result_type, Type
 
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([list_expr])
+
+    sig { returns(String) }
+    def elem_zig
+      payload = async_shape.payload_type.success_type || async_shape.payload_type
+      payload.nested_zig_type
+    end
 
     sig { returns(OwnershipEffect) }
     def ownership_effect

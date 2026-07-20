@@ -9,6 +9,10 @@ module TypeExpression
   interface!
 
   Dimension = T.type_alias { T.any(Integer, Symbol) }
+  VALID_TENSE_ORDERS = T.let(
+    ["", "!", "?", "!?", "~", "~!", "~?", "~!?", "!~", "!~!", "!~?", "!~!?"].freeze,
+    T::Array[String],
+  )
 
   sig { abstract.returns(TypeCapabilities) }
   def capabilities; end
@@ -207,6 +211,39 @@ class TypeExpressionTree
       allocation_hint: expression.allocation_hint,
       capabilities: expression.capabilities
     )
+  end
+
+  # Return the item beneath one linear collection while retaining every tense
+  # wrapped around that collection. For example, `![]T` becomes `!T`. Promise
+  # lists use this to give each physical Promise the same semantic payload
+  # envelope that aggregate NEXT later reconstructs around the result list.
+  sig { params(expression: TypeExpression).returns(T.nilable(TypeExpression)) }
+  def self.linear_item_envelope(expression)
+    case expression
+    when FallibleTypeExpression
+      inner = linear_item_envelope(expression.inner)
+      return nil unless inner
+
+      FallibleTypeExpression.new(
+        inner: inner,
+        error_set: expression.error_set,
+        capabilities: expression.capabilities,
+      )
+    when FutureTypeExpression
+      inner = linear_item_envelope(expression.inner)
+      return nil unless inner
+
+      FutureTypeExpression.new(inner: inner, capabilities: expression.capabilities)
+    when OptionalTypeExpression
+      inner = linear_item_envelope(expression.inner)
+      return nil unless inner
+
+      OptionalTypeExpression.new(inner: inner, capabilities: expression.capabilities)
+    when LinearTypeExpression
+      expression.item
+    else
+      nil
+    end
   end
 
   # Replace the argument children of a nominal type without flattening any
@@ -503,6 +540,15 @@ class TypeExpressionParser
     prefix = source[0]
     return nil unless ["~", "!", "?"].include?(prefix)
 
+    order = source[/\A[~!?]+/].to_s
+    unless TypeExpression::VALID_TENSE_ORDERS.include?(order)
+      raise ArgumentError, "double future type is not allowed" if order.include?("~~")
+      raise ArgumentError, "double fallible type is not allowed" if order.include?("!!")
+      raise ArgumentError, "double optional type is not allowed" if order.include?("??")
+
+      raise ArgumentError, "unsupported tense order #{order.inspect}"
+    end
+
     inner_source = source[1..].to_s
     case prefix
     when "~"
@@ -510,9 +556,6 @@ class TypeExpressionParser
 
       FutureTypeExpression.new(inner: parse_source(inner_source))
     when "!"
-      raise ArgumentError, "double fallible type is not allowed" if inner_source.start_with?("!")
-      raise ArgumentError, "fallible future types must be written as ~!T" if inner_source.start_with?("~")
-
       FallibleTypeExpression.new(inner: parse_source(inner_source))
     when "?"
       parse_optional_source(inner_source)
