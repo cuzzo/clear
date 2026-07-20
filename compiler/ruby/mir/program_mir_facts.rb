@@ -108,6 +108,11 @@ class ProgramMIRFinalizer
       ).returns(T::Boolean)
     end
     def function_needs_runtime?(function, cleanup, fn_nodes, schema_lookup)
+      if generic_direct_parameter_return?(function)
+        return params_need_runtime_cleanup?(function.params) ||
+          generic_return_needs_runtime?(function, fn_nodes, schema_lookup)
+      end
+      return false if generic_projection_return?(function)
       return true if finalized_runtime_input?(function)
       return true if params_need_runtime_cleanup?(function.params)
       return true if cleanup && runtime_cleanup_facts?(cleanup)
@@ -117,6 +122,74 @@ class ProgramMIRFinalizer
         found = true if ast_node_needs_runtime?(node, fn_nodes, schema_lookup)
       end
       found || return_path_needs_allocator?(function, schema_lookup)
+    end
+
+    sig do
+      params(
+        function: AST::FunctionDef,
+        fn_nodes: FnNodes,
+        schema_lookup: Type::SchemaLookup,
+      ).returns(T::Boolean)
+    end
+    def generic_return_needs_runtime?(function, fn_nodes, schema_lookup)
+      returned = generic_returned_parameter_name(function)
+      return false unless returned
+
+      index = function.params.index { |param| param.name.to_s == returned }
+      return false unless index
+
+      # The generic body must materialize an independent owned return only when
+      # a concrete call instantiates the returned parameter with an owning
+      # shape. Scalar-only instantiations retain the pure ABI.
+      fn_nodes.each_value.any? do |caller|
+        next false unless caller.body
+
+        needs_runtime = T.let(false, T::Boolean)
+        AST.each_locatable(caller.body) do |node|
+          next unless node.is_a?(AST::FuncCall) && node.name.to_s == function.name.to_s
+
+          argument = node.args[index]
+          next unless argument
+
+          type = argument.full_type!(context: "generic return instantiation").success_type
+          needs_runtime ||= type.string? || type.collection_value? ||
+            type.recursive_cleanup_shape?(T.unsafe(schema_lookup))
+        end
+        needs_runtime
+      end
+    end
+
+    sig { params(function: AST::FunctionDef).returns(T::Boolean) }
+    def generic_direct_parameter_return?(function)
+      !generic_returned_parameter_name(function).nil?
+    end
+
+    sig { params(function: AST::FunctionDef).returns(T::Boolean) }
+    def generic_projection_return?(function)
+      return_type = function.return_type
+      return false unless return_type.is_a?(Type) && return_type.generic_type_parameter?
+
+      returns = T.let([], T::Array[AST::ReturnNode])
+      AST.each_locatable(function.body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
+      return false unless returns.length == 1
+
+      T.must(returns.first).value.is_a?(AST::GetField)
+    end
+
+    sig { params(function: AST::FunctionDef).returns(T.nilable(String)) }
+    def generic_returned_parameter_name(function)
+      return_type = function.return_type
+      return nil unless return_type.is_a?(Type) && return_type.generic_type_parameter?
+
+      returns = T.let([], T::Array[AST::ReturnNode])
+      AST.each_locatable(function.body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
+      return nil unless returns.length == 1
+
+      value = T.must(returns.first).value
+      return nil unless value.is_a?(AST::Identifier)
+      return nil unless function.params.any? { |param| param.name.to_s == value.name.to_s }
+
+      value.name.to_s
     end
 
     sig { params(function: AST::FunctionDef).returns(T::Boolean) }

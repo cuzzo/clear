@@ -37,4 +37,21 @@ RSpec.describe ProgramMIRFacts do
 
     expect(facts.functions.values.map(&:needs_runtime)).to all(eq(true))
   end
+
+  it "threads runtime ownership only for owning generic identity instantiations" do
+    scalar_facts = compile(<<~CLEAR)
+      FN identity<T>(value: T) RETURNS T -> RETURN value; END
+      FN scalar() RETURNS Int64 -> RETURN identity(1_i64); END
+    CLEAR
+    owned_facts = compile(<<~CLEAR)
+      FN text() RETURNS String -> RETURN COPY "x"; END
+      FN identity<T>(value: T) RETURNS T -> RETURN value; END
+      FN owned() RETURNS Tuple<Int64,String> ->
+        RETURN identity(Tuple{1_i64, text()});
+      END
+    CLEAR
+
+    expect(scalar_facts.functions.fetch("identity").needs_runtime).to be(false)
+    expect(owned_facts.functions.fetch("identity").needs_runtime).to be(true)
+  end
 end
