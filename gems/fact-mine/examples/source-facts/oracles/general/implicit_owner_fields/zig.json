@@ -63,8 +63,43 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:MyClass#myMethod:entry:0:3:4",
+        "kind": "entry",
+        "line": 3
+      },
+      {
+        "id": "cfg:MyClass#myMethod:exit:2:5:5",
+        "kind": "exit",
+        "line": 5
+      },
+      {
+        "id": "cfg:MyClass#myMethod:stmt:1:4:8",
+        "kind": "statement",
+        "line": 4
+      }
+    ],
     "decisions": [],
+    "def_use": [],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [],
     "functions": [
       {
         "line": 3,
@@ -75,6 +110,11 @@
         ],
         "visibility": "private"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -115,6 +155,22 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:MyClass#myMethod:local:self"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "struct",
@@ -123,6 +179,13 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:MyClass#myMethod:local:self",
+        "kind": "local",
+        "name": "self"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -143,6 +206,12 @@
         ]
       }
     ],
+    "reachability": [
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [],
     "redundant_nil_guards": [],
     "semantic_effects": [],
     "state_declarations": [

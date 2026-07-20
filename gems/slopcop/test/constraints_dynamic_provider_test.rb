@@ -38,6 +38,31 @@ class ConstraintsDynamicProviderTest < Minitest::Test
       assert_equal 1, findings.size
       assert_equal "slopcop-ruby-metaprogramming-uncovered", findings.first.rule_id
       assert_equal 3, findings.first.line
+
+      # Write covered evidence (Cobertura XML covering line 3)
+      xml_content = <<~XML
+        <?xml version="1.0" ?>
+        <coverage line-rate="1.0" branch-rate="1.0" version="1.9">
+          <packages>
+            <package name="test" line-rate="1.0" branch-rate="1.0">
+              <classes>
+                <class name="Foo" filename="test.rb" line-rate="1.0" branch-rate="1.0">
+                  <methods/>
+                  <lines>
+                    <line number="3" hits="1" branch="false"/>
+                  </lines>
+                </class>
+              </classes>
+            </package>
+          </packages>
+        </coverage>
+      XML
+      xml_path = File.join(dir, "cobertura.xml")
+      File.write(xml_path, xml_content)
+
+      covered_evidence = SlopCop::Constraints::Evidence.from_specs(["nil-kill:#{xml_path}"], repo: dir)
+      covered_findings = SlopCop::Constraints::RubyProvider.findings(repo: dir, additions: { path => [3] }, evidence: covered_evidence)
+      assert_empty covered_findings
     end
   end
 

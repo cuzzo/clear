@@ -579,6 +579,116 @@
         "source": "@status == :ready"
       }
     ],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "short_circuit"
+      },
+      {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_default"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactBranchPredicatePaths#ready?:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactBranchPredicatePaths#ready?:exit:2:6:5",
+        "kind": "exit",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactBranchPredicatePaths#ready?:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactBranchPredicatePaths#route:entry:0:8:2",
+        "kind": "entry",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactBranchPredicatePaths#route:exit:3:23:5",
+        "kind": "exit",
+        "line": 23
+      },
+      {
+        "id": "cfg:SourceFactBranchPredicatePaths#route:stmt:0.else.0:12:6",
+        "kind": "statement",
+        "line": 12
+      },
+      {
+        "id": "cfg:SourceFactBranchPredicatePaths#route:stmt:0.then.0:10:6",
+        "kind": "statement",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactBranchPredicatePaths#route:stmt:1.case0.0:17:6",
+        "kind": "statement",
+        "line": 17
+      },
+      {
+        "id": "cfg:SourceFactBranchPredicatePaths#route:stmt:1.case1.0:19:6",
+        "kind": "statement",
+        "line": 19
+      },
+      {
+        "id": "cfg:SourceFactBranchPredicatePaths#route:stmt:1.default.0:21:6",
+        "kind": "statement",
+        "line": 21
+      },
+      {
+        "id": "cfg:SourceFactBranchPredicatePaths#route:stmt:1:9:4",
+        "kind": "branch",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactBranchPredicatePaths#route:stmt:2:15:4",
+        "kind": "case",
+        "line": 15
+      }
+    ],
     "decisions": [
       {
         "enclosing_span": [
@@ -613,7 +723,33 @@
         "predicate": "@status == :ready && user.active?"
       }
     ],
+    "def_use": [
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 4,
@@ -631,6 +767,20 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -730,6 +880,71 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchPredicatePaths#ready?:instance_field:@status"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactBranchPredicatePaths#route:local:user"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchPredicatePaths#route:local:user"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchPredicatePaths#route:local:user"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchPredicatePaths#route:local:user"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchPredicatePaths#route:instance_field:@status",
+          "place:SourceFactBranchPredicatePaths#route:local:user"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchPredicatePaths#route:local:user"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -755,6 +970,23 @@
           "!user.active?"
         ],
         "line": 12
+      }
+    ],
+    "places": [
+      {
+        "id": "place:SourceFactBranchPredicatePaths#ready?:instance_field:@status",
+        "kind": "instance_field",
+        "name": "@status"
+      },
+      {
+        "id": "place:SourceFactBranchPredicatePaths#route:instance_field:@status",
+        "kind": "instance_field",
+        "name": "@status"
+      },
+      {
+        "id": "place:SourceFactBranchPredicatePaths#route:local:user",
+        "kind": "local",
+        "name": "user"
       }
     ],
     "predicate_bodies": [
@@ -872,6 +1104,29 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

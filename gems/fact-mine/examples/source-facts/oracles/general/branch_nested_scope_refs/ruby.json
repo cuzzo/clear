@@ -889,8 +889,154 @@
         "source": "edge.source == edge.target"
       }
     ],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#case_arms:entry:0:10:2",
+        "kind": "entry",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#case_arms:exit:2:17:5",
+        "kind": "exit",
+        "line": 17
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#case_arms:stmt:1:11:4",
+        "kind": "statement",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#do_block_branch:entry:0:19:2",
+        "kind": "entry",
+        "line": 19
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#do_block_branch:exit:2:25:5",
+        "kind": "exit",
+        "line": 25
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#do_block_branch:stmt:1:20:4",
+        "kind": "statement",
+        "line": 20
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#nested_blocks:branch:1.loop.0:7:24",
+        "kind": "branch",
+        "line": 7
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#nested_blocks:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#nested_blocks:exit:3:8:5",
+        "kind": "exit",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#nested_blocks:return:0.then.0:5:4",
+        "kind": "jump",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#nested_blocks:stmt:1.loop.0.then.0:7:24",
+        "kind": "statement",
+        "line": 7
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#nested_blocks:stmt:1:5:4",
+        "kind": "branch",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#nested_blocks:stmt:2:7:4",
+        "kind": "loop",
+        "line": 7
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 10,
@@ -920,6 +1066,21 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -1063,6 +1224,89 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactBranchNestedScopeRefs#case_arms:local:edge"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchNestedScopeRefs#case_arms:local:edge"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactBranchNestedScopeRefs#do_block_branch:local:components"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchNestedScopeRefs#do_block_branch:local:component",
+          "place:SourceFactBranchNestedScopeRefs#do_block_branch:local:components"
+        ],
+        "writes": [
+          "place:SourceFactBranchNestedScopeRefs#do_block_branch:local:component"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:edge"
+        ],
+        "writes": [
+          "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:edge"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:edges",
+          "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:funcs"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:edge"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:fn",
+          "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:funcs"
+        ],
+        "writes": [
+          "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:fn"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:edges"
+        ],
+        "writes": [
+          "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:edge"
+        ]
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -1071,6 +1315,43 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactBranchNestedScopeRefs#case_arms:local:edge",
+        "kind": "local",
+        "name": "edge"
+      },
+      {
+        "id": "place:SourceFactBranchNestedScopeRefs#do_block_branch:local:components",
+        "kind": "local",
+        "name": "components"
+      },
+      {
+        "id": "place:SourceFactBranchNestedScopeRefs#do_block_branch:local:component",
+        "kind": "local",
+        "name": "component"
+      },
+      {
+        "id": "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:edges",
+        "kind": "local",
+        "name": "edges"
+      },
+      {
+        "id": "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:funcs",
+        "kind": "local",
+        "name": "funcs"
+      },
+      {
+        "id": "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:fn",
+        "kind": "local",
+        "name": "fn"
+      },
+      {
+        "id": "place:SourceFactBranchNestedScopeRefs#nested_blocks:local:edge",
+        "kind": "local",
+        "name": "edge"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -1186,6 +1467,31 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

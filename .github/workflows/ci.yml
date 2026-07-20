@@ -95,7 +95,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ruby-coverage-unit
-          path: coverage/.resultset.json
+          path: |
+            coverage/.resultset.json
+            coverage/coverage.xml
           include-hidden-files: true
           retention-days: 7
       - uses: codecov/codecov-action@v5
@@ -1506,7 +1508,8 @@ jobs:
       - changes
       - zig-special-coverage
       - sarif-rust-binaries
-    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && (needs.zig-special-coverage.result == 'success' || needs.zig-special-coverage.result == 'skipped') && needs.sarif-rust-binaries.result == 'success' }}
+      - ruby-unit
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && (needs.zig-special-coverage.result == 'success' || needs.zig-special-coverage.result == 'skipped') && needs.sarif-rust-binaries.result == 'success' && (needs.ruby-unit.result == 'success' || needs.ruby-unit.result == 'skipped') }}
     permissions:
       contents: read
       security-events: write
@@ -1528,6 +1531,12 @@ jobs:
         with:
           pattern: zig-coverage-*
           path: tmp/zig-special-coverage-artifacts
+      - name: Download Ruby coverage artifact
+        if: ${{ needs.ruby-unit.result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ruby-coverage-unit
+          path: tmp/ruby-coverage-unit
       - name: Generate SlopCop constraint SARIF
         run: |
           chmod +x tmp/sarif-binaries/fact-mine-rust
@@ -1541,6 +1550,11 @@ jobs:
             while IFS= read -r path; do
               args+=(--coverage="vopr:${path}")
             done < <(find tmp/zig-special-coverage-artifacts -path '*zig-coverage-vopr-*/*cobertura.xml' -type f | sort)
+          fi
+          if [ -d tmp/ruby-coverage-unit ]; then
+            while IFS= read -r path; do
+              args+=(--coverage="nil-kill:${path}")
+            done < <(find tmp/ruby-coverage-unit \( -name 'cobertura.xml' -o -name 'coverage.xml' \) -type f | sort)
           fi
           FACT_MINE_RUST_BINARY=tmp/sarif-binaries/fact-mine-rust bundle exec ruby gems/slopcop/exe/slopcop constraints \
             --repo=. \

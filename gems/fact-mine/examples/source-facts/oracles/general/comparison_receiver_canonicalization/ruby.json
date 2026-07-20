@@ -304,8 +304,74 @@
         "source": "rule.fetch(\"id\") == rule_id"
       }
     ],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactComparisonReceiverCanonicalization#dark_arm_result:entry:0:8:2",
+        "kind": "entry",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactComparisonReceiverCanonicalization#dark_arm_result:exit:2:10:5",
+        "kind": "exit",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactComparisonReceiverCanonicalization#dark_arm_result:stmt:1:9:4",
+        "kind": "statement",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactComparisonReceiverCanonicalization#tree_sitter?:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactComparisonReceiverCanonicalization#tree_sitter?:exit:2:6:5",
+        "kind": "exit",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactComparisonReceiverCanonicalization#tree_sitter?:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 4,
@@ -324,6 +390,14 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -399,6 +473,38 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactComparisonReceiverCanonicalization#dark_arm_result:local:rule",
+          "place:SourceFactComparisonReceiverCanonicalization#dark_arm_result:local:rule_id"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactComparisonReceiverCanonicalization#dark_arm_result:local:rule",
+          "place:SourceFactComparisonReceiverCanonicalization#dark_arm_result:local:rule_id"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -407,6 +513,18 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactComparisonReceiverCanonicalization#dark_arm_result:local:rule",
+        "kind": "local",
+        "name": "rule"
+      },
+      {
+        "id": "place:SourceFactComparisonReceiverCanonicalization#dark_arm_result:local:rule_id",
+        "kind": "local",
+        "name": "rule_id"
+      }
+    ],
     "predicate_bodies": [
       {
         "body": "ENV.fetch(\"DECOMPLEX_PARSER\", \"tree_sitter\").to_s.tr(\"-\", \"_\") == \"tree_sitter\"",
@@ -452,6 +570,18 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

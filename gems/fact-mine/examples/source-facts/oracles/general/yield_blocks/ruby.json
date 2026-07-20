@@ -118,8 +118,68 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:(top-level)#method_three:entry:0:1:0",
+        "kind": "entry",
+        "line": 1
+      },
+      {
+        "id": "cfg:(top-level)#method_three:exit:2:3:3",
+        "kind": "exit",
+        "line": 3
+      },
+      {
+        "id": "cfg:(top-level)#method_three:stmt:1:2:2",
+        "kind": "statement",
+        "line": 2
+      },
+      {
+        "id": "cfg:(top-level)#method_with_empty_block:entry:0:5:0",
+        "kind": "entry",
+        "line": 5
+      },
+      {
+        "id": "cfg:(top-level)#method_with_empty_block:exit:2:7:3",
+        "kind": "exit",
+        "line": 7
+      },
+      {
+        "id": "cfg:(top-level)#method_with_empty_block:stmt:1:6:2",
+        "kind": "statement",
+        "line": 6
+      }
+    ],
     "decisions": [],
+    "def_use": [],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [],
     "functions": [
       {
         "line": 1,
@@ -135,6 +195,14 @@
         "params": [],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -204,8 +272,35 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      }
+    ],
     "owners": [],
     "path_conditions": [],
+    "places": [],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -237,6 +332,15 @@
         "writes": []
       }
     ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [],
     "redundant_nil_guards": [],
     "semantic_effects": [
       {

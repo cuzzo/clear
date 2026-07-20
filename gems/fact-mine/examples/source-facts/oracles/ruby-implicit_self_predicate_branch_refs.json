@@ -416,6 +416,94 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "short_circuit"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:exit:5:10:5",
+        "kind": "exit",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:return:0.then.0:5:4",
+        "kind": "jump",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:return:1.then.0:6:4",
+        "kind": "jump",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:return:2.then.0:7:4",
+        "kind": "jump",
+        "line": 7
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:stmt:1:5:4",
+        "kind": "branch",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:stmt:2:6:4",
+        "kind": "branch",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:stmt:3:7:4",
+        "kind": "branch",
+        "line": 7
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:stmt:4:9:4",
+        "kind": "statement",
+        "line": 9
+      }
+    ],
     "decisions": [
       {
         "enclosing_span": [
@@ -434,7 +522,29 @@
         "predicate": "calls.empty? && internal_calls_for(fn).empty?"
       }
     ],
+    "def_use": [
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 4,
@@ -447,6 +557,17 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -554,6 +675,55 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:local:calls",
+          "place:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:local:fn",
+          "place:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:local:mod"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:local:mod"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:local:fn"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:local:calls",
+          "place:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:local:fn"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -562,6 +732,23 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:local:calls",
+        "kind": "local",
+        "name": "calls"
+      },
+      {
+        "id": "place:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:local:fn",
+        "kind": "local",
+        "name": "fn"
+      },
+      {
+        "id": "place:SourceFactImplicitSelfPredicateBranchRefs#branch_refs:local:mod",
+        "kind": "local",
+        "name": "mod"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -638,6 +825,23 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

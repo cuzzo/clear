@@ -2,9 +2,21 @@
 ((function_item (function_modifiers) @mods) @hazard.rust_unsafe_fn (#match? @mods "unsafe"))
 ((impl_item) @hazard.rust_unsafe_impl (#match? @hazard.rust_unsafe_impl "^unsafe "))
 
+;; Refined Rust Atomic/Loom queries for precision
 (
-  (call_expression function: (field_expression field: (field_identifier) @method)) @hazard.rust_loom_atomic
-  (#match? @method "^(load|store|swap|compare_exchange|compare_exchange_weak|fetch_add|fetch_sub|fetch_or|fetch_and|fetch_xor|fetch_update)$")
+  (call_expression
+    function: (field_expression
+      value: _ @recv
+      field: (field_identifier) @method)) @hazard.rust_loom_atomic
+  (#match? @method "^(load|store|swap)$")
+  (#match? @recv "^(?i).*(atomic|val|cnt|counter|state|ref|ptr|cell|lock|flag|seq|epoch|gen|ptr_).*$")
+)
+
+(
+  (call_expression
+    function: (field_expression
+      field: (field_identifier) @method)) @hazard.rust_loom_atomic
+  (#match? @method "^(compare_exchange|compare_exchange_weak|fetch_add|fetch_sub|fetch_or|fetch_and|fetch_xor|fetch_update)$")
 )
 
 (
@@ -60,9 +72,21 @@
   (#match? @func "^(read|write|copy|copy_nonoverlapping|from_raw|into_raw)$")
 )
 
+;; Refined unsafe ptr operation queries for precision
 (
-  (call_expression function: (field_expression field: (field_identifier) @method)) @hazard.rust_unsafe_operation
-  (#match? @method "^(add|offset|read|write|copy_to|copy_from|get_unchecked|get_unchecked_mut|unwrap_unchecked|transmute|assume_init)$")
+  (call_expression
+    function: (field_expression
+      value: _ @recv
+      field: (field_identifier) @method)) @hazard.rust_unsafe_operation
+  (#match? @method "^(add|offset|read|write|copy_to|copy_from)$")
+  (#match? @recv "^(?i).*(ptr|pointer|raw|addr).*$")
+)
+
+(
+  (call_expression
+    function: (field_expression
+      field: (field_identifier) @method)) @hazard.rust_unsafe_operation
+  (#match? @method "^(get_unchecked|get_unchecked_mut|unwrap_unchecked|transmute|assume_init)$")
 )
 
 (

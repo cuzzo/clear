@@ -253,6 +253,34 @@
         "source": "cart.total > 0"
       }
     ],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactNormalizedBooleanComplexity#eligible?:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactNormalizedBooleanComplexity#eligible?:exit:2:8:5",
+        "kind": "exit",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactNormalizedBooleanComplexity#eligible?:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      }
+    ],
     "decisions": [
       {
         "enclosing_span": [
@@ -271,7 +299,20 @@
         "predicate": "user.active? && !user.suspended?"
       }
     ],
+    "def_use": [
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 4,
@@ -283,6 +324,11 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -330,6 +376,26 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactNormalizedBooleanComplexity#eligible?:local:cart",
+          "place:SourceFactNormalizedBooleanComplexity#eligible?:local:user"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactNormalizedBooleanComplexity#eligible?:local:cart",
+          "place:SourceFactNormalizedBooleanComplexity#eligible?:local:user"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -364,6 +430,18 @@
           "user.active?"
         ],
         "line": 6
+      }
+    ],
+    "places": [
+      {
+        "id": "place:SourceFactNormalizedBooleanComplexity#eligible?:local:cart",
+        "kind": "local",
+        "name": "cart"
+      },
+      {
+        "id": "place:SourceFactNormalizedBooleanComplexity#eligible?:local:user",
+        "kind": "local",
+        "name": "user"
       }
     ],
     "predicate_bodies": [
@@ -401,6 +479,15 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

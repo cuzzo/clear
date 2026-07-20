@@ -43,11 +43,49 @@
   (#match? @hazard.csharp_unsafe_memory "^\\*")
 )
 
+;; Refined C# Metaprogramming queries for precision
 (
   (invocation_expression
     function: (member_access_expression
+      expression: (identifier) @recv_id
       name: (identifier) @method_name)) @hazard.csharp_metaprogramming
-  (#match? @method_name "^(Load|LoadFrom|LoadFile|GetType|GetMethod|GetMethods|GetField|GetFields|GetProperty|GetProperties|GetConstructor|GetConstructors|Invoke|GetValue|SetValue|CreateInstance)$")
+  (#match? @recv_id "^(?i)(Assembly|asm)$")
+  (#match? @method_name "^(Load|LoadFrom|LoadFile)$")
+)
+
+(
+  (invocation_expression
+    function: (member_access_expression
+      expression: (typeof_expression)
+      name: (identifier) @method_name)) @hazard.csharp_metaprogramming
+  (#match? @method_name "^(GetMethod|GetMethods|GetField|GetFields|GetProperty|GetProperties|GetConstructor|GetConstructors)$")
+)
+
+(
+  (invocation_expression
+    function: (member_access_expression
+      expression: _ @recv
+      name: (identifier) @method_name)) @hazard.csharp_metaprogramming
+  (#match? @recv "^(?i).*(Type|t|typeof|clazz|class|declaringType).*$")
+  (#match? @method_name "^(GetType|GetMethod|GetMethods|GetField|GetFields|GetProperty|GetProperties|GetConstructor|GetConstructors|CreateInstance)$")
+)
+
+(
+  (invocation_expression
+    function: (member_access_expression
+      expression: _ @recv
+      name: (identifier) @method_name)) @hazard.csharp_metaprogramming
+  (#match? @recv "^(?i).*(Method|Field|Property|Constructor|info|mi|fi|pi|member).*$")
+  (#match? @method_name "^(Invoke|GetValue|SetValue)$")
+)
+
+(
+  (invocation_expression
+    function: (member_access_expression
+      expression: (identifier) @recv_id
+      name: (identifier) @method_name)) @hazard.csharp_metaprogramming
+  (#eq? @recv_id "Activator")
+  (#eq? @method_name "CreateInstance")
 )
 
 (

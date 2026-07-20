@@ -835,6 +835,159 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "short_circuit"
+      },
+      {
+        "kind": "continue"
+      },
+      {
+        "kind": "continue"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "short_circuit"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:branch:2.loop.0:9:6",
+        "kind": "branch",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:branch:2.loop.1.loop.1:13:8",
+        "kind": "branch",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:continue:2.loop.0.then.0:9:6",
+        "kind": "jump",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:continue:2.loop.1.loop.1.then.0:13:8",
+        "kind": "jump",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:exit:6:22:5",
+        "kind": "exit",
+        "line": 22
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:loop:2.loop.1:11:6",
+        "kind": "loop",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:stmt:1.then.0:6:4",
+        "kind": "statement",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:stmt:2.loop.1.loop.0:12:8",
+        "kind": "statement",
+        "line": 12
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:stmt:2.loop.1.loop.2:15:8",
+        "kind": "statement",
+        "line": 15
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:stmt:2.loop.1.loop.3:16:8",
+        "kind": "statement",
+        "line": 16
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:stmt:2:6:4",
+        "kind": "branch",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:stmt:3:8:4",
+        "kind": "loop",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:stmt:4:20:4",
+        "kind": "statement",
+        "line": 20
+      },
+      {
+        "id": "cfg:SourceFactLocalFlowEdges#build:stmt:5:21:4",
+        "kind": "statement",
+        "line": 21
+      }
+    ],
     "decisions": [
       {
         "enclosing_span": [
@@ -871,7 +1024,52 @@
         "predicate": "grammar && File.file?(grammar)"
       }
     ],
+    "def_use": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 4,
@@ -884,6 +1082,24 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -1094,6 +1310,113 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [
+          "place:SourceFactLocalFlowEdges#build:local:findings"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalFlowEdges#build:local:file",
+          "place:SourceFactLocalFlowEdges#build:local:meth"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactLocalFlowEdges#build:local:audit",
+          "place:SourceFactLocalFlowEdges#build:local:grammar",
+          "place:SourceFactLocalFlowEdges#build:local:sections"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalFlowEdges#build:local:findings"
+        ],
+        "writes": [
+          "place:SourceFactLocalFlowEdges#build:local:finding"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactLocalFlowEdges#build:local:rows"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalFlowEdges#build:local:finding"
+        ],
+        "writes": [
+          "place:SourceFactLocalFlowEdges#build:local:file",
+          "place:SourceFactLocalFlowEdges#build:local:meth"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalFlowEdges#build:local:file",
+          "place:SourceFactLocalFlowEdges#build:local:meth"
+        ],
+        "writes": [
+          "place:SourceFactLocalFlowEdges#build:local:key"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalFlowEdges#build:local:audit",
+          "place:SourceFactLocalFlowEdges#build:local:key",
+          "place:SourceFactLocalFlowEdges#build:local:rows"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalFlowEdges#build:local:grammar"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalFlowEdges#build:local:sections"
+        ],
+        "writes": [
+          "place:SourceFactLocalFlowEdges#build:local:finding",
+          "place:SourceFactLocalFlowEdges#build:local:findings",
+          "place:SourceFactLocalFlowEdges#build:local:title"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalFlowEdges#build:local:audit"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalFlowEdges#build:local:rows"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -1110,6 +1433,58 @@
           "!grammar"
         ],
         "line": 6
+      }
+    ],
+    "places": [
+      {
+        "id": "place:SourceFactLocalFlowEdges#build:local:file",
+        "kind": "local",
+        "name": "file"
+      },
+      {
+        "id": "place:SourceFactLocalFlowEdges#build:local:meth",
+        "kind": "local",
+        "name": "meth"
+      },
+      {
+        "id": "place:SourceFactLocalFlowEdges#build:local:key",
+        "kind": "local",
+        "name": "key"
+      },
+      {
+        "id": "place:SourceFactLocalFlowEdges#build:local:audit",
+        "kind": "local",
+        "name": "audit"
+      },
+      {
+        "id": "place:SourceFactLocalFlowEdges#build:local:grammar",
+        "kind": "local",
+        "name": "grammar"
+      },
+      {
+        "id": "place:SourceFactLocalFlowEdges#build:local:sections",
+        "kind": "local",
+        "name": "sections"
+      },
+      {
+        "id": "place:SourceFactLocalFlowEdges#build:local:rows",
+        "kind": "local",
+        "name": "rows"
+      },
+      {
+        "id": "place:SourceFactLocalFlowEdges#build:local:finding",
+        "kind": "local",
+        "name": "finding"
+      },
+      {
+        "id": "place:SourceFactLocalFlowEdges#build:local:findings",
+        "kind": "local",
+        "name": "findings"
+      },
+      {
+        "id": "place:SourceFactLocalFlowEdges#build:local:title",
+        "kind": "local",
+        "name": "title"
       }
     ],
     "predicate_bodies": [],
@@ -1206,6 +1581,40 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

@@ -1,3 +1,12 @@
 (method_invocation
   name: (identifier) @name
-  (#match? @name "^(forName|loadClass|getMethod|getDeclaredMethod|getField|getDeclaredField|getConstructor|getDeclaredConstructor|newInstance|newProxyInstance|invoke)$")) @hazard.java_metaprogramming
+  (#match? @name "^(forName|loadClass|newProxyInstance)$")) @hazard.java_metaprogramming
+
+(method_invocation
+  object: [
+    (method_invocation name: (identifier) @recv_method (#eq? @recv_method "getClass"))
+    (field_access field: (identifier) @recv_field (#eq? @recv_field "class"))
+    (identifier) @recv_id (#match? @recv_id "^(?i)(Class|Method|Constructor|Field|ClassLoader|clazz|method|constructor|field|loader)$")
+  ]
+  name: (identifier) @name
+  (#match? @name "^(getMethod|getDeclaredMethod|getField|getDeclaredField|getConstructor|getDeclaredConstructor|newInstance|invoke)$")) @hazard.java_metaprogramming

@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use crate::syntax::{HazardSite, Language};
 use crate::syntax::parser_grammar::grammar_for_language;
 use tree_sitter::{Node, Query, QueryCursor};
@@ -16,57 +17,74 @@ const TYPESCRIPT_HAZARDS: &str = include_str!("typescript_hazards.scm");
 const LUA_HAZARDS: &str = include_str!("lua_hazards.scm");
 const JAVA_HAZARDS: &str = include_str!("java_hazards.scm");
 const PHP_HAZARDS: &str = include_str!("php_hazards.scm");
+const KOTLIN_HAZARDS: &str = include_str!("kotlin_hazards.scm");
+const SWIFT_HAZARDS: &str = include_str!("swift_hazards.scm");
 
-pub fn extract_hazards(
+fn get_cached_query(language: Language) -> Option<&'static Query> {
+    macro_rules! cached_query {
+        ($lang:expr, $query_str:expr) => {{
+            static CACHE: OnceLock<Option<Query>> = OnceLock::new();
+            CACHE.get_or_init(|| {
+                let grammar = grammar_for_language($lang);
+                Query::new(&grammar, $query_str).ok()
+            }).as_ref()
+        }};
+    }
+
+    match language {
+        Language::C => cached_query!(Language::C, C_HAZARDS),
+        Language::Cpp => cached_query!(Language::Cpp, CPP_HAZARDS),
+        Language::CSharp => cached_query!(Language::CSharp, CSHARP_HAZARDS),
+        Language::Go => cached_query!(Language::Go, GO_HAZARDS),
+        Language::Rust => cached_query!(Language::Rust, RUST_HAZARDS),
+        Language::Zig => cached_query!(Language::Zig, ZIG_HAZARDS),
+        Language::Ruby => cached_query!(Language::Ruby, RUBY_HAZARDS),
+        Language::Python => cached_query!(Language::Python, PYTHON_HAZARDS),
+        Language::JavaScript => cached_query!(Language::JavaScript, JAVASCRIPT_HAZARDS),
+        Language::TypeScript => cached_query!(Language::TypeScript, TYPESCRIPT_HAZARDS),
+        Language::Lua => cached_query!(Language::Lua, LUA_HAZARDS),
+        Language::Java => cached_query!(Language::Java, JAVA_HAZARDS),
+        Language::Php => cached_query!(Language::Php, PHP_HAZARDS),
+        Language::Kotlin => cached_query!(Language::Kotlin, KOTLIN_HAZARDS),
+        Language::Swift => cached_query!(Language::Swift, SWIFT_HAZARDS),
+        _ => None,
+    }
+}
+
+pub(crate) fn extract_hazards(
     file_path: &str,
     root: Node,
     source: &str,
     language: Language,
 ) -> Vec<HazardSite> {
-    let source_bytes = source.as_bytes();
-    let query_str = match language {
-        Language::C => C_HAZARDS,
-        Language::Cpp => CPP_HAZARDS,
-        Language::CSharp => CSHARP_HAZARDS,
-        Language::Go => GO_HAZARDS,
-        Language::Rust => RUST_HAZARDS,
-        Language::Zig => ZIG_HAZARDS,
-        Language::Ruby => RUBY_HAZARDS,
-        Language::Python => PYTHON_HAZARDS,
-        Language::JavaScript => JAVASCRIPT_HAZARDS,
-        Language::TypeScript => TYPESCRIPT_HAZARDS,
-        Language::Lua => LUA_HAZARDS,
-        Language::Java => JAVA_HAZARDS,
-        Language::Php => PHP_HAZARDS,
-        _ => return Vec::new(),
+    let query = match get_cached_query(language) {
+        Some(q) => q,
+        None => return Vec::new(),
     };
 
-    let grammar = grammar_for_language(language);
-    let query = Query::new(&grammar, query_str).unwrap();
-
+    let source_bytes = source.as_bytes();
     let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&query, root, source_bytes);
+    let mut matches = cursor.matches(query, root, source_bytes);
     
     let mut sites = Vec::new();
     let mut recorded_lines = std::collections::HashSet::new();
+
+    let source_lines: Vec<&str> = source.lines().collect();
 
     while let Some(m) = matches.next() {
         for cap in m.captures {
             let capture_name = query.capture_names()[cap.index as usize];
             
-            // In lineage, hazard tags look like `@hazard.zig_loom_atomic`
-            // Tree-sitter drops the `@`, so it's `hazard.zig_loom_atomic`
             if !capture_name.starts_with("hazard.") {
                 continue;
             }
             
-            let hazard_type = capture_name.strip_prefix("hazard.").unwrap().to_string();
+            let hazard_type = capture_name.strip_prefix("hazard.").unwrap_or("").to_string();
             
             let line = (cap.node.start_position().row + 1) as u32;
-            let line_text = source
-                .lines()
-                .nth((line as usize).saturating_sub(1))
-                .unwrap_or_default()
+            let line_text = source_lines
+                .get((line as usize).saturating_sub(1))
+                .unwrap_or(&"")
                 .trim()
                 .to_string();
 
@@ -76,11 +94,17 @@ pub fn extract_hazards(
                 "loom".to_string()
             } else if hazard_type.contains("_wait_loop") {
                 "hammer".to_string()
+            } else if hazard_type.contains("_metaprogramming") {
+                "nil-kill".to_string()
             } else {
                 "".to_string()
             };
 
-            let dedupe_key = (line, hazard_type.clone());
+            let start_col = cap.node.start_position().column as u32;
+            let end_line = (cap.node.end_position().row + 1) as u32;
+            let end_col = cap.node.end_position().column as u32;
+
+            let dedupe_key = (line, start_col, end_line, end_col, hazard_type.clone());
             if !recorded_lines.contains(&dedupe_key) {
                 recorded_lines.insert(dedupe_key);
                 sites.push(HazardSite {
@@ -89,13 +113,15 @@ pub fn extract_hazards(
                     snippet: line_text,
                     hazard_type,
                     required_evidence,
+                    start_column: Some(start_col),
+                    end_line: Some(end_line),
+                    end_column: Some(end_col),
                 });
             }
         }
     }
     
-    // Sort to keep deterministic order
-    sites.sort_by_key(|s| (s.line, s.hazard_type.clone()));
+    sites.sort_by_key(|s| (s.line, s.start_column, s.end_line, s.end_column, s.hazard_type.clone()));
     sites
 }
 
@@ -297,7 +323,7 @@ local mt = {
         let tree = parser.parse(code, None).unwrap();
         
         let hazards = extract_hazards("test.lua", tree.root_node(), code, Language::Lua);
-        assert_eq!(hazards.len(), 12);
+        assert_eq!(hazards.len(), 14);
         assert!(hazards.iter().all(|h| h.hazard_type == "lua_metaprogramming"));
         
         let snippets: Vec<&str> = hazards.iter().map(|h| h.snippet.as_str()).collect();
@@ -370,5 +396,39 @@ local mt = {
         let hazards = extract_hazards("test.cs", tree.root_node(), code, Language::CSharp);
         let metaprog_hazards: Vec<_> = hazards.iter().filter(|h| h.hazard_type == "csharp_metaprogramming").collect();
         assert_eq!(metaprog_hazards.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_hazards_kotlin() {
+        let code = "
+            fun test() {
+                Class.forName(\"Bar\")
+                val prop = Foo::class.memberProperties
+            }
+        ";
+        let mut parser = Parser::new();
+        parser.set_language(&grammar_for_language(Language::Kotlin)).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        
+        let hazards = extract_hazards("test.kt", tree.root_node(), code, Language::Kotlin);
+        assert_eq!(hazards.len(), 2);
+        assert!(hazards.iter().all(|h| h.hazard_type == "kotlin_metaprogramming"));
+    }
+
+    #[test]
+    fn test_extract_hazards_swift() {
+        let code = "
+            func test() {
+                let m = Mirror(reflecting: self)
+                let c = NSClassFromString(\"Bar\")
+            }
+        ";
+        let mut parser = Parser::new();
+        parser.set_language(&grammar_for_language(Language::Swift)).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        
+        let hazards = extract_hazards("test.swift", tree.root_node(), code, Language::Swift);
+        assert_eq!(hazards.len(), 2);
+        assert!(hazards.iter().all(|h| h.hazard_type == "swift_metaprogramming"));
     }
 }

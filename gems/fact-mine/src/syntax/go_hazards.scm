@@ -25,8 +25,11 @@
   (#match? @method "^(Add|Done|Wait)$")
 )
 
+;; Refined Go Channel check to only target channel creation
 (
-  (call_expression function: (identifier) @func) @hazard.go_concurrency_channel
+  (call_expression
+    function: (identifier) @func
+    arguments: (argument_list (channel_type))) @hazard.go_concurrency_channel
   (#eq? @func "make")
 )
 

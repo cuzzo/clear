@@ -832,8 +832,169 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactPathConditionReport#duplicate_guard:entry:0:53:2",
+        "kind": "entry",
+        "line": 53
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#duplicate_guard:exit:2:59:5",
+        "kind": "exit",
+        "line": 59
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#duplicate_guard:stmt:1:54:4",
+        "kind": "statement",
+        "line": 54
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#first:entry:0:10:2",
+        "kind": "entry",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#first:exit:2:23:5",
+        "kind": "exit",
+        "line": 23
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#first:stmt:1:11:4",
+        "kind": "statement",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#missing_enabled:entry:0:45:2",
+        "kind": "entry",
+        "line": 45
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#missing_enabled:exit:2:51:5",
+        "kind": "exit",
+        "line": 51
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#missing_enabled:stmt:1:46:4",
+        "kind": "statement",
+        "line": 46
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#second:entry:0:25:2",
+        "kind": "entry",
+        "line": 25
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#second:exit:2:33:5",
+        "kind": "exit",
+        "line": 33
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#second:stmt:1:26:4",
+        "kind": "statement",
+        "line": 26
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#third:entry:0:35:2",
+        "kind": "entry",
+        "line": 35
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#third:exit:2:43:5",
+        "kind": "exit",
+        "line": 43
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#third:stmt:1:36:4",
+        "kind": "statement",
+        "line": 36
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 10,
@@ -887,6 +1048,23 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -1128,6 +1306,102 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactPathConditionReport#duplicate_guard:local:user"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactPathConditionReport#duplicate_guard:local:user"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactPathConditionReport#first:local:enabled",
+          "place:SourceFactPathConditionReport#first:local:feature",
+          "place:SourceFactPathConditionReport#first:local:user"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactPathConditionReport#first:local:enabled",
+          "place:SourceFactPathConditionReport#first:local:feature",
+          "place:SourceFactPathConditionReport#first:local:user"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactPathConditionReport#missing_enabled:local:feature",
+          "place:SourceFactPathConditionReport#missing_enabled:local:user"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactPathConditionReport#missing_enabled:local:feature",
+          "place:SourceFactPathConditionReport#missing_enabled:local:user"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactPathConditionReport#second:local:enabled",
+          "place:SourceFactPathConditionReport#second:local:feature",
+          "place:SourceFactPathConditionReport#second:local:user"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactPathConditionReport#second:local:enabled",
+          "place:SourceFactPathConditionReport#second:local:feature",
+          "place:SourceFactPathConditionReport#second:local:user"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactPathConditionReport#third:local:enabled",
+          "place:SourceFactPathConditionReport#third:local:feature",
+          "place:SourceFactPathConditionReport#third:local:user"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactPathConditionReport#third:local:enabled",
+          "place:SourceFactPathConditionReport#third:local:feature",
+          "place:SourceFactPathConditionReport#third:local:user"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -1183,6 +1457,68 @@
           "user"
         ],
         "line": 39
+      }
+    ],
+    "places": [
+      {
+        "id": "place:SourceFactPathConditionReport#first:local:enabled",
+        "kind": "local",
+        "name": "enabled"
+      },
+      {
+        "id": "place:SourceFactPathConditionReport#first:local:feature",
+        "kind": "local",
+        "name": "feature"
+      },
+      {
+        "id": "place:SourceFactPathConditionReport#first:local:user",
+        "kind": "local",
+        "name": "user"
+      },
+      {
+        "id": "place:SourceFactPathConditionReport#second:local:enabled",
+        "kind": "local",
+        "name": "enabled"
+      },
+      {
+        "id": "place:SourceFactPathConditionReport#second:local:feature",
+        "kind": "local",
+        "name": "feature"
+      },
+      {
+        "id": "place:SourceFactPathConditionReport#second:local:user",
+        "kind": "local",
+        "name": "user"
+      },
+      {
+        "id": "place:SourceFactPathConditionReport#third:local:enabled",
+        "kind": "local",
+        "name": "enabled"
+      },
+      {
+        "id": "place:SourceFactPathConditionReport#third:local:feature",
+        "kind": "local",
+        "name": "feature"
+      },
+      {
+        "id": "place:SourceFactPathConditionReport#third:local:user",
+        "kind": "local",
+        "name": "user"
+      },
+      {
+        "id": "place:SourceFactPathConditionReport#missing_enabled:local:feature",
+        "kind": "local",
+        "name": "feature"
+      },
+      {
+        "id": "place:SourceFactPathConditionReport#missing_enabled:local:user",
+        "kind": "local",
+        "name": "user"
+      },
+      {
+        "id": "place:SourceFactPathConditionReport#duplicate_guard:local:user",
+        "kind": "local",
+        "name": "user"
       }
     ],
     "predicate_bodies": [],
@@ -1349,6 +1685,37 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

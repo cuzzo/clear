@@ -452,6 +452,119 @@
         "source": "types >= 2"
       }
     ],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "short_circuit"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "short_circuit"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactModifierReturnPathConditions#load:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactModifierReturnPathConditions#load:exit:3:8:5",
+        "kind": "exit",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactModifierReturnPathConditions#load:return:0.then.0:5:4",
+        "kind": "jump",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactModifierReturnPathConditions#load:stmt:1:5:4",
+        "kind": "branch",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactModifierReturnPathConditions#load:stmt:2:7:4",
+        "kind": "statement",
+        "line": 7
+      },
+      {
+        "id": "cfg:SourceFactModifierReturnPathConditions#risk_multiplier:entry:0:10:2",
+        "kind": "entry",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactModifierReturnPathConditions#risk_multiplier:exit:4:15:5",
+        "kind": "exit",
+        "line": 15
+      },
+      {
+        "id": "cfg:SourceFactModifierReturnPathConditions#risk_multiplier:return:0.then.0:11:4",
+        "kind": "jump",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactModifierReturnPathConditions#risk_multiplier:return:1.then.0:12:4",
+        "kind": "jump",
+        "line": 12
+      },
+      {
+        "id": "cfg:SourceFactModifierReturnPathConditions#risk_multiplier:stmt:1:11:4",
+        "kind": "branch",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactModifierReturnPathConditions#risk_multiplier:stmt:2:12:4",
+        "kind": "branch",
+        "line": 12
+      },
+      {
+        "id": "cfg:SourceFactModifierReturnPathConditions#risk_multiplier:stmt:3:14:4",
+        "kind": "statement",
+        "line": 14
+      }
+    ],
     "decisions": [
       {
         "enclosing_span": [
@@ -486,7 +599,34 @@
         "predicate": "path && ::File.file?(path)"
       }
     ],
+    "def_use": [
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 10,
@@ -508,6 +648,20 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -659,6 +813,71 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactModifierReturnPathConditions#load:local:path"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactModifierReturnPathConditions#load:local:path"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactModifierReturnPathConditions#load:local:path"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactModifierReturnPathConditions#risk_multiplier:local:killed",
+          "place:SourceFactModifierReturnPathConditions#risk_multiplier:local:tests",
+          "place:SourceFactModifierReturnPathConditions#risk_multiplier:local:types"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactModifierReturnPathConditions#risk_multiplier:local:killed"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactModifierReturnPathConditions#risk_multiplier:local:tests",
+          "place:SourceFactModifierReturnPathConditions#risk_multiplier:local:types"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -675,6 +894,28 @@
           "!path"
         ],
         "line": 5
+      }
+    ],
+    "places": [
+      {
+        "id": "place:SourceFactModifierReturnPathConditions#risk_multiplier:local:killed",
+        "kind": "local",
+        "name": "killed"
+      },
+      {
+        "id": "place:SourceFactModifierReturnPathConditions#risk_multiplier:local:tests",
+        "kind": "local",
+        "name": "tests"
+      },
+      {
+        "id": "place:SourceFactModifierReturnPathConditions#risk_multiplier:local:types",
+        "kind": "local",
+        "name": "types"
+      },
+      {
+        "id": "place:SourceFactModifierReturnPathConditions#load:local:path",
+        "kind": "local",
+        "name": "path"
       }
     ],
     "predicate_bodies": [],
@@ -754,6 +995,27 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

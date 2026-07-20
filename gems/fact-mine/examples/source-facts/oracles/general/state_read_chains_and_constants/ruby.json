@@ -632,8 +632,166 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#build:entry:0:10:2",
+        "kind": "entry",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#build:exit:2:12:5",
+        "kind": "exit",
+        "line": 12
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#build:stmt:1:11:4",
+        "kind": "statement",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#core_effects:entry:0:24:2",
+        "kind": "entry",
+        "line": 24
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#core_effects:exit:3:27:5",
+        "kind": "exit",
+        "line": 27
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#core_effects:stmt:1:25:4",
+        "kind": "statement",
+        "line": 25
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#core_effects:stmt:2:26:4",
+        "kind": "statement",
+        "line": 26
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#helper_result:entry:0:18:2",
+        "kind": "entry",
+        "line": 18
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#helper_result:exit:2:22:5",
+        "kind": "exit",
+        "line": 22
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#helper_result:stmt:1:19:4",
+        "kind": "statement",
+        "line": 19
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#provider_paths:entry:0:14:2",
+        "kind": "entry",
+        "line": 14
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#provider_paths:exit:2:16:5",
+        "kind": "exit",
+        "line": 16
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#provider_paths:stmt:1:15:4",
+        "kind": "statement",
+        "line": 15
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#results:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#results:exit:2:8:5",
+        "kind": "exit",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#results:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 10,
@@ -676,6 +834,24 @@
         "params": [],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -864,6 +1040,99 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactStateReadChainsAndConstants#build:local:path"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactStateReadChainsAndConstants#build:local:path"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactStateReadChainsAndConstants#core_effects:local:path"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactStateReadChainsAndConstants#core_effects:local:path"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactStateReadChainsAndConstants#helper_result:local:items"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactStateReadChainsAndConstants#helper_result:local:item",
+          "place:SourceFactStateReadChainsAndConstants#helper_result:local:items",
+          "place:SourceFactStateReadChainsAndConstants#helper_result:local:out"
+        ],
+        "writes": [
+          "place:SourceFactStateReadChainsAndConstants#helper_result:local:item",
+          "place:SourceFactStateReadChainsAndConstants#helper_result:local:out"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactStateReadChainsAndConstants#provider_paths:local:provider"
+        ],
+        "writes": [
+          "place:SourceFactStateReadChainsAndConstants#provider_paths:local:provider"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactStateReadChainsAndConstants#results:instance_field:@ranked",
+          "place:SourceFactStateReadChainsAndConstants#results:instance_field:@top",
+          "place:SourceFactStateReadChainsAndConstants#results:local:row"
+        ],
+        "writes": [
+          "place:SourceFactStateReadChainsAndConstants#results:local:row"
+        ]
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -872,6 +1141,53 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactStateReadChainsAndConstants#build:local:path",
+        "kind": "local",
+        "name": "path"
+      },
+      {
+        "id": "place:SourceFactStateReadChainsAndConstants#provider_paths:local:provider",
+        "kind": "local",
+        "name": "provider"
+      },
+      {
+        "id": "place:SourceFactStateReadChainsAndConstants#helper_result:local:items",
+        "kind": "local",
+        "name": "items"
+      },
+      {
+        "id": "place:SourceFactStateReadChainsAndConstants#helper_result:local:item",
+        "kind": "local",
+        "name": "item"
+      },
+      {
+        "id": "place:SourceFactStateReadChainsAndConstants#helper_result:local:out",
+        "kind": "local",
+        "name": "out"
+      },
+      {
+        "id": "place:SourceFactStateReadChainsAndConstants#core_effects:local:path",
+        "kind": "local",
+        "name": "path"
+      },
+      {
+        "id": "place:SourceFactStateReadChainsAndConstants#results:instance_field:@ranked",
+        "kind": "instance_field",
+        "name": "@ranked"
+      },
+      {
+        "id": "place:SourceFactStateReadChainsAndConstants#results:instance_field:@top",
+        "kind": "instance_field",
+        "name": "@top"
+      },
+      {
+        "id": "place:SourceFactStateReadChainsAndConstants#results:local:row",
+        "kind": "local",
+        "name": "row"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -975,6 +1291,35 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

@@ -3,7 +3,7 @@
     {
       "code": "[1, \"two\", :three, true, nil, CustomClass]",
       "line": 14,
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_shapes.rb",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_shapes.rb",
       "size": 0,
       "tuple_types": [
         "Integer",
@@ -28,7 +28,7 @@
         "CustomClass"
       ],
       "line": 4,
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_shapes.rb",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_shapes.rb",
       "value_types": [
         {
           "data": "Symbol",
@@ -54,7 +54,8 @@
   ],
   "methods": [
     {
-      "id": "fn:d81de45ef5aeaa40",
+      "dispatch_name": "initialize",
+      "id": "fn:ec941d71faca5951",
       "key": [
         "RubyShapes",
         "initialize",
@@ -67,9 +68,9 @@
       "name": "initialize",
       "normalized_source": "def initialize [1, \"two\", :three, true, nil, CustomClass] end",
       "owner": "RubyShapes",
-      "owner_id": "owner:24675cda39b19392",
+      "owner_id": "owner:b26fe4ac5692839d",
       "params": [],
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_shapes.rb",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_shapes.rb",
       "raw_source": "def initialize\n    [1, \"two\", :three, true, nil, CustomClass]\n  end",
       "signature": "",
       "source": {},
@@ -85,12 +86,12 @@
   "owners": [
     {
       "confidence": "high",
-      "id": "owner:24675cda39b19392",
+      "id": "owner:b26fe4ac5692839d",
       "kind": "class",
       "language": "ruby",
       "line": 3,
       "name": "RubyShapes",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_shapes.rb",
+      "path": "/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_shapes.rb",
       "span": [
         3,
         0,

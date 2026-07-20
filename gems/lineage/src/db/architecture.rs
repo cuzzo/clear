@@ -176,12 +176,12 @@ pub fn ingest_architecture_json(
                 pressure.get("explanation").cloned().unwrap_or_else(|| json!({})).to_string()],
         )?;
     }
-    tx.commit()?;
-
     let mut file_cache: HashMap<String, (BlobFile, Vec<LogicalUnit>)> = HashMap::new();
     let extractor = HeuristicExtractor::default();
     let repo_path = Path::new(&root);
     let timestamp = storage.commit_timestamp(commit).ok().flatten().unwrap_or_else(crate::hazard::now_timestamp);
+
+    let mut deactivated_languages = std::collections::HashSet::new();
 
     for hazard in document
         .get("hazards")
@@ -191,6 +191,57 @@ pub fn ingest_architecture_json(
     {
         let path = text(hazard, "path");
         let line = integer(hazard, "line") as u32;
+
+        let hazard_type = text(hazard, "hazard_type");
+        let source = text(hazard, "source");
+
+        let provider = {
+            let p = text(hazard, "provider");
+            if p.is_empty() {
+                if let Some(lang) = hazard_type.split('_').next() {
+                    lang.to_string()
+                } else {
+                    let ext = Path::new(&path).extension().and_then(|e| e.to_str()).unwrap_or("");
+                    match ext {
+                        "rs" => "rust",
+                        "go" => "go",
+                        "zig" => "zig",
+                        "rb" => "ruby",
+                        "py" => "python",
+                        "js" => "javascript",
+                        "ts" => "typescript",
+                        "lua" => "lua",
+                        "java" => "java",
+                        "php" => "php",
+                        "kt" => "kotlin",
+                        "swift" => "swift",
+                        "c" => "c",
+                        "cpp" => "cpp",
+                        "cs" => "csharp",
+                        _ => "",
+                    }.to_string()
+                }
+            } else {
+                p
+            }
+        };
+
+        if !provider.is_empty() && deactivated_languages.insert(provider.clone()) {
+            storage.deactivate_active_hazards(&provider)?;
+        }
+
+        let mut required_evidence = text(hazard, "required_evidence");
+        if required_evidence.is_empty() {
+            if hazard_type.contains("_vopr_") {
+                required_evidence = "vopr".to_string();
+            } else if hazard_type.contains("_loom_") {
+                required_evidence = "loom".to_string();
+            } else if hazard_type.contains("_wait_loop") {
+                required_evidence = "hammer".to_string();
+            } else if hazard_type.contains("_metaprogramming") {
+                required_evidence = "nil-kill".to_string();
+            }
+        }
 
         if !file_cache.contains_key(&path) {
             if let Ok(contents) = fs::read_to_string(repo_path.join(&path)) {
@@ -211,13 +262,11 @@ pub fn ingest_architecture_json(
             resolved_id = storage
                 .resolve_unit_id(&unit.id, &unit.path, &unit.name)?
                 .unwrap_or_else(|| unit.id.clone());
-            symbol = Some(unit.name);
+            symbol = Some(unit.name.clone());
+            if resolved_id == unit.id {
+                storage.upsert_logical_unit(&unit, timestamp)?;
+            }
         }
-
-        let provider = text(hazard, "provider");
-        let hazard_type = text(hazard, "hazard_type");
-        let required_evidence = text(hazard, "required_evidence");
-        let source = text(hazard, "source");
 
         storage.insert_hazard_event(&HazardEvent {
             unit_id: resolved_id,
@@ -238,6 +287,8 @@ pub fn ingest_architecture_json(
             .to_string(),
         })?;
     }
+
+    tx.commit()?;
 
     Ok(stats)
 }
@@ -475,19 +526,36 @@ mod tests {
     #[test]
     fn ingests_and_queries_focused_architecture() {
         let storage = Storage::open_memory().unwrap();
+        
+        let dir = tempfile::tempdir().unwrap();
+        let demo_path = dir.path().join("demo.rb");
+        fs::write(
+            &demo_path,
+            "class Demo\n  def run\n    @value = 1\n  end\nend\n",
+        )
+        .unwrap();
+
         let payload = json!({
             "schema_version": 1,
             "kind": "espalier.architecture.v1",
             "analyzer": {"name": "espalier", "version": "test"},
             "generated_at": "2026-07-11T00:00:00Z",
-            "corpus": {"commit": "abc", "root": ".", "complete": true},
+            "corpus": {"commit": "abc", "root": dir.path().to_str().unwrap(), "complete": true},
             "nodes": [
                 {"id":"owner:1","kind":"owner","name":"Demo","owner":"Demo","path":"demo.rb","start_line":1,"start_column":0,"end_line":8,"end_column":3,"metadata":{"confidence":"high"}},
                 {"id":"fn:1","kind":"function","name":"run","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":2,"start_column":0,"end_line":5,"end_column":3,"metadata":{"confidence":"high"}},
                 {"id":"state:1","kind":"state","name":"@value","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":3,"start_column":2,"end_line":3,"end_column":8,"metadata":{"confidence":"high"}}
             ],
             "edges": [{"id":"edge:1","source":"fn:1","target":"state:1","kind":"writes","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":3,"start_column":2,"end_line":3,"end_column":8}]}],
-            "pressure": [{"node_id":"fn:1","score":60.0,"band":"orange","components":{"collaboration":0.2,"state":0.8,"implementation":0.0,"operational":0.0},"explanation":{"state_writes":1}}]
+            "pressure": [{"node_id":"fn:1","score":60.0,"band":"orange","components":{"collaboration":0.2,"state":0.8,"implementation":0.0,"operational":0.0},"explanation":{"state_writes":1}}],
+            "hazards": [
+                {
+                    "path": "demo.rb",
+                    "line": 3,
+                    "hazard_type": "ruby_metaprogramming",
+                    "source": "send(:run)"
+                }
+            ]
         }).to_string();
         let stats = ingest_architecture_json(&storage, &payload).unwrap();
         assert_eq!(stats.nodes, 3);
@@ -497,5 +565,8 @@ mod tests {
         assert_eq!(inventory["members"][0]["pressure"]["band"], "orange");
         let access = state_access(&storage, "state:1").unwrap();
         assert_eq!(access["total_relationships"], 1);
+
+        // Verify the hazard was ingested
+        assert_eq!(storage.count_rows("unit_hazards").unwrap(), 1);
     }
 }

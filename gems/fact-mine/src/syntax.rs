@@ -335,6 +335,12 @@ pub struct HazardSite {
     pub snippet: String,
     pub hazard_type: String,
     pub required_evidence: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_column: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_column: Option<u32>,
 }
 
 /// Minimal, adapter-proven facts needed to canonicalize source symbols.
