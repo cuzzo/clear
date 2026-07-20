@@ -9,6 +9,7 @@ const CSHARP_HAZARDS: &str = include_str!("csharp_hazards.scm");
 const GO_HAZARDS: &str = include_str!("go_hazards.scm");
 const RUST_HAZARDS: &str = include_str!("rust_hazards.scm");
 const ZIG_HAZARDS: &str = include_str!("zig_hazards.scm");
+const RUBY_HAZARDS: &str = include_str!("ruby_hazards.scm");
 
 pub fn extract_hazards(
     file_path: &str,
@@ -24,13 +25,12 @@ pub fn extract_hazards(
         Language::Go => GO_HAZARDS,
         Language::Rust => RUST_HAZARDS,
         Language::Zig => ZIG_HAZARDS,
+        Language::Ruby => RUBY_HAZARDS,
         _ => return Vec::new(),
     };
 
     let grammar = grammar_for_language(language);
-    let Ok(query) = Query::new(&grammar, query_str) else {
-        return Vec::new();
-    };
+    let query = Query::new(&grammar, query_str).unwrap();
 
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&query, root, source_bytes);
@@ -134,5 +134,35 @@ mod tests {
         let unsafe_hazard = hazards.iter().find(|h| h.hazard_type == "rust_unsafe_block").unwrap();
         assert_eq!(unsafe_hazard.required_evidence, "");
         assert_eq!(unsafe_hazard.snippet, "unsafe {");
+    }
+
+    #[test]
+    fn test_extract_hazards_ruby() {
+        let code = "
+            class Foo
+              def test
+                send(:hello)
+                self.send(:hello2)
+                instance_variable_get(:@x)
+                const_get(:BAR)
+              end
+              def method_missing(m, *args)
+              end
+            end
+        ";
+        let mut parser = Parser::new();
+        parser.set_language(&grammar_for_language(Language::Ruby)).unwrap();
+        let tree = parser.parse(code, None).unwrap();
+        
+        let hazards = extract_hazards("test.rb", tree.root_node(), code, Language::Ruby);
+        assert_eq!(hazards.len(), 5);
+        assert!(hazards.iter().all(|h| h.hazard_type == "ruby_metaprogramming"));
+        
+        let snippets: Vec<&str> = hazards.iter().map(|h| h.snippet.as_str()).collect();
+        assert!(snippets.contains(&"send(:hello)"));
+        assert!(snippets.contains(&"self.send(:hello2)"));
+        assert!(snippets.contains(&"instance_variable_get(:@x)"));
+        assert!(snippets.contains(&"const_get(:BAR)"));
+        assert!(snippets.contains(&"def method_missing(m, *args)"));
     }
 }
