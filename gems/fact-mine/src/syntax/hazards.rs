@@ -417,12 +417,18 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                     }
                 }
             }
+            let is_raw_param = enclosing_fn.params.contains(&call.message)
+                || enclosing_fn.callback_params.contains(&call.message);
             if !is_var_call
+                && !is_raw_param
                 && (origin.param_derived.contains(&call.message)
                     || origin.callable_typed.contains(&call.message))
                 && !fn_map.contains_key(&(call.owner.clone(), call.message.clone()))
             {
-                // Aliased or typed callable local: my_cb = cb; my_cb()
+                // Aliased or typed callable local: my_cb = cb; my_cb().
+                // Raw parameters are excluded - direct param calls are gated
+                // by the branch above, and self-receiver references to params
+                // (e.g. default-argument expressions) are not invocations.
                 is_var_call = true;
             }
             if !is_var_call {
@@ -1172,6 +1178,15 @@ local mt = {
             Language::Ruby,
         );
         assert_eq!(rb_chain.len(), 0);
+
+        // A bare parameter reference inside a default-argument expression is
+        // not an invocation of that parameter.
+        let rb_default_arg = check(
+            "class Demo\n  def match?(candidate, arg_type, names = lookup(arg_type))\n    candidate.to_s == arg_type.to_s\n  end\nend",
+            ".rb",
+            Language::Ruby,
+        );
+        assert_eq!(rb_default_arg.len(), 0);
 
         // Gap 1 (fp-hazard-gaps.md): C member calls always dispatch through a
         // function-pointer field.
