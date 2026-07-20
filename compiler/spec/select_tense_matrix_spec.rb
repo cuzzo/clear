@@ -151,11 +151,13 @@ RSpec.describe "SELECT tense assignment matrix" do
   it "unwraps an outer selector failure before awaiting its promise" do
     code = <<~CLEAR
       FN start(value: Int64) RETURNS !~Int64 -> RETURN BG { value; }; END
+      FN plainLater(value: Int64) RETURNS ~Int64 -> RETURN BG { value; }; END
       FN later(value: Int64) RETURNS ~!Int64 -> RETURN BG { risky(value); }; END
       FN risky(value: Int64) RETURNS !Int64 -> RETURN value; END
       FN main() RETURNS !Void ->
         input: []Int64 = [1_i64];
         outer: ![~]Int64 = input |> SELECT:!~ start(_);
+        plain: [~]Int64 = input |> SELECT:~ plainLater(_);
         inner: [~]!Int64 = input |> SELECT:~! later(_);
         RETURN;
       END
@@ -164,8 +166,10 @@ RSpec.describe "SELECT tense assignment matrix" do
     out = ZigTranspiler.new.transpile(code)
     expect(out).to match(/const __select_promise\d+ = try start\(/)
     expect(out).to match(/const __tmp_\d+ = try __select_promise\d+\.next\(\)/)
+    expect(out).to match(/const __select_promise\d+ = try plainLater\(/)
     expect(out).to match(/const __select_promise\d+ = try later\(/)
     expect(out).to match(/\(try __select_promise\d+\.next\(\)\)\.value/)
+    expect(out).not_to include("try try")
   end
 
   it "rejects implicit list-to-stream projection" do

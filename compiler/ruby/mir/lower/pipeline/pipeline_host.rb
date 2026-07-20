@@ -792,7 +792,16 @@ class PipelineHost
       # failure is not a source-level outer `!`. Resolve the handle before
       # invoking Promise#next; leaving it on the temporary asks Zig for
       # `.next()` on `!Promise(T)`.
-      promise_value = MIR::TryExpr.new(selector)
+      # Function-call lowering may already have made the operational Promise
+      # allocation fallible through either Call#try_wrap or an explicit
+      # TryExpr. Normalize both representations before adding the one required
+      # boundary; nested tries emit invalid `try try call()` Zig.
+      promise_source = if selector.is_a?(MIR::TryExpr)
+        selector.expr.without_try
+      else
+        selector.without_try
+      end
+      promise_value = MIR::TryExpr.new(promise_source)
       selector_prefix << MIR::Let.new(promise_name, promise_value, false, nil, nil)
       promise_type = outer_fallible ? T.must(expression_type.payload_type) : expression_type
       async_shape = AsyncResultShape.promise(promise_type.tense_type)
