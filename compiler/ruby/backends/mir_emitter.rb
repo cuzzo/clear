@@ -839,8 +839,8 @@ class MIREmitter
     init_fields = T.let([], T::Array[String])
     init_fields << ".self_val = #{receiver_code}" if receiver_code
     runtime_arg_codes.each_index { |index| init_fields << ".a#{index} = #{args_tuple_name}[#{index}]" }
-    if node.alloc_kind
-      alloc_expr = alloc_zig(node.alloc_kind)
+    if (alloc_kind = node.alloc_kind)
+      alloc_expr = alloc_zig(alloc_kind)
       init_fields << ".alloc = #{alloc_expr}"
     end
 
@@ -2012,7 +2012,7 @@ class MIREmitter
       end
     end
     if cache_name && body.include?(cache_name)
-      cache_init = "const #{cache_name} = #{T.must(runtime_param).name}.heapAlloc(); " \
+      cache_init = "const #{cache_name} = #{runtime_param.name}.heapAlloc(); " \
         "_ = &#{cache_name};"
       body = [cache_init, body].reject(&:empty?).join("\n")
     end
@@ -3473,7 +3473,7 @@ class MIREmitter
     raise "alloc_zig: unknown allocator symbol :#{sym.inspect}" unless sym == :heap || sym == :frame
 
     if sym == :heap && @heap_allocator_cache_name && @heap_allocator_cache_runtime_name == @rt_name
-      return T.must(@heap_allocator_cache_name)
+      return @heap_allocator_cache_name
     end
 
     MIR::Placement.zig_allocator(sym, @rt_name)

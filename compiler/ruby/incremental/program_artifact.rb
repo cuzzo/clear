@@ -193,7 +193,7 @@ module Incremental
       return false unless item.kind == :comment
 
       following = @items[index + 1]
-      following&.kind == :function && names.include?(following.name.to_s)
+      following ? following.kind == :function && names.include?(following.name.to_s) : false
     end
 
     sig { params(item: EmittedItem, after: T.nilable(Integer), by: Integer).returns(EmittedItem) }
