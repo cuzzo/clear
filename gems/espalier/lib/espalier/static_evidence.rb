@@ -526,6 +526,7 @@ module Espalier
         "generated_at" => Time.now.utc.iso8601,
         "root" => @root,
         "vcs" => @vcs&.to_s,
+        "languages" => project_languages.map(&:to_s),
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
         "corpus" => corpus_metadata,

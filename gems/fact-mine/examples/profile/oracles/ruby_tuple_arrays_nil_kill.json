@@ -1148,7 +1148,7 @@
     {
       "array_element_shape": null,
       "blockers": [
-        "unknown return expression ARGS at examples/profile/ruby_tuple_arrays_nil_kill.rb:13"
+        "unknown return expression ARGS at /home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:13"
       ],
       "candidate_type": {
         "kind": "Untyped"
@@ -1387,7 +1387,7 @@
       "candidate_kind": "parameter",
       "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
-      "id": "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:name",
+      "id": "type-definition:examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:name",
       "kind": "definition",
       "line": 7,
       "name": "name",
@@ -1406,7 +1406,7 @@
       "candidate_kind": "parameter",
       "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
-      "id": "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:node",
+      "id": "type-definition:examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:node",
       "kind": "definition",
       "line": 7,
       "name": "node",
@@ -1425,7 +1425,7 @@
       "candidate_kind": "parameter",
       "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "consume",
-      "id": "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#consume:entry:0:13:2:place:TupleArrayEvidence#consume:local:kind",
+      "id": "type-definition:examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#consume:entry:0:13:2:place:TupleArrayEvidence#consume:local:kind",
       "kind": "definition",
       "line": 13,
       "name": "kind",
@@ -1444,7 +1444,7 @@
       "candidate_kind": "parameter",
       "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "consume",
-      "id": "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#consume:entry:0:13:2:place:TupleArrayEvidence#consume:local:text",
+      "id": "type-definition:examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#consume:entry:0:13:2:place:TupleArrayEvidence#consume:local:text",
       "kind": "definition",
       "line": 13,
       "name": "text",
@@ -1463,13 +1463,13 @@
       "candidate_kind": null,
       "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
-      "id": "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:stmt:2:9:4:place:TupleArrayEvidence#build:local:name",
+      "id": "type-read:examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:stmt:2:9:4:place:TupleArrayEvidence#build:local:name",
       "kind": "flow_read",
       "line": 9,
       "name": "name",
       "owner": "TupleArrayEvidence",
       "requirements": [
-        "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:name"
+        "type-definition:examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:name"
       ],
       "resolved": true,
       "span": [
@@ -1487,13 +1487,13 @@
       "candidate_kind": null,
       "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
-      "id": "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:stmt:2:9:4:place:TupleArrayEvidence#build:local:node",
+      "id": "type-read:examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:stmt:2:9:4:place:TupleArrayEvidence#build:local:node",
       "kind": "flow_read",
       "line": 9,
       "name": "node",
       "owner": "TupleArrayEvidence",
       "requirements": [
-        "examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:node"
+        "type-definition:examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:node"
       ],
       "resolved": true,
       "span": [

@@ -1,6 +1,14 @@
 (method_invocation
-  name: (identifier) @name
-  (#match? @name "^(forName|loadClass|newProxyInstance)$")) @hazard.java_metaprogramming
+  object: (identifier) @recv_id (#match? @recv_id "^(?i)(Class|clazz)$")
+  name: (identifier) @name (#eq? @name "forName")) @hazard.java_metaprogramming
+
+(method_invocation
+  object: (identifier) @recv_id (#match? @recv_id "^(?i)(ClassLoader|loader)$")
+  name: (identifier) @name (#eq? @name "loadClass")) @hazard.java_metaprogramming
+
+(method_invocation
+  object: (identifier) @recv_id (#match? @recv_id "^(?i)(Proxy)$")
+  name: (identifier) @name (#eq? @name "newProxyInstance")) @hazard.java_metaprogramming
 
 (method_invocation
   object: [

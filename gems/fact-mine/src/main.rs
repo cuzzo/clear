@@ -56,9 +56,13 @@ fn run() -> Result<()> {
             for summary in complexity_summaries {
                 fact_mine_rust::external_summary::apply_file(&mut merged, &summary)?;
             }
-            let json = serde_json::to_string_pretty(&merged)?;
+            let mut value = serde_json::to_value(&merged)?;
+            if let Ok(current_dir) = std::env::current_dir() {
+                fact_mine_rust::profile::normalize_paths(&mut value, &current_dir);
+            }
+            let json = serde_json::to_string_pretty(&value)?;
             if let Some(ref output_path) = output {
-                fs::write(output_path, json)?;
+                fs::write(output_path, &json)?;
             } else {
                 println!("{}", json);
             }

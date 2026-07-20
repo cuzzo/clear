@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "fact_mine_provider_helper"
 require_relative "language_provider"
-
 module SlopCop
   module Constraints
     module RustProvider
@@ -79,6 +79,15 @@ module SlopCop
               "text" => "A changed Rust unsafe block, unsafe declaration, or unsafe operation was not reached by Miri-style evidence."
             },
             "defaultConfiguration" => { "level" => "warning" }
+          },
+          {
+            "id" => "slopcop-rust-callback-uncovered",
+            "name" => "Rust callback coverage missing",
+            "shortDescription" => { "text" => "Rust callback site lacks Nil-Kill coverage evidence" },
+            "fullDescription" => {
+              "text" => "A changed Rust callback or function pointer invocation site was not reached by Nil-Kill coverage evidence."
+            },
+            "defaultConfiguration" => { "level" => "warning" }
           }
         ]
       end
@@ -88,7 +97,18 @@ module SlopCop
       end
 
       def scan_hazards(repo:, paths: nil)
-        LanguageProvider.scan_hazards(self, repo: repo, paths: paths)
+        hazards = LanguageProvider.scan_hazards(self, repo: repo, paths: paths)
+        cb_hazards = FactMineProviderHelper.scan_hazards_via_fact_mine(
+          paths,
+          repo: repo,
+          language_extension: ".rs",
+          hazard_type_filter: "rust_callback_invocation",
+          required_evidence: "nil-kill",
+          label: "Rust callback invocation site"
+        )
+        (hazards + cb_hazards).uniq { |h| [h[:path] || h["path"], h[:line] || h["line"]] }.sort_by do |h|
+          [h[:path] || h["path"], h[:line] || h["line"]]
+        end
       end
 
       def source_path?(path)
@@ -96,7 +116,13 @@ module SlopCop
       end
 
       def rule_id_for(required_evidence)
-        required_evidence == "loom" ? "slopcop-rust-loom-uncovered" : "slopcop-rust-miri-uncovered"
+        if required_evidence == "nil-kill"
+          "slopcop-rust-callback-uncovered"
+        elsif required_evidence == "loom"
+          "slopcop-rust-loom-uncovered"
+        else
+          "slopcop-rust-miri-uncovered"
+        end
       end
 
       def scan_file(path, contents)

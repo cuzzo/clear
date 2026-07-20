@@ -163,33 +163,33 @@ fn is_cb_name(s: &str) -> bool {
         || s_lower.contains("callable")
 }
 
+fn is_cb_type(s: &str) -> bool {
+    let s_lower = s.to_lowercase();
+    s_lower.contains("callback")
+        || s_lower.contains("listener")
+        || s_lower.contains("handler")
+        || s_lower.contains("observer")
+        || s_lower.contains("executor")
+        || s_lower.contains("consumer")
+        || s_lower.contains("supplier")
+        || s_lower.contains("predicate")
+        || s_lower.contains("runnable")
+        || s_lower.contains("callable")
+        || s_lower == "fn"
+        || s_lower == "func"
+        || s_lower == "function"
+        || s_lower.starts_with("fn(")
+        || s_lower.starts_with("fn ")
+        || s_lower.ends_with("_fn")
+        || s_lower.ends_with("_func")
+        || s_lower.contains("->")
+        || s_lower.contains("=>")
+}
+
 fn is_callback_type_or_name(name: &str, type_str: Option<&str>, language: Language) -> bool {
     if !supports_interfaces(language) {
         return false;
     }
-
-    let is_cb_type = |s: &str| {
-        let s_lower = s.to_lowercase();
-        s_lower.contains("callback")
-            || s_lower.contains("listener")
-            || s_lower.contains("handler")
-            || s_lower.contains("observer")
-            || s_lower.contains("executor")
-            || s_lower.contains("consumer")
-            || s_lower.contains("supplier")
-            || s_lower.contains("predicate")
-            || s_lower.contains("runnable")
-            || s_lower.contains("callable")
-            || s_lower == "fn"
-            || s_lower == "func"
-            || s_lower == "function"
-            || s_lower.starts_with("fn(")
-            || s_lower.starts_with("fn ")
-            || s_lower.ends_with("_fn")
-            || s_lower.ends_with("_func")
-            || s_lower.contains("->")
-            || s_lower.contains("=>")
-    };
 
     if is_cb_name(name) {
         return true;
@@ -234,25 +234,13 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                         .and_then(|params| params.get(&call.message))
                         .map(|s| s.as_str());
                     let is_cb = is_callback_type_or_name(&call.message, param_type, document.language)
+                        || is_cb_name(&call.message)
                         || matches!(
                             call.message.as_str(),
-                            "cb" | "fp"
-                                | "fn"
-                                | "func"
-                                | "blk"
-                                | "block"
+                            "blk" | "block"
                                 | "work"
                                 | "mapper"
                                 | "runner"
-                                | "scenario"
-                                | "handler"
-                                | "listener"
-                                | "on_skip"
-                                | "error_handler"
-                                | "warn_handler"
-                                | "sig_lookup"
-                                | "schema_lookup"
-                                | "project"
                         );
                     if is_cb {
                         is_var_call = true;
@@ -262,8 +250,7 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
             if !is_var_call {
                 if let Some(locals) = document.method_local_types.get(&call.function) {
                     if let Some(t) = locals.get(&call.message) {
-                        let t_lower = t.to_lowercase();
-                        if t_lower.contains("func") || t_lower.contains("fn") || t_lower.contains("->") || t_lower.contains("function") {
+                        if is_cb_type(t) {
                             is_var_call = true;
                         }
                     }

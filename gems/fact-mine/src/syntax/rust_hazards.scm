@@ -9,7 +9,7 @@
       value: _ @recv
       field: (field_identifier) @method)) @hazard.rust_loom_atomic
   (#match? @method "^(load|store|swap)$")
-  (#match? @recv "^(?i).*(atomic|val|cnt|counter|state|ref|ptr|cell|lock|flag|seq|epoch|gen|ptr_).*$")
+  (#match? @recv "^(?i)(.*(atomic|atom|cell).*|^val$|^cnt$|^seq$|^flag$|^counter$|^state$|_(cnt|counter|state|flag|atomic|atom|ptr))$")
 )
 
 (

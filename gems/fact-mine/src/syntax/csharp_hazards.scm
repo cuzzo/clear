@@ -66,7 +66,7 @@
     function: (member_access_expression
       expression: _ @recv
       name: (identifier) @method_name)) @hazard.csharp_metaprogramming
-  (#match? @recv "^(?i).*(Type|t|typeof|clazz|class|declaringType).*$")
+  (#match? @recv "^(?i)(.*(Type|typeof|clazz|class|declaringType).*|^t$|^t_|_t$)$")
   (#match? @method_name "^(GetType|GetMethod|GetMethods|GetField|GetFields|GetProperty|GetProperties|GetConstructor|GetConstructors|CreateInstance)$")
 )
 

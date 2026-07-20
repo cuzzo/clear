@@ -1988,7 +1988,7 @@
       "candidate_kind": "parameter",
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "missing?",
-      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required",
+      "id": "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required",
       "kind": "definition",
       "line": 19,
       "name": "required",
@@ -2007,7 +2007,7 @@
       "candidate_kind": "parameter",
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:arms",
+      "id": "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:arms",
       "kind": "definition",
       "line": 11,
       "name": "arms",
@@ -2026,7 +2026,7 @@
       "candidate_kind": "parameter",
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts",
+      "id": "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts",
       "kind": "definition",
       "line": 11,
       "name": "facts",
@@ -2045,7 +2045,7 @@
       "candidate_kind": "parameter",
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:node",
+      "id": "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:node",
       "kind": "definition",
       "line": 11,
       "name": "node",
@@ -2064,7 +2064,7 @@
       "candidate_kind": "local",
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema",
+      "id": "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema",
       "kind": "definition",
       "line": 13,
       "name": "schema",
@@ -2083,7 +2083,7 @@
       "candidate_kind": "local",
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants",
+      "id": "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants",
       "kind": "definition",
       "line": 14,
       "name": "all_variants",
@@ -2102,13 +2102,13 @@
       "candidate_kind": null,
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "missing?",
-      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:stmt:1:20:4:place:MIRLoweringControlFlow#missing?:local:required",
+      "id": "type-read:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:stmt:1:20:4:place:MIRLoweringControlFlow#missing?:local:required",
       "kind": "flow_read",
       "line": 20,
       "name": "required",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required"
+        "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required"
       ],
       "resolved": true,
       "span": [
@@ -2126,13 +2126,13 @@
       "candidate_kind": null,
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:facts",
+      "id": "type-read:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:facts",
       "kind": "flow_read",
       "line": 13,
       "name": "facts",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts"
+        "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts"
       ],
       "resolved": true,
       "span": [
@@ -2150,13 +2150,13 @@
       "candidate_kind": null,
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema",
+      "id": "type-read:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema",
       "kind": "flow_read",
       "line": 14,
       "name": "schema",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema"
+        "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema"
       ],
       "resolved": false,
       "span": [
@@ -2172,13 +2172,13 @@
       "candidate_kind": null,
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
-      "id": "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:4:15:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants",
+      "id": "type-read:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:4:15:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants",
       "kind": "flow_read",
       "line": 15,
       "name": "all_variants",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants"
+        "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants"
       ],
       "resolved": false,
       "span": [

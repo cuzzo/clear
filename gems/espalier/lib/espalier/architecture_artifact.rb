@@ -81,6 +81,7 @@ module Espalier
           "root" => root.to_s,
           "complete" => evidence.dig("corpus", "complete") == true,
           "completeness_reason" => evidence.dig("corpus", "reason"),
+          "languages" => Array(evidence["languages"]).uniq,
           "language_capabilities" => evidence["language_capabilities"] || {}
         },
         "nodes" => nodes.sort_by { |node| [node["kind"], node["path"].to_s, node["start_line"].to_i, node["id"]] },

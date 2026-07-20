@@ -7346,3 +7346,54 @@ impl<'a> StateParamVisitor<'a> {
         }
     }
 }
+
+fn normalize_string(s: &str, root: &std::path::Path) -> String {
+    if s.contains('\x00') {
+        let parts: Vec<String> = s.split('\x00').map(|part| normalize_string(part, root)).collect();
+        parts.join("\x00")
+    } else if s.contains(':') {
+        let parts: Vec<String> = s.split(':').map(|part| {
+            let path = std::path::Path::new(part);
+            if path.is_absolute() {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    return rel.to_string_lossy().to_string();
+                }
+            }
+            part.to_string()
+        }).collect();
+        parts.join(":")
+    } else {
+        let path = std::path::Path::new(s);
+        if path.is_absolute() {
+            if let Ok(rel) = path.strip_prefix(root) {
+                return rel.to_string_lossy().to_string();
+            }
+        }
+        s.to_string()
+    }
+}
+
+pub fn normalize_paths(v: &mut serde_json::Value, root: &std::path::Path) {
+    match v {
+        serde_json::Value::Object(map) => {
+            for (key, val) in map.iter_mut() {
+                if key == "path" || key == "file" || key == "id" {
+                    if let serde_json::Value::String(s) = val {
+                        *val = serde_json::Value::String(normalize_string(s, root));
+                    }
+                } else {
+                    normalize_paths(val, root);
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for val in arr {
+                normalize_paths(val, root);
+            }
+        }
+        serde_json::Value::String(s) => {
+            *s = normalize_string(s, root);
+        }
+        _ => {}
+    }
+}

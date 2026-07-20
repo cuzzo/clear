@@ -184,11 +184,11 @@ pub fn ingest_architecture_json(
     let mut deactivated_languages = std::collections::HashSet::new();
 
     if complete {
-        if let Some(nodes) = document.get("nodes").and_then(Value::as_array) {
-            for node in nodes {
-                if let Some(lang_val) = node.get("language").and_then(Value::as_str) {
-                    if !lang_val.is_empty() && deactivated_languages.insert(lang_val.to_string()) {
-                        storage.deactivate_active_hazards(lang_val)?;
+        if let Some(langs) = document.pointer("/corpus/languages").and_then(Value::as_array) {
+            for lang_val in langs {
+                if let Some(lang_str) = lang_val.as_str() {
+                    if !lang_str.is_empty() && deactivated_languages.insert(lang_str.to_string()) {
+                        storage.deactivate_active_hazards(lang_str)?;
                     }
                 }
             }
@@ -234,14 +234,28 @@ pub fn ingest_architecture_json(
             }
         };
 
-        if !provider.is_empty() && deactivated_languages.insert(provider.clone()) {
+        if complete && !provider.is_empty() && deactivated_languages.insert(provider.clone()) {
             storage.deactivate_active_hazards(&provider)?;
         }
 
         let required_evidence = {
             let req = text(hazard, "required_evidence");
             if req.is_empty() {
-                "nil-kill".to_string()
+                if hazard_type.contains("vopr") {
+                    "vopr".to_string()
+                } else if hazard_type.contains("loom") {
+                    "loom".to_string()
+                } else if hazard_type.contains("wait_loop") || hazard_type.contains("retry") || hazard_type.contains("hammer") {
+                    "hammer".to_string()
+                } else if hazard_type.contains("metaprogramming") || hazard_type.contains("callback") {
+                    "nil-kill".to_string()
+                } else if hazard_type.contains("unsafe") || hazard_type.contains("memory") || hazard_type.contains("atomic") || hazard_type.contains("leak") {
+                    "miri".to_string()
+                } else if hazard_type.contains("concurrency") || hazard_type.contains("race") || hazard_type.contains("lock") {
+                    "concurrency".to_string()
+                } else {
+                    "unknown".to_string()
+                }
             } else {
                 req
             }
@@ -544,7 +558,7 @@ mod tests {
             "kind": "espalier.architecture.v1",
             "analyzer": {"name": "espalier", "version": "test"},
             "generated_at": "2026-07-11T00:00:00Z",
-            "corpus": {"commit": "abc", "root": dir.path().to_str().unwrap(), "complete": true},
+            "corpus": {"commit": "abc", "root": dir.path().to_str().unwrap(), "complete": true, "languages": ["ruby"]},
             "nodes": [
                 {"id":"owner:1","kind":"owner","name":"Demo","owner":"Demo","path":"demo.rb","start_line":1,"start_column":0,"end_line":8,"end_column":3,"metadata":{"confidence":"high"}},
                 {"id":"fn:1","kind":"function","name":"run","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":2,"start_column":0,"end_line":5,"end_column":3,"metadata":{"confidence":"high"}},
@@ -590,7 +604,7 @@ mod tests {
             "kind": "espalier.architecture.v1",
             "analyzer": {"name": "espalier", "version": "test"},
             "generated_at": "2026-07-11T00:00:00Z",
-            "corpus": {"commit": "def", "root": dir.path().to_str().unwrap(), "complete": true},
+            "corpus": {"commit": "def", "root": dir.path().to_str().unwrap(), "complete": true, "languages": ["ruby"]},
             "nodes": [
                 {"id":"owner:1","kind":"owner","name":"Demo","owner":"Demo","path":"demo.rb","start_line":1,"language":"ruby"},
             ],
@@ -614,7 +628,7 @@ mod tests {
             "kind": "espalier.architecture.v1",
             "analyzer": {"name": "espalier", "version": "test"},
             "generated_at": "2026-07-11T00:00:00Z",
-            "corpus": {"commit": "ghi", "root": dir.path().to_str().unwrap(), "complete": true},
+            "corpus": {"commit": "ghi", "root": dir.path().to_str().unwrap(), "complete": true, "languages": ["ruby"]},
             "nodes": [
                 {"id":"owner:1","kind":"owner","name":"Demo","owner":"Demo","path":"demo.rb","start_line":1,"language":"ruby"},
             ],
@@ -653,7 +667,7 @@ mod tests {
             "kind": "espalier.architecture.v1",
             "analyzer": {"name": "espalier", "version": "test"},
             "generated_at": "2026-07-11T00:00:00Z",
-            "corpus": {"commit": "broken", "root": dir.path().to_str().unwrap(), "complete": true},
+            "corpus": {"commit": "broken", "root": dir.path().to_str().unwrap(), "complete": true, "languages": ["ruby"]},
             "nodes": [
                 // Duplicate IDs to trigger constraint violation
                 {"id":"owner:1","kind":"owner","name":"Demo","owner":"Demo","path":"demo.rb","start_line":1,"language":"ruby"},
