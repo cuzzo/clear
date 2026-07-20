@@ -7391,9 +7391,6 @@ pub fn normalize_paths(v: &mut serde_json::Value, root: &std::path::Path) {
                 normalize_paths(val, root);
             }
         }
-        serde_json::Value::String(s) => {
-            *s = normalize_string(s, root);
-        }
         _ => {}
     }
 }

@@ -106,7 +106,7 @@ module SlopCop
           required_evidence: "nil-kill",
           label: "Rust callback invocation site"
         )
-        (hazards + cb_hazards).uniq { |h| [h[:path] || h["path"], h[:line] || h["line"]] }.sort_by do |h|
+        (hazards + cb_hazards).uniq { |h| [h[:path] || h["path"], h[:line] || h["line"], h[:hazard_type] || h["hazard_type"]] }.sort_by do |h|
           [h[:path] || h["path"], h[:line] || h["line"]]
         end
       end

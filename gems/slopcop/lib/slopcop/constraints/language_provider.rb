@@ -11,26 +11,32 @@ module SlopCop
 
       def findings(provider, repo:, additions:, evidence:)
         repo = File.expand_path(repo)
-        additions.each_with_object([]) do |(path, lines), out|
-          next unless provider.source_path?(path)
+        changed_files = additions.keys.select { |path| provider.source_path?(path) }
+        return [] if changed_files.empty?
 
-          hazards = provider.scan_file(path, source_contents(repo, path))
+        hazards = provider.scan_hazards(repo: repo, paths: changed_files)
+
+        hazards.each_with_object([]) do |hazard, out|
+          path = hazard[:path] || hazard["path"]
+          lines = additions[path]
+          next unless lines
+
           changed = lines.to_set
-          hazards.each do |hazard|
-            next unless changed.include?(hazard[:line])
-            next if covered?(evidence, hazard)
+          line = hazard[:line] || hazard["line"]
+          next unless changed.include?(line)
+          next if covered?(evidence, hazard)
 
-            out << Finding.new(
-              path: path,
-              line: hazard[:line],
-              rule_id: provider.rule_id_for(hazard[:required_evidence]),
-              message: "changed #{hazard[:label]} has no #{hazard[:required_evidence]} coverage evidence",
-              source: hazard[:source],
-              hazard_type: hazard[:hazard_type],
-              required_evidence: hazard[:required_evidence],
-              severity: "warning"
-            )
-          end
+          req_ev = hazard[:required_evidence] || hazard["required_evidence"]
+          out << Finding.new(
+            path: path,
+            line: line,
+            rule_id: provider.rule_id_for(req_ev),
+            message: "changed #{hazard[:label] || hazard["label"]} has no #{req_ev} coverage evidence",
+            source: hazard[:source] || hazard["source"],
+            hazard_type: hazard[:hazard_type] || hazard["hazard_type"],
+            required_evidence: req_ev,
+            severity: "warning"
+          )
         end
       end
 
@@ -47,10 +53,12 @@ module SlopCop
       end
 
       def covered?(evidence, hazard)
-        evidence_type = hazard[:required_evidence]
+        evidence_type = hazard[:required_evidence] || hazard["required_evidence"]
         return false unless evidence.known_type?(evidence_type)
 
-        evidence.line_covered?(evidence_type, hazard[:path], hazard[:line])
+        path = hazard[:path] || hazard["path"]
+        line = hazard[:line] || hazard["line"]
+        evidence.line_covered?(evidence_type, path, line)
       end
 
       def source_contents(repo, path)

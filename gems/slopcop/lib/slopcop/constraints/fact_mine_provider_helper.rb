@@ -27,15 +27,14 @@ module SlopCop
             hazard_sites = facts["hazard_sites"] || []
             return filter_and_format_hazards(hazard_sites, files, repo, hazard_type_filter, required_evidence, label)
           rescue => e
-            warn "Failed to read pre-computed facts from #{ENV["FACT_MINE_FACTS_FILE"]}: #{e.message}"
+            raise "Failed to parse pre-computed facts from #{ENV["FACT_MINE_FACTS_FILE"]}: #{e.message}"
           end
         end
 
         # 2. Fallback to running fact-mine-rust directly
         fact_mine_bin = ENV.fetch("FACT_MINE_RUST_BINARY", File.expand_path("../../../../fact-mine/target/release/fact-mine-rust", __dir__))
         unless File.executable?(fact_mine_bin)
-          warn "fact-mine-rust binary not found or not executable at #{fact_mine_bin}."
-          return []
+          raise "fact-mine-rust binary not found or not executable at #{fact_mine_bin}."
         end
 
         # Run on files in slices to avoid argument length limits
@@ -43,10 +42,9 @@ module SlopCop
           rel_slice = slice.map { |f| Pathname.new(f).relative_path_from(Pathname.new(repo)).to_s }
           stdout, stderr, status = Open3.capture3(fact_mine_bin, "profile", "nil-kill", *rel_slice, chdir: repo)
           unless status.success?
-            warn "fact-mine-rust failed: #{stderr}"
-            next []
+            raise "fact-mine-rust failed: #{stderr}"
           end
-          facts = JSON.parse(stdout) rescue {}
+          facts = JSON.parse(stdout)
           hazard_sites = facts["hazard_sites"] || []
           filter_and_format_hazards(hazard_sites, slice, repo, hazard_type_filter, required_evidence, label)
         end

@@ -62,8 +62,12 @@
 )
 
 (
-  (call_expression function: (field_expression field: (field_identifier) @method)) @hazard.rust_loom_concurrency
+  (call_expression
+    function: (field_expression
+      value: _ @recv
+      field: (field_identifier) @method)) @hazard.rust_loom_concurrency
   (#match? @method "^(lock|try_lock)$")
+  (#match? @recv "^(?i)(.*(lock|mutex|rwlock|condvar|arc|sync).*|^mu$|^m$)$")
 )
 
 (

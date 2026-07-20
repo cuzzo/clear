@@ -16,12 +16,8 @@
 )
 
 (
-  (selector_expression operand: (identifier) @obj field: (field_identifier) @method) @hazard.go_concurrency_waitgroup
-  (#match? @obj "^(WaitGroup)$")
-)
-
-(
-  (selector_expression field: (field_identifier) @method) @hazard.go_concurrency_waitgroup
+  (selector_expression operand: _ @obj field: (field_identifier) @method) @hazard.go_concurrency_waitgroup
+  (#match? @obj "(?i)(wg|wait|group)")
   (#match? @method "^(Add|Done|Wait)$")
 )
 

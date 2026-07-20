@@ -90,14 +90,30 @@ pub(crate) fn extract_hazards(
                 .trim()
                 .to_string();
 
-            let required_evidence = if hazard_type.contains("_vopr_") {
+            let required_evidence = if hazard_type.contains("_vopr_") || hazard_type.starts_with("zig_vopr_") {
                 "vopr".to_string()
-            } else if hazard_type.contains("_loom_") {
+            } else if hazard_type.contains("_loom_") || hazard_type.starts_with("rust_loom_") {
                 "loom".to_string()
-            } else if hazard_type.contains("_wait_loop") {
+            } else if hazard_type.contains("_wait_loop") || hazard_type.ends_with("_wait_loop") {
                 "hammer".to_string()
-            } else if hazard_type.contains("_metaprogramming") {
+            } else if hazard_type.contains("_metaprogramming") || hazard_type.contains("_callback_") {
                 "nil-kill".to_string()
+            } else if hazard_type.contains("_asan_") || hazard_type.starts_with("c_asan_") {
+                "asan".to_string()
+            } else if hazard_type.contains("_lsan_") || hazard_type.starts_with("c_lsan_") {
+                "lsan".to_string()
+            } else if hazard_type.contains("_ubsan_") || hazard_type.starts_with("c_ubsan_") {
+                "ubsan".to_string()
+            } else if hazard_type.contains("_tsan_") || hazard_type.starts_with("c_tsan_") {
+                "tsan".to_string()
+            } else if hazard_type.starts_with("go_race_") {
+                "race".to_string()
+            } else if hazard_type.starts_with("go_concurrency_") {
+                "concurrency".to_string()
+            } else if hazard_type == "csharp_unsafe_memory" {
+                "unsafe".to_string()
+            } else if hazard_type.starts_with("rust_unsafe_") {
+                "miri".to_string()
             } else {
                 "".to_string()
             };
@@ -387,7 +403,7 @@ mod tests {
         let hazards = extract_hazards("test.rs", tree.root_node(), code, Language::Rust);
         assert!(!hazards.is_empty());
         let unsafe_hazard = hazards.iter().find(|h| h.hazard_type == "rust_unsafe_block").unwrap();
-        assert_eq!(unsafe_hazard.required_evidence, "");
+        assert_eq!(unsafe_hazard.required_evidence, "miri");
         assert_eq!(unsafe_hazard.snippet, "unsafe {");
     }
 

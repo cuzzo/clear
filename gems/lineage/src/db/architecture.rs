@@ -241,21 +241,7 @@ pub fn ingest_architecture_json(
         let required_evidence = {
             let req = text(hazard, "required_evidence");
             if req.is_empty() {
-                if hazard_type.contains("vopr") {
-                    "vopr".to_string()
-                } else if hazard_type.contains("loom") {
-                    "loom".to_string()
-                } else if hazard_type.contains("wait_loop") || hazard_type.contains("retry") || hazard_type.contains("hammer") {
-                    "hammer".to_string()
-                } else if hazard_type.contains("metaprogramming") || hazard_type.contains("callback") {
-                    "nil-kill".to_string()
-                } else if hazard_type.contains("unsafe") || hazard_type.contains("memory") || hazard_type.contains("atomic") || hazard_type.contains("leak") {
-                    "miri".to_string()
-                } else if hazard_type.contains("concurrency") || hazard_type.contains("race") || hazard_type.contains("lock") {
-                    "concurrency".to_string()
-                } else {
-                    "unknown".to_string()
-                }
+                "unknown".to_string()
             } else {
                 req
             }
@@ -571,6 +557,7 @@ mod tests {
                     "path": "demo.rb",
                     "line": 3,
                     "hazard_type": "ruby_metaprogramming",
+                    "required_evidence": "nil-kill",
                     "source": "send(:run)"
                 }
             ]

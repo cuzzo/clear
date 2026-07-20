@@ -36,6 +36,7 @@ fn run() -> Result<()> {
             language_override,
             scip_indexes,
             complexity_summaries,
+            portable,
         } => {
             let profile = match profile.as_str() {
                 "espalier" => Profile::Espalier,
@@ -57,8 +58,10 @@ fn run() -> Result<()> {
                 fact_mine_rust::external_summary::apply_file(&mut merged, &summary)?;
             }
             let mut value = serde_json::to_value(&merged)?;
-            if let Ok(current_dir) = std::env::current_dir() {
-                fact_mine_rust::profile::normalize_paths(&mut value, &current_dir);
+            if portable {
+                if let Ok(current_dir) = std::env::current_dir() {
+                    fact_mine_rust::profile::normalize_paths(&mut value, &current_dir);
+                }
             }
             let json = serde_json::to_string_pretty(&value)?;
             if let Some(ref output_path) = output {
@@ -247,6 +250,7 @@ enum Command {
         language_override: Option<String>,
         scip_indexes: Vec<PathBuf>,
         complexity_summaries: Vec<PathBuf>,
+        portable: bool,
     },
     CallResolution {
         files: Vec<PathBuf>,
@@ -343,6 +347,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut files = Vec::new();
             let mut scip_indexes = Vec::new();
             let mut complexity_summaries = Vec::new();
+            let mut portable = false;
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
                     "--output" => {
@@ -382,6 +387,9 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                             other.strip_prefix("--complexity-summary=").unwrap(),
                         ));
                     }
+                    "--portable" => {
+                        portable = true;
+                    }
                     other if other.starts_with("--") => bail!("unsupported option: {other}"),
                     path => files.push(PathBuf::from(path)),
                 }
@@ -396,6 +404,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 language_override,
                 scip_indexes,
                 complexity_summaries,
+                portable,
             })
         }
         "call-resolution" => {
