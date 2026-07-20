@@ -452,7 +452,23 @@ module PredicateRewriter
     return nil unless i >= obj_start && source[i] == '.'
     obj_end = i
     return nil unless obj_end > obj_start
-    source[obj_start...obj_end]
+    receiver = T.must(source[obj_start...obj_end])
+
+    # Parentheses used only for grouping are intentionally absent from the
+    # AST. The receiver token for `(xs).length()` therefore starts at `x`,
+    # while the source range ending before `.length` is `xs)`. Include the
+    # matching opening wrapper instead of handing an unbalanced `xs)` to the
+    # replacement renderer.
+    balance = receiver.count('(') - receiver.count(')')
+    while balance < 0
+      cursor = obj_start - 1
+      cursor -= 1 while cursor >= 0 && source[cursor] =~ /\s/
+      return nil unless cursor >= 0 && source[cursor] == '('
+
+      obj_start = cursor
+      balance += 1
+    end
+    T.must(source[obj_start...obj_end])
   end
 
   # Wrap source text in parens iff it could be misparsed when
