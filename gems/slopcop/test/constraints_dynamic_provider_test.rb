@@ -14,6 +14,10 @@ class ConstraintsDynamicProviderTest < Minitest::Test
     assert_same SlopCop::Constraints::JavascriptProvider, SlopCop::Constraints.providers.fetch("javascript")
     assert_same SlopCop::Constraints::TypescriptProvider, SlopCop::Constraints.providers.fetch("typescript")
     assert_same SlopCop::Constraints::LuaProvider, SlopCop::Constraints.providers.fetch("lua")
+    assert_same SlopCop::Constraints::JavaProvider, SlopCop::Constraints.providers.fetch("java")
+    assert_same SlopCop::Constraints::KotlinProvider, SlopCop::Constraints.providers.fetch("kotlin")
+    assert_same SlopCop::Constraints::SwiftProvider, SlopCop::Constraints.providers.fetch("swift")
+    assert_same SlopCop::Constraints::PhpProvider, SlopCop::Constraints.providers.fetch("php")
   end
 
   def test_ruby_provider_finds_metaprogramming_hazard

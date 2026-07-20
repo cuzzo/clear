@@ -21,7 +21,7 @@ def usage
       slopcop constraints [--repo=.] --base=origin/master [--head=HEAD] \\
                    [--coverage=loom:zig/zig-out/coverage-loom/merged/kcov-merged/cobertura.xml] \\
                    [--coverage=vopr:zig/zig-out/coverage-vopr/merged/kcov-merged/cobertura.xml] \\
-                   [--language=zig|go|rust|c|cpp|csharp] \\
+                   [--language=zig|go|rust|c|cpp|csharp|ruby|python|javascript|typescript|lua|java|kotlin|swift|php] \\
                    [--sarif=slopcop-constraints.sarif] [--json=constraints.sarif] \\
                    [--markdown=constraints.md] [--strict]
 
