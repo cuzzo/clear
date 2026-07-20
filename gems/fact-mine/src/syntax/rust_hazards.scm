@@ -102,8 +102,3 @@
   (macro_invocation macro: (identifier) @macro) @hazard.rust_unsafe_operation
   (#match? @macro "^(addr_of|asm)$")
 )
-
-(
-  (unary_expression) @hazard.rust_unsafe_operation
-  (#match? @hazard.rust_unsafe_operation "^\\*")
-)

@@ -75,7 +75,7 @@
     function: (member_access_expression
       expression: _ @recv
       name: (identifier) @method_name)) @hazard.csharp_metaprogramming
-  (#match? @recv "^(?i).*(Method|Field|Property|Constructor|info|mi|fi|pi|member).*$")
+  (#match? @recv "^(?i)(mi|fi|pi|ci|.*info|.*method|.*field|.*property|.*constructor|.*member)$")
   (#match? @method_name "^(Invoke|GetValue|SetValue)$")
 )
 

@@ -981,6 +981,16 @@ local mt = {
         assert_eq!(loom_hazards.len(), 1);
         assert!(loom_hazards[0].snippet.contains("mutex.lock()"));
 
+        // Safe reference derefs are not unsafe operations; raw-pointer derefs
+        // are already covered by the enclosing unsafe block.
+        let rust_deref = check_all("
+            fn read(x: &i32) -> i32 {
+                let v = *x;
+                v
+            }
+        ", ".rs", Language::Rust);
+        assert!(rust_deref.iter().all(|h| h.hazard_type != "rust_unsafe_operation"));
+
         // 3. Kotlin Reflection call vs normal function call
         let kt_hazards = check_all("
             fun test() {
@@ -1023,6 +1033,21 @@ local mt = {
         ", ".cs", Language::CSharp);
         let cs_metaprog: Vec<_> = cs_hazards.iter().filter(|h| h.hazard_type == "csharp_metaprogramming").collect();
         assert_eq!(cs_metaprog.len(), 1);
+
+        // Reflection-info receivers flag on Invoke; ordinary identifiers that
+        // merely contain \"mi\"/\"fi\"/\"pi\" as substrings do not.
+        let cs_invoke = check_all("
+            class Demo {
+                void Test() {
+                    mi.Invoke(null, null);
+                    methodInfo.Invoke(null, null);
+                    admin.Invoke();
+                    family.GetValue(null);
+                }
+            }
+        ", ".cs", Language::CSharp);
+        let cs_invoke_metaprog: Vec<_> = cs_invoke.iter().filter(|h| h.hazard_type == "csharp_metaprogramming").collect();
+        assert_eq!(cs_invoke_metaprog.len(), 2);
 
         // 6. Callback compositions: neutral name, aliasing, hops, multiline, struct function pointers
         let compositions_code = "
