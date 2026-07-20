@@ -366,24 +366,6 @@
       ],
       "hazard_sites": [
         {
-          "end_column": 15,
-          "end_line": 31,
-          "hazard_type": "c_asan_pointer",
-          "line": 31,
-          "required_evidence": "asan",
-          "source": "self->count += 1;",
-          "start_column": 4
-        },
-        {
-          "end_column": 18,
-          "end_line": 30,
-          "hazard_type": "c_asan_pointer",
-          "line": 30,
-          "required_evidence": "asan",
-          "source": "if (self->status == STATUS_IDLE && user->ready) {",
-          "start_column": 6
-        },
-        {
           "end_column": 20,
           "end_line": 15,
           "hazard_type": "c_callback_invocation",
@@ -391,78 +373,6 @@
           "required_evidence": "nil-kill",
           "source": "self.callback(...)",
           "start_column": 2
-        },
-        {
-          "end_column": 20,
-          "end_line": 17,
-          "hazard_type": "c_asan_pointer",
-          "line": 17,
-          "required_evidence": "asan",
-          "source": "switch (user->role) {",
-          "start_column": 10
-        },
-        {
-          "end_column": 20,
-          "end_line": 49,
-          "hazard_type": "c_asan_pointer",
-          "line": 49,
-          "required_evidence": "asan",
-          "source": "return self->count > 0;",
-          "start_column": 9
-        },
-        {
-          "end_column": 21,
-          "end_line": 45,
-          "hazard_type": "c_asan_pointer",
-          "line": 45,
-          "required_evidence": "asan",
-          "source": "return self->status;",
-          "start_column": 9
-        },
-        {
-          "end_column": 22,
-          "end_line": 44,
-          "hazard_type": "c_asan_pointer",
-          "line": 44,
-          "required_evidence": "asan",
-          "source": "sink_send(self->sink, \"record\", name);",
-          "start_column": 12
-        },
-        {
-          "end_column": 34,
-          "end_line": 13,
-          "hazard_type": "c_asan_pointer",
-          "line": 13,
-          "required_evidence": "asan",
-          "source": "const char *name = user->profile->name;",
-          "start_column": 21
-        },
-        {
-          "end_column": 40,
-          "end_line": 13,
-          "hazard_type": "c_asan_pointer",
-          "line": 13,
-          "required_evidence": "asan",
-          "source": "const char *name = user->profile->name;",
-          "start_column": 21
-        },
-        {
-          "end_column": 48,
-          "end_line": 30,
-          "hazard_type": "c_asan_pointer",
-          "line": 30,
-          "required_evidence": "asan",
-          "source": "if (self->status == STATUS_IDLE && user->ready) {",
-          "start_column": 37
-        },
-        {
-          "end_column": 51,
-          "end_line": 14,
-          "hazard_type": "c_asan_pointer",
-          "line": 14,
-          "required_evidence": "asan",
-          "source": "Account account = make_account(name, user->active);",
-          "start_column": 39
         }
       ],
       "language": "c",

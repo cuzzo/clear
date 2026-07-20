@@ -1007,6 +1007,52 @@ local mt = {
         let kt_metaprog: Vec<_> = kt_hazards.iter().filter(|h| h.hazard_type == "kotlin_metaprogramming").collect();
         assert_eq!(kt_metaprog.len(), 1);
 
+        // Ordinary .call() invocations on non-reflection receivers stay quiet.
+        let kt_service = check_all("
+            fun test(service: ApiService) {
+                service.call()
+                retry.call()
+            }
+        ", ".kt", Language::Kotlin);
+        let kt_service_metaprog: Vec<_> = kt_service.iter().filter(|h| h.hazard_type == "kotlin_metaprogramming").collect();
+        assert_eq!(kt_service_metaprog.len(), 0);
+
+        // C/C++ pointer member access, literal shifts, and value casts are not
+        // sanitizer hazards; variable divisors and pointer casts are.
+        let c_precision = check_all("
+            int scale(struct Cfg *cfg, int n, int d) {
+                int half = n / 2;
+                int mask = n << 3;
+                int total = (int)cfg->count;
+                int ratio = n / d;
+                char *bytes = (char *)cfg;
+                return half + mask + total + ratio + bytes[0];
+            }
+        ", ".c", Language::C);
+        assert!(c_precision.iter().all(|h| h.hazard_type != "c_asan_pointer"));
+        let c_arith: Vec<_> = c_precision.iter().filter(|h| h.hazard_type == "c_ubsan_arithmetic").collect();
+        assert_eq!(c_arith.len(), 1);
+        assert!(c_arith[0].snippet.contains("n / d"));
+        let c_casts: Vec<_> = c_precision.iter().filter(|h| h.hazard_type == "c_ubsan_cast").collect();
+        assert_eq!(c_casts.len(), 1);
+        assert!(c_casts[0].snippet.contains("(char *)cfg"));
+
+        let cpp_precision = check_all("
+            int scale(Cfg *cfg, int n, int d) {
+                int half = n / 2;
+                int checked = static_cast<int>(n);
+                int punned = *reinterpret_cast<int *>(cfg);
+                return half + checked + punned + n / d;
+            }
+        ", ".cpp", Language::Cpp);
+        assert!(cpp_precision.iter().all(|h| h.hazard_type != "cpp_asan_pointer_or_cast" || h.snippet.contains("reinterpret_cast")));
+        let cpp_arith: Vec<_> = cpp_precision.iter().filter(|h| h.hazard_type == "cpp_ubsan_arithmetic").collect();
+        assert_eq!(cpp_arith.len(), 1);
+        let cpp_casts: Vec<_> = cpp_precision.iter().filter(|h| h.hazard_type == "cpp_ubsan_cast").collect();
+        assert!(cpp_casts.iter().all(|h| h.snippet.contains("reinterpret_cast")));
+        assert!(!cpp_casts.is_empty());
+        assert!(cpp_precision.iter().all(|h| !h.snippet.contains("static_cast") || h.hazard_type != "cpp_ubsan_cast"));
+
         // 4. Java Real Class.forName vs shadowed class Class
         let java_hazards = check_all("
             class Demo {

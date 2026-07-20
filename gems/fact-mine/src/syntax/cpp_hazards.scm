@@ -38,9 +38,6 @@
   (#match? @hazard.cpp_asan_raw_memory_api "string_view")
 )
 
-(field_expression operator: "->") @hazard.cpp_asan_pointer_or_cast
-(pointer_expression operator: "*") @hazard.cpp_asan_pointer_or_cast
-
 (
   (call_expression function: (template_function name: (identifier) @cast)) @hazard.cpp_asan_pointer_or_cast
   (#match? @cast "^(reinterpret_cast|const_cast)$")
@@ -59,14 +56,21 @@
 (new_expression) @hazard.cpp_lsan_lifetime
 (delete_expression) @hazard.cpp_lsan_lifetime
 
+;; Division/shift by a literal cannot trap; only non-constant right operands
+;; carry divide-by-zero or oversized-shift risk.
 (
-  (binary_expression operator: _ @op) @hazard.cpp_ubsan_arithmetic
+  (binary_expression operator: _ @op right: (_) @rhs) @hazard.cpp_ubsan_arithmetic
   (#match? @op "^(/|%|<<|>>)$")
+  (#not-match? @rhs "^[0-9']")
 )
 
-(cast_expression) @hazard.cpp_ubsan_cast
+;; Only pointer-target C-style casts and the type-punning named casts carry
+;; UB risk; static_cast and dynamic_cast are checked conversions.
+(cast_expression
+  type: (type_descriptor
+    declarator: (abstract_pointer_declarator))) @hazard.cpp_ubsan_cast
 
 (
   (call_expression function: (template_function name: (identifier) @cast)) @hazard.cpp_ubsan_cast
-  (#match? @cast "^(static_cast|dynamic_cast|reinterpret_cast|const_cast)$")
+  (#match? @cast "^(reinterpret_cast|const_cast)$")
 )
