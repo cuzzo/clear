@@ -515,7 +515,7 @@ RSpec.describe SemanticAnnotator do
         src = 'STRUCT N { v: Int64 }
               FN f() RETURNS !Void -> x = N{ v: 1 } @multiowned; w = LINK x; r:? = RESOLVE w; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to match(/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&r\)/)
+        expect(out).to match(/CheatLib\.cleanup\([^,]+,\s*__clear_heap_alloc,\s*&r\)/)
       end
 
       it "@link type annotation preserves link_source" do
@@ -545,7 +545,7 @@ RSpec.describe SemanticAnnotator do
               STRUCT Edge { target: N@link }
               FN f() RETURNS !Void -> n = N{ v: 1 } @multiowned; e = Edge{ target: LINK n }; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("CheatLib.cleanup(@TypeOf(e), rt.heapAlloc(), &e)")
+        expect(out).to include("CheatLib.cleanup(@TypeOf(e), __clear_heap_alloc, &e)")
       end
 
       it "struct with @multiowned field emits cleanup" do
@@ -553,7 +553,7 @@ RSpec.describe SemanticAnnotator do
               STRUCT W { inner: N@multiowned }
               FN f() RETURNS !Void -> n = N{ v: 1 } @multiowned; w = W{ inner: n }; RETURN; END'
         out = ZigTranspiler.new.transpile(src)
-        expect(out).to include("CheatLib.cleanup(@TypeOf(w), rt.heapAlloc(), &w)")
+        expect(out).to include("CheatLib.cleanup(@TypeOf(w), __clear_heap_alloc, &w)")
       end
 
       it "raises error when passing @link to function expecting plain type" do

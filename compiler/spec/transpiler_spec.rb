@@ -132,7 +132,7 @@ RSpec.describe ZigTranspiler do
       CLEAR
 
       expect(zig).to include("defer if (!v_moved) CheatLib.cleanup(@TypeOf(v), rt.frameAlloc(), &v);")
-      expect(zig).not_to include("CheatLib.cleanup(@TypeOf(v), rt.heapAlloc(), &v)")
+      expect(zig).not_to include("CheatLib.cleanup(@TypeOf(v), __clear_heap_alloc, &v)")
     end
 
     it "cleans popped frame-list struct captures with the receiver allocator" do
@@ -150,7 +150,7 @@ RSpec.describe ZigTranspiler do
       CLEAR
 
       expect(zig).to include("defer if (!v_moved) CheatLib.cleanup(@TypeOf(v), rt.frameAlloc(), &v);")
-      expect(zig).not_to include("CheatLib.cleanup(@TypeOf(v), rt.heapAlloc(), &v)")
+      expect(zig).not_to include("CheatLib.cleanup(@TypeOf(v), __clear_heap_alloc, &v)")
     end
 
     it "lets heap return destinations override frame-default intrinsic return allocation" do
@@ -319,7 +319,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("rt.heapAlloc()")
+      expect(zig).to include("__clear_heap_alloc")
     end
   end
 
@@ -368,7 +368,7 @@ RSpec.describe ZigTranspiler do
 
     it "uses heapAlloc for always-escaped list operations" do
       zig = transpile(frame_list_src)
-      expect(zig).to include("rt.heapAlloc()")
+      expect(zig).to include("__clear_heap_alloc")
     end
 
     it "caller cleans up heap-allocated list (no frame deinit)" do
@@ -399,26 +399,26 @@ RSpec.describe ZigTranspiler do
       # StringMap already uses heapAlloc for all ops, so mapPromote is not needed.
       # The escape path just ensures .alloc is set.
       expect(zig).not_to include("CheatLib.mapPromote")
-      expect(zig).to include(".alloc = rt.heapAlloc()")
+      expect(zig).to include(".alloc = __clear_heap_alloc")
     end
 
     it "always-escaped map is heap from start (no separate alloc set before return)" do
       zig = transpile(map_return_src)
       # StringMap init already sets .alloc = rt.heapAlloc(). Always-escaped
       # detection eliminates the redundant MIR::Promote alloc assignment.
-      expect(zig).to include(".alloc = rt.heapAlloc()")
-      expect(zig).not_to include("m.alloc = rt.heapAlloc()")
+      expect(zig).to include(".alloc = __clear_heap_alloc")
+      expect(zig).not_to include("m.alloc = __clear_heap_alloc")
     end
 
     it "uses heapAlloc for mapPut keys and values (heap-provenance map)" do
       zig = transpile(map_return_src)
-      expect(zig).to include(".put(rt.heapAlloc(), rt.heapAlloc()")
+      expect(zig).to include(".put(__clear_heap_alloc, __clear_heap_alloc")
     end
 
     it "caller uses cleanup with heapAlloc for promoted map" do
       zig = transpile(map_return_src)
       expect(zig).to include("CheatLib.cleanup(")
-      expect(zig).to include("rt.heapAlloc()")
+      expect(zig).to include("__clear_heap_alloc")
     end
 
     it "all string maps use heapAlloc cleanup (consistent with put allocator)" do
@@ -431,7 +431,7 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("CheatLib.cleanup(")
-      expect(zig).to include("rt.heapAlloc()")
+      expect(zig).to include("__clear_heap_alloc")
     end
   end
 
@@ -1104,7 +1104,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("val_moved")
       expect(zig).not_to include("dupeUnionValue(Value, val")
       expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\);/)
-      expect(zig).to include('map.put(rt.heapAlloc(), rt.heapAlloc(), "key", val)')
+      expect(zig).to include('map.put(__clear_heap_alloc, __clear_heap_alloc, "key", val)')
     end
 
     it "moves owned map assignment values without deep-copying them" do
@@ -1121,7 +1121,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("val_moved = true")
       expect(zig).not_to include("dupeUnionValue(Value, val")
       expect(zig).not_to match(/defer CheatLib\.cleanup\([^,]+, [^,]+, &val\)/)
-      expect(zig).to include('map.put(rt.heapAlloc(), rt.heapAlloc(), "key", val)')
+      expect(zig).to include('map.put(__clear_heap_alloc, __clear_heap_alloc, "key", val)')
     end
 
     it "does not emit source_moved for plain MATCH AS on non-Copy variant" do
@@ -1186,7 +1186,7 @@ RSpec.describe ZigTranspiler do
       zig = transpile(src)
       # String literal "hello" must be heap-duped before storing in HashMap.
       # Without this, HashMap.deinit tries to free rodata -> crash.
-      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8.*"hello"/)
+      expect(zig).to match(/__clear_heap_alloc\.dupe\(u8.*"hello"/)
     end
 
     it "heap-dupes string literal inside union value in HashMap assignment" do
@@ -1946,9 +1946,9 @@ RSpec.describe ZigTranspiler do
 
       expect(zig).to match(/const __tmp_\d+ = try text\(rt\);/)
       expect(zig).to match(/const __tmp_\d+ = \.\{1, __tmp_\d+\};/)
-      expect(zig).to match(/defer CheatLib\.cleanup\(@TypeOf\(__tmp_\d+\), rt\.heapAlloc\(\), &__tmp_\d+\)/)
+      expect(zig).to match(/defer CheatLib\.cleanup\(@TypeOf\(__tmp_\d+\), __clear_heap_alloc, &__tmp_\d+\)/)
       expect(zig).to match(/const __hoist_\d+ = try copyTuple\(rt, __tmp_\d+\);/)
-      expect(zig).to match(/defer if \(!__hoist_\d+_moved\) CheatLib\.cleanup\(@TypeOf\(__hoist_\d+\), rt\.heapAlloc\(\), &__hoist_\d+\)/)
+      expect(zig).to match(/defer if \(!__hoist_\d+_moved\) CheatLib\.cleanup\(@TypeOf\(__hoist_\d+\), __clear_heap_alloc, &__hoist_\d+\)/)
       expect(zig).to match(/consume\(rt, __hoist_\d+\);\n__hoist_\d+_moved = true;/)
     end
 
@@ -1958,7 +1958,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void -> consume([1_i64]); RETURN; END
       CLEAR
 
-      expect(zig).to include('heapAlloc().dupe(@typeInfo(@TypeOf(__x)).array.child, __x[0..])')
+      expect(zig).to include('__clear_heap_alloc.dupe(@typeInfo(@TypeOf(__x)).array.child, __x[0..])')
       expect(zig).not_to match(/__hoist_\d+_moved/)
     end
 
@@ -2021,8 +2021,8 @@ RSpec.describe ZigTranspiler do
 
       expect(zig).to include("text.ctrl.data.*")
       expect(zig).to include("values.ctrl.data.*")
-      expect(zig).to include('@as([]const u8, try rt.heapAlloc().dupe(u8, "one"))')
-      expect(zig).to include('rcCreate([]const u8, rt.heapAlloc(), __tmp_1)')
+      expect(zig).to include('@as([]const u8, try __clear_heap_alloc.dupe(u8, "one"))')
+      expect(zig).to include('rcCreate([]const u8, __clear_heap_alloc, __tmp_1)')
     end
 
     it "transfers nested copies of fresh managed aggregates without leaking the constructor" do
@@ -2035,7 +2035,7 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
 
-      expect(zig).to include('arcCreate(struct { i64, []const u8 }, rt.heapAlloc(), .{1, __tmp_1})')
+      expect(zig).to include('arcCreate(struct { i64, []const u8 }, __clear_heap_alloc, .{1, __tmp_1})')
       expect(zig).not_to include('const __copy_src = .{1, __tmp_1};')
     end
 
@@ -2051,7 +2051,7 @@ RSpec.describe ZigTranspiler do
       CLEAR
 
       expect(zig).to include('if (value) |__or_val_')
-      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8, __or_val_\d+\)/)
+      expect(zig).to match(/__clear_heap_alloc\.dupe\(u8, __or_val_\d+\)/)
     end
 
     it "threads runtime through a managed OR_ELSE return" do
@@ -2112,7 +2112,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void -> result = TRY caller(); RETURN; END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/dupeValue\(\[\]const u8, .+, rt\.heapAlloc\(\)\)/)
+      expect(zig).to match(/dupeValue\(\[\]const u8, .+, __clear_heap_alloc\)/)
     end
   end
 

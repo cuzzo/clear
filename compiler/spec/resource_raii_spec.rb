@@ -77,6 +77,6 @@ RSpec.describe "Resource RAII Transpilation" do
     zig = transpile(src)
     expect(zig).to include("pub fn __clear_drop(self: *@This(), alloc: std.mem.Allocator) void")
     expect(zig).to include("self.f.close()")
-    expect(zig).to include("defer CheatLib.cleanup(@TypeOf(h), rt.heapAlloc(), &h)")
+    expect(zig).to include("defer CheatLib.cleanup(@TypeOf(h), __clear_heap_alloc, &h)")
   end
 end

@@ -422,9 +422,9 @@ RSpec.describe "type-system change contracts" do
       END
     CLEAR
 
-    expect(zig).to match(/const __tmp_\d+ = @as\(\[\]const u8, try rt\.heapAlloc\(\)\.dupe\(u8, "hello"\)\)/)
+    expect(zig).to match(/const __tmp_\d+ = @as\(\[\]const u8, try __clear_heap_alloc\.dupe\(u8, "hello"\)\)/)
     expect(zig).to match(/const value = \.\{__tmp_\d+, 1\}/)
-    expect(zig).to include('CheatLib.cleanup(@TypeOf(value), rt.heapAlloc(), &value)')
+    expect(zig).to include('CheatLib.cleanup(@TypeOf(value), __clear_heap_alloc, &value)')
     expect(zig).to match(/errdefer if \(!__tmp_\d+_moved\) CheatLib\.cleanup/)
     expect(zig).to match(/__tmp_\d+_moved = true/)
     expect(zig.scan(/__tmp_\d+_moved = true/).length).to eq(1)
@@ -445,7 +445,7 @@ RSpec.describe "type-system change contracts" do
       END
     CLEAR
 
-    expect(tuple_zig).to include("CheatLib.cleanup(@TypeOf(value), rt.heapAlloc(), &value)")
+    expect(tuple_zig).to include("CheatLib.cleanup(@TypeOf(value), __clear_heap_alloc, &value)")
     expect(list_zig).to include("try futures.append(rt.frameAlloc()")
   end
 

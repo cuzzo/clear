@@ -123,7 +123,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       zig = transpile(src)
 
       tick_body = zig[/fn tick_Versioned.*?\nfn /m] || zig[/fn tick_Versioned.*/m]
-      expect(tick_body).to include(".update(rt, rt.heapAlloc()")
+      expect(tick_body).to include(".update(rt, __clear_heap_alloc")
       expect(tick_body).to include("error.UpdateRetriesExhausted")
       expect(tick_body).to include("ErrorName.MvccConflict")
 
@@ -151,7 +151,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       zig = transpile(src)
 
       tick_body = zig[/fn tick_Atomic.*?\nfn /m] || zig[/fn tick_Atomic.*/m]
-      expect(tick_body).to include(".update(rt, rt.heapAlloc()")
+      expect(tick_body).to include(".update(rt, __clear_heap_alloc")
 
       # No mutex acquire/release.
       expect(tick_body).not_to match(/\.acquire\(\)/)
@@ -191,7 +191,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       # The polymorphic shape uses comptime probes (`@hasField` / `@hasDecl`)
       # that resolve per actual-type at the call site.
       expect(tick_body).to include("comptime")
-      expect(tick_body).to include(".update(rt, rt.heapAlloc()")
+      expect(tick_body).to include(".update(rt, __clear_heap_alloc")
     end
   end
 
@@ -217,7 +217,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       tick_body = zig[/fn tick_Local.*?\nfn /m] || zig[/fn tick_Local.*/m]
       # No-op assertion: tick body must NOT contain any sync ops.
       expect(tick_body).not_to match(/\.acquire\(\)/)
-      expect(tick_body).not_to match(/\.update\(rt, rt\.heapAlloc/)
+      expect(tick_body).not_to match(/\.update\(rt, __clear_heap_alloc/)
       expect(tick_body).not_to include("error.UpdateRetriesExhausted")
       expect(tick_body).not_to include("error.AtomicConflict")
       expect(tick_body).to include("const x = (if (comptime @typeInfo(@TypeOf(c)) == .pointer)")
@@ -239,7 +239,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       zig = transpile(src)
       tick_body = zig[/fn tick_Multi.*?\nfn /m] || zig[/fn tick_Multi.*/m]
       expect(tick_body).not_to match(/\.acquire\(\)/)
-      expect(tick_body).not_to match(/\.update\(rt, rt\.heapAlloc/)
+      expect(tick_body).not_to match(/\.update\(rt, __clear_heap_alloc/)
       expect(tick_body).to include("comptime @hasField")
       expect(tick_body).not_to include("const x = c.*;")
     end
@@ -277,7 +277,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       zig = transpile(src)
       tick_body = zig[/fn tick_Plain.*?\nfn /m] || zig[/fn tick_Plain.*/m]
       expect(tick_body).not_to match(/\.acquire\(\)/)
-      expect(tick_body).not_to match(/\.update\(rt, rt\.heapAlloc/)
+      expect(tick_body).not_to match(/\.update\(rt, __clear_heap_alloc/)
     end
   end
 

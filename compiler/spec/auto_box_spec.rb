@@ -72,7 +72,7 @@ RSpec.describe "EASY automatic indirection" do
 
     zig = transpile(source, mode: :default)
     add_body = zig.split("fn add", 2).last.split("fn clearMain", 2).first
-    expect(add_body).to include("items.append(rt.heapAlloc(), f)")
+    expect(add_body).to include("items.append(__clear_heap_alloc, f)")
     expect(add_body).to include("f_moved = true")
     expect(add_body).not_to include("dupeValue")
   end

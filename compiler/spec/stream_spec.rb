@@ -869,7 +869,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         out = transpile_fn(src)
-        expect(out).to include("defer CheatLib.cleanup(@TypeOf(s), rt.heapAlloc(), &s)")
+        expect(out).to include("defer CheatLib.cleanup(@TypeOf(s), __clear_heap_alloc, &s)")
         expect(out).not_to include("s_moved")
       end
     end
@@ -1473,7 +1473,7 @@ RSpec.describe SemanticAnnotator do
 
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include(".Item => |value|")
-        expect(out).to include("CheatLib.cleanup(@TypeOf(value), rt.heapAlloc(), &value)")
+        expect(out).to include("CheatLib.cleanup(@TypeOf(value), __clear_heap_alloc, &value)")
       end
 
       it "allows ~?T[] in BindExpr declarations" do

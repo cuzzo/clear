@@ -39,7 +39,7 @@ RSpec.describe "EXTERN borrowed return lifetimes" do
       FN escape(scanner: Scanner) RETURNS String -> RETURN peek(scanner); END
     CLEAR
 
-    expect(zig).to match(/heapAlloc\(\)\.dupe\(u8, .*scanner\.peek/m)
+    expect(zig).to match(/__clear_heap_alloc\.dupe\(u8, .*scanner\.peek/m)
   end
 
   it "allows an explicit COPY to detach the view from the EXTERN argument" do

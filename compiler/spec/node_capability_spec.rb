@@ -70,7 +70,7 @@ RSpec.describe "@node capability" do
     expect(zig).to include("CheatLib.NodeStore(Node).createBound(__node_store_Node, Node{")
     expect(zig).to include("CheatLib.NodeStore(Node).getBound(__node_store_Node, root).?.left")
     create_child = "const __eval_2 = try CheatLib.NodeStore(Node).createBound(__node_store_Node, Node{ .id = 3 });"
-    append_child = "children.append(rt.heapAlloc(), __eval_2);"
+    append_child = "children.append(__clear_heap_alloc, __eval_2);"
     expect(zig).to include(create_child)
     expect(zig).to include(append_child)
     expect(zig.index(create_child)).to be < zig.index(append_child)

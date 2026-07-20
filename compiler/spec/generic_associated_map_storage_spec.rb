@@ -32,7 +32,7 @@ RSpec.describe "generic associated-key map storage" do
     expect(zig).to include("entries: CheatLib.MapType(CheatLib.MapFacts(M).Key")
     expect(zig).to include("try __inherent_Index_get")
     expect(zig).to include("CheatLib.mapProtocolGet(&self.entries")
-    expect(zig).to include("const __tmp_1 = CheatLib.StringMap([]const u8){ .alloc = rt.heapAlloc() };")
+    expect(zig).to include("const __tmp_1 = CheatLib.StringMap([]const u8){ .alloc = __clear_heap_alloc };")
     expect(zig).to include("Index(CheatLib.StringMap([]const u8)){ .entries = __tmp_1 }")
     expect(zig).to include("dupeValue(@TypeOf(__copy_src)")
     expect(zig).not_to include("HashMap<M::")

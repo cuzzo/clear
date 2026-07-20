@@ -41,7 +41,7 @@ RSpec.describe "automatic ownership transport" do
     CLEAR
 
     expect(zig).to include("const __copy_src = value")
-    expect(zig).to include("CheatLib.dupeValue(@TypeOf(value), __copy_src, rt.heapAlloc())")
+    expect(zig).to include("CheatLib.dupeValue(@TypeOf(value), __copy_src, __clear_heap_alloc)")
   end
 
   it "keeps parent cleanup when a local field view is inferred as a borrow" do

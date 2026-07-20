@@ -424,7 +424,7 @@ RSpec.describe MIRLowering do
       program = lower_fixture_program("transpile-tests/06_heap_return.clear")
 
       expect(program).to include("fn makeUser(rt: *Runtime) !*User")
-      expect(program).to include("try rt.heapAlloc().create(User)")
+      expect(program).to include("try __clear_heap_alloc.create(User)")
       expect(program).not_to include("__p.* = @as(*User")
       expect(program).not_to include("return u;")
     end
@@ -969,7 +969,7 @@ RSpec.describe MIRLowering do
       expect(zig).not_to include("CheatLib.cleanup(@TypeOf(s), rt.heapAlloc(), &s)")
 
       expect(zig).to match(/var s_L\d+: \[\]const u8 = try make\(rt\)/)
-      expect(zig).to match(/CheatLib\.cleanup\(@TypeOf\(s_L\d+\), rt\.heapAlloc\(\), &s_L\d+\)/)
+      expect(zig).to match(/CheatLib\.cleanup\(@TypeOf\(s_L\d+\), __clear_heap_alloc, &s_L\d+\)/)
     end
   end
 
@@ -4459,25 +4459,25 @@ RSpec.describe MIRLowering do
     fixture_expectations = {
       "transpile-tests/253_while_bind.clear" => {
         description: "WHILE bind and RESOLVE traversal",
-        required_patterns: [/while \(items\.pop\(\)\) \|v\|/, /CheatLib\.weakRcUpgrade/, /CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&__tmp_/]
+        required_patterns: [/while \(items\.pop\(\)\) \|v\|/, /CheatLib\.weakRcUpgrade/, /CheatLib\.cleanup\([^,]+,\s*__clear_heap_alloc,\s*&__tmp_/]
       },
       "transpile-tests/305_observable_collect.clear" => {
         description: "observable COLLECT wait/destroy cleanup",
         # wait+destroy lives in CheatLib.cleanup's observable arm now; the
         # codegen contract is "binding cleanup routes through CheatLib.cleanup
         # with heapAlloc, calling running.next() in the body."
-        required_patterns: [/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&running\)/, /try running\.next\(\)/]
+        required_patterns: [/CheatLib\.cleanup\([^,]+,\s*__clear_heap_alloc,\s*&running\)/, /try running\.next\(\)/]
       },
       "transpile-tests/306_observable_default.clear" => {
         description: "inline observable aggregate COLLECT accumulator ownership",
         required_patterns: [
           /const __collect_acc_\d+/,
-          /CheatLib\.cleanup\(@TypeOf\(__collect_acc_\d+\), rt\.heapAlloc\(\), &__collect_acc_\d+\)/
+          /CheatLib\.cleanup\(@TypeOf\(__collect_acc_\d+\), __clear_heap_alloc, &__collect_acc_\d+\)/
         ]
       },
       "transpile-tests/329_versioned_snapshot_mutable.clear" => {
         description: "versioned mutable snapshot update conflict handling",
-        required_patterns: [/\.update\(rt, rt\.heapAlloc\(\)/, /MvccConflict/]
+        required_patterns: [/\.update\(rt, __clear_heap_alloc/, /MvccConflict/]
       },
       "transpile-tests/337_atomic_basic_ops.clear" => {
         description: "primitive atomic load/store/fetch operations",
@@ -4489,7 +4489,7 @@ RSpec.describe MIRLowering do
       },
       "transpile-tests/349_polymorphic_transaction_acceptance.clear" => {
         description: "polymorphic lock and snapshot dispatch",
-        required_patterns: [/acquire\(\)/, /\.update\(rt, rt\.heapAlloc\(\)/, /@hasField/]
+        required_patterns: [/acquire\(\)/, /\.update\(rt, __clear_heap_alloc/, /@hasField/]
       }
     }
 

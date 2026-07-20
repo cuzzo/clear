@@ -120,7 +120,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.Pool(User).initCapacity(rt.heapAlloc(), 100)")
+        expect(out).to include("CheatLib.Pool(User).initCapacity(__clear_heap_alloc, 100)")
       end
 
       it "emits plain defer cleanup when pool is never moved" do
@@ -133,7 +133,7 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         # Post-collapse: pool routes through CheatLib.cleanup shim (Pool arm
         # calls .deinit(alloc) internally). Functionally identical.
-        expect(out).to include("defer CheatLib.cleanup(@TypeOf(pool), rt.heapAlloc(), &pool)")
+        expect(out).to include("defer CheatLib.cleanup(@TypeOf(pool), __clear_heap_alloc, &pool)")
         expect(out).not_to include("pool_moved")
       end
     end
@@ -194,7 +194,7 @@ RSpec.describe SemanticAnnotator do
         expect(bind.full_type.to_sym).to eq(:"Id<User>")
       end
 
-      it "emits try pool.insert(rt.heapAlloc(), ...) in Zig" do
+      it "emits try pool.insert with the cached heap allocator in Zig" do
         out = transpile_fn(<<~CLEAR)
           STRUCT User { name: String }
           FN f() RETURNS !Void ->
@@ -203,7 +203,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("pool.insert(rt.heapAlloc(),")
+        expect(out).to include("pool.insert(__clear_heap_alloc,")
         expect(out).to include("try pool.insert")
       end
 
@@ -360,10 +360,10 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.Pool(User).initCapacity(rt.heapAlloc(), 100)")
-        expect(out).to include("defer CheatLib.cleanup(@TypeOf(pool), rt.heapAlloc(), &pool)")
+        expect(out).to include("CheatLib.Pool(User).initCapacity(__clear_heap_alloc, 100)")
+        expect(out).to include("defer CheatLib.cleanup(@TypeOf(pool), __clear_heap_alloc, &pool)")
         expect(out).not_to include("pool_moved")
-        expect(out).to include("try pool.insert(rt.heapAlloc(),")
+        expect(out).to include("try pool.insert(__clear_heap_alloc,")
         expect(out).to include("pool.get(id)")
         expect(out).to include("pool.remove(id)")
       end
