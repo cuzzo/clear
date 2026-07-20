@@ -11,3 +11,8 @@
   ) @hazard.ruby_metaprogramming
   (#match? @method_name "^(method_missing|respond_to_missing\?)$")
 )
+
+(
+  (global_variable) @hazard.ruby_metaprogramming
+  (#match? @hazard.ruby_metaprogramming "^\\$([1-9]|~|&|\\+)$")
+)

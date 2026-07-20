@@ -153,6 +153,10 @@ mod tests {
                 self.send(:hello2)
                 instance_variable_get(:@x)
                 const_get(:BAR)
+                $1
+                $~
+                $&
+                $+
               end
               def method_missing(m, *args)
               end
@@ -163,7 +167,7 @@ mod tests {
         let tree = parser.parse(code, None).unwrap();
         
         let hazards = extract_hazards("test.rb", tree.root_node(), code, Language::Ruby);
-        assert_eq!(hazards.len(), 5);
+        assert_eq!(hazards.len(), 9);
         assert!(hazards.iter().all(|h| h.hazard_type == "ruby_metaprogramming"));
         
         let snippets: Vec<&str> = hazards.iter().map(|h| h.snippet.as_str()).collect();
@@ -172,6 +176,10 @@ mod tests {
         assert!(snippets.contains(&"instance_variable_get(:@x)"));
         assert!(snippets.contains(&"const_get(:BAR)"));
         assert!(snippets.contains(&"def method_missing(m, *args)"));
+        assert!(snippets.contains(&"$1"));
+        assert!(snippets.contains(&"$~"));
+        assert!(snippets.contains(&"$&"));
+        assert!(snippets.contains(&"$+"));
     }
 
     #[test]
@@ -218,13 +226,14 @@ new Proxy(target, {
 Reflect.get(obj, 'prop');
 Reflect.set(obj, 'prop', 1);
 Reflect.apply(func, thisArg, args);
+RegExp.$1;
         ";
         let mut parser = Parser::new();
         parser.set_language(&grammar_for_language(Language::JavaScript)).unwrap();
         let tree = parser.parse(code, None).unwrap();
         
         let hazards = extract_hazards("test.js", tree.root_node(), code, Language::JavaScript);
-        assert_eq!(hazards.len(), 6);
+        assert_eq!(hazards.len(), 7);
         assert!(hazards.iter().all(|h| h.hazard_type == "javascript_metaprogramming"));
         
         let snippets: Vec<&str> = hazards.iter().map(|h| h.snippet.as_str()).collect();
@@ -234,6 +243,7 @@ Reflect.apply(func, thisArg, args);
         assert!(snippets.contains(&"Reflect.get(obj, 'prop');"));
         assert!(snippets.contains(&"Reflect.set(obj, 'prop', 1);"));
         assert!(snippets.contains(&"Reflect.apply(func, thisArg, args);"));
+        assert!(snippets.contains(&"RegExp.$1;"));
     }
 
     #[test]
@@ -249,13 +259,14 @@ new Proxy(target, {
 Reflect.get(obj, 'prop');
 Reflect.set(obj, 'prop', 1);
 Reflect.apply(func, thisArg, args);
+RegExp.$2;
         ";
         let mut parser = Parser::new();
         parser.set_language(&grammar_for_language(Language::TypeScript)).unwrap();
         let tree = parser.parse(code, None).unwrap();
         
         let hazards = extract_hazards("test.ts", tree.root_node(), code, Language::TypeScript);
-        assert_eq!(hazards.len(), 6);
+        assert_eq!(hazards.len(), 7);
         assert!(hazards.iter().all(|h| h.hazard_type == "typescript_metaprogramming"));
     }
 

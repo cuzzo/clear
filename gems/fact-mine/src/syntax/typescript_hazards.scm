@@ -22,3 +22,12 @@
   (#eq? @obj "Reflect")
   (#match? @prop "^(get|set|apply)$")
 )
+
+(
+  (member_expression
+    object: (identifier) @obj
+    property: (property_identifier) @prop
+  ) @hazard.typescript_metaprogramming
+  (#eq? @obj "RegExp")
+  (#match? @prop "^\\$[1-9]$")
+)
