@@ -66,6 +66,7 @@ class MIREmitter
     @rt_name = T.let("rt", String)
     @heap_allocator_cache_name = T.let(nil, T.nilable(String))
     @heap_allocator_cache_runtime_name = T.let(nil, T.nilable(String))
+    @heap_allocator_cache_names = T.let([], T::Array[String])
     @flow_alias_name = T.let(nil, T.nilable(String))
     @if_bind_counter = T.let(state&.if_bind_counter, T.nilable(Integer))
     @discard_counter = T.let(state&.discard_counter || 0, Integer)
@@ -1456,10 +1457,12 @@ class MIREmitter
   def with_heap_allocator_cache(cache_name, runtime_name, &blk)
     previous_name = T.let(@heap_allocator_cache_name, T.nilable(String))
     previous_runtime = T.let(@heap_allocator_cache_runtime_name, T.nilable(String))
+    @heap_allocator_cache_names << cache_name if cache_name
     @heap_allocator_cache_name = cache_name
     @heap_allocator_cache_runtime_name = runtime_name
     blk.call
   ensure
+    @heap_allocator_cache_names.pop if cache_name
     @heap_allocator_cache_name = previous_name
     @heap_allocator_cache_runtime_name = previous_runtime
   end
@@ -2003,7 +2006,7 @@ class MIREmitter
 
     ret = node.can_fail ? "!#{node.ret_type}" : node.ret_type
     runtime_param = node.params.find { |param| param.zig_type == "*Runtime" }
-    cache_name = runtime_param ? "__clear_heap_alloc" : nil
+    cache_name = runtime_param ? unique_heap_allocator_cache_name : nil
     body = with_heap_allocator_cache(cache_name, runtime_param&.name) do
       if runtime_param
         emit_body_with_runtime(node.body, runtime_param.name)
@@ -3477,6 +3480,16 @@ class MIREmitter
     end
 
     MIR::Placement.zig_allocator(sym, @rt_name)
+  end
+
+  sig { returns(String) }
+  def unique_heap_allocator_cache_name
+    base = "__clear_heap_alloc"
+    return base unless @heap_allocator_cache_names.include?(base)
+
+    suffix = 1
+    suffix += 1 while @heap_allocator_cache_names.include?("#{base}_#{suffix}")
+    "#{base}_#{suffix}"
   end
 
   sig { params(name: String, body: String, guarded: T::Boolean, errdefer: T::Boolean).returns(String) }

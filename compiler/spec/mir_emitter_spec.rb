@@ -396,6 +396,32 @@ RSpec.describe MIREmitter do
     expect(nested).to eq("__rt_nested.heapAlloc()")
   end
 
+  it "uses distinct heap allocator bindings in lexically nested runtime functions" do
+    nested_fn = MIR::FnDef.new(
+      "nested_allocate",
+      [MIR::Param.new("__rt", "*Runtime")],
+      "void",
+      [MIR::ExprStmt.new(MIR::Call.new("consume", [MIR::AllocatorRef.new(:heap)], false), false)],
+      :private, false, nil
+    )
+    node = MIR::FnDef.new(
+      "allocate",
+      [MIR::Param.new("rt", "*Runtime")],
+      "void",
+      [
+        MIR::ExprStmt.new(MIR::Call.new("consume", [MIR::AllocatorRef.new(:heap)], false), false),
+        MIR::Let.new("nested", MIR::LambdaExpr.new(nested_fn, []), false, nil, "_ = &nested;"),
+      ],
+      nil, false, nil
+    )
+
+    zig = e.emit(node)
+
+    expect(zig).to include("const __clear_heap_alloc = rt.heapAlloc()")
+    expect(zig).to include("const __clear_heap_alloc_1 = __rt.heapAlloc()")
+    expect(zig).to include("consume(__clear_heap_alloc_1)")
+  end
+
   it "emits comptime params" do
     node = MIR::FnDef.new(
       "make",
