@@ -1134,7 +1134,7 @@ fn project_source_syntax(fixture: &Path, language: Language, expected: &Value) -
                 "def_use" => &["def_line", "var", "use_line"][..],
                 "liveness" => &["line", "live_vars"][..],
                 "flow_types" => &["id", "type_text"][..],
-                "hazard_sites" => &["path", "line", "source", "hazard_type", "required_evidence", "start_column", "end_line", "end_column"][..],
+                "hazard_sites" => &["line", "source", "hazard_type", "required_evidence", "start_column", "end_line", "end_column"][..],
                 _ => bail!("unsupported source syntax section: {key}"),
             };
             out.insert(key.clone(), rows(field(&document, key), keys));

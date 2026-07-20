@@ -1279,6 +1279,62 @@
           "visibility": "private"
         }
       ],
+      "hazard_sites": [
+        {
+          "end_column": 22,
+          "end_line": 30,
+          "hazard_type": "ruby_callback_invocation",
+          "line": 30,
+          "required_evidence": "nil-kill",
+          "source": "self.callback(...)",
+          "start_column": 4
+        },
+        {
+          "end_column": 23,
+          "end_line": 61,
+          "hazard_type": "ruby_metaprogramming",
+          "line": 61,
+          "required_evidence": "nil-kill",
+          "source": "send(:record, name)",
+          "start_column": 4
+        },
+        {
+          "end_column": 6,
+          "end_line": 63,
+          "hazard_type": "ruby_metaprogramming",
+          "line": 63,
+          "required_evidence": "nil-kill",
+          "source": "$1",
+          "start_column": 4
+        },
+        {
+          "end_column": 6,
+          "end_line": 64,
+          "hazard_type": "ruby_metaprogramming",
+          "line": 64,
+          "required_evidence": "nil-kill",
+          "source": "$~",
+          "start_column": 4
+        },
+        {
+          "end_column": 6,
+          "end_line": 65,
+          "hazard_type": "ruby_metaprogramming",
+          "line": 65,
+          "required_evidence": "nil-kill",
+          "source": "$&",
+          "start_column": 4
+        },
+        {
+          "end_column": 6,
+          "end_line": 66,
+          "hazard_type": "ruby_metaprogramming",
+          "line": 66,
+          "required_evidence": "nil-kill",
+          "source": "$+",
+          "start_column": 4
+        }
+      ],
       "language": "ruby",
       "owners": [
         {

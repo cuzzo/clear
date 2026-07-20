@@ -491,6 +491,17 @@
           "visibility": "private"
         }
       ],
+      "hazard_sites": [
+        {
+          "end_column": 26,
+          "end_line": 24,
+          "hazard_type": "rust_callback_invocation",
+          "line": 24,
+          "required_evidence": "nil-kill",
+          "source": "self.callback(...)",
+          "start_column": 8
+        }
+      ],
       "language": "rust",
       "owners": [
         {

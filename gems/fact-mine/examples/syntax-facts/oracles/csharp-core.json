@@ -358,6 +358,35 @@
           "visibility": "private"
         }
       ],
+      "hazard_sites": [
+        {
+          "end_column": 15,
+          "end_line": 70,
+          "hazard_type": "csharp_metaprogramming",
+          "line": 70,
+          "required_evidence": "nil-kill",
+          "source": "dynamic x = 1;",
+          "start_column": 8
+        },
+        {
+          "end_column": 25,
+          "end_line": 21,
+          "hazard_type": "csharp_callback_invocation",
+          "line": 21,
+          "required_evidence": "nil-kill",
+          "source": "self.callback(...)",
+          "start_column": 8
+        },
+        {
+          "end_column": 34,
+          "end_line": 69,
+          "hazard_type": "csharp_metaprogramming",
+          "line": 69,
+          "required_evidence": "nil-kill",
+          "source": "System.Type.GetType(\"Bar\");",
+          "start_column": 8
+        }
+      ],
       "language": "csharp",
       "owners": [
         {
