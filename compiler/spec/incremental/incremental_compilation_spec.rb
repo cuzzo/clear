@@ -147,7 +147,6 @@ RSpec.describe "incremental CLEAR compilation" do
       "more than one function changed" => source(alpha: "3", beta: "4"),
       "main function changed" => source(main_body: 'print("no");'),
       "function interface changed" => source.sub("FN alpha() RETURNS Int64", "FN alpha(x: Int64) RETURNS Int64"),
-      "source line layout changed" => source.sub("RETURN 1;", "\n  RETURN 1;"),
     }
     cases.each do |reason, changed_source|
       decision = Incremental::ItemReconciler.reconcile(baseline, catalog(changed_source))
@@ -192,6 +191,186 @@ RSpec.describe "incremental CLEAR compilation" do
     reverted = session.compile(source)
     expect(reverted.status).to eq(:incremental)
     expect(reverted.zig).to eq(initial.zig)
+  end
+
+  it "incrementally compiles a line inserted inside one function" do
+    compiler = Incremental::ZigCompiler.new(
+      Incremental::ZigCompilerConfig.new(source_dir: Dir.pwd),
+    )
+    session = Incremental::CompilationSession.new(
+      compiler: compiler,
+      module_path: module_path,
+      verify: true,
+    )
+
+    session.compile(source)
+    changed_source = source.sub("RETURN 1;", "ASSERT TRUE;\n  RETURN 1;")
+    changed = session.compile(changed_source)
+
+    expect(changed.status).to eq(:incremental)
+    expect(changed.changed_function).to eq("alpha")
+    expect(changed.zig).to eq(compiler.artifact(compiler.compile(changed_source)).render)
+  end
+
+  it "preserves generated names when an earlier function gains a line" do
+    path = File.expand_path("../../../transpile-tests/40_locked.clear", __dir__)
+    original = File.binread(path)
+    changed_source = original.sub("    RETURN c.value;", "    ASSERT TRUE;\n    RETURN c.value;")
+    compiler = Incremental::ZigCompiler.new(
+      Incremental::ZigCompilerConfig.new(source_dir: File.dirname(path)),
+    )
+    session = Incremental::CompilationSession.new(
+      compiler: compiler,
+      module_path: path,
+      verify: true,
+    )
+
+    session.compile(original)
+    changed = session.compile(changed_source)
+
+    expect(changed.status).to eq(:incremental)
+    expect(changed.changed_function).to eq("getVal")
+  end
+
+  it "preserves shadowed owned-binding names when an earlier function gains a line" do
+    original = <<~CLEAR
+      FN alpha() RETURNS Int64 ->
+        RETURN 1;
+      END
+
+      FN shadowed() RETURNS !Void ->
+        IF TRUE THEN
+          values = List[1_i64];
+          ASSERT values.length() == 1;
+        END
+        IF TRUE THEN
+          values = List[2_i64];
+          ASSERT values.length() == 1;
+        END
+        RETURN;
+      END
+
+      FN main() RETURNS Void ->
+        RETURN;
+      END
+    CLEAR
+    changed_source = original.sub("  RETURN 1;", "  ASSERT TRUE;\n  RETURN 1;")
+    compiler = Incremental::ZigCompiler.new(
+      Incremental::ZigCompilerConfig.new(source_dir: Dir.pwd),
+    )
+    session = Incremental::CompilationSession.new(
+      compiler: compiler,
+      module_path: module_path,
+      verify: true,
+    )
+
+    session.compile(original)
+    changed = session.compile(changed_source)
+
+    expect(changed.status).to eq(:incremental)
+    expect(changed.changed_function).to eq("alpha")
+  end
+
+  it "keeps hoist names function-local when a function gains a statement" do
+    original = <<~CLEAR
+      FN preceding() RETURNS !Int64 ->
+        parts = " first,second".split(",");
+        part = trim(UNWRAP parts[0]);
+        RETURN part.length();
+      END
+
+      FN alpha() RETURNS !Int64 ->
+        parts = " third,fourth".split(",");
+        part = trim(UNWRAP parts[0]);
+        RETURN part.length();
+      END
+
+      FN main() RETURNS Void ->
+        RETURN;
+      END
+    CLEAR
+    changed_source = original.sub(
+      "FN alpha() RETURNS !Int64 ->",
+      "FN alpha() RETURNS !Int64 ->\n  ASSERT TRUE;",
+    )
+    compiler = Incremental::ZigCompiler.new(
+      Incremental::ZigCompilerConfig.new(source_dir: Dir.pwd),
+    )
+    session = Incremental::CompilationSession.new(
+      compiler: compiler,
+      module_path: module_path,
+      verify: true,
+    )
+
+    session.compile(original)
+    changed = session.compile(changed_source)
+
+    expect(changed.status).to eq(:incremental)
+    expect(changed.changed_function).to eq("alpha")
+  end
+
+  it "relocates runtime error source lines after an inserted line" do
+    original = <<~CLEAR
+      FN alpha() RETURNS Int64 ->
+        RETURN 1;
+      END
+
+      FN mayFail() RETURNS !Void ->
+        RAISE "boom";
+      END
+
+      FN main() RETURNS Void ->
+        RETURN;
+      END
+    CLEAR
+    changed_source = original.sub("  RETURN 1;", "  ASSERT TRUE;\n  RETURN 1;")
+    compiler = Incremental::ZigCompiler.new(
+      Incremental::ZigCompilerConfig.new(source_dir: Dir.pwd),
+    )
+    session = Incremental::CompilationSession.new(
+      compiler: compiler,
+      module_path: module_path,
+      verify: true,
+    )
+
+    session.compile(original)
+    changed = session.compile(changed_source)
+
+    expect(changed.status).to eq(:incremental)
+    expect(changed.changed_function).to eq("alpha")
+  end
+
+  it "relocates task-profile source lines after an inserted line" do
+    original = <<~CLEAR
+      FN alpha() RETURNS Int64 ->
+        RETURN 1;
+      END
+
+      FN spawnOne() RETURNS !Void ->
+        task:~ = BG { print("hi"); };
+        NEXT task;
+        RETURN;
+      END
+
+      FN main() RETURNS Void ->
+        RETURN;
+      END
+    CLEAR
+    changed_source = original.sub("  RETURN 1;", "  ASSERT TRUE;\n  RETURN 1;")
+    compiler = Incremental::ZigCompiler.new(
+      Incremental::ZigCompilerConfig.new(source_dir: Dir.pwd),
+    )
+    session = Incremental::CompilationSession.new(
+      compiler: compiler,
+      module_path: module_path,
+      verify: true,
+    )
+
+    session.compile(original)
+    changed = session.compile(changed_source)
+
+    expect(changed.status).to eq(:incremental)
+    expect(changed.changed_function).to eq("alpha")
   end
 
   it "keeps a timed compilation session alive for watch mode" do

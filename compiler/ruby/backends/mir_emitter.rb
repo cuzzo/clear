@@ -64,6 +64,9 @@ class MIREmitter
   def initialize(state: nil)
     @indent = T.let(0, Integer)
     @rt_name = T.let("rt", String)
+    @heap_allocator_cache_name = T.let(nil, T.nilable(String))
+    @heap_allocator_cache_runtime_name = T.let(nil, T.nilable(String))
+    @heap_allocator_cache_names = T.let([], T::Array[String])
     @flow_alias_name = T.let(nil, T.nilable(String))
     @if_bind_counter = T.let(state&.if_bind_counter, T.nilable(Integer))
     @discard_counter = T.let(state&.discard_counter || 0, Integer)
@@ -837,8 +840,8 @@ class MIREmitter
     init_fields = T.let([], T::Array[String])
     init_fields << ".self_val = #{receiver_code}" if receiver_code
     runtime_arg_codes.each_index { |index| init_fields << ".a#{index} = #{args_tuple_name}[#{index}]" }
-    if node.alloc_kind
-      alloc_expr = node.alloc_kind == :heap ? "#{@rt_name}.heapAlloc()" : "#{@rt_name}.frameAlloc()"
+    if (alloc_kind = node.alloc_kind)
+      alloc_expr = alloc_zig(alloc_kind)
       init_fields << ".alloc = #{alloc_expr}"
     end
 
@@ -1446,6 +1449,24 @@ class MIREmitter
     @rt_name = T.must(previous)
   end
 
+  sig do
+    type_parameters(:U)
+      .params(cache_name: T.nilable(String), runtime_name: T.nilable(String), blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def with_heap_allocator_cache(cache_name, runtime_name, &blk)
+    previous_name = T.let(@heap_allocator_cache_name, T.nilable(String))
+    previous_runtime = T.let(@heap_allocator_cache_runtime_name, T.nilable(String))
+    @heap_allocator_cache_names << cache_name if cache_name
+    @heap_allocator_cache_name = cache_name
+    @heap_allocator_cache_runtime_name = runtime_name
+    blk.call
+  ensure
+    @heap_allocator_cache_names.pop if cache_name
+    @heap_allocator_cache_name = previous_name
+    @heap_allocator_cache_runtime_name = previous_runtime
+  end
+
   sig { params(stmts: T::Array[MIR::Node], return_kind: Symbol).returns(String) }
   def emit_body_flow(stmts, return_kind)
     return "" unless stmts
@@ -1985,10 +2006,18 @@ class MIREmitter
 
     ret = node.can_fail ? "!#{node.ret_type}" : node.ret_type
     runtime_param = node.params.find { |param| param.zig_type == "*Runtime" }
-    body = if runtime_param
-      emit_body_with_runtime(node.body, runtime_param.name)
-    else
-      emit_body(node.body)
+    cache_name = runtime_param ? unique_heap_allocator_cache_name : nil
+    body = with_heap_allocator_cache(cache_name, runtime_param&.name) do
+      if runtime_param
+        emit_body_with_runtime(node.body, runtime_param.name)
+      else
+        emit_body(node.body)
+      end
+    end
+    if cache_name && body.include?(cache_name)
+      cache_init = "const #{cache_name} = #{runtime_param.name}.heapAlloc(); " \
+        "_ = &#{cache_name};"
+      body = [cache_init, body].reject(&:empty?).join("\n")
     end
 
     "#{vis}fn #{node.name}(#{all_params}) #{ret} {\n#{body}\n}"
@@ -2435,8 +2464,8 @@ class MIREmitter
     key_t = node.key_zig_type || "u8"
     elem_t = node.elem_zig_type
     alloc_str = case node.alloc
-                when :heap, nil then "#{@rt_name || 'rt'}.heapAlloc()"
-                when :frame     then "#{@rt_name || 'rt'}.frameAlloc()"
+                when :heap, nil then alloc_zig(:heap)
+                when :frame     then alloc_zig(:frame)
                 else node.alloc.to_s
                 end
     # Decompose to the existing getOrPut + value_ptr.append idiom.
@@ -2510,7 +2539,7 @@ class MIREmitter
                   0 => {
                       #{base_case_branches}
                       // recursive call -- push child frame
-                      const child = #{@rt_name}.heapAlloc().create(Frame) catch unreachable;
+                      const child = #{alloc_zig(:heap)}.create(Frame) catch unreachable;
                       child.* = .{ #{recurse_arg_inits}, .parent = current };
                       current.step = 1;
                       current = child;
@@ -2531,7 +2560,7 @@ class MIREmitter
     <<~ZIG.chomp
                           if (current.parent) |p| {
                               p.child_result = result;
-                              if (current != &initial) #{@rt_name}.heapAlloc().destroy(current);
+                              if (current != &initial) #{alloc_zig(:heap)}.destroy(current);
                               current = p;
                               continue;
                           }
@@ -2976,6 +3005,10 @@ class MIREmitter
   sig { params(node: MIR::MethodCall).returns(String) }
   def emit_method_call(node)
     recv = paren_if_try(T.must(emit(node.receiver)))
+    if node.method == "heapAlloc" && node.args.empty? && recv == @rt_name
+      return alloc_zig(:heap)
+    end
+
     args = node.args.map { |a| emit_call_argument(a) }.join(", ")
     call = "#{recv}.#{node.method}(#{args})"
     node.try_wrap ? "try #{call}" : call
@@ -3302,7 +3335,7 @@ class MIREmitter
     # rewrites `rt` to the consumer fiber's `__rt_obs_N` — produce
     # consistent allocator strings across both AllocatorRef and
     # alloc_zig-emitted call sites.
-    MIR::Placement.zig_allocator(node.kind, @rt_name)
+    alloc_zig(node.kind)
   end
 
   sig { params(node: MIR::TypeSentinel).returns(T.nilable(String)) }
@@ -3442,7 +3475,21 @@ class MIREmitter
   def alloc_zig(sym)
     raise "alloc_zig: unknown allocator symbol :#{sym.inspect}" unless sym == :heap || sym == :frame
 
+    if sym == :heap && @heap_allocator_cache_name && @heap_allocator_cache_runtime_name == @rt_name
+      return @heap_allocator_cache_name
+    end
+
     MIR::Placement.zig_allocator(sym, @rt_name)
+  end
+
+  sig { returns(String) }
+  def unique_heap_allocator_cache_name
+    base = "__clear_heap_alloc"
+    return base unless @heap_allocator_cache_names.include?(base)
+
+    suffix = 1
+    suffix += 1 while @heap_allocator_cache_names.include?("#{base}_#{suffix}")
+    "#{base}_#{suffix}"
   end
 
   sig { params(name: String, body: String, guarded: T::Boolean, errdefer: T::Boolean).returns(String) }
@@ -3485,7 +3532,7 @@ class MIREmitter
   sig { params(action: Schemas::ResourceCloseAction, root_name: String).returns(String) }
   def render_resource_close_action(action, root_name)
     target = ([root_name] + action.field_path).join(".")
-    runtime_args = Array.new(action.runtime_heap_alloc_args) { "#{@rt_name}.heapAlloc()" }
+    runtime_args = Array.new(action.runtime_heap_alloc_args) { alloc_zig(:heap) }
     case action.call_kind
     when Schemas::ResourceCloseCallKind::Method
       "#{target}.#{action.name}(#{runtime_args.join(", ")})"

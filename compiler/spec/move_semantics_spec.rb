@@ -36,7 +36,7 @@ RSpec.describe "Move semantics for heap-owning types" do
 
     it "transfers the source directly after append" do
       body = fn_body(zig, "clearMain")
-      expect(body).to include("try items.append(rt.heapAlloc(), m)")
+      expect(body).to include("try items.append(__clear_heap_alloc, m)")
       expect(body).not_to include("CheatLib.dupeValue(CheatLib.StringMap(i64), m")
     end
   end
@@ -126,8 +126,8 @@ RSpec.describe "Move semantics for heap-owning types" do
         END
       CLEAR
       body = fn_body(zig, "clearMain")
-      expect(body).to include("defer if (!__hoist_1_moved) CheatLib.cleanup(@TypeOf(__hoist_1), rt.heapAlloc(), &__hoist_1)")
-      expect(body).to include("CheatLib.cleanup(@TypeOf(v.name), rt.heapAlloc(), &v.name)")
+      expect(body).to include("defer if (!__hoist_1_moved) CheatLib.cleanup(@TypeOf(__hoist_1), __clear_heap_alloc, &__hoist_1)")
+      expect(body).to include("CheatLib.cleanup(@TypeOf(v.name), __clear_heap_alloc, &v.name)")
       expect(body).to match(/v\.name = __hoist_1;\s*__hoist_1_moved = true;/)
     end
 
@@ -144,7 +144,7 @@ RSpec.describe "Move semantics for heap-owning types" do
         END
       CLEAR
       body = fn_body(zig, "run")
-      expect(body).to include("defer if (!__tmp_1_moved) CheatLib.cleanup(@TypeOf(__tmp_1), rt.heapAlloc(), &__tmp_1)")
+      expect(body).to include("defer if (!__tmp_1_moved) CheatLib.cleanup(@TypeOf(__tmp_1), __clear_heap_alloc, &__tmp_1)")
       expect(body).to match(/try __hm\.put[^\n]*__tmp_1[^\n]*\n__tmp_1_moved = true;/)
       expect(body).to match(/try __hm\.put[^\n]*__tmp_2[^\n]*\n__tmp_2_moved = true;/)
     end
@@ -223,7 +223,7 @@ RSpec.describe "Move semantics for heap-owning types" do
       # @list is implicit-copied for TAKES: source list is NOT consumed
       # (its defer still fires), and plain Int64 slice data can remain frame-backed.
       expect(body).to include("CheatLib.dupeValue(std.ArrayListUnmanaged(i64)")
-      expect(body).to include("rt.heapAlloc()")
+      expect(body).to include("__clear_heap_alloc")
       expect(body).not_to include("vals_moved")
     end
   end

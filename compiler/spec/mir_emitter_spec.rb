@@ -368,8 +368,58 @@ RSpec.describe MIREmitter do
     )
 
     zig = e.emit(node)
-    expect(zig).to include("__rt.heapAlloc(), &owned")
+    expect(zig).to include("const __clear_heap_alloc = __rt.heapAlloc()")
+    expect(zig).to include("__clear_heap_alloc, &owned")
     expect(zig).not_to match(/(?<!_)rt\.heapAlloc\(\), &owned/)
+  end
+
+  it "reuses a function-scoped heap allocator without capturing nested runtimes" do
+    node = MIR::FnDef.new(
+      "allocate",
+      [MIR::Param.new("rt", "*Runtime")],
+      "void",
+      [
+        MIR::ExprStmt.new(MIR::AllocatorRef.new(:heap), false),
+        MIR::ExprStmt.new(MIR::AllocatorRef.new(:heap), false),
+        MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false), false),
+      ],
+      nil, true, nil
+    )
+    zig = e.emit(node)
+    expect(zig.scan("rt.heapAlloc()").length).to eq(1)
+    expect(zig).to include("const __clear_heap_alloc = rt.heapAlloc(); _ = &__clear_heap_alloc;")
+    expect(zig.lines.count { |line| line.strip == "__clear_heap_alloc;" }).to eq(3)
+
+    nested = e.send(:with_heap_allocator_cache, "__outer_heap_alloc", "rt") do
+      e.send(:emit_node_with_runtime, MIR::AllocatorRef.new(:heap), "__rt_nested")
+    end
+    expect(nested).to eq("__rt_nested.heapAlloc()")
+  end
+
+  it "uses distinct heap allocator bindings in lexically nested runtime functions" do
+    nested_fn = MIR::FnDef.new(
+      "nested_allocate",
+      [MIR::Param.new("__rt", "*Runtime")],
+      "void",
+      [MIR::ExprStmt.new(MIR::Call.new("consume", [MIR::AllocatorRef.new(:heap)], false), false)],
+      :private, false, nil
+    )
+    node = MIR::FnDef.new(
+      "allocate",
+      [MIR::Param.new("rt", "*Runtime")],
+      "void",
+      [
+        MIR::ExprStmt.new(MIR::Call.new("consume", [MIR::AllocatorRef.new(:heap)], false), false),
+        MIR::Let.new("nested", MIR::LambdaExpr.new(nested_fn, []), false, nil, "_ = &nested;"),
+      ],
+      nil, false, nil
+    )
+
+    zig = e.emit(node)
+
+    expect(zig).to include("const __clear_heap_alloc = rt.heapAlloc()")
+    expect(zig).to include("const __clear_heap_alloc_1 = __rt.heapAlloc()")
+    expect(zig).to include("consume(__clear_heap_alloc_1)")
   end
 
   it "emits comptime params" do

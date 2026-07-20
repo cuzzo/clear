@@ -81,15 +81,15 @@ RSpec.describe "WITH VIEW / WITH MATERIALIZED VIEW codegen" do
       CLEAR
     end
 
-    it "emits `var s = try running.materialize(rt.heapAlloc())` (owned, escapable)" do
-      # Allocator is `rt.heapAlloc()` (not `self.allocator`) so the
+    it "emits `var s = try running.materialize(__clear_heap_alloc)` (owned, escapable)" do
+      # Allocator is the function-scoped heap allocator (not `self.allocator`) so the
       # snapshot survives outside struct-method context too. `try`
       # propagates the allocation error from inner.materialize.
       # Use full Zig output rather than fn_body — the BG STREAM block
       # emits a nested struct whose first `^}` ends the inner type,
       # not clearMain, fooling the simple fn_body regex.
       body = zig
-      expect(body).to match(/var s = try running\.materialize\(rt\.heapAlloc\(\)\);/)
+      expect(body).to match(/var s = try running\.materialize\(__clear_heap_alloc\);/)
     end
   end
 end

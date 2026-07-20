@@ -669,7 +669,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.ShardedPool(Score, 4).initCapacity(rt.heapAlloc(), 100)")
+        expect(out).to include("CheatLib.ShardedPool(Score, 4).initCapacity(__clear_heap_alloc, 100)")
       end
 
       it "emits plain defer cleanup when sharded pool is never moved" do
@@ -681,7 +681,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         # Post-collapse: sharded pool routes through CheatLib.cleanup shim.
-        expect(out).to include("defer CheatLib.cleanup(@TypeOf(sp), rt.heapAlloc(), &sp)")
+        expect(out).to include("defer CheatLib.cleanup(@TypeOf(sp), __clear_heap_alloc, &sp)")
         expect(out).not_to include("sp_moved")
       end
 
@@ -725,7 +725,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("try sp.insert(rt.heapAlloc(),")
+        expect(out).to include("try sp.insert(__clear_heap_alloc,")
         expect(out).to include("sp.get(id)")
         expect(out).to include("sp.remove(id)")
         expect(out).to include("sp.length()")
@@ -1052,7 +1052,7 @@ RSpec.describe SemanticAnnotator do
         code = "FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("CheatLib.cleanup(")
-        expect(zig).to include("rt.heapAlloc()")
+        expect(zig).to include("__clear_heap_alloc")
       end
 
       it "auto-derefs Arc for index read (.get)" do
@@ -1133,7 +1133,7 @@ RSpec.describe SemanticAnnotator do
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       # Post-collapse: SOA pool routes through CheatLib.cleanup shim.
-      expect(zig).to include("CheatLib.cleanup(@TypeOf(pool), rt.heapAlloc(), &pool)")
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(pool), __clear_heap_alloc, &pool)")
     end
 
     it "uses field-slice iteration for scalar folds without materializing structs" do

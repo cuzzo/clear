@@ -395,7 +395,7 @@ module MIRLoweringVariables
     # the names unique so the checker sees independent containers.
     original_safe = safe_name
     if alloc_marked_names.key?(safe_name)
-      safe_name = "#{safe_name}_L#{node.line}"
+      safe_name = "#{safe_name}_L#{function_relative_line(node.line)}"
     end
     alloc_marked_names[safe_name] = true
     decl_name_map[node.object_id] = safe_name

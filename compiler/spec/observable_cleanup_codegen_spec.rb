@@ -49,14 +49,14 @@ RSpec.describe CleanupClassifier do
   it "routes scalar observable cleanup through CheatLib.cleanup with heapAlloc" do
     expect(scalar_zig).to include("defer CheatLib.cleanup(")
     expect(scalar_zig).to include("&running")
-    expect(scalar_zig).to match(/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&running\)/)
+    expect(scalar_zig).to match(/CheatLib\.cleanup\([^,]+,\s*__clear_heap_alloc,\s*&running\)/)
     expect(scalar_zig).not_to match(/CheatLib\.cleanup\([^,]+,\s*rt\.frameAlloc\(\),\s*&running\)/)
   end
 
   it "routes collection observable cleanup through CheatLib.cleanup with heapAlloc" do
     expect(collection_zig).to include("defer CheatLib.cleanup(")
     expect(collection_zig).to include("&running")
-    expect(collection_zig).to match(/CheatLib\.cleanup\([^,]+,\s*rt\.heapAlloc\(\),\s*&running\)/)
+    expect(collection_zig).to match(/CheatLib\.cleanup\([^,]+,\s*__clear_heap_alloc,\s*&running\)/)
     expect(collection_zig).not_to match(/CheatLib\.cleanup\([^,]+,\s*rt\.frameAlloc\(\),\s*&running\)/)
   end
 end

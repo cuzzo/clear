@@ -556,7 +556,13 @@ class MIRLowering
   sig { params(node: AST::Locatable).returns(String) }
   def stable_node_suffix(node)
     range = node.source_range
-    "#{range.start_line}_#{range.start_column}_#{range.end_line}_#{range.end_column}"
+    "#{function_relative_line(range.start_line)}_#{range.start_column}_#{function_relative_line(range.end_line)}_#{range.end_column}"
+  end
+
+  sig { params(line: Integer).returns(Integer) }
+  def function_relative_line(line)
+    function_start = current_function_context&.source_start_line
+    function_start ? line - function_start + 1 : line
   end
 
   sig { returns(MIRLoweringFunctions::FunctionState) }

@@ -2841,13 +2841,23 @@ module MIRLoweringExpressions
     function_state.guarded_cleanup_names[nm] = true
   end
 
-  sig { params(node: AST::MoveNode).returns(MIR::Ident) }
+  sig { params(node: AST::MoveNode).returns(MIR::Node) }
   def lower_move(node)
     T.bind(self, MIRLowering) rescue nil
     if node.value.is_a?(AST::Identifier)
       # Route through lower_identifier so BG capture-map rewrites apply:
       # GIVE lst inside BG { ... } must emit __ctx_N.lst, not lst.
       ident = lower_identifier(node.value)
+      # Pointer-passed TAKES parameters are an ownership-transfer boundary.
+      # The caller deliberately passes the storage address so the callee can
+      # own (and clean up) its value. A plain identifier is therefore *T here;
+      # moving it into a local must transfer the pointee T, not manufacture a
+      # second pointer alias. In particular this keeps CLONE of an Arc-backed
+      # HashMap valid after `local = GIVE map`.
+      type_info = Type.from_node!(node.value, context: "GIVE parameter")
+      if current_function_takes_param_name?(node.value.name) && type_info.needs_pointer_passing?
+        return MIR::Deref.new(ident)
+      end
       ident
     else
       lower(node.value)

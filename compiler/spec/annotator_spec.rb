@@ -3990,7 +3990,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include('m.remove(rt.heapAlloc(), "x")')
+        expect(out).to include('m.remove(__clear_heap_alloc, "x")')
       end
 
       it "raises when delete receives no arguments" do
@@ -4090,7 +4090,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("__hm.put(rt.heapAlloc(), rt.heapAlloc()")
+        expect(out).to include("__hm.put(__clear_heap_alloc, __clear_heap_alloc")
         expect(out).to include('"a"')
         expect(out).to include('"b"')
       end
@@ -4102,7 +4102,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("CheatLib.StringMap(i64){ .alloc = rt.heapAlloc() }")
+        expect(out).to include("CheatLib.StringMap(i64){ .alloc = __clear_heap_alloc }")
         expect(out).not_to include("mapPut")
       end
     end

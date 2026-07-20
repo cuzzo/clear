@@ -130,7 +130,7 @@ RSpec.describe "the intrinsic generic Map protocol" do
     expect(zig).to include("fn write(comptime M: type")
     expect(zig).to include("map: *M, __clear_map_alloc_map: std.mem.Allocator")
     expect(zig).to include("CheatLib.mapProtocolPut(map, __clear_map_alloc_map, __clear_map_alloc_map")
-    expect(zig).to match(/write\(CheatLib\.StringMap\(i64\), rt, &words, rt\.heapAlloc\(\)/)
+    expect(zig).to match(/write\(CheatLib\.StringMap\(i64\), rt, &words, __clear_heap_alloc/)
     expect(zig).to match(/write\(M, rt, map, __clear_map_alloc_map/)
     expect(zig).not_to include("WitnessTable")
     expect(zig).not_to include("vtable")

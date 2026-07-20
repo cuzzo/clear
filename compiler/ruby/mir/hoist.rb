@@ -68,11 +68,11 @@ module Hoist
   sig { params(ast: AST::Program, schema_lookup: T.nilable(Proc)).returns(Result) }
   def self.apply!(ast, schema_lookup: nil)
     MIRPassState.require!(ast, :string_concat_rewritten, consumer: "Hoist")
-    counter = HoistCounter.new
     bindings_by_function = T.let({}, T::Hash[String, T::Array[AST::VarDecl]])
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef) && stmt.body
       next if synthesized_body?(stmt)
+      counter = HoistCounter.new
       generated = T.let([], T::Array[AST::VarDecl])
       hoist_body!(stmt.body, counter, schema_lookup, return_type: stmt.return_type, generated: generated)
       bindings_by_function[stmt.name.to_s] = generated unless generated.empty?

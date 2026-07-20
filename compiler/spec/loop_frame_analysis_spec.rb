@@ -344,7 +344,7 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).not_to include("loopPreserveAndRewind")
       expect(zig).to include("saveLoopMark")
       expect(zig).to include("defer rt.restoreLoopMark")
-      expect(zig).to include("rt.heapAlloc()")
+      expect(zig).to include("__clear_heap_alloc")
     end
 
     it "outer string reassigned with user function call result is heap-backed across loop iterations" do
@@ -457,7 +457,7 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("saveLoopMark")
-      expect(zig).to include("log.append(rt.heapAlloc()")
+      expect(zig).to include("log.append(__clear_heap_alloc")
     end
 
     it "outer @list mutated inside a nested loop uses heap-backed outer storage" do
@@ -482,7 +482,7 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("saveLoopMark")
-      expect(zig).to match(/outer\.append\(rt\.heapAlloc\(\)/)
+      expect(zig).to match(/outer\.append\(__clear_heap_alloc/)
     end
 
     it "outer @list mutated inside a MATCH branch uses heap-backed outer storage" do
@@ -504,7 +504,7 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       zig = transpile(src)
       expect(zig).to include("saveLoopMark")
-      expect(zig).to match(/outer\.append\(rt\.heapAlloc\(\)/)
+      expect(zig).to match(/outer\.append\(__clear_heap_alloc/)
     end
 
   end
@@ -596,8 +596,8 @@ RSpec.describe LoopFrameAnalysis do
 
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
-      expect(zig).to include("const ch: []const u8 = try CheatLib.charAtCodepoint(rt.heapAlloc()")
-      expect(zig).to include("try parts.append(rt.heapAlloc(), ch)")
+      expect(zig).to include("const ch: []const u8 = try CheatLib.charAtCodepoint(__clear_heap_alloc")
+      expect(zig).to include("try parts.append(__clear_heap_alloc, ch)")
       expect(zig).to include("ch_moved = true")
     end
 
@@ -618,8 +618,8 @@ RSpec.describe LoopFrameAnalysis do
 
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
-      expect(zig).to include("try inner.append(rt.heapAlloc(), i)")
-      expect(zig).to include("try outer.append(rt.heapAlloc(), inner)")
+      expect(zig).to include("try inner.append(__clear_heap_alloc, i)")
+      expect(zig).to include("try outer.append(__clear_heap_alloc, inner)")
       expect(zig).to include("inner_moved = true")
     end
 
@@ -639,8 +639,8 @@ RSpec.describe LoopFrameAnalysis do
 
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
-      expect(zig).to include("try CheatLib.makeList(i64, rt.heapAlloc()")
-      expect(zig).to include("try outer.append(rt.heapAlloc(), inner)")
+      expect(zig).to include("try CheatLib.makeList(i64, __clear_heap_alloc")
+      expect(zig).to include("try outer.append(__clear_heap_alloc, inner)")
     end
 
     it "WhileLoop keeps an escaping loop-local map on heap without loop marks" do
@@ -661,7 +661,7 @@ RSpec.describe LoopFrameAnalysis do
       zig = nil
       expect { zig = transpile(src) }.not_to raise_error
       expect(zig).to include("StringMap")
-      expect(zig).to include("rt.heapAlloc()")
+      expect(zig).to include("__clear_heap_alloc")
       expect(zig).not_to include("saveLoopMark")
     end
 
@@ -821,8 +821,8 @@ RSpec.describe LoopFrameAnalysis do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include('var resp: []const u8 = @as([]const u8, try rt.heapAlloc().dupe(u8, ""))')
-      expect(zig).to include("defer if (!resp_moved) CheatLib.cleanup(@TypeOf(resp), rt.heapAlloc(), &resp)")
+      expect(zig).to include('var resp: []const u8 = @as([]const u8, try __clear_heap_alloc.dupe(u8, ""))')
+      expect(zig).to include("defer if (!resp_moved) CheatLib.cleanup(@TypeOf(resp), __clear_heap_alloc, &resp)")
     end
 
     it "nested loop-carried string reassignment uses heap allocation because it survives inner loop restore" do
@@ -845,9 +845,9 @@ RSpec.describe LoopFrameAnalysis do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("try std.mem.concat(rt.heapAlloc()")
+      expect(zig).to include("try std.mem.concat(__clear_heap_alloc")
       expect(zig).to include("__new_resp")
-      expect(zig).to include("CheatLib.cleanup(@TypeOf(resp), rt.heapAlloc(), &resp)")
+      expect(zig).to include("CheatLib.cleanup(@TypeOf(resp), __clear_heap_alloc, &resp)")
     end
 
   end
