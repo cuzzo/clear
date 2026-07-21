@@ -8,56 +8,21 @@ module SlopCop
       module_function
 
       EXCLUDED_DIRS = %w[target vendor node_modules tmp dist tests benches examples].freeze
-      ATOMIC_NEEDLES = [
-        "std::sync::atomic",
-        "core::sync::atomic",
-        "Ordering::",
-        ".load(",
-        ".store(",
-        ".swap(",
-        ".compare_exchange(",
-        ".compare_exchange_weak(",
-        ".fetch_add(",
-        ".fetch_sub(",
-        ".fetch_or(",
-        ".fetch_and(",
-        ".fetch_xor(",
-        ".fetch_update(",
-        "fence("
-      ].freeze
-      CONCURRENCY_NEEDLES = [
-        "thread::spawn",
-        "std::thread::spawn",
-        "std::sync::Mutex",
-        "std::sync::RwLock",
-        "std::sync::Condvar",
-        "std::sync::Arc",
-        "Arc<",
-        "Mutex<",
-        "RwLock<",
-        "Condvar",
-        "mpsc::",
-        "crossbeam::channel",
-        ".lock(",
-        ".try_lock("
-      ].freeze
-      UNSAFE_API_NEEDLES = [
-        "std::ptr::",
-        "core::ptr::",
-        "ptr::read",
-        "ptr::write",
-        "ptr::copy",
-        "copy_nonoverlapping",
-        "from_raw",
-        "into_raw",
-        "get_unchecked",
-        "get_unchecked_mut",
-        "unwrap_unchecked",
-        "transmute",
-        "assume_init",
-        "MaybeUninit",
-        "addr_of!",
-        "asm!"
+
+      # Every category below is detected by FactMine's tree-sitter query
+      # (gems/fact-mine/src/syntax/rust_hazards.scm), the same source of
+      # truth Lineage's own hazard ingestion uses - not reimplemented here
+      # as a second, independent regex/needle classifier that can drift
+      # from it (see gems/lineage/src/db/hazard.rs's fixed
+      # "unsafe_block" contains "lock" misclassification for exactly the
+      # kind of drift two implementations of "detect this hazard" invite).
+      SYSTEMS_HAZARD_CATEGORIES = [
+        { hazard_type: "rust_loom_atomic", required_evidence: "loom", label: "atomic or memory-ordering site" },
+        { hazard_type: "rust_loom_concurrency", required_evidence: "loom", label: "thread/lock/shared-concurrency site" },
+        { hazard_type: "rust_unsafe_fn", required_evidence: "miri", label: "unsafe function" },
+        { hazard_type: "rust_unsafe_impl", required_evidence: "miri", label: "unsafe impl" },
+        { hazard_type: "rust_unsafe_block", required_evidence: "miri", label: "unsafe block" },
+        { hazard_type: "rust_unsafe_operation", required_evidence: "miri", label: "unsafe operation inside unsafe context" }
       ].freeze
 
       def rules
@@ -97,18 +62,13 @@ module SlopCop
       end
 
       def scan_hazards(repo:, paths: nil)
-        hazards = LanguageProvider.scan_hazards(self, repo: repo, paths: paths)
-        cb_hazards = FactMineProviderHelper.scan_hazards_via_fact_mine(
-          paths,
-          repo: repo,
-          language_extension: ".rs",
-          hazard_type_filter: "rust_callback_invocation",
-          required_evidence: "nil-kill",
-          label: "Rust callback invocation site"
+        categories = SYSTEMS_HAZARD_CATEGORIES + [
+          { hazard_type: "rust_callback_invocation", required_evidence: "nil-kill", label: "Rust callback invocation site" }
+        ]
+        hazards = FactMineProviderHelper.scan_multi_hazards_via_fact_mine(
+          paths, repo: repo, language_extension: ".rs", categories: categories
         )
-        (hazards + cb_hazards).uniq { |h| [h[:path] || h["path"], h[:line] || h["line"], h[:hazard_type] || h["hazard_type"]] }.sort_by do |h|
-          [h[:path] || h["path"], h[:line] || h["line"]]
-        end
+        hazards.uniq { |h| [h[:path], h[:line], h[:hazard_type]] }.sort_by { |h| [h[:path], h[:line]] }
       end
 
       def source_path?(path)
@@ -125,78 +85,6 @@ module SlopCop
         end
       end
 
-      def scan_file(path, contents)
-        sites = []
-        comment = { active: false }
-        unsafe_depth = 0
-        contents.lines.each_with_index do |source, index|
-          line = index + 1
-          code = LanguageProvider.c_style_code(source, comment)
-          next if code.strip.empty?
-
-          add_loom_sites(sites, path, line, source, code)
-          add_unsafe_sites(sites, path, line, source, code, unsafe_depth)
-          unsafe_depth = update_unsafe_depth(code, unsafe_depth)
-        end
-        sites
-      end
-
-      def add_loom_sites(sites, path, line, source, code)
-        if atomic_site?(code)
-          sites << LanguageProvider.hazard(path, line, source, "rust_loom_atomic", "loom", "atomic or memory-ordering site")
-        end
-        if concurrency_site?(code)
-          sites << LanguageProvider.hazard(path, line, source, "rust_loom_concurrency", "loom", "thread/lock/shared-concurrency site")
-        end
-      end
-
-      def add_unsafe_sites(sites, path, line, source, code, unsafe_depth)
-        if code.match?(/\bunsafe\s+fn\b/)
-          sites << LanguageProvider.hazard(path, line, source, "rust_unsafe_fn", "miri", "unsafe function")
-        end
-        if code.match?(/\bunsafe\s+impl\b/)
-          sites << LanguageProvider.hazard(path, line, source, "rust_unsafe_impl", "miri", "unsafe impl")
-        end
-        if unsafe_block_start?(code)
-          sites << LanguageProvider.hazard(path, line, source, "rust_unsafe_block", "miri", "unsafe block")
-        end
-        if unsafe_operation?(code) && (unsafe_depth.positive? || unsafe_block_start?(code))
-          sites << LanguageProvider.hazard(path, line, source, "rust_unsafe_operation", "miri", "unsafe operation inside unsafe context")
-        end
-      end
-
-      def atomic_site?(code)
-        code.match?(/\bAtomic(?:Bool|I(?:8|16|32|64|size)|U(?:8|16|32|64|size)|Ptr)\b/) ||
-          LanguageProvider.any_include?(code, ATOMIC_NEEDLES)
-      end
-
-      def concurrency_site?(code)
-        LanguageProvider.any_include?(code, CONCURRENCY_NEEDLES)
-      end
-
-      def unsafe_block_start?(code)
-        code.match?(/\bunsafe\s*\{/)
-      end
-
-      def unsafe_operation?(code)
-        LanguageProvider.any_include?(code, UNSAFE_API_NEEDLES) ||
-          code.match?(/(?:\w|\))\s*\.\s*(?:add|offset|read|write|copy_to|copy_from)\s*\(/) ||
-          code.match?(/\*\s*[A-Za-z_][A-Za-z0-9_]*/)
-      end
-
-      def update_unsafe_depth(code, unsafe_depth)
-        code = code.chomp
-        relevant = if unsafe_depth.positive?
-                     code
-                   elsif (match = code.match(/\bunsafe\s*\{.*\z/))
-                     match[0]
-                   else
-                     ""
-                   end
-        return unsafe_depth if relevant.empty?
-
-        [unsafe_depth + relevant.count("{") - relevant.count("}"), 0].max
-      end
     end
   end
 end

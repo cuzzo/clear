@@ -276,6 +276,57 @@ class ArchitectureToolsTest < Minitest::Test
     end
   end
 
+  # Real bug this fixes: the default git-log mode counts co-changes by raw
+  # file path, so a rename splits one file's history into two disjoint
+  # identities - commits before the rename count toward the old name,
+  # commits after count toward the new one, and neither total reflects the
+  # real, full coupling. --db=PATH uses Lineage's own rename-stable
+  # logical-unit ledger instead: a class/file-level MOVE event still gets
+  # recorded even where a nested method-level sibling unit's own move
+  # tracking lags (a real, separate Lineage limitation, not something this
+  # tool can fix) - built as a single global old-name -> new-name alias
+  # applied to every raw event path, not per-unit resolution, specifically
+  # so one unit's tracked rename still canonicalizes every other unit's
+  # stale path for the same file.
+  def test_change_coupling_db_mode_unifies_coupling_across_a_rename
+    skip "lineage binary missing; build gems/lineage first" unless File.executable?(LINEAGE_BIN)
+
+    with_repo do |dir|
+      FileUtils.mkdir_p(%w[core util])
+      File.write("core/a.rb", "class A\n  def run\n    1\n  end\nend\n")
+      File.write("util/b.rb", "class B\n  def run\n    1\n  end\nend\n")
+      commit_all("init")
+      5.times do |i|
+        File.write("core/a.rb", "class A\n  def run\n    return #{i}\n  end\nend\n")
+        File.write("util/b.rb", "class B\n  def run\n    return #{i + 1}\n  end\nend\n")
+        commit_all("co-change #{i}")
+      end
+      # A pure rename (no content change) gives git's own similarity
+      # detection - which Lineage's move tracking builds on - the clearest
+      # possible signal.
+      system("git mv util/b.rb util/renamed_b.rb", exception: true)
+      commit_all("pure rename of b")
+      2.times do |i|
+        File.write("core/a.rb", "class A\n  def run\n    return #{i + 5}\n  end\nend\n")
+        File.write("util/renamed_b.rb", "class B\n  def run\n    return #{i + 6}\n  end\nend\n")
+        commit_all("co-change #{i} post-rename")
+      end
+
+      db = File.join(dir, "lineage.db")
+      system(LINEAGE_BIN, "init", "--db", db, exception: true)
+      build_output, build_status = Open3.capture2(LINEAGE_BIN, "build", "--db", db, "--repo", dir)
+      assert build_status.success?, "lineage build failed: #{build_output}"
+
+      out_default = run_tool(File.join(LINEAGE_TOOLS, "change_coupling.rb"), dir, "5")
+      out_db = run_tool(File.join(LINEAGE_TOOLS, "change_coupling.rb"), dir, "5", "--db=#{db}")
+
+      assert_match(/s=6\s+c=1\.00\s+cross-module\s+core\/a\.rb <-> util\/b\.rb/, out_default,
+                   "default mode should only see the pre-rename co-changes under the old name")
+      assert_match(/s=7\s+c=1\.00\s+cross-module\s+core\/a\.rb <-> util\/renamed_b\.rb/, out_db,
+                   "--db mode should unify pre- and post-rename co-changes under the current name")
+    end
+  end
+
   def test_sarif_outputs_ingest_into_lineage
     skip "lineage binary missing; build gems/lineage first" unless File.executable?(LINEAGE_BIN)
 

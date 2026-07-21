@@ -67,7 +67,7 @@ class ConstraintsSystemsProviderTest < Minitest::Test
   end
 
   def test_cpp_provider_finds_sanitizer_hazard_families
-    with_file("src/runtime.cpp", <<~CPP) do |_dir, path|
+    with_file("src/runtime.cpp", <<~CPP) do |dir, path|
       #include <atomic>
       void run(char *dst, char *src, int n) {
           std::atomic<int> ready;
@@ -78,7 +78,7 @@ class ConstraintsSystemsProviderTest < Minitest::Test
           delete[] buf;
       }
     CPP
-      hazards = SlopCop::Constraints::CppProvider.scan_file(path, File.read(File.join(_dir, path)))
+      hazards = SlopCop::Constraints::CppProvider.scan_hazards(repo: dir, paths: [path])
       types = hazards.map { |hazard| hazard[:hazard_type] }
 
       assert_includes types, "cpp_tsan_concurrency"
@@ -119,7 +119,7 @@ class ConstraintsSystemsProviderTest < Minitest::Test
           return half + mask + total + *cfg->values;
       }
     C
-      hazards = SlopCop::Constraints::CProvider.scan_file(path, File.read(File.join(dir, path)))
+      hazards = SlopCop::Constraints::CProvider.scan_hazards(repo: dir, paths: [path])
       types = hazards.map { |hazard| hazard[:hazard_type] }
 
       refute_includes types, "c_asan_pointer"
@@ -133,7 +133,7 @@ class ConstraintsSystemsProviderTest < Minitest::Test
           return checked + cfg->count + n / 2;
       }
     CPP
-      hazards = SlopCop::Constraints::CppProvider.scan_file(path, File.read(File.join(dir, path)))
+      hazards = SlopCop::Constraints::CppProvider.scan_hazards(repo: dir, paths: [path])
       types = hazards.map { |hazard| hazard[:hazard_type] }
 
       refute_includes types, "cpp_asan_pointer_or_cast"

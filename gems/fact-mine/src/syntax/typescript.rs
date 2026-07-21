@@ -145,6 +145,10 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         )
     }
 
+    fn treats_object_literal_binding_as_owner(&self) -> bool {
+        true
+    }
+
     fn wrap_branch_predicate(&self, branch: &Node) -> bool {
         let _ = branch;
         true

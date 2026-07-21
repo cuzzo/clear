@@ -312,6 +312,34 @@ impl NormalizedLanguageBehavior for JavaScriptNormalizedBehavior {
         (node.r#type == "CLASS").then_some(default_span)
     }
 
+    // Real bug: `store.items.push(x)`/`.unshift(x)`/`.pop()` mutate `items`
+    // in place with no top-level `=`, so without this override
+    // record_state_write_for_mutating_call (normalized_extractor.rs) never
+    // fires and the receiver is only ever seen as read, never written -
+    // every JS array/collection field mutated via a method call instead of
+    // assignment was invisible as state. TypeScript already overrides this
+    // (typescript.rs); .js files use JavaScriptNormalizedBehavior, not
+    // TypeScriptNormalizedBehavior, so that override never applied to them.
+    fn mutating_receiver_message(&self, message: &str) -> bool {
+        matches!(
+            message,
+            "add"
+                | "delete"
+                | "pop"
+                | "push"
+                | "reverse"
+                | "set"
+                | "shift"
+                | "sort"
+                | "splice"
+                | "unshift"
+        )
+    }
+
+    fn treats_object_literal_binding_as_owner(&self) -> bool {
+        true
+    }
+
     fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
         nil_guard_from_predicates(
             message,

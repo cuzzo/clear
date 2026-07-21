@@ -11,32 +11,12 @@
               "obj"
             ]
           ],
-          "dependencies": [
-            [
-              "self.cache",
-              "key"
-            ],
-            [
-              "self.cache",
-              "obj"
-            ],
-            [
-              "status",
-              "key"
-            ],
-            [
-              "status",
-              "obj"
-            ]
-          ],
+          "dependencies": [],
           "reads": [
             "key",
             "obj"
           ],
-          "writes": [
-            "self.cache",
-            "status"
-          ]
+          "writes": []
         },
         {
           "co_uses": [],
@@ -423,24 +403,7 @@
                 "obj"
               ]
             ],
-            "dependencies": [
-              [
-                "self.cache",
-                "key"
-              ],
-              [
-                "self.cache",
-                "obj"
-              ],
-              [
-                "status",
-                "key"
-              ],
-              [
-                "status",
-                "obj"
-              ]
-            ],
+            "dependencies": [],
             "end_line": 2,
             "index": 0,
             "line": 2,
@@ -455,10 +418,7 @@
               2,
               30
             ],
-            "writes": [
-              "self.cache",
-              "status"
-            ]
+            "writes": []
           },
           {
             "co_uses": [],

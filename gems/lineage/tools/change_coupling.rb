@@ -1,15 +1,26 @@
 # frozen_string_literal: true
 
-# WIP: cross-module change coupling from git history.
+# Cross-module change coupling, from git history or (with --db) Lineage's
+# own rename-stable logical-unit ledger.
 #
-# Counts commits in which two production source files change together,
-# keeping only pairs living in DIFFERENT modules (top-level directories) -
-# same-directory co-change is expected and boring. Reports pairs by support
-# (co-change commits) and confidence (co-changes / changes of the less-churned
-# file). File-granularity is the WIP simplification; Lineage's rename-stable
-# unit ledger is the intended upgrade path.
+# Counts commits in which two production source files (or, in --db mode,
+# logical units) change together, keeping only pairs living in DIFFERENT
+# modules (top-level directories) - same-directory co-change is expected and
+# boring. Reports pairs by support (co-change commits) and confidence
+# (co-changes / changes of the less-churned side).
 #
-# Usage: ruby change_coupling.rb REPO_ROOT [min_support] [--sarif=PATH] [--base=REF [--head=REF]]
+# Default mode parses raw `git log --name-only`: fast, no prerequisites, but
+# a renamed file's co-change history splits across its old and new name -
+# undercounting support for anything renamed mid-history. Pass --db=PATH to
+# an already-built lineage.db instead: coupling is computed over
+# logical_units/events (unit_id survives a MOVE event, so a rename no
+# longer fragments the count), and every result is still reported by its
+# current path. This mode requires `lineage build --db PATH --repo .` to
+# have already populated that database - a full-history scan, too
+# expensive to run as a side effect of every invocation of this tool, so it
+# stays opt-in rather than replacing the default.
+#
+# Usage: ruby change_coupling.rb REPO_ROOT [min_support] [--sarif=PATH] [--base=REF [--head=REF]] [--db=PATH]
 
 require "set"
 require "json"
@@ -28,12 +39,13 @@ RULES = [
 ].freeze
 
 args = []
-options = { sarif: nil, base: nil, head: nil }
+options = { sarif: nil, base: nil, head: nil, db: nil }
 ARGV.each do |arg|
   case arg
   when /\A--sarif=(.+)/ then options[:sarif] = Regexp.last_match(1)
   when /\A--base=(.+)/ then options[:base] = Regexp.last_match(1)
   when /\A--head=(.+)/ then options[:head] = Regexp.last_match(1)
+  when /\A--db=(.+)/ then options[:db] = Regexp.last_match(1)
   else args << arg
   end
 end
@@ -49,41 +61,112 @@ def module_of(path)
   parts.size > 1 ? parts[0] : "(root)"
 end
 
-commits = []
-current = nil
-IO.popen(["git", "-C", repo, "log", "--no-merges", "--format=%x01%H", "--name-only"]) do |io|
-  io.each_line do |line|
-    line = line.strip
-    if line.start_with?("\x01")
-      commits << current if current
-      current = []
-    elsif !line.empty? && line.match?(SOURCE_EXT) && !line.match?(EXCLUDE)
-      current << line if current
+# Bulk commits/change-sets (mass renames, reformats, generators) poison
+# co-change counts - present in both modes, so factored out.
+def reject_bulk_changesets!(changesets)
+  changesets.reject! { |items| items.size > 20 || items.size < 2 }
+end
+
+# Shared core: given, per commit, the set of distinct items (file paths or
+# unit_ids) touched, and a way to resolve an item to its module-grouping
+# path, compute [support, confidence, distance, display_a, display_b] rows.
+def coupled_pairs(changesets, min_support)
+  changesets = changesets.map(&:uniq)
+  reject_bulk_changesets!(changesets)
+
+  item_changes = Hash.new(0)
+  pair_changes = Hash.new(0)
+  changesets.each do |items|
+    items.each { |item| item_changes[item] += 1 }
+    items.combination(2) do |a, b|
+      path_a, path_b = yield(a), yield(b)
+      next if module_of(path_a) == module_of(path_b) && File.dirname(path_a) == File.dirname(path_b)
+
+      pair_changes[[a, b].sort] += 1
     end
   end
-end
-commits << current if current
 
-# Bulk commits (mass renames, reformats, generators) poison co-change counts.
-commits.reject! { |files| files.size > 20 || files.size < 2 }
+  pair_changes.filter_map do |(a, b), support|
+    next if support < min_support
 
-file_changes = Hash.new(0)
-pair_changes = Hash.new(0)
-commits.each do |files|
-  files = files.uniq
-  files.each { |f| file_changes[f] += 1 }
-  files.combination(2) do |a, b|
-    next if module_of(a) == module_of(b) && File.dirname(a) == File.dirname(b)
-    pair_changes[[a, b].sort] += 1
+    confidence = support.to_f / [item_changes[a], item_changes[b]].min
+    path_a, path_b = yield(a), yield(b)
+    distance = module_of(path_a) == module_of(path_b) ? "cross-dir" : "cross-module"
+    [support, confidence, distance, path_a, path_b]
   end
 end
 
-rows = pair_changes.filter_map do |(a, b), support|
-  next if support < min_support
-  confidence = support.to_f / [file_changes[a], file_changes[b]].min
-  distance = module_of(a) == module_of(b) ? "cross-dir" : "cross-module"
-  [support, confidence, distance, a, b]
+def rows_from_git_log(repo, min_support)
+  commits = []
+  current = nil
+  IO.popen(["git", "-C", repo, "log", "--no-merges", "--format=%x01%H", "--name-only"]) do |io|
+    io.each_line do |line|
+      line = line.strip
+      if line.start_with?("\x01")
+        commits << current if current
+        current = []
+      elsif !line.empty? && line.match?(SOURCE_EXT) && !line.match?(EXCLUDE)
+        current << line if current
+      end
+    end
+  end
+  commits << current if current
+
+  [commits.size, coupled_pairs(commits, min_support) { |path| path }]
 end
+
+def rows_from_lineage_db(db_path, min_support)
+  require "sqlite3"
+  db = SQLite3::Database.new(db_path)
+
+  # A renamed file owns several units (the class, each method); a MOVE
+  # event is recorded per unit independently, and in practice not every
+  # sibling unit's own move gets tracked as reliably as the file/class-
+  # level one - resolving "this unit's own current path" per unit_id
+  # would leave a lagging method still bucketed under the file's old
+  # name, splitting one real rename into two separate (and now
+  # incomplete) coupling entries. Building one GLOBAL old-name ->
+  # new-name alias map from every MOVE event recorded by ANY unit, and
+  # applying it to every raw event path uniformly, fixes that: as long
+  # as at least one unit belonging to the file tracked the rename, every
+  # other unit's stale path resolves through the same alias.
+  alias_target = {}
+  db.execute("SELECT unit_id, path, event_type, timestamp, id FROM events ORDER BY unit_id, timestamp, id")
+    .group_by { |unit_id, *| unit_id }.each_value do |unit_events|
+      unit_events.each_cons(2) do |(_, prev_path, *), (_, move_path, move_type, *)|
+        alias_target[prev_path] = move_path if move_type == "MOVE" && prev_path != move_path
+      end
+    end
+  canonical_path = lambda do |path|
+    seen = Set.new
+    current = path
+    while (next_path = alias_target[current]) && seen.add?(current)
+      current = next_path
+    end
+    current
+  end
+
+  commits = Hash.new { |h, k| h[k] = Set.new }
+  db.execute("SELECT commit_hash, path FROM events").each do |commit_hash, path|
+    canonical = canonical_path.call(path)
+    next unless canonical&.match?(SOURCE_EXT) && !canonical.match?(EXCLUDE)
+
+    commits[commit_hash] << canonical
+  end
+  changesets = commits.values.map(&:to_a)
+
+  [changesets.size, coupled_pairs(changesets, min_support) { |path| path }]
+end
+
+commit_count, rows =
+  if options[:db]
+    unless File.file?(options[:db])
+      abort "--db=#{options[:db]}: not found (run `lineage build --db #{options[:db]} --repo #{repo}` first?)"
+    end
+    rows_from_lineage_db(options[:db], min_support)
+  else
+    rows_from_git_log(repo, min_support)
+  end
 
 changed = nil
 if options[:base]
@@ -95,7 +178,7 @@ end
 
 rows = rows.select { |_, _, _, a, b| changed.include?(a) || changed.include?(b) } if changed
 
-puts "repo: #{repo}  commits considered: #{commits.size}"
+puts "repo: #{repo}  #{options[:db] ? "logical units" : "commits"} considered: #{commit_count}"
 puts
 puts "== Change-coupled pairs (support >= #{min_support}, sorted by support*confidence) =="
 sorted_rows = rows.sort_by { |s, c, _, _, _| -(s * c) }

@@ -1077,6 +1077,19 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    /// Whether a module-level `const NAME = { key: value, ... }`-shaped
+    /// binding (a plain object-literal singleton, not a class) should
+    /// register each key as a state declaration owned by NAME. Object
+    /// literals are this common a "stateful module" idiom, and a key that
+    /// is only ever initialized here - never read or written again
+    /// anywhere else - was otherwise invisible as state entirely, since
+    /// every other path to a state declaration requires a later read or
+    /// write to react to. Defaults to false; only a language whose real
+    /// literal-object syntax matches this shape overrides it.
+    fn treats_object_literal_binding_as_owner(&self) -> bool {
+        false
+    }
+
     fn field_name_from_declaration(&self, _node: &Node) -> Option<String> {
         None
     }

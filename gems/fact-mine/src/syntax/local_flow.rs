@@ -674,6 +674,24 @@ fn local_read_name(node: &Node) -> Option<String> {
     }
 }
 
+/// True for `self.x.y`-shaped (or `this.x.y`, `self->x.y`, `$this->x.y`)
+/// left-hand sides: a `self.`-style prefix, one identifier, then ANOTHER
+/// bare `.` immediately continuing the chain. A plain `self.x` (no further
+/// dot) returns false, as does `self.x[i]` (bracket, the separately
+/// supported indexed-write case).
+fn chained_self_attribute_lhs(trimmed_lhs: &str) -> bool {
+    for prefix in ["self.", "this.", "self->", "this->", "$this->"] {
+        let Some(rest) = trimmed_lhs.strip_prefix(prefix) else {
+            continue;
+        };
+        let end = rest
+            .find(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+            .unwrap_or(rest.len());
+        return rest[end..].starts_with('.');
+    }
+    false
+}
+
 fn textual_local_writes(source: &str, behavior: &dyn NormalizedLanguageBehavior) -> Vec<String> {
     let Some((lhs, operator)) = split_assignment(source) else {
         return Vec::new();
@@ -698,6 +716,22 @@ fn textual_local_writes(source: &str, behavior: &dyn NormalizedLanguageBehavior)
         return Vec::new();
     }
     if !is_state_write && (lhs.contains('.') || lhs.contains("->") || lhs.contains('[')) {
+        return Vec::new();
+    }
+    // `self._thread_local.last_nonce = nonce` is a nested attribute write:
+    // the real target is `last_nonce`, a field ON whatever `_thread_local`
+    // refers to - nothing reassigned `_thread_local` itself. But
+    // identifiers_with_positions has no notion of a receiver chain: it
+    // greedily folds "self." plus the first identifier into one token
+    // ("self._thread_local"), then resumes scanning and tokenizes the
+    // second hop ("last_nonce") as a wholly independent identifier. With
+    // no bracket in the way (see the comment above - that's the already-
+    // supported, different case), both would be returned as "written",
+    // fabricating a write to `self._thread_local` that never happened.
+    // Bail to no write fact at all rather than guess: the same
+    // conservative call the bracket-free bailout above already makes for
+    // any non-self-prefixed dotted LHS.
+    if is_state_write && chained_self_attribute_lhs(trimmed_lhs) && !lhs.contains('[') {
         return Vec::new();
     }
 
@@ -1447,6 +1481,73 @@ mod tests {
         assert!(call_statement.dependencies.is_empty());
         assert!(call_statement.reads.contains("request"));
         assert!(call_statement.reads.contains("stream"));
+    }
+
+    // Real bug, found auditing requests/requests/auth.py's HTTPDigestAuth: a
+    // nested attribute write (`self._thread_local.last_nonce = nonce`) was
+    // misread as ALSO reassigning `self._thread_local` itself, because
+    // identifiers_with_positions has no notion of a receiver chain - it
+    // folds "self." plus the first identifier into one token
+    // ("self._thread_local"), then tokenizes the second hop
+    // ("last_nonce") as if it were a wholly independent identifier, and
+    // with no bracket in the way (unlike the already-supported
+    // `self.cache[index].status = 1` case) both got returned as written.
+    // decomplex's derived_state detector trusted that fabricated
+    // "self._thread_local" write verbatim, seeing what was really just a
+    // mutation of one of _thread_local's own fields as if the whole
+    // thread-local object were being replaced. Nothing reassigned
+    // `_thread_local`; only its own declaration in __init__ should ever
+    // write it.
+    #[test]
+    fn nested_attribute_write_does_not_fabricate_a_write_to_its_receiver() {
+        use std::io::Write;
+        let mut file = tempfile::Builder::new().suffix(".py").tempfile().unwrap();
+        file.write_all(
+            b"import threading\n\
+              class HTTPDigestAuth:\n\
+              \x20   def __init__(self):\n\
+              \x20       self._thread_local = threading.local()\n\
+              \x20   def handle_401(self, nonce):\n\
+              \x20       self._thread_local.last_nonce = nonce\n",
+        )
+        .unwrap();
+        let summaries = scan_files(&[file.path().to_path_buf()], crate::syntax::Language::Python).unwrap();
+        let all_statements = summaries.iter().flat_map(|summary| &summary.statements).collect::<Vec<_>>();
+
+        let init_statement = all_statements
+            .iter()
+            .find(|statement| statement.source.contains("threading.local()"))
+            .expect("declaration statement");
+        assert_eq!(init_statement.writes, BTreeSet::from(["@_thread_local".to_string()]));
+
+        let mutation_statement = all_statements
+            .iter()
+            .find(|statement| statement.source.contains("last_nonce"))
+            .expect("nested-attribute mutation statement");
+        assert!(
+            !mutation_statement.writes.contains("self._thread_local"),
+            "the nested mutation must never fabricate a write to the receiver itself, got {:?}",
+            mutation_statement.writes
+        );
+        assert!(
+            !mutation_statement.writes.contains("@_thread_local"),
+            "the nested mutation must never fabricate a write to the receiver itself, got {:?}",
+            mutation_statement.writes
+        );
+    }
+
+    // The nested-attribute bailout above must not swallow the different,
+    // already-supported indexed self-attribute write - a real regression
+    // caught earlier this session via the indexed_assignments oracle,
+    // where `self.cache[index].status = 1` losing its writes entirely
+    // was the bug. That case has a bracket between the two attribute
+    // hops; chained_self_attribute_lhs (and the bailout that calls it)
+    // only fires for a bracket-free chain.
+    #[test]
+    fn indexed_self_attribute_write_still_returns_its_writes() {
+        let behavior = crate::syntax::python::behavior();
+        let writes = textual_local_writes("self.cache[index].status = 1", behavior);
+        assert!(!writes.is_empty(), "expected the indexed write's targets to survive, got none");
     }
 
     // Real bug, found auditing wrk/src/http_parser.c's http_parser_execute:

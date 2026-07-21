@@ -461,3 +461,157 @@ fn source_digest_matches_the_real_file_even_when_the_parse_buffer_is_rewritten()
         "source_digest must hash the real file content, not the macro-stripped parse buffer"
     );
 }
+
+// Real bug, found auditing a real JS codebase: state mutated via
+// increment/decrement (`this.lastId++`) or an in-place mutating method
+// call (`this.items.push(x)`) produced zero state_writes - only a plain
+// `this.field = value` assignment was ever recognized. Root causes were
+// two separate gaps: (1) UPDATE_EXPRESSION (JS/C++/Java's dedicated
+// increment/decrement grammar node) had no dispatch arm at all, so its
+// operand was only ever scanned as an ordinary read; (2) state_receiver_field
+// (shared across every "this."-spelling language) only recognized a
+// "self." prefix, so even TypeScript - which already declared "push" a
+// mutating_receiver_message - silently produced no write for `this.x.push()`.
+#[test]
+fn javascript_increment_and_mutating_method_call_are_recognized_as_state_writes() {
+    let document = parse_source(
+        ".js",
+        Language::JavaScript,
+        "class Store {\n\
+         constructor() {\n\
+         this.items = [];\n\
+         this.lastId = 0;\n\
+         }\n\
+         add(x) {\n\
+         this.items.push(x);\n\
+         this.lastId++;\n\
+         }\n\
+         };\n",
+    );
+
+    assert!(
+        document.state_writes.iter().any(|w| w.field == "items" && w.function == "add"),
+        "expected this.items.push(x) to be recognized as a write to items, got {:?}",
+        document.state_writes
+    );
+    assert!(
+        document.state_writes.iter().any(|w| w.field == "lastId" && w.function == "add"),
+        "expected this.lastId++ to be recognized as a write to lastId, got {:?}",
+        document.state_writes
+    );
+}
+
+// The same increment fix must not fire for C#'s generic
+// PREFIX_UNARY_EXPRESSION/POSTFIX_UNARY_EXPRESSION node kind on any
+// operator besides ++/--: `!this.flag` and `-this.count` are pure reads,
+// and C# (unlike JS/Java) has no separate grammar rule distinguishing
+// increment/decrement from every other unary operator - only the `++`/`--`
+// spelling itself tells them apart.
+#[test]
+fn csharp_unary_negation_and_logical_not_are_not_recognized_as_state_writes() {
+    let document = parse_source(
+        ".cs",
+        Language::CSharp,
+        "class Store {\n\
+         int lastId;\n\
+         bool flag;\n\
+         void Add() {\n\
+         this.lastId++;\n\
+         bool x = !this.flag;\n\
+         int y = -this.lastId;\n\
+         }\n\
+         }\n",
+    );
+
+    assert!(
+        document.state_writes.iter().any(|w| w.field == "lastId"),
+        "expected this.lastId++ to still be recognized as a write, got {:?}",
+        document.state_writes
+    );
+    assert!(
+        !document.state_writes.iter().any(|w| w.field == "flag"),
+        "!this.flag is a read, not a write - it must never appear in state_writes, got {:?}",
+        document.state_writes
+    );
+}
+
+// Go has no self/this keyword - method receivers are named freely
+// (`func (s *Store) Add()`) and resolved to the canonical "self" receiver
+// via receiver aliasing elsewhere. Go also spells increment/decrement as
+// dedicated statements (INC_STATEMENT/DEC_STATEMENT), not an expression.
+#[test]
+fn go_receiver_increment_is_recognized_as_a_state_write() {
+    let document = parse_source(
+        ".go",
+        Language::Go,
+        "package demo\n\n\
+         type Store struct {\n\
+         LastId int\n\
+         }\n\n\
+         func (s *Store) Add() {\n\
+         s.LastId++\n\
+         }\n",
+    );
+
+    assert!(
+        document.state_writes.iter().any(|w| w.field == "LastId" && w.owner == "Store"),
+        "expected s.LastId++ to be recognized as a write to Store.LastId, got {:?}",
+        document.state_writes
+    );
+}
+
+// Real bug, third of the three reported JS object-literal state gaps: an
+// object-literal key that is only ever initialized - never read or
+// written again anywhere else - was invisible as state entirely, since
+// every existing path to a state declaration only reacts to a later
+// read/write. A module-level `const NAME = { key: value, ... }` binding
+// (a plain-object "stateful module" idiom) now registers each key as
+// state owned by NAME at declaration time, the same way a class field's
+// initializer already does - the same fix applies to TypeScript, which
+// has its own separate NormalizedLanguageBehavior for .ts files.
+#[test]
+fn javascript_object_literal_binding_registers_init_only_keys_as_state() {
+    let document = parse_source(
+        ".js",
+        Language::JavaScript,
+        "const config = {\n\
+         timeout: 30,\n\
+         retries: 3,\n\
+         };\n\n\
+         function connect() {\n\
+         return config.timeout;\n\
+         }\n",
+    );
+
+    assert!(
+        document.state_declarations.iter().any(|d| d.field == "timeout" && d.owner == "config"),
+        "expected config.timeout to be declared as state, got {:?}",
+        document.state_declarations
+    );
+    assert!(
+        document.state_declarations.iter().any(|d| d.field == "retries" && d.owner == "config"),
+        "expected the init-only field retries (never read or written again) to still be \
+         declared as state, got {:?}",
+        document.state_declarations
+    );
+}
+
+// A plain object literal built inside a function body is a local, throwaway
+// value, not a module-level singleton - it must not be registered as state.
+#[test]
+fn javascript_function_local_object_literal_is_not_registered_as_state() {
+    let document = parse_source(
+        ".js",
+        Language::JavaScript,
+        "function build() {\n\
+         const opts = { debug: true };\n\
+         return opts;\n\
+         }\n",
+    );
+
+    assert!(
+        document.state_declarations.is_empty(),
+        "a function-local object literal must not be registered as module state, got {:?}",
+        document.state_declarations
+    );
+}

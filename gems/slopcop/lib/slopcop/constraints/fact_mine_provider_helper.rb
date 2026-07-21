@@ -10,6 +10,35 @@ module SlopCop
       module_function
 
       def scan_hazards_via_fact_mine(paths, repo:, language_extension:, hazard_type_filter:, required_evidence:, label:)
+        hazard_sites_via_fact_mine(paths, repo: repo, language_extension: language_extension) do |hazard_sites, files, repo_path|
+          filter_and_format_hazards(hazard_sites, files, repo_path, hazard_type_filter, required_evidence, label)
+        end
+      end
+
+      # Same underlying fact-mine invocation as scan_hazards_via_fact_mine,
+      # but resolves several distinct hazard categories (each with its own
+      # required_evidence/label) from ONE pass over the facts instead of one
+      # call per category. A provider needing N systems-hazard categories
+      # (Rust: loom-atomic, loom-concurrency, unsafe-fn, unsafe-impl,
+      # unsafe-block, unsafe-operation) would otherwise re-invoke the
+      # fact-mine-rust binary N times for the exact same files - multiplying
+      # CI's subprocess-spawn count for no benefit, since every category's
+      # data comes from the same single fact-mine pass regardless.
+      #
+      # `categories` is an Array of Hashes: { hazard_type:, required_evidence:, label: }
+      # `hazard_type` may be a String or an Array of Strings.
+      def scan_multi_hazards_via_fact_mine(paths, repo:, language_extension:, categories:)
+        hazard_sites_via_fact_mine(paths, repo: repo, language_extension: language_extension) do |hazard_sites, files, repo_path|
+          categories.flat_map do |category|
+            filter_and_format_hazards(
+              hazard_sites, files, repo_path,
+              category.fetch(:hazard_type), category.fetch(:required_evidence), category.fetch(:label)
+            )
+          end
+        end
+      end
+
+      def hazard_sites_via_fact_mine(paths, repo:, language_extension:)
         repo = File.expand_path(repo)
         extensions = Array(language_extension)
         files = if paths && !Array(paths).empty?
@@ -26,7 +55,7 @@ module SlopCop
           begin
             facts = JSON.parse(File.read(ENV["FACT_MINE_FACTS_FILE"]))
             hazard_sites = facts["hazard_sites"] || []
-            return filter_and_format_hazards(hazard_sites, files, repo, hazard_type_filter, required_evidence, label)
+            return yield(hazard_sites, files, repo)
           rescue => e
             raise "Failed to parse pre-computed facts from #{ENV["FACT_MINE_FACTS_FILE"]}: #{e.message}"
           end
@@ -47,13 +76,13 @@ module SlopCop
           end
           facts = JSON.parse(stdout)
           hazard_sites = facts["hazard_sites"] || []
-          filter_and_format_hazards(hazard_sites, slice, repo, hazard_type_filter, required_evidence, label)
+          yield(hazard_sites, slice, repo)
         end
       end
 
       def filter_and_format_hazards(hazard_sites, files, repo, hazard_type_filter, required_evidence, label)
         abs_files = files.map { |f| File.expand_path(f, repo) }
-        
+
         hazard_sites.select do |site|
           site_abs_path = File.expand_path(site["path"], repo)
           match_hazard = if hazard_type_filter.is_a?(Regexp)
