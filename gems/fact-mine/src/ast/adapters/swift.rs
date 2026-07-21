@@ -46,6 +46,28 @@ impl AstNormalizationAdapter for SwiftAstAdapter {
         None
     }
 
+    fn function_kind(&self, kind: &str) -> bool {
+        // `init { ... }` has no separate "function" keyword in Swift's
+        // grammar (raw kind `init_declaration`, distinct from
+        // `function_declaration`), so the shared default list - which this
+        // widens rather than replaces, to avoid dropping any of its other
+        // matches for this language - never recognized it as a function at
+        // all. Constructors are where most instance state gets
+        // initialized, so this also under-produced state-write edges for
+        // Espalier's architecture graph. See
+        // gems/fact-mine/tests/architecture_extraction_multilang_test.rs.
+        matches!(
+            kind,
+            "method"
+                | "function_definition"
+                | "function_declaration"
+                | "method_definition"
+                | "method_declaration"
+                | "function_item"
+                | "init_declaration"
+        )
+    }
+
     fn function_parameter_nodes<'tree>(
         &self,
         node: TreeSitterNode<'tree>,

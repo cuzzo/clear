@@ -1307,6 +1307,22 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    /// Extra raw nodes to fold into a class's scanned body, for grammars
+    /// where the class declaration's members live outside its body block
+    /// (for example Kotlin's `class Widget(private var count: Int) { .. }`:
+    /// `count` is a `class_parameter` of a sibling `primary_constructor`
+    /// node, not a child of `class_body`, so it is invisible to
+    /// `collect_owner_fields_from_children` unless surfaced here).
+    /// Defaults to none for every language; only overridden where a real
+    /// gap was found and reproduced with a fixture, not speculatively.
+    fn supplementary_class_body_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        Vec::new()
+    }
+
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         match kind {
             "while" | "while_statement" | "while_modifier" => Some("WHILE"),

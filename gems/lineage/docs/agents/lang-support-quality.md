@@ -206,6 +206,30 @@ Spot checks:
 
 Remaining caveat: Swift needs coverage ingestion and better function/owner extraction before architecture metrics should be treated as strong signal.
 
+**Root cause found and fixed (2026-07-21):** minimal-fixture validation (a
+6-line `struct Widget { var count: Int; init(...) { ... }; mutating func
+increment() { ... } }`, not a repo clone) confirmed `init` was dropped from
+`function_defs` entirely - `fact_mine_rust::syntax::parse_files` on this
+fixture returned only `increment`, never `init`. Since constructors are
+where most instance state gets initialized, this also underrepresented
+Swift's real state-write edges (the CLI spot check that found this saw 1
+edge produced vs 4 for an equivalent C# class). Root cause: Swift's `init`
+has no separate "function" keyword (raw tree-sitter kind
+`init_declaration`, distinct from `function_declaration`), so the
+extractor's function-kind recognition never matched it. Fixed by widening
+`SwiftAstAdapter::function_kind`
+(`gems/fact-mine/src/ast/adapters/swift.rs`) to include
+`init_declaration`. Verified against real, unmodified production code, not
+just the fixture: re-running Espalier over
+`swift-argument-parser/Sources/ArgumentParser/` (shallow clone, not
+committed to this repo) found **147 real `init` declarations** now
+correctly recognized as functions across the codebase, and the existing
+`gems/fact-mine` oracle fixture for Swift (`examples/syntax-facts/oracles/
+swift-core.json`) updated to reflect `sink`/`status` writes now correctly
+attributed to `init` instead of the wrong `"(top-level)"`. Regression test:
+`gems/fact-mine/tests/architecture_extraction_multilang_test.rs`
+(`swift_init_is_recognized_as_a_function`).
+
 ### Kotlin / Okio
 
 Status: usable static ingestion, moderate Decomplex signal.
@@ -219,6 +243,46 @@ Spot checks:
 - Nil-kill untyped signatures point at equality/select APIs where extraction needs stronger Kotlin typing rules.
 
 Remaining caveat: no coverage was generated, SlopCop is empty, and Kotlin parser extraction needs more language-specific tuning before architecture metrics are high confidence.
+
+**Root cause found and fixed (2026-07-21):** minimal-fixture validation (a
+5-line `class Widget(private var count: Int) { fun increment() { count +=
+1 } }`, not a repo clone) confirmed why: Kotlin's `AstNormalizationAdapter`
+(`gems/fact-mine/src/ast/adapters/kotlin.rs`) had no handling for
+primary-constructor-declared properties - the single most idiomatic way
+Kotlin declares instance state. The raw tree-sitter `class_parameter` node
+never got recognized as a field/property declaration, so no
+`StateDeclaration` was ever produced for it, and `count += 1` inside a
+method produced zero state-write edges. This was likely the dominant cause
+of Kotlin's "sparse" architecture signal, more than general parser
+immaturity.
+
+Root cause: `class_parameter` is a child of `primary_constructor`, which
+is a *sibling* of `class_body` in tree-sitter-kotlin's grammar - not a
+descendant of it - so it was structurally invisible to the class-body scan
+regardless of any per-language field-detection logic. Fixed via a new
+opt-in `AstNormalizationAdapter` hook, `supplementary_class_body_nodes`
+(`gems/fact-mine/src/ast/adapters/base.rs` + `normalize_class` in
+`ast/normalizer.rs`), that folds extra raw nodes into a class's scanned
+body before the existing field-collection walk runs. It defaults to
+returning nothing for every language (zero behavior change for anyone but
+Kotlin) and is overridden in `gems/fact-mine/src/ast/adapters/kotlin.rs` to
+surface `var`/`val` primary-constructor parameters specifically. Kotlin's
+pre-existing `state_declaration_from_node` text heuristic
+(`gems/fact-mine/src/syntax/kotlin.rs`) then picks the resulting node up
+unchanged - no changes needed there.
+
+Verified against real, unmodified production code, not just the fixture:
+`Pipe(internal val maxBufferSize: Long)` in Okio's own
+`okio/src/jvmMain/kotlin/okio/Pipe.kt` (shallow clone, not committed to
+this repo) now correctly produces a `state` node for `maxBufferSize`
+owned by `Pipe`, and a broader sweep of Okio's `commonMain/kotlin/okio/`
+directory found 51 owners, 83 states, and 667 functions (state extraction
+was near-zero for this style of declaration before the fix). Regression
+test: `gems/fact-mine/tests/architecture_extraction_multilang_test.rs`
+(`kotlin_primary_constructor_property_is_recognized_as_state`). C# and Lua
+were also validated with equivalent minimal fixtures in the same test file
+and found to already work correctly - architecture extraction was not
+broadly broken for those two.
 
 ## Cross-Cutting Assessment
 
