@@ -26,7 +26,7 @@ RULES = [
   }
 ].freeze
 
-def resolve_import_target(repo, src_path, import, file_set)
+def resolve_import_target(repo, src_path, import, file_set, dir_index = {})
   target = import["target"].to_s
   return nil if target.empty?
   dir = File.dirname(src_path)
@@ -55,7 +55,28 @@ def resolve_import_target(repo, src_path, import, file_set)
     else
       []
     end
-  candidates.find { |candidate| file_set.include?(candidate) }
+  found = candidates.find { |candidate| file_set.include?(candidate) }
+  return found if found
+
+  # Go (and any other package-per-directory language) imports a directory,
+  # not a file: "demo/util" names every .go file under demo/util/, sharing
+  # one package. No single candidate file name can ever match that - fall
+  # back to a representative file in the target directory, which still
+  # produces a correct directory-level edge (the granularity these imports
+  # actually describe) even though the specific file-level edge picks one
+  # arbitrary member of the target package. The import path is rooted at
+  # the Go module name (e.g. "github.com/org/repo/util"), not the repo
+  # root, so an exact match against a relative directory only works by
+  # coincidence - try the longest trailing path suffix that matches a real
+  # directory instead, since the module-root prefix is unknown here.
+  return nil unless import["kind"] == "symbol"
+  segments = target.split("/").reject(&:empty?)
+  (segments.size).downto(1).each do |len|
+    suffix = segments.last(len).join("/")
+    representative = dir_index[suffix]&.min
+    return representative if representative
+  end
+  nil
 end
 
 options = CorpusCommon.parse_tool_options(ARGV)
@@ -63,17 +84,20 @@ repo = options[:repo]
 files = CorpusCommon.production_files(repo)
 abort "no production sources found" if files.empty?
 
+# The dependency graph is always built from the FULL corpus, changed-scope
+# or not. A cycle can involve modules the current diff never touches
+# (A -> B -> C -> A where only A changed); narrowing the corpus before
+# graph construction makes such a cycle structurally undetectable, not just
+# unreported. `changed` still exists to scope which findings get reported
+# below - only the graph itself must never be scoped.
 changed = options[:base] ? CorpusCommon.changed_files(repo, options[:base], options[:head]).to_set : nil
-if changed
-  files, scoped_modules = CorpusCommon.scope_to_changed_modules(files, changed)
-  warn "scoped to changed modules: #{scoped_modules.sort.join(", ")} (#{files.size} files)"
-  if files.empty?
-    CorpusCommon.write_sarif(options[:sarif], "espalier-cycle-report", RULES, []) if options[:sarif]
-    puts "(no production sources in changed modules)"
-    exit 0
-  end
+if changed&.empty?
+  CorpusCommon.write_sarif(options[:sarif], "espalier-cycle-report", RULES, []) if options[:sarif]
+  puts "(no changed production sources)"
+  exit 0
 end
 file_set = files.to_set
+dir_index = files.group_by { |path| File.dirname(path) }
 
 facts = CorpusCommon.run_syntax_facts(repo, files)
 edge_facts = CorpusCommon.run_call_edges(repo, files)
@@ -96,7 +120,7 @@ import_edge_count = 0
 (facts["documents"] || []).each do |doc|
   src = doc["file"]
   (doc["imports"] || []).each do |import|
-    dst = resolve_import_target(repo, src, import, file_set)
+    dst = resolve_import_target(repo, src, import, file_set, dir_index)
     next unless dst
     import_edge_count += 1
     add_edge.call(src, dst, "import #{src}:#{import["line"]} -> #{dst}")

@@ -576,6 +576,15 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
         if in_method {
             return None;
         }
+        // Unlike every other language's version of this heuristic, this
+        // one had no node-type guard at all: any node whose text loosely
+        // looked like "word word ... = ..." matched, including comments
+        // (`// TODO this seems wrong` parsed as a field named "wrong" of
+        // type "// TODO this seems"). Field declarations are the only
+        // legitimate source for this heuristic.
+        if node.r#type != "FIELD_DECLARATION" {
+            return None;
+        }
         let text = node
             .text
             .lines()

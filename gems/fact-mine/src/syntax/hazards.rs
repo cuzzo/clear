@@ -53,6 +53,45 @@ fn get_cached_query(language: Language) -> Option<&'static Query> {
     }
 }
 
+/// FactMine is the single source of truth for what evidence a given hazard
+/// type requires (which test harness must exist to prove it's actually
+/// handled: miri, loom, tsan, ...). Every consumer - Lineage's own hazard
+/// ingestion, SlopCop, anything else - must call this rather than
+/// re-deriving the same meaning from a hazard-name substring on its own;
+/// two independent implementations of "classify this hazard_type string"
+/// are two chances to diverge; a previous, second implementation living in
+/// Lineage did exactly that (`"unsafe_block"` contains `"lock"`, so it
+/// misclassified every Rust unsafe-block hazard as a data race).
+pub fn required_evidence_for_hazard_type(hazard_type: &str) -> String {
+    if hazard_type.contains("_vopr_") || hazard_type.starts_with("zig_vopr_") {
+        "vopr".to_string()
+    } else if hazard_type.contains("_loom_") || hazard_type.starts_with("rust_loom_") {
+        "loom".to_string()
+    } else if hazard_type.contains("_wait_loop") || hazard_type.ends_with("_wait_loop") {
+        "hammer".to_string()
+    } else if hazard_type.contains("_metaprogramming") || hazard_type.contains("_callback_") {
+        "nil-kill".to_string()
+    } else if hazard_type.contains("_asan_") || hazard_type.starts_with("c_asan_") {
+        "asan".to_string()
+    } else if hazard_type.contains("_lsan_") || hazard_type.starts_with("c_lsan_") {
+        "lsan".to_string()
+    } else if hazard_type.contains("_ubsan_") || hazard_type.starts_with("c_ubsan_") {
+        "ubsan".to_string()
+    } else if hazard_type.contains("_tsan_") || hazard_type.starts_with("c_tsan_") {
+        "tsan".to_string()
+    } else if hazard_type.starts_with("go_race_") {
+        "race".to_string()
+    } else if hazard_type.starts_with("go_concurrency_") {
+        "concurrency".to_string()
+    } else if hazard_type == "csharp_unsafe_memory" {
+        "unsafe".to_string()
+    } else if hazard_type.starts_with("rust_unsafe_") {
+        "miri".to_string()
+    } else {
+        "".to_string()
+    }
+}
+
 pub(crate) fn extract_hazards(
     file_path: &str,
     root: Node,
@@ -90,33 +129,7 @@ pub(crate) fn extract_hazards(
                 .trim()
                 .to_string();
 
-            let required_evidence = if hazard_type.contains("_vopr_") || hazard_type.starts_with("zig_vopr_") {
-                "vopr".to_string()
-            } else if hazard_type.contains("_loom_") || hazard_type.starts_with("rust_loom_") {
-                "loom".to_string()
-            } else if hazard_type.contains("_wait_loop") || hazard_type.ends_with("_wait_loop") {
-                "hammer".to_string()
-            } else if hazard_type.contains("_metaprogramming") || hazard_type.contains("_callback_") {
-                "nil-kill".to_string()
-            } else if hazard_type.contains("_asan_") || hazard_type.starts_with("c_asan_") {
-                "asan".to_string()
-            } else if hazard_type.contains("_lsan_") || hazard_type.starts_with("c_lsan_") {
-                "lsan".to_string()
-            } else if hazard_type.contains("_ubsan_") || hazard_type.starts_with("c_ubsan_") {
-                "ubsan".to_string()
-            } else if hazard_type.contains("_tsan_") || hazard_type.starts_with("c_tsan_") {
-                "tsan".to_string()
-            } else if hazard_type.starts_with("go_race_") {
-                "race".to_string()
-            } else if hazard_type.starts_with("go_concurrency_") {
-                "concurrency".to_string()
-            } else if hazard_type == "csharp_unsafe_memory" {
-                "unsafe".to_string()
-            } else if hazard_type.starts_with("rust_unsafe_") {
-                "miri".to_string()
-            } else {
-                "".to_string()
-            };
+            let required_evidence = required_evidence_for_hazard_type(&hazard_type);
 
             let start_col = cap.node.start_position().column as u32;
             let end_line = (cap.node.end_position().row + 1) as u32;

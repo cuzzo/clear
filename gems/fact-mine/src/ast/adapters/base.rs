@@ -62,6 +62,17 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         Vec::new()
     }
 
+    /// Pre-parse source transformation, fed to tree-sitter's `parse()` call
+    /// only - never used for digests, snippets, or spans, which always read
+    /// the untouched original source. Defaults to a no-op; override only
+    /// where a reproduced grammar-corruption gap requires rewriting what the
+    /// parser sees. MUST be byte-length preserving (same total length, same
+    /// line/column layout everywhere) - callers rely on original-source spans
+    /// staying valid against whatever tree-sitter produces from this buffer.
+    fn source_preprocessing(&self, _source: &str) -> Option<String> {
+        None
+    }
+
     fn scope_locals(
         &self,
         _node: TreeSitterNode<'_>,

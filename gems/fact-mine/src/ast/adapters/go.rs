@@ -16,7 +16,34 @@ impl AstNormalizationAdapter for GoAstAdapter {
             .map(|child| node_text(child, source))
             .and_then(|text| text.split_whitespace().nth(1).map(str::to_string))
             .unwrap_or_default();
-        (package, Vec::new())
+        // A single `import "os"` puts `import_spec` directly under
+        // `import_declaration`; a grouped `import ( ... )` wraps each spec
+        // in an intermediate `import_spec_list` - collect specs at either
+        // depth rather than assuming one shape.
+        fn collect_import_specs<'tree>(
+            node: TreeSitterNode<'tree>,
+            out: &mut Vec<TreeSitterNode<'tree>>,
+        ) {
+            for child in named_children(node) {
+                if child.kind() == "import_spec" {
+                    out.push(child);
+                } else if child.kind() == "import_spec_list" {
+                    collect_import_specs(child, out);
+                }
+            }
+        }
+        let mut specs = Vec::new();
+        for decl in named_children(root)
+            .into_iter()
+            .filter(|child| child.kind() == "import_declaration")
+        {
+            collect_import_specs(decl, &mut specs);
+        }
+        let imports = specs
+            .into_iter()
+            .filter_map(|spec| go_import_alias_and_target(spec, source))
+            .collect();
+        (package, imports)
     }
 
     fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
@@ -80,6 +107,31 @@ fn go_statement_without_inner_call(node: TreeSitterNode<'_>) -> bool {
             .any(|child| child.kind() == "call_expression")
 }
 
+/// An `import_spec`'s `path` field carries its quoted string
+/// (`"demo/util"`); an explicit `name` field (`util "demo/util"`,
+/// including blank `_` and dot `.` imports) names the alias, otherwise the
+/// alias importing code uses is the path's own last segment (Go's
+/// convention: `import "demo/util"` still binds the identifier `util`,
+/// from that package's own package clause, which by convention - and for
+/// every case this can statically see - matches the last path segment).
+/// Blank/dot imports still create a real dependency edge (a cycle through
+/// one is exactly as real as through a named import), so they are kept,
+/// not dropped - their alias just never happens to match a qualified call.
+fn go_import_alias_and_target(spec: TreeSitterNode<'_>, source: &str) -> Option<(String, String)> {
+    let path_node = spec.child_by_field_name("path")?;
+    let target = node_text(path_node, source)
+        .trim_matches('"')
+        .to_string();
+    if target.is_empty() {
+        return None;
+    }
+    let alias = spec
+        .child_by_field_name("name")
+        .map(|name| node_text(name, source).to_string())
+        .unwrap_or_else(|| target.rsplit('/').next().unwrap_or(&target).to_string());
+    Some((alias, target))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,4 +176,28 @@ mod tests {
         assert_eq!(args[0].kind(), "identifier");
     }
 
+    // Real bug: symbol_scope unconditionally returned Vec::new() for
+    // imports, so Go emitted zero import facts regardless of what a
+    // downstream consumer's resolver could do with them - a cycle or
+    // dependency spanning a Go import edge was invisible to any tool
+    // relying on fact-mine's imports, not just narrowly unsupported.
+    #[test]
+    fn symbol_scope_extracts_grouped_and_single_import_declarations() {
+        let source = "package main\n\nimport (\n\t\"fmt\"\n\tutil \"demo/util\"\n\t_ \"demo/sideeffect\"\n)\n\nimport \"os\"\n\nfunc main() {}\n";
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_go::LANGUAGE.into()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        let (package, imports) = GoAstAdapter.symbol_scope(tree.root_node(), source);
+        assert_eq!(package, "main");
+        assert_eq!(
+            imports,
+            vec![
+                ("fmt".to_string(), "fmt".to_string()),
+                ("util".to_string(), "demo/util".to_string()),
+                ("_".to_string(), "demo/sideeffect".to_string()),
+                ("os".to_string(), "os".to_string()),
+            ]
+        );
+    }
 }

@@ -76,6 +76,75 @@ class ArchitectureToolsTest < Minitest::Test
     end
   end
 
+  # Real bug: changed-scope mode used to narrow the CORPUS (the files fed
+  # into graph construction) to just the module trees the diff touched,
+  # before any cycle detection ran. A cycle spanning an unchanged module
+  # (moduleA -> moduleB -> moduleA, where only moduleA's file changed) was
+  # therefore structurally invisible - moduleB's file, and its edge back
+  # into moduleA, were never even part of the graph. The correct model:
+  # always build the full-corpus graph; scope only which findings get
+  # reported. This proves a cross-module cycle is still found even when the
+  # diff between --base and HEAD only touches one side of it.
+  def test_cycle_report_changed_scope_still_finds_cycles_spanning_unchanged_modules
+    with_repo do |dir|
+      FileUtils.mkdir_p(%w[moduleA moduleB])
+      File.write("moduleA/a.rb", "require_relative '../moduleB/b'\nclass A; end\n")
+      File.write("moduleB/b.rb", "require_relative '../moduleA/a'\nclass B; end\n")
+      commit_all("init")
+      File.write("moduleA/a.rb", "require_relative '../moduleB/b'\nclass A\n  VERSION = 2\nend\n")
+      commit_all("touch moduleA only")
+
+      out = run_tool(File.join(TOOLS, "cycle_report.rb"), dir, "--base=HEAD~1")
+
+      assert_includes out, "file dependency cycle",
+        "expected the moduleA <-> moduleB cycle to still be found even though " \
+        "the diff only touched moduleA - the full corpus must always be graphed"
+      assert(out.include?("moduleA/a.rb <-> moduleB/b.rb"))
+    end
+  end
+
+  # Real bug: fact-mine emitted zero import facts for Go at all (a separate
+  # gap, fixed alongside this one), and even once it did, cycle_report's
+  # import resolver only knew Python/Java dotted-module and JS/Ruby/C
+  # relative-path conventions - a Go import names a whole package
+  # directory, rooted at the module name from go.mod (e.g.
+  # "github.com/org/repo/pkgb"), not a single file relative to the repo
+  # root. Neither gap alone nor together produced any cross-package Go
+  # cycle finding.
+  def test_cycle_report_resolves_go_module_rooted_package_imports
+    with_repo do |dir|
+      File.write("go.mod", "module github.com/demo/project\n\ngo 1.21\n")
+      FileUtils.mkdir_p(%w[pkga pkgb])
+      File.write("pkga/a.go", <<~GO)
+        package pkga
+
+        import "github.com/demo/project/pkgb"
+
+        func UseB() int {
+        \treturn pkgb.Value
+        }
+      GO
+      File.write("pkgb/b.go", <<~GO)
+        package pkgb
+
+        import "github.com/demo/project/pkga"
+
+        var Value = 1
+
+        func UseA() {
+        \tpkga.UseB()
+        }
+      GO
+      commit_all("init")
+
+      out = run_tool(File.join(TOOLS, "cycle_report.rb"), dir)
+
+      assert_includes out, "file dependency cycle"
+      assert_includes out, "pkga/a.go <-> pkgb/b.go"
+      assert_includes out, "directory dependency cycle"
+    end
+  end
+
   def test_reach_through_report_flags_convention_privacy_and_send_bypass
     with_repo do |dir|
       FileUtils.mkdir_p("lib")
@@ -122,6 +191,55 @@ class ArchitectureToolsTest < Minitest::Test
       rule_ids = results.map { |r| r["ruleId"] }
       assert_includes rule_ids, "arch-privacy-bypass"
       assert_includes rule_ids, "arch-reach-through"
+    end
+  end
+
+  # Real bug, same root cause as the cycle_report case above: narrowing the
+  # corpus to changed modules before building the call graph drops the
+  # callee's facts entirely whenever the reached-into module didn't itself
+  # change. A caller reaching into another module's private API is exactly
+  # as real a finding when only the caller's module changed - the callee
+  # not changing is not a reason to miss it.
+  def test_reach_through_report_changed_scope_still_finds_callee_in_unchanged_module
+    with_repo do |dir|
+      FileUtils.mkdir_p(%w[moduleA moduleB])
+      File.write("moduleB/vault.rb", <<~RB)
+        class Vault
+          def open_door
+            unlock
+          end
+
+          private
+
+          def unlock
+            @locked = false
+          end
+        end
+      RB
+      File.write("moduleA/thief.rb", <<~RB)
+        class Thief
+          def rob(vault)
+            vault.send(:unlock)
+          end
+        end
+      RB
+      commit_all("init")
+      File.write("moduleA/thief.rb", <<~RB)
+        class Thief
+          def rob(vault)
+            vault.send(:unlock)
+          end
+
+          def loot; end
+        end
+      RB
+      commit_all("touch moduleA only")
+
+      out = run_tool(File.join(TOOLS, "reach_through_report.rb"), dir, "--base=HEAD~1")
+
+      assert_includes out, "Thief -> Vault#unlock",
+        "expected the reach-through into moduleB's private method to still be found " \
+        "even though the diff only touched moduleA - the full corpus must always be graphed"
     end
   end
 

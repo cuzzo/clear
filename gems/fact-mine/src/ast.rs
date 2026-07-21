@@ -110,6 +110,18 @@ pub fn parse(file: &Path) -> Result<(Node, Vec<String>)> {
     parse_with_language(file, language)
 }
 
+/// The buffer actually fed to tree-sitter's `parse()` call, when a language
+/// adapter wants to rewrite what the parser sees (see
+/// `AstNormalizationAdapter::source_preprocessing`). Never used for
+/// anything besides the parse call itself - digests, snippets, and node
+/// text all read the untouched original source, which is safe precisely
+/// because every such rewrite is required to be byte-length preserving.
+pub(crate) fn parse_buffer(source: &str, language: Language) -> String {
+    adapters::normalization_adapter(language)
+        .source_preprocessing(source)
+        .unwrap_or_else(|| source.to_string())
+}
+
 pub fn parse_with_language(file: &Path, language: Language) -> Result<(Node, Vec<String>)> {
     let source =
         fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
@@ -118,7 +130,7 @@ pub fn parse_with_language(file: &Path, language: Language) -> Result<(Node, Vec
         .set_language(&grammar_for_language(language))
         .with_context(|| "failed to initialize tree-sitter parser")?;
     let tree = parser
-        .parse(&source, None)
+        .parse(parse_buffer(&source, language), None)
         .with_context(|| format!("tree-sitter produced no tree for {}", file.display()))?;
     let root = normalize_tree(tree.root_node(), &source, language);
     let lines = source.lines().map(ToString::to_string).collect();

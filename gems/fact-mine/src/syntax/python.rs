@@ -319,9 +319,6 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
         _owner: &str,
         in_method: bool,
     ) -> Option<StateDeclaration> {
-        if !node.text.contains(':') {
-            return None;
-        }
         if !matches!(
             node.r#type.as_str(),
             "expression_statement"
@@ -335,6 +332,31 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
         }
         if in_method && !node.text.trim().starts_with("self.") {
             return None;
+        }
+        if !node.text.contains(':') {
+            // A plain, unannotated class-body assignment (`STANDARD = 1`)
+            // - real state (this is exactly how Enum/IntEnum members are
+            // declared), just with no type to report. Only valid at
+            // class-body scope: an in-method bare assignment without
+            // `self.` was already excluded above, so reaching here with
+            // in_method true would only be `self.x = value` with no
+            // annotation, which is an assignment inside a method body,
+            // not a declaration - leave that to state-write tracking
+            // instead of double-counting it here.
+            if in_method {
+                return None;
+            }
+            let (raw_name, _) = node.text.trim().split_once('=')?;
+            let raw_name = raw_name.trim();
+            return is_simple_name(raw_name).then(|| StateDeclaration {
+                field: raw_name.to_string(),
+                owner: String::new(),
+                r#type: None,
+                immutable: false,
+                file: String::new(),
+                line: node.first_lineno,
+                span: span(node),
+            });
         }
         // Try structured children first: [name_node, type_node?, value_node?]
         let child_nodes: Vec<&Node> = node
@@ -351,8 +373,21 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
             if is_simple_name(name) {
                 let type_text = child_nodes[1].text.trim().to_string();
                 if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('=') {
+                    // A declaration and its own value assignment are the
+                    // same real field, but state-write tracking spells a
+                    // self-attribute with Ruby-convention `@` canonicalization
+                    // (canonical_state_field below) while this declaration
+                    // path did not - producing two entries for one field
+                    // (`tokens` and `@tokens`) wherever a consumer merges
+                    // declarations with writes. Canonicalize identically
+                    // here so both pipelines spell it the same way.
+                    let field = if raw_name.starts_with("self.") {
+                        self.canonical_state_field("self", name)
+                    } else {
+                        name.to_string()
+                    };
                     return Some(StateDeclaration {
-                        field: name.to_string(),
+                        field,
                         owner: String::new(),
                         r#type: Some(type_text),
                         immutable: false,
@@ -377,8 +412,13 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
                     .trim_end_matches(',')
                     .to_string();
                 if !type_text.is_empty() && type_text != ":" {
+                    let field = if raw_name.starts_with("self.") {
+                        self.canonical_state_field("self", name)
+                    } else {
+                        name.to_string()
+                    };
                     return Some(StateDeclaration {
-                        field: name.to_string(),
+                        field,
                         owner: String::new(),
                         r#type: Some(type_text),
                         immutable: false,
@@ -728,7 +768,10 @@ mod tests {
         let decl = b
             .state_declaration_from_node(&decl_node, "MyClass", false)
             .unwrap();
-        assert_eq!(decl.field, "myField");
+        // Canonicalized to match how state-write tracking spells the same
+        // self-attribute (canonical_state_field), so a declaration and its
+        // own assignment are never counted as two different fields.
+        assert_eq!(decl.field, "@myField");
         assert_eq!(decl.r#type, Some("int".to_string()));
 
         // Text-based fallback branch
@@ -736,7 +779,7 @@ mod tests {
         let decl_fallback = b
             .state_declaration_from_node(&field_node, "MyClass", false)
             .unwrap();
-        assert_eq!(decl_fallback.field, "myField");
+        assert_eq!(decl_fallback.field, "@myField");
         assert_eq!(decl_fallback.r#type, Some("int".to_string()));
 
         // None branches
@@ -777,5 +820,32 @@ mod tests {
         // Helper functions
         assert!(is_simple_name("var_name"));
         assert!(!is_simple_name(""));
+    }
+
+    // Real bug, found auditing mistune's InlineParser.__init__ and pluggy's
+    // HookImpl.__init__: an annotated `self.x: Type = value` declaration
+    // was recorded with the plain field name ("tokens"), while the same
+    // assignment's state-*write* tracking canonicalizes a self-attribute
+    // with the Ruby-convention `@` prefix ("@tokens") via
+    // canonical_state_field - two different spellings of the same real
+    // field, both surfacing wherever a consumer merges declarations with
+    // writes (a ~48% duplication rate was measured in one sampled repo).
+    #[test]
+    fn self_attribute_declaration_and_write_share_one_canonical_spelling() {
+        use crate::syntax::{self, Language};
+        use std::io::Write;
+        let mut file = tempfile::Builder::new().suffix(".py").tempfile().unwrap();
+        file.write_all(b"class Foo:\n    def __init__(self):\n        self.tokens: int = 1\n").unwrap();
+        let documents = syntax::parse_files(&[file.path().to_path_buf()], Language::Python).unwrap();
+        let document = &documents[0];
+
+        assert_eq!(document.state_declarations.len(), 1);
+        assert_eq!(document.state_declarations[0].field, "@tokens");
+        assert_eq!(document.state_writes.len(), 1);
+        assert_eq!(
+            document.state_declarations[0].field, document.state_writes[0].field,
+            "declaration and write must spell the same field identically, got {:?} vs {:?}",
+            document.state_declarations[0], document.state_writes[0]
+        );
     }
 }

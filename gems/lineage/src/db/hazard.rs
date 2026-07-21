@@ -349,26 +349,49 @@ fn excluded_zig_file(path: &str) -> bool {
         || matches!(name, "all-tests.zig" | "all-fuzz.zig" | "size_check.zig" | "runtime-header.zig")
 }
 
-// FactMine owns the hazard query definitions; include them directly so the
-// two scanners can never drift apart.
-const GO_HAZARDS: &str = include_str!("../../../fact-mine/src/syntax/go_hazards.scm");
-const RUST_HAZARDS: &str = include_str!("../../../fact-mine/src/syntax/rust_hazards.scm");
-const ZIG_HAZARDS: &str = include_str!("../../../fact-mine/src/syntax/zig_hazards.scm");
-const C_HAZARDS: &str = include_str!("../../../fact-mine/src/syntax/c_hazards.scm");
-const CPP_HAZARDS: &str = include_str!("../../../fact-mine/src/syntax/cpp_hazards.scm");
-const CSHARP_HAZARDS: &str = include_str!("../../../fact-mine/src/syntax/csharp_hazards.scm");
+// FactMine owns the canonical hazard query definitions. `include_str!` can
+// only ever reach files inside this crate's own directory - a path
+// escaping it (as a previous version of this file did, reaching into the
+// sibling fact-mine crate) is absent from a `cargo package`/published
+// tarball and breaks standalone builds. These are therefore vendored
+// copies, not a live reference; `hazard_scm_vendor_test.rs` (monorepo-only,
+// skipped when the sibling tree is unavailable) fails the build the moment
+// a vendored copy drifts from its fact-mine original, so the two scanners
+// still can never silently drift apart.
+const GO_HAZARDS: &str = include_str!("hazards/go_hazards.scm");
+const RUST_HAZARDS: &str = include_str!("hazards/rust_hazards.scm");
+const ZIG_HAZARDS: &str = include_str!("hazards/zig_hazards.scm");
+const C_HAZARDS: &str = include_str!("hazards/c_hazards.scm");
+const CPP_HAZARDS: &str = include_str!("hazards/cpp_hazards.scm");
+const CSHARP_HAZARDS: &str = include_str!("hazards/csharp_hazards.scm");
 
+/// A second, independently-evolved implementation of "classify this
+/// hazard_type string", alongside FactMine's own
+/// `fact_mine_rust::syntax::hazards::required_evidence_for_hazard_type`.
+/// Ideally there would be exactly one; a real Cargo dependency on FactMine
+/// (even dev-only, test-only) currently fails to resolve, because the two
+/// crates pin different, non-overlapping versions across 8+ tree-sitter
+/// grammar crates (e.g. tree-sitter-go 0.25.0 here vs 0.23.4 in FactMine).
+/// Until those pins are aligned and a real shared call is possible, treat
+/// any change here as a change to a hazard-classification contract: the
+/// specific, proven danger is an accidental substring collision like
+/// `"unsafe_block".contains("lock")` silently reclassifying an entire
+/// category of hazard - see
+/// `rust_unsafe_hazards_are_not_misclassified_as_a_race_via_the_lock_substring`.
 fn evidence_for_hazard(hazard_type: &str) -> &'static str {
     if hazard_type.contains("callback") || hazard_type.contains("metaprogramming") {
         "nil-kill"
     } else if hazard_type.contains("concurrency") || hazard_type.contains("channel") || hazard_type.contains("waitgroup") || hazard_type.contains("sync") {
         "concurrency"
+    } else if hazard_type.contains("unsafe_fn") || hazard_type.contains("unsafe_impl") || hazard_type.contains("unsafe_block") || hazard_type.contains("unsafe_operation") {
+        // Must be checked before the "lock" substring match below:
+        // "unsafe_block" contains "lock" (b-lock), which would otherwise
+        // misclassify every Rust unsafe-block hazard as a data race.
+        "miri"
     } else if hazard_type.contains("race") || hazard_type.contains("lock") {
         "race"
     } else if hazard_type.contains("loom") {
         "loom"
-    } else if hazard_type.contains("unsafe_fn") || hazard_type.contains("unsafe_impl") || hazard_type.contains("unsafe_block") || hazard_type.contains("unsafe_operation") {
-        "miri"
     } else if hazard_type.contains("tsan") {
         "tsan"
     } else if hazard_type.contains("asan") {
@@ -1050,6 +1073,23 @@ mod tests {
         assert_eq!(evidence_for_hazard("unknown_hazard"), "hazard");
     }
 
+    // Real bug: "unsafe_block" contains the substring "lock" (b-LOCK), which
+    // matched the "race"-classifying branch before the intended
+    // "unsafe_*" -> "miri" branch was ever reached - every Rust unsafe
+    // block, fn, impl, and operation hazard was misclassified as a data
+    // race. A test previously asserted this wrong value directly rather
+    // than fixing it; fixed here by checking unsafe_* first.
+    #[test]
+    fn rust_unsafe_hazards_are_not_misclassified_as_a_race_via_the_lock_substring() {
+        assert_eq!(evidence_for_hazard("rust_unsafe_block"), "miri");
+        assert_eq!(evidence_for_hazard("rust_unsafe_fn"), "miri");
+        assert_eq!(evidence_for_hazard("rust_unsafe_impl"), "miri");
+        assert_eq!(evidence_for_hazard("rust_unsafe_operation"), "miri");
+        // A genuine lock/race hazard must still classify correctly.
+        assert_eq!(evidence_for_hazard("go_race_lock"), "race");
+        assert_eq!(evidence_for_hazard("go_race_atomic"), "race");
+    }
+
     #[test]
     fn test_non_directory_file_collection_no_files() {
         let dir = tempdir().unwrap();
@@ -1058,5 +1098,40 @@ mod tests {
         let storage = Storage::open_memory().unwrap();
         let stats = ingest_hazards(&storage, &file_path, "zig", "abc", Some(10)).unwrap();
         assert_eq!(stats.scanned_files, 0);
+    }
+
+    // The hazard query text below is vendored (not a live include_str! path
+    // into the sibling fact-mine crate - that broke `cargo package`, since
+    // a published tarball never contains sibling directories). Vendoring
+    // trades a build-time guarantee for a test-time one: this only runs
+    // inside the monorepo checkout (skipped otherwise, e.g. when building
+    // from a published crate) and fails the moment a vendored copy drifts
+    // from its fact-mine original, so the two scanners still cannot
+    // silently diverge.
+    #[test]
+    fn vendored_hazard_queries_match_fact_mines_originals() {
+        let originals_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fact-mine/src/syntax");
+        if !originals_dir.is_dir() {
+            eprintln!("skipping: fact-mine sibling tree not present (not a monorepo checkout)");
+            return;
+        }
+        let vendored = [
+            ("go_hazards.scm", GO_HAZARDS),
+            ("rust_hazards.scm", RUST_HAZARDS),
+            ("zig_hazards.scm", ZIG_HAZARDS),
+            ("c_hazards.scm", C_HAZARDS),
+            ("cpp_hazards.scm", CPP_HAZARDS),
+            ("csharp_hazards.scm", CSHARP_HAZARDS),
+        ];
+        for (name, vendored_text) in vendored {
+            let original = fs::read_to_string(originals_dir.join(name))
+                .unwrap_or_else(|_| panic!("fact-mine original {name} is missing"));
+            assert_eq!(
+                vendored_text, original,
+                "{name} has drifted from fact-mine's original - re-copy it from \
+                 gems/fact-mine/src/syntax/{name} into gems/lineage/src/db/hazards/{name}"
+            );
+        }
     }
 }

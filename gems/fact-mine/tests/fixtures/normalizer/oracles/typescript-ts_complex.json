@@ -248,32 +248,44 @@
                               "Node": {
                                 "children": [
                                   {
-                                    "String": "a"
-                                  }
-                                ],
-                                "first_column": 2,
-                                "first_lineno": 6,
-                                "last_column": 3,
-                                "last_lineno": 6,
-                                "text": "a",
-                                "type": "LVAR"
-                              }
-                            },
-                            {
-                              "Node": {
-                                "children": [
-                                  {
-                                    "String": ": number"
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "a"
+                                        }
+                                      ],
+                                      "first_column": 2,
+                                      "first_lineno": 6,
+                                      "last_column": 3,
+                                      "last_lineno": 6,
+                                      "text": "a",
+                                      "type": "LVAR"
+                                    }
                                   },
                                   {
                                     "Node": {
-                                      "children": [],
-                                      "first_column": 14,
+                                      "children": [
+                                        {
+                                          "String": ": number"
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 14,
+                                            "first_lineno": 6,
+                                            "last_column": 15,
+                                            "last_lineno": 6,
+                                            "text": "1",
+                                            "type": "NUMBER"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 2,
                                       "first_lineno": 6,
                                       "last_column": 15,
                                       "last_lineno": 6,
-                                      "text": "1",
-                                      "type": "NUMBER"
+                                      "text": "a: number = 1",
+                                      "type": "LASGN"
                                     }
                                   }
                                 ],
@@ -282,63 +294,124 @@
                                 "last_column": 15,
                                 "last_lineno": 6,
                                 "text": "a: number = 1",
-                                "type": "LASGN"
+                                "type": "PUBLIC_FIELD_DEFINITION"
                               }
-                            }
-                          ],
-                          "first_column": 2,
-                          "first_lineno": 6,
-                          "last_column": 15,
-                          "last_lineno": 6,
-                          "text": "a: number = 1",
-                          "type": "PUBLIC_FIELD_DEFINITION"
-                        }
-                      },
-                      {
-                        "Node": {
-                          "children": [
-                            {
-                              "Symbol": "constructor"
                             },
                             {
                               "Node": {
                                 "children": [
-                                  "Nil",
-                                  "Nil",
-                                  "Nil"
+                                  {
+                                    "Symbol": "constructor"
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        "Nil",
+                                        "Nil",
+                                        "Nil"
+                                      ],
+                                      "first_column": 2,
+                                      "first_lineno": 7,
+                                      "last_column": 34,
+                                      "last_lineno": 7,
+                                      "text": "constructor(public b: string) {}",
+                                      "type": "SCOPE"
+                                    }
+                                  }
                                 ],
                                 "first_column": 2,
                                 "first_lineno": 7,
                                 "last_column": 34,
                                 "last_lineno": 7,
                                 "text": "constructor(public b: string) {}",
-                                "type": "SCOPE"
+                                "type": "DEFN"
                               }
                             }
                           ],
-                          "first_column": 2,
+                          "first_column": 21,
+                          "first_lineno": 5,
+                          "last_column": 1,
+                          "last_lineno": 8,
+                          "text": "{\n  a: number = 1;\n  constructor(public b: string) {}\n}",
+                          "type": "BLOCK"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [],
+                                "first_column": 14,
+                                "first_lineno": 7,
+                                "last_column": 20,
+                                "last_lineno": 7,
+                                "text": "public",
+                                "type": "ACCESSIBILITY_MODIFIER"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "String": "b"
+                                  }
+                                ],
+                                "first_column": 21,
+                                "first_lineno": 7,
+                                "last_column": 22,
+                                "last_lineno": 7,
+                                "text": "b",
+                                "type": "LVAR"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 24,
+                                      "first_lineno": 7,
+                                      "last_column": 30,
+                                      "last_lineno": 7,
+                                      "text": "string",
+                                      "type": "PREDEFINED_TYPE"
+                                    }
+                                  }
+                                ],
+                                "first_column": 22,
+                                "first_lineno": 7,
+                                "last_column": 30,
+                                "last_lineno": 7,
+                                "text": ": string",
+                                "type": "TYPE_ANNOTATION"
+                              }
+                            }
+                          ],
+                          "first_column": 14,
                           "first_lineno": 7,
-                          "last_column": 34,
+                          "last_column": 30,
                           "last_lineno": 7,
-                          "text": "constructor(public b: string) {}",
-                          "type": "DEFN"
+                          "text": "public b: string",
+                          "type": "REQUIRED_PARAMETER"
                         }
                       }
                     ],
-                    "first_column": 21,
+                    "first_column": 0,
                     "first_lineno": 5,
                     "last_column": 1,
                     "last_lineno": 8,
-                    "text": "{\n  a: number = 1;\n  constructor(public b: string) {}\n}",
+                    "text": "class Y implements X {\n  a: number = 1;\n  constructor(public b: string) {}\n}",
                     "type": "BLOCK"
                   }
                 }
               ],
-              "first_column": 21,
+              "first_column": 0,
               "first_lineno": 5,
               "last_column": 1,
               "last_lineno": 8,
-              "text": "{\n  a: number = 1;\n  constructor(public b: string) {}\n}",
+              "text": "class Y implements X {\n  a: number = 1;\n  constructor(public b: string) {}\n}",
               "type": "SCOPE"
             }
           }

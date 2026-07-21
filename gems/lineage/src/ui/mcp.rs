@@ -272,8 +272,40 @@ fn query_rows(
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
 }
 
+/// Joins `path` onto `repo` and verifies the result cannot escape `repo` -
+/// an absolute `path` (`Path::join` discards the base entirely for those)
+/// or a `../` traversal would otherwise let a caller read arbitrary host
+/// files through an MCP tool that is only ever supposed to expose one
+/// repository's own tracked content. Both sides are canonicalized so a
+/// symlink inside `repo` pointing back within it still resolves, and the
+/// comparison isn't fooled by non-canonical `.`/`..` segments; the target
+/// must already exist on disk (every caller here only ever reads a file
+/// that should be present, so this is not an added restriction in
+/// practice).
+fn resolve_repo_relative_path(repo: &Path, path: &str) -> Option<PathBuf> {
+    if Path::new(path).is_absolute() {
+        return None;
+    }
+    let repo_root = repo.canonicalize().ok()?;
+    let joined = repo_root.join(path).canonicalize().ok()?;
+    joined.starts_with(&repo_root).then_some(joined)
+}
+
+/// Escapes SQL LIKE metacharacters (`%`, `_`, and the escape character
+/// itself) in a caller-supplied path before it becomes a LIKE pattern.
+/// Every LIKE clause built from `path` pairs this with `ESCAPE '\'` -
+/// without it, a path containing `%` or `_` (a real, if unusual, path
+/// component - or an adversarial one) would have those characters
+/// reinterpreted as wildcards instead of matched literally, silently
+/// broadening the query beyond the directory scope the caller asked for.
+fn escape_like_pattern(input: &str) -> String {
+    input.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
 /// Try an exact-path match; if empty, retry as a `path%` prefix (directory
-/// scope). Mirrors the Ruby MVP's `resolve_path_or_prefix`.
+/// scope). Mirrors the Ruby MVP's `resolve_path_or_prefix`. `sql_prefix`
+/// must end its LIKE clause with `ESCAPE '\'` to match `prefix_arg`'s
+/// escaping.
 fn resolve_path_or_prefix(
     storage: &Storage,
     sql_exact: &str,
@@ -285,7 +317,7 @@ fn resolve_path_or_prefix(
     if !exact.is_empty() {
         return Ok((exact, path.to_string()));
     }
-    let prefix_arg = format!("{path}%");
+    let prefix_arg = format!("{}%", escape_like_pattern(path));
     let rows = query_rows(storage, sql_prefix, &[&prefix_arg], names)?;
     Ok((rows, format!("{path}*")))
 }
@@ -307,7 +339,11 @@ fn resolve_path_or_prefix(
 // numerator and denominator of their respective average, not treated as
 // zero - "never measured" must not silently drag the average down as if
 // it were "measured and uncovered".
-fn file_risk_sql(op: &str) -> String {
+/// `clause` is the full `current_path` predicate, e.g. `"= ?1"` or
+/// `"LIKE ?1 ESCAPE '\\'"` - the LIKE variant must carry its own ESCAPE
+/// clause so `resolve_path_or_prefix`'s escaped prefix argument is
+/// interpreted correctly.
+fn file_risk_sql(clause: &str) -> String {
     format!(
         "WITH latest_events AS (
            SELECT * FROM (
@@ -339,7 +375,7 @@ fn file_risk_sql(op: &str) -> String {
                 SUM(current_distinct_tests) AS total_distinct_tests,
                 SUM(CASE WHEN is_hard_gated = 1 THEN 1 ELSE 0 END) AS hard_gated_units
          FROM current_units
-         WHERE current_path {op} ?1
+         WHERE current_path {clause}
          GROUP BY current_path"
     )
 }
@@ -355,8 +391,8 @@ fn file_risk(storage: &Storage, path: &str) -> Result<Value, String> {
     ];
     let (rows, matched) = resolve_path_or_prefix(
         storage,
-        &file_risk_sql("="),
-        &file_risk_sql("LIKE"),
+        &file_risk_sql("= ?1"),
+        &file_risk_sql("LIKE ?1 ESCAPE '\\'"),
         path,
         &names,
     )?;
@@ -366,11 +402,11 @@ fn file_risk(storage: &Storage, path: &str) -> Result<Value, String> {
 
     let is_prefix = matched.ends_with('*');
     let hazard_sql = if is_prefix {
-        "SELECT path, COUNT(*) AS hazards FROM unit_hazards WHERE is_active = 1 AND path LIKE ?1 GROUP BY path"
+        "SELECT path, COUNT(*) AS hazards FROM unit_hazards WHERE is_active = 1 AND path LIKE ?1 ESCAPE '\\' GROUP BY path"
     } else {
         "SELECT path, COUNT(*) AS hazards FROM unit_hazards WHERE is_active = 1 AND path = ?1 GROUP BY path"
     };
-    let hazard_arg = if is_prefix { format!("{path}%") } else { path.to_string() };
+    let hazard_arg = if is_prefix { format!("{}%", escape_like_pattern(path)) } else { path.to_string() };
     let hazard_rows = query_rows(storage, hazard_sql, &[&hazard_arg], &["path", "hazards"])?;
     let hazards_by_path: std::collections::HashMap<String, Value> = hazard_rows
         .into_iter()
@@ -400,15 +436,15 @@ fn verification_gaps(storage: Option<&Storage>, repo: &Path, path: &str) -> Resu
 
     let is_prefix = query_rows(storage, "SELECT 1 AS x FROM unit_hazards WHERE path = ?1 LIMIT 1", &[path], &["x"])?.is_empty()
         && query_rows(storage, "SELECT 1 AS x FROM current_sarif_findings WHERE path = ?1 LIMIT 1", &[path], &["x"])?.is_empty();
-    let arg = if is_prefix { format!("{path}%") } else { path.to_string() };
-    let op = if is_prefix { "LIKE" } else { "=" };
+    let arg = if is_prefix { format!("{}%", escape_like_pattern(path)) } else { path.to_string() };
+    let op = if is_prefix { "LIKE ?1 ESCAPE '\\'" } else { "= ?1" };
     let hazard_sql = format!(
         "SELECT path, line, hazard_type, required_evidence, symbol, source AS snippet \
-         FROM unit_hazards WHERE is_active = 1 AND path {op} ?1"
+         FROM unit_hazards WHERE is_active = 1 AND path {op}"
     );
     let finding_sql = format!(
         "SELECT path, start_line, rule_id, message FROM current_sarif_findings \
-         WHERE (is_dark_arm = 1 OR rule_id LIKE 'test-miser.%') AND path {op} ?1"
+         WHERE (is_dark_arm = 1 OR rule_id LIKE 'test-miser.%') AND path {op}"
     );
     let open_hazards = query_rows(
         storage,
@@ -641,7 +677,7 @@ fn hazard_scan_fn(path: &str) -> Option<fn(&str, &str) -> Vec<HazardSite>> {
 
 fn live_rescan_hazards(repo: &Path, path: &str, start_line: u32, end_line: u32) -> Option<Vec<Value>> {
     let scan = hazard_scan_fn(path)?;
-    let contents = fs::read_to_string(repo.join(path)).ok()?;
+    let contents = fs::read_to_string(resolve_repo_relative_path(repo, path)?).ok()?;
     Some(
         scan(path, &contents)
             .into_iter()
@@ -664,7 +700,9 @@ fn live_rescan_hazards(repo: &Path, path: &str, start_line: u32, end_line: u32) 
 /// same live in-process rescan used for the dirty-file case above. No
 /// history, coverage, mutation, or hotness data exists without a database.
 fn live_unit_context(repo: &Path, path: &str, line: u32) -> Value {
-    let full_path = repo.join(path);
+    let Some(full_path) = resolve_repo_relative_path(repo, path) else {
+        return json!({"error": format!("cannot read {path}: outside the repository or does not exist")});
+    };
     let contents = match fs::read_to_string(&full_path) {
         Ok(c) => c,
         Err(e) => return json!({"error": format!("cannot read {path}: {e}")}),
@@ -702,7 +740,9 @@ fn live_unit_context(repo: &Path, path: &str, line: u32) -> Value {
 }
 
 fn live_verification_gaps(repo: &Path, path: &str) -> Value {
-    let full_path = repo.join(path);
+    let Some(full_path) = resolve_repo_relative_path(repo, path) else {
+        return json!({"error": format!("cannot read {path}: outside the repository or does not exist")});
+    };
     let contents = match fs::read_to_string(&full_path) {
         Ok(c) => c,
         Err(e) => return json!({"error": format!("cannot read {path}: {e}")}),
@@ -928,6 +968,51 @@ mod tests {
         assert_eq!(live_rescan_hazards(dir.path(), "src/missing.rs", 1, 10), None);
     }
 
+    // --- path containment (resolve_repo_relative_path) -----------------
+
+    // Real bug: `repo.join(path)` was fed straight to `fs::read_to_string`
+    // with no containment check. `Path::join` discards the base entirely
+    // when the joined-on path is absolute, and never resolves `../`
+    // segments itself - so an MCP tool meant to expose only one
+    // repository's own tracked content could be made to read (and
+    // hazard-scan) arbitrary files elsewhere on the host.
+    #[test]
+    fn resolve_repo_relative_path_rejects_absolute_paths() {
+        let dir = init_repo();
+        write(dir.path(), "src/lib.rs", "fn f() {}\n");
+        assert_eq!(resolve_repo_relative_path(dir.path(), "/etc/passwd"), None);
+    }
+
+    #[test]
+    fn resolve_repo_relative_path_rejects_parent_directory_traversal() {
+        let dir = init_repo();
+        write(dir.path(), "src/lib.rs", "fn f() {}\n");
+        // A file that genuinely exists one level above the repo root -
+        // proving this fails because of containment, not a missing file.
+        let outside = dir.path().parent().unwrap().join("outside-secret.txt");
+        fs::write(&outside, "outside\n").unwrap();
+        assert_eq!(resolve_repo_relative_path(dir.path(), "../outside-secret.txt"), None);
+        let _ = fs::remove_file(&outside);
+    }
+
+    #[test]
+    fn resolve_repo_relative_path_accepts_a_real_file_inside_the_repo() {
+        let dir = init_repo();
+        write(dir.path(), "src/lib.rs", "fn f() {}\n");
+        let resolved = resolve_repo_relative_path(dir.path(), "src/lib.rs").unwrap();
+        assert_eq!(fs::read_to_string(resolved).unwrap(), "fn f() {}\n");
+    }
+
+    #[test]
+    fn live_rescan_hazards_does_not_escape_the_repo_via_traversal() {
+        let dir = init_repo();
+        write(dir.path(), "src/lib.rs", "fn f() {}\n");
+        let outside = dir.path().parent().unwrap().join("outside.rs");
+        fs::write(&outside, "fn g() { let p = &0 as *const i32; unsafe { *p }; }\n").unwrap();
+        assert_eq!(live_rescan_hazards(dir.path(), "../outside.rs", 1, 10), None);
+        let _ = fs::remove_file(&outside);
+    }
+
     // --- unit_context's dirty-file wiring ----------------------------------
 
     // logical_units has no end_line column - upsert_logical_unit only ever
@@ -1017,5 +1102,35 @@ mod tests {
         let context = unit_context(Some(&storage), dir.path(), "src/lib.rs", 2).unwrap();
         assert!(context.get("dirty").is_none());
         assert!(context.get("live_hazards").is_none());
+    }
+
+    // --- LIKE wildcard escaping ---------------------------------------
+
+    #[test]
+    fn escape_like_pattern_neutralizes_percent_underscore_and_backslash() {
+        assert_eq!(escape_like_pattern("plain/path.rs"), "plain/path.rs");
+        assert_eq!(escape_like_pattern("100%_done.rs"), "100\\%\\_done.rs");
+        assert_eq!(escape_like_pattern("back\\slash.rs"), "back\\\\slash.rs");
+    }
+
+    // Real bug: `format!("{path}%")` fed a caller-supplied path straight
+    // into a LIKE pattern with no escaping. A path containing a literal
+    // `%` or `_` had that character reinterpreted as a wildcard instead of
+    // matched literally, so a directory-scope query could silently widen
+    // to match unrelated paths that merely "look similar" under wildcard
+    // rules - here, a query for the literal prefix "src%unusual" must
+    // match only the unit whose real path starts with exactly that string,
+    // not a same-length sibling whose middle three characters differ (which
+    // an unescaped `%` would treat as "any characters").
+    #[test]
+    fn file_risk_prefix_scope_treats_percent_in_path_literally_not_as_a_wildcard() {
+        let storage = Storage::open_memory().unwrap();
+        seed_unit(&storage, "src%unusual/mod.rs", 1, 3);
+        seed_unit(&storage, "srcXXXunusual/mod.rs", 1, 3);
+
+        let result = file_risk(&storage, "src%unusual").unwrap();
+        let files = result["files"].as_array().unwrap();
+        let paths: Vec<&str> = files.iter().filter_map(|f| f["current_path"].as_str()).collect();
+        assert_eq!(paths, vec!["src%unusual/mod.rs"]);
     }
 }

@@ -2912,6 +2912,30 @@ fn get_def_header(lines: &[String], start_line_1indexed: usize) -> String {
     header
 }
 
+/// Truncates a declaration header at its own body-opening `{`, tracking
+/// paren AND bracket depth so a parameter type's own braces (Go's
+/// `interface{}`, a C# anonymous-object-adjacent `{}`, etc.) - whether
+/// inside the parameter list's `(...)` or, for a generic Go function, its
+/// type-parameter list's `[...]` (`func F[T interface{ ~int }](x T)`) - are
+/// not mistaken for it. Naively splitting on the first `{`, or tracking
+/// only paren depth, cuts the signature off mid-declaration for any
+/// function whose type/value parameters include one.
+fn header_before_body_brace(header: &str) -> &str {
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+    for (index, ch) in header.char_indices() {
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth -= 1,
+            '{' if paren_depth <= 0 && bracket_depth <= 0 => return &header[..index],
+            _ => {}
+        }
+    }
+    header
+}
+
 fn is_param_untraceable(sig_text: &str, param: &str) -> bool {
     let bytes = sig_text.as_bytes();
     let p_bytes = param.as_bytes();
@@ -3203,10 +3227,7 @@ fn method_signature(lines: &[String], fn_def: &syntax::FunctionDef, language: &s
         // (`name (arg)`), which loses return annotations required by CFG/DFG.
         // Their declaration header is the source of truth for static facts.
         "c" | "cpp" | "csharp" | "go" | "java" | "kotlin" | "php" | "rust" | "swift" | "zig" => {
-            get_def_header(lines, fn_def.line)
-                .split('{')
-                .next()
-                .unwrap_or_default()
+            header_before_body_brace(&get_def_header(lines, fn_def.line))
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ")
@@ -6945,6 +6966,43 @@ def py_fn(a: int) -> str:
     #[test]
     fn test_profile_extra_coverage() {
         test_profile_extra_coverage_impl();
+    }
+
+    // Real bug, found auditing mapstructure's Decode/decodeSlice: a
+    // parameter typed `interface{}` (Go's idiom for "any value", the whole
+    // point of this library) has its own `{}` inside the parameter list,
+    // and the old naive `.split('{').next()` truncated the signature right
+    // there, dropping the closing `)`, the return type, and any params
+    // after it - breaking captured signatures for the majority of a
+    // reflection-heavy codebase's public API.
+    #[test]
+    fn header_before_body_brace_skips_braces_inside_the_parameter_list() {
+        assert_eq!(
+            super::header_before_body_brace(
+                "func Decode(input interface{}, output interface{}) error {\n\tbody\n}"
+            ),
+            "func Decode(input interface{}, output interface{}) error "
+        );
+        assert_eq!(
+            super::header_before_body_brace("func Simple() error {\n\tbody\n}"),
+            "func Simple() error "
+        );
+    }
+
+    // Real bug: a generic Go function's type-parameter list uses `[...]`,
+    // not `(...)` - `func F[T interface{ ~int }](x T) error {` has its own
+    // `{}` inside the *bracket* list, before the parameter list even
+    // starts. Tracking only paren depth treated that brace as the body
+    // opener at bracket-depth-only position, truncating the signature to
+    // "func F[T interface" and losing the parameter list and return type.
+    #[test]
+    fn header_before_body_brace_skips_braces_inside_a_generic_type_parameter_list() {
+        assert_eq!(
+            super::header_before_body_brace(
+                "func F[T interface{ ~int }](x T) error {\n\treturn nil\n}"
+            ),
+            "func F[T interface{ ~int }](x T) error "
+        );
     }
 }
 

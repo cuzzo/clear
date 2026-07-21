@@ -31,9 +31,7 @@
         {
           "co_uses": [],
           "dependencies": [],
-          "reads": [
-            "methods"
-          ],
+          "reads": [],
           "writes": [
             "methods"
           ]
@@ -931,9 +929,7 @@
             "end_line": 9,
             "index": 1,
             "line": 9,
-            "reads": [
-              "methods"
-            ],
+            "reads": [],
             "source": "let mut methods: Vec<String> = Vec::new();",
             "span": [
               9,

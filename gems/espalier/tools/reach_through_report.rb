@@ -49,15 +49,19 @@ repo = options[:repo]
 files = CorpusCommon.production_files(repo)
 abort "no production sources found" if files.empty?
 
+# The call graph is always built from the FULL corpus, changed-scope or
+# not. A changed file's reach-through into another module's private API is
+# a real finding regardless of whether that other module happened to
+# change too; narrowing the corpus before graph construction would drop
+# the callee's facts entirely, making the violation undetectable rather
+# than merely unreported. `changed` (below, at the finding-filter step)
+# still scopes which findings get reported - only the graph itself must
+# never be scoped.
 changed = options[:base] ? CorpusCommon.changed_files(repo, options[:base], options[:head]).to_set : nil
-if changed
-  files, scoped_modules = CorpusCommon.scope_to_changed_modules(files, changed)
-  warn "scoped to changed modules: #{scoped_modules.sort.join(", ")} (#{files.size} files)"
-  if files.empty?
-    CorpusCommon.write_sarif(options[:sarif], "espalier-reach-through", RULES, []) if options[:sarif]
-    puts "(no production sources in changed modules)"
-    exit 0
-  end
+if changed&.empty?
+  CorpusCommon.write_sarif(options[:sarif], "espalier-reach-through", RULES, []) if options[:sarif]
+  puts "(no changed production sources)"
+  exit 0
 end
 
 facts = CorpusCommon.run_syntax_facts(repo, files)
@@ -168,7 +172,6 @@ end
   findings[bucket].uniq! { |f| [f[:at], f[:to]] }
 end
 
-changed = options[:base] ? CorpusCommon.changed_files(repo, options[:base], options[:head]).to_set : nil
 in_scope = lambda do |finding|
   changed.nil? || changed.include?(finding[:at].split(":").first)
 end

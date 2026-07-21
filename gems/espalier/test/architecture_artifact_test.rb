@@ -28,4 +28,42 @@ class ArchitectureArtifactTest < Minitest::Test
     function = artifact["nodes"].find { |node| node["id"] == "fn:1" }
     assert_equal "private", function.dig("metadata", "visibility")
   end
+
+  # Real bug, found auditing C repos: fact-mine's C extractor makes a
+  # best-effort guess at an owner for a free function when it can't find a
+  # real enclosing struct (e.g. inferring "widget" from a `widget_t*`
+  # parameter), and tags that guess "confidence: partial" specifically so
+  # consumers can tell it apart from a real, declared type. build rendered
+  # every owner identically regardless of confidence, so the heuristic guess
+  # became indistinguishable from `widget_t` (a real struct, confidence
+  # high) - fabricating an architectural entity, and even misattributing an
+  # unrelated free function to it.
+  def test_partial_confidence_owners_are_not_rendered_as_owner_nodes
+    evidence = {
+      "root" => "/repo",
+      "corpus" => { "complete" => true },
+      "owners" => [
+        { "id" => "owner:1", "name" => "widget_t", "kind" => "struct", "confidence" => "high", "language" => "c", "path" => "/repo/widget.c", "line" => 1, "span" => [1, 0, 1, 30] },
+        { "id" => "owner:2", "name" => "widget", "kind" => "owner", "confidence" => "partial", "language" => "c", "path" => "/repo/widget.c", "line" => 10, "span" => [10, 0, 12, 1] }
+      ],
+      "methods" => [
+        { "id" => "fn:1", "owner_id" => "owner:1", "owner" => "widget_t", "name" => "widget_init", "language" => "c", "path" => "/repo/widget.c", "line" => 2, "span" => [2, 0, 4, 1] },
+        { "id" => "fn:2", "owner_id" => "owner:2", "owner" => "widget", "name" => "add_numbers", "language" => "c", "path" => "/repo/widget.c", "line" => 10, "span" => [10, 0, 12, 1] }
+      ],
+      "fields" => [],
+      "facts" => { "calls" => [], "state_accesses" => [] }
+    }
+
+    artifact = Espalier::ArchitectureArtifact.build(evidence, root: "/repo")
+    owner_nodes = artifact["nodes"].select { |node| node["kind"] == "owner" }
+    assert_equal ["widget_t"], owner_nodes.map { |node| node["name"] },
+                 "the partial-confidence 'widget' guess must not become a first-class owner node"
+
+    real_owner_fn = artifact["nodes"].find { |node| node["id"] == "fn:1" }
+    assert_equal "owner:1", real_owner_fn["owner_id"]
+
+    guessed_owner_fn = artifact["nodes"].find { |node| node["id"] == "fn:2" }
+    assert_nil guessed_owner_fn["owner_id"],
+               "a function whose only owner is a partial-confidence guess must not link to a fabricated node"
+  end
 end

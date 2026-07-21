@@ -244,7 +244,22 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
             _ => false,
         });
 
-        if in_method {
+        // `constructor(private readonly foo: Foo)`: a parameter-property
+        // (TypeScript's own version of the identically-shaped Kotlin
+        // primary-constructor-property gap already fixed this session)
+        // normalizes as REQUIRED_PARAMETER/OPTIONAL_PARAMETER, only when it
+        // actually carries an accessibility/readonly modifier (a plain
+        // parameter with none is just a parameter, not state). Checked
+        // ahead of the in_method branching below: a constructor's own
+        // parameters live inside its DEFN subtree, so this walk visits them
+        // with in_method already true, even though they are a declaration
+        // site, not a use inside the method body.
+        let is_parameter_property =
+            has_modifier && matches!(node.r#type.as_str(), "REQUIRED_PARAMETER" | "OPTIONAL_PARAMETER");
+
+        if is_parameter_property {
+            // fall through to the shared structured-children extraction below
+        } else if in_method {
             if node.r#type != "ATTRASGN" && node.r#type != "IASGN" {
                 return None;
             }

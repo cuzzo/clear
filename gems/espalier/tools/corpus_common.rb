@@ -207,23 +207,4 @@ module CorpusCommon
     options
   end
 
-  # The module directory a path belongs to: two components for monorepo
-  # layouts whose first component groups projects (gems/espalier), otherwise
-  # the first component.
-  GROUPING_ROOTS = %w[gems packages crates apps libs].to_set.freeze
-
-  def module_root(path)
-    parts = path.split("/")
-    return parts[0] if parts.size < 2
-    GROUPING_ROOTS.include?(parts[0]) && parts.size > 2 ? parts[0, 2].join("/") : parts[0]
-  end
-
-  # In changed-scope (CI) mode, whole-repo call resolution is unaffordable on
-  # a monorepo. Restrict the corpus to the module trees the diff touches;
-  # cross-module edges from untouched modules are out of scope by contract.
-  def scope_to_changed_modules(files, changed)
-    modules = changed.map { |path| module_root(path) }.to_set
-    scoped = files.select { |path| modules.include?(module_root(path)) }
-    [scoped, modules]
-  end
 end

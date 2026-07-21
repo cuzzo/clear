@@ -197,13 +197,7 @@ class McpServerTest < Minitest::Test
         refute_nil context["live_hazards"]
         unsafe_hazard = context["live_hazards"].find { |h| h["hazard_type"] == "rust_unsafe_block" }
         refute_nil unsafe_hazard, "expected a live-rescanned rust_unsafe_block hazard, got #{context["live_hazards"].inspect}"
-        # Pre-existing hazard.rs quirk, not asserting a bug fix: "rust_unsafe_block"
-        # contains the substring "lock" (b-lock), which matches
-        # evidence_for_hazard's earlier `contains("lock") -> "race"` branch
-        # before the intended `contains("unsafe_block") -> "miri"` branch is
-        # reached. Documented here rather than fixed - out of scope for this
-        # test.
-        assert_equal "race", unsafe_hazard["required_evidence"]
+        assert_equal "miri", unsafe_hazard["required_evidence"]
       ensure
         client.shutdown!
       end

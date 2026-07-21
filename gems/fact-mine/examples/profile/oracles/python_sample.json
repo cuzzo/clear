@@ -4,12 +4,12 @@
     {
       "collection_depth": 0,
       "declaration_kind": "state_field",
-      "declaration_name": "port",
+      "declaration_name": "@port",
       "declared_type": {
         "data": "int",
         "kind": "Primitive"
       },
-      "id": "python\u0000examples/profile/python_sample.py\u0000Database\u0000state_field\u0000port\u00005\u0000python-typing\u0000declared",
+      "id": "python\u0000examples/profile/python_sample.py\u0000Database\u0000state_field\u0000@port\u00005\u0000python-typing\u0000declared",
       "language": "python",
       "line": 5,
       "nested_union_width": 0,
@@ -85,24 +85,6 @@
   "fields": [
     {
       "declared_type": "int",
-      "id": "state:d8491840ef488397",
-      "language": "python",
-      "line": 5,
-      "name": "port",
-      "owner": "Database",
-      "owner_id": "owner:1a8faee6057d3971",
-      "path": "examples/profile/python_sample.py",
-      "source": "syntax",
-      "span": [
-        5,
-        8,
-        5,
-        29
-      ],
-      "static_origin": "state_declaration"
-    },
-    {
-      "declared_type": null,
       "id": "state:41638fe5d66c2aa3",
       "language": "python",
       "line": 5,
@@ -117,7 +99,7 @@
         5,
         29
       ],
-      "static_origin": "state_write"
+      "static_origin": "state_declaration"
     },
     {
       "declared_type": null,
@@ -417,8 +399,8 @@
         "data": "int",
         "kind": "Primitive"
       },
-      "field": "port",
-      "key": "Database\u0000port",
+      "field": "@port",
+      "key": "Database\u0000@port",
       "language": "python",
       "line": 5,
       "owner": "Database",
@@ -432,7 +414,7 @@
     }
   ],
   "state_types": {
-    "Database\u0000port": {
+    "Database\u0000@port": {
       "data": "int",
       "kind": "Primitive"
     }
@@ -485,11 +467,11 @@
     },
     {
       "declared_type": "int",
-      "id": "python\u0000examples/profile/python_sample.py\u0000Database\u0000state_field\u0000port\u00005\u0000python-typing",
+      "id": "python\u0000examples/profile/python_sample.py\u0000Database\u0000state_field\u0000@port\u00005\u0000python-typing",
       "kind": "state_field",
       "language": "python",
       "line": 5,
-      "name": "port",
+      "name": "@port",
       "owner": "Database",
       "path": "examples/profile/python_sample.py",
       "source": "syntax",

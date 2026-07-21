@@ -7,7 +7,7 @@ pub(crate) mod cpp;
 pub(crate) mod csharp;
 pub(crate) mod effects;
 pub(crate) mod go;
-pub(crate) mod hazards;
+pub mod hazards;
 pub(crate) mod imports;
 pub(crate) mod java;
 pub(crate) mod javascript;

@@ -521,11 +521,32 @@ impl<'a> LocalFlow<'a> {
         local_names: &BTreeSet<String>,
         writes: &BTreeSet<String>,
     ) -> BTreeSet<String> {
+        // A multi-declarator statement (`int retval, j, numevents = 0;`)
+        // only forms an assignment-shaped node for declarators that carry
+        // an initializer; bare co-declared names have no dedicated
+        // "declaration target" node, so they normalize as plain identifier
+        // references and get misread as reads of the whole declaration
+        // statement (falsely "deriving" the initialized declarator from
+        // them). Declarator names named in a declaration-like LHS are
+        // being introduced here, not referenced, regardless of whether
+        // they carry their own initializer.
+        let source = ast::slice(node, &self.lines);
+        let declared_names: BTreeSet<String> = split_assignment(&source)
+            .filter(|(lhs, _)| declaration_like_lhs(lhs, self.behavior))
+            .map(|(lhs, _)| {
+                identifiers_with_positions(lhs)
+                    .into_iter()
+                    .map(|identifier| identifier.name)
+                    .filter(|name| !self.behavior.local_flow_keyword(name))
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+
         let mut reads = Vec::new();
         self.walk_local(node, &mut |child| {
             if LOCAL_READ_TYPES.contains(&child.r#type.as_str()) {
                 if let Some(name) = local_read_name(child) {
-                    if local_names.contains(&name) {
+                    if local_names.contains(&name) && !declared_names.contains(&name) {
                         reads.push(name);
                     }
                 }
@@ -536,11 +557,11 @@ impl<'a> LocalFlow<'a> {
         // identifiers in comments and string fragments masquerade as data
         // dependencies even when the AST already supplied the real reads.
         if reads.is_empty() {
-            reads.extend(textual_local_reads(
-                &ast::slice(node, &self.lines),
-                local_names,
-                writes,
-            ));
+            reads.extend(
+                textual_local_reads(&ast::slice(node, &self.lines), local_names, writes)
+                    .into_iter()
+                    .filter(|name| !declared_names.contains(name)),
+            );
         }
         reads.into_iter().collect()
     }
@@ -665,13 +686,18 @@ fn textual_local_writes(source: &str, behavior: &dyn NormalizedLanguageBehavior)
         || trimmed_lhs.starts_with("$this->")
         || trimmed_lhs.starts_with('@');
 
-    if !is_state_write
-        && (lhs.contains('.')
-            || lhs.contains("->")
-            || lhs.contains('[')
-            || lhs.contains('(')
-            || lhs.contains(')'))
-    {
+    // A call whose receiver happens to start with `self.`/`this.` (e.g.
+    // `self.add_headers(request, stream=stream, ...)`) must never be read
+    // as a `self.x = value` state write just because its first `=` is a
+    // keyword argument's binding, not an assignment. Parens mean this is a
+    // call, never a plain assignment target, regardless of the receiver
+    // prefix that made it look like one - unlike brackets, which a
+    // legitimate indexed state write (`self.cache[index].status = 1`)
+    // still needs to keep tolerating for is_state_write.
+    if lhs.contains('(') || lhs.contains(')') {
+        return Vec::new();
+    }
+    if !is_state_write && (lhs.contains('.') || lhs.contains("->") || lhs.contains('[')) {
         return Vec::new();
     }
 
@@ -745,7 +771,32 @@ fn normalized_target_names(node: &Node) -> Vec<String> {
     node.children
         .iter()
         .filter_map(ast::node)
-        .flat_map(normalized_target_names)
+        .flat_map(normalized_assignment_target_names)
+        .collect()
+}
+
+/// Descends looking only for genuine assignment targets (LASGN/DASGN), not
+/// bare reads. A bare LVAR/DVAR found directly as a for-loop's own init
+/// clause (matched by `normalized_target_names` above, at the top level)
+/// is a for-each-style loop variable and a legitimate write; the same node
+/// type found while recursing through a *different* expression is just a
+/// read. This distinction matters for a C-style `for (; cond; step)` with
+/// an empty init clause: the loop's first child is then the *condition*
+/// (e.g. `p != data + len`), and blindly harvesting every LVAR/DVAR found
+/// while descending into it - as the old single-function recursion did -
+/// misclassified every variable the condition merely reads (`data`, `len`)
+/// as if the loop reassigned them.
+fn normalized_assignment_target_names(node: &Node) -> Vec<String> {
+    if matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
+        return local_read_name(node)
+            .filter(|name| simple_identifier(name))
+            .into_iter()
+            .collect();
+    }
+    node.children
+        .iter()
+        .filter_map(ast::node)
+        .flat_map(normalized_assignment_target_names)
         .collect()
 }
 
@@ -1323,5 +1374,113 @@ mod tests {
         assert_eq!(symbol_child(&Child::Symbol("foo".to_string())), Some("foo"));
         assert_eq!(symbol_child(&Child::String("bar".to_string())), Some("bar"));
         assert_eq!(symbol_child(&Child::Nil), None);
+    }
+
+    // Real bug, found auditing wrk/src/ae_select.c's aeApiPoll: a bare
+    // co-declared name with no initializer of its own
+    // (`int retval, j, numevents = 0;`) has no assignment-shaped node, so
+    // it normalizes as a plain identifier reference and got misread as a
+    // *read* of the whole declaration statement - producing a false
+    // "numevents derived from retval" dependency once retval was later
+    // reassigned elsewhere in the function. retval/j must not appear as
+    // reads of their own declaration line; numevents (the only declarator
+    // with an initializer) is unaffected.
+    #[test]
+    fn multi_declarator_statement_does_not_read_its_own_bare_declarators() {
+        use std::io::Write;
+        let mut file = tempfile::Builder::new().suffix(".c").tempfile().unwrap();
+        file.write_all(
+            b"void run(void) {\n\
+              \x20   int retval, j, numevents = 0;\n\
+              \x20   retval = select_thing();\n\
+              \x20   for (j = 0; j < 3; j++) {\n\
+              \x20       numevents++;\n\
+              \x20   }\n\
+              \x20   return numevents;\n\
+              }\n",
+        )
+        .unwrap();
+        let summaries = scan_files(&[file.path().to_path_buf()], crate::syntax::Language::C).unwrap();
+        let declaration = summaries[0]
+            .statements
+            .iter()
+            .find(|statement| statement.source.contains("numevents = 0"))
+            .expect("declaration statement");
+        assert!(declaration.reads.is_empty(), "reads should be empty, got {:?}", declaration.reads);
+        assert_eq!(declaration.writes, BTreeSet::from(["numevents".to_string()]));
+        assert!(declaration.dependencies.is_empty());
+    }
+
+    // Real bug, found auditing requests/src/requests/adapters.py's
+    // Session.send: a multi-line call whose receiver happens to start with
+    // `self.` (`self.add_headers(request, stream=stream, ...)`) was read
+    // as a `self.x = value` state write, because the is_state_write
+    // exception (meant only to let a real dotted assignment target
+    // through despite containing a `.`) also bypassed the parens/brackets
+    // exclusion - so the call's first `=` (a keyword argument binding, not
+    // an assignment) got treated as the statement's own reassignment.
+    // request/stream must be plain reads of this call, not writes.
+    #[test]
+    fn call_with_self_prefixed_receiver_is_not_read_as_a_state_write() {
+        use std::io::Write;
+        let mut file = tempfile::Builder::new().suffix(".py").tempfile().unwrap();
+        file.write_all(
+            b"class Session:\n\
+              \x20   def send(self, request, stream):\n\
+              \x20       self.add_headers(\n\
+              \x20           request,\n\
+              \x20           stream=stream,\n\
+              \x20       )\n",
+        )
+        .unwrap();
+        let summaries = scan_files(&[file.path().to_path_buf()], crate::syntax::Language::Python).unwrap();
+        let call_statement = summaries[0]
+            .statements
+            .iter()
+            .find(|statement| statement.source.contains("add_headers"))
+            .expect("call statement");
+        assert!(
+            call_statement.writes.is_empty(),
+            "a call is not a state write, got {:?}",
+            call_statement.writes
+        );
+        assert!(call_statement.dependencies.is_empty());
+        assert!(call_statement.reads.contains("request"));
+        assert!(call_statement.reads.contains("stream"));
+    }
+
+    // Real bug, found auditing wrk/src/http_parser.c's http_parser_execute:
+    // a C-style `for (; cond; step)` with an empty init clause has the
+    // *condition* as its first child (there is no init assignment to be
+    // first instead), so recursively harvesting every LVAR/DVAR found
+    // while descending into it - which normalized_target_names used to do
+    // - treated every variable the condition merely reads as if the loop
+    // reassigned it. `data`/`len` (read-only for the whole function) must
+    // not appear as writes of a loop that only ever assigns its own
+    // counter/state locals.
+    #[test]
+    fn empty_init_for_loop_does_not_write_variables_its_condition_only_reads() {
+        use std::io::Write;
+        let mut file = tempfile::Builder::new().suffix(".c").tempfile().unwrap();
+        file.write_all(
+            b"void run(const char *data, size_t len) {\n\
+              \x20   const char *p = data;\n\
+              \x20   for (; p != data + len; p++) {\n\
+              \x20       char ch = *p;\n\
+              \x20   }\n\
+              }\n",
+        )
+        .unwrap();
+        let summaries = scan_files(&[file.path().to_path_buf()], crate::syntax::Language::C).unwrap();
+        let loop_statement = summaries[0]
+            .statements
+            .iter()
+            .find(|statement| statement.source.starts_with("for ("))
+            .expect("for-loop statement");
+        assert!(
+            !loop_statement.writes.contains("data") && !loop_statement.writes.contains("len"),
+            "condition-only reads must not appear as writes, got {:?}",
+            loop_statement.writes
+        );
     }
 }

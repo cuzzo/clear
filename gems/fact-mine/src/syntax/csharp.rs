@@ -33,6 +33,29 @@ pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     nominal::parse(source, &CSHARP_NOMINAL_TYPE_SYNTAX)
 }
 
+/// Everything before a field/property declarator's own `=` initializer (if
+/// any) - never a comparison/lambda-arrow/compound-assignment operator
+/// that merely contains `=`, since those can appear inside a declared
+/// generic type's default or an expression-bodied member and are not the
+/// declarator's own initializer boundary.
+fn declarator_before_initializer(text: &str) -> &str {
+    let bytes = text.as_bytes();
+    for (index, &byte) in bytes.iter().enumerate() {
+        if byte != b'=' {
+            continue;
+        }
+        let previous = index.checked_sub(1).and_then(|i| bytes.get(i)).copied();
+        let next = bytes.get(index + 1).copied();
+        if matches!(previous, Some(b'=' | b'!' | b'<' | b'>' | b'+' | b'-' | b'*' | b'/'))
+            || matches!(next, Some(b'=' | b'>'))
+        {
+            continue;
+        }
+        return &text[..index];
+    }
+    text
+}
+
 fn scip_dotnet_parts(symbol: &str) -> Option<(&str, &str)> {
     let (package, _version, descriptor) = scip_global_parts(symbol, "scip-dotnet", "nuget")?;
     Some((package, descriptor))
@@ -339,7 +362,17 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         if node.r#type != "FIELD_DECLARATION" && node.r#type != "PROPERTY_DECLARATION" {
             return None;
         }
-        let decl_part = node.text.split('{').next().unwrap_or(&node.text);
+        // A field with an initializer that contains no literal `{` at all
+        // (`static readonly Lazy<T> _x = new Lazy<T>(..., Mode.Value);`)
+        // was not truncated by the existing brace-split, so the "last
+        // identifier" grab reached all the way into the initializer
+        // expression and returned its trailing token instead of the
+        // field's own name. Truncate at the declarator's own `=` first -
+        // an initializer is never part of the name/type being declared.
+        let decl_part = declarator_before_initializer(&node.text)
+            .split('{')
+            .next()
+            .unwrap_or(&node.text);
         decl_part
             .trim_end_matches(';')
             .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))

@@ -258,7 +258,7 @@ impl ParsedDocument {
             .set_language(&grammar_for_language(language))
             .with_context(|| "failed to initialize tree-sitter parser")?;
         let tree = parser
-            .parse(&source, None)
+            .parse(crate::ast::parse_buffer(&source, language), None)
             .with_context(|| format!("tree-sitter produced no tree for {}", file.display()))?;
         Ok(Self { file, source, tree })
     }
