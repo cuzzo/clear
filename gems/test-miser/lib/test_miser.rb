@@ -3,6 +3,8 @@
 require_relative "test_miser/mutation_report"
 require_relative "test_miser/analyzer"
 require_relative "test_miser/evidence/contribution"
+require_relative "test_miser/evidence/subsumption"
+require_relative "test_miser/evidence/stability"
 require_relative "test_miser/location_resolver"
 require_relative "test_miser/reporter"
 require_relative "test_miser/mutation_corpus"
