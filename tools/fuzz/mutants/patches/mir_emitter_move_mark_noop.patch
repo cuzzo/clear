@@ -1,12 +1,12 @@
 diff --git a/compiler/ruby/backends/mir_emitter.rb b/compiler/ruby/backends/mir_emitter.rb
 --- a/compiler/ruby/backends/mir_emitter.rb
 +++ b/compiler/ruby/backends/mir_emitter.rb
-@@ -2289,7 +2289,7 @@ class MIREmitter
- 
+@@ -2834,7 +2834,6 @@ class MIREmitter
    sig { params(node: MIR::MoveMark).returns(String) }
    def emit_move_mark(node)
--    "#{node.name}_moved = true;"
+-    guard = @move_guard_overrides.fetch(node.name.to_s, "#{node.name}_moved")
+-    "#{guard} = true;"
 +    "" # MUTANT: ownership transfer no longer suppresses deferred cleanup.
    end
- 
+
    sig { params(node: MIR::DeepCopy).returns(T.nilable(String)) }

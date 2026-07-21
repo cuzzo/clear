@@ -1,11 +1,11 @@
 diff --git a/compiler/ruby/mir/mir_lowering.rb b/compiler/ruby/mir/mir_lowering.rb
 --- a/compiler/ruby/mir/mir_lowering.rb
 +++ b/compiler/ruby/mir/mir_lowering.rb
-@@ -798,6 +798,7 @@
- 
+@@ -1070,6 +1070,7 @@
+
    sig { params(mir: MIR::Node, dst_ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
    def place_owned_branch_value_for_destination(mir, dst_ti, dest_alloc)
 +    return mir # MUTANT: OR/branch owned values are no longer placed into the destination allocator.
-     owned_alloc = mir_owned_alloc(mir)
-     return mir if owned_alloc == dest_alloc
-     return place_owned_alloc_mismatch_for_destination(mir, dst_ti, dest_alloc, owned_alloc) if owned_alloc
+     # Nested optional merges have not yet received finalized ownership facts
+     # when destination placement runs. Preserve their branch structure now;
+     # treating the merge as a borrowed DeepCopy source leaves an allocating

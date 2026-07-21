@@ -236,7 +236,11 @@ module FuzzMutants
       invariant: :declaration_provenance_escape_stamping,
       patch: File.join(PATCH_DIR, 'escape_identifier_heap_noop.patch'),
       templates: [:escape_mechanism_matrix],
-      kill: { bucket: :mir_error, min_delta: 1 }
+      # Disabling the walker doesn't reach a static MIR-checker rejection --
+      # the un-escaped value is used past its frame's lifetime and the
+      # cleanup pairing goes wrong at runtime (observed: testing-allocator
+      # leak surfaced through the generic `fail` bucket, not `mir_error`).
+      kill: { bucket: :fail, min_delta: 1 }
     ),
     Mutant.new(
       name: :ownership_surface_finalization,
@@ -379,7 +383,11 @@ module FuzzMutants
       invariant: :or_branch_destination_placement,
       patch: File.join(PATCH_DIR, 'owned_branch_destination_noop.patch'),
       templates: [:or_heap_destination_matrix],
-      kill: { bucket: :mir_error, min_delta: 1 }
+      # Unlike the sibling or_positional_branch_placement (which this same
+      # patch also kills via mir_error), this template's branch-placement
+      # mismatches surface as runtime testing-allocator failures rather than
+      # a static rejection (observed: 23/168 fail, 0 mir_error).
+      kill: { bucket: :fail, min_delta: 1 }
     ),
     Mutant.new(
       name: :or_positional_branch_placement,
@@ -399,7 +407,10 @@ module FuzzMutants
       invariant: :owned_sink_heap_placement,
       patch: File.join(PATCH_DIR, 'escape_identifier_heap_noop.patch'),
       templates: [:owned_sink_destination_matrix],
-      kill: { bucket: :mir_error, min_delta: 1 }
+      # Same walker as escape_identifier_heap_placement above: the mutation
+      # surfaces as a runtime testing-allocator leak (generic `fail` bucket),
+      # not a static mir_error.
+      kill: { bucket: :fail, min_delta: 1 }
     ),
     Mutant.new(
       name: :return_value_branch_placement,
