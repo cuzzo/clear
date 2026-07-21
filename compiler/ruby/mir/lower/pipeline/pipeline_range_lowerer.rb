@@ -6,6 +6,7 @@ require "sorbet-runtime"
 require_relative "../../../ast/ast"
 require_relative "../../../ast/type"
 require_relative "../../lowering/schema_registry"
+require_relative "../../cleanup_entry"
 require_relative "../../mir"
 
 PipelineBcIterRange = T.type_alias { [MIR::IterRange, T.nilable(String)] }
@@ -52,6 +53,12 @@ class PipelineLazyRangePrefix < T::Struct
   const :item_used, T::Boolean
   const :elem_zig, String
   const :next_method, String
+  # Ownership statements for the raw popped stream item (AllocMark +
+  # guarded Cleanup). Streams hand each item over OWNED; the defer-based
+  # pair frees it on every loop exit path (including stage `continue`/
+  # `break`) unless a transfer site emits MIR::MoveMark first. Empty for
+  # range/list sources and non-owning element types.
+  const :item_ownership_prelude, T::Array[MIR::Emittable], default: []
 
   sig { returns(T::Array[MIR::Emittable]) }
   def setup_stmts
@@ -84,13 +91,23 @@ class PipelineLazyRangePrefix < T::Struct
     MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(source_name), "deinit", [], false, MIR::CallableContract.no_ownership(0)))
   end
 
-  sig { params(iter: T.nilable(MIR::Emittable), body_stmts: T::Array[MIR::Emittable], capture_name: T.nilable(String)).returns(T.any(MIR::ForStmt, MIR::WhileStmt)) }
-  def loop_stmt(iter, body_stmts, capture_name: initial_capture)
+  sig { params(iter: T.nilable(MIR::Emittable), body_stmts: T::Array[MIR::Emittable], capture_name: T.nilable(String), owns_item: T::Boolean).returns(T.any(MIR::ForStmt, MIR::WhileStmt)) }
+  def loop_stmt(iter, body_stmts, capture_name: initial_capture, owns_item: true)
     body = stage_body(body_stmts)
     if iter
       MIR::ForStmt.new(iter, capture_name, body, nil)
     else
-      MIR::WhileStmt.new(next_call, body, T.must(capture_name), nil, nil, nil)
+      cap = capture_name
+      # owns_item: false opts out for consumers (e.g. INDEX's owned-transfer
+      # path) that already emit their own full AllocMark/transfer contract
+      # for the raw item; the blanket prelude below would double-mark it.
+      unless !owns_item || item_ownership_prelude.empty?
+        # The ownership pair references the raw item, so the capture cannot
+        # be discarded even when the user body ignores it.
+        cap = initial_capture
+        body = item_ownership_prelude + body
+      end
+      MIR::WhileStmt.new(next_call, body, T.must(cap), nil, nil, nil)
     end
   end
   private :next_call
@@ -414,7 +431,28 @@ class PipelineRangeLowerer
     PipelineLazyRangePrefix.new(range_mark: range_mark, range_let: range_let, source_name: source_name,
       outer_stmts: outer_stmts, stage_stmts: stage_stmts,
       item_var: item_var, initial_capture: initial_capture, item_used: item_used,
-      elem_zig: elem_zig, next_method: next_method)
+      elem_zig: elem_zig, next_method: next_method,
+      item_ownership_prelude: stream_item_ownership_prelude(source_ti, elem_t, initial_capture))
+  end
+
+  # Streams transfer each popped item to the consumer OWNED (the producer
+  # move-marks it at YIELD). Mirror the FOR-over-stream contract from
+  # lower_while_bind: a per-iteration AllocMark + moved-guarded Cleanup so
+  # the item is freed on every exit path unless a transfer site emits
+  # MIR::MoveMark. Range literals and borrowing list sources emit nothing.
+  sig { params(source_ti: Type, elem_t: Type, item_var: String).returns(T::Array[MIR::Emittable]) }
+  def stream_item_ownership_prelude(source_ti, elem_t, item_var)
+    return [] if @host.range_bc_target?
+    stream_source = source_ti.dynamic_stream? || source_ti.open_stream? ||
+      source_ti.bounded_stream? || source_ti.inf_stream?
+    return [] unless stream_source && pipeline_element_owns_heap?(elem_t)
+
+    kind = elem_t.any_rc? ? :rc : :uniform
+    entry = CleanupEntry.build(kind, alloc: :heap, has_moved_guard: true)
+    [
+      MIR::AllocMark.new(item_var, :heap, elem_t, :iteration),
+      MIR::Cleanup.new(item_var, entry),
+    ]
   end
 
   sig { params(source_node: AST::Node).returns(Type) }
@@ -799,7 +837,7 @@ class PipelineRangeLowerer
     ]
 
     body_mir = [p.loop_stmt(nil, [
-      *observable_stream_item_alloc_marks(p.item_var, source_node),
+      *(p.item_var == p.initial_capture ? [] : observable_stream_item_alloc_marks(p.item_var, source_node)),
       *publish_stmts,
     ])]
     fid = observable_id || @host.range_next_observable_id
@@ -863,14 +901,21 @@ class PipelineRangeLowerer
     call = MIR::ExprStmt.new(
       MIR::MethodCall.new(inner_recv, spec.publish_method, arg, false, callable_contract), nil)
 
-    item_cleanup = consumed_stream_item_cleanup(item, source_node)
+    # The raw popped item is owned by the loop's defer-based ownership
+    # prelude (see stream_item_ownership_prelude): the publish call's
+    # consume-operands contract move-marks it on transfer, and every other
+    # path is freed by the guarded defer. Only a stage-produced item
+    # (item != initial_capture) still needs the positional cleanup,
+    # because the prelude does not know about it.
+    raw_item = item == p.initial_capture
+    item_cleanup = raw_item ? [] : consumed_stream_item_cleanup(item, source_node)
     publish = case spec.gate
     when :always
       [call, *item_cleanup]
     when :pred
       pred_mir = @host.range_visit_mir_with_context(fold_op.expression, placeholder: item)
       if spec.transfers_item_on_success
-        [MIR::IfStmt.new(pred_mir, [call], item_cleanup)]
+        [MIR::IfStmt.new(pred_mir, [call], item_cleanup.empty? ? nil : item_cleanup)]
       else
         [MIR::IfStmt.new(pred_mir, [call], nil), *item_cleanup]
       end

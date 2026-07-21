@@ -826,17 +826,45 @@ class PipelineHost
       end
     end
 
-    push = MIR::ExprStmt.new(MIR::MethodCall.new(
-      MIR::Ident.new(local_stream), "push", [selector], true,
-      MIR::CallableContract.no_ownership(1)), false)
-    item_body = [*selector_prefix, push]
     source_ref = MIR::FieldGet.new(MIR::Ident.new("ctx"), "source")
     loop = if source_type.array?
-      MIR::ForStmt.new(MIR::ItemsAccess.new(source_ref, true), "__select_item", item_body, nil)
+      # List sources are borrowed; elements stay owned by the list.
+      push = MIR::ExprStmt.new(MIR::MethodCall.new(
+        MIR::Ident.new(local_stream), "push", [selector], true,
+        MIR::CallableContract.no_ownership(1)), false)
+      MIR::ForStmt.new(MIR::ItemsAccess.new(source_ref, true), "__select_item", [*selector_prefix, push], nil)
     else
+      # Stream sources hand each popped item over OWNED. The defer-based
+      # AllocMark/Cleanup pair (same contract as FOR-over-stream) frees it;
+      # an identity selector transfers the item into the result stream, so
+      # the push carries a consume-operands contract and the ownership-fact
+      # finalizer move-marks it.
+      source_elem_t = source_type.runtime_stream_storage_element_type ||
+        source_type.tense_type&.element_type
+      item_ownership = source_elem_t ?
+        @range_lowerer.stream_item_ownership_prelude(source_type, source_elem_t, "__select_item") : []
+      identity_transfer = !item_ownership.empty? &&
+        selector.is_a?(MIR::Ident) && selector.name == "__select_item"
+      push_contract = if identity_transfer
+        MIR::CallableContract.new(
+          FunctionSignature.new(params: [
+            AST::Param.new(name: "item", type: T.must(source_elem_t), takes: true),
+          ], return_type: Type.new(:Void)),
+          MIR::OwnershipContract.consume_operands([
+            MIR::OwnershipOperandFact.owned_binding(
+              "__select_item", T.must(source_elem_t), "stream SELECT identity transfer", :heap),
+          ]),
+          1,
+        )
+      else
+        MIR::CallableContract.no_ownership(1)
+      end
+      push = MIR::ExprStmt.new(MIR::MethodCall.new(
+        MIR::Ident.new(local_stream), "push", [selector], true, push_contract), false)
       next_method = source_type.inf_stream? || source_type.bounded_stream? ? "nextOrNull" : "next"
       MIR::WhileStmt.new(MIR::MethodCall.new(source_ref, next_method, [], true,
-        MIR::CallableContract.no_ownership(0)), item_body, "__select_item", nil, nil, nil)
+        MIR::CallableContract.no_ownership(0)),
+        [*item_ownership, *selector_prefix, push], "__select_item", nil, nil, nil)
     end
 
     stream_zig = if stream_type.inf_stream?

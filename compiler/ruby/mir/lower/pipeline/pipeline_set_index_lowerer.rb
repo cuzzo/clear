@@ -222,7 +222,7 @@ class PipelineSetIndexLowerer < T::Struct
             expr_node: expr_node,
             item_type: elem_type,
             value_ownership: PipelineIndexValueOwnership::Owned,
-          )),
+          ), owns_item: false),
           MIR::BreakStmt.new(label, MIR::Ident.new("idx_result")),
         ], result_type)
       end
@@ -232,6 +232,9 @@ class PipelineSetIndexLowerer < T::Struct
       *prefix.setup_stmts,
       index_result_let(map_type, :heap),
       *([defer_deinit].compact),
+      # owns_item: false -- build_index_gop_body's Owned value_ownership
+      # already emits a full AllocMark + transfer-into-map contract for the
+      # raw item; the loop's blanket item-ownership prelude would double it.
       prefix.loop_stmt(nil, build_index_gop_body(
         expr_mir,
         :heap,
@@ -239,7 +242,7 @@ class PipelineSetIndexLowerer < T::Struct
         expr_node: expr_node,
         item_type: elem_type,
         value_ownership: PipelineIndexValueOwnership::Owned,
-      )),
+      ), owns_item: false),
       MIR::BreakStmt.new(label, MIR::Ident.new("idx_result")),
     ], result_type)
   end
