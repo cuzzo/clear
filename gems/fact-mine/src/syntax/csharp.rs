@@ -283,14 +283,20 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
     }
 
     fn function_visibility(&self, _name: &str, node: &Node, _lines: &[String]) -> String {
-        let text = node.text.trim_start();
-        if text.starts_with("public ") {
-            "public".to_string()
-        } else if text.starts_with("protected ") {
-            "protected".to_string()
-        } else {
-            "private".to_string()
+        let header = node.text.split('(').next().unwrap_or("");
+        let tokens: Vec<&str> = header.split_whitespace().take(8).collect();
+        if tokens.contains(&"internal") {
+            return "internal".to_string();
         }
+        for token in &tokens {
+            match *token {
+                "public" => return "public".to_string(),
+                "protected" => return "protected".to_string(),
+                "private" => return "private".to_string(),
+                _ => {}
+            }
+        }
+        "private".to_string()
     }
 
     fn parameter_type_from_signature(&self, parameter: &str) -> Option<String> {
@@ -596,6 +602,14 @@ mod tests {
         assert_eq!(
             b.function_visibility("Foo", &node("DEFN", "void Foo()"), &[]),
             "private"
+        );
+        assert_eq!(
+            b.function_visibility("Foo", &node("DEFN", "internal void Foo()"), &[]),
+            "internal"
+        );
+        assert_eq!(
+            b.function_visibility("Foo", &node("DEFN", "protected internal void Foo()"), &[]),
+            "internal"
         );
 
         assert!(b.property_read_call(

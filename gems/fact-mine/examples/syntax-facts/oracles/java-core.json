@@ -457,7 +457,7 @@
             51,
             3
           ],
-          "visibility": "public"
+          "visibility": "package"
         },
         {
           "line": 53,
@@ -470,7 +470,7 @@
             56,
             3
           ],
-          "visibility": "public"
+          "visibility": "package"
         }
       ],
       "language": "java",
