@@ -119,14 +119,14 @@ module TestMiser
           end
 
           OracleFact.new(
-            oracle_id: String(row.fetch("oracle_id")),
-            test_id: String(row.fetch("test_id")),
+            oracle_id: nonempty_string(row.fetch("oracle_id"), "oracle_id"),
+            test_id: nonempty_string(row.fetch("test_id"), "test_id"),
             oracle_kind: OracleKind.deserialize(String(row.fetch("oracle_kind"))),
             oracle_span: parse_span(row.fetch("oracle_span")),
             expected_span: optional_span(row["expected_span"]),
             actual_span: optional_span(row["actual_span"]),
-            framework: String(row.fetch("framework")),
-            confidence: Float(row.fetch("confidence")),
+            framework: nonempty_string(row.fetch("framework"), "framework"),
+            confidence: confidence(row.fetch("confidence")),
             source_file: row["source_file"]&.to_s,
           )
         rescue KeyError, TypeError, ArgumentError => error
@@ -139,14 +139,49 @@ module TestMiser
             raise InvalidOracleFacts, "oracle span must be an object"
           end
 
+          start_line = Integer(row.fetch("start_line"))
+          start_column = Integer(row.fetch("start_column"))
+          end_line = Integer(row.fetch("end_line"))
+          end_column = Integer(row.fetch("end_column"))
+          start_offset = optional_integer(row["start_offset"])
+          end_offset = optional_integer(row["end_offset"])
+          unless start_line.positive? && start_column.positive? && end_line.positive? && end_column.positive?
+            raise InvalidOracleFacts, "oracle span positions must be positive"
+          end
+          unless end_line > start_line || (end_line == start_line && end_column >= start_column)
+            raise InvalidOracleFacts, "oracle span end must not precede its start"
+          end
+          if start_offset && start_offset.negative? || end_offset && end_offset.negative?
+            raise InvalidOracleFacts, "oracle span offsets must not be negative"
+          end
+          if start_offset && end_offset && end_offset < start_offset
+            raise InvalidOracleFacts, "oracle span end offset must not precede its start offset"
+          end
+
           SourceSpan.new(
-            start_line: Integer(row.fetch("start_line")),
-            start_column: Integer(row.fetch("start_column")),
-            end_line: Integer(row.fetch("end_line")),
-            end_column: Integer(row.fetch("end_column")),
-            start_offset: optional_integer(row["start_offset"]),
-            end_offset: optional_integer(row["end_offset"]),
+            start_line: start_line,
+            start_column: start_column,
+            end_line: end_line,
+            end_column: end_column,
+            start_offset: start_offset,
+            end_offset: end_offset,
           )
+        end
+
+        sig { params(value: T.untyped, label: String).returns(String) }
+        def nonempty_string(value, label)
+          text = String(value)
+          raise InvalidOracleFacts, "#{label} must not be empty" if text.empty?
+
+          text
+        end
+
+        sig { params(value: T.untyped).returns(Float) }
+        def confidence(value)
+          parsed = Float(value)
+          raise InvalidOracleFacts, "confidence must be finite and between 0 and 1" unless parsed.finite? && parsed.between?(0.0, 1.0)
+
+          parsed
         end
 
         sig { params(value: T.untyped).returns(T.nilable(SourceSpan)) }
@@ -365,12 +400,19 @@ module TestMiser
       def self.analyze(facts:, original_kills:, disabled_trials:, rewrites:)
         rewrite_by_id = rewrites.to_h { |rewrite| [rewrite.oracle_id, rewrite] }
         results = facts.facts.map do |fact|
+          original_known = original_kills.key?(fact.test_id)
           original = original_kills.fetch(fact.test_id, []).uniq.sort
-          rewrite = rewrite_by_id[fact.oracle_id]
-          trials = disabled_trials.select do |trial|
-            trial.test_id == fact.test_id && trial.oracle_id == fact.oracle_id && original.include?(trial.mutant_id)
+          fact_trials = disabled_trials.select do |trial|
+            trial.test_id == fact.test_id && trial.oracle_id == fact.oracle_id
           end
-          result_for(fact, original, trials, rewrite)
+          trials = fact_trials.select { |trial| original.include?(trial.mutant_id) }
+          result_for(
+            fact,
+            original,
+            trials,
+            rewrite_by_id[fact.oracle_id],
+            original_known: original_known,
+          )
         end.freeze
         OracleSensitivityAnalysis.new(results: results)
       end
@@ -386,10 +428,12 @@ module TestMiser
             original: T::Array[String],
             trials: T::Array[OracleTrial],
             rewrite: T.nilable(OracleRewrite),
+            original_known: T::Boolean,
           ).returns(OracleSensitivity)
         end
-        def result_for(fact, original, trials, rewrite)
-          reason = rewrite_reason(rewrite)
+        def result_for(fact, original, trials, rewrite, original_known:)
+          reason = original_known ? nil : "original kill attribution is missing"
+          reason ||= rewrite_reason(rewrite)
           reason ||= trial_reason(original, trials)
           complete = reason.nil?
           disabled_kills = trials.select(&:killed).map(&:mutant_id).uniq.sort

@@ -144,6 +144,33 @@ class EvidenceOracleTest < Minitest::Test
     invalid_row.unlink
   end
 
+  def test_invalid_spans_and_confidence_are_rejected_at_the_artifact_boundary
+    invalid_span = fact_payload
+    invalid_span["oracle_span"]["start_line"] = 0
+    assert_invalid_fact(invalid_span)
+
+    reversed_span = fact_payload
+    reversed_span["oracle_span"]["end_column"] = 0
+    assert_invalid_fact(reversed_span)
+
+    invalid_confidence = fact_payload
+    invalid_confidence["confidence"] = 1.1
+    assert_invalid_fact(invalid_confidence)
+  end
+
+  def test_missing_original_kills_are_incomplete
+    fact_value = fact("o1", kind: Evidence::OracleKind::Equality, test_id: "t1")
+    missing_original = Evidence::OracleSensitivityAnalyzer.analyze(
+      facts: Evidence::OracleFacts.new(facts: [fact_value]),
+      original_kills: {},
+      disabled_trials: [],
+      rewrites: [rewrite("o1", recognized: true, applied: true)],
+    ).results.fetch(0)
+
+    refute missing_original.complete
+    assert_equal "original kill attribution is missing", missing_original.unknown_reason
+  end
+
   private
 
   def span
@@ -182,5 +209,30 @@ class EvidenceOracleTest < Minitest::Test
       killed: killed,
       executed: executed,
     )
+  end
+
+  def fact_payload
+    {
+      "oracle_id" => "o1",
+      "test_id" => "t1",
+      "oracle_kind" => "EQUALITY",
+      "oracle_span" => {
+        "start_line" => 1,
+        "start_column" => 1,
+        "end_line" => 1,
+        "end_column" => 8,
+      },
+      "framework" => "fixture",
+      "confidence" => 0.99,
+    }
+  end
+
+  def assert_invalid_fact(payload)
+    path = Tempfile.new(["invalid-oracle-fact", ".json"])
+    path.write(JSON.generate("schema" => "test-quality-oracle-facts/v1", "facts" => [payload]))
+    path.close
+    assert_raises(Evidence::InvalidOracleFacts) { Evidence::OracleFacts.load(path.path) }
+  ensure
+    path&.unlink
   end
 end

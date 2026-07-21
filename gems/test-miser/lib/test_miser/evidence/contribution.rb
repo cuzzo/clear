@@ -3,9 +3,12 @@
 
 require "set"
 require "sorbet-runtime"
+require_relative "completeness"
 
 module TestMiser
   module Evidence
+    class InvalidCohort < ArgumentError; end
+
     class FindingKind < T::Enum
       enums do
         AddsUniqueKills = new("ADDS_UNIQUE_KILLS")
@@ -105,12 +108,17 @@ module TestMiser
 
       sig { returns(T::Boolean) }
       def complete?
-        complete == true
+        completeness.complete?
+      end
+
+      sig { returns(EvidenceCompleteness) }
+      def completeness
+        EvidenceCompleteness.new(status: complete, reason: completeness_reason)
       end
 
       sig { returns(T.nilable(String)) }
       def completeness_reason
-        return nil if complete?
+        return nil if complete == true
         return incomplete_reason unless incomplete_reason.nil?
 
         complete == false ? "mutation corpus or attribution is incomplete" : "corpus completeness is unknown"
@@ -185,6 +193,7 @@ module TestMiser
       const :mutant_count, Integer
       const :corpus_complete, T.nilable(T::Boolean)
       const :unknown_reason, T.nilable(String)
+      const :completeness, EvidenceCompleteness
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
@@ -194,6 +203,7 @@ module TestMiser
             "tests" => test_contributions.length,
             "mutants" => mutant_count,
             "corpus_complete" => corpus_complete,
+            "evidence_completeness" => completeness.to_h,
             "tests_with_unique_kills" => test_contributions.count { |test| !test.unique_kills.empty? },
             "cohort_new_detection" => cohort&.new_detection || [],
             "unknown_reason" => unknown_reason,
@@ -255,6 +265,7 @@ module TestMiser
           mutant_count: @corpus.mutants.length,
           corpus_complete: @corpus.complete,
           unknown_reason: @corpus.completeness_reason,
+          completeness: @corpus.completeness,
         )
       end
 
@@ -262,7 +273,7 @@ module TestMiser
 
       sig { params(test: TestObservation).returns(T::Array[String]) }
       def unique_kills_for(test)
-        return [] unless @corpus.complete?
+        return [] unless @corpus.completeness.complete?
 
         other_kills = @corpus.tests.reject { |candidate| candidate.id == test.id }
           .flat_map(&:killed_mutants)
@@ -272,7 +283,7 @@ module TestMiser
 
       sig { params(test: TestObservation, unique_kills: T::Array[String]).returns(T::Array[FindingKind]) }
       def findings_for(test, unique_kills)
-        return [FindingKind::UnknownIncompleteAttribution] unless @corpus.complete?
+        return [FindingKind::UnknownIncompleteAttribution] unless @corpus.completeness.complete?
         return [FindingKind::AddsUniqueKills] unless unique_kills.empty?
         return [FindingKind::MutationRedundant] unless test.killed_mutants.empty?
         return [FindingKind::CoveredWeakOracle] unless test.covered_mutants.empty?
@@ -287,7 +298,7 @@ module TestMiser
         ).returns(T::Array[String])
       end
       def dominated_by_for(contribution, all_contributions)
-        return [] unless @corpus.complete?
+        return [] unless @corpus.completeness.complete?
         return [] unless contribution.unique_kills.empty?
         # A test outside the observed mutation scope has no evidence-bearing
         # set relationship.  Empty sets are subsets of every set, so allowing
@@ -310,10 +321,11 @@ module TestMiser
       def cohort_for(new_test_ids, baseline_test_ids)
         normalized_new = new_test_ids.uniq.sort.freeze
         normalized_baseline = baseline_test_ids.uniq.sort.freeze
+        validate_cohort_ids!(normalized_new, normalized_baseline)
         new_kills = kills_for(normalized_new)
         baseline_kills = kills_for(normalized_baseline)
-        new_detection = @corpus.complete? ? (new_kills - baseline_kills).sort.freeze : [].freeze
-        findings = if !@corpus.complete?
+        new_detection = @corpus.completeness.complete? ? (new_kills - baseline_kills).sort.freeze : [].freeze
+        findings = if !@corpus.completeness.complete?
                      [FindingKind::UnknownIncompleteAttribution]
                    elsif new_detection.empty?
                      []
@@ -326,6 +338,20 @@ module TestMiser
           new_detection: new_detection,
           findings: findings.freeze,
         )
+      end
+
+      sig { params(new_test_ids: T::Array[String], baseline_test_ids: T::Array[String]).void }
+      def validate_cohort_ids!(new_test_ids, baseline_test_ids)
+        known_test_ids = @corpus.tests.map(&:id)
+        unknown = (new_test_ids + baseline_test_ids).uniq.reject { |test_id| known_test_ids.include?(test_id) }
+        unless unknown.empty?
+          raise InvalidCohort, "cohort names unknown tests: #{unknown.sort.join(", ")}"
+        end
+
+        overlap = (new_test_ids & baseline_test_ids).sort
+        return if overlap.empty?
+
+        raise InvalidCohort, "cohort tests overlap baseline tests: #{overlap.join(", ")}"
       end
 
       sig { params(test_ids: T::Array[String]).returns(T::Set[String]) }

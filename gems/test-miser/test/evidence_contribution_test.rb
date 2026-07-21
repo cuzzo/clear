@@ -93,6 +93,22 @@ class EvidenceContributionTest < Minitest::Test
     assert_empty out_of_scope&.dominated_by
   end
 
+  def test_cohort_rejects_unknown_and_overlapping_test_ids
+    corpus = Evidence::Corpus.new(
+      tests: [observation("new", covered: [], killed: []), observation("baseline", covered: [], killed: [])],
+      mutants: [],
+      complete: true,
+    )
+    analyzer = Evidence::ContributionAnalyzer.new(corpus)
+
+    assert_raises(Evidence::InvalidCohort) do
+      analyzer.analyze(new_test_ids: ["missing"], baseline_test_ids: [])
+    end
+    assert_raises(Evidence::InvalidCohort) do
+      analyzer.analyze(new_test_ids: ["new"], baseline_test_ids: ["new"])
+    end
+  end
+
   def test_report_adapter_normalizes_sets_and_referenced_tests
     test = Struct.new(:id, :name).new("t1", "one")
     mutant = Struct.new(:id, :covered_by, :killed_by).new("m1", ["t1"], Set.new(["t1"]))

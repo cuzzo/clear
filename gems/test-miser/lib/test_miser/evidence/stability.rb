@@ -242,7 +242,7 @@ module TestMiser
         ).returns(MatrixCheck)
       end
       def matrix_check(test_ids, mutant_ids, trial_ids, observations, duplicate_observations)
-        return MatrixCheck.new(complete: false, unknown_reason: @corpus.completeness_reason) unless @corpus.complete?
+        return MatrixCheck.new(complete: false, unknown_reason: @corpus.completeness_reason) unless @corpus.completeness.complete?
         return MatrixCheck.new(complete: false, unknown_reason: "stability matrix has no selected tests or mutants") if test_ids.empty? || mutant_ids.empty?
         return MatrixCheck.new(complete: false, unknown_reason: "stability matrix has fewer trial IDs than its consistency threshold") if trial_ids.length < @threshold
         return MatrixCheck.new(complete: false, unknown_reason: "stability matrix contains duplicate trial observations") if duplicate_observations

@@ -4,6 +4,7 @@
 require "json"
 require "sorbet-runtime"
 require_relative "contribution"
+require_relative "completeness"
 require_relative "subsumption"
 require_relative "stability"
 require_relative "counterfactual"
@@ -11,6 +12,42 @@ require_relative "oracle"
 
 module TestMiser
   module Evidence
+    class EvidenceGate < T::Struct
+      extend T::Sig
+
+      const :completeness, EvidenceCompleteness
+
+      sig { params(contributions: ContributionAnalysis).returns(EvidenceGate) }
+      def self.for(contributions)
+        new(completeness: contributions.completeness)
+      end
+
+      sig { returns(T::Boolean) }
+      def corpus_complete?
+        completeness.complete?
+      end
+
+      sig { params(finding: FindingKind).returns(T::Boolean) }
+      def allows_contribution_finding?(finding)
+        corpus_complete? || finding == FindingKind::UnknownIncompleteAttribution
+      end
+
+      sig { params(stability: T.nilable(StabilityAnalysis)).returns(T::Boolean) }
+      def allows_stability?(stability)
+        corpus_complete? && stability&.matrix_complete == true
+      end
+
+      sig { params(result: OracleSensitivity).returns(T::Boolean) }
+      def allows_oracle?(result)
+        corpus_complete? && result.complete
+      end
+
+      sig { params(counterfactual: T.nilable(CounterfactualResult)).returns(T::Boolean) }
+      def allows_counterfactual?(counterfactual)
+        corpus_complete? && !counterfactual.nil? && counterfactual.status != CounterfactualStatus::Inconclusive
+      end
+    end
+
     class ReviewFindingKind < T::Enum
       enums do
         AddsUniqueKills = new("ADDS_UNIQUE_KILLS")
@@ -148,6 +185,7 @@ module TestMiser
         contributions:, subsumption:, stability: nil, counterfactual: nil,
         oracle_sensitivity: nil, counterfactual_test_ids: [], runtimes: {}, high_cost_ms: 1_000.0
       )
+        gate = EvidenceGate.for(contributions)
         vectors = build_vectors(
           contributions: contributions,
           subsumption: subsumption,
@@ -156,6 +194,7 @@ module TestMiser
           oracle_sensitivity: oracle_sensitivity,
           counterfactual_test_ids: counterfactual_test_ids,
           runtimes: runtimes,
+          gate: gate,
         )
         findings = build_findings(
           contributions: contributions,
@@ -166,6 +205,7 @@ module TestMiser
           counterfactual_test_ids: counterfactual_test_ids,
           vectors: vectors,
           high_cost_ms: high_cost_ms,
+          gate: gate,
         )
         EvidenceReport.new(
           contribution: contributions,
@@ -189,9 +229,10 @@ module TestMiser
           oracle_sensitivity: T.nilable(OracleSensitivityAnalysis),
           counterfactual_test_ids: T::Array[String],
           runtimes: T::Hash[String, Float],
+          gate: EvidenceGate,
         ).returns(T::Array[EvidenceVector])
       end
-      def build_vectors(contributions:, subsumption:, stability:, counterfactual:, oracle_sensitivity:, counterfactual_test_ids:, runtimes:)
+      def build_vectors(contributions:, subsumption:, stability:, counterfactual:, oracle_sensitivity:, counterfactual_test_ids:, runtimes:, gate:)
         frontier = subsumption.rankings.to_h { |ranking| [ranking.test_id, ranking] }
         stable = stability&.stable_unique_kills&.to_h { |row| [row.test_id, row.stable_unique_kills] } || {}
         oracle = oracle_sensitivity&.results&.group_by(&:test_id) || {}
@@ -199,6 +240,7 @@ module TestMiser
           oracle_rows = oracle.fetch(contribution.test_id, [])
           original = oracle_rows.sum { |row| row.original_kills.length }
           dependent = oracle_rows.sum { |row| row.oracle_dependent_kills.length }
+          oracle_complete = !oracle_rows.empty? && oracle_rows.all? { |row| gate.allows_oracle?(row) }
           ranking = frontier[contribution.test_id]
           EvidenceVector.new(
             test_id: contribution.test_id,
@@ -206,10 +248,10 @@ module TestMiser
             stable_unique_kills: stable.fetch(contribution.test_id, []).length,
             frontier_unique_kills: ranking&.frontier_unique_kills&.length || 0,
             cohort_new_detection: ranking&.cohort_new_frontier_detection&.length || 0,
-            detects_reverted_change: counterfactual_value(counterfactual, counterfactual_test_ids, contribution.test_id),
-            oracle_dependent_kill_ratio: original.zero? ? nil : dependent.to_f / original,
+            detects_reverted_change: gate.allows_counterfactual?(counterfactual) ? counterfactual_value(counterfactual, counterfactual_test_ids, contribution.test_id) : nil,
+            oracle_dependent_kill_ratio: oracle_complete && !original.zero? ? dependent.to_f / original : nil,
             runtime_ms: runtimes[contribution.test_id],
-            completeness: completeness_label(contributions.corpus_complete),
+            completeness: contributions.completeness.label,
           )
         end.freeze
       end
@@ -224,30 +266,33 @@ module TestMiser
           counterfactual_test_ids: T::Array[String],
           vectors: T::Array[EvidenceVector],
           high_cost_ms: Float,
+          gate: EvidenceGate,
         ).returns(T::Array[ReviewFinding])
       end
-      def build_findings(contributions:, subsumption:, stability:, counterfactual:, oracle_sensitivity:, counterfactual_test_ids:, vectors:, high_cost_ms:)
+      def build_findings(contributions:, subsumption:, stability:, counterfactual:, oracle_sensitivity:, counterfactual_test_ids:, vectors:, high_cost_ms:, gate:)
         findings = contributions.test_contributions.flat_map do |contribution|
-          contribution_findings(contribution)
+          contribution_findings(contribution, gate)
         end
-        findings.concat(cohort_findings(contributions))
-        findings.concat(equal_kill_findings(contributions))
-        findings.concat(subsumption_findings(subsumption))
-        findings.concat(stability_findings(stability, contributions.corpus_complete))
-        findings.concat(oracle_findings(oracle_sensitivity))
-        findings.concat(counterfactual_findings(counterfactual, counterfactual_test_ids))
-        findings.concat(cost_findings(vectors, high_cost_ms, contributions.corpus_complete))
+        findings.concat(cohort_findings(contributions, gate))
+        findings.concat(equal_kill_findings(contributions, gate))
+        findings.concat(subsumption_findings(subsumption, gate))
+        findings.concat(stability_findings(stability, gate))
+        findings.concat(oracle_findings(oracle_sensitivity, gate))
+        findings.concat(counterfactual_findings(counterfactual, counterfactual_test_ids, gate))
+        findings.concat(cost_findings(vectors, high_cost_ms, gate))
         findings.sort_by { |finding| [finding.test_id.to_s, finding.kind.serialize] }.freeze
       end
 
-      sig { params(contribution: TestContribution).returns(T::Array[ReviewFinding]) }
-      def contribution_findings(contribution)
+      sig { params(contribution: TestContribution, gate: EvidenceGate).returns(T::Array[ReviewFinding]) }
+      def contribution_findings(contribution, gate)
         evidence = {
           "unique_kills" => contribution.unique_kills,
           "covered_mutants" => contribution.covered_mutants,
           "killed_mutants" => contribution.killed_mutants,
         }
         contribution.findings.filter_map do |finding|
+          next unless gate.allows_contribution_finding?(finding)
+
           kind = case finding
                  when FindingKind::AddsUniqueKills then ReviewFindingKind::AddsUniqueKills
                  when FindingKind::MutationRedundant then ReviewFindingKind::MutationRedundant
@@ -263,9 +308,9 @@ module TestMiser
         end
       end
 
-      sig { params(contributions: ContributionAnalysis).returns(T::Array[ReviewFinding]) }
-      def equal_kill_findings(contributions)
-        return [] unless contributions.corpus_complete == true
+      sig { params(contributions: ContributionAnalysis, gate: EvidenceGate).returns(T::Array[ReviewFinding]) }
+      def equal_kill_findings(contributions, gate)
+        return [] unless gate.corpus_complete?
 
         contributions.test_contributions
           .reject { |contribution| contribution.killed_mutants.empty? }
@@ -285,10 +330,10 @@ module TestMiser
           end
       end
 
-      sig { params(contributions: ContributionAnalysis).returns(T::Array[ReviewFinding]) }
-      def cohort_findings(contributions)
+      sig { params(contributions: ContributionAnalysis, gate: EvidenceGate).returns(T::Array[ReviewFinding]) }
+      def cohort_findings(contributions, gate)
         cohort = contributions.cohort
-        return [] if cohort.nil?
+        return [] if cohort.nil? || !gate.corpus_complete?
 
         cohort.findings.filter_map do |finding|
           next unless finding == FindingKind::AddsGroupDetection
@@ -306,8 +351,10 @@ module TestMiser
         end
       end
 
-      sig { params(subsumption: SubsumptionAnalysis).returns(T::Array[ReviewFinding]) }
-      def subsumption_findings(subsumption)
+      sig { params(subsumption: SubsumptionAnalysis, gate: EvidenceGate).returns(T::Array[ReviewFinding]) }
+      def subsumption_findings(subsumption, gate)
+        return [] unless gate.corpus_complete?
+
         subsumption.rankings.filter_map do |ranking|
           next if ranking.frontier_unique_kills.empty?
 
@@ -321,28 +368,31 @@ module TestMiser
       end
 
       sig do
-        params(stability: T.nilable(StabilityAnalysis), corpus_complete: T.nilable(T::Boolean)).returns(T::Array[ReviewFinding])
+        params(stability: T.nilable(StabilityAnalysis), gate: EvidenceGate).returns(T::Array[ReviewFinding])
       end
-      def stability_findings(stability, corpus_complete)
-        return [] if stability.nil? || corpus_complete != true || !stability.matrix_complete
+      def stability_findings(stability, gate)
+        return [] unless gate.allows_stability?(stability)
 
-        stability.stable_unique_kills.filter_map do |row|
+        stable_analysis = T.must(stability)
+        stable_analysis.stable_unique_kills.filter_map do |row|
           next if row.stable_unique_kills.empty?
 
           ReviewFinding.new(
             kind: ReviewFindingKind::AddsStableUniqueKills,
             test_id: row.test_id,
             reason: "three or more consistent trials identify unique mutant kills",
-            evidence: {"stable_unique_kills" => row.stable_unique_kills, "threshold" => stability.threshold},
+            evidence: {"stable_unique_kills" => row.stable_unique_kills, "threshold" => stable_analysis.threshold},
           )
         end
       end
 
-      sig { params(oracle: T.nilable(OracleSensitivityAnalysis)).returns(T::Array[ReviewFinding]) }
-      def oracle_findings(oracle)
+      sig { params(oracle: T.nilable(OracleSensitivityAnalysis), gate: EvidenceGate).returns(T::Array[ReviewFinding]) }
+      def oracle_findings(oracle, gate)
         return [] if oracle.nil?
 
         oracle.results.flat_map do |result|
+          next [] unless gate.allows_oracle?(result)
+
           rows = []
           unless result.oracle_dependent_kills.empty?
             rows << ReviewFinding.new(
@@ -365,11 +415,11 @@ module TestMiser
       end
 
       sig do
-        params(counterfactual: T.nilable(CounterfactualResult), test_ids: T::Array[String]).returns(T::Array[ReviewFinding])
+        params(counterfactual: T.nilable(CounterfactualResult), test_ids: T::Array[String], gate: EvidenceGate).returns(T::Array[ReviewFinding])
       end
-      def counterfactual_findings(counterfactual, test_ids)
+      def counterfactual_findings(counterfactual, test_ids, gate)
         return [] if counterfactual.nil? || test_ids.empty?
-        return [] if counterfactual.status == CounterfactualStatus::Inconclusive
+        return [] unless gate.allows_counterfactual?(counterfactual)
 
         kind = if counterfactual.status == CounterfactualStatus::ProvesRevertedChange
                  counterfactual.baseline_detects_reversal ? ReviewFindingKind::DuplicatesChangeDetection : ReviewFindingKind::ProvesRevertedChange
@@ -385,11 +435,11 @@ module TestMiser
         params(
           vectors: T::Array[EvidenceVector],
           threshold: Float,
-          corpus_complete: T.nilable(T::Boolean),
+          gate: EvidenceGate,
         ).returns(T::Array[ReviewFinding])
       end
-      def cost_findings(vectors, threshold, corpus_complete)
-        return [] unless corpus_complete == true
+      def cost_findings(vectors, threshold, gate)
+        return [] unless gate.corpus_complete?
 
         vectors.filter_map do |vector|
           next if vector.runtime_ms.nil? || T.must(vector.runtime_ms) < threshold
@@ -412,13 +462,6 @@ module TestMiser
         counterfactual.status == CounterfactualStatus::ProvesRevertedChange
       end
 
-      sig { params(complete: T.nilable(T::Boolean)).returns(String) }
-      def completeness_label(complete)
-        return "complete" if complete == true
-        return "incomplete" if complete == false
-
-        "unknown"
-      end
     end
   end
 end

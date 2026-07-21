@@ -142,6 +142,32 @@ class EvidenceReportTest < Minitest::Test
     end
   end
 
+  def test_shared_completeness_gate_suppresses_otherwise_complete_negative_evidence
+    corpus = Evidence::Corpus.new(
+      tests: [observation("t1", ["m1"], ["m1"])],
+      mutants: [mutant("m1", ["t1"], ["t1"])],
+      complete: false,
+      incomplete_reason: "missing attribution",
+    )
+    contributions = Evidence::ContributionAnalyzer.new(corpus).analyze
+    subsumption = Evidence::SubsumptionAnalyzer.new(corpus).analyze(contributions: contributions)
+    report = Evidence::ReportBuilder.new(corpus).build(
+      contributions: contributions,
+      subsumption: subsumption,
+      counterfactual: counterfactual(Evidence::CounterfactualStatus::ProvesRevertedChange, baseline_status: 0),
+      oracle_sensitivity: oracle_analysis,
+      counterfactual_test_ids: ["t1"],
+      runtimes: {"t1" => 2_000.0},
+      high_cost_ms: 1.0,
+    )
+
+    assert_equal ["UNKNOWN_INCOMPLETE_ATTRIBUTION"], report.findings.map { |finding| finding.kind.serialize }
+    assert_nil report.vectors.fetch(0).detects_reverted_change
+    assert_nil report.vectors.fetch(0).oracle_dependent_kill_ratio
+    assert_equal({"status" => "incomplete", "complete" => false, "reason" => "missing attribution"},
+                 contributions.completeness.to_h)
+  end
+
   private
 
   def complete_corpus

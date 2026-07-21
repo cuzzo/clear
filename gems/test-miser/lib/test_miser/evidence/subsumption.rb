@@ -99,7 +99,7 @@ module TestMiser
 
       sig { params(contributions: T.nilable(ContributionAnalysis)).returns(SubsumptionAnalysis) }
       def analyze(contributions: nil)
-        unless @corpus.complete?
+        unless @corpus.completeness.complete?
           return SubsumptionAnalysis.new(
             equivalent_groups: [],
             relations: [],
