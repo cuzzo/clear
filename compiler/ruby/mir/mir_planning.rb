@@ -62,7 +62,7 @@ class MIRPlanner
         lifecycle_registry: lifecycle_registry,
       )
     end
-    LoopFrameAnalysis.analyze!(fn_nodes, schema_lookup, lifecycle_registry)
+    LoopFrameAnalysis.analyze!(fn_nodes, schema_lookup)
 
     fallible = fn_nodes.each_with_object(Set.new) do |(name, function), names|
       names << name if function.can_fail
