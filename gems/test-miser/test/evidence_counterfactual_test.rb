@@ -136,6 +136,21 @@ class EvidenceCounterfactualTest < Minitest::Test
     refute truncated.success?
   end
 
+  def test_process_runner_kills_term_ignoring_process_within_hard_bound
+    process = Evidence::ProcessCommandRunner.new
+    started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    timed_out = process.run(
+      ["ruby", "-e", 'Signal.trap("TERM", "IGNORE"); sleep 10'],
+      chdir: Dir.pwd,
+      limits: Evidence::CommandLimits.new(timeout_seconds: 0.05, max_output_bytes: 100),
+    )
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
+
+    assert timed_out.timed_out
+    refute timed_out.success?
+    assert_operator elapsed, :<, 1.0
+  end
+
   def test_real_ruby_and_python_fixture_repositories_prove_the_reversed_change
     {
       "ruby" => {

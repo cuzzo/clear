@@ -4,7 +4,6 @@
 require "digest"
 require "open3"
 require "sorbet-runtime"
-require "timeout"
 require "tmpdir"
 
 module TestMiser
@@ -69,6 +68,9 @@ module TestMiser
       extend T::Sig
       include CommandRunner
 
+      TERMINATION_GRACE_SECONDS = T.let(0.1, Float)
+      PIPE_CLEANUP_GRACE_SECONDS = T.let(0.1, Float)
+
       sig do
         override.params(
           command: T::Array[String],
@@ -88,17 +90,20 @@ module TestMiser
         stdout_thread = Thread.new { capture_output(stdout, limits.max_output_bytes) }
         stderr_thread = Thread.new { capture_output(stderr, limits.max_output_bytes) }
         timed_out = false
-        status = begin
-          Timeout.timeout(limits.timeout_seconds) { wait_thread.value }
-        rescue Timeout::Error
+        status = wait_for_exit(wait_thread, limits.timeout_seconds)
+        if status.nil?
           timed_out = true
-          terminate(wait_thread)
-          wait_thread.value
+          signal_process_group(wait_thread, "TERM")
+          status = wait_for_exit(wait_thread, TERMINATION_GRACE_SECONDS)
         end
-        captured_stdout = T.cast(stdout_thread.value, CapturedOutput)
-        captured_stderr = T.cast(stderr_thread.value, CapturedOutput)
+        if status.nil?
+          signal_process_group(wait_thread, "KILL")
+          status = wait_for_exit(wait_thread, TERMINATION_GRACE_SECONDS)
+        end
+        captured_stdout = finish_capture(stdout_thread, stdout)
+        captured_stderr = finish_capture(stderr_thread, stderr)
         CommandResult.new(
-          status: status.exitstatus || 1,
+          status: status&.exitstatus || 1,
           stdout: captured_stdout.text,
           stderr: captured_stderr.text,
           timed_out: timed_out,
@@ -107,9 +112,12 @@ module TestMiser
       rescue StandardError
         raise
       ensure
-        stdout&.close unless stdout.nil? || stdout.closed?
-        stderr&.close unless stderr.nil? || stderr.closed?
-        stdin&.close unless stdin.nil? || stdin.closed?
+        close_io(stdout)
+        close_io(stderr)
+        close_io(stdin)
+        cleanup_thread(stdout_thread)
+        cleanup_thread(stderr_thread)
+        cleanup_process(wait_thread)
       end
 
       private
@@ -134,10 +142,63 @@ module TestMiser
         io.close unless io.closed?
       end
 
-      sig { params(wait_thread: Thread).void }
-      def terminate(wait_thread)
-        Process.kill("TERM", -T.unsafe(wait_thread).pid)
+      sig { params(wait_thread: Thread, timeout_seconds: Float).returns(T.nilable(Process::Status)) }
+      def wait_for_exit(wait_thread, timeout_seconds)
+        return nil unless wait_thread.join(timeout_seconds)
+
+        T.cast(wait_thread.value, Process::Status)
+      end
+
+      sig { params(thread: Thread, io: IO).returns(CapturedOutput) }
+      def finish_capture(thread, io)
+        return T.cast(thread.value, CapturedOutput) if thread.join(PIPE_CLEANUP_GRACE_SECONDS)
+
+        close_io(io)
+        thread.kill
+        thread.join(PIPE_CLEANUP_GRACE_SECONDS)
+        CapturedOutput.new(text: "", truncated: true)
+      rescue StandardError
+        close_io(io)
+        cleanup_thread(thread)
+        CapturedOutput.new(text: "", truncated: true)
+      end
+
+      sig { params(wait_thread: Thread, signal: String).void }
+      def signal_process_group(wait_thread, signal)
+        Process.kill(signal, -T.unsafe(wait_thread).pid)
       rescue Errno::ESRCH
+        nil
+      end
+
+      sig { params(thread: T.nilable(Thread)).void }
+      def cleanup_thread(thread)
+        return if thread.nil? || !thread.alive?
+
+        thread.kill
+        thread.join(PIPE_CLEANUP_GRACE_SECONDS)
+      rescue StandardError
+        nil
+      end
+
+      sig { params(wait_thread: T.nilable(Thread)).void }
+      def cleanup_process(wait_thread)
+        return if wait_thread.nil? || !wait_thread.alive?
+
+        signal_process_group(wait_thread, "TERM")
+        return if wait_thread.join(TERMINATION_GRACE_SECONDS)
+
+        signal_process_group(wait_thread, "KILL")
+        wait_thread.join(TERMINATION_GRACE_SECONDS)
+      rescue StandardError
+        nil
+      end
+
+      sig { params(io: T.nilable(IO)).void }
+      def close_io(io)
+        return if io.nil? || io.closed?
+
+        io.close
+      rescue IOError
         nil
       end
     end

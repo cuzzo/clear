@@ -48,14 +48,12 @@ module TestMiser
 
       const :test_id, String
       const :frontier_unique_kills, T::Array[String]
-      const :cohort_new_frontier_detection, T::Array[String]
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
         {
           "test_id" => test_id,
           "frontier_unique_kills" => frontier_unique_kills,
-          "cohort_new_frontier_detection" => cohort_new_frontier_detection,
         }
       end
     end
@@ -66,6 +64,7 @@ module TestMiser
       const :equivalent_groups, T::Array[EquivalentMutantGroup]
       const :relations, T::Array[SubsumptionRelation]
       const :frontier_mutants, T::Array[String]
+      const :cohort_new_frontier_detection, T::Array[String]
       const :rankings, T::Array[FrontierRanking]
       const :corpus_complete, T.nilable(T::Boolean)
       const :unknown_reason, T.nilable(String)
@@ -79,6 +78,7 @@ module TestMiser
             "subsumption_relations" => relations.length,
             "relation_scope" => "immediate",
             "frontier_mutants" => frontier_mutants,
+            "cohort_new_frontier_detection" => cohort_new_frontier_detection,
             "corpus_complete" => corpus_complete,
             "unknown_reason" => unknown_reason,
           },
@@ -104,6 +104,7 @@ module TestMiser
             equivalent_groups: [],
             relations: [],
             frontier_mutants: [],
+            cohort_new_frontier_detection: [],
             rankings: rankings_for([], contributions),
             corpus_complete: @corpus.complete,
             unknown_reason: @corpus.completeness_reason,
@@ -118,6 +119,7 @@ module TestMiser
           equivalent_groups: groups,
           relations: relations,
           frontier_mutants: frontier,
+          cohort_new_frontier_detection: cohort_frontier_detection(frontier, contributions),
           rankings: rankings_for(frontier, contributions),
           corpus_complete: @corpus.complete,
           unknown_reason: nil,
@@ -222,21 +224,25 @@ module TestMiser
       def rankings_for(frontier, contributions)
         return [] if contributions.nil?
 
-        cohort = contributions.cohort
         contributions.test_contributions.map do |contribution|
           FrontierRanking.new(
             test_id: contribution.test_id,
             frontier_unique_kills: (contribution.unique_kills & frontier).sort.freeze,
-            # Cohort evidence is relevant only to members of the selected
-            # cohort.  Do not attach the cohort's set to baseline or unrelated
-            # tests; report vectors use this field for per-test cost findings.
-            cohort_new_frontier_detection: if cohort && cohort.test_ids.include?(contribution.test_id)
-                                             (cohort.new_detection & frontier).sort.freeze
-                                           else
-                                             [].freeze
-                                           end,
           )
         end.freeze
+      end
+
+      sig do
+        params(
+          frontier: T::Array[String],
+          contributions: T.nilable(ContributionAnalysis),
+        ).returns(T::Array[String])
+      end
+      def cohort_frontier_detection(frontier, contributions)
+        cohort = contributions&.cohort
+        return [].freeze if cohort.nil?
+
+        (cohort.new_detection & frontier).sort.freeze
       end
 
     end

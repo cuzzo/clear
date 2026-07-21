@@ -89,7 +89,6 @@ module TestMiser
       const :unique_kills, Integer
       const :stable_unique_kills, Integer
       const :frontier_unique_kills, Integer
-      const :cohort_new_detection, Integer
       const :detects_reverted_change, T.nilable(T::Boolean)
       const :oracle_dependent_kill_ratio, T.nilable(Float)
       const :runtime_ms, T.nilable(Float)
@@ -102,11 +101,33 @@ module TestMiser
           "unique_kills" => unique_kills,
           "stable_unique_kills" => stable_unique_kills,
           "frontier_unique_kills" => frontier_unique_kills,
-          "cohort_new_detection" => cohort_new_detection,
           "detects_reverted_change" => detects_reverted_change,
           "oracle_dependent_kill_ratio" => oracle_dependent_kill_ratio,
           "runtime_ms" => runtime_ms,
           "completeness" => completeness,
+        }
+      end
+    end
+
+    class CohortEvidenceVector < T::Struct
+      extend T::Sig
+
+      const :test_ids, T::Array[String]
+      const :baseline_test_ids, T::Array[String]
+      const :new_detection, T::Array[String]
+      const :frontier_new_detection, T::Array[String]
+      const :internally_redundant_test_ids, T::Array[String]
+      const :counterfactual_test_ids, T::Array[String]
+
+      sig { returns(T::Hash[String, T.untyped]) }
+      def to_h
+        {
+          "test_ids" => test_ids,
+          "baseline_test_ids" => baseline_test_ids,
+          "new_detection" => new_detection,
+          "frontier_new_detection" => frontier_new_detection,
+          "internally_redundant_test_ids" => internally_redundant_test_ids,
+          "counterfactual_test_ids" => counterfactual_test_ids,
         }
       end
     end
@@ -138,6 +159,7 @@ module TestMiser
       const :stability, T.nilable(StabilityAnalysis)
       const :counterfactual, T.nilable(CounterfactualResult)
       const :oracle_sensitivity, T.nilable(OracleSensitivityAnalysis)
+      const :cohort, T.nilable(CohortEvidenceVector)
       const :vectors, T::Array[EvidenceVector]
       const :findings, T::Array[ReviewFinding]
 
@@ -150,6 +172,7 @@ module TestMiser
           "stability" => stability&.to_h,
           "counterfactual" => counterfactual&.to_h,
           "oracle_sensitivity" => oracle_sensitivity&.to_h,
+          "cohort" => cohort&.to_h,
           "vectors" => vectors.map(&:to_h),
           "findings" => findings.map(&:to_h),
         }.compact
@@ -186,6 +209,11 @@ module TestMiser
         oracle_sensitivity: nil, counterfactual_test_ids: [], runtimes: {}, high_cost_ms: 1_000.0
       )
         gate = EvidenceGate.for(contributions)
+        cohort = build_cohort_vector(
+          contributions: contributions,
+          subsumption: subsumption,
+          counterfactual_test_ids: counterfactual_test_ids,
+        )
         vectors = build_vectors(
           contributions: contributions,
           subsumption: subsumption,
@@ -194,6 +222,7 @@ module TestMiser
           oracle_sensitivity: oracle_sensitivity,
           counterfactual_test_ids: counterfactual_test_ids,
           runtimes: runtimes,
+          cohort: cohort,
           gate: gate,
         )
         findings = build_findings(
@@ -203,6 +232,7 @@ module TestMiser
           counterfactual: counterfactual,
           oracle_sensitivity: oracle_sensitivity,
           counterfactual_test_ids: counterfactual_test_ids,
+          cohort: cohort,
           vectors: vectors,
           high_cost_ms: high_cost_ms,
           gate: gate,
@@ -213,6 +243,7 @@ module TestMiser
           stability: stability,
           counterfactual: counterfactual,
           oracle_sensitivity: oracle_sensitivity,
+          cohort: cohort,
           vectors: vectors,
           findings: findings,
         )
@@ -229,10 +260,11 @@ module TestMiser
           oracle_sensitivity: T.nilable(OracleSensitivityAnalysis),
           counterfactual_test_ids: T::Array[String],
           runtimes: T::Hash[String, Float],
+          cohort: T.nilable(CohortEvidenceVector),
           gate: EvidenceGate,
         ).returns(T::Array[EvidenceVector])
       end
-      def build_vectors(contributions:, subsumption:, stability:, counterfactual:, oracle_sensitivity:, counterfactual_test_ids:, runtimes:, gate:)
+      def build_vectors(contributions:, subsumption:, stability:, counterfactual:, oracle_sensitivity:, counterfactual_test_ids:, runtimes:, cohort:, gate:)
         frontier = subsumption.rankings.to_h { |ranking| [ranking.test_id, ranking] }
         stable = stability&.stable_unique_kills&.to_h { |row| [row.test_id, row.stable_unique_kills] } || {}
         oracle = oracle_sensitivity&.results&.group_by(&:test_id) || {}
@@ -247,8 +279,7 @@ module TestMiser
             unique_kills: contribution.unique_kills.length,
             stable_unique_kills: stable.fetch(contribution.test_id, []).length,
             frontier_unique_kills: ranking&.frontier_unique_kills&.length || 0,
-            cohort_new_detection: ranking&.cohort_new_frontier_detection&.length || 0,
-            detects_reverted_change: gate.allows_counterfactual?(counterfactual) ? counterfactual_value(counterfactual, counterfactual_test_ids, contribution.test_id) : nil,
+            detects_reverted_change: gate.allows_counterfactual?(counterfactual) ? counterfactual_value(counterfactual, counterfactual_test_ids, contribution.test_id, cohort) : nil,
             oracle_dependent_kill_ratio: oracle_complete && !original.zero? ? dependent.to_f / original : nil,
             runtime_ms: runtimes[contribution.test_id],
             completeness: contributions.completeness.label,
@@ -264,21 +295,22 @@ module TestMiser
           counterfactual: T.nilable(CounterfactualResult),
           oracle_sensitivity: T.nilable(OracleSensitivityAnalysis),
           counterfactual_test_ids: T::Array[String],
+          cohort: T.nilable(CohortEvidenceVector),
           vectors: T::Array[EvidenceVector],
           high_cost_ms: Float,
           gate: EvidenceGate,
         ).returns(T::Array[ReviewFinding])
       end
-      def build_findings(contributions:, subsumption:, stability:, counterfactual:, oracle_sensitivity:, counterfactual_test_ids:, vectors:, high_cost_ms:, gate:)
+      def build_findings(contributions:, subsumption:, stability:, counterfactual:, oracle_sensitivity:, counterfactual_test_ids:, cohort:, vectors:, high_cost_ms:, gate:)
         findings = contributions.test_contributions.flat_map do |contribution|
           contribution_findings(contribution, gate)
         end
-        findings.concat(cohort_findings(contributions, gate))
+        findings.concat(cohort_findings(contributions, cohort, gate))
         findings.concat(equal_kill_findings(contributions, gate))
         findings.concat(subsumption_findings(subsumption, gate))
         findings.concat(stability_findings(stability, gate))
         findings.concat(oracle_findings(oracle_sensitivity, gate))
-        findings.concat(counterfactual_findings(counterfactual, counterfactual_test_ids, gate))
+        findings.concat(counterfactual_findings(counterfactual, counterfactual_test_ids, cohort, gate))
         findings.concat(cost_findings(vectors, high_cost_ms, gate))
         findings.sort_by { |finding| [finding.test_id.to_s, finding.kind.serialize] }.freeze
       end
@@ -330,10 +362,10 @@ module TestMiser
           end
       end
 
-      sig { params(contributions: ContributionAnalysis, gate: EvidenceGate).returns(T::Array[ReviewFinding]) }
-      def cohort_findings(contributions, gate)
+      sig { params(contributions: ContributionAnalysis, cohort_vector: T.nilable(CohortEvidenceVector), gate: EvidenceGate).returns(T::Array[ReviewFinding]) }
+      def cohort_findings(contributions, cohort_vector, gate)
         cohort = contributions.cohort
-        return [] if cohort.nil? || !gate.corpus_complete?
+        return [] if cohort.nil? || cohort_vector.nil? || !gate.corpus_complete?
 
         cohort.findings.filter_map do |finding|
           next unless finding == FindingKind::AddsGroupDetection
@@ -341,12 +373,8 @@ module TestMiser
           ReviewFinding.new(
             kind: ReviewFindingKind::AddsGroupDetection,
             test_id: nil,
-            reason: "the selected cohort detects mutants not killed by the baseline",
-            evidence: {
-              "test_ids" => cohort.test_ids,
-              "baseline_test_ids" => cohort.baseline_test_ids,
-              "new_detection" => cohort.new_detection,
-            },
+            reason: "the selected cohort detects mutants not killed by the baseline; cohort members may be internally redundant",
+            evidence: cohort_vector.to_h,
           )
         end
       end
@@ -415,9 +443,14 @@ module TestMiser
       end
 
       sig do
-        params(counterfactual: T.nilable(CounterfactualResult), test_ids: T::Array[String], gate: EvidenceGate).returns(T::Array[ReviewFinding])
+        params(
+          counterfactual: T.nilable(CounterfactualResult),
+          test_ids: T::Array[String],
+          cohort: T.nilable(CohortEvidenceVector),
+          gate: EvidenceGate,
+        ).returns(T::Array[ReviewFinding])
       end
-      def counterfactual_findings(counterfactual, test_ids, gate)
+      def counterfactual_findings(counterfactual, test_ids, cohort, gate)
         return [] if counterfactual.nil? || test_ids.empty?
         return [] unless gate.allows_counterfactual?(counterfactual)
 
@@ -426,9 +459,21 @@ module TestMiser
                else
                  ReviewFindingKind::DoesNotDetectRevertedChange
                end
-        test_ids.map do |test_id|
-          ReviewFinding.new(kind: kind, test_id: test_id, reason: counterfactual.reason, evidence: counterfactual.to_h)
+        unless cohort_group_scope?(test_ids, cohort)
+          return test_ids.map do |test_id|
+            ReviewFinding.new(kind: kind, test_id: test_id, reason: counterfactual.reason, evidence: counterfactual.to_h)
+          end
         end
+
+        [ReviewFinding.new(
+          kind: kind,
+          test_id: nil,
+          reason: "the supplied cohort command result applies to the cohort as a group: #{counterfactual.reason}",
+          evidence: counterfactual.to_h.merge(
+            "scope" => "cohort",
+            "test_ids" => T.must(cohort).test_ids,
+          ),
+        )]
       end
 
       sig do
@@ -443,7 +488,7 @@ module TestMiser
 
         vectors.filter_map do |vector|
           next if vector.runtime_ms.nil? || T.must(vector.runtime_ms) < threshold
-          next unless vector.unique_kills.zero? && vector.stable_unique_kills.zero? && vector.cohort_new_detection.zero?
+          next unless vector.unique_kills.zero? && vector.stable_unique_kills.zero?
 
           ReviewFinding.new(
             kind: ReviewFindingKind::HighCostNoMarginalDetection,
@@ -454,12 +499,62 @@ module TestMiser
         end
       end
 
-      sig { params(counterfactual: T.nilable(CounterfactualResult), test_ids: T::Array[String], test_id: String).returns(T.nilable(T::Boolean)) }
-      def counterfactual_value(counterfactual, test_ids, test_id)
+      sig do
+        params(
+          counterfactual: T.nilable(CounterfactualResult),
+          test_ids: T::Array[String],
+          test_id: String,
+          cohort: T.nilable(CohortEvidenceVector),
+        ).returns(T.nilable(T::Boolean))
+      end
+      def counterfactual_value(counterfactual, test_ids, test_id, cohort)
+        return nil if cohort_group_scope?(test_ids, cohort)
         return nil unless counterfactual && test_ids.include?(test_id)
         return nil if counterfactual.status == CounterfactualStatus::Inconclusive
 
         counterfactual.status == CounterfactualStatus::ProvesRevertedChange
+      end
+
+      sig { params(test_ids: T::Array[String], cohort: T.nilable(CohortEvidenceVector)).returns(T::Boolean) }
+      def cohort_group_scope?(test_ids, cohort)
+        !cohort.nil? && test_ids.length > 1 && (test_ids - cohort.test_ids).empty?
+      end
+
+      sig do
+        params(
+          contributions: ContributionAnalysis,
+          subsumption: SubsumptionAnalysis,
+          counterfactual_test_ids: T::Array[String],
+        ).returns(T.nilable(CohortEvidenceVector))
+      end
+      def build_cohort_vector(contributions:, subsumption:, counterfactual_test_ids:)
+        cohort = contributions.cohort
+        return nil if cohort.nil?
+
+        members = contributions.test_contributions.select { |contribution| cohort.test_ids.include?(contribution.test_id) }
+        baseline_kills = contributions.test_contributions
+          .select { |contribution| cohort.baseline_test_ids.include?(contribution.test_id) }
+          .flat_map(&:killed_mutants)
+          .uniq
+        internally_redundant = if contributions.completeness.complete?
+                                 members.filter_map do |member|
+                                   other_kills = members
+                                     .reject { |other| other.test_id == member.test_id }
+                                     .flat_map(&:killed_mutants)
+                                   remaining_detection = (other_kills - baseline_kills).uniq
+                                   member.test_id if (cohort.new_detection - remaining_detection).empty?
+                                 end.sort.freeze
+                               else
+                                 [].freeze
+                               end
+        CohortEvidenceVector.new(
+          test_ids: cohort.test_ids,
+          baseline_test_ids: cohort.baseline_test_ids,
+          new_detection: cohort.new_detection,
+          frontier_new_detection: subsumption.cohort_new_frontier_detection,
+          internally_redundant_test_ids: internally_redundant,
+          counterfactual_test_ids: counterfactual_test_ids,
+        )
       end
 
     end

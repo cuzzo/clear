@@ -104,14 +104,50 @@ class EvidenceReportTest < Minitest::Test
       high_cost_ms: 1_000.0,
     )
 
-    assert_equal ["m1"], subsumption.rankings.find { |ranking| ranking.test_id == "new" }&.cohort_new_frontier_detection
-    assert_empty subsumption.rankings.find { |ranking| ranking.test_id == "baseline" }&.cohort_new_frontier_detection
-    assert_empty subsumption.rankings.find { |ranking| ranking.test_id == "unrelated" }&.cohort_new_frontier_detection
+    assert_equal ["m1"], report.cohort&.new_detection
+    assert_equal ["m1"], report.cohort&.frontier_new_detection
     unrelated = report.vectors.find { |vector| vector.test_id == "unrelated" }
-    assert_equal 0, unrelated&.cohort_new_detection
+    refute unrelated&.to_h&.key?("cohort_new_detection")
     assert_equal ["unrelated"], report.findings
       .select { |finding| finding.kind == Evidence::ReviewFindingKind::HighCostNoMarginalDetection }
       .map(&:test_id)
+  end
+
+  def test_cohort_redundancy_stays_at_cohort_scope_and_does_not_hide_member_cost
+    corpus = Evidence::Corpus.new(
+      tests: [
+        observation("new1", ["m1"], ["m1"]),
+        observation("new2", ["m1"], ["m1"]),
+        observation("baseline", [], []),
+      ],
+      mutants: [mutant("m1", ["new1", "new2"], ["new1", "new2"])],
+      complete: true,
+    )
+    contributions = Evidence::ContributionAnalyzer.new(corpus).analyze(
+      new_test_ids: %w[new1 new2],
+      baseline_test_ids: ["baseline"],
+    )
+    subsumption = Evidence::SubsumptionAnalyzer.new(corpus).analyze(contributions: contributions)
+    report = Evidence::ReportBuilder.new(corpus).build(
+      contributions: contributions,
+      subsumption: subsumption,
+      counterfactual: counterfactual(Evidence::CounterfactualStatus::ProvesRevertedChange, baseline_status: 0),
+      counterfactual_test_ids: %w[new1 new2],
+      runtimes: {"new1" => 2_000.0, "new2" => 2_000.0},
+      high_cost_ms: 1_000.0,
+    )
+
+    assert_equal %w[new1 new2], report.cohort&.internally_redundant_test_ids
+    assert_equal %w[new1 new2], report.cohort&.counterfactual_test_ids
+    assert report.findings.any? { |finding| finding.kind == Evidence::ReviewFindingKind::AddsGroupDetection && finding.test_id.nil? }
+    assert_equal %w[new1 new2], report.findings
+      .select { |finding| finding.kind == Evidence::ReviewFindingKind::HighCostNoMarginalDetection }
+      .map(&:test_id).sort
+    assert report.findings.any? do |finding|
+      finding.kind == Evidence::ReviewFindingKind::ProvesRevertedChange && finding.test_id.nil? &&
+        finding.evidence.fetch("scope") == "cohort"
+    end
+    assert report.vectors.all? { |vector| vector.detects_reverted_change.nil? }
   end
 
   def test_incomplete_and_unknown_corpus_completeness_is_preserved_in_vectors
