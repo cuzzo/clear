@@ -2237,4 +2237,37 @@ mod tests {
         let defs_non_match = storage.find_definitions("other_method", Some("c1"), None).unwrap();
         assert!(defs_non_match.is_empty());
     }
+
+    #[test]
+    fn current_unit_spans_for_path_falls_back_to_logical_units_start_line() {
+        // Same first-commit gap as file_units in ui/lsp.rs: a unit's
+        // creating commit records no `events` row, so `le.*` is NULL until
+        // a later commit changes/moves/fixes it. Without a fallback to
+        // logical_units.start_line, every fresh unit collapses to line 1.
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/worker.rb",
+            1,
+            7,
+            9,
+            "def run",
+            "def run\n  1\nend",
+        );
+        let unit_id = unit.id.clone();
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+
+        let spans = storage.current_unit_spans_for_path("src/worker.rb").unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].id, unit_id);
+        assert_eq!(spans[0].start_line, 7, "must fall back to logical_units.start_line, not 1");
+        assert_eq!(spans[0].end_line, 7, "no end_line column on logical_units to recover the true extent");
+
+        assert_eq!(
+            storage.current_unit_id_for_path_line("src/worker.rb", 7).unwrap(),
+            Some(unit_id)
+        );
+        assert_eq!(storage.current_unit_id_for_path_line("src/worker.rb", 1).unwrap(), None);
+    }
 }

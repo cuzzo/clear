@@ -17,11 +17,15 @@ WITH filtered_units AS (
               )
               WHERE rank = 1
             ),
+            -- A unit's creating commit records no `events` row (only later
+            -- changes/moves/fixes do), so `le.*` is NULL until then. Fall
+            -- back to logical_units.start_line, which the engine always
+            -- sets at creation, before the line-1 default.
             current_units AS (
               SELECT u.id,
                      COALESCE(le.path, u.original_path) AS current_path,
-                     COALESCE(le.start_line, 1) AS start_line,
-                     COALESCE(le.end_line, le.start_line, 1) AS end_line
+                     COALESCE(le.start_line, u.start_line, 1) AS start_line,
+                     COALESCE(le.end_line, le.start_line, u.start_line, 1) AS end_line
               FROM logical_units u
               LEFT JOIN latest_events le ON le.unit_id = u.id
               WHERE u.id IN (SELECT id FROM filtered_units)
