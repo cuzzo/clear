@@ -16,12 +16,12 @@ pub struct HazardIngestStats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct HazardSite {
-    path: String,
-    line: u32,
-    source: String,
-    hazard_type: String,
-    required_evidence: String,
+pub(crate) struct HazardSite {
+    pub(crate) path: String,
+    pub(crate) line: u32,
+    pub(crate) source: String,
+    pub(crate) hazard_type: String,
+    pub(crate) required_evidence: String,
 }
 
 pub fn ingest_hazards(
@@ -448,7 +448,7 @@ fn query_hazards(
     unique_sites
 }
 
-fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+pub(crate) fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     let sites = query_hazards(path, contents, tree_sitter_zig::LANGUAGE.into(), ZIG_HAZARDS, "vopr");
 
     let mut final_sites = Vec::new();
@@ -530,23 +530,23 @@ fn executable_zig_retry_line(line: &str) -> bool {
         && code != "} else {"
 }
 
-fn scan_go_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+pub(crate) fn scan_go_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     query_hazards(path, contents, tree_sitter_go::LANGUAGE.into(), GO_HAZARDS, "race")
 }
 
-fn scan_rust_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+pub(crate) fn scan_rust_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     query_hazards(path, contents, tree_sitter_rust::LANGUAGE.into(), RUST_HAZARDS, "miri")
 }
 
-fn scan_c_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+pub(crate) fn scan_c_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     query_hazards(path, contents, tree_sitter_c::LANGUAGE.into(), C_HAZARDS, "tsan")
 }
 
-fn scan_cpp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+pub(crate) fn scan_cpp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     query_hazards(path, contents, tree_sitter_cpp::LANGUAGE.into(), CPP_HAZARDS, "tsan")
 }
 
-fn scan_csharp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+pub(crate) fn scan_csharp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     query_hazards(path, contents, tree_sitter_c_sharp::LANGUAGE.into(), CSHARP_HAZARDS, "concurrency")
 }
 

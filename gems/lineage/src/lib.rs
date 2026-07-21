@@ -17,6 +17,8 @@ pub mod git;
 pub mod hazard;
 #[path = "ui/lsp.rs"]
 pub mod lsp;
+#[path = "ui/mcp.rs"]
+pub mod mcp;
 #[path = "db/model.rs"]
 pub mod model;
 #[path = "db/mutant.rs"]
@@ -45,6 +47,7 @@ pub use lsp::{
     diagnostics_for_annotations, gutter_items_for_annotations, serve_lsp, GutterItem,
     GutterUpdateParams,
 };
+pub use mcp::serve_mcp;
 pub use model::{
     BlobFile, CommitMetadata, CrashEvent, Event, EventType, LogicalUnit, QualityEvent,
     HazardEvent, QualityMetric, SarifArtifact, SarifFinding, TestExposureEvent, UnitKind,

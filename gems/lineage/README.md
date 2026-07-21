@@ -450,14 +450,15 @@ logical-unit inventory at ingest time and never guessed.
 See [profiling-data-integration.md](docs/agents/profiling-data-integration.md)
 for per-language recipes, resolution tiers, and known gaps.
 
-### MCP server (MVP)
+### MCP server
 
-`ruby gems/lineage/tools/mcp_server.rb --db lineage.db --repo .` exposes
-five read-only, workflow-shaped tools (file risk, unit context,
-verification gaps, change history, find-definition) over stdio MCP - not
-one tool per table. See
-[mcp-server.md](docs/agents/mcp-server.md) for the tool list, why 5 and not
-17, and known MVP gaps.
+`lineage mcp --db lineage.db --repo .` exposes five read-only,
+workflow-shaped tools (file risk, unit context, verification gaps, change
+history, find-definition) over stdio MCP - not one tool per table. `--db`
+is optional: omitting it runs a DB-less mode serving live-disk structure
+and in-process hazard scans only. See
+[mcp.md](docs/agents/mcp.md) for the tool list, why 5 and not 17, the
+uncommitted-changes and DB-less designs, and known gaps.
 
 ## Supported Languages Roadmap
 
