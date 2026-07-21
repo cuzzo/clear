@@ -237,6 +237,9 @@ expected hard error is absent.
 | `tense_predicate_matrix`     | 11           | Postfix tense predicates, stacked refinement, readiness polling, and ambiguous optional-Boolean rejection. |
 | `next_tense_matrix`          | 9            | NEXT across future/stream values and their fallible/optional tense permutations, including invalid redundant and missing unwraps. |
 | `tense_operation_plan_matrix` | 34          | Executable annotation-to-MIR handoff coverage for TRY, UNWRAP, OR_ELSE, tense predicates, ordered tense navigation, scalar NEXT, and fallible promise-list aggregation. |
+| `string_interpolation_matrix` | 30          | `"${expr}"` interpolation shapes (variable, toString, multi-hole, bare `$`, chained call) crossed with local, return, arg, list, struct-field, and loop-fold consumers; Ruby-declared expected values. |
+| `lambda_capture_matrix`      | 20           | Lambda literal shapes (plain, USE captures of ints/strings/pairs, default params) through inferred, typed FN(...), loop, and higher-order call contexts. |
+| `module_graph_matrix`        | 10           | REQUIRE graphs (single edge, chain, diamond) importing PUB/package functions and STRUCT/UNION/ENUM types via emitted companion modules; PRIVATE symbols locked invisible as negative cells. |
 
 ### `stream_into_boundary` matrix
 

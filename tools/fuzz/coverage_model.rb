@@ -218,6 +218,9 @@ module FuzzCoverageModel
     infallible_signature: profile(
       failure_proves: 'Infallible function signatures accept valid returns and reject fallible/control-flow mismatches.'
     ),
+    lambda_capture_matrix: profile(
+      failure_proves: 'Lambda literals and USE captures produce correct values through inferred, typed, loop, and higher-order call contexts.'
+    ),
     lifetimed_return: profile(
       failure_proves: 'BG handles tied to lifetime-bound captures cannot escape their source scope.',
       high_risk: true
@@ -270,6 +273,9 @@ module FuzzCoverageModel
     ),
     mir_lowering_shape_matrix: profile(
       failure_proves: 'MIR lowering shapes for declarations, returns, branches, calls, loops, and dispatch keep ownership facts.'
+    ),
+    module_graph_matrix: profile(
+      failure_proves: 'REQUIRE graphs (single, chain, diamond) import PUB/package symbols and types correctly and keep PRIVATE declarations invisible.'
     ),
     mutable_collection_param: profile(
       failure_proves: 'Mutable collection params retain allocator and mutation visibility across forwarding calls.',
@@ -383,6 +389,9 @@ module FuzzCoverageModel
     stream_into_boundary: profile(
       failure_proves: 'STREAM NEXT values crossing BG/DO/BG STREAM boundaries obey capability and sync rules.',
       high_risk: true
+    ),
+    string_interpolation_matrix: profile(
+      failure_proves: 'Interpolated heap strings carry correct values and cleanup through locals, returns, args, list/struct storage, and loop folding.'
     ),
     struct_field_store_modality: profile(
       failure_proves: 'Every cleanup-bearing value shape stored into a heap struct field preserves ownership facts.',
