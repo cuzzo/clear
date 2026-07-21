@@ -1,0 +1,7 @@
+diff --git a/lib/calculator.py b/lib/calculator.py
+--- a/lib/calculator.py
++++ b/lib/calculator.py
+@@ -1,2 +1,2 @@
+ def value():
+-    return "old"
++    return "new"

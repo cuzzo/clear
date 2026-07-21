@@ -1,0 +1,2 @@
+def value():
+    return "new"

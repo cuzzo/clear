@@ -1,8 +1,10 @@
 # typed: strict
 # frozen_string_literal: true
 
+require "digest"
 require "open3"
 require "sorbet-runtime"
+require "timeout"
 require "tmpdir"
 
 module TestMiser
@@ -14,16 +16,32 @@ module TestMiser
       const :stdout, String
       const :stderr, String
       const :executed, T::Boolean, default: true
+      const :timed_out, T::Boolean, default: false
+      const :output_truncated, T::Boolean, default: false
 
       sig { returns(T::Boolean) }
       def success?
-        executed && status.zero?
+        executed && status.zero? && !timed_out && !output_truncated
       end
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
-        {"status" => status, "stdout" => stdout, "stderr" => stderr, "executed" => executed}
+        {
+          "status" => status,
+          "stdout" => stdout,
+          "stderr" => stderr,
+          "executed" => executed,
+          "timed_out" => timed_out,
+          "output_truncated" => output_truncated,
+        }
       end
+    end
+
+    class CommandLimits < T::Struct
+      const :timeout_seconds, Float, default: 60.0
+      const :max_output_bytes, Integer, default: 1_048_576
+      const :cpu_seconds, T.nilable(Integer), default: nil
+      const :memory_bytes, T.nilable(Integer), default: nil
     end
 
     module CommandRunner
@@ -31,19 +49,143 @@ module TestMiser
       extend T::Helpers
       interface!
 
-      sig { abstract.params(command: T::Array[String], chdir: String).returns(CommandResult) }
-      def run(command, chdir:)
+      sig do
+        abstract.params(
+          command: T::Array[String],
+          chdir: String,
+          limits: CommandLimits,
+        ).returns(CommandResult)
       end
+      def run(command, chdir:, limits:)
+      end
+    end
+
+    class CapturedOutput < T::Struct
+      const :text, String
+      const :truncated, T::Boolean
     end
 
     class ProcessCommandRunner
       extend T::Sig
       include CommandRunner
 
-      sig { override.params(command: T::Array[String], chdir: String).returns(CommandResult) }
-      def run(command, chdir:)
-        stdout, stderr, status = T.unsafe(Open3).capture3(*command, chdir: chdir)
-        CommandResult.new(status: status.exitstatus || 1, stdout: stdout, stderr: stderr)
+      sig do
+        override.params(
+          command: T::Array[String],
+          chdir: String,
+          limits: CommandLimits,
+        ).returns(CommandResult)
+      end
+      def run(command, chdir:, limits:)
+        raise ArgumentError, "timeout_seconds must be positive" unless limits.timeout_seconds.positive?
+        raise ArgumentError, "max_output_bytes must be positive" unless limits.max_output_bytes.positive?
+
+        options = {chdir: chdir, pgroup: true}
+        options[:rlimit_cpu] = limits.cpu_seconds unless limits.cpu_seconds.nil?
+        options[:rlimit_as] = limits.memory_bytes unless limits.memory_bytes.nil?
+        stdin, stdout, stderr, wait_thread = T.unsafe(Open3).popen3(*command, **options)
+        stdin.close
+        stdout_thread = Thread.new { capture_output(stdout, limits.max_output_bytes) }
+        stderr_thread = Thread.new { capture_output(stderr, limits.max_output_bytes) }
+        timed_out = false
+        status = begin
+          Timeout.timeout(limits.timeout_seconds) { wait_thread.value }
+        rescue Timeout::Error
+          timed_out = true
+          terminate(wait_thread)
+          wait_thread.value
+        end
+        captured_stdout = T.cast(stdout_thread.value, CapturedOutput)
+        captured_stderr = T.cast(stderr_thread.value, CapturedOutput)
+        CommandResult.new(
+          status: status.exitstatus || 1,
+          stdout: captured_stdout.text,
+          stderr: captured_stderr.text,
+          timed_out: timed_out,
+          output_truncated: captured_stdout.truncated || captured_stderr.truncated,
+        )
+      rescue StandardError
+        raise
+      ensure
+        stdout&.close unless stdout.nil? || stdout.closed?
+        stderr&.close unless stderr.nil? || stderr.closed?
+        stdin&.close unless stdin.nil? || stdin.closed?
+      end
+
+      private
+
+      sig { params(io: IO, limit: Integer).returns(CapturedOutput) }
+      def capture_output(io, limit)
+        output = T.let(+"", String)
+        truncated = T.let(false, T::Boolean)
+        loop do
+          chunk = io.readpartial([4_096, limit - output.bytesize + 1].max)
+          if output.bytesize + chunk.bytesize > limit
+            output << chunk.byteslice(0, limit - output.bytesize).to_s
+            truncated = true
+            break
+          end
+          output << chunk
+        end
+        CapturedOutput.new(text: output, truncated: truncated)
+      rescue EOFError, IOError
+        CapturedOutput.new(text: T.must(output), truncated: T.must(truncated))
+      ensure
+        io.close unless io.closed?
+      end
+
+      sig { params(wait_thread: Thread).void }
+      def terminate(wait_thread)
+        Process.kill("TERM", -T.unsafe(wait_thread).pid)
+      rescue Errno::ESRCH
+        nil
+      end
+    end
+
+    class TestOutcome < T::Enum
+      enums do
+        Passed = new("PASSED")
+        AssertionFailure = new("ASSERTION_FAILURE")
+        Crash = new("CRASH")
+        TimedOut = new("TIMED_OUT")
+        ResourceLimited = new("RESOURCE_LIMITED")
+        InfrastructureFailure = new("INFRASTRUCTURE_FAILURE")
+        UnknownFailure = new("UNKNOWN_FAILURE")
+      end
+    end
+
+    module TestResultParser
+      extend T::Sig
+      extend T::Helpers
+      interface!
+
+      sig { abstract.params(result: CommandResult).returns(TestOutcome) }
+      def parse(result)
+      end
+    end
+
+    class DefaultTestResultParser
+      extend T::Sig
+      include TestResultParser
+
+      ASSERTION_MARKERS = T.let(
+        /(?:Minitest::Assertion|RSpec::Expectations::ExpectationNotMetError|AssertionError:|^Failure:|^Expected:)/,
+        Regexp,
+      )
+      CRASH_MARKERS = T.let(/(?:Segmentation fault|NoMethodError|Traceback \(most recent call last\))/, Regexp)
+
+      sig { override.params(result: CommandResult).returns(TestOutcome) }
+      def parse(result)
+        return TestOutcome::InfrastructureFailure unless result.executed
+        return TestOutcome::TimedOut if result.timed_out
+        return TestOutcome::ResourceLimited if result.output_truncated
+        return TestOutcome::Passed if result.status.zero?
+
+        output = "#{result.stdout}\n#{result.stderr}"
+        return TestOutcome::AssertionFailure if output.match?(ASSERTION_MARKERS)
+        return TestOutcome::Crash if output.match?(CRASH_MARKERS)
+
+        TestOutcome::UnknownFailure
       end
     end
 
@@ -61,8 +203,37 @@ module TestMiser
       const :head_command, T::Array[String]
       const :build_command, T::Array[String]
       const :new_test_command, T::Array[String]
+      const :baseline_head_command, T.nilable(T::Array[String]), default: nil
       const :baseline_test_command, T.nilable(T::Array[String]), default: nil
       const :revision, String, default: "HEAD"
+      const :test_result_parser, TestResultParser, factory: -> { DefaultTestResultParser.new }
+      const :limits, CommandLimits, factory: -> { CommandLimits.new }
+      const :allow_dirty, T::Boolean, default: false
+    end
+
+    class CounterfactualProvenance < T::Struct
+      extend T::Sig
+
+      const :repository, String
+      const :requested_revision, String
+      const :resolved_revision, T.nilable(String)
+      const :production_patch_path, String
+      const :production_patch_sha256, T.nilable(String)
+      const :clean_worktree, T::Boolean
+      const :worktree_path, T.nilable(String)
+
+      sig { returns(T::Hash[String, T.untyped]) }
+      def to_h
+        {
+          "repository" => repository,
+          "requested_revision" => requested_revision,
+          "resolved_revision" => resolved_revision,
+          "production_patch_path" => production_patch_path,
+          "production_patch_sha256" => production_patch_sha256,
+          "clean_worktree" => clean_worktree,
+          "worktree_path" => worktree_path,
+        }.compact
+      end
     end
 
     class CounterfactualResult < T::Struct
@@ -70,12 +241,16 @@ module TestMiser
 
       const :status, CounterfactualStatus
       const :head, CommandResult
+      const :repository_status, CommandResult, default: CommandResult.new(status: 125, stdout: "", stderr: "not run", executed: false)
+      const :revision_resolution, CommandResult, default: CommandResult.new(status: 125, stdout: "", stderr: "not run", executed: false)
+      const :baseline_head, T.nilable(CommandResult), default: nil
       const :worktree, T.nilable(CommandResult)
       const :reverse_patch, T.nilable(CommandResult)
       const :build, T.nilable(CommandResult)
       const :new_tests, T.nilable(CommandResult)
       const :baseline_tests, T.nilable(CommandResult)
       const :baseline_detects_reversal, T.nilable(T::Boolean)
+      const :provenance, T.nilable(CounterfactualProvenance), default: nil
       const :reason, String
 
       sig { returns(T::Hash[String, T.untyped]) }
@@ -83,6 +258,9 @@ module TestMiser
         {
           "schema" => "test-quality-evidence/counterfactual-v1",
           "status" => status.serialize,
+          "repository_status" => repository_status.to_h,
+          "revision_resolution" => revision_resolution.to_h,
+          "baseline_head" => baseline_head&.to_h,
           "head" => head.to_h,
           "worktree" => worktree&.to_h,
           "reverse_patch" => reverse_patch&.to_h,
@@ -90,6 +268,7 @@ module TestMiser
           "new_tests" => new_tests&.to_h,
           "baseline_tests" => baseline_tests&.to_h,
           "baseline_detects_reversal" => baseline_detects_reversal,
+          "provenance" => provenance&.to_h,
           "reason" => reason,
         }
       end
@@ -107,8 +286,100 @@ module TestMiser
 
       sig { returns(CounterfactualResult) }
       def run
+        patch_path = File.expand_path(@request.production_patch_path, @request.repository)
+        patch_sha256 = patch_digest(patch_path)
+        provenance = provenance_for(
+          patch_path: patch_path,
+          patch_sha256: patch_sha256,
+          resolved_revision: nil,
+          clean_worktree: false,
+          worktree_path: nil,
+        )
+        not_run = not_executed_result("not run")
+        return inconclusive(
+          head: not_run,
+          provenance: provenance,
+          reason: "production patch does not exist or could not be hashed",
+        ) if patch_sha256.nil?
+
+        repository_status = safe_run(
+          ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+          @request.repository,
+        )
+        provenance = provenance_for(
+          patch_path: patch_path,
+          patch_sha256: patch_sha256,
+          resolved_revision: nil,
+          clean_worktree: repository_status.success? && repository_status.stdout.empty?,
+          worktree_path: nil,
+        )
+        return inconclusive(
+          head: not_run,
+          repository_status: repository_status,
+          provenance: provenance,
+          reason: "repository worktree status could not be determined",
+        ) unless repository_status.executed && repository_status.success?
+        if !@request.allow_dirty && !repository_status.stdout.empty?
+          return inconclusive(
+            head: not_run,
+            repository_status: repository_status,
+            provenance: provenance,
+            reason: "repository worktree is not clean",
+          )
+        end
+
+        revision_resolution = safe_run(
+          ["git", "rev-parse", "--verify", "#{@request.revision}^{commit}"],
+          @request.repository,
+        )
+        return inconclusive(
+          head: not_run,
+          repository_status: repository_status,
+          revision_resolution: revision_resolution,
+          provenance: provenance,
+          reason: "requested revision could not be resolved",
+        ) unless revision_resolution.success?
+
+        resolved_revision = revision_resolution.stdout.strip
+        provenance = provenance_for(
+          patch_path: patch_path,
+          patch_sha256: patch_sha256,
+          resolved_revision: resolved_revision,
+          clean_worktree: repository_status.stdout.empty?,
+          worktree_path: nil,
+        )
         head = safe_run(@request.head_command, @request.repository)
-        return inconclusive(head: head, reason: "selected tests do not pass on the current source") unless head.success?
+        head_outcome = parse_result(head)
+        return inconclusive(
+          head: head,
+          repository_status: repository_status,
+          revision_resolution: revision_resolution,
+          provenance: provenance,
+          reason: "current selected-test result was #{head_outcome.serialize}, not PASSED",
+        ) unless head_outcome == TestOutcome::Passed
+
+        baseline_head = nil
+        unless @request.baseline_test_command.nil?
+          if @request.baseline_head_command.nil?
+            return inconclusive(
+              head: head,
+              repository_status: repository_status,
+              revision_resolution: revision_resolution,
+              provenance: provenance,
+              reason: "baseline tests were not verified on the unreversed source",
+            )
+          end
+          baseline_head = safe_run(T.must(@request.baseline_head_command), @request.repository)
+          baseline_head_outcome = parse_result(baseline_head)
+          return inconclusive(
+            head: head,
+            repository_status: repository_status,
+            revision_resolution: revision_resolution,
+            baseline_head: baseline_head,
+            provenance: provenance,
+            reason: "current baseline-test result was #{baseline_head_outcome.serialize}, not PASSED",
+          ) unless baseline_head_outcome == TestOutcome::Passed
+        end
 
         worktree = nil
         reverse_patch = nil
@@ -122,65 +393,100 @@ module TestMiser
             ["git", "worktree", "add", "--detach", worktree_path, @request.revision],
             @request.repository,
           )
-          return inconclusive(head: head, worktree: worktree, reason: "isolated worktree could not be created") unless worktree.success?
+          provenance = provenance_for(
+            patch_path: patch_path,
+            patch_sha256: patch_sha256,
+            resolved_revision: resolved_revision,
+            clean_worktree: repository_status.stdout.empty?,
+            worktree_path: worktree_path,
+          )
+          return inconclusive(
+            head: head,
+            repository_status: repository_status,
+            revision_resolution: revision_resolution,
+            baseline_head: baseline_head,
+            worktree: worktree,
+            provenance: provenance,
+            reason: "isolated worktree could not be created",
+          ) unless worktree.success?
 
-          patch_path = File.expand_path(@request.production_patch_path, @request.repository)
           reverse_patch = safe_run(
             ["git", "apply", "--reverse", "--whitespace=nowarn", patch_path],
             worktree_path,
           )
           return inconclusive(
             head: head,
+            repository_status: repository_status,
+            revision_resolution: revision_resolution,
+            baseline_head: baseline_head,
             worktree: worktree,
             reverse_patch: reverse_patch,
+            provenance: provenance,
             reason: "production patch could not be reversed",
           ) unless reverse_patch.success?
 
           build = safe_run(@request.build_command, worktree_path)
           return inconclusive(
             head: head,
+            repository_status: repository_status,
+            revision_resolution: revision_resolution,
+            baseline_head: baseline_head,
             worktree: worktree,
             reverse_patch: reverse_patch,
             build: build,
+            provenance: provenance,
             reason: "reversed source does not build",
           ) unless build.success?
 
           new_tests = safe_run(@request.new_test_command, worktree_path)
+          new_outcome = parse_result(new_tests)
           return inconclusive(
             head: head,
+            repository_status: repository_status,
+            revision_resolution: revision_resolution,
+            baseline_head: baseline_head,
             worktree: worktree,
             reverse_patch: reverse_patch,
             build: build,
             new_tests: new_tests,
-            reason: "new-test command could not execute",
-          ) unless new_tests.executed
+            provenance: provenance,
+            reason: "reversed new-test result was #{new_outcome.serialize}, not an expected assertion failure or pass",
+          ) unless [TestOutcome::Passed, TestOutcome::AssertionFailure].include?(new_outcome)
 
           unless @request.baseline_test_command.nil?
             baseline_tests = safe_run(T.must(@request.baseline_test_command), worktree_path)
+            baseline_outcome = parse_result(baseline_tests)
             return inconclusive(
               head: head,
+              repository_status: repository_status,
+              revision_resolution: revision_resolution,
+              baseline_head: baseline_head,
               worktree: worktree,
               reverse_patch: reverse_patch,
               build: build,
               new_tests: new_tests,
               baseline_tests: baseline_tests,
-              reason: "baseline-test command could not execute",
-            ) unless baseline_tests.executed
+              provenance: provenance,
+              reason: "reversed baseline-test result was #{baseline_outcome.serialize}, not PASSED or an expected assertion failure",
+            ) unless [TestOutcome::Passed, TestOutcome::AssertionFailure].include?(baseline_outcome)
           end
 
-          result_status = new_tests.success? ?
-            CounterfactualStatus::DoesNotDetectRevertedChange :
-            CounterfactualStatus::ProvesRevertedChange
+          result_status = new_outcome == TestOutcome::Passed ?
+            CounterfactualStatus::DoesNotDetectRevertedChange : CounterfactualStatus::ProvesRevertedChange
           CounterfactualResult.new(
             status: result_status,
             head: head,
+            repository_status: repository_status,
+            revision_resolution: revision_resolution,
+            baseline_head: baseline_head,
             worktree: worktree,
             reverse_patch: reverse_patch,
             build: build,
             new_tests: new_tests,
             baseline_tests: baseline_tests,
-            baseline_detects_reversal: baseline_tests.nil? ? nil : !baseline_tests.success?,
-            reason: new_tests.success? ? "new tests pass after the production change is reversed" :
+            baseline_detects_reversal: baseline_tests.nil? ? nil : parse_result(baseline_tests) == TestOutcome::AssertionFailure,
+            provenance: provenance,
+            reason: new_outcome == TestOutcome::Passed ? "new tests pass after the production change is reversed" :
               "new tests fail after the production change is reversed",
           )
         ensure
@@ -211,32 +517,84 @@ module TestMiser
 
       sig { params(command: T::Array[String], chdir: String).returns(CommandResult) }
       def safe_run(command, chdir)
-        @runner.run(command, chdir: chdir)
+        @runner.run(command, chdir: chdir, limits: @request.limits)
       rescue StandardError => error
         CommandResult.new(status: 127, stdout: "", stderr: error.message, executed: false)
+      end
+
+      sig { params(result: CommandResult).returns(TestOutcome) }
+      def parse_result(result)
+        @request.test_result_parser.parse(result)
+      rescue StandardError
+        TestOutcome::InfrastructureFailure
+      end
+
+      sig { params(path: String).returns(T.nilable(String)) }
+      def patch_digest(path)
+        Digest::SHA256.file(path).hexdigest
+      rescue SystemCallError
+        nil
+      end
+
+      sig { params(reason: String).returns(CommandResult) }
+      def not_executed_result(reason)
+        CommandResult.new(status: 125, stdout: "", stderr: reason, executed: false)
+      end
+
+      sig do
+        params(
+          patch_path: String,
+          patch_sha256: T.nilable(String),
+          resolved_revision: T.nilable(String),
+          clean_worktree: T::Boolean,
+          worktree_path: T.nilable(String),
+        ).returns(CounterfactualProvenance)
+      end
+      def provenance_for(patch_path:, patch_sha256:, resolved_revision:, clean_worktree:, worktree_path:)
+        CounterfactualProvenance.new(
+          repository: @request.repository,
+          requested_revision: @request.revision,
+          resolved_revision: resolved_revision,
+          production_patch_path: patch_path,
+          production_patch_sha256: patch_sha256,
+          clean_worktree: clean_worktree,
+          worktree_path: worktree_path,
+        )
       end
 
       sig do
         params(
           head: CommandResult,
           reason: String,
+          repository_status: CommandResult,
+          revision_resolution: CommandResult,
+          baseline_head: T.nilable(CommandResult),
           worktree: T.nilable(CommandResult),
           reverse_patch: T.nilable(CommandResult),
           build: T.nilable(CommandResult),
           new_tests: T.nilable(CommandResult),
           baseline_tests: T.nilable(CommandResult),
+          provenance: T.nilable(CounterfactualProvenance),
         ).returns(CounterfactualResult)
       end
-      def inconclusive(head:, reason:, worktree: nil, reverse_patch: nil, build: nil, new_tests: nil, baseline_tests: nil)
+      def inconclusive(
+        head:, reason:, repository_status: not_executed_result("not run"),
+        revision_resolution: not_executed_result("not run"), baseline_head: nil,
+        worktree: nil, reverse_patch: nil, build: nil, new_tests: nil, baseline_tests: nil, provenance: nil
+      )
         CounterfactualResult.new(
           status: CounterfactualStatus::Inconclusive,
           head: head,
+          repository_status: repository_status,
+          revision_resolution: revision_resolution,
+          baseline_head: baseline_head,
           worktree: worktree,
           reverse_patch: reverse_patch,
           build: build,
           new_tests: new_tests,
           baseline_tests: baseline_tests,
           baseline_detects_reversal: nil,
+          provenance: provenance,
           reason: reason,
         )
       end
