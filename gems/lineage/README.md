@@ -473,6 +473,15 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-hotness \
 or as part of a full import: `bin/lineage-import --hotness=hotness.json`.
 Re-ingesting the same `source` replaces its previous rows.
 
+For this repository, `ruby tools/profile_hotness.rb` packages the whole
+step-1-through-3 workflow with a per-subproject recipe: `--target compiler`
+profiles real compiles of the `benchmarks/` and `examples/` corpus under
+stackprof, `--target boobytrap` uses `go test -cpuprofile`, `--target
+fact-mine` and `--target zig` use `perf record` around real workloads, and
+each Ruby gem target profiles its test files (advisory). Add `--ingest
+--db lineage.db` to ingest every generated profile in the same run;
+`--list` shows all targets.
+
 **4. What the UI does with it:**
 
 - The dashboard "Expensive Operations" list ranks by Big-O first, then by

@@ -77,6 +77,60 @@ class PprofToHotnessTest < Minitest::Test
     end
   end
 
+  def test_parses_perf_report_children_output
+    Dir.mktmpdir do |dir|
+      report = File.join(dir, "report.txt")
+      File.write(report, <<~REPORT)
+        # Children      Self  Command  Shared Object     Symbol
+            62.10%     1.20%  bench    bench             [.] ParkingLot.acquire
+             4.00%     4.00%  bench    libc.so.6         [.] malloc
+             0.02%     0.02%  bench    bench             [.] tiny_helper
+      REPORT
+
+      doc = convert("--perf-report=#{report}")
+
+      assert_equal "perf", doc["source"]
+      by_function = doc["entries"].to_h { |entry| [entry["function"], entry] }
+      acquire = by_function.fetch("ParkingLot.acquire")
+      assert_equal "critical", acquire["tier"]
+      assert_in_delta 0.621, acquire["cum_share"], 1e-9
+      assert_nil acquire["path"]
+      assert_equal "warm", by_function.fetch("malloc")["tier"]
+      assert_equal "cold", by_function.fetch("tiny_helper")["tier"]
+    end
+  end
+
+  def test_path_prefix_filters_out_harness_frames
+    Dir.mktmpdir do |dir|
+      dump = File.join(dir, "stackprof.json")
+      File.write(dump, JSON.generate(
+        "samples" => 100,
+        "frames" => {
+          "1" => { "name" => "Compiler#run", "file" => "/repo/compiler/ruby/run.rb", "line" => 3,
+                   "samples" => 50, "total_samples" => 90 },
+          "2" => { "name" => "<main>", "file" => "/repo/tools/harness.rb", "line" => 1,
+                   "samples" => 1, "total_samples" => 100 }
+        }
+      ))
+
+      doc = convert("--stackprof=#{dump}", "--strip-prefix=/repo", "--path-prefix=compiler/")
+      assert_equal ["Compiler#run"], doc["entries"].map { |entry| entry["function"] }
+    end
+  end
+
+  def test_profile_hotness_tool_lists_targets
+    script = File.expand_path("../../../tools/profile_hotness.rb", __dir__)
+    stdout, stderr, status = Open3.capture3("ruby", script, "--list")
+    assert status.success?, stderr
+    %w[compiler boobytrap fact-mine zig espalier slopcop].each do |target|
+      assert_includes stdout.lines.map(&:strip), target
+    end
+
+    _stdout, stderr, status = Open3.capture3("ruby", script, "--target=nonexistent")
+    refute status.success?
+    assert_includes stderr, "unknown target"
+  end
+
   def test_rejects_unrecognized_input
     Dir.mktmpdir do |dir|
       empty = File.join(dir, "empty.txt")

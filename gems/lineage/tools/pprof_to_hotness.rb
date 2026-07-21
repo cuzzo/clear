@@ -5,9 +5,11 @@
 # Reference converter for the workflow documented in the Espalier and Lineage
 # READMEs. Two inputs are supported:
 #
-#   --pprof-top FILE   output of: go tool pprof -top -lines <profile>
-#                      (also produced by `pprof` for Rust/C++ protobuf profiles)
-#   --stackprof FILE   stackprof JSON dump (Ruby): stackprof --json > FILE
+#   --pprof-top FILE     output of: go tool pprof -top -lines <profile>
+#                        (also produced by `pprof` for Rust/C++ protobuf profiles)
+#   --stackprof FILE     stackprof JSON dump (Ruby): stackprof --json > FILE
+#   --perf-report FILE   output of: perf report --stdio --children -g none
+#                        (Rust/Zig/C binaries; symbols only, no paths)
 #
 # Tiers are assigned from cumulative share of total samples:
 #   critical >= 5%, warm >= 0.5%, cold otherwise.
@@ -25,13 +27,15 @@ require "optparse"
 CRITICAL_SHARE = 0.05
 WARM_SHARE = 0.005
 
-options = { source: nil, commit: nil, strip: nil, pprof_top: nil, stackprof: nil }
+options = { source: nil, commit: nil, strip: nil, pprof_top: nil, stackprof: nil, perf_report: nil, path_prefixes: [] }
 OptionParser.new do |opts|
   opts.on("--pprof-top=FILE") { |v| options[:pprof_top] = v }
   opts.on("--stackprof=FILE") { |v| options[:stackprof] = v }
+  opts.on("--perf-report=FILE") { |v| options[:perf_report] = v }
   opts.on("--source=LABEL") { |v| options[:source] = v }
   opts.on("--commit=SHA") { |v| options[:commit] = v }
   opts.on("--strip-prefix=PATH", "Strip this prefix from paths (e.g. absolute build dir)") { |v| options[:strip] = v }
+  opts.on("--path-prefix=PREFIX", "Keep only entries under this path prefix; drops harness/vendor frames. May be repeated") { |v| options[:path_prefixes] << v }
 end.parse!
 
 def tier_for(share)
@@ -95,10 +99,38 @@ elsif options[:stackprof]
     }
   end
   options[:source] ||= "stackprof"
+elsif options[:perf_report]
+  # perf report --stdio --children -g none rows:
+  #     12.34%   3.21%  command  shared_object  [.] symbol
+  File.foreach(options[:perf_report]) do |line|
+    next if line.start_with?("#")
+    match = line.match(/^\s*([\d.]+)%\s+([\d.]+)%\s+\S+\s+(\S+)\s+\[[.k]\]\s+(.+?)\s*$/)
+    next unless match
+
+    children_pct, self_pct, _object, symbol = match.captures
+    entries << {
+      "function" => symbol,
+      "path" => nil,
+      "line" => nil,
+      "flat" => (self_pct.to_f * 100).round,
+      "cum" => (children_pct.to_f * 100).round,
+      "flat_share" => self_pct.to_f / 100.0,
+      "cum_share" => children_pct.to_f / 100.0
+    }
+  end
+  abort "no perf report rows recognized in #{options[:perf_report]}" if entries.empty?
+  options[:source] ||= "perf"
+  total = 10_000
 else
-  abort "one of --pprof-top or --stackprof is required"
+  abort "one of --pprof-top, --stackprof, or --perf-report is required"
 end
 
+unless options[:path_prefixes].empty?
+  entries.select! do |entry|
+    options[:path_prefixes].any? { |prefix| entry["path"].to_s.start_with?(prefix) }
+  end
+  abort "no entries under #{options[:path_prefixes].join(", ")}" if entries.empty?
+end
 entries.each { |entry| entry["tier"] = tier_for(entry["cum_share"]) }
 entries.sort_by! { |entry| [-entry["cum_share"], entry["function"]] }
 
