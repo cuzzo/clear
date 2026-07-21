@@ -103,7 +103,12 @@ class McpServerTest < Minitest::Test
         # the method's true multi-line extent (def/body/end), not the
         # single-line first-commit fallback.
         assert_equal [3, 5], context["span"]
-        assert(context["hazards"].any? { |h| h["hazard_type"] == "ruby_metaprogramming" })
+        hazard = context["hazards"].find { |h| h["hazard_type"] == "ruby_metaprogramming" }
+        refute_nil hazard
+        # The actual triggering source line, not just its classification -
+        # otherwise a caller needs a second, separate file read to see what
+        # was flagged.
+        assert_equal "test-fixture", hazard["snippet"]
         assert(context["hotness"].any? { |h| h["tier"] == "critical" })
 
         risk = client.call_tool("lineage_file_risk", { "path" => "src/" })
@@ -111,7 +116,10 @@ class McpServerTest < Minitest::Test
         assert(risk["files"].any? { |f| f["current_path"] == "src/worker.rb" && f["open_hazards"] == 1 })
 
         gaps = client.call_tool("lineage_verification_gaps", { "path" => "src/worker.rb" })
-        assert(gaps["open_hazards"].any? { |h| h["hazard_type"] == "ruby_metaprogramming" })
+        gap_hazard = gaps["open_hazards"].find { |h| h["hazard_type"] == "ruby_metaprogramming" }
+        refute_nil gap_hazard
+        assert_equal "test-fixture", gap_hazard["snippet"]
+        assert_equal "run", gap_hazard["symbol"]
 
         history = client.call_tool("lineage_change_history", { "path" => "src/worker.rb" })
         assert_operator history["events"].size, :>=, 1

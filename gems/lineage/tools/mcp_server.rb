@@ -117,7 +117,7 @@ def unit_context(path, line)
                       "current_mutant_verified_tests", "current_mutant_killed_tests", "is_hard_gated"),
     span: [containing["start_line"], containing["end_line"]],
     event_counts: events,
-    hazards: hazards.map { |row| row.slice("line", "hazard_type", "required_evidence", "verified") },
+    hazards: hazards.map { |row| row.slice("line", "hazard_type", "required_evidence", "verified", "source").transform_keys { |k| k == "source" ? "snippet" : k } },
     hotness: hotness.map { |row| row.slice("line", "tier", "cum_share", "source") },
     findings: findings
   }
@@ -126,8 +126,8 @@ end
 def verification_gaps(path)
   is_prefix = DB.execute("SELECT 1 FROM unit_hazards WHERE path = ?1 LIMIT 1", [path]).empty? &&
               DB.execute("SELECT 1 FROM current_sarif_findings WHERE path = ?1 LIMIT 1", [path]).empty?
-  hazard_sql = is_prefix ? "SELECT path, line, hazard_type, required_evidence FROM unit_hazards WHERE is_active = 1 AND path LIKE ?1" \
-                          : "SELECT path, line, hazard_type, required_evidence FROM unit_hazards WHERE is_active = 1 AND path = ?1"
+  hazard_sql = is_prefix ? "SELECT path, line, hazard_type, required_evidence, symbol, source AS snippet FROM unit_hazards WHERE is_active = 1 AND path LIKE ?1" \
+                          : "SELECT path, line, hazard_type, required_evidence, symbol, source AS snippet FROM unit_hazards WHERE is_active = 1 AND path = ?1"
   finding_sql = is_prefix ? "SELECT path, start_line, rule_id, message FROM current_sarif_findings WHERE (is_dark_arm = 1 OR rule_id LIKE 'test-miser.%') AND path LIKE ?1" \
                            : "SELECT path, start_line, rule_id, message FROM current_sarif_findings WHERE (is_dark_arm = 1 OR rule_id LIKE 'test-miser.%') AND path = ?1"
   arg = is_prefix ? "#{path}%" : path
