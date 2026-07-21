@@ -151,6 +151,12 @@ jobs:
           bundler-cache: true
       - name: Verify runner adapters, dynamic planning, and canonical checkpoints
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/test_miser_test.rb
+      - name: Verify PR step summary tallies
+        run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/step_summary_test.rb
+      - name: Verify Lineage corpus ingestion round-trip
+        # Skips internally when the lineage release binary is absent; runs
+        # fully in local checkouts where the workspace is built.
+        run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/lineage_ingest_integration_test.rb
 
   boobytrap-go-unit:
     name: boobytrap Go tests
