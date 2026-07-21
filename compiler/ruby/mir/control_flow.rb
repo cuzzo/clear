@@ -1647,81 +1647,10 @@ module LoopFrameAnalysis
     found = T.let(false, T::Boolean)
     MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |stmt|
       next if direct_loop_expression_boundary?(stmt)
-      if destination_driven_iteration_frame_alloc?(stmt, local_names, lifecycle_registry)
-        found = true
-        next
-      end
       each_loop_local_locatable(stmt, local_names) do |node|
         next if found
         found = true if expression_allocates_frame_value?(node, fn_nodes)
       end
-    end
-    found
-  end
-
-  # Assignment lowering evaluates an owning RHS under the destination
-  # binding's allocator. An explicit COPY is context-free annotated as heap,
-  # but a reassignment to an iteration-local frame binding therefore lowers as
-  # a frame DeepCopy. Inspect the finalized binding and lifecycle contracts
-  # together so loop rewinding sees the allocation that lowering will emit.
-  sig do
-    params(
-      node: AST::Node,
-      local_names: T::Set[String],
-      lifecycle_registry: T.nilable(Semantic::LifecycleRegistry),
-    ).returns(T::Boolean)
-  end
-  def self.destination_driven_iteration_frame_alloc?(node, local_names, lifecycle_registry)
-    value = assignment_value(node)
-    return false unless value
-    name = assignment_name(node)
-    return false unless name && local_names.include?(name)
-
-    entry = assignment_binding_entry(node)
-    return false unless entry&.present? && entry.frame? && entry.scope == :iteration
-
-    allocating_copy_in?(value, lifecycle_registry)
-  end
-
-  sig { params(node: AST::Node).returns(T.nilable(AST::Node)) }
-  def self.assignment_value(node)
-    return node.value if node.is_a?(AST::BindExpr) && node.mode == :assign
-
-    nil
-  end
-
-  sig { params(node: AST::Node).returns(T.nilable(String)) }
-  def self.assignment_name(node)
-    raw = node.name if node.is_a?(AST::BindExpr) && node.mode == :assign
-    return raw.to_s if raw.is_a?(String)
-
-    nil
-  end
-
-  sig { params(node: AST::Node).returns(T.nilable(CleanupEntry)) }
-  def self.assignment_binding_entry(node)
-    symbol = node.respond_to?(:symbol) ? T.unsafe(node).symbol : nil
-    declaration = symbol&.reg
-    return nil unless declaration&.respond_to?(:mir_binding_entry)
-
-    MIR::LocalBindingAnalysis.binding_entry(T.unsafe(declaration))
-  end
-
-  sig do
-    params(
-      root: AST::Node,
-      lifecycle_registry: T.nilable(Semantic::LifecycleRegistry),
-    ).returns(T::Boolean)
-  end
-  def self.allocating_copy_in?(root, lifecycle_registry)
-    found = T.let(false, T::Boolean)
-    AST.each_locatable(root) do |candidate|
-      next unless candidate.is_a?(AST::CopyNode)
-
-      source_type = Type.from_node!(candidate.value, context: "loop COPY source")
-      strategy = lifecycle_registry&.fetch(source_type)&.copy_strategy
-      found = [:deep_clone, :generic].include?(strategy)
-      break if found
     end
     found
   end

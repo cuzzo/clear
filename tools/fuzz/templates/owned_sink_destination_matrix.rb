@@ -33,6 +33,24 @@ end
   end
 end
 
+# :hoisted sources declare the owned payload as its own separately-named
+# local BEFORE wrapping it by identifier inside an outer struct/union
+# literal (`v: Nest = Nest{ items: inner };`, not `Nest{ items: mkList() }`).
+# Every other source in this template builds its owned value inline at the
+# wrap site, which every OSD sink can already trace back to a single owning
+# declaration through the return/assignment escape sinks alone. A prior
+# separately-declared identifier is only reachable through
+# EscapeAnalysis#propagate_hoist_dependencies!, a fixed-point pass distinct
+# from those escape sinks -- confirmed by hand (see git history) that
+# disabling its one non-redundant call site (mark_expr_identifiers_heap! on
+# a binding's own recorded value expression) produces a real leak for this
+# exact two-step shape and none of the template's other sources.
+%i[struct_owned union_owned nested_owned].each do |shape|
+  %i[return_value takes_arg].each do |sink|
+    OWNED_SINK_DESTINATION_CELLS << { source: :hoisted, sink: sink, shape: shape, expected: :pass }
+  end
+end
+
 def osd_prelude(shape)
   case shape
   when :struct_owned
@@ -119,6 +137,18 @@ def osd_source_setup(source, shape)
     ["src: SrcHolder = SrcHolder{ value: #{osd_return_expr(shape)} };", "src.value"]
   when :index_borrow
     ["MUTABLE srcs: #{osd_type(shape)}[]@list = [];\n    &srcs.append(#{osd_return_expr(shape)});", "srcs[0_i64]"]
+  when :hoisted
+    inner_setup, wrap = case shape
+    when :struct_owned
+      ['inner: String = COPY "abc";', "Box{ label: inner }"]
+    when :union_owned
+      ["MUTABLE inner: String[]@list = List[];\n    &inner.append(COPY \"a\");\n    &inner.append(COPY \"b\");\n    &inner.append(COPY \"c\");",
+       "Val{ Items: inner }"]
+    when :nested_owned
+      ["MUTABLE inner: String[]@list = List[];\n    &inner.append(COPY \"a\");\n    &inner.append(COPY \"b\");\n    &inner.append(COPY \"c\");",
+       "Nest{ items: inner }"]
+    end
+    ["#{inner_setup}\n    v: #{osd_type(shape)} = #{wrap};", "v"]
   end
 end
 
