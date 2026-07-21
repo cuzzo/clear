@@ -460,8 +460,13 @@ fn main() -> Result<()> {
                 commit.as_deref(),
             )?;
             println!(
-                "ingested hotness: entries={} critical={} skipped={}",
-                stats.entries, stats.critical, stats.skipped
+                "ingested hotness: entries={} critical={} skipped={} resolved_exact={} resolved_symbol={} unresolved={}",
+                stats.entries,
+                stats.critical,
+                stats.skipped,
+                stats.resolved_exact,
+                stats.resolved_symbol,
+                stats.unresolved
             );
         }
         Command::IngestHazards {

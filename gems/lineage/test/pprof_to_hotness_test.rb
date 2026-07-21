@@ -77,26 +77,39 @@ class PprofToHotnessTest < Minitest::Test
     end
   end
 
-  def test_parses_perf_report_children_output
+  def test_parses_perf_script_stacks_with_srclines
     Dir.mktmpdir do |dir|
-      report = File.join(dir, "report.txt")
-      File.write(report, <<~REPORT)
-        # Children      Self  Command  Shared Object     Symbol
-            62.10%     1.20%  bench    bench             [.] ParkingLot.acquire
-             4.00%     4.00%  bench    libc.so.6         [.] malloc
-             0.02%     0.02%  bench    bench             [.] tiny_helper
-      REPORT
+      script = File.join(dir, "script.txt")
+      File.write(script, <<~SCRIPT)
+        bench 111 12.34: 250000 cycles:
+        \t7f01 ParkingLot.acquire+0x10 (bench)
+          /repo/zig/lib/parking-lot.zig:42
+        \t7f02 main (bench)
+          :0
 
-      doc = convert("--perf-report=#{report}")
+        bench 111 12.35: 250000 cycles:
+        \t7f02 main (bench)
+          :0
+
+      SCRIPT
+
+      doc = convert("--perf-script=#{script}", "--strip-prefix=/repo/")
 
       assert_equal "perf", doc["source"]
+      assert_equal 2, doc["total"]
       by_function = doc["entries"].to_h { |entry| [entry["function"], entry] }
+
       acquire = by_function.fetch("ParkingLot.acquire")
-      assert_equal "critical", acquire["tier"]
-      assert_in_delta 0.621, acquire["cum_share"], 1e-9
-      assert_nil acquire["path"]
-      assert_equal "warm", by_function.fetch("malloc")["tier"]
-      assert_equal "cold", by_function.fetch("tiny_helper")["tier"]
+      assert_equal "zig/lib/parking-lot.zig", acquire["path"]
+      assert_equal 42, acquire["line"]
+      assert_in_delta 0.5, acquire["cum_share"], 1e-9
+      assert_in_delta 0.5, acquire["flat_share"], 1e-9
+
+      main = by_function.fetch("main")
+      assert_nil main["path"]
+      assert_in_delta 1.0, main["cum_share"], 1e-9
+      assert_in_delta 0.5, main["flat_share"], 1e-9
+      assert_equal "critical", main["tier"]
     end
   end
 

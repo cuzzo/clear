@@ -149,20 +149,38 @@ end
 def perf_record!(command, work_dir, label, chdir: ROOT, env: {})
   abort "perf unavailable" unless tool_available?("perf")
   data = File.join(work_dir, "#{label}.perf.data")
-  run!(["perf", "record", "-g", "-o", data, "--", *command], chdir: chdir, env: env)
-  report = File.join(work_dir, "#{label}-report.txt")
-  stdout, = run!(["perf", "report", "--stdio", "--children", "-g", "none",
-                  "--percent-limit", "0.05", "-i", data], chdir: chdir)
-  File.write(report, stdout)
-  report
+  # 297Hz keeps captures small enough that perf script srcline resolution
+  # (addr2line per unique address) stays fast.
+  run!(["perf", "record", "-g", "-F", "297", "-o", data, "--", *command], chdir: chdir, env: env)
+  script = File.join(work_dir, "#{label}-script.txt")
+  # binutils addr2line re-parses DWARF per query and can take unbounded time
+  # on large binaries (Zig especially). --no-inline avoids the worst cost;
+  # if srcline still exceeds the budget, fall back to symbols only - the
+  # ingest-time resolver attributes those against the unit inventory.
+  stdout, _err, status = run!(
+    ["timeout", "180", "perf", "script", "--no-inline", "-F", "comm,ip,sym,srcline", "-i", data],
+    chdir: chdir, allow_failure: true
+  )
+  if status.success?
+    File.write(script, stdout)
+  else
+    warn "  srcline symbolization exceeded 180s; falling back to symbols only"
+    stdout, = run!(["perf", "script", "-F", "comm,ip,sym", "-i", data], chdir: chdir)
+    File.write(script, stdout)
+  end
+  script
 end
 
 def profile_fact_mine(work_dir, out_path, limit)
-  binary = File.join(ROOT, "gems/fact-mine/target/release/fact-mine-rust")
-  abort "build gems/fact-mine first: #{binary} missing" unless File.executable?(binary)
+  # The profiling cargo profile keeps DWARF so perf script yields file:line.
+  binary = File.join(ROOT, "gems/fact-mine/target/profiling/fact-mine-rust")
+  unless File.executable?(binary)
+    puts "  building fact-mine with the profiling cargo profile (keeps DWARF)"
+    run!(["cargo", "build", "--profile", "profiling"], chdir: File.join(ROOT, "gems/fact-mine"))
+  end
   workload = Dir[File.join(ROOT, "compiler/ruby/**/*.rb")].sort.first([limit * 4, 24].max)
-  report = perf_record!([binary, "profile", "nil-kill", *workload], work_dir, "fact-mine")
-  convert!("--perf-report", report, "perf:fact-mine", out_path)
+  script = perf_record!([binary, "profile", "nil-kill", *workload], work_dir, "fact-mine")
+  convert!("--perf-script", script, "perf:fact-mine", out_path, strip: "#{ROOT}/")
 end
 
 def profile_zig(work_dir, out_path)
@@ -170,8 +188,8 @@ def profile_zig(work_dir, out_path)
   zig_dir = File.join(ROOT, "zig")
   # Warm the build cache so the profile measures the benchmark, not compilation.
   run!(["zig", "build", "bench-locks"], chdir: zig_dir)
-  report = perf_record!(["zig", "build", "bench-locks"], work_dir, "zig", chdir: zig_dir)
-  convert!("--perf-report", report, "perf:zig", out_path)
+  script = perf_record!(["zig", "build", "bench-locks"], work_dir, "zig", chdir: zig_dir)
+  convert!("--perf-script", script, "perf:zig", out_path, strip: "#{ROOT}/")
 end
 
 targets = {

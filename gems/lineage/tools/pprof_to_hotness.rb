@@ -8,8 +8,11 @@
 #   --pprof-top FILE     output of: go tool pprof -top -lines <profile>
 #                        (also produced by `pprof` for Rust/C++ protobuf profiles)
 #   --stackprof FILE     stackprof JSON dump (Ruby): stackprof --json > FILE
-#   --perf-report FILE   output of: perf report --stdio --children -g none
-#                        (Rust/Zig/C binaries; symbols only, no paths)
+#   --perf-script FILE   output of: perf script -F comm,ip,sym,srcline
+#                        (Rust/Zig/C/C++ binaries; carries file:line when the
+#                        binary has DWARF - build Rust with
+#                        `cargo build --profile profiling` and do not strip
+#                        Zig/C binaries, otherwise entries are symbol-only)
 #
 # Tiers are assigned from cumulative share of total samples:
 #   critical >= 5%, warm >= 0.5%, cold otherwise.
@@ -27,11 +30,11 @@ require "optparse"
 CRITICAL_SHARE = 0.05
 WARM_SHARE = 0.005
 
-options = { source: nil, commit: nil, strip: nil, pprof_top: nil, stackprof: nil, perf_report: nil, path_prefixes: [] }
+options = { source: nil, commit: nil, strip: nil, pprof_top: nil, stackprof: nil, perf_script: nil, path_prefixes: [] }
 OptionParser.new do |opts|
   opts.on("--pprof-top=FILE") { |v| options[:pprof_top] = v }
   opts.on("--stackprof=FILE") { |v| options[:stackprof] = v }
-  opts.on("--perf-report=FILE") { |v| options[:perf_report] = v }
+  opts.on("--perf-script=FILE") { |v| options[:perf_script] = v }
   opts.on("--source=LABEL") { |v| options[:source] = v }
   opts.on("--commit=SHA") { |v| options[:commit] = v }
   opts.on("--strip-prefix=PATH", "Strip this prefix from paths (e.g. absolute build dir)") { |v| options[:strip] = v }
@@ -99,30 +102,63 @@ elsif options[:stackprof]
     }
   end
   options[:source] ||= "stackprof"
-elsif options[:perf_report]
-  # perf report --stdio --children -g none rows:
-  #     12.34%   3.21%  command  shared_object  [.] symbol
-  File.foreach(options[:perf_report]) do |line|
-    next if line.start_with?("#")
-    match = line.match(/^\s*([\d.]+)%\s+([\d.]+)%\s+\S+\s+(\S+)\s+\[[.k]\]\s+(.+?)\s*$/)
-    next unless match
+elsif options[:perf_script]
+  # perf script -F comm,ip,sym,srcline emits one sample as a comm line, then
+  # frame pairs: "\t<addr> <symbol>" followed by "  <file>:<line>" (or ":0"
+  # without DWARF), blank line between samples. Leaf frame first. Flat = leaf
+  # occurrences, cum = samples containing the frame anywhere.
+  flat_counts = Hash.new(0)
+  cum_counts = Hash.new(0)
+  frame_info = {}
+  total_samples = 0
+  stack = []
+  pending_symbol = nil
 
-    children_pct, self_pct, _object, symbol = match.captures
+  finish_sample = lambda do
+    next if stack.empty?
+    total_samples += 1
+    flat_counts[stack.first] += 1
+    stack.uniq.each { |frame| cum_counts[frame] += 1 }
+    stack = []
+  end
+
+  File.foreach(options[:perf_script]) do |line|
+    if line.strip.empty?
+      stack << pending_symbol if pending_symbol
+      pending_symbol = nil
+      finish_sample.call
+    elsif (match = line.match(/^\t\s*[0-9a-f]+\s+(.+?)(?:\+0x[0-9a-f]+)?\s*(?:\(.*\))?$/))
+      stack << pending_symbol if pending_symbol
+      pending_symbol = match[1].strip
+    elsif pending_symbol && (match = line.match(/^\s+(\S+):(\d+)\s*$/))
+      file, line_no = match.captures
+      if line_no.to_i.positive? && file != "?"
+        frame_info[pending_symbol] ||= [relative_path(file, options[:strip]), line_no.to_i]
+      end
+      stack << pending_symbol
+      pending_symbol = nil
+    end
+  end
+  stack << pending_symbol if pending_symbol
+  finish_sample.call
+  abort "no perf script samples recognized in #{options[:perf_script]}" if total_samples.zero?
+
+  cum_counts.each do |symbol, cum|
+    path, line_no = frame_info[symbol]
     entries << {
       "function" => symbol,
-      "path" => nil,
-      "line" => nil,
-      "flat" => (self_pct.to_f * 100).round,
-      "cum" => (children_pct.to_f * 100).round,
-      "flat_share" => self_pct.to_f / 100.0,
-      "cum_share" => children_pct.to_f / 100.0
+      "path" => path,
+      "line" => line_no,
+      "flat" => flat_counts[symbol],
+      "cum" => cum,
+      "flat_share" => flat_counts[symbol].to_f / total_samples,
+      "cum_share" => cum.to_f / total_samples
     }
   end
-  abort "no perf report rows recognized in #{options[:perf_report]}" if entries.empty?
   options[:source] ||= "perf"
-  total = 10_000
+  total = total_samples
 else
-  abort "one of --pprof-top, --stackprof, or --perf-report is required"
+  abort "one of --pprof-top, --stackprof, or --perf-script is required"
 end
 
 unless options[:path_prefixes].empty?

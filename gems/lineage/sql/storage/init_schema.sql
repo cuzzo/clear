@@ -115,7 +115,8 @@
               tier TEXT NOT NULL CHECK (tier IN ('critical', 'warm', 'cold')),
               source TEXT NOT NULL,
               commit_hash TEXT,
-              is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
+              is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+              resolution TEXT NOT NULL DEFAULT 'declared'
             );
 
             CREATE TABLE IF NOT EXISTS coverage_line_events (

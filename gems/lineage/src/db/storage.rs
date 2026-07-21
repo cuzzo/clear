@@ -1143,12 +1143,26 @@ impl Storage {
                tier TEXT NOT NULL CHECK (tier IN ('critical', 'warm', 'cold')),
                source TEXT NOT NULL,
                commit_hash TEXT,
-               is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
+               is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+               resolution TEXT NOT NULL DEFAULT 'declared'
              );
              CREATE INDEX IF NOT EXISTS idx_unit_hotness_path ON unit_hotness(path, is_active);
              CREATE INDEX IF NOT EXISTS idx_unit_hotness_source ON unit_hotness(source, is_active);",
         )?;
+        self.ensure_column("unit_hotness", "resolution", "TEXT NOT NULL DEFAULT 'declared'")?;
         Ok(())
+    }
+
+    /// (name, path, start_line) for every logical unit: the symbol inventory
+    /// hotness resolution matches profiler frames against.
+    pub fn unit_symbol_index(&self) -> Result<Vec<(String, String, i64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name, original_path, start_line FROM logical_units")?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     pub fn deactivate_hotness_for_source(&self, source: &str) -> Result<usize> {
@@ -1170,11 +1184,12 @@ impl Storage {
         tier: &str,
         source: &str,
         commit_hash: Option<&str>,
+        resolution: &str,
     ) -> Result<()> {
         self.ensure_unit_hotness_table()?;
         self.conn.execute(
             include_str!("../../sql/storage/insert_unit_hotness.sql"),
-            params![path, function, line, flat_share, cum_share, tier, source, commit_hash],
+            params![path, function, line, flat_share, cum_share, tier, source, commit_hash, resolution],
         )?;
         Ok(())
     }
@@ -1657,6 +1672,7 @@ fn checked_table(table: &str) -> Result<&str> {
         | "crash_events"
         | "test_exposure_events"
         | "unit_hazards"
+        | "unit_hotness"
         | "coverage_line_events"
         | "sarif_artifacts"
         | "sarif_findings"

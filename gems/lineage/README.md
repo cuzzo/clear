@@ -425,75 +425,30 @@ file.
 
 ### Runtime profiling (pprof) hotness
 
-Static Big-O tells you which functions *can* be expensive; a runtime
-profile tells you which ones actually are. Lineage ingests
-`profile-hotness/v1` documents and uses them to rank and badge critical
-functions.
-
-**1. Create the profile with your language's profiler.** Profile a
-representative workload (production traffic or the `benchmarks/` suite;
-unit-test runs are setup-dominated and unrepresentative):
+Static Big-O says which functions can be expensive; a profile says which
+ones are. Lineage ingests `profile-hotness/v1` and uses it to rank the
+Expensive Operations view (Big-O first, then measured share), badge
+critical functions with a flame icon in the file view, and annotate lines
+in the info popup.
 
 ```bash
-# Go (or any pprof-protobuf producer: Rust pprof crate, C++ gperftools)
-go test -bench=. -cpuprofile cpu.pb.gz
+# capture with your language's profiler, e.g. Go:
 go tool pprof -top -lines cpu.pb.gz > pprof-top.txt
-
-# Ruby
-stackprof --json tmp/stackprof-cpu.dump > stackprof.json
+# convert (also accepts stackprof JSON and perf script output):
+ruby gems/lineage/tools/pprof_to_hotness.rb --pprof-top pprof-top.txt > hotness.json
+# ingest:
+lineage ingest-hotness --db lineage.db --repo . --input hotness.json
 ```
 
-**2. Convert to `profile-hotness/v1`.** The reference converter parses
-`pprof -top -lines` text and stackprof JSON, computes each function's
-cumulative share, and assigns a tier (`critical` >= 5% cumulative,
-`warm` >= 0.5%, `cold` otherwise):
+For this repository, `ruby tools/profile_hotness.rb --target NAME --ingest
+--db lineage.db` packages the whole flow per sub-project. For perf-based
+languages the binary must carry DWARF or frames arrive without file:line -
+build Rust with `cargo build --profile profiling` and do not strip
+Zig/C/C++ binaries. Frames without paths are resolved against the
+logical-unit inventory at ingest time and never guessed.
 
-```bash
-ruby gems/lineage/tools/pprof_to_hotness.rb \
-  --pprof-top pprof-top.txt \
-  --strip-prefix "$PWD" \
-  --source pprof:cpu > hotness.json
-```
-
-Writing a converter for another profiler is a page of code: emit
-`{"schema": "profile-hotness/v1", "source": ..., "entries": [{"function",
-"path", "line", "flat_share", "cum_share", "tier"}]}`. Merge multiple
-workloads by ingesting each under its own `--source`; consumers take the
-maximum tier across sources, because hot in any real workload means hot.
-
-**3. Ingest into Lineage:**
-
-```bash
-cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-hotness \
-  --db /tmp/lineage.db \
-  --repo . \
-  --input hotness.json
-```
-
-or as part of a full import: `bin/lineage-import --hotness=hotness.json`.
-Re-ingesting the same `source` replaces its previous rows.
-
-For this repository, `ruby tools/profile_hotness.rb` packages the whole
-step-1-through-3 workflow with a per-subproject recipe: `--target compiler`
-profiles real compiles of the `benchmarks/` and `examples/` corpus under
-stackprof, `--target boobytrap` uses `go test -cpuprofile`, `--target
-fact-mine` and `--target zig` use `perf record` around real workloads, and
-each Ruby gem target profiles its test files (advisory). Add `--ingest
---db lineage.db` to ingest every generated profile in the same run;
-`--list` shows all targets.
-
-**4. What the UI does with it:**
-
-- The dashboard "Expensive Operations" list ranks by Big-O first, then by
-  profiled cumulative share within each Big-O tier - an `O(N^2)` function
-  measured at 60% of runtime outranks an unprofiled `O(N^2)` one, and the
-  entry's detail line gains `Profile: critical 60.0% (pprof:cpu)`.
-- Critical functions get a Font Awesome flame icon
-  (`fa-fire`) next to their name in the file-view outline, with the
-  measured share in the tooltip.
-- Lines attributed by the profile gain a `runtime profile: critical -
-  60.0% cumulative (pprof:cpu)` row in the line's info popup
-  (`fa-circle-info`).
+See [profiling-data-integration.md](docs/agents/profiling-data-integration.md)
+for per-language recipes, resolution tiers, and known gaps.
 
 ## Supported Languages Roadmap
 

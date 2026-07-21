@@ -10220,7 +10220,7 @@ mod tests {
         storage.refresh_current_sarif_findings_view().unwrap();
 
         storage
-            .insert_unit_hotness(Some("src/hot.rb"), "Hot#scan", Some(1), 0.4, 0.6, "critical", "pprof:cpu", None)
+            .insert_unit_hotness(Some("src/hot.rb"), "Hot#scan", Some(1), 0.4, 0.6, "critical", "pprof:cpu", None, "declared")
             .unwrap();
 
         let findings = top_complexity_functions(&storage, "", &CoverageScope::all()).unwrap();
