@@ -1585,6 +1585,69 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  architecture-sarif:
+    # Architecture findings on changed files: dependency cycles
+    # (espalier/tools/cycle_report.rb), cross-module private reach-through
+    # (espalier/tools/reach_through_report.rb), and cross-module change
+    # coupling (lineage/tools/change_coupling.rb). All three are advisory
+    # (warning/note level); they annotate PRs and feed the Lineage ledger via
+    # SARIF, they do not block merges.
+    name: Architecture SARIF
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - sarif-rust-binaries
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true') && needs.sarif-rust-binaries.result == 'success' }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+      - name: Generate architecture SARIFs
+        run: |
+          chmod +x tmp/sarif-binaries/fact-mine-rust
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
+          mkdir -p tmp
+          export FACT_MINE_RUST_BINARY=$PWD/tmp/sarif-binaries/fact-mine-rust
+          base="origin/${{ github.event.pull_request.base.ref }}"
+          ruby gems/espalier/tools/cycle_report.rb . \
+            --base="$base" --sarif=tmp/arch-cycles.sarif
+          ruby gems/espalier/tools/reach_through_report.rb . \
+            --base="$base" --sarif=tmp/arch-reach-through.sarif
+          ruby gems/lineage/tools/change_coupling.rb . 8 \
+            --base="$base" --sarif=tmp/arch-change-coupling.sarif
+      - name: Upload cycles SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/arch-cycles.sarif
+          category: architecture-cycles
+      - name: Upload reach-through SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/arch-reach-through.sarif
+          category: architecture-reach-through
+      - name: Upload change-coupling SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/arch-change-coupling.sarif
+          category: architecture-change-coupling
+      - uses: actions/upload-artifact@v4
+        with:
+          name: architecture-sarifs
+          path: tmp/arch-*.sarif
+          if-no-files-found: error
+          retention-days: 7
+
   # Keep each SARIF producer in its own job. Besides isolating failures, this
   # makes a producer job directly copyable into a downstream repository.
   # Native analyzers are the sole shared prerequisite and are built once here.

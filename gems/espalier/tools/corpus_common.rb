@@ -14,7 +14,10 @@ module CorpusCommon
     test tests spec specs testing vendor node_modules examples example bench
     benchmark benchmarks dist build target third_party docs doc fixtures
     __pycache__ scripts tools ci .git generated samples sample demo
+    zig-out .zig-cache coverage tmp transpile-tests zig-mutants
   ].to_set.freeze
+
+  TEST_BASENAME = /\A(test_|.*[._-]tests?\.|.*[._]spec\.)/.freeze
 
   EXT_LANGUAGE = {
     ".rb" => "ruby", ".py" => "python", ".js" => "javascript", ".mjs" => "javascript",
@@ -38,7 +41,7 @@ module CorpusCommon
         EXCLUDE_DIRS.include?(down) || down.end_with?(".tests", ".test", "-tests", "_tests")
       end
       next false if path.end_with?(".d.ts", "_test.go", ".min.js")
-      next false if File.basename(path).match?(/\A(test_|.*[._]test\.|.*[._]spec\.)/)
+      next false if File.basename(path).match?(TEST_BASENAME)
       EXT_LANGUAGE.key?(File.extname(path))
     end
     # .h is ambiguous: assign to the repo's dominant C-family language.
@@ -202,5 +205,25 @@ module CorpusCommon
     end
     options[:repo] = File.expand_path(positional.first || ".")
     options
+  end
+
+  # The module directory a path belongs to: two components for monorepo
+  # layouts whose first component groups projects (gems/espalier), otherwise
+  # the first component.
+  GROUPING_ROOTS = %w[gems packages crates apps libs].to_set.freeze
+
+  def module_root(path)
+    parts = path.split("/")
+    return parts[0] if parts.size < 2
+    GROUPING_ROOTS.include?(parts[0]) && parts.size > 2 ? parts[0, 2].join("/") : parts[0]
+  end
+
+  # In changed-scope (CI) mode, whole-repo call resolution is unaffordable on
+  # a monorepo. Restrict the corpus to the module trees the diff touches;
+  # cross-module edges from untouched modules are out of scope by contract.
+  def scope_to_changed_modules(files, changed)
+    modules = changed.map { |path| module_root(path) }.to_set
+    scoped = files.select { |path| modules.include?(module_root(path)) }
+    [scoped, modules]
   end
 end

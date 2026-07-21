@@ -49,6 +49,17 @@ repo = options[:repo]
 files = CorpusCommon.production_files(repo)
 abort "no production sources found" if files.empty?
 
+changed = options[:base] ? CorpusCommon.changed_files(repo, options[:base], options[:head]).to_set : nil
+if changed
+  files, scoped_modules = CorpusCommon.scope_to_changed_modules(files, changed)
+  warn "scoped to changed modules: #{scoped_modules.sort.join(", ")} (#{files.size} files)"
+  if files.empty?
+    CorpusCommon.write_sarif(options[:sarif], "espalier-reach-through", RULES, []) if options[:sarif]
+    puts "(no production sources in changed modules)"
+    exit 0
+  end
+end
+
 facts = CorpusCommon.run_syntax_facts(repo, files)
 documents = facts["documents"] || []
 edge_facts = CorpusCommon.run_call_edges(repo, files)

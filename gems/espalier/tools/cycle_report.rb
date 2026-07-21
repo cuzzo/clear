@@ -62,6 +62,17 @@ options = CorpusCommon.parse_tool_options(ARGV)
 repo = options[:repo]
 files = CorpusCommon.production_files(repo)
 abort "no production sources found" if files.empty?
+
+changed = options[:base] ? CorpusCommon.changed_files(repo, options[:base], options[:head]).to_set : nil
+if changed
+  files, scoped_modules = CorpusCommon.scope_to_changed_modules(files, changed)
+  warn "scoped to changed modules: #{scoped_modules.sort.join(", ")} (#{files.size} files)"
+  if files.empty?
+    CorpusCommon.write_sarif(options[:sarif], "espalier-cycle-report", RULES, []) if options[:sarif]
+    puts "(no production sources in changed modules)"
+    exit 0
+  end
+end
 file_set = files.to_set
 
 facts = CorpusCommon.run_syntax_facts(repo, files)
@@ -116,8 +127,6 @@ file_graph.each do |src, dsts|
   next if barrels.include?(src)
   dsts.each { |dst| facade_free[src] << dst unless barrels.include?(dst) }
 end
-
-changed = options[:base] ? CorpusCommon.changed_files(repo, options[:base], options[:head]).to_set : nil
 
 findings = []
 { "file" => facade_free, "directory" => dir_graph }.each do |granularity, graph|
