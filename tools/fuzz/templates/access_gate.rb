@@ -151,21 +151,34 @@ FuzzGenerator.register(:access_gate, cells: ACCESS_GATE_CELLS) do |p|
     CHT
 
   when :return_alias
-    <<~CHT
-      STRUCT Counter { value: #{field_type} }
+    # Returning the alias struct itself (not a field) is unconditionally a
+    # borrow escape regardless of payload type, and RETURN_FROM_WITH_SCOPED
+    # is its ONLY enforcement point (errors.rb's `value.is_a?(AST::Identifier)
+    # && value.symbol&.non_escaping` branch). Pin the diagnostic code: without
+    # it, a caller that forgets to TRY/OR_ELSE the fallible `leak()` result
+    # hits an unrelated fallible-inference error first, and with the escape
+    # check disabled the emitted `RETURN ref;` still fails via a downstream
+    # Zig pointer/value type mismatch -- both mask a disabled escape check
+    # behind an unrelated but still-nonzero exit code.
+    {
+      source: <<~CHT,
+        STRUCT Counter { value: #{field_type} }
 
-      FN leak() RETURNS !Counter ->
-          #{decl}
-          #{head} {
-              RETURN ref;
-          }
-      END
+        FN leak() RETURNS !Counter ->
+            #{decl}
+            #{head} {
+                RETURN ref;
+            }
+        END
 
-      FN main() RETURNS Void ->
-          c2 = leak();
-          RETURN;
-      END
-    CHT
+        FN main() RETURNS !Void ->
+            c2 = TRY leak();
+            RETURN;
+        END
+      CHT
+      error_code: :RETURN_FROM_WITH_SCOPED,
+      diagnostic_code_required: true,
+    }
 
   when :return_field
     # Alias is a borrow; alias.value is also a borrow (or a Copy primitive
