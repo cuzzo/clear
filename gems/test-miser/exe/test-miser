@@ -4,13 +4,14 @@
 require "optparse"
 require_relative "../lib/test_miser"
 
-command = %w[infer adapt].include?(ARGV.first) ? ARGV.shift : "report"
+command = %w[infer adapt evidence].include?(ARGV.first) ? ARGV.shift : "report"
 options = {
-  format: command == "infer" ? "sarif" : "markdown", output: nil,
-  root: Dir.pwd, language: "java", selected_components: []
+  format: command == "infer" ? "sarif" : command == "evidence" ? "json" : "markdown", output: nil,
+  root: Dir.pwd, language: "java", selected_components: [], new_test_ids: [], baseline_test_ids: [],
+  runtimes: {}, high_cost_ms: 1_000.0
 }
 parser = OptionParser.new do |opts|
-  opts.banner = "Usage: test-miser [infer|adapt] [options] INPUT [...]"
+  opts.banner = "Usage: test-miser [infer|adapt|evidence] [options] INPUT [...]"
   opts.on("-f", "--format FORMAT", %w[markdown json sarif], "Output format: markdown, json, or sarif") do |format|
     options[:format] = format
   end
@@ -26,6 +27,21 @@ parser = OptionParser.new do |opts|
   opts.on("--path-prefix PATH", "Prefix adapter source and test paths") { |path| options[:path_prefix] = path }
   opts.on("--selected-component PATH", "Declare an exactly refreshed source component") do |path|
     options[:selected_components] << path
+  end
+  opts.on("--new-test TEST_ID", "Include TEST_ID in the selected new-test cohort") do |test_id|
+    options[:new_test_ids] << test_id
+  end
+  opts.on("--baseline-test TEST_ID", "Include TEST_ID in the comparison baseline cohort") do |test_id|
+    options[:baseline_test_ids] << test_id
+  end
+  opts.on("--runtime TEST_ID=MILLISECONDS", "Record a test runtime for cost-aware review") do |value|
+    test_id, milliseconds = value.split("=", 2)
+    raise OptionParser::InvalidArgument, value if test_id.to_s.empty? || milliseconds.to_s.empty?
+
+    options[:runtimes][test_id] = Float(milliseconds)
+  end
+  opts.on("--high-cost-ms MILLISECONDS", Float, "Runtime threshold for cost findings") do |milliseconds|
+    options[:high_cost_ms] = milliseconds
   end
   opts.on("-h", "--help", "Show this help") do
     puts opts
@@ -91,6 +107,29 @@ begin
       exit 1
     end
     output = JSON.pretty_generate(payload)
+    if options[:output]
+      File.write(options[:output], "#{output}\n")
+    else
+      puts output
+    end
+    exit 0
+  end
+
+  if command == "evidence"
+    report = TestMiser::MutationReport.load_files(ARGV)
+    corpus = TestMiser::Evidence::Corpus.from_report(report)
+    contributions = TestMiser::Evidence::ContributionAnalyzer.new(corpus).analyze(
+      new_test_ids: options[:new_test_ids],
+      baseline_test_ids: options[:baseline_test_ids],
+    )
+    subsumption = TestMiser::Evidence::SubsumptionAnalyzer.new(corpus).analyze(contributions: contributions)
+    evidence = TestMiser::Evidence::ReportBuilder.new(corpus).build(
+      contributions: contributions,
+      subsumption: subsumption,
+      runtimes: options[:runtimes],
+      high_cost_ms: options[:high_cost_ms],
+    )
+    output = evidence.json
     if options[:output]
       File.write(options[:output], "#{output}\n")
     else

@@ -1,6 +1,6 @@
 # TestMiser Extended Features
 
-Status: Proposed design
+Status: Core implementation landed; counterfactual and oracle execution remain adapter-driven
 
 ## Purpose
 
