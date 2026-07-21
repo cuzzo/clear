@@ -21,6 +21,8 @@
 --ignore=gems/espalier/
 --ignore=gems/fact-mine/
 --ignore=gems/ruby-to-clear/
+--ignore=gems/test-miser/
+--ignore=gems/lineage/
 --ignore=dump_tree.rb
 --ignore=check_util.rb
 --ignore=debug_ruby.rb
