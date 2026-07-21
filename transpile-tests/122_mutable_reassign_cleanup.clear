@@ -11,5 +11,11 @@ FN main() RETURNS Void ->
     MUTABLE result = TRY makeStr("hello");
     result = makeStr("world");
     result = Value.Nil;
+    MUTABLE isNil = FALSE;
+    PARTIAL MATCH result START
+        Value.Nil -> isNil = TRUE;,
+        DEFAULT -> isNil = FALSE;
+    END
+    ASSERT isNil;
     RETURN;
 END

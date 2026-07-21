@@ -26,5 +26,11 @@ FN main() RETURNS Void ->
     result = TRY makeOuter();
     # result is Value.List containing two Value.List elements.
     # cleanup(Value) must free: outer []Value slice + each inner []Value slice.
+    MUTABLE outerLen = 0_i64;
+    PARTIAL MATCH result START
+        Value.List AS items -> outerLen = items.length();,
+        DEFAULT -> outerLen = -1;
+    END
+    ASSERT outerLen == 2;
     RETURN;
 END

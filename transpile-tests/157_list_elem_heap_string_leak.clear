@@ -7,14 +7,15 @@ UNION Val {
     Pair { car: String, cdr: String }
 }
 
-FN buildAndDiscard() RETURNS !Void ->
+FN buildAndDiscard() RETURNS !Int64 ->
     MUTABLE items: []Val = List[];
     &items.append(Val{ Str: "hello" });
     &items.append(Val{ Str: "world" });
-    RETURN;
+    # items is discarded here; its heap strings must be freed.
+    RETURN items.length();
 END
 
 FN main() RETURNS Void ->
-    buildAndDiscard();
-    print("PASS");
+    n = TRY buildAndDiscard();
+    ASSERT n == 2;
 END

@@ -21,5 +21,10 @@ FN main() RETURNS Void ->
     2 -> "two",
     DEFAULT -> "other"
   END;
+  ASSERT x == "two";
+  ASSERT label(1) == "one";
+  ASSERT label(3) == "other";
+  ASSERT score(2) == 200;
+  ASSERT score(9) == 0;
   RETURN;
 END

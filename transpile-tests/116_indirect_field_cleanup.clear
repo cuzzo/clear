@@ -17,5 +17,11 @@ FN main() RETURNS Void ->
     body = Value{ Num: 42.0 };
     lambda = TRY captureLambda(body, &pool);
     # lambda goes out of scope. cleanup(Value) must free *Value body.
+    MUTABLE lambdaId = 0_i64;
+    PARTIAL MATCH lambda START
+        Value.Lambda AS l -> lambdaId = l.id;,
+        DEFAULT -> lambdaId = -1;
+    END
+    ASSERT lambdaId == 1;
     RETURN;
 END

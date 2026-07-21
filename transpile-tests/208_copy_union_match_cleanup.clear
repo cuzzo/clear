@@ -8,27 +8,27 @@ UNION Data { Empty, Text: String }
 FN testAs() RETURNS !Void ->
     d = Data{ Text: "hello" };
     d2 = COPY d;
+    MUTABLE sawText = FALSE;
     PARTIAL MATCH d2 START
-        Data.Text AS s -> print(s);,
-        DEFAULT -> print("wrong");
+        Data.Text AS s -> sawText = (s == "hello");,
+        DEFAULT -> sawText = FALSE;
     END
+    ASSERT sawText;
 END
 
 # DEFAULT case: d2 has heap data (Text), cleanup must fire for d2
 FN testDefault() RETURNS !Void ->
     d = Data{ Text: "world" };
     d2 = COPY d;
+    MUTABLE sawDefault = FALSE;
     PARTIAL MATCH d2 START
-        Data.Empty -> print("empty");,
-        DEFAULT -> print("default");
+        Data.Empty -> sawDefault = FALSE;,
+        DEFAULT -> sawDefault = TRUE;
     END
+    ASSERT sawDefault;
 END
 
 FN main() RETURNS Void ->
     testAs();
     testDefault();
 END
-
-# EXPECT
-# hello
-# default
