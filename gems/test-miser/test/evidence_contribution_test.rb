@@ -76,6 +76,23 @@ class EvidenceContributionTest < Minitest::Test
     end
   end
 
+  def test_out_of_mutation_scope_test_is_not_dominated_by_a_covered_test
+    corpus = Evidence::Corpus.new(
+      tests: [
+        observation("out_of_scope", covered: [], killed: []),
+        observation("covered", covered: ["m1"], killed: []),
+      ],
+      mutants: [mutant("m1", covered: ["covered"], killed: [])],
+      complete: true,
+    )
+
+    analysis = Evidence::ContributionAnalyzer.new(corpus).analyze
+    out_of_scope = analysis.test_contributions.find { |test| test.test_id == "out_of_scope" }
+
+    assert_equal [Evidence::FindingKind::OutOfMutationScope], out_of_scope&.findings
+    assert_empty out_of_scope&.dominated_by
+  end
+
   def test_report_adapter_normalizes_sets_and_referenced_tests
     test = Struct.new(:id, :name).new("t1", "one")
     mutant = Struct.new(:id, :covered_by, :killed_by).new("m1", ["t1"], Set.new(["t1"]))

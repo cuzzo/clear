@@ -34,6 +34,15 @@ module TestMiser
       end
     end
 
+    class IndexedKillSet < T::Struct
+      extend T::Sig
+
+      const :mutant_ids, T::Array[String]
+      const :killer_tests, T::Array[String]
+      const :mask, Integer
+      const :cardinality, Integer
+    end
+
     class FrontierRanking < T::Struct
       extend T::Sig
 
@@ -68,6 +77,7 @@ module TestMiser
           "summary" => {
             "equivalent_groups" => equivalent_groups.length,
             "subsumption_relations" => relations.length,
+            "relation_scope" => "immediate",
             "frontier_mutants" => frontier_mutants,
             "corpus_complete" => corpus_complete,
             "unknown_reason" => unknown_reason,
@@ -100,9 +110,10 @@ module TestMiser
           )
         end
 
-        groups = equivalent_groups
-        relations = subsumption_relations
-        frontier = frontier_mutants(groups, relations)
+        kill_sets = indexed_kill_sets
+        groups = equivalent_groups(kill_sets)
+        relations = subsumption_relations(kill_sets)
+        frontier = frontier_mutants(kill_sets, relations)
         SubsumptionAnalysis.new(
           equivalent_groups: groups,
           relations: relations,
@@ -115,54 +126,91 @@ module TestMiser
 
       private
 
-      sig { returns(T::Array[EquivalentMutantGroup]) }
-      def equivalent_groups
-        @corpus.mutants
-          .reject { |mutant| mutant.killed_by.empty? }
-          .group_by(&:killed_by)
-          .values
-          .select { |group| group.length > 1 }
-          .map do |group|
-            EquivalentMutantGroup.new(
-              mutant_ids: group.map(&:id).sort.freeze,
-              killer_tests: T.must(group.first).killed_by,
-            )
-          end
-          .sort_by { |group| T.must(group.mutant_ids.first) }
-          .freeze
+      sig { params(kill_sets: T::Array[IndexedKillSet]).returns(T::Array[EquivalentMutantGroup]) }
+      def equivalent_groups(kill_sets)
+        kill_sets.filter_map do |kill_set|
+          next if kill_set.mutant_ids.length < 2
+
+          EquivalentMutantGroup.new(
+            mutant_ids: kill_set.mutant_ids,
+            killer_tests: kill_set.killer_tests,
+          )
+        end.sort_by { |group| T.must(group.mutant_ids.first) }.freeze
       end
 
-      sig { returns(T::Array[SubsumptionRelation]) }
-      def subsumption_relations
-        @corpus.mutants.flat_map do |harder|
-          next [] if harder.killed_by.empty?
+      sig { params(kill_sets: T::Array[IndexedKillSet]).returns(T::Array[SubsumptionRelation]) }
+      def subsumption_relations(kill_sets)
+        ordered = kill_sets.sort_by { |kill_set| [kill_set.cardinality, T.must(kill_set.mutant_ids.first)] }
+        relations = []
 
-          @corpus.mutants.filter_map do |easier|
-            next if harder.id == easier.id || easier.killed_by.empty?
-            next unless strict_subset?(harder.killed_by, easier.killed_by)
+        ordered.each_with_index do |target, target_index|
+          immediate_subsumers = []
+          (target_index - 1).downto(0) do |candidate_index|
+            candidate = T.must(ordered[candidate_index])
+            next unless candidate.cardinality < target.cardinality
+            next unless subset_mask?(candidate.mask, target.mask)
+            # Candidates are visited from the largest sets down.  If an
+            # already-selected candidate contains this one, the relation is
+            # transitive and need not be materialized.
+            next if immediate_subsumers.any? { |middle| subset_mask?(candidate.mask, middle.mask) }
 
-            SubsumptionRelation.new(
-              subsuming_mutant_id: harder.id,
-              subsumed_mutant_id: easier.id,
-              killer_tests: harder.killed_by,
+            immediate_subsumers << candidate
+          end
+
+          immediate_subsumers.each do |source|
+            relations << SubsumptionRelation.new(
+              subsuming_mutant_id: source.mutant_ids.fetch(0),
+              subsumed_mutant_id: target.mutant_ids.fetch(0),
+              killer_tests: source.killer_tests,
             )
           end
-        end.sort_by { |relation| [relation.subsuming_mutant_id, relation.subsumed_mutant_id] }.freeze
+        end
+
+        relations.sort_by { |relation| [relation.subsuming_mutant_id, relation.subsumed_mutant_id] }.freeze
       end
 
       sig do
         params(
-          groups: T::Array[EquivalentMutantGroup],
+          kill_sets: T::Array[IndexedKillSet],
           relations: T::Array[SubsumptionRelation],
         ).returns(T::Array[String])
       end
-      def frontier_mutants(groups, relations)
-        representatives = groups.flat_map { |group| group.mutant_ids.drop(1) }
-        subsumed = relations.map(&:subsumed_mutant_id)
-        @corpus.mutants.map(&:id).select do |mutant_id|
-          next false if @corpus.mutants.find { |mutant| mutant.id == mutant_id }&.killed_by&.empty?
-          !representatives.include?(mutant_id) && !subsumed.include?(mutant_id)
+      def frontier_mutants(kill_sets, relations)
+        subsumed = relations.to_h { |relation| [relation.subsumed_mutant_id, true] }
+        kill_sets.filter_map do |kill_set|
+          representative = T.must(kill_set.mutant_ids.first)
+          representative unless subsumed.key?(representative)
         end.sort.freeze
+      end
+
+      sig { returns(T::Array[IndexedKillSet]) }
+      def indexed_kill_sets
+        test_bits = test_bit_index
+        groups = @corpus.mutants.group_by { |mutant| mutant.killed_by.uniq.sort }
+        groups.filter_map do |killer_tests, mutants|
+          next if killer_tests.empty?
+
+          mask = killer_tests.reduce(0) do |value, test_id|
+            value | test_bits.fetch(test_id)
+          end
+          IndexedKillSet.new(
+            mutant_ids: mutants.map(&:id).sort.freeze,
+            killer_tests: killer_tests.freeze,
+            mask: mask,
+            cardinality: killer_tests.length,
+          )
+        end.sort_by { |kill_set| T.must(kill_set.mutant_ids.first) }.freeze
+      end
+
+      sig { returns(T::Hash[String, Integer]) }
+      def test_bit_index
+        test_ids = (@corpus.tests.map(&:id) + @corpus.mutants.flat_map(&:killed_by)).uniq.sort
+        test_ids.each_with_index.to_h { |test_id, index| [test_id, 1 << index] }
+      end
+
+      sig { params(left: Integer, right: Integer).returns(T::Boolean) }
+      def subset_mask?(left, right)
+        (left & ~right).zero?
       end
 
       sig do
@@ -191,10 +239,6 @@ module TestMiser
         end.freeze
       end
 
-      sig { params(left: T::Array[String], right: T::Array[String]).returns(T::Boolean) }
-      def strict_subset?(left, right)
-        left.length < right.length && left.all? { |value| right.include?(value) }
-      end
     end
   end
 end

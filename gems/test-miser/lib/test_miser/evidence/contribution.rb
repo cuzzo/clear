@@ -289,6 +289,10 @@ module TestMiser
       def dominated_by_for(contribution, all_contributions)
         return [] unless @corpus.complete?
         return [] unless contribution.unique_kills.empty?
+        # A test outside the observed mutation scope has no evidence-bearing
+        # set relationship.  Empty sets are subsets of every set, so allowing
+        # them here would falsely mark unrelated tests as dominated.
+        return [] if contribution.covered_mutants.empty? && contribution.killed_mutants.empty?
 
         candidate = all_contributions.filter_map do |other|
           next if other.test_id == contribution.test_id

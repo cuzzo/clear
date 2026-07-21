@@ -36,6 +36,8 @@ class EvidenceSubsumptionStabilityTest < Minitest::Test
       ["m1", "m2"]
     assert_includes analysis.relations.map { |relation| [relation.subsuming_mutant_id, relation.subsumed_mutant_id] },
       ["m2", "m4"]
+    refute_includes analysis.relations.map { |relation| [relation.subsuming_mutant_id, relation.subsumed_mutant_id] },
+      ["m1", "m4"]
     assert_equal ["m1"], analysis.frontier_mutants
 
     t1 = analysis.rankings.find { |ranking| ranking.test_id == "t1" }
@@ -48,6 +50,33 @@ class EvidenceSubsumptionStabilityTest < Minitest::Test
     assert_equal "test-quality-evidence/subsumption-v1", analysis.to_h.fetch("schema")
     assert_equal ["m1", "t1"], [analysis.to_h.fetch("summary").fetch("frontier_mutants").first,
                                     analysis.to_h.fetch("equivalent_mutants").first.fetch("killer_tests").first]
+  end
+
+  def test_subsumption_retains_only_immediate_edges_for_a_kill_set_chain
+    mutant_count = 40
+    test_ids = mutant_count.times.map { |index| "t#{index}" }
+    mutant_ids = mutant_count.times.map { |index| "m#{index}" }
+    corpus = Evidence::Corpus.new(
+      tests: test_ids.each_with_index.map do |test_id, test_index|
+        killed = mutant_ids[test_index..]
+        observation(test_id, killed, killed)
+      end,
+      mutants: mutant_ids.each_with_index.map do |mutant_id, mutant_index|
+        killer_tests = test_ids[0..mutant_index]
+        mutant(mutant_id, killer_tests, killer_tests)
+      end,
+      complete: true,
+    )
+
+    analysis = Evidence::SubsumptionAnalyzer.new(corpus).analyze
+
+    assert_equal mutant_count - 1, analysis.relations.length
+    assert_equal ["m0"], analysis.frontier_mutants
+    assert_includes analysis.relations.map { |relation| [relation.subsuming_mutant_id, relation.subsumed_mutant_id] },
+      ["m0", "m1"]
+    refute_includes analysis.relations.map { |relation| [relation.subsuming_mutant_id, relation.subsumed_mutant_id] },
+      ["m0", "m2"]
+    assert_equal "immediate", analysis.to_h.fetch("summary").fetch("relation_scope")
   end
 
   def test_incomplete_subsumption_is_unknown_and_can_omit_rankings
