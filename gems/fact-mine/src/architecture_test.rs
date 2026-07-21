@@ -328,6 +328,7 @@ fn syntax_directory_does_not_gain_unreviewed_helper_files() {
         "typescript.rs",
         "zig.rs",
         "hazards.rs",
+        "imports.rs",
         "parser_grammar.rs",
         "passes.rs",
         "path_condition.rs",

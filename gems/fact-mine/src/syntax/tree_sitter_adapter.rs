@@ -153,7 +153,23 @@ fn parse_normalized_file(
         method_local_types: metadata.syntax.method_local_types,
         state_param_origins: Vec::new(),
         hazard_sites: facts.hazard_sites,
+        imports: Vec::new(),
     };
+    let mut import_facts = crate::syntax::imports::symbol_imports(
+        &document
+            .symbol_scope
+            .explicit_imports
+            .iter()
+            .map(|(alias, target)| (alias.clone(), target.clone()))
+            .collect::<Vec<_>>(),
+        language,
+    );
+    import_facts.extend(crate::syntax::imports::extract_file_imports(
+        parsed.tree.root_node(),
+        &parsed.source,
+        language,
+    ));
+    document.imports = import_facts;
     crate::syntax::hazards::detect_and_append_callback_hazards(&mut document);
     profile_parse_phase(
         profile,

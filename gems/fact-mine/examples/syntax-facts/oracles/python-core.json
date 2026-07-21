@@ -347,6 +347,14 @@
           "visibility": "public"
         }
       ],
+      "imports": [
+        {
+          "alias": "os",
+          "kind": "symbol",
+          "line": 0,
+          "target": "os.path"
+        }
+      ],
       "language": "python",
       "owners": [
         {

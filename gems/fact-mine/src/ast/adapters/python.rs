@@ -44,13 +44,25 @@ impl AstNormalizationAdapter for PythonAstAdapter {
         root: TreeSitterNode<'_>,
         source: &str,
     ) -> (String, Vec<(String, String)>) {
+        // Multi-line parenthesized imports carry trailing comments; strip
+        // per-line comment tails before splitting entries.
+        fn clean(entry: &str) -> String {
+            entry
+                .lines()
+                .map(|line| line.split('#').next().unwrap_or("").trim())
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+
         let mut imports = Vec::new();
         for child in named_children(root) {
             let text = node_text(child, source).trim();
             match child.kind() {
                 "import_statement" => {
                     let tail = text.strip_prefix("import ").unwrap_or(text);
-                    for entry in tail.split(',').map(str::trim) {
+                    for entry in tail.split(',').map(clean) {
+                        let entry = entry.as_str();
                         let (target, local) = entry
                             .split_once(" as ")
                             .map(|(target, local)| (target.trim(), local.trim()))
@@ -68,7 +80,8 @@ impl AstNormalizationAdapter for PythonAstAdapter {
                         continue;
                     };
                     let names = names.trim().trim_start_matches('(').trim_end_matches(')');
-                    for entry in names.split(',').map(str::trim) {
+                    for entry in names.split(',').map(clean) {
+                        let entry = entry.as_str();
                         if entry.is_empty() || entry == "*" {
                             continue;
                         }

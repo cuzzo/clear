@@ -8,6 +8,7 @@ pub(crate) mod csharp;
 pub(crate) mod effects;
 pub(crate) mod go;
 pub(crate) mod hazards;
+pub(crate) mod imports;
 pub(crate) mod java;
 pub(crate) mod javascript;
 pub(crate) mod kotlin;
@@ -325,6 +326,8 @@ pub struct Document {
     pub state_param_origins: Vec<StateParamOrigin>,
     #[serde(default)]
     pub hazard_sites: Vec<HazardSite>,
+    #[serde(default)]
+    pub imports: Vec<imports::ImportFact>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

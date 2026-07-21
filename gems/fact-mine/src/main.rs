@@ -24,9 +24,49 @@ fn run() -> Result<()> {
     let command = parse_args(std::env::args().skip(1).collect())?;
     match command {
         Command::SyntaxFacts { language, files } => {
-            let language = Language::parse(&language)?;
-            let facts = syntax_oracle::project_files(&files, language)
-                .with_context(|| "failed to project syntax facts")?;
+            let facts = match language {
+                Some(language) => {
+                    let language = Language::parse(&language)?;
+                    syntax_oracle::project_files(&files, language)
+                        .with_context(|| "failed to project syntax facts")?
+                }
+                None => {
+                    // No explicit language: infer per file extension, batch per
+                    // language, and merge the document lists.
+                    let mut batches: std::collections::BTreeMap<&'static str, Vec<PathBuf>> =
+                        std::collections::BTreeMap::new();
+                    for file in &files {
+                        let extension = file
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .unwrap_or("");
+                        let language = Language::for_extension(extension).with_context(|| {
+                            format!(
+                                "cannot infer language for {} (pass --language to override)",
+                                file.display()
+                            )
+                        })?;
+                        batches.entry(language.as_str()).or_default().push(file.clone());
+                    }
+                    let mut merged: Option<serde_json::Value> = None;
+                    for (language_name, batch) in batches {
+                        let language = Language::parse(language_name)?;
+                        let chunk = syntax_oracle::project_files(&batch, language)
+                            .with_context(|| "failed to project syntax facts")?;
+                        match merged.as_mut() {
+                            None => merged = Some(chunk),
+                            Some(out) => {
+                                let docs = chunk["documents"].as_array().cloned().unwrap_or_default();
+                                out["documents"]
+                                    .as_array_mut()
+                                    .expect("documents array")
+                                    .extend(docs);
+                            }
+                        }
+                    }
+                    merged.unwrap_or_else(|| serde_json::json!({ "documents": [] }))
+                }
+            };
             println!("{}", serde_json::to_string(&facts)?);
         }
         Command::Profile {
@@ -240,7 +280,7 @@ fn percent(numerator: usize, denominator: usize) -> f64 {
 
 enum Command {
     SyntaxFacts {
-        language: String,
+        language: Option<String>,
         files: Vec<PathBuf>,
     },
     Profile {
@@ -322,12 +362,16 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             })
         }
         "syntax-facts" => {
-            let mut language = "ruby".to_string();
+            let mut language = None;
             let mut files = Vec::new();
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
                     "--language" => {
-                        language = iter.next().with_context(|| "--language requires a value")?;
+                        language =
+                            Some(iter.next().with_context(|| "--language requires a value")?);
+                    }
+                    other if other.starts_with("--language=") => {
+                        language = Some(other.strip_prefix("--language=").unwrap().to_string());
                     }
                     other if other.starts_with("--") => bail!("unsupported option: {other}"),
                     path => files.push(PathBuf::from(path)),

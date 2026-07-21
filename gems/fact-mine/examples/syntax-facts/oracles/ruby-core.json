@@ -1335,6 +1335,7 @@
           "start_column": 4
         }
       ],
+      "imports": [],
       "language": "ruby",
       "owners": [
         {
