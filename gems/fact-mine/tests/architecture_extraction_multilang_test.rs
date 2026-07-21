@@ -11,6 +11,7 @@
 // pinning down its exact shape, without leaving the suite red for
 // unrelated contributors. `cargo test -- --ignored` runs them directly.
 
+use fact_mine_rust::profile::{self, Profile};
 use fact_mine_rust::syntax::{self, Language};
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -613,5 +614,158 @@ fn javascript_function_local_object_literal_is_not_registered_as_state() {
         document.state_declarations.is_empty(),
         "a function-local object literal must not be registered as module state, got {:?}",
         document.state_declarations
+    );
+}
+
+#[test]
+fn javascript_calls_do_not_produce_phantom_state_reads() {
+    let document = parse_source(
+        ".js",
+        Language::JavaScript,
+        "class Widget {\n\
+         escalate(user) {\n\
+         return user;\n\
+         }\n\
+         process(fn, user) {\n\
+         fn(5);\n\
+         this.escalate(user);\n\
+         }\n\
+         };\n",
+    );
+
+    assert!(
+        !document.state_reads.iter().any(|r| r.field == "fn"),
+        "a bare call to a plain parameter must never read a field named after it, got {:?}",
+        document.state_reads
+    );
+    assert!(
+        !document.state_reads.iter().any(|r| r.field == "escalate"),
+        "a real method call must never also read a field named after the method, got {:?}",
+        document.state_reads
+    );
+    assert!(
+        document.function_defs.iter().any(|f| f.name == "escalate" && f.owner == "Widget"),
+        "escalate must still be recognized as a real method, got {:?}",
+        document.function_defs
+    );
+}
+
+#[test]
+fn java_constructor_is_recognized_as_a_function_and_owns_its_field_writes() {
+    let document = parse_source(
+        ".java",
+        Language::Java,
+        "public class Widget {\n\
+         private int count;\n\
+         private String name;\n\
+         public Widget(String name) {\n\
+         this.count = 0;\n\
+         this.name = name;\n\
+         }\n\
+         }\n",
+    );
+
+    assert!(
+        document.function_defs.iter().any(|f| f.name == "Widget" && f.owner == "Widget"),
+        "the constructor must be recognized as a function, got {:?}",
+        document.function_defs
+    );
+    assert!(
+        document
+            .state_writes
+            .iter()
+            .any(|w| w.field == "count" && w.function == "Widget"),
+        "the constructor's own field write must be attributed to it, not (top-level), got {:?}",
+        document.state_writes
+    );
+    assert!(
+        !document.state_writes.iter().any(|w| w.function == "(top-level)"),
+        "no write should be left attributed to (top-level), got {:?}",
+        document.state_writes
+    );
+}
+
+fn parse_source_keep_file(
+    suffix: &str,
+    language: Language,
+    source: &str,
+) -> (syntax::Document, tempfile::NamedTempFile) {
+    let mut file = tempfile::Builder::new().suffix(suffix).tempfile().unwrap();
+    file.write_all(source.as_bytes()).unwrap();
+    let documents = syntax::parse_files(&[file.path().to_path_buf()], language).unwrap();
+    (documents.into_iter().next().unwrap(), file)
+}
+
+#[test]
+fn java_and_csharp_leading_annotation_does_not_clobber_the_method_signature() {
+    // profile::extract re-reads the source file from disk by path, so the
+    // backing tempfile must outlive the call - unlike parse_source's other
+    // callers, which only read the already-parsed Document.
+    let (java_document, _java_file) = parse_source_keep_file(
+        ".java",
+        Language::Java,
+        "public class Widget {\n\
+         @Override\n\
+         public String toString() {\n\
+         return \"widget\";\n\
+         }\n\
+         }\n",
+    );
+    let java_output = profile::extract(&java_document, Profile::Espalier);
+    let java_method = java_output
+        .methods
+        .iter()
+        .find(|m| m.name == "toString")
+        .unwrap_or_else(|| panic!("toString not found, got {:?}", java_output.methods));
+    assert_eq!(java_method.signature, "public String toString()");
+
+    let (csharp_document, _csharp_file) = parse_source_keep_file(
+        ".cs",
+        Language::CSharp,
+        "public class Widget {\n\
+         [Obsolete]\n\
+         public int Run() {\n\
+         return 1;\n\
+         }\n\
+         }\n",
+    );
+    let csharp_output = profile::extract(&csharp_document, Profile::Espalier);
+    let csharp_method = csharp_output
+        .methods
+        .iter()
+        .find(|m| m.name == "Run")
+        .unwrap_or_else(|| panic!("Run not found, got {:?}", csharp_output.methods));
+    assert_eq!(csharp_method.signature, "public int Run()");
+}
+
+#[test]
+fn csharp_manual_property_accessor_bodies_are_recognized_as_state_reads_and_writes() {
+    let document = parse_source(
+        ".cs",
+        Language::CSharp,
+        "public class Widget {\n\
+         private int _count;\n\
+         public int Count {\n\
+         get { return _count; }\n\
+         set { _count = value; }\n\
+         }\n\
+         }\n",
+    );
+
+    assert!(
+        document
+            .state_reads
+            .iter()
+            .any(|r| r.field == "_count" && r.function == "Count"),
+        "the getter's read of the backing field must be attributed to the property, got {:?}",
+        document.state_reads
+    );
+    assert!(
+        document
+            .state_writes
+            .iter()
+            .any(|w| w.field == "_count" && w.function == "Count"),
+        "the setter's write of the backing field must be attributed to the property, got {:?}",
+        document.state_writes
     );
 }

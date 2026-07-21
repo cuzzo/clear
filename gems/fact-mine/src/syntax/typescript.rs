@@ -175,6 +175,14 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         call.receiver == "self" && call.message == "callback"
     }
 
+    // call_parts defaults every receiver-less call's receiver to "self" (a
+    // Ruby-implicit-dispatch convention); TS has no implicit self dispatch,
+    // so that default would otherwise read as a phantom field access on the
+    // called name.
+    fn suppress_method_call_state_read(&self, call: &NormalizedCallProjection) -> bool {
+        call.receiver == "self"
+    }
+
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
         (node.r#type == "CLASS" || node.r#type == "INTERFACE_DECLARATION").then_some(default_span)
     }

@@ -480,19 +480,6 @@
       ],
       "state_reads": [
         {
-          "field": "#audit",
-          "function": "process",
-          "line": 35,
-          "owner": "JavaScriptSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            35,
-            6,
-            35,
-            17
-          ]
-        },
-        {
           "field": "#status",
           "function": "#audit",
           "line": 55,
@@ -545,19 +532,6 @@
           ]
         },
         {
-          "field": "defaultCase",
-          "function": "process",
-          "line": 24,
-          "owner": "JavaScriptSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            24,
-            8,
-            24,
-            24
-          ]
-        },
-        {
           "field": "error",
           "function": "#audit",
           "line": 49,
@@ -568,32 +542,6 @@
             6,
             49,
             19
-          ]
-        },
-        {
-          "field": "escalate",
-          "function": "process",
-          "line": 18,
-          "owner": "JavaScriptSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            18,
-            8,
-            18,
-            21
-          ]
-        },
-        {
-          "field": "fallback",
-          "function": "process",
-          "line": 21,
-          "owner": "JavaScriptSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            21,
-            8,
-            21,
-            21
           ]
         },
         {
@@ -646,19 +594,6 @@
             17,
             11,
             30
-          ]
-        },
-        {
-          "field": "publish",
-          "function": "process",
-          "line": 29,
-          "owner": "JavaScriptSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            29,
-            6,
-            29,
-            18
           ]
         },
         {

@@ -304,6 +304,14 @@ impl NormalizedLanguageBehavior for JavaScriptNormalizedBehavior {
         call.receiver == "self" && call.message == "callback"
     }
 
+    // call_parts defaults every receiver-less call's receiver to "self" (a
+    // Ruby-implicit-dispatch convention); JS/TS have no implicit self
+    // dispatch, so that default would otherwise read as a phantom field
+    // access on the called name.
+    fn suppress_method_call_state_read(&self, call: &NormalizedCallProjection) -> bool {
+        call.receiver == "self"
+    }
+
     fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
         property_read_call(node, parts)
     }

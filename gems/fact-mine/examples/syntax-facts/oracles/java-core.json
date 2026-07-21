@@ -471,6 +471,21 @@
             3
           ],
           "visibility": "package"
+        },
+        {
+          "line": 7,
+          "name": "JavaSyntaxFactsCore",
+          "owner": "JavaSyntaxFactsCore",
+          "params": [
+            "status"
+          ],
+          "span": [
+            7,
+            2,
+            10,
+            3
+          ],
+          "visibility": "public"
         }
       ],
       "language": "java",
@@ -570,7 +585,7 @@
       "state_writes": [
         {
           "field": "count",
-          "function": "(top-level)",
+          "function": "JavaSyntaxFactsCore",
           "line": 9,
           "owner": "JavaSyntaxFactsCore",
           "receiver": "self",
@@ -596,7 +611,7 @@
         },
         {
           "field": "status",
-          "function": "(top-level)",
+          "function": "JavaSyntaxFactsCore",
           "line": 8,
           "owner": "JavaSyntaxFactsCore",
           "receiver": "self",

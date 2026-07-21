@@ -2880,8 +2880,48 @@ fn attach_return_type_dependencies(
     }
 }
 
+// Java/C#/Kotlin/PHP nest a leading annotation/attribute inside the
+// declaration node itself, so `fn_def.line` can point at `@Override` rather
+// than the header; its own balanced parens would otherwise satisfy the
+// bailout below on the first line.
+fn skip_annotation_lines(lines: &[String], mut idx: usize) -> usize {
+    while idx < lines.len() {
+        let trimmed = lines[idx].trim();
+        if trimmed.is_empty() {
+            idx += 1;
+            continue;
+        }
+        if !(trimmed.starts_with('@') || trimmed.starts_with('[') || trimmed.starts_with("#[")) {
+            break;
+        }
+        let mut depth: i32 = 0;
+        let mut balanced_at = None;
+        for (offset, line) in lines[idx..std::cmp::min(lines.len(), idx + 20)]
+            .iter()
+            .enumerate()
+        {
+            for c in line.chars() {
+                match c {
+                    '(' | '[' => depth += 1,
+                    ')' | ']' => depth -= 1,
+                    _ => {}
+                }
+            }
+            if depth <= 0 {
+                balanced_at = Some(offset);
+                break;
+            }
+        }
+        match balanced_at {
+            Some(offset) => idx += offset + 1,
+            None => break,
+        }
+    }
+    idx
+}
+
 fn get_def_header(lines: &[String], start_line_1indexed: usize) -> String {
-    let start_idx = start_line_1indexed.saturating_sub(1);
+    let start_idx = skip_annotation_lines(lines, start_line_1indexed.saturating_sub(1));
     if start_idx >= lines.len() {
         return String::new();
     }
@@ -3036,12 +3076,17 @@ fn extract_methods(
                 .local_complexity_scores
                 .get(&format!("{}#{}", owner, name));
 
+            // dispatch_kind "top" means owner is only the file-stem
+            // fallback, not a real enclosing type - resolving it by name
+            // alone would link to an unrelated class that happens to share
+            // the file's name (e.g. Foo.h declaring `class Foo`).
+            let structural_owner = if kind == "top" { "" } else { owner.as_str() };
             MethodRecord {
                 id: function_id(language, path, fn_def),
                 semantic_symbol: None,
-                owner_id: owner_id(language, path, &owner, owner_span(document, &owner)),
+                owner_id: owner_id(language, path, structural_owner, owner_span(document, structural_owner)),
                 key: vec![owner.clone(), name.clone(), kind.clone()],
-                symbol_owner: canonical_symbol_owner(document, &owner, Some(fn_def.span)),
+                symbol_owner: canonical_symbol_owner(document, structural_owner, Some(fn_def.span)),
                 lexical_symbol: (kind == "top"
                     && document.symbol_scope.canonical
                     && declaration_namespace(document, fn_def.span).is_some())
@@ -5988,6 +6033,46 @@ pub(crate) mod tests {
         assert_eq!(method.owner, "Greeter");
         assert_eq!(method.kind, "instance");
         assert_eq!(method.signature, "def hello(name)");
+    }
+
+    #[test]
+    fn top_level_function_whose_fallback_owner_name_collides_with_a_real_owner_is_not_linked_to_it() {
+        let mut doc = test_document();
+        doc.function_defs.push(syntax::FunctionDef {
+            file: "test.rb".to_string(),
+            name: "helper".to_string(),
+            owner: "Greeter".to_string(),
+            dispatch_kind: "top".to_string(),
+            line: 20,
+            span: [20, 0, 20, 20],
+            body: crate::ast::RawNode {
+                kind: "function".to_string(),
+                text: "def helper".to_string(),
+                span: [20, 0, 20, 20],
+                named: true,
+                field_name: None,
+                children: vec![],
+            },
+            visibility: Some("public".to_string()),
+            params: Vec::new(),
+            callback_params: Vec::new(),
+            signature: "def helper".to_string(),
+        });
+        let output = extract(&doc, Profile::Espalier);
+
+        let real_member = output.methods.iter().find(|m| m.name == "hello").expect("real method");
+        let free_function = output.methods.iter().find(|m| m.name == "helper").expect("free function");
+
+        assert_eq!(free_function.owner, "Greeter", "the display owner (file-stem fallback) is unchanged");
+        assert_ne!(
+            free_function.owner_id, real_member.owner_id,
+            "a free function must never share owner_id with an unrelated real owner of the same name"
+        );
+        assert!(
+            free_function.symbol_owner.is_none(),
+            "a free function has no real owning type, so symbol_owner must not fabricate one, got {:?}",
+            free_function.symbol_owner
+        );
     }
 
     pub(crate) fn extracts_fields_impl() {
