@@ -1566,13 +1566,12 @@ module LoopFrameAnalysis
     params(
       fn_nodes: FnNodes,
       schema_lookup: T.nilable(Proc),
-      lifecycle_registry: T.nilable(Semantic::LifecycleRegistry),
     ).returns(FnNodes)
   end
-  def self.analyze!(fn_nodes, schema_lookup = nil, lifecycle_registry = nil)
+  def self.analyze!(fn_nodes, schema_lookup = nil)
     fn_nodes.each_value do |fn|
       next unless fn.body
-      walk_stmts!(fn.body, schema_lookup, fn_nodes, lifecycle_registry)
+      walk_stmts!(fn.body, schema_lookup, fn_nodes)
       update_shard_contexts!(fn.body, fn_nodes)
     end
   end
@@ -1584,11 +1583,10 @@ module LoopFrameAnalysis
       stmts: T::Array[AST::Node],
       schema_lookup: T.nilable(Proc),
       fn_nodes: FnNodes,
-      lifecycle_registry: T.nilable(Semantic::LifecycleRegistry),
     ).void
   end
-  def self.walk_stmts!(stmts, schema_lookup = nil, fn_nodes = {}, lifecycle_registry = nil)
-    stmts.each { |s| walk_stmt!(s, schema_lookup, fn_nodes, lifecycle_registry) }
+  def self.walk_stmts!(stmts, schema_lookup = nil, fn_nodes = {})
+    stmts.each { |s| walk_stmt!(s, schema_lookup, fn_nodes) }
   end
 
   sig do
@@ -1596,14 +1594,13 @@ module LoopFrameAnalysis
       stmt: T.nilable(T.any(AST::Node, Struct)),
       schema_lookup: T.nilable(Proc),
       fn_nodes: FnNodes,
-      lifecycle_registry: T.nilable(Semantic::LifecycleRegistry),
     ).void
   end
-  def self.walk_stmt!(stmt, schema_lookup = nil, fn_nodes = {}, lifecycle_registry = nil)
+  def self.walk_stmt!(stmt, schema_lookup = nil, fn_nodes = {})
     child_bodies = AST.child_bodies(stmt)
-    child_bodies.each { |body| walk_stmts!(body, schema_lookup, fn_nodes, lifecycle_registry) }
+    child_bodies.each { |body| walk_stmts!(body, schema_lookup, fn_nodes) }
     if AST.loop_node?(stmt)
-      process_loop!(T.cast(stmt, LoopNode), child_bodies.first || [], schema_lookup, fn_nodes, lifecycle_registry)
+      process_loop!(T.cast(stmt, LoopNode), child_bodies.first || [], schema_lookup, fn_nodes)
     end
     nil
   end
@@ -1616,17 +1613,16 @@ module LoopFrameAnalysis
       body: T::Array[AST::Node],
       schema_lookup: T.nilable(Proc),
       fn_nodes: FnNodes,
-      lifecycle_registry: T.nilable(Semantic::LifecycleRegistry),
     ).void
   end
-  def self.process_loop!(loop_node, body, schema_lookup = nil, fn_nodes = {}, lifecycle_registry = nil)
+  def self.process_loop!(loop_node, body, schema_lookup = nil, fn_nodes = {})
     return if loop_node.tight
     local_facts = MIR::LocalBindingAnalysis.direct_loop_body_facts(body)
     local_names = local_facts.names
     has_iteration_frame_locals =
       local_facts.iteration_frame_decls.any? ||
       loop_capture_frame_alloc?(loop_node, schema_lookup) ||
-      direct_loop_expression_frame_alloc?(body, fn_nodes, local_names, lifecycle_registry)
+      direct_loop_expression_frame_alloc?(body, fn_nodes, local_names)
     has_extended_frame_locals = local_facts.frame_decls.any? do |decl|
       entry = MIR::LocalBindingAnalysis.binding_entry(decl)
       entry&.present? && entry.frame? && entry.scope != :iteration
@@ -1640,88 +1636,17 @@ module LoopFrameAnalysis
       body: T::Array[AST::Node],
       fn_nodes: FnNodes,
       local_names: T::Set[String],
-      lifecycle_registry: T.nilable(Semantic::LifecycleRegistry),
     ).returns(T::Boolean)
   end
-  def self.direct_loop_expression_frame_alloc?(body, fn_nodes, local_names = Set.new, lifecycle_registry = nil)
+  def self.direct_loop_expression_frame_alloc?(body, fn_nodes, local_names = Set.new)
     found = T.let(false, T::Boolean)
     MIR::LocalBindingAnalysis.each_direct_loop_node(body) do |stmt|
       next if direct_loop_expression_boundary?(stmt)
-      if destination_driven_iteration_frame_alloc?(stmt, local_names, lifecycle_registry)
-        found = true
-        next
-      end
       each_loop_local_locatable(stmt, local_names) do |node|
-        next if found
-        found = true if expression_allocates_frame_value?(node, fn_nodes)
+        unless found
+          found = true if expression_allocates_frame_value?(node, fn_nodes)
+        end
       end
-    end
-    found
-  end
-
-  # Assignment lowering evaluates an owning RHS under the destination
-  # binding's allocator. An explicit COPY is context-free annotated as heap,
-  # but a reassignment to an iteration-local frame binding therefore lowers as
-  # a frame DeepCopy. Inspect the finalized binding and lifecycle contracts
-  # together so loop rewinding sees the allocation that lowering will emit.
-  sig do
-    params(
-      node: AST::Node,
-      local_names: T::Set[String],
-      lifecycle_registry: T.nilable(Semantic::LifecycleRegistry),
-    ).returns(T::Boolean)
-  end
-  def self.destination_driven_iteration_frame_alloc?(node, local_names, lifecycle_registry)
-    value = assignment_value(node)
-    return false unless value
-    name = assignment_name(node)
-    return false unless name && local_names.include?(name)
-
-    entry = assignment_binding_entry(node)
-    return false unless entry&.present? && entry.frame? && entry.scope == :iteration
-
-    allocating_copy_in?(value, lifecycle_registry)
-  end
-
-  sig { params(node: AST::Node).returns(T.nilable(AST::Node)) }
-  def self.assignment_value(node)
-    return node.value if node.is_a?(AST::BindExpr) && node.mode == :assign
-
-    nil
-  end
-
-  sig { params(node: AST::Node).returns(T.nilable(String)) }
-  def self.assignment_name(node)
-    raw = node.name if node.is_a?(AST::BindExpr) && node.mode == :assign
-    return raw.to_s if raw.is_a?(String)
-
-    nil
-  end
-
-  sig { params(node: AST::Node).returns(T.nilable(CleanupEntry)) }
-  def self.assignment_binding_entry(node)
-    symbol = node.respond_to?(:symbol) ? T.unsafe(node).symbol : nil
-    declaration = symbol&.reg
-    return nil unless declaration&.respond_to?(:mir_binding_entry)
-
-    MIR::LocalBindingAnalysis.binding_entry(T.unsafe(declaration))
-  end
-
-  sig do
-    params(
-      root: AST::Node,
-      lifecycle_registry: T.nilable(Semantic::LifecycleRegistry),
-    ).returns(T::Boolean)
-  end
-  def self.allocating_copy_in?(root, lifecycle_registry)
-    found = T.let(false, T::Boolean)
-    AST.each_locatable(root) do |candidate|
-      next unless candidate.is_a?(AST::CopyNode)
-
-      source_type = Type.from_node!(candidate.value, context: "loop COPY source")
-      strategy = lifecycle_registry&.fetch(source_type)&.copy_strategy
-      found = [:deep_clone, :generic].include?(strategy)
-      break if found
     end
     found
   end

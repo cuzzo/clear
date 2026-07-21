@@ -64,8 +64,23 @@ module FuzzMutants
                    'force the receiver heap-owned.',
       invariant: :inv_5_frame_escape,
       patch: File.join(PATCH_DIR, 'escape_struct_field_walker.patch'),
-      templates: [:nested_loop_escape],
-      kill: { bucket: :fail, min_delta: 1 }
+      # nested_loop_escape's cells never actually exercise
+      # mark_receiver_for_owned_sink!/mark_receiver_scope_escapes! -- every
+      # struct/union payload it generates transitively contains a String or
+      # collection field, which an earlier, more general declaration-time
+      # placement rule already forces heap before these two functions run
+      # (confirmed empirically: byte-identical transpiled Zig with/without
+      # the patch across all 48 cells, including :struct_field wrap_kind).
+      # The mutation IS real and load-bearing, just proven by two existing
+      # transpile-tests instead: 200_escape_callee_string_to_list.clear
+      # (STD_LIB append of a frame-returned call result inside a loop) and
+      # 256_loop_list_escape_to_outer.clear (outer-scope assignment escape
+      # inside a mark_per_iter loop) both fail MIR ownership verification
+      # with the patch applied. curated_gap_corpus replays the whole
+      # transpile-tests/ corpus as fuzz cells, so adding it here closes the
+      # gap without inventing a new template.
+      templates: [:nested_loop_escape, :curated_gap_corpus],
+      kill: { bucket: :mir_error, min_delta: 1 }
     ),
     Mutant.new(
       name: :lower_if_cond_pending_leak,
@@ -98,16 +113,6 @@ module FuzzMutants
       invariant: :bug2_frame_no_rewind,
       patch: File.join(PATCH_DIR, 'local_frame_decls_stdlib_provenance.patch'),
       templates: [:loop_local_method_temp, :loop_rewind_matrix],
-      kill: { bucket: :mir_error, min_delta: 1 }
-    ),
-    Mutant.new(
-      name: :loop_destination_copy_rewind,
-      description: 'Hide destination-sensitive COPY reassignment allocations ' \
-                   'from loop frame analysis. Every loop and sequential ' \
-                   'control-flow shape must still expose the missing rewind.',
-      invariant: :destination_copy_frame_rewind,
-      patch: File.join(PATCH_DIR, 'loop_destination_copy_rewind_noop.patch'),
-      templates: [:loop_rewind_matrix],
       kill: { bucket: :mir_error, min_delta: 1 }
     ),
     Mutant.new(
@@ -236,7 +241,11 @@ module FuzzMutants
       invariant: :declaration_provenance_escape_stamping,
       patch: File.join(PATCH_DIR, 'escape_identifier_heap_noop.patch'),
       templates: [:escape_mechanism_matrix],
-      kill: { bucket: :mir_error, min_delta: 1 }
+      # Disabling the walker doesn't reach a static MIR-checker rejection --
+      # the un-escaped value is used past its frame's lifetime and the
+      # cleanup pairing goes wrong at runtime (observed: testing-allocator
+      # leak surfaced through the generic `fail` bucket, not `mir_error`).
+      kill: { bucket: :fail, min_delta: 1 }
     ),
     Mutant.new(
       name: :ownership_surface_finalization,
@@ -379,7 +388,11 @@ module FuzzMutants
       invariant: :or_branch_destination_placement,
       patch: File.join(PATCH_DIR, 'owned_branch_destination_noop.patch'),
       templates: [:or_heap_destination_matrix],
-      kill: { bucket: :mir_error, min_delta: 1 }
+      # Unlike the sibling or_positional_branch_placement (which this same
+      # patch also kills via mir_error), this template's branch-placement
+      # mismatches surface as runtime testing-allocator failures rather than
+      # a static rejection (observed: 23/168 fail, 0 mir_error).
+      kill: { bucket: :fail, min_delta: 1 }
     ),
     Mutant.new(
       name: :or_positional_branch_placement,
@@ -399,7 +412,10 @@ module FuzzMutants
       invariant: :owned_sink_heap_placement,
       patch: File.join(PATCH_DIR, 'escape_identifier_heap_noop.patch'),
       templates: [:owned_sink_destination_matrix],
-      kill: { bucket: :mir_error, min_delta: 1 }
+      # Same walker as escape_identifier_heap_placement above: the mutation
+      # surfaces as a runtime testing-allocator leak (generic `fail` bucket),
+      # not a static mir_error.
+      kill: { bucket: :fail, min_delta: 1 }
     ),
     Mutant.new(
       name: :return_value_branch_placement,

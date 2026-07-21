@@ -60,6 +60,15 @@ RSpec.describe "annotator import resolution boundaries" do
     annotator.send(:root_scope)
   end
 
+  it "can inline explicitly registered packages for single-file test builds" do
+    importer = ModuleImporter.new(
+      pkg_paths: { "generated" => "/tmp/generated.clear" },
+      inline_packages: Set["generated"],
+    )
+
+    expect(importer.stdlib_package?("generated")).to be(true)
+  end
+
   it "imports function signatures as isolated semantic copies" do
     source_scope = Scope.new
     source_sig = FunctionSignature.new(

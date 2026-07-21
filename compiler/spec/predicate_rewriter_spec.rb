@@ -65,6 +65,20 @@ RSpec.describe PredicateRewriter do
       CLEAR
       expect(rw(src)).to include("NIL == x")
     end
+
+    it "absorbs whitespace-padded parens wrapping the compared value" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          x: ?Int64 = NIL;
+          IF (( x ) == NIL) THEN RETURN; END
+          RETURN;
+        END
+      CLEAR
+
+      rewritten = rw(src)
+      expect(rewritten).to include("IF (( x ).nil?()) THEN")
+      expect { ClearParser.new(Lexer.new(rewritten).tokenize, rewritten).parse }.not_to raise_error
+    end
   end
 
   describe "length() comparisons — empty?" do
@@ -100,6 +114,72 @@ RSpec.describe PredicateRewriter do
         END
       CLEAR
       expect(rw(src)).to include("xs.empty?()")
+    end
+
+    it "preserves balanced parentheses around a nested negated comparison" do
+      src = <<~CLEAR
+        FN present(xs: []Int64) RETURNS Bool ->
+          IF !(((xs).length() == 0)) THEN RETURN TRUE; END
+          RETURN FALSE;
+        END
+      CLEAR
+
+      rewritten = rw(src)
+      expect(rewritten).to include("IF !(((xs).empty?())) THEN")
+      expect { ClearParser.new(Lexer.new(rewritten).tokenize, rewritten).parse }.not_to raise_error
+      expect { fmt(src) }.not_to raise_error
+    end
+
+    it "preserves whitespace-padded grouping parens around the receiver" do
+      src = <<~CLEAR
+        FN present(xs: []Int64) RETURNS Bool ->
+          IF (( xs ).length() == 0) THEN RETURN TRUE; END
+          RETURN FALSE;
+        END
+      CLEAR
+
+      rewritten = rw(src)
+      expect(rewritten).to include("IF (( xs ).empty?()) THEN")
+      expect { ClearParser.new(Lexer.new(rewritten).tokenize, rewritten).parse }.not_to raise_error
+    end
+
+    it "preserves doubled whitespace-padded grouping parens around the receiver" do
+      src = <<~CLEAR
+        FN present(xs: []Int64) RETURNS Bool ->
+          IF ((( xs )).length() == 0) THEN RETURN TRUE; END
+          RETURN FALSE;
+        END
+      CLEAR
+
+      rewritten = rw(src)
+      expect(rewritten).to include("IF ((( xs )).empty?()) THEN")
+      expect { ClearParser.new(Lexer.new(rewritten).tokenize, rewritten).parse }.not_to raise_error
+    end
+
+    it "ignores parens inside a string-literal receiver when balancing" do
+      src = <<~CLEAR
+        FN check() RETURNS Bool ->
+          IF (") ".length() == 0) THEN RETURN TRUE; END
+          RETURN FALSE;
+        END
+      CLEAR
+
+      rewritten = rw(src)
+      expect(rewritten).to include(%q{IF ((") ").empty?()) THEN})
+      expect { ClearParser.new(Lexer.new(rewritten).tokenize, rewritten).parse }.not_to raise_error
+    end
+
+    it "absorbs whitespace-padded parens wrapping the whole length call" do
+      src = <<~CLEAR
+        FN present(xs: []Int64) RETURNS Bool ->
+          IF (( xs.length() ) == 0) THEN RETURN TRUE; END
+          RETURN FALSE;
+        END
+      CLEAR
+
+      rewritten = rw(src)
+      expect(rewritten).to include("IF (xs.empty?()) THEN")
+      expect { ClearParser.new(Lexer.new(rewritten).tokenize, rewritten).parse }.not_to raise_error
     end
   end
 

@@ -1,0 +1,10 @@
+FN main() RETURNS Void ->
+    ASSERT 0.bitLength() == 0;
+    ASSERT 1.bitLength() == 1;
+    ASSERT 2.bitLength() == 2;
+    ASSERT 255.bitLength() == 8;
+    ASSERT (-1).bitLength() == 0;
+    ASSERT (-2).bitLength() == 1;
+    ASSERT (-256).bitLength() == 8;
+    RETURN;
+END

@@ -11,9 +11,14 @@ require_relative '../compiler/ruby/backends/transpiler'
 
 # Generates Zig test blocks from .clear files using MIRLowering + MIREmitter.
 class TestGenerator
-  def generate_test_block(filename, cheat_code, source_dir: Dir.pwd)
+  def generate_test_block(filename, cheat_code, source_dir: Dir.pwd, pkg_paths: {})
     source_dir = File.expand_path(source_dir)
-    importer = ModuleImporter.new(base_dir: source_dir, use_mir: true)
+    importer = ModuleImporter.new(
+      base_dir: source_dir,
+      pkg_paths: pkg_paths,
+      inline_packages: pkg_paths.keys.to_set,
+      use_mir: true,
+    )
 
     result = CompilerFrontend.compile(cheat_code, importer: importer, source_dir: source_dir)
 
@@ -199,8 +204,8 @@ class TestGenerator
   end
 
   # Generate a complete single-file zig test (header + one test block).
-  def generate_single_test(filename, cheat_code, source_dir: Dir.pwd)
-    block = generate_test_block(filename, cheat_code, source_dir: source_dir)
+  def generate_single_test(filename, cheat_code, source_dir: Dir.pwd, pkg_paths: {})
+    block = generate_test_block(filename, cheat_code, source_dir: source_dir, pkg_paths: pkg_paths)
     frame_debug = ENV['CLEAR_FRAME_DEBUG'] == '1'
     <<~ZIG
       pub const CLEAR_FRAME_DEBUG = #{frame_debug};
@@ -221,6 +226,18 @@ if __FILE__ == $0
 # Accept --mir for backward compatibility (ignored, MIR is always used)
 ARGV.delete('--mir')
 
+pkg_paths = {}
+while (pkg_index = ARGV.index('--pkg'))
+  spec = ARGV[pkg_index + 1]
+  unless spec&.include?('=')
+    $stderr.puts "--pkg requires name=/path/to/lib.clear"
+    exit 1
+  end
+  name, path = spec.split('=', 2)
+  pkg_paths[name] = File.expand_path(path)
+  ARGV.slice!(pkg_index, 2)
+end
+
 # Single-file mode: ruby gen.rb --single foo.clear
 # Outputs a complete zig test file to stdout.
 if ARGV.delete('--single')
@@ -232,7 +249,9 @@ if ARGV.delete('--single')
   code = File.read(test_file)
   source_dir = File.expand_path(File.dirname(test_file))
   generator = TestGenerator.new
-  puts generator.generate_single_test(File.basename(test_file), code, source_dir: source_dir)
+  puts generator.generate_single_test(
+    File.basename(test_file), code, source_dir: source_dir, pkg_paths: pkg_paths
+  )
   exit 0
 end
 

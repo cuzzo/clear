@@ -703,6 +703,14 @@ STD_LIB = T.let({
     args: [:Int64], return: :Bool, zig: "(@mod({0}, 2) != 0)", bc: true, is_method: true,
   },
 
+  # Number of significant bits in Ruby's signed-integer sense. Negative
+  # values count the bits in their complement, so -1 is 0 and -2 is 1.
+  "bitLength" => {
+    args: [:Int64], return: :Int64,
+    zig: "@as(i64, @intCast(64 - @clz(@as(u64, @bitCast(if ({0} < 0) ~{0} else {0})))))",
+    bc: true, is_method: true,
+  },
+
   # n.between?(low, high) -> low <= n <= high (inclusive). Like Ruby
   # Comparable#between?; chosen over an exclusive variant because
   # half-open ranges are spelled differently elsewhere (`a..<b`).

@@ -45,7 +45,10 @@ class FuzzGenerator
   # Returns a hash:
   #   { source: <text>, expected: :pass | :compile_error,
   #     kind: :clear | :mir_checker, error_code: Symbol | nil,
-  #     diagnostic_code_required: true | false }.
+  #     diagnostic_code_required: true | false,
+  #     support_files: { "name.clear" => <text> } }.
+  # support_files are REQUIRE-able companion modules written next to the
+  # generated program; multiple cells may share a name with identical content.
   def emit(tuple)
     t = TEMPLATES.fetch(tuple[:template])
     cell = tuple[:params].dup
@@ -61,6 +64,7 @@ class FuzzGenerator
       kind: kind,
       error_code: meta[:error_code],
       diagnostic_code_required: meta.fetch(:diagnostic_code_required, false),
+      support_files: meta.fetch(:support_files, {}),
     }
   end
 end

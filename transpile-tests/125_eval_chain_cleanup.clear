@@ -32,5 +32,12 @@ END
 FN main() RETURNS Void ->
     ast = TRY makeAst();
     result = TRY eval(ast);
+    # eval of a List AST routes through evalList, which returns Nil.
+    MUTABLE isNil = FALSE;
+    PARTIAL MATCH result START
+        Value.Nil -> isNil = TRUE;,
+        DEFAULT -> isNil = FALSE;
+    END
+    ASSERT isNil;
     RETURN;
 END

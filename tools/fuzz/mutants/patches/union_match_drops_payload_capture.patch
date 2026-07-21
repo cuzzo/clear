@@ -2,13 +2,14 @@ diff --git a/compiler/ruby/backends/mir_emitter.rb b/compiler/ruby/backends/mir_
 index 000000000..000000000 100644
 --- a/compiler/ruby/backends/mir_emitter.rb
 +++ b/compiler/ruby/backends/mir_emitter.rb
-@@ -2200,10 +2200,10 @@ class MIREmitter
+@@ -2405,11 +2405,11 @@ class MIREmitter
    def emit_union_match(node)
      subject = emit(node.subject)
      arms = node.arms.map do |arm|
        body = emit_body(arm.body)
        payload = arm.payload
--      capture = payload ? " |#{payload}|" : ""
+       capture_name = arm.pointer_payload ? "*#{payload}" : payload
+-      capture = payload ? " |#{capture_name}|" : ""
 +      capture = ""
        suppress = payload ? "_ = &#{payload};\n" : ""
        ".#{arm.variant} =>#{capture} {\n#{suppress}#{body}\n}"

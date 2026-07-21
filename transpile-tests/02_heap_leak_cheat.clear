@@ -9,6 +9,7 @@ FN main() RETURNS Void ->
 
     # If transpiler logic works, `zig test` passes.
     # If it fails to free, `zig test` reports "Memory leak detected".
+    ASSERT u.id == 99;
     RETURN;
 END
 

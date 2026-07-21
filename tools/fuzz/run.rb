@@ -92,6 +92,12 @@ tuples.each do |tuple|
   name = "fuzz_#{tuple[:template]}_#{hash}.#{ext}"
   path = File.join(opts[:out], name)
   File.write(path, result[:source])
+  result[:support_files].each do |support_name, support_source|
+    unless support_name.start_with?('fuzz_support_')
+      abort "[fuzz] support file #{support_name} must use the fuzz_support_ prefix so --clean removes it"
+    end
+    File.write(File.join(opts[:out], support_name), support_source)
+  end
   emitted << {
     path: path,
     expected: result[:expected],

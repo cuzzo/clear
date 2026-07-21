@@ -216,12 +216,18 @@ module PredicateRewriter
 
     span = compute_compare_span(node, source)
     return nil unless span
-    receiver = receiver_source_for_method_call(length_call, source)
-    return nil unless receiver && !receiver.strip.empty?
+    receiver_span = receiver_source_for_method_call(length_call, source)
+    return nil unless receiver_span
+    receiver, receiver_start = receiver_span
+    return nil if receiver.strip.empty?
 
+    # The replacement reconstructs the receiver text, so the edit must
+    # begin where that text begins — even when the receiver absorbed a
+    # grouping wrapper the compare span did not.
+    start = [span.start, receiver_start].min
     Edit.new(
-      start: span.start,
-      len: span.end_pos - span.start,
+      start: start,
+      len: span.end_pos - start,
       replacement: "#{paren_if_needed(receiver)}.#{pred}()",
     )
   end
@@ -277,20 +283,24 @@ module PredicateRewriter
     )
   end
 
-  # If the source character immediately before `lhs_start` is `(` AND
-  # the character at `lhs_end` is `)`, those are a matched outer pair
-  # wrapping the whole LHS (parens are dropped by the parser). Walk
-  # outward as far as the pairs match so the rewrite span includes
-  # them — otherwise replacing from inside the parens orphans the
-  # opening one. Returns the expanded (lhs_start, lhs_end).
+  # If the nearest non-whitespace character before `lhs_start` is `(`
+  # AND the nearest at/after `lhs_end` is `)`, those are a matched
+  # outer pair wrapping the whole LHS (parens are dropped by the
+  # parser). Walk outward as far as the pairs match so the rewrite
+  # span includes them — otherwise replacing from inside the parens
+  # orphans the opening one. Returns the expanded (lhs_start, lhs_end).
   sig { params(source: String, lhs_start: Integer, lhs_end: Integer).returns(Array) }
   def self.expand_paren_wrap(source, lhs_start, lhs_end)
-    while lhs_start > 0 &&
-          lhs_end < source.length &&
-          source[lhs_start - 1] == '(' &&
-          source[lhs_end] == ')'
-      lhs_start -= 1
-      lhs_end   += 1
+    loop do
+      left = lhs_start - 1
+      left -= 1 while left >= 0 && source[left] =~ /\s/
+      right = lhs_end
+      right += 1 while right < source.length && source[right] =~ /\s/
+      break unless left >= 0 && right < source.length &&
+                   source[left] == '(' && source[right] == ')'
+
+      lhs_start = left
+      lhs_end   = right + 1
     end
     [lhs_start, lhs_end]
   end
@@ -439,7 +449,7 @@ module PredicateRewriter
   # `coll.length()`), so the receiver ends one char before the `.`
   # that precedes that name. Walking back through whitespace handles
   # `coll  .length()` style spacing.
-  sig { params(call: AST::MethodCall, source: String).returns(String) }
+  sig { params(call: AST::MethodCall, source: String).returns(T.nilable([String, Integer])) }
   def self.receiver_source_for_method_call(call, source)
     obj_start = leftmost_offset(call.object, source)
     return nil unless obj_start
@@ -452,7 +462,63 @@ module PredicateRewriter
     return nil unless i >= obj_start && source[i] == '.'
     obj_end = i
     return nil unless obj_end > obj_start
-    source[obj_start...obj_end]
+    receiver = T.must(source[obj_start...obj_end])
+
+    # Parentheses used only for grouping are intentionally absent from the
+    # AST. The receiver token for `(xs).length()` therefore starts at `x`,
+    # while the source range ending before `.length` is `xs)`. Include the
+    # matching opening wrapper instead of handing an unbalanced `xs)` to the
+    # replacement renderer.
+    balance = grouping_paren_balance(receiver)
+    while balance < 0
+      cursor = obj_start - 1
+      cursor -= 1 while cursor >= 0 && source[cursor] =~ /\s/
+      return nil unless cursor >= 0 && source[cursor] == '('
+
+      obj_start = cursor
+      balance += 1
+    end
+    [T.must(source[obj_start...obj_end]), obj_start]
+  end
+
+  # Net `(`/`)` count of `text`, ignoring parens inside string
+  # literals (with escapes and `"""` triple strings) so a receiver
+  # like `") "` cannot fake an unbalanced grouping wrapper.
+  sig { params(text: String).returns(Integer) }
+  def self.grouping_paren_balance(text)
+    balance = 0
+    i = 0
+    in_str = false
+    in_triple = false
+    while i < text.length
+      c = text[i]
+      if in_triple
+        if text[i, 3] == '"""'
+          in_triple = false
+          i += 3
+          next
+        end
+      elsif in_str
+        if c == '\\' && i + 1 < text.length
+          i += 2
+          next
+        elsif c == '"'
+          in_str = false
+        end
+      elsif text[i, 3] == '"""'
+        in_triple = true
+        i += 3
+        next
+      elsif c == '"'
+        in_str = true
+      elsif c == '('
+        balance += 1
+      elsif c == ')'
+        balance -= 1
+      end
+      i += 1
+    end
+    balance
   end
 
   # Wrap source text in parens iff it could be misparsed when
@@ -505,6 +571,7 @@ module PredicateRewriter
   private_class_method :compute_compare_span
   private_class_method :expand_paren_wrap
   private_class_method :expression_terminator_op?
+  private_class_method :grouping_paren_balance
   private_class_method :length_call?
   private_class_method :literal_node?
   private_class_method :literal_source_length

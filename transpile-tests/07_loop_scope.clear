@@ -2,11 +2,14 @@ STRUCT User { id: Int64 }
 
 FN main() RETURNS Void ->
     MUTABLE i = 0;
+    MUTABLE total = 0;
     WHILE i < 10 DO
         # This variable dies every iteration (stack allocated, no escape)
         u = User{ id: i };
+        total = total + u.id;
         i = i + 1;
     END
+    ASSERT total == 45;
     RETURN;
 END
 

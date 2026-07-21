@@ -16,9 +16,10 @@ CALL_OWNERSHIP_VALUE_SHAPES.each do |shape|
    :receiver_mutation, :bg_call, :pipeline_call].each do |mode|
     next if mode == :receiver_mutation && %i[string union_owned].include?(shape)
     next if mode == :pipeline_call && shape != :string
-    cell = { shape: shape, mode: mode }
-    cell[:expected] = :compile_error if mode == :pipeline_call
-    CALL_OWNERSHIP_CELLS << cell
+    # pipeline_call was expected=:compile_error until named-function calls in
+    # stream pipelines (`src |> SELECT size(_)`) landed; it now compiles, runs,
+    # and asserts the folded value.
+    CALL_OWNERSHIP_CELLS << { shape: shape, mode: mode }
   end
 end
 

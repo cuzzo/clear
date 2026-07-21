@@ -2,11 +2,11 @@ diff --git a/compiler/ruby/mir/mir_checker.rb b/compiler/ruby/mir/mir_checker.rb
 index 000000000..000000000 100644
 --- a/compiler/ruby/mir/mir_checker.rb
 +++ b/compiler/ruby/mir/mir_checker.rb
-@@ -1340,6 +1340,7 @@ class MIRChecker
- 
+@@ -1456,6 +1456,7 @@ class MIRChecker
+
    sig { params(node: MIR::Let, cleanup: T.any(MIR::Cleanup, MIR::ErrCleanup)).returns(T::Boolean) }
    def cleanup_source_owns_value?(node, cleanup)
 +    return true
      init = ownership_source_expr(node.init)
      return true if cleanup.cleanup_entry.match_as?
-     return true if allocating_expr?(init)
+     # An empty optional is a valid owned-slot state: cleanup is a no-op while

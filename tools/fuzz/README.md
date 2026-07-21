@@ -221,7 +221,7 @@ expected hard error is absent.
 | `collection_iteration_storage_matrix` | 43    | Collection iteration/storage across arrays, lists, sets, maps, pools, nested and SOA containers. |
 | `mir_checker_negative_matrix` | 47            | Generated malformed-MIR cells for fail-closed ownership verification: double release/finalizer, implicit move, UAF after transfer, unverifiable joins, aggregate allocator mismatch, return allocator invariants, MIR call contracts, InlineZig/RawZig allocator contracts, invalid allocator facts, missing cleanup finalizers, borrowed capture cleanup, structural Rc/Arc copies, unhoisted allocs, COPY_CLEANUP, and INDIRECT_DOUBLE_BOX. |
 | `or_heap_destination_matrix` | 168            | Owned OR / TryCatch / optional branch results placed into return, local, field, list, call, and branch destinations across string/list/struct/union/nested owned shapes. |
-| `owned_sink_destination_matrix` | 240         | Owned source expressions crossed with return, field, list, map, TAKES, and normal call sinks across string/list/struct/union/nested owned shapes. |
+| `owned_sink_destination_matrix` | 246         | Owned source expressions crossed with return, field, list, map, TAKES, and normal call sinks across string/list/struct/union/nested owned shapes, plus a `:hoisted` source (return/TAKES only) wrapping a separately-declared identifier inside an outer struct/union literal. |
 | `union_lowering_cleanup_matrix` | 36         | Union helper lowering and recursive cleanup for string/list/map/inline-struct/nested payload variants. |
 | `builtin_emit_matrix`       | 16              | Source-level builtin emission through strings, collections, union active tags, and pipeline terminals. |
 | `bg_capture_transfer_matrix` | 144            | BG / DO / BG STREAM capture-transfer roots across string/list/struct/union/nested owned shapes and borrow/COPY/GIVE/call/member/index/returned-handle modes. |
@@ -233,10 +233,13 @@ expected hard error is absent.
 | `lowering_boundary_matrix`   | 28           | MIR lowering boundary coverage for call contracts, WITH variants, BG/DO/NEXT, and pipeline terminals. |
 | `test_framework_matrix`      | 6            | TEST/WHEN/TEST THAT grammar through hooks, LET bindings, stubs, pending tests, benchmark, smash, and profile forms. |
 | `extern_boundary_matrix`     | 6            | Negative extern declaration/call boundaries for free functions, trampolines, extern methods/resources, generic comptime calls, and tight-loop rejection. |
-| `curated_gap_corpus`         | 493          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
+| `curated_gap_corpus`         | 494          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
 | `tense_predicate_matrix`     | 11           | Postfix tense predicates, stacked refinement, readiness polling, and ambiguous optional-Boolean rejection. |
 | `next_tense_matrix`          | 9            | NEXT across future/stream values and their fallible/optional tense permutations, including invalid redundant and missing unwraps. |
 | `tense_operation_plan_matrix` | 34          | Executable annotation-to-MIR handoff coverage for TRY, UNWRAP, OR_ELSE, tense predicates, ordered tense navigation, scalar NEXT, and fallible promise-list aggregation. |
+| `string_interpolation_matrix` | 30          | `"${expr}"` interpolation shapes (variable, toString, multi-hole, bare `$`, chained call) crossed with local, return, arg, list, struct-field, and loop-fold consumers; Ruby-declared expected values. |
+| `lambda_capture_matrix`      | 20           | Lambda literal shapes (plain, USE captures of ints/strings/pairs, default params) through inferred, typed FN(...), loop, and higher-order call contexts. |
+| `module_graph_matrix`        | 10           | REQUIRE graphs (single edge, chain, diamond) importing PUB/package functions and STRUCT/UNION/ENUM types via emitted companion modules; PRIVATE symbols locked invisible as negative cells. |
 
 ### `stream_into_boundary` matrix
 

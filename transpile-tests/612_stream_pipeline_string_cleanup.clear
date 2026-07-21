@@ -1,0 +1,23 @@
+FN size(s: String) RETURNS Int64 -> RETURN s.length(); END
+
+FN main() RETURNS Void ->
+  src: ~?String[] = BG STREAM {
+    a: String = COPY "a";
+    b: String = COPY "bb";
+    YIELD a;
+    YIELD b;
+  };
+  running: ~Int64@observable = src |> SELECT _.length() |> SUM _;
+  total = NEXT running;
+  ASSERT total == 3_i64;
+
+  src2: ~?String[] = BG STREAM {
+    c: String = COPY "ccc";
+    d: String = COPY "dddd";
+    YIELD c;
+    YIELD d;
+  };
+  running2: ~Int64@observable = src2 |> SELECT size(_) |> SUM _;
+  total2 = NEXT running2;
+  ASSERT total2 == 7_i64;
+END

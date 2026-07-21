@@ -8,6 +8,7 @@ FN main() RETURNS Void ->
 
     # If 'a' tries to free at end of scope -> Double Free Crash
     # If 'b' fails to free -> Leak
+    ASSERT b.id == 1;
     RETURN;
 END
 

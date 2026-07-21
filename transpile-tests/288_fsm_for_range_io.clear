@@ -1,9 +1,13 @@
 FN main() RETURNS Void ->
-  p1: ~Void = BG {
+  p1: ~Int64 = BG {
+    MUTABLE n = 0;
     FOR i IN (0 ..< 3) DO
       sleep(10);
+      n = n + 1;
     END
+    n;
   };
-  NEXT p1;
+  total = NEXT p1;
+  ASSERT total == 3;
   RETURN;
 END

@@ -32,5 +32,8 @@ FN main() RETURNS Void ->
     s = wrapStr(makeLambda());
     s2 = wrapStr(makeLambda());
     s3 = wrapStr(makeLambda());
-    print("PASS");
+    # A Lambda is not a Str, so getStr falls through to DEFAULT.
+    ASSERT s == "nil";
+    ASSERT s2 == "nil";
+    ASSERT s3 == "nil";
 END

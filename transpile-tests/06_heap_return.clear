@@ -8,5 +8,6 @@ END
 FN main() RETURNS Void ->
     us2 = TRY makeUser();
     # u2 should be freed here
+    ASSERT us2.id == 1;
     RETURN;
 END

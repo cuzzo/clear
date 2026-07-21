@@ -15,5 +15,15 @@ FN main() RETURNS Void ->
   b = IF FALSE THEN 100 ELSE 200 END;
   flag = TRUE;
   c = IF flag THEN 42 ELSE 0 END;
+  ASSERT a == 1;
+  ASSERT b == 200;
+  ASSERT c == 42;
+  ASSERT pick(TRUE) == 10;
+  ASSERT pick(FALSE) == 20;
+  ASSERT grade(95) == "A";
+  ASSERT grade(85) == "B";
+  ASSERT grade(70) == "C";
+  ASSERT label(TRUE) == "ok";
+  ASSERT label(FALSE) == "error";
   RETURN;
 END
