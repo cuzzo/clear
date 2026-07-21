@@ -132,7 +132,59 @@ fn run() -> Result<()> {
             let rendered = match format.as_str() {
                 "json" => serde_json::to_string_pretty(&merged.call_resolution_coverage)?,
                 "text" => render_call_resolution(&merged.call_resolution_coverage),
-                other => bail!("unsupported call-resolution format: {other}; use text or json"),
+                // Corpus-resolved call edges plus the method index needed to
+                // join them: the architecture layer consumes this directly.
+                "edges" => {
+                    let method_index: std::collections::BTreeMap<&str, &fact_mine_rust::profile::MethodRecord> =
+                        merged.methods.iter().map(|method| (method.id.as_str(), method)).collect();
+                    let edges = merged
+                        .calls
+                        .iter()
+                        .filter_map(|call| {
+                            let target = call.target.as_deref()?;
+                            let target_method = method_index.get(target)?;
+                            let source_method = method_index.get(call.source.as_str());
+                            Some(serde_json::json!({
+                                "source": call.source,
+                                "source_owner": call.owner,
+                                "source_function": call.function,
+                                "source_path": call.path,
+                                "line": call.line,
+                                "receiver": call.receiver,
+                                "message": call.message,
+                                "target": target,
+                                "target_owner": target_method.owner,
+                                "target_name": target_method.name,
+                                "target_path": target_method.path,
+                                "target_line": target_method.line,
+                                "target_visibility": target_method.visibility,
+                                "source_resolved": source_method.is_some(),
+                            }))
+                        })
+                        .collect::<Vec<_>>();
+                    let methods = merged
+                        .methods
+                        .iter()
+                        .map(|method| {
+                            serde_json::json!({
+                                "id": method.id,
+                                "owner": method.owner,
+                                "name": method.name,
+                                "path": method.path,
+                                "line": method.line,
+                                "visibility": method.visibility,
+                                "language": method.language,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    serde_json::to_string(&serde_json::json!({
+                        "format": "fact-mine.call-edges.v1",
+                        "edges": edges,
+                        "methods": methods,
+                        "coverage": merged.call_resolution_coverage,
+                    }))?
+                }
+                other => bail!("unsupported call-resolution format: {other}; use text, json, or edges"),
             };
             if let Some(ref output_path) = output {
                 fs::write(output_path, rendered)?;
