@@ -45,6 +45,7 @@ class EvidenceReportTest < Minitest::Test
     assert_includes kinds, "PROVES_REVERTED_CHANGE"
     assert_includes kinds, "STRENGTHENS_EXISTING_ORACLE"
     assert_includes kinds, "INCIDENTAL_MUTANT_KILLS"
+    assert_includes kinds, "MUTATION_REDUNDANT"
     assert_includes kinds, "EQUAL_KILL_SET"
     assert_includes kinds, "MUTATION_DOMINATED"
     assert_includes kinds, "COVERED_WEAK_ORACLE"
@@ -88,10 +89,22 @@ class EvidenceReportTest < Minitest::Test
       )
       contributions = Evidence::ContributionAnalyzer.new(corpus).analyze
       subsumption = Evidence::SubsumptionAnalyzer.new(corpus).analyze(contributions: contributions)
-      report = Evidence::ReportBuilder.new(corpus).build(contributions: contributions, subsumption: subsumption)
+      stability = Evidence::StabilityAnalyzer.new(corpus).analyze(
+        3.times.map { |trial| Evidence::KillTrial.new(test_id: "t1", mutant_id: "m1", killed: true, trial: trial) },
+      )
+      report = Evidence::ReportBuilder.new(corpus).build(
+        contributions: contributions,
+        subsumption: subsumption,
+        stability: stability,
+        runtimes: {"t1" => 2_000.0},
+        high_cost_ms: 1.0,
+      )
 
       assert_equal complete == false ? "incomplete" : "unknown", report.vectors.fetch(0).completeness
       assert_equal 0, report.vectors.fetch(0).unique_kills
+      assert_equal ["UNKNOWN_INCOMPLETE_ATTRIBUTION"], report.findings.map { |finding| finding.kind.serialize }
+      refute_includes report.findings.map { |finding| finding.kind }, Evidence::ReviewFindingKind::HighCostNoMarginalDetection
+      refute_includes report.findings.map { |finding| finding.kind }, Evidence::ReviewFindingKind::AddsStableUniqueKills
     end
   end
 

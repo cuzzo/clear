@@ -22,12 +22,14 @@ module TestMiser
         DuplicatesChangeDetection = new("DUPLICATES_CHANGE_DETECTION")
         StrengthensExistingOracle = new("STRENGTHENS_EXISTING_ORACLE")
         IncidentalMutantKills = new("INCIDENTAL_MUTANT_KILLS")
+        MutationRedundant = new("MUTATION_REDUNDANT")
         MutationDominated = new("MUTATION_DOMINATED")
         EqualKillSet = new("EQUAL_KILL_SET")
         CoveredWeakOracle = new("COVERED_WEAK_ORACLE")
         OutOfMutationScope = new("OUT_OF_MUTATION_SCOPE")
         HighCostNoMarginalDetection = new("HIGH_COST_NO_MARGINAL_DETECTION")
         Unknown = new("UNKNOWN")
+        UnknownIncompleteAttribution = new("UNKNOWN_INCOMPLETE_ATTRIBUTION")
       end
     end
 
@@ -231,10 +233,10 @@ module TestMiser
         findings.concat(cohort_findings(contributions))
         findings.concat(equal_kill_findings(contributions))
         findings.concat(subsumption_findings(subsumption))
-        findings.concat(stability_findings(stability))
+        findings.concat(stability_findings(stability, contributions.corpus_complete))
         findings.concat(oracle_findings(oracle_sensitivity))
         findings.concat(counterfactual_findings(counterfactual, counterfactual_test_ids))
-        findings.concat(cost_findings(vectors, high_cost_ms))
+        findings.concat(cost_findings(vectors, high_cost_ms, contributions.corpus_complete))
         findings.sort_by { |finding| [finding.test_id.to_s, finding.kind.serialize] }.freeze
       end
 
@@ -248,9 +250,11 @@ module TestMiser
         contribution.findings.filter_map do |finding|
           kind = case finding
                  when FindingKind::AddsUniqueKills then ReviewFindingKind::AddsUniqueKills
+                 when FindingKind::MutationRedundant then ReviewFindingKind::MutationRedundant
                  when FindingKind::MutationDominated then ReviewFindingKind::MutationDominated
                  when FindingKind::CoveredWeakOracle then ReviewFindingKind::CoveredWeakOracle
                  when FindingKind::OutOfMutationScope then ReviewFindingKind::OutOfMutationScope
+                 when FindingKind::UnknownIncompleteAttribution then ReviewFindingKind::UnknownIncompleteAttribution
                  else nil
                  end
           next if kind.nil?
@@ -316,9 +320,11 @@ module TestMiser
         end
       end
 
-      sig { params(stability: T.nilable(StabilityAnalysis)).returns(T::Array[ReviewFinding]) }
-      def stability_findings(stability)
-        return [] if stability.nil?
+      sig do
+        params(stability: T.nilable(StabilityAnalysis), corpus_complete: T.nilable(T::Boolean)).returns(T::Array[ReviewFinding])
+      end
+      def stability_findings(stability, corpus_complete)
+        return [] if stability.nil? || corpus_complete != true
 
         stability.stable_unique_kills.filter_map do |row|
           next if row.stable_unique_kills.empty?
@@ -375,8 +381,16 @@ module TestMiser
         end
       end
 
-      sig { params(vectors: T::Array[EvidenceVector], threshold: Float).returns(T::Array[ReviewFinding]) }
-      def cost_findings(vectors, threshold)
+      sig do
+        params(
+          vectors: T::Array[EvidenceVector],
+          threshold: Float,
+          corpus_complete: T.nilable(T::Boolean),
+        ).returns(T::Array[ReviewFinding])
+      end
+      def cost_findings(vectors, threshold, corpus_complete)
+        return [] unless corpus_complete == true
+
         vectors.filter_map do |vector|
           next if vector.runtime_ms.nil? || T.must(vector.runtime_ms) < threshold
           next unless vector.unique_kills.zero? && vector.stable_unique_kills.zero? && vector.cohort_new_detection.zero?
