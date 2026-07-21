@@ -13,9 +13,7 @@ class EvidenceReportTest < Minitest::Test
       baseline_test_ids: ["t3"],
     )
     subsumption = Evidence::SubsumptionAnalyzer.new(corpus).analyze(contributions: contributions)
-    stability = Evidence::StabilityAnalyzer.new(corpus).analyze(
-      3.times.map { |trial| Evidence::KillTrial.new(test_id: "t1", mutant_id: "m2", killed: true, trial: trial) },
-    )
+    stability = complete_stability(corpus)
     counterfactual = counterfactual(Evidence::CounterfactualStatus::ProvesRevertedChange, baseline_status: 0)
     oracle = oracle_analysis
 
@@ -142,6 +140,22 @@ class EvidenceReportTest < Minitest::Test
       baseline_detects_reversal: baseline.nil? ? nil : !baseline.success?,
       reason: "fixture result",
     )
+  end
+
+  def complete_stability(corpus)
+    outcomes = {
+      ["t1", "m1"] => true, ["t1", "m2"] => true, ["t1", "m3"] => false,
+      ["t2", "m1"] => true, ["t2", "m2"] => false, ["t2", "m3"] => false,
+      ["t3", "m1"] => false, ["t3", "m2"] => false, ["t3", "m3"] => false,
+      ["t4", "m1"] => false, ["t4", "m2"] => false, ["t4", "m3"] => false,
+      ["t5", "m1"] => true, ["t5", "m2"] => false, ["t5", "m3"] => false,
+    }
+    trials = outcomes.flat_map do |(test_id, mutant_id), killed|
+      3.times.map do |trial|
+        Evidence::KillTrial.new(test_id: test_id, mutant_id: mutant_id, killed: killed, trial: trial)
+      end
+    end
+    Evidence::StabilityAnalyzer.new(corpus).analyze(trials)
   end
 
   def oracle_analysis

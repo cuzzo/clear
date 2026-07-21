@@ -74,15 +74,20 @@ class EvidenceSubsumptionStabilityTest < Minitest::Test
       mutants: [mutant("m1", %w[t1 t2], %w[t1 t2]), mutant("m2", %w[t1], %w[t1]), mutant("m3", %w[t1 t2], %w[t1 t2])],
       complete: true,
     )
-    trials = [
-      *3.times.map { |trial| Evidence::KillTrial.new(test_id: "t1", mutant_id: "m1", killed: true, trial: trial) },
-      *3.times.map { |trial| Evidence::KillTrial.new(test_id: "t2", mutant_id: "m1", killed: true, trial: trial) },
-      *3.times.map { |trial| Evidence::KillTrial.new(test_id: "t1", mutant_id: "m2", killed: true, trial: trial) },
-      *2.times.map { |trial| Evidence::KillTrial.new(test_id: "t1", mutant_id: "m3", killed: true, trial: trial) },
-      Evidence::KillTrial.new(test_id: "t2", mutant_id: "m3", killed: true, trial: 0),
-      Evidence::KillTrial.new(test_id: "t2", mutant_id: "m3", killed: false, trial: 1),
-      *3.times.map { |trial| Evidence::KillTrial.new(test_id: "t2", mutant_id: "m2", killed: false, trial: trial) },
-    ]
+    outcomes = {
+      ["t1", "m1"] => true,
+      ["t2", "m1"] => true,
+      ["t1", "m2"] => true,
+      ["t2", "m2"] => false,
+      ["t1", "m3"] => [true, false, true],
+      ["t2", "m3"] => [true, false, true],
+    }
+    trials = outcomes.flat_map do |(test_id, mutant_id), outcome|
+      3.times.map do |trial|
+        killed = outcome.is_a?(Array) ? outcome.fetch(trial) : outcome
+        Evidence::KillTrial.new(test_id: test_id, mutant_id: mutant_id, killed: killed, trial: trial)
+      end
+    end
 
     analysis = Evidence::StabilityAnalyzer.new(corpus).analyze(trials)
     t1 = analysis.attributions.find { |attribution| attribution.test_id == "t1" }
@@ -92,13 +97,43 @@ class EvidenceSubsumptionStabilityTest < Minitest::Test
     assert_equal ["m3"], t1&.unstable_kills
     assert_equal %w[m1], t2&.stable_kills
     assert_equal ["m3"], t2&.unstable_kills
+    assert analysis.matrix_complete
     assert_equal ["m2"], analysis.stable_unique_kills.find { |row| row.test_id == "t1" }&.stable_unique_kills
     assert_empty analysis.stable_unique_kills.find { |row| row.test_id == "t2" }&.stable_unique_kills
-    assert_equal 16, analysis.observed_trials
+    assert_equal 3, analysis.observed_trials
+    assert_equal [0, 1, 2], analysis.trial_ids
     assert_equal [true, true, true], t1&.observations&.fetch("m1")
     assert_equal "test-quality-evidence/stability-v1", analysis.to_h.fetch("schema")
     assert_equal 1, Evidence::StabilityAnalyzer.new(corpus, threshold: 1).analyze([]).threshold
     assert_raises(ArgumentError) { Evidence::StabilityAnalyzer.new(corpus, threshold: 0) }
+
+    duplicate = Evidence::StabilityAnalyzer.new(corpus).analyze(
+      trials + [Evidence::KillTrial.new(test_id: "t1", mutant_id: "m2", killed: true, trial: 0)],
+    )
+    refute duplicate.matrix_complete
+    assert_empty duplicate.stable_unique_kills.find { |row| row.test_id == "t1" }&.stable_unique_kills
+    assert_equal "stability matrix contains duplicate trial observations", duplicate.unknown_reason
+    assert_equal 3, duplicate.observed_trials
+
+    partial_corpus = Evidence::Corpus.new(
+      tests: corpus.tests,
+      mutants: corpus.mutants,
+      complete: false,
+      incomplete_reason: "partial corpus",
+    )
+    partial = Evidence::StabilityAnalyzer.new(partial_corpus).analyze(trials)
+    refute partial.matrix_complete
+    assert_empty partial.stable_unique_kills.flat_map(&:stable_unique_kills)
+    assert_equal "partial corpus", partial.unknown_reason
+
+    short = Evidence::StabilityAnalyzer.new(corpus).analyze(trials, trial_ids: [0, 1])
+    assert_equal "stability matrix has fewer trial IDs than its consistency threshold", short.unknown_reason
+    missing = Evidence::StabilityAnalyzer.new(corpus).analyze(trials[1..], mutant_ids: ["m1"])
+    assert_equal "stability matrix is missing test × mutant × trial observations", missing.unknown_reason
+    unknown = Evidence::StabilityAnalyzer.new(corpus).analyze(trials, test_ids: ["missing"])
+    assert_equal "stability matrix names an unknown test or mutant", unknown.unknown_reason
+    empty = Evidence::StabilityAnalyzer.new(corpus).analyze(trials, test_ids: [])
+    assert_equal "stability matrix has no selected tests or mutants", empty.unknown_reason
   end
 
   def test_scheduler_selects_weak_redundant_and_dominated_tests
@@ -118,7 +153,7 @@ class EvidenceSubsumptionStabilityTest < Minitest::Test
     assert_equal %w[duplicate weak], candidates.map(&:test_id)
     assert_equal ["m1"], candidates.fetch(0).mutant_ids
     assert_includes candidates.fetch(0).reason, "MUTATION_REDUNDANT"
-    assert_equal({"test_id" => "weak", "mutant_ids" => [], "reason" => "COVERED_WEAK_ORACLE"}, candidates.fetch(1).to_h)
+    assert_equal({"test_id" => "weak", "mutant_ids" => ["m3"], "reason" => "COVERED_WEAK_ORACLE"}, candidates.fetch(1).to_h)
   end
 
   private

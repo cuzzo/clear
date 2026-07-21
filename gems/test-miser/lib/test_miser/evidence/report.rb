@@ -324,7 +324,7 @@ module TestMiser
         params(stability: T.nilable(StabilityAnalysis), corpus_complete: T.nilable(T::Boolean)).returns(T::Array[ReviewFinding])
       end
       def stability_findings(stability, corpus_complete)
-        return [] if stability.nil? || corpus_complete != true
+        return [] if stability.nil? || corpus_complete != true || !stability.matrix_complete
 
         stability.stable_unique_kills.filter_map do |row|
           next if row.stable_unique_kills.empty?
