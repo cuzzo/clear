@@ -9,12 +9,37 @@
 # file). File-granularity is the WIP simplification; Lineage's rename-stable
 # unit ledger is the intended upgrade path.
 #
-# Usage: ruby change_coupling.rb REPO_ROOT [min_support]
+# Usage: ruby change_coupling.rb REPO_ROOT [min_support] [--sarif=PATH] [--base=REF [--head=REF]]
 
 require "set"
+require "json"
+require "open3"
 
-repo = File.expand_path(ARGV[0] || ".")
-min_support = (ARGV[1] || 5).to_i
+RULES = [
+  {
+    "id" => "arch-change-coupling",
+    "name" => "Cross-module change coupling",
+    "shortDescription" => { "text" => "Files in different modules almost always change together" },
+    "fullDescription" => {
+      "text" => "High co-change support and confidence between files in different modules indicates a hidden dependency or a misplaced boundary: the logical unit spans the module split."
+    },
+    "defaultConfiguration" => { "level" => "note" }
+  }
+].freeze
+
+args = []
+options = { sarif: nil, base: nil, head: nil }
+ARGV.each do |arg|
+  case arg
+  when /\A--sarif=(.+)/ then options[:sarif] = Regexp.last_match(1)
+  when /\A--base=(.+)/ then options[:base] = Regexp.last_match(1)
+  when /\A--head=(.+)/ then options[:head] = Regexp.last_match(1)
+  else args << arg
+  end
+end
+
+repo = File.expand_path(args[0] || ".")
+min_support = (args[1] || 5).to_i
 
 SOURCE_EXT = /\.(rb|py|js|mjs|cjs|ts|go|c|h|cc|cpp|cxx|hpp|hh|cs|java|kt|swift|lua|rs|zig|php)\z/
 EXCLUDE = %r{(^|/)(test|tests|spec|specs|vendor|node_modules|examples?|bench(mark)?s?|dist|build|target|docs?|fixtures)(/|$)|(^|/)test_|[._](test|spec)\.}
@@ -60,10 +85,58 @@ rows = pair_changes.filter_map do |(a, b), support|
   [support, confidence, distance, a, b]
 end
 
+changed = nil
+if options[:base]
+  stdout, _stderr, status = Open3.capture3(
+    "git", "-C", repo, "diff", "--name-only", "#{options[:base]}...#{options[:head] || "HEAD"}"
+  )
+  changed = stdout.lines.map(&:strip).reject(&:empty?).to_set if status.success?
+end
+
+rows = rows.select { |_, _, _, a, b| changed.include?(a) || changed.include?(b) } if changed
+
 puts "repo: #{repo}  commits considered: #{commits.size}"
 puts
 puts "== Change-coupled pairs (support >= #{min_support}, sorted by support*confidence) =="
-rows.sort_by { |s, c, _, _, _| -(s * c) }.first(15).each do |support, confidence, distance, a, b|
+sorted_rows = rows.sort_by { |s, c, _, _, _| -(s * c) }
+sorted_rows.first(15).each do |support, confidence, distance, a, b|
   printf("  s=%-3d c=%.2f %-12s %s <-> %s\n", support, confidence, distance, a, b)
 end
 puts "  (none)" if rows.empty?
+
+if options[:sarif]
+  findings = sorted_rows.first(50).map do |support, confidence, distance, a, b|
+    {
+      rule_id: "arch-change-coupling",
+      level: "note",
+      message: "#{a} and #{b} co-changed in #{support} commits (confidence #{confidence.round(2)}, #{distance})",
+      path: a,
+      line: 1
+    }
+  end
+  document = {
+    "$schema" => "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+    "version" => "2.1.0",
+    "runs" => [
+      {
+        "tool" => { "driver" => { "name" => "lineage-change-coupling", "rules" => RULES } },
+        "results" => findings.map do |finding|
+          {
+            "ruleId" => finding[:rule_id],
+            "level" => finding[:level],
+            "message" => { "text" => finding[:message] },
+            "locations" => [
+              {
+                "physicalLocation" => {
+                  "artifactLocation" => { "uri" => finding[:path] },
+                  "region" => { "startLine" => finding[:line] }
+                }
+              }
+            ]
+          }
+        end
+      }
+    ]
+  }
+  File.write(options[:sarif], JSON.pretty_generate(document))
+end

@@ -1,29 +1,84 @@
 # frozen_string_literal: true
 
-# WIP: cross-language reach-through report - module A invoking non-public
-# methods of module B.
+# Cross-language reach-through report: module A invoking non-public methods
+# of module B.
 #
-# Sources of truth: fact-mine syntax-facts (declared visibility per function,
-# call sites with receiver/message/arguments). Three finding classes:
-#   1. declared-private cross-owner call (visibility != public at the target)
-#   2. convention-private cross-owner call (leading-underscore target in
-#      Python/JS where the language enforces nothing)
-#   3. Ruby send bypass: send(:literal) resolved to the actual target and
-#      checked; send(dynamic) reported as an unverifiable privacy bypass
-#      (the ruby_metaprogramming hazard already covers these sites).
+# Primary source: corpus-resolved call edges (call-resolution --format
+# edges), which carry the target's declared visibility - no name heuristics.
+# Secondary sources from syntax-facts: Ruby send(:literal) resolution and
+# convention-private (leading underscore) cross-owner calls in languages
+# without enforcement. Dynamic send sites are counted, not resolved - they
+# are already ruby_metaprogramming hazards with a nil-kill escalation path.
 #
-# Usage: ruby reach_through_report.rb REPO_ROOT
+# Visibility semantics: package (Java), crate (Rust), and internal (C#) are
+# same-namespace-legal and never reported. private/protected findings in
+# compiler-enforcing languages are quarantined as suspects (they indicate
+# resolution or extraction artifacts, since such code cannot compile).
+#
+# Usage: ruby reach_through_report.rb REPO_ROOT [--sarif=PATH] [--base=REF [--head=REF]]
 
 require_relative "corpus_common"
 
-repo = File.expand_path(ARGV[0] || ".")
+RULES = [
+  {
+    "id" => "arch-reach-through",
+    "name" => "Cross-module private reach-through",
+    "shortDescription" => { "text" => "A module invokes another module's non-public method" },
+    "fullDescription" => {
+      "text" => "Cross-owner call to a method whose declared or conventional visibility is non-public. The language does not or cannot enforce this boundary; the dependency bypasses the target's public API."
+    },
+    "defaultConfiguration" => { "level" => "warning" }
+  },
+  {
+    "id" => "arch-privacy-bypass",
+    "name" => "Privacy bypass via dynamic dispatch",
+    "shortDescription" => { "text" => "send(:literal) resolves to a non-public method of another owner" },
+    "fullDescription" => {
+      "text" => "A literal send bypasses declared privacy. Dynamic sends are covered separately by metaprogramming hazards with runtime-evidence escalation."
+    },
+    "defaultConfiguration" => { "level" => "warning" }
+  }
+].freeze
+
+NAMESPACE_SCOPED = %w[package crate internal].freeze
+ENFORCING_LANGUAGES = %w[java csharp go rust swift kotlin].freeze
+SEND_METHODS = %w[send __send__ public_send].freeze
+
+options = CorpusCommon.parse_tool_options(ARGV)
+repo = options[:repo]
 files = CorpusCommon.production_files(repo)
 abort "no production sources found" if files.empty?
 
 facts = CorpusCommon.run_syntax_facts(repo, files)
 documents = facts["documents"] || []
+edge_facts = CorpusCommon.run_call_edges(repo, files)
 
-# function identity: [owner, name] -> {visibility, path, line}
+language_by_path = documents.to_h { |doc| [doc["file"], doc["language"]] }
+
+findings = { declared: [], convention: [], send_resolved: [], suspect: [] }
+send_dynamic = 0
+
+# --- Primary: resolved call edges with target visibility ---
+(edge_facts["edges"] || []).each do |edge|
+  visibility = edge["target_visibility"].to_s
+  next if visibility.empty? || visibility == "public"
+  next if NAMESPACE_SCOPED.include?(visibility)
+  next if edge["source_owner"] == edge["target_owner"]
+  # Nested/outer class access is not a module boundary violation.
+  next if edge["source_owner"].to_s.start_with?("#{edge["target_owner"]}::")
+  next if edge["target_owner"].to_s.start_with?("#{edge["source_owner"]}::")
+
+  language = language_by_path[edge["source_path"]]
+  finding = {
+    from: edge["source_owner"], to: "#{edge["target_owner"]}##{edge["target_name"]}",
+    visibility: visibility, at: "#{edge["source_path"]}:#{edge["line"]}",
+    target_at: "#{edge["target_path"]}:#{edge["target_line"]}", resolution: "call-edge"
+  }
+  bucket = ENFORCING_LANGUAGES.include?(language) ? :suspect : :declared
+  findings[bucket] << finding
+end
+
+# --- Secondary: syntax-facts for sends and convention privacy ---
 functions = {}
 owners_by_tail = Hash.new { |h, k| h[k] = Set.new }
 documents.each do |doc|
@@ -31,161 +86,117 @@ documents.each do |doc|
   (doc["functions"] || []).each do |f|
     owner = f["owner"].to_s
     functions[[lang, owner, f["name"]]] ||= {
-      "visibility" => f["visibility"] || "public",
-      "path" => doc["file"],
-      "line" => f["line"]
+      "visibility" => f["visibility"] || "public", "path" => doc["file"], "line" => f["line"]
     }
     owners_by_tail[[lang, owner.split("::").last]] << owner unless owner.empty?
     owners_by_tail[[lang, owner]] << owner unless owner.empty?
   end
 end
 
-def resolve_owner(owners_by_tail, lang, receiver)
-  candidates = owners_by_tail[[lang, receiver]]
-  candidates.size == 1 ? candidates.first : nil
-end
-
-SEND_METHODS = %w[send __send__ public_send].freeze
-
-# Universal method names that unique-name resolution must never claim:
-# stdlib collections and lifecycle verbs define these everywhere, so a single
-# project definition proves nothing about the call target.
-GENERIC_NAMES = %w[
-  add get set remove delete create close open dispose run call apply next
-  size clear put pop push write read count reset init start stop update
-  build parse format merge copy clone equals hash to_s toString insert find
-  max min entry scope len new push_back append contains includes has key
-  keys values each map filter reduce
-].to_set.freeze
-
-# Languages whose compiler already rejects cross-class private access: a
-# cross-owner-private finding there is a resolution artifact (or
-# package-private mislabeled), not a real violation.
-ENFORCING_LANGUAGES = %w[java csharp go rust swift kotlin].freeze
-
-findings = { declared: [], convention: [], send_resolved: [], send_dynamic: 0, suspect: [] }
-
 documents.each do |doc|
+  lang = doc["language"]
   (doc["calls"] || []).each do |call|
     caller_owner = call["owner"].to_s
     receiver = call["receiver"].to_s
     message = call["message"].to_s
     file = doc["file"]
 
-    # Ruby send-family: try to resolve literal symbol targets.
     if SEND_METHODS.include?(message)
-      literal = Array(call["arguments"]).first.to_s[/\A:(\w+[?!]?)\z/, 1]
+      literal = Array(call["arguments"]).first.to_s[/\A:(\w+[?!=]?)\z/, 1]
       if literal.nil?
-        findings[:send_dynamic] += 1
+        send_dynamic += 1
         next
       end
       target_owner =
         if receiver.empty? || receiver == "self"
           caller_owner
         elsif receiver.match?(/\A[A-Z]/)
-          resolve_owner(owners_by_tail, doc["language"], receiver)
+          candidates = owners_by_tail[[lang, receiver]]
+          candidates.size == 1 ? candidates.first : nil
         else
-          defining = functions.keys.select { |(l, _, name)| l == doc["language"] && name == literal }
+          defining = functions.keys.select { |(l, _, name)| l == lang && name == literal }
                               .map { |(_, owner, _)| owner }.uniq
           defining.size == 1 ? defining.first : nil
         end
       next unless target_owner
-      target = functions[[doc["language"], target_owner, literal]]
+      target = functions[[lang, target_owner, literal]]
       next unless target
-      if message != "public_send" && target["visibility"] != "public"
+      if message != "public_send" && !NAMESPACE_SCOPED.include?(target["visibility"]) && target["visibility"] != "public"
         findings[:send_resolved] << {
-          from: caller_owner, to: "#{target_owner}##{literal}",
-          visibility: target["visibility"],
-          at: "#{file}:#{call["line"]}", target_at: "#{target["path"]}:#{target["line"]}"
+          from: caller_owner, to: "#{target_owner}##{literal}", visibility: target["visibility"],
+          at: "#{file}:#{call["line"]}", target_at: "#{target["path"]}:#{target["line"]}",
+          resolution: "send-literal"
         }
       end
       next
     end
 
-    # Ordinary cross-owner calls: resolve constant-shaped receivers by owner
-    # name; fall back to unique-definition resolution for instance receivers
-    # (the message is defined by exactly one owner in the corpus).
-    next if receiver.empty? || receiver == "self" || receiver == "this" || receiver == "cls"
-    target_owner = nil
-    resolution = nil
-    if receiver.match?(/\A[A-Z][A-Za-z0-9_:.]*\z/)
-      target_owner = resolve_owner(owners_by_tail, doc["language"], receiver)
-      resolution = "owner"
-    elsif message.start_with?("_") && !GENERIC_NAMES.include?(message)
-      # Unique-name resolution is only trustworthy for distinctive names.
-      # Plain names collide with struct fields and attr_reader accessors
-      # (which fact-mine does not emit as functions), so restrict the
-      # fallback to underscore-convention targets; everything else needs
-      # receiver type evidence (flow_types / nil-kill runtime types).
-      defining = functions.keys.select { |(l, _, name)| l == doc["language"] && name == message }
-                          .map { |(_, owner, _)| owner }.uniq
-      if defining.size == 1
-        target_owner = defining.first
-        resolution = "unique-name"
-      end
-    end
-    next unless target_owner && target_owner != caller_owner
-    target = functions[[doc["language"], target_owner, message]]
-    next unless target
-
-    if target["visibility"] && target["visibility"] != "public"
-      finding = {
-        from: caller_owner, to: "#{target_owner}##{message}",
-        visibility: "#{target["visibility"]}, via #{resolution}",
-        at: "#{file}:#{call["line"]}", target_at: "#{target["path"]}:#{target["line"]}"
-      }
-      bucket = ENFORCING_LANGUAGES.include?(doc["language"]) ? :suspect : :declared
-      findings[bucket] << finding
-    elsif message.start_with?("_") && !message.start_with?("__")
-      findings[:convention] << {
-        from: caller_owner, to: "#{target_owner}##{message}",
-        visibility: "underscore-convention",
-        at: "#{file}:#{call["line"]}", target_at: "#{target["path"]}:#{target["line"]}"
-      }
-    end
-  end
-
-  # Convention-private access in owner-less module systems (Python/JS):
-  # calling _name on an imported module object.
-  next unless %w[python javascript typescript].include?(doc["language"])
-  (doc["calls"] || []).each do |call|
-    receiver = call["receiver"].to_s
-    message = call["message"].to_s
+    # Convention privacy: underscore-prefixed cross-owner target in languages
+    # that enforce nothing. Distinctive names only; plain names need the
+    # call-edge path above.
+    next unless %w[python javascript typescript ruby].include?(lang)
     next unless message.start_with?("_") && !message.start_with?("__")
-    next if receiver.empty? || receiver == "self" || receiver == "cls" || receiver == "this"
-    next unless receiver.match?(/\A[a-z][a-z0-9_]*\z/)
-    target = functions.keys.find { |(l, _, name)| l == doc["language"] && name == message }
+    next if receiver.empty? || %w[self cls this].include?(receiver)
+    defining = functions.keys.select { |(l, _, name)| l == lang && name == message }
+                        .map { |(_, owner, _)| owner }.uniq
+    next unless defining.size == 1
+    target_owner = defining.first
+    next if target_owner == caller_owner
+    target = functions[[lang, target_owner, message]]
     next unless target
-    target_info = functions[target]
-    next if target_info["path"] == doc["file"]
     findings[:convention] << {
-      from: "#{doc["file"]} (via #{receiver})", to: "#{target[1]}##{message}",
-      visibility: "underscore-convention",
-      at: "#{doc["file"]}:#{call["line"]}", target_at: "#{target_info["path"]}:#{target_info["line"]}"
+      from: caller_owner.empty? ? file : caller_owner, to: "#{target_owner}##{message}",
+      visibility: target["visibility"] == "public" ? "underscore-convention" : target["visibility"],
+      at: "#{file}:#{call["line"]}", target_at: "#{target["path"]}:#{target["line"]}",
+      resolution: "unique-name"
     }
   end
 end
 
-findings[:convention].uniq! { |f| [f[:at], f[:to]] }
+%i[declared convention send_resolved suspect].each do |bucket|
+  findings[bucket].uniq! { |f| [f[:at], f[:to]] }
+end
 
-puts "repo: #{repo}  files: #{files.size}  functions: #{functions.size}"
+changed = options[:base] ? CorpusCommon.changed_files(repo, options[:base], options[:head]).to_set : nil
+in_scope = lambda do |finding|
+  changed.nil? || changed.include?(finding[:at].split(":").first)
+end
+
+sarif_findings = []
+findings[:declared].select(&in_scope).each do |f|
+  sarif_findings << {
+    rule_id: "arch-reach-through",
+    message: "#{f[:from]} calls #{f[:to]} (#{f[:visibility]}, defined #{f[:target_at]})",
+    path: f[:at].split(":").first, line: f[:at].split(":").last
+  }
+end
+findings[:convention].select(&in_scope).each do |f|
+  sarif_findings << {
+    rule_id: "arch-reach-through",
+    message: "#{f[:from]} calls #{f[:to]} (#{f[:visibility]}, defined #{f[:target_at]})",
+    path: f[:at].split(":").first, line: f[:at].split(":").last
+  }
+end
+findings[:send_resolved].select(&in_scope).each do |f|
+  sarif_findings << {
+    rule_id: "arch-privacy-bypass",
+    message: "#{f[:from]} send-bypasses #{f[:to]} (#{f[:visibility]}, defined #{f[:target_at]})",
+    path: f[:at].split(":").first, line: f[:at].split(":").last
+  }
+end
+
+puts "repo: #{repo}  files: #{files.size}  resolved edges: #{(edge_facts["edges"] || []).size}"
 puts
 puts "== Declared-private reach-through (#{findings[:declared].size}) =="
-findings[:declared].first(12).each do |f|
-  puts "  #{f[:at]}  #{f[:from]} -> #{f[:to]} (#{f[:visibility]}, defined #{f[:target_at]})"
-end
+findings[:declared].first(12).each { |f| puts "  #{f[:at]}  #{f[:from]} -> #{f[:to]} (#{f[:visibility]}, defined #{f[:target_at]})" }
 puts
-puts "== send(:literal) privacy bypass (#{findings[:send_resolved].size}); dynamic send sites: #{findings[:send_dynamic]} =="
-findings[:send_resolved].first(12).each do |f|
-  puts "  #{f[:at]}  #{f[:from]} -> #{f[:to]} (#{f[:visibility]})"
-end
+puts "== send(:literal) privacy bypass (#{findings[:send_resolved].size}); dynamic send sites: #{send_dynamic} =="
+findings[:send_resolved].first(12).each { |f| puts "  #{f[:at]}  #{f[:from]} -> #{f[:to]} (#{f[:visibility]})" }
 puts
 puts "== Convention-private reach-through (#{findings[:convention].size}) =="
-findings[:convention].first(12).each do |f|
-  puts "  #{f[:at]}  #{f[:from]} -> #{f[:to]}"
-end
+findings[:convention].first(12).each { |f| puts "  #{f[:at]}  #{f[:from]} -> #{f[:to]} (#{f[:visibility]})" }
 puts
-puts "== Suspect (enforcing language; likely package-private or resolution artifact) (#{findings[:suspect].size}) =="
-findings[:suspect].first(6).each do |f|
-  puts "  #{f[:at]}  #{f[:from]} -> #{f[:to]} (#{f[:visibility]})"
-end
+puts "== Suspect (enforcing language; likely extraction artifact) (#{findings[:suspect].size}) =="
+findings[:suspect].first(6).each { |f| puts "  #{f[:at]}  #{f[:from]} -> #{f[:to]} (#{f[:visibility]})" }
+
+CorpusCommon.write_sarif(options[:sarif], "espalier-reach-through", RULES, sarif_findings) if options[:sarif]

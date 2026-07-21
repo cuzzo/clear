@@ -121,3 +121,86 @@ module CorpusCommon
     sccs
   end
 end
+
+module CorpusCommon
+  module_function
+
+  # Corpus-resolved call edges (fact-mine.call-edges.v1).
+  def run_call_edges(repo, files)
+    bin = fact_mine_bin
+    raise "fact-mine binary missing: #{bin}" unless File.executable?(bin)
+
+    edges = []
+    methods = []
+    files.each_slice(200) do |slice|
+      stdout, stderr, status = Open3.capture3(
+        bin, "call-resolution", "--format=edges", *slice, chdir: repo
+      )
+      raise "fact-mine call-resolution failed: #{stderr[0, 400]}" unless status.success?
+      chunk = JSON.parse(stdout)
+      edges.concat(chunk["edges"] || [])
+      methods.concat(chunk["methods"] || [])
+    end
+    { "edges" => edges, "methods" => methods }
+  end
+
+  def changed_files(repo, base, head)
+    stdout, stderr, status = Open3.capture3(
+      "git", "-C", repo, "diff", "--name-only", "#{base}...#{head || "HEAD"}"
+    )
+    raise "git diff failed: #{stderr[0, 200]}" unless status.success?
+    stdout.lines.map(&:strip).reject(&:empty?)
+  end
+
+  def sarif_document(tool_name, rules, findings)
+    {
+      "$schema" => "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+      "version" => "2.1.0",
+      "runs" => [
+        {
+          "tool" => {
+            "driver" => {
+              "name" => tool_name,
+              "rules" => rules
+            }
+          },
+          "results" => findings.map do |finding|
+            {
+              "ruleId" => finding[:rule_id],
+              "level" => finding[:level] || "warning",
+              "message" => { "text" => finding[:message] },
+              "locations" => [
+                {
+                  "physicalLocation" => {
+                    "artifactLocation" => { "uri" => finding[:path] },
+                    "region" => { "startLine" => [finding[:line].to_i, 1].max }
+                  }
+                }
+              ]
+            }
+          end
+        }
+      ]
+    }
+  end
+
+  def write_sarif(path, tool_name, rules, findings)
+    File.write(path, JSON.pretty_generate(sarif_document(tool_name, rules, findings)))
+  end
+
+  def parse_tool_options(argv)
+    options = { repo: nil, sarif: nil, base: nil, head: nil }
+    positional = []
+    argv.each do |arg|
+      case arg
+      when /\A--sarif=(.+)/ then options[:sarif] = Regexp.last_match(1)
+      when /\A--base=(.+)/ then options[:base] = Regexp.last_match(1)
+      when /\A--head=(.+)/ then options[:head] = Regexp.last_match(1)
+      when /\A--/ then raise "unknown option: #{arg}"
+      else positional << arg
+      end
+    end
+    options[:repo] = File.expand_path(positional.first || ".")
+    options
+  end
+end
