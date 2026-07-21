@@ -229,6 +229,19 @@ fn analyze(method: &MethodSummary, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
                 continue;
             }
 
+            // A later statement reading b and a together (`source[start_pos...pos]`)
+            // is a deliberate before/after range or diff, not a forgotten stale
+            // cache - the whole point is comparing the snapshot to the current
+            // value side by side.
+            let read_together_with_source = method.statements.iter().any(|statement| {
+                statement.index >= reasn.statement_index
+                    && statement.reads.contains(&b.name)
+                    && statement.reads.contains(a)
+            });
+            if read_together_with_source {
+                continue;
+            }
+
             // Is the derived variable b read at or after a's reassignment?
             let is_read_after_reasn = method
                 .statements
@@ -558,6 +571,23 @@ mod tests {
         assert!(
             scan_summaries(&[method]).is_empty(),
             "a predicate that controls source normalization is intentionally retained"
+        );
+    }
+
+    #[test]
+    fn cursor_snapshot_read_alongside_advanced_cursor_is_not_staleness() {
+        let method: MethodSummary = serde_json::from_value(json!({
+            "id": "12", "owner": "T", "name": "scan_token", "file": "lexer.rb", "line": 1, "span": [1,0,10,0],
+            "statements": [
+                { "index": 0, "line": 2, "end_line": 2, "span": [2,0,2,20], "source": "start_pos = pos", "reads": ["pos"], "writes": ["start_pos"], "dependencies": [["start_pos", "pos"]], "co_uses": [] },
+                { "index": 1, "line": 4, "end_line": 4, "span": [4,0,4,15], "source": "pos += 1", "reads": ["pos"], "writes": ["pos"], "dependencies": [], "co_uses": [] },
+                { "index": 2, "line": 6, "end_line": 6, "span": [6,0,6,35], "source": "token = source[start_pos...pos]", "reads": ["start_pos", "pos"], "writes": ["token"], "dependencies": [], "co_uses": [] }
+            ], "boundaries": []
+        })).unwrap();
+
+        assert!(
+            scan_summaries(&[method]).is_empty(),
+            "a snapshot read side by side with the current value is a deliberate range, not a stale cache"
         );
     }
 }

@@ -20,6 +20,12 @@ pub(crate) struct NormalizedFacts {
     pub(crate) state_declarations: Vec<StateDeclaration>,
     pub(crate) state_reads: Vec<StateRead>,
     pub(crate) state_writes: Vec<StateWrite>,
+    /// Bare reads through a chained self-attribute receiver (`self.spec.namespace`).
+    /// Excluded from `state_reads` because the receiver's actual runtime type is
+    /// unproven, so attributing the read to `namespace`'s owning class would be
+    /// unsound; kept separately so a consumer with its own type evidence can
+    /// still use it as a lower-confidence signal.
+    pub(crate) chained_self_reads: Vec<StateRead>,
     pub(crate) decision_sites: Vec<DecisionSite>,
     pub(crate) branch_decisions: Vec<BranchDecision>,
     pub(crate) branch_arms: Vec<BranchArm>,
@@ -1140,10 +1146,22 @@ impl<'a> Extractor<'a> {
         {
             return;
         }
+        if let Some(receiver_field) = call.receiver.strip_prefix('@') {
+            self.facts.chained_self_reads.push(StateRead {
+                field: call.message.clone(),
+                identity: String::new(),
+                receiver: receiver_field.to_string(),
+                file: self.file.clone(),
+                function: self.current_function(),
+                line: node.first_lineno,
+                span: call.span,
+                owner: self.current_owner(),
+            });
+            return;
+        }
         if call.receiver.is_empty()
             || constant_receiver(&call.receiver)
             || literal_receiver(&call.receiver)
-            || call.receiver.starts_with('@')
             || call.receiver.starts_with('$')
         {
             return;

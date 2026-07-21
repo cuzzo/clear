@@ -97,6 +97,10 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         }
     }
 
+    fn function_dispatch_kind_from_node(&self, _name: &str, node: &Node, owner: &str) -> String {
+        javascript::function_dispatch_kind_from_node(node, owner)
+    }
+
     fn parameter_name_from_signature(&self, param: &str) -> Option<String> {
         let mut text = param.split('=').next().unwrap_or(param).trim();
         for prefix in ["public ", "private ", "protected ", "readonly "] {
@@ -320,6 +324,30 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
                 child_nodes.remove(0);
             } else {
                 break;
+            }
+        }
+
+        // An initializer collapses `name[: Type] = value` into a single
+        // LASGN child carrying the whole thing as one blob (no separate
+        // type_annotation sibling survives), so it must be parsed from its
+        // own text instead of split across child_nodes.
+        if let Some(lasgn) = child_nodes.iter().find(|c| c.r#type == "LASGN") {
+            let before_eq = lasgn.text.split('=').next().unwrap_or(&lasgn.text).trim();
+            let (raw_name, type_text) = before_eq
+                .split_once(':')
+                .map(|(n, t)| (n.trim(), Some(t.trim().to_string()).filter(|t| !t.is_empty())))
+                .unwrap_or((before_eq, None));
+            let name = raw_name.strip_prefix("this.").unwrap_or(raw_name);
+            if is_simple_name(name) {
+                return Some(StateDeclaration {
+                    field: name.to_string(),
+                    owner: String::new(),
+                    r#type: type_text,
+                    immutable: false,
+                    file: String::new(),
+                    line: node.first_lineno,
+                    span: span(node),
+                });
             }
         }
 

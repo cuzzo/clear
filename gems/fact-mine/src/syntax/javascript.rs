@@ -284,6 +284,10 @@ impl NormalizedLanguageBehavior for JavaScriptNormalizedBehavior {
         }
     }
 
+    fn function_dispatch_kind_from_node(&self, _name: &str, node: &Node, owner: &str) -> String {
+        function_dispatch_kind_from_node(node, owner)
+    }
+
     fn wrap_branch_predicate(&self, _branch: &Node) -> bool {
         true
     }
@@ -450,6 +454,22 @@ pub(crate) fn property_read_call(node: &Node, parts: &NormalizedCallParts) -> bo
     }
     let text = node.text.as_str();
     !text.contains('(') || (text.starts_with('(') && text.ends_with(')'))
+}
+
+pub(crate) fn function_dispatch_kind_from_node(node: &Node, owner: &str) -> String {
+    if owner.is_empty() {
+        return "top".to_string();
+    }
+    let header = node.text.split('{').next().unwrap_or(node.text.as_str());
+    if header
+        .split(|character: char| !(character == '_' || character.is_ascii_alphanumeric()))
+        .any(|token| token == "static")
+    {
+        "class"
+    } else {
+        "instance"
+    }
+    .to_string()
 }
 
 #[cfg(test)]

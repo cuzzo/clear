@@ -262,6 +262,13 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         span: Span,
     ) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
         let mut writes = Vec::new();
+        if let Some(field) = interlocked_ref_argument_field(node) {
+            writes.push(crate::syntax::normalized_behavior::NormalizedStateWrite {
+                receiver: "self".to_string(),
+                field,
+                span,
+            });
+        }
         if node.r#type == "OBJECT_CREATION_EXPRESSION" {
             let mut type_name = ".literal".to_string();
             for child in &node.children {
@@ -534,6 +541,48 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
     fn untyped_hash_type(&self) -> String {
         "Dictionary<string, object>".to_string()
     }
+}
+
+// Interlocked.Increment/Decrement take their operand by `ref`, mutating the
+// caller's variable directly - unlike an ordinary call argument, this is a
+// write to whatever field is passed, not a read.
+fn interlocked_ref_argument_field(node: &Node) -> Option<String> {
+    if node.r#type != "CALL" {
+        return None;
+    }
+    let method = node.children.iter().find_map(|c| match c {
+        crate::ast::Child::Symbol(s) => Some(s.as_str()),
+        _ => None,
+    })?;
+    if !matches!(method, "Increment" | "Decrement") {
+        return None;
+    }
+    let receiver_matches = node.children.iter().any(|c| match c {
+        crate::ast::Child::Node(n) if n.r#type == "CALL" || n.r#type == "LVAR" => {
+            n.text == "Interlocked" || n.text.ends_with(".Interlocked")
+        }
+        _ => false,
+    });
+    if !receiver_matches {
+        return None;
+    }
+    let argument = node.children.iter().find_map(|c| match c {
+        crate::ast::Child::Node(n) if n.r#type == "LIST" => n.children.iter().find_map(|a| match a {
+            crate::ast::Child::Node(a) if a.r#type == "ARGUMENT" => Some(a.text.trim()),
+            _ => None,
+        }),
+        _ => None,
+    })?;
+    let reference = argument
+        .strip_prefix("ref ")
+        .or_else(|| argument.strip_prefix("out "))?
+        .trim();
+    let field = reference.strip_prefix("this.").unwrap_or(reference);
+    field
+        .starts_with('_')
+        .then_some(field)
+        .filter(|field| field.len() > 1)
+        .map(str::to_string)
 }
 
 static BEHAVIOR: CSharpNormalizedBehavior = CSharpNormalizedBehavior;

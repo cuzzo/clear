@@ -59,6 +59,22 @@ pub(crate) fn extract_file_imports(root: Node, source: &str, language: Language)
                 }
             });
         }
+        Language::Lua => {
+            walk(root, &mut |node| {
+                if node.kind() != "function_call" {
+                    return;
+                }
+                let callee = node
+                    .child_by_field_name("name")
+                    .map(|f| text(f, source))
+                    .unwrap_or_default();
+                if callee == "require" {
+                    if let Some(target) = first_string_literal(node, source) {
+                        push(&mut imports, node, "", &target, "file");
+                    }
+                }
+            });
+        }
         Language::C | Language::Cpp => {
             walk(root, &mut |node| {
                 if node.kind() != "preproc_include" {

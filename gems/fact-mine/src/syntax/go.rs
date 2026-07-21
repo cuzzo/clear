@@ -331,13 +331,10 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             return None;
         }
         if let Some(name) = first_lvar_child_name(node) {
-            let ty = node
-                .text
-                .trim_start()
-                .strip_prefix(&name)
-                .unwrap_or("")
-                .trim()
-                .to_string();
+            let ty = strip_struct_tag(
+                node.text.trim_start().strip_prefix(&name).unwrap_or("").trim(),
+            )
+            .to_string();
             return (!ty.is_empty()).then(|| super::StateDeclaration {
                 field: name,
                 owner: String::new(),
@@ -355,7 +352,7 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         // entirely, not just under the wrong name, since neither this
         // function nor field_name_from_declaration (unset for Go) had
         // anything to find.
-        let embedded_type = node.text.trim();
+        let embedded_type = strip_struct_tag(node.text.trim());
         let name = embedded_type.trim_start_matches('*').rsplit('.').next()?.to_string();
         (simple_identifier(&name)).then(|| super::StateDeclaration {
             field: name,
@@ -920,6 +917,20 @@ fn span(node: &Node) -> Span {
         node.last_lineno,
         node.last_column,
     ]
+}
+
+// A struct tag is a trailing backtick-quoted string on the field's own
+// declaration line, not part of its type - Go itself never allows a
+// backtick inside the tag string, so the last two backticks always bound
+// exactly one tag.
+fn strip_struct_tag(text: &str) -> &str {
+    let trimmed = text.trim_end();
+    if trimmed.ends_with('`') {
+        if let Some(start) = trimmed[..trimmed.len() - 1].rfind('`') {
+            return trimmed[..start].trim_end();
+        }
+    }
+    trimmed
 }
 
 fn first_lvar_child_name(node: &Node) -> Option<String> {

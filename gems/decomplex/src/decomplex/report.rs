@@ -1061,6 +1061,16 @@ fn sarif_message_detail(title: &str, finding: &Value) -> String {
             "state `{}` has {} (confidence={})",
             rv::field(finding, "field"), rv::field(finding, "classification"), rv::field(finding, "confidence")
         ),
+        "Superfluous State" => {
+            let reason = rv::field(finding, "confidence_reason");
+            format!(
+                "state `{}` has {} (confidence={}{})",
+                rv::field(finding, "field"),
+                rv::field(finding, "classification"),
+                rv::field(finding, "confidence"),
+                if reason.is_empty() { String::new() } else { format!(": {reason}") }
+            )
+        }
         "State Heatmap" => format!(
             "state `{}` has pressure={}, messiness={} (writes={}, reads={}, re-derived={}, scatter={}); writers {}; readers {}",
             rv::field(finding, "field"),
@@ -1969,5 +1979,27 @@ mod tests {
         });
         let locs = sarif_locations_for_finding(&finding);
         assert!(locs.is_empty());
+    }
+
+    #[test]
+    fn superfluous_state_sarif_detail_surfaces_confidence_and_reason() {
+        let low_confidence = json!({
+            "field": "namespace",
+            "classification": "dead_state",
+            "confidence": "low",
+            "confidence_reason": "possible external reader via an unresolved chained receiver: app.rb:describe:8 (via spec.namespace)"
+        });
+        let detail = sarif_message_detail("Superfluous State", &low_confidence);
+        assert!(detail.contains("confidence=low"), "got {detail:?}");
+        assert!(detail.contains("unresolved chained receiver"), "got {detail:?}");
+
+        let high_confidence = json!({
+            "field": "unused",
+            "classification": "dead_state",
+            "confidence": "high",
+            "confidence_reason": null
+        });
+        let detail = sarif_message_detail("Superfluous State", &high_confidence);
+        assert_eq!(detail, "state `unused` has dead_state (confidence=high)");
     }
 }

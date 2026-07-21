@@ -5972,6 +5972,7 @@ pub(crate) mod tests {
             call_receiver_projections: vec![],
             state_reads: vec![],
             state_writes: vec![],
+            chained_self_reads: vec![],
             decision_sites: vec![],
             branch_decisions: vec![],
             branch_arms: vec![],

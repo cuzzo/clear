@@ -120,6 +120,7 @@ fn parse_normalized_file(
         state_declarations: facts.state_declarations,
         state_reads: facts.state_reads,
         state_writes: facts.state_writes,
+        chained_self_reads: facts.chained_self_reads,
         decision_sites: facts.decision_sites,
         branch_decisions: facts.branch_decisions,
         branch_arms: facts.branch_arms,

@@ -769,3 +769,157 @@ fn csharp_manual_property_accessor_bodies_are_recognized_as_state_reads_and_writ
         document.state_writes
     );
 }
+
+#[test]
+fn typescript_field_with_initializer_is_recognized_as_state_with_correct_type() {
+    let document = parse_source(
+        ".ts",
+        Language::TypeScript,
+        "class Widget {\n\
+         untyped = 10;\n\
+         typed: number = 20;\n\
+         }\n",
+    );
+
+    assert!(
+        document.state_declarations.iter().any(|d| d.field == "untyped" && d.r#type.is_none()),
+        "an untyped field with an initializer must still be declared as state, got {:?}",
+        document.state_declarations
+    );
+    let typed = document
+        .state_declarations
+        .iter()
+        .find(|d| d.field == "typed")
+        .unwrap_or_else(|| panic!("typed field not found, got {:?}", document.state_declarations));
+    assert_eq!(
+        typed.r#type,
+        Some("number".to_string()),
+        "a typed field's initializer must not leak into its declared type"
+    );
+}
+
+#[test]
+fn csharp_interlocked_increment_is_recognized_as_a_state_write() {
+    let document = parse_source(
+        ".cs",
+        Language::CSharp,
+        "public class Widget {\n\
+         private int _count;\n\
+         public void Bump() {\n\
+         Interlocked.Increment(ref _count);\n\
+         }\n\
+         }\n",
+    );
+
+    assert!(
+        document.state_writes.iter().any(|w| w.field == "_count" && w.function == "Bump"),
+        "Interlocked.Increment(ref _count) must be recognized as a write to _count, got {:?}",
+        document.state_writes
+    );
+}
+
+#[test]
+fn lua_require_is_recognized_as_an_import() {
+    let document = parse_source(
+        ".lua",
+        Language::Lua,
+        "local Widget = require(\"widget\")\n\
+         local Other = require('other.thing')\n",
+    );
+
+    assert!(
+        document.imports.iter().any(|i| i.target == "widget" && i.kind == "file"),
+        "require(\"widget\") must be recognized as a file import, got {:?}",
+        document.imports
+    );
+    assert!(
+        document.imports.iter().any(|i| i.target == "other.thing" && i.kind == "file"),
+        "require('other.thing') must be recognized as a file import, got {:?}",
+        document.imports
+    );
+}
+
+#[test]
+fn go_struct_tag_does_not_hide_an_embedded_field_or_leak_into_a_named_fields_type() {
+    let document = parse_source(
+        ".go",
+        Language::Go,
+        "package widget\n\n\
+         type Widget struct {\n\
+         Base  `mapstructure:\",squash\"`\n\
+         Name string `mapstructure:\"name\"`\n\
+         }\n",
+    );
+
+    assert!(
+        document.state_declarations.iter().any(|d| d.field == "Base" && d.owner == "Widget"),
+        "an embedded field with a struct tag must still be declared as state, got {:?}",
+        document.state_declarations
+    );
+    let name_field = document
+        .state_declarations
+        .iter()
+        .find(|d| d.field == "Name")
+        .unwrap_or_else(|| panic!("Name field not found, got {:?}", document.state_declarations));
+    assert_eq!(
+        name_field.r#type,
+        Some("string".to_string()),
+        "a struct tag must not leak into the field's declared type"
+    );
+}
+
+#[test]
+fn javascript_static_method_is_tagged_class_not_instance() {
+    let document = parse_source(
+        ".js",
+        Language::JavaScript,
+        "class Widget {\n\
+         static create() {\n\
+         return new Widget();\n\
+         }\n\
+         instanceMethod() {\n\
+         return 1;\n\
+         }\n\
+         }\n",
+    );
+
+    let create = document
+        .function_defs
+        .iter()
+        .find(|f| f.name == "create")
+        .unwrap_or_else(|| panic!("create not found, got {:?}", document.function_defs));
+    assert_eq!(create.dispatch_kind, "class");
+    let instance_method = document
+        .function_defs
+        .iter()
+        .find(|f| f.name == "instanceMethod")
+        .unwrap_or_else(|| panic!("instanceMethod not found, got {:?}", document.function_defs));
+    assert_eq!(instance_method.dispatch_kind, "instance");
+}
+
+#[test]
+fn python_chained_self_attribute_read_is_captured_separately_from_state_reads() {
+    let document = parse_source(
+        ".py",
+        Language::Python,
+        "class HookImpl:\n\
+         def __init__(self, spec):\n\
+         self.spec = spec\n\n\
+         def describe(self):\n\
+         return self.spec.namespace\n",
+    );
+
+    assert!(
+        !document.state_reads.iter().any(|r| r.field == "namespace"),
+        "an unproven cross-instance read must not be attributed as a direct state read, got {:?}",
+        document.state_reads
+    );
+    assert!(
+        document
+            .chained_self_reads
+            .iter()
+            .any(|r| r.field == "namespace" && r.receiver == "spec"),
+        "self.spec.namespace must be captured as a chained self-attribute read, got {:?}",
+        document.chained_self_reads
+    );
+}

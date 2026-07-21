@@ -52,6 +52,36 @@ pub fn scan_documents_with_corpus(documents: &[Document], corpus_complete: bool)
 
     let icf_report = implicit_control_flow::scan_documents(documents);
     let opaque_state_escapes = opaque_state_escape_functions(documents);
+    // (file, function) -> owner, used to resolve what class a chained read's
+    // receiver attribute (`spec` in `self.spec.namespace`) is declared on.
+    let function_owner: BTreeMap<(String, String), String> = documents
+        .iter()
+        .flat_map(|document| {
+            document
+                .function_defs
+                .iter()
+                .map(|f| ((document.file.clone(), f.name.clone()), f.owner.clone()))
+        })
+        .collect();
+    // (owner, field) -> declared type text, used to check whether that
+    // receiver attribute is actually an instance of the field's own owner.
+    let declared_type: BTreeMap<(String, String), String> = documents
+        .iter()
+        .flat_map(|document| {
+            document.state_declarations.iter().filter_map(|decl| {
+                decl.r#type
+                    .clone()
+                    .map(|ty| ((decl.owner.clone(), decl.field.clone()), ty))
+            })
+        })
+        .collect();
+    let chained_reads_by_field: BTreeMap<&str, Vec<&crate::decomplex::syntax::StateRead>> = documents
+        .iter()
+        .flat_map(|document| document.chained_self_reads.iter())
+        .fold(BTreeMap::new(), |mut acc, read| {
+            acc.entry(read.field.as_str()).or_default().push(read);
+            acc
+        });
     let mut adjacent_pairs: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
     for proto in &icf_report.ordered_protocols {
         if proto.dependency.contains(&"write_read".to_string()) && proto.protocol.len() >= 2 {
@@ -85,6 +115,64 @@ pub fn scan_documents_with_corpus(documents: &[Document], corpus_complete: bool)
             if !corpus_complete {
                 continue;
             }
+
+            // `norm` collapses to the bare field name whenever it is the only
+            // slot with that spelling in the corpus, so the writer's owner
+            // must come from the writer sites themselves, not by parsing it
+            // back out of the display key.
+            let field_name = norm.rsplit("::").next().unwrap_or(norm.as_str());
+            let writer_owner: Option<&str> = self_writes.iter().find_map(|writer| {
+                function_owner
+                    .get(&(writer.file.clone(), writer.defn.clone()))
+                    .map(String::as_str)
+            });
+
+            // A chained read (`self.spec.namespace`) is only unsound when the
+            // receiver's actual type can't be checked. Resolve it against
+            // that receiver's own declared type when we have one; only when
+            // it's genuinely unresolvable does this become a confidence
+            // downgrade instead of a full reader.
+            let mut proven_reader = false;
+            let mut unresolved_sites = Vec::new();
+            if let Some(candidates) = chained_reads_by_field.get(field_name) {
+                for read in candidates {
+                    let resolved = function_owner
+                        .get(&(read.file.clone(), read.function.clone()))
+                        .and_then(|reading_owner| {
+                            declared_type.get(&(reading_owner.clone(), read.receiver.clone()))
+                        });
+                    match (resolved, writer_owner) {
+                        (Some(ty), Some(writer_owner)) if ty == writer_owner => {
+                            proven_reader = true;
+                            break;
+                        }
+                        _ => {
+                            unresolved_sites.push(format!(
+                                "{}:{}:{} (via {}.{})",
+                                read.file, read.function, read.line, read.receiver, read.field
+                            ));
+                        }
+                    }
+                }
+            }
+            if proven_reader {
+                continue;
+            }
+
+            let (confidence, confidence_reason) = if unresolved_sites.is_empty() {
+                ("high".to_string(), None)
+            } else {
+                unresolved_sites.sort();
+                unresolved_sites.dedup();
+                (
+                    "low".to_string(),
+                    Some(format!(
+                        "possible external reader via an unresolved chained receiver: {}",
+                        unresolved_sites.join(", ")
+                    )),
+                )
+            };
+
             results.push(SuperfluousStateFinding {
                 field: norm.clone(),
                 score: 0.85,
@@ -115,8 +203,8 @@ pub fn scan_documents_with_corpus(documents: &[Document], corpus_complete: bool)
                 reader_methods: Vec::new(),
                 ctorset: self_writes.iter().all(|w| w.defn == "initialize"),
                 adjacent_sites: None,
-                confidence: "high".to_string(),
-                confidence_reason: None,
+                confidence,
+                confidence_reason,
             });
             continue;
         }
@@ -477,5 +565,75 @@ mod tests {
         let findings = scan_documents(&[doc]);
         let cache = findings.iter().find(|finding| finding.field == "cache").unwrap();
         assert_eq!(cache.classification, "derived_cache");
+    }
+
+    fn function_def(file: &str, name: &str, owner: &str, line: usize) -> serde_json::Value {
+        json!({
+            "file": file, "name": name, "owner": owner, "line": line, "span": [line, 0, line, 1],
+            "body": { "kind": "def", "text": "", "span": [line, 0, line, 1], "named": true, "field_name": null, "children": [] },
+            "visibility": "public", "params": []
+        })
+    }
+
+    #[test]
+    fn cross_instance_read_with_unresolved_receiver_downgrades_confidence_instead_of_suppressing() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "app.rb",
+            "language": "ruby",
+            "function_defs": [
+                function_def("app.rb", "set_namespace", "HookSpec", 3),
+                function_def("app.rb", "describe", "HookImpl", 8)
+            ],
+            "state_declarations": [
+                { "field": "spec", "owner": "HookImpl", "type": null, "file": "app.rb", "line": 6, "span": [6, 1, 6, 10] }
+            ],
+            "state_writes": [
+                { "field": "namespace", "receiver": "self", "file": "app.rb", "function": "set_namespace", "line": 3, "span": [3, 1, 3, 10], "owner": "HookSpec" }
+            ],
+            "chained_self_reads": [
+                { "field": "namespace", "receiver": "spec", "file": "app.rb", "function": "describe", "line": 8, "span": [8, 1, 8, 20], "owner": "HookImpl" }
+            ]
+        })).unwrap();
+
+        let findings = scan_documents(&[doc]);
+        let namespace = findings
+            .iter()
+            .find(|finding| finding.field.ends_with("namespace"))
+            .expect("namespace must still be reported since spec's type is unresolved");
+        assert_eq!(namespace.classification, "dead_state");
+        assert_eq!(namespace.confidence, "low");
+        assert!(
+            namespace.confidence_reason.as_deref().is_some_and(|reason| reason.contains("spec")),
+            "reason should cite the unresolved receiver, got {:?}",
+            namespace.confidence_reason
+        );
+    }
+
+    #[test]
+    fn cross_instance_read_with_resolved_receiver_type_is_a_proven_reader() {
+        let doc: Document = serde_json::from_value(json!({
+            "file": "app.rb",
+            "language": "ruby",
+            "function_defs": [
+                function_def("app.rb", "set_namespace", "HookSpec", 3),
+                function_def("app.rb", "describe", "HookImpl", 8)
+            ],
+            "state_declarations": [
+                { "field": "spec", "owner": "HookImpl", "type": "HookSpec", "file": "app.rb", "line": 6, "span": [6, 1, 6, 10] }
+            ],
+            "state_writes": [
+                { "field": "namespace", "receiver": "self", "file": "app.rb", "function": "set_namespace", "line": 3, "span": [3, 1, 3, 10], "owner": "HookSpec" }
+            ],
+            "chained_self_reads": [
+                { "field": "namespace", "receiver": "spec", "file": "app.rb", "function": "describe", "line": 8, "span": [8, 1, 8, 20], "owner": "HookImpl" }
+            ]
+        })).unwrap();
+
+        let findings = scan_documents(&[doc]);
+        assert!(
+            !findings.iter().any(|finding| finding.field.ends_with("namespace")),
+            "spec is proven to be a HookSpec, so namespace has a real reader, got {:?}",
+            findings
+        );
     }
 }

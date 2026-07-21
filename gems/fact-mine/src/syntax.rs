@@ -260,6 +260,11 @@ pub struct Document {
     pub state_reads: Vec<StateRead>,
     #[serde(default)]
     pub state_writes: Vec<StateWrite>,
+    /// Reads through a chained self-attribute receiver (`self.spec.namespace`)
+    /// whose actual runtime type is unproven, so they are kept separate from
+    /// `state_reads` rather than unsoundly attributed to a specific owner.
+    #[serde(default)]
+    pub chained_self_reads: Vec<StateRead>,
     #[serde(default)]
     pub decision_sites: Vec<DecisionSite>,
     #[serde(default)]
