@@ -1263,6 +1263,14 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         crate::ast::normalize_text(&text)
     }
 
+    fn accessor_declaration_methods(&self) -> &'static [(&'static str, bool, bool)] {
+        &[
+            ("attr_reader", true, false),
+            ("attr_writer", false, true),
+            ("attr_accessor", true, true),
+        ]
+    }
+
     fn visibility_events_from_calls(
         &self,
         calls: &[super::CallSite],

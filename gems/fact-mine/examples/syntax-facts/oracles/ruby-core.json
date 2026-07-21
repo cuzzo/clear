@@ -1118,6 +1118,19 @@
           "visibility": "private"
         },
         {
+          "line": 12,
+          "name": "count",
+          "owner": "RubySyntaxFactsCore",
+          "params": [],
+          "span": [
+            12,
+            2,
+            12,
+            20
+          ],
+          "visibility": "public"
+        },
+        {
           "line": 121,
           "name": "loaded?",
           "owner": "RubySyntaxFactsCore",

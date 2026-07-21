@@ -295,6 +295,66 @@
         5
       ],
       "visibility": "public"
+    },
+    {
+      "dispatch_name": "total",
+      "id": "fn:588c35772c399506",
+      "key": [
+        "Calculator",
+        "total",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "ruby",
+      "line": 2,
+      "local_complexity": 0.0,
+      "name": "total",
+      "normalized_source": "attr_accessor :total",
+      "owner": "Calculator",
+      "owner_id": "owner:c89bc43899119c68",
+      "params": [],
+      "path": "examples/profile/ruby_calculator.rb",
+      "raw_source": "attr_accessor :total",
+      "signature": "",
+      "source": {},
+      "span": [
+        2,
+        2,
+        2,
+        22
+      ],
+      "visibility": "public"
+    },
+    {
+      "dispatch_name": "total=",
+      "id": "fn:bc2167e86fe1e86f",
+      "key": [
+        "Calculator",
+        "total=",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "ruby",
+      "line": 2,
+      "local_complexity": 0.0,
+      "name": "total=",
+      "normalized_source": "attr_accessor :total",
+      "owner": "Calculator",
+      "owner_id": "owner:c89bc43899119c68",
+      "params": [
+        "value"
+      ],
+      "path": "examples/profile/ruby_calculator.rb",
+      "raw_source": "attr_accessor :total",
+      "signature": "",
+      "source": {},
+      "span": [
+        2,
+        2,
+        2,
+        22
+      ],
+      "visibility": "public"
     }
   ],
   "owners": [

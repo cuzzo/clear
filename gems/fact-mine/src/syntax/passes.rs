@@ -79,6 +79,7 @@ impl<'a> StatefulSyntaxPass<'a> {
         &self,
         facts: &mut normalized_extractor::NormalizedFacts,
     ) -> StatefulSyntaxMetadata {
+        synthesize_accessor_functions(self.behavior, facts);
         let visibility_events = self
             .behavior
             .visibility_events_from_calls(&facts.call_sites);
@@ -162,4 +163,65 @@ impl<'a> StatefulSyntaxPass<'a> {
             syntax,
         }
     }
+}
+
+/// Synthesize function definitions for accessor-declaration macro calls
+/// (Ruby attr_reader/attr_writer/attr_accessor). Without these, generated
+/// getters and setters are invisible to visibility and call-target facts.
+fn synthesize_accessor_functions(
+    behavior: &dyn NormalizedLanguageBehavior,
+    facts: &mut normalized_extractor::NormalizedFacts,
+) {
+    let declarations = behavior.accessor_declaration_methods();
+    if declarations.is_empty() {
+        return;
+    }
+
+    let existing = facts
+        .function_defs
+        .iter()
+        .map(|function| (function.owner.clone(), function.name.clone()))
+        .collect::<std::collections::BTreeSet<_>>();
+
+    let mut synthesized = Vec::new();
+    for call in &facts.call_sites {
+        let Some((_, reader, writer)) = declarations
+            .iter()
+            .find(|(message, _, _)| *message == call.message)
+        else {
+            continue;
+        };
+        if !(call.receiver.is_empty() || call.receiver == "self") {
+            continue;
+        }
+        for argument in &call.arguments {
+            let name = argument
+                .trim()
+                .trim_start_matches(':')
+                .trim_matches(|c| c == '"' || c == '\'');
+            if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                continue;
+            }
+            let mut emit = |method_name: String, params: Vec<String>| {
+                if existing.contains(&(call.owner.clone(), method_name.clone())) {
+                    return;
+                }
+                synthesized.push(super::FunctionDef::synthetic_accessor(
+                    call.file.clone(),
+                    method_name,
+                    call.owner.clone(),
+                    call.line,
+                    call.span,
+                    params.clone(),
+                ));
+            };
+            if *reader {
+                emit(name.to_string(), Vec::new());
+            }
+            if *writer {
+                emit(format!("{name}="), vec!["value".to_string()]);
+            }
+        }
+    }
+    facts.function_defs.extend(synthesized);
 }

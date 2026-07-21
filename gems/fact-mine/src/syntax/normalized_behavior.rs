@@ -1423,6 +1423,12 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         Vec::new()
     }
 
+    /// Language macro calls that declare accessor methods (Ruby `attr_*`).
+    /// Returned as (call message, reader?, writer?) tuples.
+    fn accessor_declaration_methods(&self) -> &'static [(&'static str, bool, bool)] {
+        &[]
+    }
+
     fn protocol_read_label_from_state(&self, receiver: &str, field: &str) -> Option<String> {
         if receiver.trim().is_empty() || receiver == "self" {
             Some(field.to_string())

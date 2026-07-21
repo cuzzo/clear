@@ -2108,7 +2108,7 @@
       "name": "required",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required"
+        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required"
       ],
       "resolved": true,
       "span": [
@@ -2132,7 +2132,7 @@
       "name": "facts",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts"
+        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts"
       ],
       "resolved": true,
       "span": [
@@ -2156,7 +2156,7 @@
       "name": "schema",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema"
+        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema"
       ],
       "resolved": false,
       "span": [
@@ -2178,7 +2178,7 @@
       "name": "all_variants",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants"
+        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants"
       ],
       "resolved": false,
       "span": [

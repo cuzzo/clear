@@ -387,6 +387,40 @@ pub struct FunctionDef {
     pub signature: String,
 }
 
+impl FunctionDef {
+    /// A definition synthesized from a declaration macro (e.g. Ruby attr_*).
+    /// Lives here so passes never construct parser-internal body nodes.
+    pub(crate) fn synthetic_accessor(
+        file: String,
+        name: String,
+        owner: String,
+        line: usize,
+        span: Span,
+        params: Vec<String>,
+    ) -> Self {
+        Self {
+            file,
+            name,
+            owner,
+            dispatch_kind: "instance".to_string(),
+            line,
+            span,
+            body: RawNode {
+                kind: "SYNTHETIC_ACCESSOR".to_string(),
+                text: String::new(),
+                span,
+                named: false,
+                field_name: None,
+                children: Vec::new(),
+            },
+            visibility: Some("public".to_string()),
+            params,
+            callback_params: Vec::new(),
+            signature: String::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct OwnerDef {
     pub file: String,
