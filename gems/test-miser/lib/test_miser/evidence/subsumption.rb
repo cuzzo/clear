@@ -179,7 +179,10 @@ module TestMiser
           FrontierRanking.new(
             test_id: contribution.test_id,
             frontier_unique_kills: (contribution.unique_kills & frontier).sort.freeze,
-            cohort_new_frontier_detection: if cohort
+            # Cohort evidence is relevant only to members of the selected
+            # cohort.  Do not attach the cohort's set to baseline or unrelated
+            # tests; report vectors use this field for per-test cost findings.
+            cohort_new_frontier_detection: if cohort && cohort.test_ids.include?(contribution.test_id)
                                              (cohort.new_detection & frontier).sort.freeze
                                            else
                                              [].freeze

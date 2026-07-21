@@ -43,6 +43,8 @@ class EvidenceSubsumptionStabilityTest < Minitest::Test
     assert_equal ["m1"], t1&.frontier_unique_kills
     assert_equal ["m1"], t1&.cohort_new_frontier_detection
     assert_empty t2&.frontier_unique_kills
+    assert_empty t2&.cohort_new_frontier_detection
+    assert_empty analysis.rankings.find { |ranking| ranking.test_id == "t3" }&.cohort_new_frontier_detection
     assert_equal "test-quality-evidence/subsumption-v1", analysis.to_h.fetch("schema")
     assert_equal ["m1", "t1"], [analysis.to_h.fetch("summary").fetch("frontier_mutants").first,
                                     analysis.to_h.fetch("equivalent_mutants").first.fetch("killer_tests").first]

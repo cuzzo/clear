@@ -78,6 +78,42 @@ class EvidenceReportTest < Minitest::Test
     refute inconclusive.vectors.find { |vector| vector.test_id == "t2" }&.detects_reverted_change
   end
 
+  def test_cohort_frontier_detection_does_not_contaminate_unrelated_cost_findings
+    corpus = Evidence::Corpus.new(
+      tests: [
+        observation("new", ["m1"], ["m1"]),
+        observation("baseline", ["m2"], ["m2"]),
+        observation("unrelated", ["m3"], []),
+      ],
+      mutants: [
+        mutant("m1", ["new"], ["new"]),
+        mutant("m2", ["baseline"], ["baseline"]),
+        mutant("m3", ["unrelated"], []),
+      ],
+      complete: true,
+    )
+    contributions = Evidence::ContributionAnalyzer.new(corpus).analyze(
+      new_test_ids: ["new"],
+      baseline_test_ids: ["baseline"],
+    )
+    subsumption = Evidence::SubsumptionAnalyzer.new(corpus).analyze(contributions: contributions)
+    report = Evidence::ReportBuilder.new(corpus).build(
+      contributions: contributions,
+      subsumption: subsumption,
+      runtimes: {"unrelated" => 2_000.0},
+      high_cost_ms: 1_000.0,
+    )
+
+    assert_equal ["m1"], subsumption.rankings.find { |ranking| ranking.test_id == "new" }&.cohort_new_frontier_detection
+    assert_empty subsumption.rankings.find { |ranking| ranking.test_id == "baseline" }&.cohort_new_frontier_detection
+    assert_empty subsumption.rankings.find { |ranking| ranking.test_id == "unrelated" }&.cohort_new_frontier_detection
+    unrelated = report.vectors.find { |vector| vector.test_id == "unrelated" }
+    assert_equal 0, unrelated&.cohort_new_detection
+    assert_equal ["unrelated"], report.findings
+      .select { |finding| finding.kind == Evidence::ReviewFindingKind::HighCostNoMarginalDetection }
+      .map(&:test_id)
+  end
+
   def test_incomplete_and_unknown_corpus_completeness_is_preserved_in_vectors
     [false, nil].each do |complete|
       corpus = Evidence::Corpus.new(
