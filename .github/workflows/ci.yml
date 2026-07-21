@@ -149,13 +149,17 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Lineage release binary
+        # The ingestion round-trip test below skips silently (not fails)
+        # when this binary is absent, so without this step CI could report
+        # green while that contract was never actually exercised.
+        run: cargo build --release --manifest-path gems/lineage/Cargo.toml
       - name: Verify runner adapters, dynamic planning, and canonical checkpoints
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/test_miser_test.rb
       - name: Verify PR step summary tallies
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/step_summary_test.rb
       - name: Verify Lineage corpus ingestion round-trip
-        # Skips internally when the lineage release binary is absent; runs
-        # fully in local checkouts where the workspace is built.
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/lineage_ingest_integration_test.rb
 
   boobytrap-go-unit:
@@ -216,15 +220,27 @@ jobs:
         run: npm install --legacy-peer-deps
       - uses: dtolnay/rust-toolchain@stable
       - name: Build Rust binaries
+        # gems/slopcop/test/cross_gem_contract_integration_test.rb and
+        # gems/espalier/test/architecture_tools_test.rb both exercise the
+        # Lineage binary; building it here is required, not optional - the
+        # SlopCop test hard-flunks without it (this job would otherwise be
+        # broken), and the Espalier one silently skips without it (so its
+        # contract would go untested with no visible failure).
         run: |
           cargo build --release --manifest-path gems/fact-mine/Cargo.toml
           cargo build --release --manifest-path gems/nil-kill/Cargo.toml
           cargo build --release --manifest-path gems/decomplex/Cargo.toml
+          cargo build --release --manifest-path gems/lineage/Cargo.toml
       - name: Run Ruby gem tests with SimpleCov
         run: bundle exec ruby tools/run_ruby_gem_coverage.rb
         env:
-          FACT_MINE_RUST_BINARY: ./gems/fact-mine/target/release/fact-mine-rust
-          NIL_KILL_INFER_RUST_BINARY: ./gems/nil-kill/target/release/nil-kill-infer-rust
+          # Absolute paths: cross_gem_contract_integration_test.rb (and other
+          # integration tests it runs) Dir.chdir into a temp fixture
+          # directory before invoking these binaries as subprocesses, so a
+          # relative path here resolves against the wrong cwd and fails with
+          # "command not found" (exit 127) once that chdir happens.
+          FACT_MINE_RUST_BINARY: ${{ github.workspace }}/gems/fact-mine/target/release/fact-mine-rust
+          NIL_KILL_INFER_RUST_BINARY: ${{ github.workspace }}/gems/nil-kill/target/release/nil-kill-infer-rust
       - uses: actions/upload-artifact@v4
         with:
           name: ruby-coverage-gems

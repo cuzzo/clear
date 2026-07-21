@@ -61,35 +61,51 @@ ingest = lambda do |directory|
   facts_files = Dir[File.join(directory, "mutant-facts-*.json")].sort
   abort "no mutant-facts-*.json in #{directory}" if facts_files.empty?
 
+  # Every mutant-facts file in one materialized directory must carry the
+  # SAME commit. The combined weak-tests.sarif is a single, un-partitioned
+  # artifact tagged with one commit below - silently picking whichever
+  # commit happened to sort first would tag that SARIF (and thus every
+  # weak-test finding in it) against the wrong commit for any suite whose
+  # facts came from a different one, corrupting the ledger's history
+  # without any visible error.
+  commits = facts_files.filter_map do |facts_path|
+    facts = JSON.parse(File.read(facts_path))
+    options[:commit] || facts.dig("test_miser", "commit")
+  end.uniq
+  abort "#{facts_files.first} carries no test_miser.commit; pass --commit" if commits.empty?
+  if commits.size > 1
+    abort "mutant-facts files in #{directory} span multiple commits (#{commits.join(", ")}); " \
+          "ingest each commit's corpus separately, or pass --commit to force one"
+  end
+  commit_used = commits.first
+
   ingested = 0
-  commit_used = nil
   facts_files.each do |facts_path|
     facts = JSON.parse(File.read(facts_path))
-    commit = options[:commit] || facts.dig("test_miser", "commit")
-    abort "#{facts_path} carries no test_miser.commit; pass --commit" unless commit
-    commit_used ||= commit
     suite = facts.dig("test_miser", "suite") || File.basename(facts_path)
     out = run!([
                  options[:lineage_bin], "ingest-mutants",
                  "--db", db, "--repo", repo,
-                 "--input", facts_path, "--commit", commit
+                 "--input", facts_path, "--commit", commit_used
                ])
     puts "#{suite}: #{out.strip}"
     ingested += 1
   end
 
+  # weak-tests.sarif is not optional output - it completes the checkpoint ->
+  # ledger path this tool exists to run (see the file header). A missing
+  # SARIF means the corpus this ingestion was explicitly asked to ingest is
+  # incomplete; report that loudly rather than silently ingesting a partial
+  # result that looks like success.
   sarif_path = File.join(directory, "weak-tests.sarif")
-  if File.file?(sarif_path)
-    out = run!([
-                 options[:lineage_bin], "ingest-sarif",
-                 "--db", db, "--repo", repo,
-                 "--input", sarif_path, "--source", "test-miser",
-                 "--commit", commit_used, "--replace"
-               ])
-    puts "weak-tests: #{out.strip}"
-  else
-    warn "weak-tests.sarif missing in #{directory}; skipped Weak Tests ingestion"
-  end
+  abort "weak-tests.sarif missing in #{directory}; the corpus is incomplete" unless File.file?(sarif_path)
+  out = run!([
+               options[:lineage_bin], "ingest-sarif",
+               "--db", db, "--repo", repo,
+               "--input", sarif_path, "--source", "test-miser",
+               "--commit", commit_used, "--replace"
+             ])
+  puts "weak-tests: #{out.strip}"
   puts "ingested #{ingested} mutant-facts file(s) at commit #{commit_used}"
 end
 
