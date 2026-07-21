@@ -105,6 +105,19 @@
               FOREIGN KEY(unit_id) REFERENCES logical_units(id)
             );
 
+            CREATE TABLE IF NOT EXISTS unit_hotness (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              path TEXT,
+              function TEXT NOT NULL,
+              line INTEGER,
+              flat_share REAL NOT NULL DEFAULT 0,
+              cum_share REAL NOT NULL DEFAULT 0,
+              tier TEXT NOT NULL CHECK (tier IN ('critical', 'warm', 'cold')),
+              source TEXT NOT NULL,
+              commit_hash TEXT,
+              is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
+            );
+
             CREATE TABLE IF NOT EXISTS coverage_line_events (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               commit_hash TEXT NOT NULL,
@@ -302,6 +315,8 @@
             CREATE INDEX IF NOT EXISTS idx_unit_hazards_path_line ON unit_hazards(path, line);
             CREATE INDEX IF NOT EXISTS idx_unit_hazards_type ON unit_hazards(hazard_type);
             CREATE INDEX IF NOT EXISTS idx_unit_hazards_detected_at ON unit_hazards(detected_at_hash);
+            CREATE INDEX IF NOT EXISTS idx_unit_hotness_path ON unit_hotness(path, is_active);
+            CREATE INDEX IF NOT EXISTS idx_unit_hotness_source ON unit_hotness(source, is_active);
             CREATE INDEX IF NOT EXISTS idx_coverage_line_events_path_line ON coverage_line_events(path, line);
             CREATE INDEX IF NOT EXISTS idx_coverage_line_events_path_line_source_latest
               ON coverage_line_events(path, line, source, timestamp DESC, id DESC);

@@ -333,6 +333,8 @@ pub struct UiSourceSymbol {
     pub architecture_owner_id: Option<String>,
     pub architecture_pressure: f64,
     pub architecture_band: String,
+    pub hotness_tier: Option<String>,
+    pub hotness_share: f64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -389,6 +391,9 @@ pub struct UiLineAnnotation {
     pub semantic_churn_events: i64,
     pub bug_weight: f64,
     pub bug_events: Vec<UiBugEvent>,
+    pub hotness_tier: Option<String>,
+    pub hotness_share: f64,
+    pub hotness_source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -806,6 +811,9 @@ struct AnnotationBuilder {
     semantic_churn_events: i64,
     bug_weight: f64,
     bug_events: Vec<UiBugEvent>,
+    hotness_tier: Option<String>,
+    hotness_share: f64,
+    hotness_source: Option<String>,
 }
 
 const MIN_HISTORY_WEIGHT: f64 = 0.001;
@@ -2049,6 +2057,7 @@ fn top_complexity_functions(
 
     let mut functions = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let hotness_rows = storage.active_hotness().unwrap_or_default();
 
     for row in rows {
         let (path, start_line, properties_json, message, tool_name) = row?;
@@ -2108,19 +2117,29 @@ fn top_complexity_functions(
 
         if rank > 10 {
             seen.insert(key);
-            functions.push((path, start_line, name, subject_kind.to_string(), big_o, big_o_space, is_dynamic, trigger, basis.to_string(), tool_name, rank));
+            let hotness = hottest_profile_match(&hotness_rows, &path, &name);
+            functions.push((path, start_line, name, subject_kind.to_string(), big_o, big_o_space, is_dynamic, trigger, basis.to_string(), tool_name, rank, hotness));
         }
     }
 
+    // Rank by Big-O first, then by measured runtime share: among equally
+    // expensive bounds, profiled-critical functions surface first.
     functions.sort_by(|left, right| {
         right.10.cmp(&left.10)
+            .then_with(|| {
+                let left_share = left.11.as_ref().map(|h| h.cum_share).unwrap_or(0.0);
+                let right_share = right.11.as_ref().map(|h| h.cum_share).unwrap_or(0.0);
+                right_share
+                    .partial_cmp(&left_share)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| left.0.cmp(&right.0))
             .then_with(|| left.2.cmp(&right.2))
     });
 
     let result = functions
         .into_iter()
-        .map(|(path, start_line, name, subject_kind, big_o, big_o_space, is_dynamic, trigger, basis, tool_name, _)| {
+        .map(|(path, start_line, name, subject_kind, big_o, big_o_space, is_dynamic, trigger, basis, tool_name, _, hotness)| {
             let complexity_type = if is_dynamic {
                 if !trigger.is_empty() {
                     format!("Dynamic, triggered by {}", trigger)
@@ -2130,7 +2149,15 @@ fn top_complexity_functions(
             } else {
                 "Static/Fixed".to_string()
             };
-            let detail = format!("Runtime: {} ({}) | Space: {} | Basis: {} ({})", big_o, complexity_type, big_o_space, basis, tool_name);
+            let mut detail = format!("Runtime: {} ({}) | Space: {} | Basis: {} ({})", big_o, complexity_type, big_o_space, basis, tool_name);
+            if let Some(hotness) = &hotness {
+                detail.push_str(&format!(
+                    " | Profile: {} {:.1}% ({})",
+                    hotness.tier,
+                    hotness.cum_share * 100.0,
+                    hotness.source
+                ));
+            }
             UiComplexityFunction {
                 name,
                 subject_kind,
@@ -2144,6 +2171,34 @@ fn top_complexity_functions(
         .collect();
 
     Ok(result)
+}
+
+/// Trailing identifier of a profiler symbol or subject name, so
+/// `main.(*Server).handle`, `Server#handle`, and `handle` all agree.
+fn simple_symbol_tail(symbol: &str) -> &str {
+    symbol
+        .rsplit(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .find(|segment| !segment.is_empty())
+        .unwrap_or("")
+}
+
+fn hottest_profile_match<'a>(
+    rows: &'a [crate::model::HotnessRow],
+    path: &str,
+    name: &str,
+) -> Option<&'a crate::model::HotnessRow> {
+    let tail = simple_symbol_tail(name);
+    if tail.is_empty() {
+        return None;
+    }
+    rows.iter()
+        .filter(|row| row.path.as_deref() == Some(path))
+        .filter(|row| simple_symbol_tail(&row.function) == tail)
+        .max_by(|left, right| {
+            left.cum_share
+                .partial_cmp(&right.cum_share)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
 }
 
 fn complexity_display_rank(complexity: &str) -> u32 {
@@ -2793,6 +2848,8 @@ fn empty_source_symbol(
         architecture_owner_id: None,
         architecture_pressure: 0.0,
         architecture_band: "ordinary".to_string(),
+        hotness_tier: None,
+        hotness_share: 0.0,
     }
 }
 
@@ -3155,6 +3212,23 @@ fn apply_symbol_hotspots(symbols: &mut [UiSourceSymbol], annotations: &[UiLineAn
         symbol.semantic_churn = semantic_churn.min(1.0);
         symbol.hotspot_score = score;
         symbol.hotspot_level = hotspot_level(score).to_string();
+
+        if let Some(hottest) = annotations
+            .iter()
+            .filter(|annotation| {
+                annotation.line >= symbol.start_line
+                    && annotation.line <= end_line
+                    && annotation.hotness_tier.is_some()
+            })
+            .max_by(|left, right| {
+                left.hotness_share
+                    .partial_cmp(&right.hotness_share)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+        {
+            symbol.hotness_tier = hottest.hotness_tier.clone();
+            symbol.hotness_share = hottest.hotness_share;
+        }
     }
 }
 
@@ -3340,6 +3414,9 @@ pub fn line_annotations(
     let sarif_start = Instant::now();
     apply_sarif_findings(storage, path, &mut lines)?;
     profile_log("line_annotations.sarif_findings", sarif_start);
+    let hotness_start = Instant::now();
+    apply_hotness(storage, path, &mut lines)?;
+    profile_log("line_annotations.hotness", hotness_start);
     let overlay_start = Instant::now();
     apply_overlays(path, overlays, &mut lines);
     profile_log("line_annotations.overlays", overlay_start);
@@ -3370,10 +3447,32 @@ pub fn line_annotations(
             semantic_churn_events: builder.semantic_churn_events,
             bug_weight: builder.bug_weight.min(1.0),
             bug_events: builder.bug_events,
+            hotness_tier: builder.hotness_tier,
+            hotness_share: builder.hotness_share,
+            hotness_source: builder.hotness_source,
         })
         .collect();
     profile_log("line_annotations.total", total_start);
     Ok(annotations)
+}
+
+fn apply_hotness(
+    storage: &Storage,
+    path: &str,
+    lines: &mut BTreeMap<u32, AnnotationBuilder>,
+) -> Result<()> {
+    for row in storage.hotness_for_path(path)? {
+        let Some(line) = row.line.filter(|line| *line > 0) else {
+            continue;
+        };
+        let builder = lines.entry(line as u32).or_default();
+        if row.cum_share >= builder.hotness_share {
+            builder.hotness_share = row.cum_share;
+            builder.hotness_tier = Some(row.tier.clone());
+            builder.hotness_source = Some(row.source.clone());
+        }
+    }
+    Ok(())
 }
 
 fn paint_statement_continuations(lines: &[String], annotations: &mut Vec<UiLineAnnotation>) {
@@ -3457,6 +3556,9 @@ fn empty_annotation(line: u32) -> UiLineAnnotation {
         semantic_churn_events: 0,
         bug_weight: 0.0,
         bug_events: Vec::new(),
+        hotness_tier: None,
+        hotness_share: 0.0,
+        hotness_source: None,
     }
 }
 
@@ -4896,6 +4998,14 @@ fn render_outline_symbol_link(
     out.push_str(&html_escape(display_name));
     if is_reentrant {
         out.push_str(" <i class=\"fa-solid fa-recycle reentrant-icon\" title=\"Re-entrant\"></i>");
+    }
+    if symbol.hotness_tier.as_deref() == Some("critical") {
+        out.push_str(" <i class=\"fa-solid fa-fire critical-icon\" title=\"Critical: ");
+        out.push_str(&html_escape(&format!(
+            "{:.1}% of runtime profile",
+            symbol.hotness_share * 100.0
+        )));
+        out.push_str("\"></i>");
     }
     out.push_str("</span></a>");
     if let Some(architecture_id) = &symbol.architecture_id {
@@ -7236,6 +7346,14 @@ fn hazard_status_text(hazard: &UiHazard) -> &'static str {
 
 fn line_detail_rows(annotation: &UiLineAnnotation) -> Vec<String> {
     let mut rows = Vec::new();
+    if let Some(tier) = &annotation.hotness_tier {
+        rows.push(format!(
+            "runtime profile: {} - {:.1}% cumulative ({})",
+            tier,
+            annotation.hotness_share * 100.0,
+            annotation.hotness_source.as_deref().unwrap_or("profile")
+        ));
+    }
     if let Some(summary) = test_type_summary(annotation) {
         rows.push(summary);
     }
@@ -9487,6 +9605,9 @@ mod tests {
                         weight: 0.25,
                     },
                 ],
+                hotness_tier: None,
+                hotness_share: 0.0,
+                hotness_source: None,
             }],
             warnings: Vec::new(),
         };
@@ -10071,6 +10192,80 @@ mod tests {
     }
 
     #[test]
+    fn top_complexity_sorts_by_big_o_then_profile_hotness() {
+        let storage = Storage::open_memory().unwrap();
+        let artifact_id = storage.insert_sarif_artifact(&SarifArtifact {
+            source: "first-party".into(), tool_name: "Espalier".into(),
+            run_format: "espalier.manifest.sarif.v1".into(), artifact_path: "tmp/espalier.sarif#run0".into(),
+            artifact_sha256: "sha".into(), commit_hash: "abc".into(), timestamp: 20, payload_json: "{}".into(),
+        }).unwrap();
+        let mut insert = |name: &str, path: &str, time: &str, key: &str| {
+            storage.insert_sarif_finding(&SarifFinding {
+                artifact_id, finding_key: key.into(), source: "first-party".into(),
+                tool_name: "Espalier".into(), run_format: "espalier.manifest.sarif.v1".into(),
+                commit_hash: "abc".into(), timestamp: 20, rule_id: "complexity.observation".into(),
+                level: "note".into(), message: format!("{name} has estimated runtime {time}"),
+                path: path.into(), start_line: 1, start_column: Some(1), end_line: None, end_column: None,
+                category: "complexity".into(), is_dark_arm: false, unit_id: None,
+                fingerprint: key.into(),
+                properties_json: serde_json::json!({"complexity": {
+                    "subject_kind": "function", "subject_name": name, "time": time,
+                    "auxiliary_space": "O(1)", "dynamic": false, "basis": "espalier-static"
+                }}).to_string(), raw_json: "{}".into(),
+            }).unwrap();
+        };
+        insert("Cold#scan", "src/cold.rb", "O(N^2)", "cold-scan");
+        insert("Hot#scan", "src/hot.rb", "O(N^2)", "hot-scan");
+        insert("Mild#worse", "src/mild.rb", "O(2^N)", "mild-worse");
+        storage.refresh_current_sarif_findings_view().unwrap();
+
+        storage
+            .insert_unit_hotness(Some("src/hot.rb"), "Hot#scan", Some(1), 0.4, 0.6, "critical", "pprof:cpu", None)
+            .unwrap();
+
+        let findings = top_complexity_functions(&storage, "", &CoverageScope::all()).unwrap();
+        let names: Vec<&str> = findings.iter().map(|f| f.name.as_str()).collect();
+        // Worst Big-O first regardless of hotness; within the O(N^2) tier the
+        // profiled-critical function outranks the cold one.
+        assert_eq!(names, vec!["Mild#worse", "Hot#scan", "Cold#scan"]);
+        assert!(findings[1].detail.contains("Profile: critical 60.0% (pprof:cpu)"));
+    }
+
+    #[test]
+    fn line_detail_rows_include_runtime_profile_hotness() {
+        let mut annotation = empty_annotation(7);
+        annotation.hotness_tier = Some("critical".to_string());
+        annotation.hotness_share = 0.61;
+        annotation.hotness_source = Some("pprof:cpu".to_string());
+        let rows = line_detail_rows(&annotation);
+        assert!(rows.iter().any(|row| row == "runtime profile: critical - 61.0% cumulative (pprof:cpu)"));
+    }
+
+    #[test]
+    fn critical_symbols_render_fire_icon_in_outline() {
+        let mut hot = empty_source_symbol("function", "scan_hot", 3, 5);
+        hot.hotness_tier = Some("critical".to_string());
+        hot.hotness_share = 0.6;
+        let cold = empty_source_symbol("function", "scan_cold", 7, 9);
+        let payload = UiSourcePayload {
+            path: "src/scanner.rb".into(),
+            commit: None,
+            lines: Vec::new(),
+            versions: Vec::new(),
+            symbols: vec![hot, cold],
+            blame: Vec::new(),
+            annotations: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        let outline = render_source_outline(&payload);
+
+        assert!(outline.contains("fa-fire"), "missing fire icon: {outline}");
+        assert!(outline.contains("60.0% of runtime profile"), "missing title: {outline}");
+        assert_eq!(outline.matches("fa-fire").count(), 1);
+    }
+
+    #[test]
     fn branch_context_legend_lists_coverage_states_without_hazard_marker() {
         let context = UiBranchContext {
             branch: "feature".to_string(),
@@ -10621,6 +10816,9 @@ flags:
             semantic_churn_events: 0,
             bug_weight: 0.0,
             bug_events: Vec::new(),
+            hotness_tier: None,
+            hotness_share: 0.0,
+            hotness_source: None,
         }];
         let lines = vec![
             "result = call(".to_string(),
@@ -10693,6 +10891,9 @@ flags:
             semantic_churn_events: 0,
             bug_weight: 0.0,
             bug_events: Vec::new(),
+            hotness_tier: None,
+            hotness_share: 0.0,
+            hotness_source: None,
         };
 
         let html =

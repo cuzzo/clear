@@ -577,6 +577,9 @@ mod tests {
             semantic_churn_events: 0,
             bug_weight: 0.0,
             bug_events: Vec::new(),
+            hotness_tier: None,
+            hotness_share: 0.0,
+            hotness_source: None,
         }
     }
 

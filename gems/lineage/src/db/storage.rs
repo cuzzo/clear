@@ -1128,6 +1128,100 @@ impl Storage {
         Ok(changed > 0)
     }
 
+    /// unit_hotness postdates many deployed databases and Storage::open only
+    /// initializes brand-new files, so every hotness path self-heals the
+    /// table (idempotent, matching the ensure_column migration style).
+    fn ensure_unit_hotness_table(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS unit_hotness (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               path TEXT,
+               function TEXT NOT NULL,
+               line INTEGER,
+               flat_share REAL NOT NULL DEFAULT 0,
+               cum_share REAL NOT NULL DEFAULT 0,
+               tier TEXT NOT NULL CHECK (tier IN ('critical', 'warm', 'cold')),
+               source TEXT NOT NULL,
+               commit_hash TEXT,
+               is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
+             );
+             CREATE INDEX IF NOT EXISTS idx_unit_hotness_path ON unit_hotness(path, is_active);
+             CREATE INDEX IF NOT EXISTS idx_unit_hotness_source ON unit_hotness(source, is_active);",
+        )?;
+        Ok(())
+    }
+
+    pub fn deactivate_hotness_for_source(&self, source: &str) -> Result<usize> {
+        self.ensure_unit_hotness_table()?;
+        Ok(self.conn.execute(
+            "UPDATE unit_hotness SET is_active = 0 WHERE source = ?1 AND is_active = 1",
+            params![source],
+        )?)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_unit_hotness(
+        &self,
+        path: Option<&str>,
+        function: &str,
+        line: Option<i64>,
+        flat_share: f64,
+        cum_share: f64,
+        tier: &str,
+        source: &str,
+        commit_hash: Option<&str>,
+    ) -> Result<()> {
+        self.ensure_unit_hotness_table()?;
+        self.conn.execute(
+            include_str!("../../sql/storage/insert_unit_hotness.sql"),
+            params![path, function, line, flat_share, cum_share, tier, source, commit_hash],
+        )?;
+        Ok(())
+    }
+
+    pub fn active_hotness(&self) -> Result<Vec<crate::model::HotnessRow>> {
+        self.ensure_unit_hotness_table()?;
+        let mut stmt = self
+            .conn
+            .prepare(include_str!("../../sql/ui/runtime/top_hotness.sql"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(crate::model::HotnessRow {
+                    path: row.get(0)?,
+                    function: row.get(1)?,
+                    line: row.get(2)?,
+                    flat_share: row.get(3)?,
+                    cum_share: row.get(4)?,
+                    tier: row.get(5)?,
+                    source: row.get(6)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn hotness_for_path(&self, path: &str) -> Result<Vec<crate::model::HotnessRow>> {
+        self.ensure_unit_hotness_table()?;
+        let mut stmt = self
+            .conn
+            .prepare(include_str!("../../sql/ui/runtime/apply_hotness.sql"))?;
+        let path_owned = path.to_string();
+        let rows = stmt
+            .query_map(params![path], move |row| {
+                Ok(crate::model::HotnessRow {
+                    path: Some(path_owned.clone()),
+                    function: row.get(0)?,
+                    line: row.get(1)?,
+                    flat_share: row.get(2)?,
+                    cum_share: row.get(3)?,
+                    tier: row.get(4)?,
+                    source: row.get(5)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     pub fn deactivate_active_hazards(&self, language: &str) -> Result<usize> {
         Ok(self.conn.execute(
             "UPDATE unit_hazards SET is_active = 0 WHERE language = ?1 AND is_active = 1",

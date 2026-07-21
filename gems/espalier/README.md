@@ -139,6 +139,30 @@ Nil-kill evidence is the most important external input today because it
 helps Espalier distinguish broad untyped surfaces from intentional typed
 interfaces.
 
+## Ranking Big-O by Runtime Criticality
+
+Espalier's Big-O bounds are static: they say which functions can be
+expensive, not which ones dominate real workloads. To rank them by what
+actually runs hot, feed a runtime profile through Lineage:
+
+1. Profile a representative workload and convert it to
+   `profile-hotness/v1` with `gems/lineage/tools/pprof_to_hotness.rb`
+   (parses `pprof -top -lines` output and stackprof JSON; tiers functions
+   critical/warm/cold by cumulative share).
+2. Ingest Espalier findings and the profile into the same database:
+   `lineage ingest-sarif` for the Espalier SARIF, `lineage
+   ingest-hotness` for the profile (or `bin/lineage-import
+   --hotness=hotness.json` for both in one import).
+3. Lineage's "Expensive Operations" view then sorts by Big-O first and by
+   profiled share within each tier, so a measured-hot `O(N^2)` outranks an
+   unprofiled one; critical functions carry a flame icon in the file-view
+   outline and a runtime-profile row in the per-line info popup.
+
+Test-run profiles are unrepresentative (mocked I/O, setup-dominated
+stacks) - profile production traffic or the benchmark suite instead. See
+the "Runtime profiling (pprof) hotness" section of the Lineage README for
+the full contract.
+
 ## Supported Languages Roadmap
 
 Espalier uses [Tree-Sitter](https://github.com/tree-sitter/tree-sitter)

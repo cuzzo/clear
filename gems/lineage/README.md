@@ -423,6 +423,69 @@ Stack-trace ingestion is commit-scoped. Re-ingesting the same event is
 idempotent; use `--replace` to reload the commits present in an input
 file.
 
+### Runtime profiling (pprof) hotness
+
+Static Big-O tells you which functions *can* be expensive; a runtime
+profile tells you which ones actually are. Lineage ingests
+`profile-hotness/v1` documents and uses them to rank and badge critical
+functions.
+
+**1. Create the profile with your language's profiler.** Profile a
+representative workload (production traffic or the `benchmarks/` suite;
+unit-test runs are setup-dominated and unrepresentative):
+
+```bash
+# Go (or any pprof-protobuf producer: Rust pprof crate, C++ gperftools)
+go test -bench=. -cpuprofile cpu.pb.gz
+go tool pprof -top -lines cpu.pb.gz > pprof-top.txt
+
+# Ruby
+stackprof --json tmp/stackprof-cpu.dump > stackprof.json
+```
+
+**2. Convert to `profile-hotness/v1`.** The reference converter parses
+`pprof -top -lines` text and stackprof JSON, computes each function's
+cumulative share, and assigns a tier (`critical` >= 5% cumulative,
+`warm` >= 0.5%, `cold` otherwise):
+
+```bash
+ruby gems/lineage/tools/pprof_to_hotness.rb \
+  --pprof-top pprof-top.txt \
+  --strip-prefix "$PWD" \
+  --source pprof:cpu > hotness.json
+```
+
+Writing a converter for another profiler is a page of code: emit
+`{"schema": "profile-hotness/v1", "source": ..., "entries": [{"function",
+"path", "line", "flat_share", "cum_share", "tier"}]}`. Merge multiple
+workloads by ingesting each under its own `--source`; consumers take the
+maximum tier across sources, because hot in any real workload means hot.
+
+**3. Ingest into Lineage:**
+
+```bash
+cargo run --manifest-path gems/lineage/Cargo.toml -- ingest-hotness \
+  --db /tmp/lineage.db \
+  --repo . \
+  --input hotness.json
+```
+
+or as part of a full import: `bin/lineage-import --hotness=hotness.json`.
+Re-ingesting the same `source` replaces its previous rows.
+
+**4. What the UI does with it:**
+
+- The dashboard "Expensive Operations" list ranks by Big-O first, then by
+  profiled cumulative share within each Big-O tier - an `O(N^2)` function
+  measured at 60% of runtime outranks an unprofiled `O(N^2)` one, and the
+  entry's detail line gains `Profile: critical 60.0% (pprof:cpu)`.
+- Critical functions get a Font Awesome flame icon
+  (`fa-fire`) next to their name in the file-view outline, with the
+  measured share in the tooltip.
+- Lines attributed by the profile gain a `runtime profile: critical -
+  60.0% cumulative (pprof:cpu)` row in the line's info popup
+  (`fa-circle-info`).
+
 ## Supported Languages Roadmap
 
 Lineage uses Tree-sitter-backed logical-unit extraction for the core

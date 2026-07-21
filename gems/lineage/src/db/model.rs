@@ -176,6 +176,17 @@ pub struct TestExposureEvent {
     pub payload_json: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct HotnessRow {
+    pub path: Option<String>,
+    pub function: String,
+    pub line: Option<i64>,
+    pub flat_share: f64,
+    pub cum_share: f64,
+    pub tier: String,
+    pub source: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HazardEvent {
     pub unit_id: String,
