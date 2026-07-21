@@ -294,37 +294,57 @@ fn resolve_path_or_prefix(
 // Tool implementations
 // ---------------------------------------------------------------------------
 
+// Weights each unit's contribution to avg_line_coverage/avg_mutant_coverage
+// by its current line count (end_line - start_line + 1), not a flat 1-per-
+// unit average - otherwise a 3-line getter and a 200-line function count
+// equally, and a file dominated by many tiny well-tested units plus one
+// large undertested one reports a misleadingly healthy average. Line span
+// per unit uses the same first-commit fallback chain as
+// current_unit_spans_for_path.sql (a unit's creating commit has no
+// `events` row yet, so it degrades to logical_units.start_line as a
+// single-line span until a real change/move/fix event exists). Units with
+// NULL current_line_cov/current_mutant_cov are excluded from both the
+// numerator and denominator of their respective average, not treated as
+// zero - "never measured" must not silently drag the average down as if
+// it were "measured and uncovered".
+fn file_risk_sql(op: &str) -> String {
+    format!(
+        "WITH latest_events AS (
+           SELECT * FROM (
+             SELECT e.*,
+                    ROW_NUMBER() OVER (PARTITION BY e.unit_id ORDER BY e.timestamp DESC, e.id DESC) AS rank
+             FROM events e
+           ) WHERE rank = 1
+         ),
+         current_units AS (
+           SELECT u.id,
+                  COALESCE(le.path, u.original_path) AS current_path,
+                  COALESCE(le.start_line, u.start_line, 1) AS start_line,
+                  COALESCE(le.end_line, le.start_line, u.start_line, 1) AS end_line,
+                  u.current_line_cov, u.current_mutant_cov,
+                  u.current_distinct_tests, u.is_hard_gated
+           FROM logical_units u
+           LEFT JOIN latest_events le ON le.unit_id = u.id
+         )
+         SELECT current_path,
+                COUNT(*) AS units,
+                ROUND(
+                  SUM(CASE WHEN current_line_cov IS NOT NULL THEN current_line_cov * (end_line - start_line + 1) ELSE 0 END)
+                  / NULLIF(SUM(CASE WHEN current_line_cov IS NOT NULL THEN (end_line - start_line + 1) ELSE 0 END), 0),
+                1) AS avg_line_coverage,
+                ROUND(
+                  SUM(CASE WHEN current_mutant_cov IS NOT NULL THEN current_mutant_cov * (end_line - start_line + 1) ELSE 0 END)
+                  / NULLIF(SUM(CASE WHEN current_mutant_cov IS NOT NULL THEN (end_line - start_line + 1) ELSE 0 END), 0),
+                1) AS avg_mutant_coverage,
+                SUM(current_distinct_tests) AS total_distinct_tests,
+                SUM(CASE WHEN is_hard_gated = 1 THEN 1 ELSE 0 END) AS hard_gated_units
+         FROM current_units
+         WHERE current_path {op} ?1
+         GROUP BY current_path"
+    )
+}
+
 fn file_risk(storage: &Storage, path: &str) -> Result<Value, String> {
-    const BASE_SQL: &str = "
-        SELECT COALESCE(le.path, u.original_path) AS current_path,
-               COUNT(DISTINCT u.id) AS units,
-               ROUND(AVG(u.current_line_cov), 1) AS avg_line_coverage,
-               ROUND(AVG(u.current_mutant_cov), 1) AS avg_mutant_coverage,
-               SUM(u.current_distinct_tests) AS total_distinct_tests,
-               SUM(CASE WHEN u.is_hard_gated = 1 THEN 1 ELSE 0 END) AS hard_gated_units
-        FROM logical_units u
-        LEFT JOIN (
-          SELECT unit_id, path,
-                 ROW_NUMBER() OVER (PARTITION BY unit_id ORDER BY timestamp DESC, id DESC) AS rank
-          FROM events
-        ) le ON le.unit_id = u.id AND le.rank = 1
-        WHERE COALESCE(le.path, u.original_path) = ?1
-        GROUP BY current_path";
-    const PREFIX_SQL: &str = "
-        SELECT COALESCE(le.path, u.original_path) AS current_path,
-               COUNT(DISTINCT u.id) AS units,
-               ROUND(AVG(u.current_line_cov), 1) AS avg_line_coverage,
-               ROUND(AVG(u.current_mutant_cov), 1) AS avg_mutant_coverage,
-               SUM(u.current_distinct_tests) AS total_distinct_tests,
-               SUM(CASE WHEN u.is_hard_gated = 1 THEN 1 ELSE 0 END) AS hard_gated_units
-        FROM logical_units u
-        LEFT JOIN (
-          SELECT unit_id, path,
-                 ROW_NUMBER() OVER (PARTITION BY unit_id ORDER BY timestamp DESC, id DESC) AS rank
-          FROM events
-        ) le ON le.unit_id = u.id AND le.rank = 1
-        WHERE COALESCE(le.path, u.original_path) LIKE ?1
-        GROUP BY current_path";
     let names = [
         "current_path",
         "units",
@@ -333,7 +353,13 @@ fn file_risk(storage: &Storage, path: &str) -> Result<Value, String> {
         "total_distinct_tests",
         "hard_gated_units",
     ];
-    let (rows, matched) = resolve_path_or_prefix(storage, BASE_SQL, PREFIX_SQL, path, &names)?;
+    let (rows, matched) = resolve_path_or_prefix(
+        storage,
+        &file_risk_sql("="),
+        &file_risk_sql("LIKE"),
+        path,
+        &names,
+    )?;
     if rows.is_empty() {
         return Err(format!("no tracked units under {path:?} (run `lineage build` first?)"));
     }
@@ -703,4 +729,293 @@ fn live_verification_gaps(repo: &Path, path: &str) -> Value {
         "open_hazards": open_hazards,
         "note": "no lineage.db: live in-process rescan only, no evidence join, no dark-arm/weak-test data",
     })
+}
+
+// ---------------------------------------------------------------------------
+// Uncommitted-changes tests. Integration-style, not mocked: real temp git
+// repositories driven through the real `git` CLI, real source files on disk
+// in the languages hazard.rs actually scans, and golden expected output -
+// mirroring the fixture-building convention already used by
+// test/mcp_server_test.rb and test/lsp_integration_test.rb, just in-process
+// so `cargo llvm-cov` can measure it directly instead of needing a spawned
+// binary.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Event, EventType, LogicalUnit, UnitKind};
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    fn git(repo: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .status()
+            .expect("git spawn failed");
+        assert!(status.success(), "git {args:?} failed in {repo:?}");
+    }
+
+    fn init_repo() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        git(dir.path(), &["init", "-q"]);
+        git(dir.path(), &["config", "user.email", "t@t"]);
+        git(dir.path(), &["config", "user.name", "t"]);
+        dir
+    }
+
+    fn write(dir: &Path, rel: &str, contents: &str) {
+        let full = dir.join(rel);
+        if let Some(parent) = full.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(full, contents).unwrap();
+    }
+
+    fn commit(dir: &Path, message: &str) {
+        git(dir, &["add", "-A"]);
+        git(dir, &["commit", "-q", "-m", message]);
+    }
+
+    // --- git_dirty_status ---------------------------------------------
+
+    #[test]
+    fn git_dirty_status_is_none_outside_a_git_repo() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "src/lib.rs", "fn f() {}\n");
+        assert_eq!(git_dirty_status(dir.path(), "src/lib.rs"), None);
+    }
+
+    #[test]
+    fn git_dirty_status_is_none_for_a_clean_tracked_file() {
+        let dir = init_repo();
+        write(dir.path(), "src/lib.rs", "fn f() {}\n");
+        commit(dir.path(), "init");
+        assert_eq!(git_dirty_status(dir.path(), "src/lib.rs"), None);
+    }
+
+    #[test]
+    fn git_dirty_status_detects_an_untracked_added_file() {
+        let dir = init_repo();
+        write(dir.path(), "README.md", "seed commit\n");
+        commit(dir.path(), "init");
+        write(dir.path(), "src/lib.rs", "fn f() {}\n");
+        // Never `git add`ed: untracked.
+        assert_eq!(git_dirty_status(dir.path(), "src/lib.rs"), Some("added-not-committed"));
+    }
+
+    #[test]
+    fn git_dirty_status_detects_a_staged_added_file() {
+        let dir = init_repo();
+        write(dir.path(), "README.md", "seed commit\n");
+        commit(dir.path(), "init");
+        write(dir.path(), "src/lib.rs", "fn f() {}\n");
+        git(dir.path(), &["add", "src/lib.rs"]);
+        assert_eq!(git_dirty_status(dir.path(), "src/lib.rs"), Some("added-not-committed"));
+    }
+
+    #[test]
+    fn git_dirty_status_detects_an_unstaged_modification() {
+        let dir = init_repo();
+        write(dir.path(), "src/lib.rs", "fn f() {}\n");
+        commit(dir.path(), "init");
+        write(dir.path(), "src/lib.rs", "fn f() { 1 }\n");
+        assert_eq!(git_dirty_status(dir.path(), "src/lib.rs"), Some("uncommitted-changes"));
+    }
+
+    #[test]
+    fn git_dirty_status_detects_a_staged_modification() {
+        let dir = init_repo();
+        write(dir.path(), "src/lib.rs", "fn f() {}\n");
+        commit(dir.path(), "init");
+        write(dir.path(), "src/lib.rs", "fn f() { 1 }\n");
+        git(dir.path(), &["add", "src/lib.rs"]);
+        assert_eq!(git_dirty_status(dir.path(), "src/lib.rs"), Some("uncommitted-changes"));
+    }
+
+    #[test]
+    fn git_dirty_status_is_none_for_a_path_git2_cannot_status() {
+        // status_file expects a single tracked-file-shaped path, not a
+        // directory prefix; git2 errors rather than returning a status,
+        // which exercises the `.ok()?` failure arm on the status_file call
+        // itself (distinct from the earlier Repository::open failure arm).
+        let dir = init_repo();
+        write(dir.path(), "src/lib.rs", "fn f() {}\n");
+        commit(dir.path(), "init");
+        assert_eq!(git_dirty_status(dir.path(), "src"), None);
+    }
+
+    // --- hazard_scan_fn --------------------------------------------------
+
+    // Behavioral, not identity, comparison: `fn` pointer equality is not a
+    // reliable way to prove "the right scanner was picked" (the compiler
+    // may merge or duplicate identical-codegen functions), so each case
+    // instead runs the dispatched scanner against a real per-language
+    // hazard-triggering snippet and checks the specific hazard type that
+    // comes back - proving both correct routing and a working scanner.
+    #[test]
+    fn hazard_scan_fn_dispatches_every_supported_extension() {
+        let cases: &[(&str, &str, &str)] = &[
+            ("src/lib.rs", "pub fn f() {\n    unsafe { std::ptr::null::<i32>(); }\n}\n", "rust_unsafe_block"),
+            ("src/LIB.RS", "pub fn f() {\n    unsafe { std::ptr::null::<i32>(); }\n}\n", "rust_unsafe_block"),
+            ("main.go", "package demo\n\nfunc run() {\n    ch <- 1\n}\n", "go_concurrency_channel"),
+            (
+                "runtime/lib.zig",
+                "// HAMMER-WAIT-LOOP-BEGIN\nwhile (true) {}\n// HAMMER-WAIT-LOOP-END\n",
+                "zig_wait_loop",
+            ),
+            ("core.c", "void run(void) {\n    pthread_mutex_lock(&lock);\n}\n", "c_tsan_concurrency"),
+            ("core.h", "void run(void) {\n    pthread_mutex_lock(&lock);\n}\n", "c_tsan_concurrency"),
+            ("core.cc", "void run() {\n    std::atomic<int> ready;\n}\n", "cpp_tsan_concurrency"),
+            ("core.cpp", "void run() {\n    std::atomic<int> ready;\n}\n", "cpp_tsan_concurrency"),
+            ("core.cxx", "void run() {\n    std::atomic<int> ready;\n}\n", "cpp_tsan_concurrency"),
+            ("core.hh", "void run() {\n    std::atomic<int> ready;\n}\n", "cpp_tsan_concurrency"),
+            ("core.hpp", "void run() {\n    std::atomic<int> ready;\n}\n", "cpp_tsan_concurrency"),
+            ("core.hxx", "void run() {\n    std::atomic<int> ready;\n}\n", "cpp_tsan_concurrency"),
+            (
+                "Program.cs",
+                "public class Worker {\n    public void Run() {\n        Task.Run(() => {});\n    }\n}\n",
+                "csharp_concurrency",
+            ),
+        ];
+        for (path, source, expected_hazard) in cases {
+            let scan = hazard_scan_fn(path).unwrap_or_else(|| panic!("expected a scanner for {path}"));
+            let sites = scan(path, source);
+            assert!(
+                sites.iter().any(|s| s.hazard_type == *expected_hazard),
+                "expected {expected_hazard} for {path}, got {sites:?}"
+            );
+        }
+
+        assert!(hazard_scan_fn("script.rb").is_none());
+        assert!(hazard_scan_fn("no_extension_at_all").is_none());
+    }
+
+    // --- live_rescan_hazards ----------------------------------------------
+
+    #[test]
+    fn live_rescan_hazards_finds_and_line_filters_a_real_unsafe_block() {
+        let dir = init_repo();
+        write(
+            dir.path(),
+            "src/lib.rs",
+            "pub fn a() -> i32 {\n    let p = &1 as *const i32;\n    unsafe { *p }\n}\n\npub fn b() -> i32 {\n    let p = &2 as *const i32;\n    unsafe { *p }\n}\n",
+        );
+        // Uncommitted: irrelevant to this function directly (it doesn't
+        // check git status itself), but matches how it's actually called -
+        // only after git_dirty_status has already said "dirty".
+        let all = live_rescan_hazards(dir.path(), "src/lib.rs", 1, 100).unwrap();
+        assert_eq!(all.len(), 2, "expected one unsafe block per function, got {all:?}");
+
+        let scoped = live_rescan_hazards(dir.path(), "src/lib.rs", 1, 4).unwrap();
+        assert_eq!(scoped.len(), 1, "line-range filter must exclude b()'s hazard: {scoped:?}");
+        assert_eq!(scoped[0]["hazard_type"], "rust_unsafe_block");
+        assert_eq!(scoped[0]["line"], 3);
+        assert_eq!(scoped[0]["snippet"], "unsafe { *p }");
+    }
+
+    #[test]
+    fn live_rescan_hazards_is_none_for_an_unsupported_language() {
+        let dir = init_repo();
+        write(dir.path(), "src/worker.rb", "def run\n  1\nend\n");
+        assert_eq!(live_rescan_hazards(dir.path(), "src/worker.rb", 1, 10), None);
+    }
+
+    #[test]
+    fn live_rescan_hazards_is_none_when_the_file_does_not_exist_on_disk() {
+        let dir = init_repo();
+        assert_eq!(live_rescan_hazards(dir.path(), "src/missing.rs", 1, 10), None);
+    }
+
+    // --- unit_context's dirty-file wiring ----------------------------------
+
+    // logical_units has no end_line column - upsert_logical_unit only ever
+    // persists start_line (see storage.rs), so a unit's true multi-line
+    // extent only exists once a real `events` row records one (the same
+    // first-commit gap current_unit_spans_for_path.sql falls back around
+    // elsewhere in this codebase). A bare upsert_logical_unit alone would
+    // degrade every span to a single line, which is untestable for
+    // dirty-file line-range filtering - so this seeds a real CHANGE event
+    // too, mirroring what a second real commit would produce.
+    fn seed_unit(storage: &Storage, path: &str, start_line: u32, end_line: u32) {
+        let unit = LogicalUnit::new(
+            "risky",
+            UnitKind::Function,
+            path,
+            1,
+            start_line,
+            end_line,
+            "pub fn risky",
+            "pub fn risky() {}",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        storage
+            .insert_event(&Event {
+                unit_id: unit.id.clone(),
+                commit_hash: "abc123".to_string(),
+                event_type: EventType::Change,
+                path: path.to_string(),
+                name: unit.name.clone(),
+                start_line,
+                end_line,
+                semantic_change: true,
+                lines_added: 1,
+                lines_removed: 1,
+                timestamp: 20,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn unit_context_flags_dirty_and_live_rescans_for_a_supported_language() {
+        let dir = init_repo();
+        write(dir.path(), "src/lib.rs", "pub fn risky() -> i32 {\n    0\n}\n");
+        commit(dir.path(), "init");
+        write(
+            dir.path(),
+            "src/lib.rs",
+            "pub fn risky() -> i32 {\n    let p = &0 as *const i32;\n    unsafe { *p }\n}\n",
+        );
+
+        let storage = Storage::open_memory().unwrap();
+        seed_unit(&storage, "src/lib.rs", 1, 4);
+
+        let context = unit_context(Some(&storage), dir.path(), "src/lib.rs", 2).unwrap();
+        assert_eq!(context["dirty"], "uncommitted-changes");
+        let live = context["live_hazards"].as_array().unwrap();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0]["hazard_type"], "rust_unsafe_block");
+        assert!(context["note"].as_str().unwrap().contains("may be stale"));
+    }
+
+    #[test]
+    fn unit_context_flags_dirty_without_live_hazards_for_an_unsupported_language() {
+        let dir = init_repo();
+        write(dir.path(), "src/worker.rb", "def run\n  1\nend\n");
+        commit(dir.path(), "init");
+        write(dir.path(), "src/worker.rb", "def run\n  2\nend\n");
+
+        let storage = Storage::open_memory().unwrap();
+        seed_unit(&storage, "src/worker.rb", 1, 3);
+
+        let context = unit_context(Some(&storage), dir.path(), "src/worker.rb", 2).unwrap();
+        assert_eq!(context["dirty"], "uncommitted-changes");
+        assert!(context.get("live_hazards").is_none());
+        assert!(context["note"].as_str().unwrap().contains("No in-process live scanner"));
+    }
+
+    #[test]
+    fn unit_context_has_no_dirty_field_for_a_clean_file() {
+        let dir = init_repo();
+        write(dir.path(), "src/lib.rs", "pub fn risky() -> i32 {\n    0\n}\n");
+        commit(dir.path(), "init");
+
+        let storage = Storage::open_memory().unwrap();
+        seed_unit(&storage, "src/lib.rs", 1, 3);
+
+        let context = unit_context(Some(&storage), dir.path(), "src/lib.rs", 2).unwrap();
+        assert!(context.get("dirty").is_none());
+        assert!(context.get("live_hazards").is_none());
+    }
 }

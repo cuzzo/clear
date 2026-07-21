@@ -155,6 +155,19 @@ degraded:
   bigger feature than this pass built - noted here as the natural next
   increment on this design, not attempted speculatively.
 
+**Test coverage.** `git_dirty_status`, `hazard_scan_fn`, `live_rescan_hazards`,
+and `unit_context`'s dirty-detection branch have 100% line coverage
+(`cargo llvm-cov`), almost entirely from in-process integration-style tests
+in `src/ui/mcp.rs`'s `mod tests` - real temporary git repositories driven
+through the actual `git` CLI (not mocked status objects), real per-language
+source fixtures containing genuine hazard-triggering constructs, and golden
+expected output (exact hazard types, line numbers, and snippets), plus the
+existing end-to-end Ruby test over the real stdio protocol
+(`test_unit_context_live_rescans_hazards_for_a_dirty_rust_file`). This is
+load-bearing infrastructure for a CI-hosted product where every open PR is
+"ahead of what the database knows" until merge, so it is tested as such -
+not spot-checked.
+
 ## DB-less mode
 
 **The question:** can MCP be useful with *no* `lineage.db` at all - on
@@ -300,13 +313,22 @@ LSP client, no editor in the loop at all - useful specifically for an
 agent working through file tools alone, which is the majority of current
 coding-agent deployments.
 
-**Known limitation surfaced but left unfixed:** `lineage_file_risk`'s
-`avg_line_coverage`/`avg_mutant_coverage` are unweighted averages across a
-path's units, so a 3-line getter and a 200-line function count equally.
+**Known limitation surfaced, then fixed.** `lineage_file_risk`'s
+`avg_line_coverage`/`avg_mutant_coverage` were unweighted averages across a
+path's units, so a 3-line getter and a 200-line function counted equally.
 Didn't matter for the finding above (8-20% vs 72-86% is stark either way),
 but a file dominated by many tiny well-tested units and one large
-undertested one could report a misleadingly healthy average. Needs
-line-count weighting before this tool is trusted for borderline cases.
+undertested one could have reported a misleadingly healthy average -
+exactly the kind of error that erodes trust in an aggregate "here's your
+grade" score. Fixed by weighting each unit's contribution by its current
+line count (`end_line - start_line + 1`, using the same first-commit
+fallback chain as `current_unit_spans_for_path.sql`), with units missing
+a coverage value excluded from both the numerator and denominator rather
+than treated as zero. Covered by
+`test_file_risk_weights_coverage_by_unit_line_count`, which proves the
+before/after concretely: a naive flat average of a 100%-covered 3-line
+function and a 10%-covered 14-line function is 55.0; the size-weighted
+result is 25.9.
 
 ## Findings from porting to Rust
 

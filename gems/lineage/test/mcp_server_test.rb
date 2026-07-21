@@ -245,6 +245,102 @@ class McpServerTest < Minitest::Test
     end
   end
 
+  # file_risk's avg_line_coverage/avg_mutant_coverage must weight each unit
+  # by its current line count, not average flatly - otherwise a 3-line
+  # getter and a 200-line function count equally, and one large undertested
+  # unit hides behind several tiny well-tested ones. Proves the fix with a
+  # concrete before/after: a naive flat average of a 100%-covered 3-line
+  # function and a 10%-covered 14-line function is 55.0; the size-weighted
+  # average is 25.9, dominated by the larger, worse-covered function.
+  def test_file_risk_weights_coverage_by_unit_line_count
+    Dir.mktmpdir do |repo|
+      FileUtils.mkdir_p(File.join(repo, "src"))
+      lib_path = File.join(repo, "src/lib.rs")
+      File.write(lib_path, <<~RUST)
+        pub fn tiny() -> i32 {
+            1
+        }
+
+        pub fn big() -> i32 {
+            let mut x = 0;
+            x += 1;
+            x += 2;
+            x += 3;
+            x += 4;
+            x += 5;
+            x += 6;
+            x += 7;
+            x += 8;
+            x += 9;
+            x
+        }
+      RUST
+
+      Dir.chdir(repo) do
+        run!("git init -q")
+        run!("git config user.email t@t")
+        run!("git config user.name t")
+        run!("git add -A")
+        run!("git commit -qm init")
+      end
+
+      # A second, semantic commit gives both units a real `events` row, so
+      # their spans are true multi-line extents (3 and 14 lines) rather
+      # than the first-commit single-line fallback - without this, every
+      # unit's weight would degrade to 1 and the "fix" would be untestable
+      # (a weighted average of equal weights is the flat average).
+      File.write(lib_path, <<~RUST)
+        pub fn tiny() -> i32 {
+            2
+        }
+
+        pub fn big() -> i32 {
+            let mut x = 0;
+            x += 1;
+            x += 2;
+            x += 3;
+            x += 4;
+            x += 5;
+            x += 6;
+            x += 7;
+            x += 8;
+            x += 9;
+            x += 10;
+            x
+        }
+      RUST
+      Dir.chdir(repo) do
+        run!("git add -A")
+        run!("git commit -qm 'grow big, tweak tiny'")
+      end
+
+      db = File.join(repo, "lineage.db")
+      run!([LINEAGE_BIN, "init", "--db", db])
+      run!([LINEAGE_BIN, "build", "--db", db, "--repo", repo])
+
+      conn = SQLite3::Database.new(db)
+      tiny_id = conn.execute("SELECT id FROM logical_units WHERE name LIKE '%tiny%' LIMIT 1").first.first
+      big_id = conn.execute("SELECT id FROM logical_units WHERE name LIKE '%big%' LIMIT 1").first.first
+      conn.execute("UPDATE logical_units SET current_line_cov = 100.0 WHERE id = ?", [tiny_id])
+      conn.execute("UPDATE logical_units SET current_line_cov = 10.0 WHERE id = ?", [big_id])
+      conn.close
+
+      client = McpStdioClient.spawn(LINEAGE_BIN, "mcp", "--db", db, "--repo", repo)
+      begin
+        client.initialize!
+        risk = client.call_tool("lineage_file_risk", { "path" => "src/lib.rs" })
+        file = risk["files"].find { |f| f["current_path"] == "src/lib.rs" }
+        refute_nil file
+        assert_equal 2, file["units"]
+        # (100 * 3 + 10 * 14) / (3 + 14) = 440 / 17 = 25.88... -> 25.9.
+        # The unweighted flat average would have been (100 + 10) / 2 = 55.0.
+        assert_equal 25.9, file["avg_line_coverage"]
+      ensure
+        client.shutdown!
+      end
+    end
+  end
+
   private
 
   def run!(command)
