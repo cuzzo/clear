@@ -4,6 +4,7 @@
 require "set"
 require "sorbet-runtime"
 require_relative "completeness"
+require_relative "scope"
 
 module TestMiser
   module Evidence
@@ -124,6 +125,18 @@ module TestMiser
         complete == false ? "mutation corpus or attribution is incomplete" : "corpus completeness is unknown"
       end
 
+      sig do
+        params(revision: String, selection_scope: String).returns(EvidenceScope)
+      end
+      def evidence_scope(revision: "unknown", selection_scope: "all")
+        EvidenceScope.from_parts(
+          revision: revision,
+          selection_scope: selection_scope,
+          mutants: mutants.map(&:to_h),
+          test_ids: tests.map(&:id),
+        )
+      end
+
       class << self
         extend T::Sig
 
@@ -194,6 +207,7 @@ module TestMiser
       const :corpus_complete, T.nilable(T::Boolean)
       const :unknown_reason, T.nilable(String)
       const :completeness, EvidenceCompleteness
+      const :scope, T.nilable(EvidenceScope), default: nil
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
@@ -204,6 +218,7 @@ module TestMiser
             "mutants" => mutant_count,
             "corpus_complete" => corpus_complete,
             "evidence_completeness" => completeness.to_h,
+            "scope" => scope&.to_h,
             "tests_with_unique_kills" => test_contributions.count { |test| !test.unique_kills.empty? },
             "cohort_new_detection" => cohort&.new_detection || [],
             "unknown_reason" => unknown_reason,
@@ -217,9 +232,10 @@ module TestMiser
     class ContributionAnalyzer
       extend T::Sig
 
-      sig { params(corpus: Corpus).void }
-      def initialize(corpus)
+      sig { params(corpus: Corpus, scope: T.nilable(EvidenceScope), revision: String).void }
+      def initialize(corpus, scope: nil, revision: "unknown")
         @corpus = corpus
+        @scope = T.let(scope || corpus.evidence_scope(revision: revision), EvidenceScope)
       end
 
       sig do
@@ -229,19 +245,23 @@ module TestMiser
         ).returns(ContributionAnalysis)
       end
       def analyze(new_test_ids: [], baseline_test_ids: [])
+        unique_kills = unique_kills_by_test
         contributions = @corpus.tests.map do |test|
+          test_unique_kills = unique_kills.fetch(test.id)
           TestContribution.new(
             test_id: test.id,
             covered_mutants: test.covered_mutants,
             killed_mutants: test.killed_mutants,
-            unique_kills: unique_kills_for(test),
+            unique_kills: test_unique_kills,
             dominated_by: [],
-            findings: findings_for(test, unique_kills_for(test)),
+            findings: findings_for(test, test_unique_kills),
           )
         end
 
+        covered_sets = @corpus.tests.to_h { |test| [test.id, test.covered_mutants.to_set] }
+        killed_sets = @corpus.tests.to_h { |test| [test.id, test.killed_mutants.to_set] }
         contributions = contributions.map do |contribution|
-          dominated_by = dominated_by_for(contribution, contributions)
+          dominated_by = dominated_by_for(contribution, contributions, covered_sets, killed_sets)
           findings = contribution.findings
           findings = (findings + [FindingKind::MutationDominated]).uniq unless dominated_by.empty?
           TestContribution.new(
@@ -266,19 +286,27 @@ module TestMiser
           corpus_complete: @corpus.complete,
           unknown_reason: @corpus.completeness_reason,
           completeness: @corpus.completeness,
+          scope: @scope,
         )
       end
 
       private
 
-      sig { params(test: TestObservation).returns(T::Array[String]) }
-      def unique_kills_for(test)
-        return [] unless @corpus.completeness.complete?
+      sig { returns(T::Hash[String, T::Array[String]]) }
+      def unique_kills_by_test
+        unique = T.let({}, T::Hash[String, T::Array[String]])
+        @corpus.tests.each { |test| unique[test.id] = T.let([], T::Array[String]) }
+        return unique.transform_values(&:freeze).freeze unless @corpus.completeness.complete?
 
-        other_kills = @corpus.tests.reject { |candidate| candidate.id == test.id }
-          .flat_map(&:killed_mutants)
-          .to_set
-        (test.killed_mutants.to_set - other_kills).to_a.sort.freeze
+        @corpus.mutants.each do |mutant|
+          next unless mutant.killed_by.length == 1
+
+          test_id = T.must(mutant.killed_by.first)
+          next unless unique.key?(test_id)
+
+          unique.fetch(test_id) << mutant.id
+        end
+        unique.transform_values { |mutant_ids| mutant_ids.sort.freeze }.freeze
       end
 
       sig { params(test: TestObservation, unique_kills: T::Array[String]).returns(T::Array[FindingKind]) }
@@ -295,9 +323,11 @@ module TestMiser
         params(
           contribution: TestContribution,
           all_contributions: T::Array[TestContribution],
+          covered_sets: T::Hash[String, T::Set[String]],
+          killed_sets: T::Hash[String, T::Set[String]],
         ).returns(T::Array[String])
       end
-      def dominated_by_for(contribution, all_contributions)
+      def dominated_by_for(contribution, all_contributions, covered_sets, killed_sets)
         return [] unless @corpus.completeness.complete?
         return [] unless contribution.unique_kills.empty?
         # A test outside the observed mutation scope has no evidence-bearing
@@ -305,12 +335,15 @@ module TestMiser
         # them here would falsely mark unrelated tests as dominated.
         return [] if contribution.covered_mutants.empty? && contribution.killed_mutants.empty?
 
+        covered = covered_sets.fetch(contribution.test_id)
+        killed = killed_sets.fetch(contribution.test_id)
         candidate = all_contributions.filter_map do |other|
           next if other.test_id == contribution.test_id
-          next unless subset?(contribution.covered_mutants, other.covered_mutants)
-          next unless subset?(contribution.killed_mutants, other.killed_mutants)
-          next unless strict_subset?(contribution.covered_mutants, other.covered_mutants) ||
-            strict_subset?(contribution.killed_mutants, other.killed_mutants)
+          other_covered = covered_sets.fetch(other.test_id)
+          other_killed = killed_sets.fetch(other.test_id)
+          next unless subset_set?(covered, other_covered)
+          next unless subset_set?(killed, other_killed)
+          next unless covered.length < other_covered.length || killed.length < other_killed.length
 
           other.test_id
         end
@@ -360,14 +393,9 @@ module TestMiser
           .flat_map(&:killed_mutants).to_set
       end
 
-      sig { params(left: T::Array[String], right: T::Array[String]).returns(T::Boolean) }
-      def subset?(left, right)
+      sig { params(left: T::Set[String], right: T::Set[String]).returns(T::Boolean) }
+      def subset_set?(left, right)
         left.all? { |value| right.include?(value) }
-      end
-
-      sig { params(left: T::Array[String], right: T::Array[String]).returns(T::Boolean) }
-      def strict_subset?(left, right)
-        subset?(left, right) && left.length < right.length
       end
     end
   end

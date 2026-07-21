@@ -14,8 +14,8 @@ class EvidenceReportTest < Minitest::Test
     )
     subsumption = Evidence::SubsumptionAnalyzer.new(corpus).analyze(contributions: contributions)
     stability = complete_stability(corpus)
-    counterfactual = counterfactual(Evidence::CounterfactualStatus::ProvesRevertedChange, baseline_status: 0)
-    oracle = oracle_analysis
+    counterfactual = counterfactual(Evidence::CounterfactualStatus::ProvesRevertedChange, baseline_status: 0, scope: corpus.evidence_scope)
+    oracle = oracle_analysis(scope: corpus.evidence_scope)
 
     report = Evidence::ReportBuilder.new(corpus).build(
       contributions: contributions,
@@ -61,7 +61,7 @@ class EvidenceReportTest < Minitest::Test
     does_not_detect = Evidence::ReportBuilder.new(corpus).build(
       contributions: contributions,
       subsumption: subsumption,
-      counterfactual: counterfactual(Evidence::CounterfactualStatus::DoesNotDetectRevertedChange),
+      counterfactual: counterfactual(Evidence::CounterfactualStatus::DoesNotDetectRevertedChange, scope: corpus.evidence_scope),
       counterfactual_test_ids: ["t2"],
       runtimes: {"t1" => 1.0},
       high_cost_ms: 10.0,
@@ -69,7 +69,7 @@ class EvidenceReportTest < Minitest::Test
     inconclusive = Evidence::ReportBuilder.new(corpus).build(
       contributions: contributions,
       subsumption: subsumption,
-      counterfactual: counterfactual(Evidence::CounterfactualStatus::Inconclusive),
+      counterfactual: counterfactual(Evidence::CounterfactualStatus::Inconclusive, scope: corpus.evidence_scope),
       counterfactual_test_ids: ["t2"],
     )
 
@@ -131,7 +131,7 @@ class EvidenceReportTest < Minitest::Test
     report = Evidence::ReportBuilder.new(corpus).build(
       contributions: contributions,
       subsumption: subsumption,
-      counterfactual: counterfactual(Evidence::CounterfactualStatus::ProvesRevertedChange, baseline_status: 0),
+      counterfactual: counterfactual(Evidence::CounterfactualStatus::ProvesRevertedChange, baseline_status: 0, scope: corpus.evidence_scope),
       counterfactual_test_ids: %w[new1 new2],
       runtimes: {"new1" => 2_000.0, "new2" => 2_000.0},
       high_cost_ms: 1_000.0,
@@ -172,13 +172,13 @@ class EvidenceReportTest < Minitest::Test
 
       assert_equal complete == false ? "incomplete" : "unknown", report.vectors.fetch(0).completeness
       assert_equal 0, report.vectors.fetch(0).unique_kills
-      assert_equal ["UNKNOWN_INCOMPLETE_ATTRIBUTION"], report.findings.map { |finding| finding.kind.serialize }
+      assert_includes report.findings.map { |finding| finding.kind }, Evidence::ReviewFindingKind::UnknownIncompleteAttribution
+      assert_includes report.findings.map { |finding| finding.kind }, Evidence::ReviewFindingKind::AddsStableUniqueKills
       refute_includes report.findings.map { |finding| finding.kind }, Evidence::ReviewFindingKind::HighCostNoMarginalDetection
-      refute_includes report.findings.map { |finding| finding.kind }, Evidence::ReviewFindingKind::AddsStableUniqueKills
     end
   end
 
-  def test_shared_completeness_gate_suppresses_otherwise_complete_negative_evidence
+  def test_scoped_gates_allow_independent_evidence_on_incomplete_mutation_corpus
     corpus = Evidence::Corpus.new(
       tests: [observation("t1", ["m1"], ["m1"])],
       mutants: [mutant("m1", ["t1"], ["t1"])],
@@ -190,18 +190,58 @@ class EvidenceReportTest < Minitest::Test
     report = Evidence::ReportBuilder.new(corpus).build(
       contributions: contributions,
       subsumption: subsumption,
-      counterfactual: counterfactual(Evidence::CounterfactualStatus::ProvesRevertedChange, baseline_status: 0),
-      oracle_sensitivity: oracle_analysis,
+      counterfactual: counterfactual(Evidence::CounterfactualStatus::ProvesRevertedChange, baseline_status: 0, scope: corpus.evidence_scope),
+      oracle_sensitivity: oracle_analysis(scope: corpus.evidence_scope),
       counterfactual_test_ids: ["t1"],
       runtimes: {"t1" => 2_000.0},
       high_cost_ms: 1.0,
     )
 
-    assert_equal ["UNKNOWN_INCOMPLETE_ATTRIBUTION"], report.findings.map { |finding| finding.kind.serialize }
-    assert_nil report.vectors.fetch(0).detects_reverted_change
-    assert_nil report.vectors.fetch(0).oracle_dependent_kill_ratio
+    assert_includes report.findings.map { |finding| finding.kind }, Evidence::ReviewFindingKind::ProvesRevertedChange
+    assert_includes report.findings.map { |finding| finding.kind }, Evidence::ReviewFindingKind::StrengthensExistingOracle
+    assert_equal true, report.vectors.fetch(0).detects_reverted_change
+    assert_in_delta 0.5, report.vectors.fetch(0).oracle_dependent_kill_ratio, 0.001
     assert_equal({"status" => "incomplete", "complete" => false, "reason" => "missing attribution"},
                  contributions.completeness.to_h)
+  end
+
+  def test_high_cost_findings_require_comparable_runtime_measurements
+    corpus = complete_corpus
+    contributions = Evidence::ContributionAnalyzer.new(corpus).analyze
+    subsumption = Evidence::SubsumptionAnalyzer.new(corpus).analyze(contributions: contributions)
+    report = Evidence::ReportBuilder.new(corpus).build(
+      contributions: contributions,
+      subsumption: subsumption,
+      runtimes: {"t4" => 2_000.0},
+      high_cost_ms: 1.0,
+      cost_comparable: false,
+    )
+
+    refute_includes report.findings.map { |finding| finding.kind }, Evidence::ReviewFindingKind::HighCostNoMarginalDetection
+    assert_equal 2_000.0, report.vectors.find { |vector| vector.test_id == "t4" }&.runtime_ms
+  end
+
+  def test_report_rejects_artifacts_from_a_different_revision
+    corpus = complete_corpus
+    current_scope = corpus.evidence_scope(revision: "rev-current")
+    stale_scope = corpus.evidence_scope(revision: "rev-stale")
+    contributions = Evidence::ContributionAnalyzer.new(corpus, scope: current_scope).analyze
+    stale_subsumption = Evidence::SubsumptionAnalyzer.new(corpus, scope: stale_scope).analyze
+
+    assert_raises(Evidence::EvidenceScopeMismatch) do
+      Evidence::ReportBuilder.new(corpus, scope: current_scope).build(
+        contributions: contributions,
+        subsumption: stale_subsumption,
+      )
+    end
+
+    assert_raises(Evidence::EvidenceScopeMismatch) do
+      Evidence::ReportBuilder.new(corpus).build(
+        contributions: Evidence::ContributionAnalyzer.new(corpus).analyze,
+        subsumption: Evidence::SubsumptionAnalyzer.new(corpus).analyze,
+        counterfactual: counterfactual(Evidence::CounterfactualStatus::Inconclusive),
+      )
+    end
   end
 
   private
@@ -224,7 +264,7 @@ class EvidenceReportTest < Minitest::Test
     )
   end
 
-  def counterfactual(status, baseline_status: nil)
+  def counterfactual(status, baseline_status: nil, scope: nil)
     command = Evidence::CommandResult.new(status: 0, stdout: "", stderr: "")
     baseline = baseline_status.nil? ? nil : Evidence::CommandResult.new(status: baseline_status, stdout: "", stderr: "")
     Evidence::CounterfactualResult.new(
@@ -236,6 +276,7 @@ class EvidenceReportTest < Minitest::Test
       new_tests: status == Evidence::CounterfactualStatus::DoesNotDetectRevertedChange ? command : Evidence::CommandResult.new(status: 1, stdout: "", stderr: ""),
       baseline_tests: baseline,
       baseline_detects_reversal: baseline.nil? ? nil : !baseline.success?,
+      scope: scope,
       reason: "fixture result",
     )
   end
@@ -256,7 +297,7 @@ class EvidenceReportTest < Minitest::Test
     Evidence::StabilityAnalyzer.new(corpus).analyze(trials)
   end
 
-  def oracle_analysis
+  def oracle_analysis(scope: nil)
     fact = Evidence::OracleFact.new(
       oracle_id: "o1",
       test_id: "t1",
@@ -276,6 +317,7 @@ class EvidenceReportTest < Minitest::Test
         oracle_id: "o1", mutation: Evidence::OracleMutationKind::DisableOracle,
         recognized: true, applied: true, reason: "fixture",
       )],
+      scope: scope,
     )
   end
 

@@ -5,6 +5,7 @@ require "digest"
 require "open3"
 require "sorbet-runtime"
 require "tmpdir"
+require_relative "scope"
 
 module TestMiser
   module Evidence
@@ -267,6 +268,7 @@ module TestMiser
       const :baseline_head_command, T.nilable(T::Array[String]), default: nil
       const :baseline_test_command, T.nilable(T::Array[String]), default: nil
       const :revision, String, default: "HEAD"
+      const :scope, T.nilable(EvidenceScope), default: nil
       const :test_result_parser, TestResultParser, factory: -> { DefaultTestResultParser.new }
       const :limits, CommandLimits, factory: -> { CommandLimits.new }
       const :allow_dirty, T::Boolean, default: false
@@ -311,6 +313,7 @@ module TestMiser
       const :new_tests, T.nilable(CommandResult)
       const :baseline_tests, T.nilable(CommandResult)
       const :baseline_detects_reversal, T.nilable(T::Boolean)
+      const :scope, T.nilable(EvidenceScope), default: nil
       const :provenance, T.nilable(CounterfactualProvenance), default: nil
       const :reason, String
 
@@ -329,6 +332,7 @@ module TestMiser
           "new_tests" => new_tests&.to_h,
           "baseline_tests" => baseline_tests&.to_h,
           "baseline_detects_reversal" => baseline_detects_reversal,
+          "scope" => scope&.to_h,
           "provenance" => provenance&.to_h,
           "reason" => reason,
         }
@@ -546,6 +550,7 @@ module TestMiser
             new_tests: new_tests,
             baseline_tests: baseline_tests,
             baseline_detects_reversal: baseline_tests.nil? ? nil : parse_result(baseline_tests) == TestOutcome::AssertionFailure,
+            scope: @request.scope,
             provenance: provenance,
             reason: new_outcome == TestOutcome::Passed ? "new tests pass after the production change is reversed" :
               "new tests fail after the production change is reversed",
@@ -635,13 +640,14 @@ module TestMiser
           build: T.nilable(CommandResult),
           new_tests: T.nilable(CommandResult),
           baseline_tests: T.nilable(CommandResult),
+          scope: T.nilable(EvidenceScope),
           provenance: T.nilable(CounterfactualProvenance),
         ).returns(CounterfactualResult)
       end
       def inconclusive(
         head:, reason:, repository_status: not_executed_result("not run"),
         revision_resolution: not_executed_result("not run"), baseline_head: nil,
-        worktree: nil, reverse_patch: nil, build: nil, new_tests: nil, baseline_tests: nil, provenance: nil
+        worktree: nil, reverse_patch: nil, build: nil, new_tests: nil, baseline_tests: nil, scope: @request.scope, provenance: nil
       )
         CounterfactualResult.new(
           status: CounterfactualStatus::Inconclusive,
@@ -655,6 +661,7 @@ module TestMiser
           new_tests: new_tests,
           baseline_tests: baseline_tests,
           baseline_detects_reversal: nil,
+          scope: scope,
           provenance: provenance,
           reason: reason,
         )

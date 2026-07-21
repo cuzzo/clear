@@ -16,10 +16,11 @@ module TestMiser
       extend T::Sig
 
       const :completeness, EvidenceCompleteness
+      const :cost_comparable, T::Boolean
 
-      sig { params(contributions: ContributionAnalysis).returns(EvidenceGate) }
-      def self.for(contributions)
-        new(completeness: contributions.completeness)
+      sig { params(contributions: ContributionAnalysis, cost_comparable: T::Boolean).returns(EvidenceGate) }
+      def self.for(contributions, cost_comparable: true)
+        new(completeness: contributions.completeness, cost_comparable: cost_comparable)
       end
 
       sig { returns(T::Boolean) }
@@ -34,17 +35,27 @@ module TestMiser
 
       sig { params(stability: T.nilable(StabilityAnalysis)).returns(T::Boolean) }
       def allows_stability?(stability)
-        corpus_complete? && stability&.matrix_complete == true
+        stability&.matrix_complete == true
       end
 
       sig { params(result: OracleSensitivity).returns(T::Boolean) }
       def allows_oracle?(result)
-        corpus_complete? && result.complete
+        result.complete
       end
 
       sig { params(counterfactual: T.nilable(CounterfactualResult)).returns(T::Boolean) }
       def allows_counterfactual?(counterfactual)
-        corpus_complete? && !counterfactual.nil? && counterfactual.status != CounterfactualStatus::Inconclusive
+        !counterfactual.nil? && counterfactual.status != CounterfactualStatus::Inconclusive
+      end
+
+      sig { params(subsumption: SubsumptionAnalysis).returns(T::Boolean) }
+      def allows_subsumption?(subsumption)
+        corpus_complete? && subsumption.subsumption_complete
+      end
+
+      sig { returns(T::Boolean) }
+      def allows_cost?
+        corpus_complete? && cost_comparable
       end
     end
 
@@ -160,6 +171,7 @@ module TestMiser
       const :counterfactual, T.nilable(CounterfactualResult)
       const :oracle_sensitivity, T.nilable(OracleSensitivityAnalysis)
       const :cohort, T.nilable(CohortEvidenceVector)
+      const :scope, EvidenceScope
       const :vectors, T::Array[EvidenceVector]
       const :findings, T::Array[ReviewFinding]
 
@@ -173,6 +185,7 @@ module TestMiser
           "counterfactual" => counterfactual&.to_h,
           "oracle_sensitivity" => oracle_sensitivity&.to_h,
           "cohort" => cohort&.to_h,
+          "scope" => scope.to_h,
           "vectors" => vectors.map(&:to_h),
           "findings" => findings.map(&:to_h),
         }.compact
@@ -187,9 +200,10 @@ module TestMiser
     class ReportBuilder
       extend T::Sig
 
-      sig { params(corpus: Corpus).void }
-      def initialize(corpus)
+      sig { params(corpus: Corpus, scope: T.nilable(EvidenceScope), revision: String).void }
+      def initialize(corpus, scope: nil, revision: "unknown")
         @corpus = corpus
+        @scope = T.let(scope || corpus.evidence_scope(revision: revision), EvidenceScope)
       end
 
       sig do
@@ -202,13 +216,21 @@ module TestMiser
           counterfactual_test_ids: T::Array[String],
           runtimes: T::Hash[String, Float],
           high_cost_ms: Float,
+          cost_comparable: T::Boolean,
         ).returns(EvidenceReport)
       end
       def build(
         contributions:, subsumption:, stability: nil, counterfactual: nil,
-        oracle_sensitivity: nil, counterfactual_test_ids: [], runtimes: {}, high_cost_ms: 1_000.0
+        oracle_sensitivity: nil, counterfactual_test_ids: [], runtimes: {}, high_cost_ms: 1_000.0, cost_comparable: true
       )
-        gate = EvidenceGate.for(contributions)
+        validate_scopes!(
+          contributions: contributions,
+          subsumption: subsumption,
+          stability: stability,
+          counterfactual: counterfactual,
+          oracle_sensitivity: oracle_sensitivity,
+        )
+        gate = EvidenceGate.for(contributions, cost_comparable: cost_comparable)
         cohort = build_cohort_vector(
           contributions: contributions,
           subsumption: subsumption,
@@ -246,6 +268,7 @@ module TestMiser
           cohort: cohort,
           vectors: vectors,
           findings: findings,
+          scope: @scope,
         )
       end
 
@@ -381,7 +404,7 @@ module TestMiser
 
       sig { params(subsumption: SubsumptionAnalysis, gate: EvidenceGate).returns(T::Array[ReviewFinding]) }
       def subsumption_findings(subsumption, gate)
-        return [] unless gate.corpus_complete?
+        return [] unless gate.allows_subsumption?(subsumption)
 
         subsumption.rankings.filter_map do |ranking|
           next if ranking.frontier_unique_kills.empty?
@@ -484,7 +507,7 @@ module TestMiser
         ).returns(T::Array[ReviewFinding])
       end
       def cost_findings(vectors, threshold, gate)
-        return [] unless gate.corpus_complete?
+        return [] unless gate.allows_cost?
 
         vectors.filter_map do |vector|
           next if vector.runtime_ms.nil? || T.must(vector.runtime_ms) < threshold
@@ -555,6 +578,36 @@ module TestMiser
           internally_redundant_test_ids: internally_redundant,
           counterfactual_test_ids: counterfactual_test_ids,
         )
+      end
+
+      sig do
+        params(
+          contributions: ContributionAnalysis,
+          subsumption: SubsumptionAnalysis,
+          stability: T.nilable(StabilityAnalysis),
+          counterfactual: T.nilable(CounterfactualResult),
+          oracle_sensitivity: T.nilable(OracleSensitivityAnalysis),
+        ).void
+      end
+      def validate_scopes!(contributions:, subsumption:, stability:, counterfactual:, oracle_sensitivity:)
+        artifacts = {
+          "contribution" => contributions,
+          "subsumption" => subsumption,
+          "stability" => stability,
+          "counterfactual" => counterfactual,
+          "oracle_sensitivity" => oracle_sensitivity,
+        }
+        artifacts.each do |name, artifact|
+          next if artifact.nil?
+
+          artifact_scope = T.unsafe(artifact).scope
+          if artifact_scope.nil?
+            raise EvidenceScopeMismatch, "#{name} evidence has no scope identity"
+          end
+          next if @scope.compatible?(artifact_scope)
+
+          raise EvidenceScopeMismatch, "#{name} evidence scope does not match the report corpus"
+        end
       end
 
     end

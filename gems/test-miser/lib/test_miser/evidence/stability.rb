@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "sorbet-runtime"
+require_relative "scope"
 
 module TestMiser
   module Evidence
@@ -72,6 +73,7 @@ module TestMiser
       const :selected_mutant_ids, T::Array[String]
       const :matrix_complete, T::Boolean
       const :unknown_reason, T.nilable(String)
+      const :scope, T.nilable(EvidenceScope), default: nil
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
@@ -88,6 +90,7 @@ module TestMiser
           },
           "selected_test_ids" => selected_test_ids,
           "selected_mutant_ids" => selected_mutant_ids,
+          "scope" => scope&.to_h,
           "tests" => attributions.map(&:to_h),
           "stable_unique_kills" => stable_unique_kills.map(&:to_h),
         }
@@ -97,12 +100,13 @@ module TestMiser
     class StabilityAnalyzer
       extend T::Sig
 
-      sig { params(corpus: Corpus, threshold: Integer).void }
-      def initialize(corpus, threshold: 3)
+      sig { params(corpus: Corpus, threshold: Integer, scope: T.nilable(EvidenceScope), revision: String).void }
+      def initialize(corpus, threshold: 3, scope: nil, revision: "unknown")
         raise ArgumentError, "threshold must be positive" unless threshold.positive?
 
         @corpus = corpus
         @threshold = threshold
+        @scope = T.let(scope || corpus.evidence_scope(revision: revision), EvidenceScope)
       end
 
       sig do
@@ -161,6 +165,7 @@ module TestMiser
           selected_mutant_ids: selected_mutant_ids,
           matrix_complete: matrix.complete,
           unknown_reason: matrix.unknown_reason,
+          scope: @scope,
         )
       end
 
@@ -242,7 +247,6 @@ module TestMiser
         ).returns(MatrixCheck)
       end
       def matrix_check(test_ids, mutant_ids, trial_ids, observations, duplicate_observations)
-        return MatrixCheck.new(complete: false, unknown_reason: @corpus.completeness_reason) unless @corpus.completeness.complete?
         return MatrixCheck.new(complete: false, unknown_reason: "stability matrix has no selected tests or mutants") if test_ids.empty? || mutant_ids.empty?
         return MatrixCheck.new(complete: false, unknown_reason: "stability matrix has fewer trial IDs than its consistency threshold") if trial_ids.length < @threshold
         return MatrixCheck.new(complete: false, unknown_reason: "stability matrix contains duplicate trial observations") if duplicate_observations

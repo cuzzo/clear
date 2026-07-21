@@ -153,9 +153,9 @@ class EvidenceSubsumptionStabilityTest < Minitest::Test
       incomplete_reason: "partial corpus",
     )
     partial = Evidence::StabilityAnalyzer.new(partial_corpus).analyze(trials)
-    refute partial.matrix_complete
-    assert_empty partial.stable_unique_kills.flat_map(&:stable_unique_kills)
-    assert_equal "partial corpus", partial.unknown_reason
+    assert partial.matrix_complete
+    assert_equal ["m2"], partial.stable_unique_kills.find { |row| row.test_id == "t1" }&.stable_unique_kills
+    assert_nil partial.unknown_reason
 
     short = Evidence::StabilityAnalyzer.new(corpus).analyze(trials, trial_ids: [0, 1])
     assert_equal "stability matrix has fewer trial IDs than its consistency threshold", short.unknown_reason
@@ -165,6 +165,33 @@ class EvidenceSubsumptionStabilityTest < Minitest::Test
     assert_equal "stability matrix names an unknown test or mutant", unknown.unknown_reason
     empty = Evidence::StabilityAnalyzer.new(corpus).analyze(trials, test_ids: [])
     assert_equal "stability matrix has no selected tests or mutants", empty.unknown_reason
+  end
+
+  def test_subsumption_falls_back_when_the_resource_budget_is_exceeded
+    corpus = Evidence::Corpus.new(
+      tests: [observation("t1", ["m1"], ["m1"]), observation("t2", ["m2"], ["m2"])],
+      mutants: [
+        mutant("m1", ["t1"], ["t1"]),
+        mutant("m2", ["t2"], ["t2"]),
+        mutant("m3", ["t1", "t2"], ["t1", "t2"]),
+      ],
+      complete: true,
+    )
+
+    limited = Evidence::SubsumptionAnalyzer.new(corpus, max_distinct_kill_sets: 1).analyze
+
+    refute limited.subsumption_complete
+    assert_empty limited.relations
+    assert_empty limited.frontier_mutants
+    assert_equal "subsumption distinct kill-set budget exceeded", limited.unknown_reason
+    relation_limited = Evidence::SubsumptionAnalyzer.new(
+      corpus,
+      max_distinct_kill_sets: 10,
+      max_relation_checks: 1,
+    ).analyze
+    refute relation_limited.subsumption_complete
+    assert_equal "subsumption relation-check budget exceeded", relation_limited.unknown_reason
+    assert_raises(ArgumentError) { Evidence::SubsumptionAnalyzer.new(corpus, max_relation_checks: 0) }
   end
 
   def test_scheduler_selects_weak_redundant_and_dominated_tests

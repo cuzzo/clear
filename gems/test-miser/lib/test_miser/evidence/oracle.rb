@@ -3,6 +3,7 @@
 
 require "json"
 require "sorbet-runtime"
+require_relative "scope"
 
 module TestMiser
   module Evidence
@@ -370,6 +371,7 @@ module TestMiser
       extend T::Sig
 
       const :results, T::Array[OracleSensitivity]
+      const :scope, T.nilable(EvidenceScope), default: nil
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
@@ -381,6 +383,7 @@ module TestMiser
             "oracle_dependent_kills" => results.sum { |result| result.oracle_dependent_kills.length },
             "incidental_kills" => results.sum { |result| result.incidental_kills.length },
           },
+          "scope" => scope&.to_h,
           "oracles" => results.map(&:to_h),
         }
       end
@@ -395,9 +398,10 @@ module TestMiser
           original_kills: T::Hash[String, T::Array[String]],
           disabled_trials: T::Array[OracleTrial],
           rewrites: T::Array[OracleRewrite],
+          scope: T.nilable(EvidenceScope),
         ).returns(OracleSensitivityAnalysis)
       end
-      def self.analyze(facts:, original_kills:, disabled_trials:, rewrites:)
+      def self.analyze(facts:, original_kills:, disabled_trials:, rewrites:, scope: nil)
         rewrite_by_id = rewrites.to_h { |rewrite| [rewrite.oracle_id, rewrite] }
         results = facts.facts.map do |fact|
           original_known = original_kills.key?(fact.test_id)
@@ -414,7 +418,7 @@ module TestMiser
             original_known: original_known,
           )
         end.freeze
-        OracleSensitivityAnalysis.new(results: results)
+        OracleSensitivityAnalysis.new(results: results, scope: scope)
       end
 
       class << self

@@ -1,7 +1,9 @@
 # typed: strict
 # frozen_string_literal: true
 
+require "set"
 require "sorbet-runtime"
+require_relative "scope"
 
 module TestMiser
   module Evidence
@@ -33,6 +35,8 @@ module TestMiser
         }
       end
     end
+
+    class SubsumptionBudgetExceeded < StandardError; end
 
     class IndexedKillSet < T::Struct
       extend T::Sig
@@ -68,6 +72,8 @@ module TestMiser
       const :rankings, T::Array[FrontierRanking]
       const :corpus_complete, T.nilable(T::Boolean)
       const :unknown_reason, T.nilable(String)
+      const :scope, T.nilable(EvidenceScope), default: nil
+      const :subsumption_complete, T::Boolean, default: true
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
@@ -81,6 +87,8 @@ module TestMiser
             "cohort_new_frontier_detection" => cohort_new_frontier_detection,
             "corpus_complete" => corpus_complete,
             "unknown_reason" => unknown_reason,
+            "subsumption_complete" => subsumption_complete,
+            "scope" => scope&.to_h,
           },
           "equivalent_mutants" => equivalent_groups.map(&:to_h),
           "relations" => relations.map(&:to_h),
@@ -92,9 +100,32 @@ module TestMiser
     class SubsumptionAnalyzer
       extend T::Sig
 
-      sig { params(corpus: Corpus).void }
-      def initialize(corpus)
+      DEFAULT_MAX_DISTINCT_KILL_SETS = T.let(50_000, Integer)
+      DEFAULT_MAX_RELATION_CHECKS = T.let(5_000_000, Integer)
+
+      sig do
+        params(
+          corpus: Corpus,
+          scope: T.nilable(EvidenceScope),
+          revision: String,
+          max_distinct_kill_sets: Integer,
+          max_relation_checks: Integer,
+        ).void
+      end
+      def initialize(
+        corpus,
+        scope: nil,
+        revision: "unknown",
+        max_distinct_kill_sets: DEFAULT_MAX_DISTINCT_KILL_SETS,
+        max_relation_checks: DEFAULT_MAX_RELATION_CHECKS
+      )
+        raise ArgumentError, "max_distinct_kill_sets must be positive" unless max_distinct_kill_sets.positive?
+        raise ArgumentError, "max_relation_checks must be positive" unless max_relation_checks.positive?
+
         @corpus = corpus
+        @scope = T.let(scope || corpus.evidence_scope(revision: revision), EvidenceScope)
+        @max_distinct_kill_sets = max_distinct_kill_sets
+        @max_relation_checks = max_relation_checks
       end
 
       sig { params(contributions: T.nilable(ContributionAnalysis)).returns(SubsumptionAnalysis) }
@@ -108,7 +139,12 @@ module TestMiser
             rankings: rankings_for([], contributions),
             corpus_complete: @corpus.complete,
             unknown_reason: @corpus.completeness_reason,
+            scope: contributions&.scope || @scope,
           )
+        end
+
+        if distinct_kill_set_count > @max_distinct_kill_sets
+          return limited_analysis(contributions, "subsumption distinct kill-set budget exceeded")
         end
 
         kill_sets = indexed_kill_sets
@@ -123,7 +159,10 @@ module TestMiser
           rankings: rankings_for(frontier, contributions),
           corpus_complete: @corpus.complete,
           unknown_reason: nil,
+          scope: contributions&.scope || @scope,
         )
+      rescue SubsumptionBudgetExceeded => error
+        limited_analysis(contributions, error.message)
       end
 
       private
@@ -144,10 +183,14 @@ module TestMiser
       def subsumption_relations(kill_sets)
         ordered = kill_sets.sort_by { |kill_set| [kill_set.cardinality, T.must(kill_set.mutant_ids.first)] }
         relations = []
+        relation_checks = T.let(0, Integer)
 
         ordered.each_with_index do |target, target_index|
           immediate_subsumers = []
           (target_index - 1).downto(0) do |candidate_index|
+            relation_checks += 1
+            raise SubsumptionBudgetExceeded, "subsumption relation-check budget exceeded" if relation_checks > @max_relation_checks
+
             candidate = T.must(ordered[candidate_index])
             next unless candidate.cardinality < target.cardinality
             next unless subset_mask?(candidate.mask, target.mask)
@@ -202,6 +245,26 @@ module TestMiser
             cardinality: killer_tests.length,
           )
         end.sort_by { |kill_set| T.must(kill_set.mutant_ids.first) }.freeze
+      end
+
+      sig { returns(Integer) }
+      def distinct_kill_set_count
+        @corpus.mutants.map { |mutant| mutant.killed_by.uniq.sort }.uniq.length
+      end
+
+      sig { params(contributions: T.nilable(ContributionAnalysis), reason: String).returns(SubsumptionAnalysis) }
+      def limited_analysis(contributions, reason)
+        SubsumptionAnalysis.new(
+          equivalent_groups: [],
+          relations: [],
+          frontier_mutants: [],
+          cohort_new_frontier_detection: [],
+          rankings: rankings_for([], contributions),
+          corpus_complete: @corpus.complete,
+          unknown_reason: reason,
+          scope: contributions&.scope || @scope,
+          subsumption_complete: false,
+        )
       end
 
       sig { returns(T::Hash[String, Integer]) }
