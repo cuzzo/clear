@@ -33,6 +33,20 @@ remain future work. Today the checkpoint materializes Lineage's existing
 mutation and Weak Tests views without teaching Lineage to read compressed
 corpus envelopes directly.
 
+The checkpoint -> ledger path is wired:
+`gems/lineage/tools/ingest_mutation_corpus.rb` accepts either the canonical
+`mutation-corpus.json.zst` envelope (materializing it via
+`test-miser-artifact materialize`) or an already-materialized directory, then
+runs `ingest-mutants` per suite and `ingest-sarif` for the combined Weak
+Tests SARIF. `bin/lineage-import --mutation-corpus=PATH` invokes it as part
+of a repository import, so downloading the latest
+`test-miser-corpus-<head-sha>` artifact and passing it to the importer fully
+populates the mutation-exposure and Weak Tests views. The round-trip is
+covered by `gems/test-miser/test/lineage_ingest_integration_test.rb`. The
+`result` job additionally publishes an advisory per-suite mutant-count step
+summary on every run (`tools/test_miser_step_summary.rb`); verdict-bearing
+weak-test findings still come only from the canonical snapshot.
+
 ## Decision
 
 Test Miser should own a file-based, cross-run mutation corpus that can be
