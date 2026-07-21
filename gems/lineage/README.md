@@ -450,6 +450,15 @@ logical-unit inventory at ingest time and never guessed.
 See [profiling-data-integration.md](docs/agents/profiling-data-integration.md)
 for per-language recipes, resolution tiers, and known gaps.
 
+### MCP server (MVP)
+
+`ruby gems/lineage/tools/mcp_server.rb --db lineage.db --repo .` exposes
+five read-only, workflow-shaped tools (file risk, unit context,
+verification gaps, change history, find-definition) over stdio MCP - not
+one tool per table. See
+[mcp-server.md](docs/agents/mcp-server.md) for the tool list, why 5 and not
+17, and known MVP gaps.
+
 ## Supported Languages Roadmap
 
 Lineage uses Tree-sitter-backed logical-unit extraction for the core
