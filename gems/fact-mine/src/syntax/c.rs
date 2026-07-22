@@ -5,7 +5,8 @@ use super::cfg::ControlFlowProfile;
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     configured_intrinsic_call_complexity, eliminable_guard_from_call, exact_direct_call_name,
-    native_pointer_nullability_contract, nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts, NormalizedCallComplexity,
+    native_pointer_nullability_contract, nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
+    type_before_parameter_name, NormalizedCallComplexity,
     NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedNullableOperation, NormalizedOwner,
     NormalizedSemanticEffect,
@@ -124,6 +125,10 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
 
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
         super::normalized_behavior::type_before_local_name(source, name)
+    }
+
+    fn parameter_type_from_signature(&self, parameter: &str) -> Option<String> {
+        type_before_parameter_name(parameter)
     }
 
     fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
@@ -434,7 +439,18 @@ fn typed_pointer_owner(parameter: &str) -> Option<String> {
     let normalized = parameter.replace(['*', '&'], " ");
     let tokens = normalized
         .split_whitespace()
-        .filter(|token| !matches!(*token, "const" | "volatile" | "struct"))
+        .filter(|token| {
+            !matches!(
+                *token,
+                "const"
+                    | "volatile"
+                    | "struct"
+                    | "_Nullable"
+                    | "_Nonnull"
+                    | "__nullable"
+                    | "__nonnull"
+            )
+        })
         .collect::<Vec<_>>();
     if tokens.len() < 2 {
         return None;
@@ -563,6 +579,27 @@ mod tests {
         );
         assert_eq!(
             behavior.declared_local_type("Widget * _Nullable value = load_widget()", "value"),
+            Some("Widget * _Nullable".to_string())
+        );
+    }
+
+    #[test]
+    fn typed_pointer_owner_ignores_nullability_annotations() {
+        assert_eq!(
+            typed_pointer_owner("Widget * _Nullable value"),
+            Some("Widget".to_string())
+        );
+        assert_eq!(
+            typed_pointer_owner("Widget * _Nonnull value"),
+            Some("Widget".to_string())
+        );
+        assert_eq!(typed_pointer_owner("* value"), None);
+    }
+
+    #[test]
+    fn c_parameter_type_preserves_nullability_annotation() {
+        assert_eq!(
+            CNormalizedBehavior.parameter_type_from_signature("Widget * _Nullable value"),
             Some("Widget * _Nullable".to_string())
         );
     }

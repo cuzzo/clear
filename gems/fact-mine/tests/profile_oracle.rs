@@ -201,6 +201,38 @@ fn native_declared_non_null_contracts_reach_public_nullable_states() -> Result<(
 }
 
 #[test]
+fn c_native_nullability_annotations_survive_parser_preprocessing() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_annotations.c"), Language::C)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("nullable_parameter")
+            && state.place_id.ends_with(":value")
+            && state.state == "maybe_null"
+            && state.complete
+    }));
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("non_null_parameter")
+            && state.place_id.ends_with(":value")
+            && state.state == "definitely_non_null"
+            && state.complete
+    }));
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("nullable_local")
+            && state.place_id.ends_with(":value")
+            && state.state == "maybe_null"
+            && state.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.path.ends_with("nullable_annotations.c")
+            && operation.operation_kind == "pointer_dereference"
+            && operation.state_at_operation == "maybe_null"
+            && operation.complete
+    }));
+    Ok(())
+}
+
+#[test]
 fn nullable_operations_join_native_dereferences_to_proven_null_states() -> Result<()> {
     for (name, language, behavior) in [
         ("nullable_operations.c", Language::C, "undefined_behavior"),
