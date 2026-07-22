@@ -3,18 +3,19 @@
 //! The crate is intentionally split around replaceable boundaries:
 //! VCS traversal, source boundary extraction, analysis, and storage.
 
-#[path = "db/engine.rs"]
-pub mod engine;
 #[path = "db/architecture.rs"]
 pub mod architecture;
+pub mod diff;
+#[path = "db/engine.rs"]
+pub mod engine;
 #[path = "db/extract.rs"]
 pub mod extract;
-#[path = "db/hotness.rs"]
-pub mod hotness;
 #[path = "db/git.rs"]
 pub mod git;
 #[path = "db/hazard.rs"]
 pub mod hazard;
+#[path = "db/hotness.rs"]
+pub mod hotness;
 #[path = "ui/lsp.rs"]
 pub mod lsp;
 #[path = "ui/mcp.rs"]
@@ -37,8 +38,14 @@ pub mod test_exposure;
 pub mod ui;
 #[path = "db/vcs.rs"]
 pub mod vcs;
+pub use architecture::{
+    architecture_search, ingest_architecture_json, node_neighborhood, owner_inventory,
+    state_access, ArchitectureIngestStats,
+};
+pub use diff::{
+    build_diff_plan, ChangeInventory, DependencyChange, DiffFile, DiffPlan, DiffScope, RevisionFile,
+};
 pub use engine::{EngineStats, LineageEngine};
-pub use architecture::{architecture_search, ingest_architecture_json, node_neighborhood, owner_inventory, state_access, ArchitectureIngestStats};
 pub use extract::{BoundaryExtractor, HeuristicExtractor, SourceFilter};
 pub use git::GitProvider;
 pub use hazard::{ingest_hazards, HazardIngestStats};
@@ -49,8 +56,8 @@ pub use lsp::{
 };
 pub use mcp::serve_mcp;
 pub use model::{
-    BlobFile, CommitMetadata, CrashEvent, Event, EventType, LogicalUnit, QualityEvent,
-    HazardEvent, QualityMetric, SarifArtifact, SarifFinding, TestExposureEvent, UnitKind,
+    BlobFile, CommitMetadata, CrashEvent, Event, EventType, HazardEvent, LogicalUnit, QualityEvent,
+    QualityMetric, SarifArtifact, SarifFinding, TestExposureEvent, UnitKind,
 };
 pub use mutant::{ingest_mutant_facts_json, parse_mutant_facts, MutantFact, MutantIngestStats};
 pub use quality::{
@@ -60,8 +67,8 @@ pub use quality::{
 };
 pub use sarif::{ingest_sarif_paths, SarifIngestStats};
 pub use stack_trace::{
-    ingest_stack_traces, LanguageNormalizer, RepoPathNormalizer, SentryProvider,
-    StackIngestStats, StackPayload, StackTraceProvider,
+    ingest_stack_traces, LanguageNormalizer, RepoPathNormalizer, SentryProvider, StackIngestStats,
+    StackPayload, StackTraceProvider,
 };
 pub use storage::{Storage, UnitSummary};
 pub use test_exposure::{

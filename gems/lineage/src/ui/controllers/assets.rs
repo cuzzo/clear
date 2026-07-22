@@ -7,7 +7,14 @@ pub(super) fn routes() -> Router<UiServerState> {
 }
 
 async fn asset_handler(AxumPath(path): AxumPath<String>) -> Response<Body> {
-    let path = path.trim_start_matches('/');
+    asset_response(path.trim_start_matches('/'))
+}
+
+pub(super) fn diff_index_response() -> Response<Body> {
+    asset_response("diff/index.html")
+}
+
+fn asset_response(path: &str) -> Response<Body> {
     let embedded_path = embedded_asset_path(path);
     let Some(asset) = EmbeddedUi::get(&embedded_path) else {
         return StatusCode::NOT_FOUND.into_response();
@@ -33,7 +40,10 @@ fn embedded_asset_path(path: &str) -> String {
 }
 
 fn asset_content_type(path: &str) -> &'static str {
-    match Path::new(path).extension().and_then(|extension| extension.to_str()) {
+    match Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+    {
         Some("css") => "text/css; charset=utf-8",
         Some("js") => "text/javascript; charset=utf-8",
         Some("html") => "text/html; charset=utf-8",

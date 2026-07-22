@@ -2,6 +2,12 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
+  base: "/assets/diff/",
+  build: {
+    emptyOutDir: true,
+    manifest: true,
+    outDir: "../src/ui/assets/diff",
+  },
   plugins: [react()],
   test: {
     coverage: {
