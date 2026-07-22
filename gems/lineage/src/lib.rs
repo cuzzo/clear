@@ -6,6 +6,7 @@
 #[path = "db/architecture.rs"]
 pub mod architecture;
 pub mod diff;
+pub mod diff_render;
 pub mod diff_service;
 #[path = "db/engine.rs"]
 pub mod engine;
@@ -48,6 +49,10 @@ pub use diff::{
     DependencyChange, DiffFile, DiffPlan, DiffScope, EvidenceScopeFingerprint, RevisionFile,
 };
 pub use diff_service::{build_structured_diff, DiffRequest};
+pub use diff_render::{
+    render_structured_diff_json, render_structured_diff_text, structured_diff_document,
+    StructuredDiffDocument, STRUCTURED_DIFF_FORMAT_VERSION,
+};
 pub use engine::{EngineStats, LineageEngine};
 pub use extract::{BoundaryExtractor, HeuristicExtractor, SourceFilter};
 pub use git::GitProvider;

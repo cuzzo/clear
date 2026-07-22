@@ -1,11 +1,12 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use lineage::{
-    coverage_records_to_test_exposure_json, ingest_architecture_json,
+    build_structured_diff, coverage_records_to_test_exposure_json, ingest_architecture_json,
     ingest_coverage_json_with_options, ingest_hazards, ingest_hotness_json,
     ingest_mutant_facts_json_with_options, ingest_sarif_paths, ingest_stack_traces,
-    ingest_test_exposure_json, parse_coverage_input, resolve_coverage_record_paths, serve_lsp,
-    serve_mcp, serve_ui_with_overlays, CoverageIngestOptions, EvidenceScopeFingerprint,
+    ingest_test_exposure_json, parse_coverage_input, render_structured_diff_json,
+    render_structured_diff_text, resolve_coverage_record_paths, serve_lsp, serve_mcp,
+    serve_ui_with_overlays, CoverageIngestOptions, DiffRequest, EvidenceScopeFingerprint,
     GitProvider, HeuristicExtractor, LineageEngine, MutantIngestOptions, RepoPathNormalizer,
     SentryProvider, Storage,
 };
@@ -22,6 +23,32 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Print a revision-pinned, evidence-aware architectural diff.
+    Diff {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+        #[arg(value_name = "BASE")]
+        base: Option<String>,
+        #[arg(value_name = "HEAD")]
+        head: Option<String>,
+        #[arg(long, value_enum, default_value_t = DiffFormat::Text)]
+        format: DiffFormat,
+        /// Include logical-unit and SARIF detail under every changed file.
+        #[arg(long)]
+        full: bool,
+        #[arg(long)]
+        coverage_source: Option<String>,
+        #[arg(long)]
+        sarif_source: Option<String>,
+        #[arg(long)]
+        selection: Option<String>,
+        #[arg(long)]
+        mutant_corpus: Option<String>,
+        #[arg(long)]
+        test_set: Option<String>,
+    },
     /// Initialize an empty lineage SQLite database.
     Init {
         #[arg(long, default_value = "lineage.db")]
@@ -210,9 +237,60 @@ enum Command {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum DiffFormat {
+    Text,
+    Json,
+}
+
+#[derive(Debug)]
+struct DiffCommandRequest {
+    repo: PathBuf,
+    db: PathBuf,
+    base: Option<String>,
+    head: Option<String>,
+    format: DiffFormat,
+    full: bool,
+    coverage_source: Option<String>,
+    sarif_source: Option<String>,
+    selection: Option<String>,
+    mutant_corpus: Option<String>,
+    test_set: Option<String>,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Diff {
+            repo,
+            db,
+            base,
+            head,
+            format,
+            full,
+            coverage_source,
+            sarif_source,
+            selection,
+            mutant_corpus,
+            test_set,
+        } => {
+            print!(
+                "{}",
+                execute_diff(DiffCommandRequest {
+                    repo,
+                    db,
+                    base,
+                    head,
+                    format,
+                    full,
+                    coverage_source,
+                    sarif_source,
+                    selection,
+                    mutant_corpus,
+                    test_set,
+                })?
+            );
+        }
         Command::Init { db } => {
             Storage::open(&db)?;
             println!("initialized {}", db.display());
@@ -585,6 +663,32 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn execute_diff(request: DiffCommandRequest) -> Result<String> {
+    let provider = GitProvider::open(&request.repo)?;
+    let storage = request
+        .db
+        .exists()
+        .then(|| Storage::open_existing(&request.db))
+        .transpose()?;
+    let plan = build_structured_diff(
+        &provider,
+        storage.as_ref(),
+        &DiffRequest {
+            base_revision: request.base,
+            head_revision: request.head,
+            coverage_source: request.coverage_source,
+            sarif_source: request.sarif_source,
+            selection: request.selection,
+            mutant_corpus: request.mutant_corpus,
+            test_set: request.test_set,
+        },
+    )?;
+    match request.format {
+        DiffFormat::Text => Ok(render_structured_diff_text(&plan, request.full)),
+        DiffFormat::Json => Ok(format!("{}\n", render_structured_diff_json(&plan)?)),
+    }
 }
 
 fn print_json_summary(units: &[lineage::UnitSummary]) {
