@@ -457,6 +457,11 @@ module Espalier
       return_usage_sites = Array(facts["return_usage_sites"])
       return_direct_usage_sites = Array(facts["return_direct_usage_sites"])
       hidden_enum_observations = Array(facts["hidden_enum_observations"])
+      nullable_refinements = Array(facts["nullable_refinements"])
+      nullable_states = Array(facts["nullable_states"])
+      nullable_summaries = Array(facts["nullable_summaries"])
+      nullable_operations = Array(facts["nullable_operations"])
+      presence_correlations = Array(facts["presence_correlations"])
       dispatcher_inferences = Array(facts["dispatcher_inferences"])
       hash_record_member_calls = Array(facts["hash_record_member_calls"])
       complexity_facts = Array(facts["complexity_facts"])
@@ -576,6 +581,11 @@ module Espalier
           "return_usage_sites" => return_usage_sites.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
           "return_direct_usage_sites" => return_direct_usage_sites.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
           "hidden_enum_observations" => hidden_enum_observations.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
+          "nullable_refinements" => nullable_refinements.sort_by { |f| [f["condition_node_id"].to_s, f["place_id"].to_s] },
+          "nullable_states" => nullable_states.sort_by { |f| [f["node_id"].to_s, f["place_id"].to_s] },
+          "nullable_summaries" => nullable_summaries.sort_by { |f| [f["owner"].to_s, f["function"].to_s] },
+          "nullable_operations" => nullable_operations.sort_by { |f| [f["path"].to_s, f["span"].to_s, f["node_id"].to_s] },
+          "presence_correlations" => presence_correlations.sort_by { |f| f["group_id"].to_s },
           "dispatcher_inferences" => dispatcher_inferences.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
           "hash_record_member_calls" => hash_record_member_calls.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
           "struct_field_hash_shapes" => facts["struct_field_hash_shapes"] || {},
