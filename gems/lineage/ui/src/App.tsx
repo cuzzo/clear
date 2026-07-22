@@ -61,13 +61,22 @@ function DiffReview({ initialLayout, plan, rawPath }: { readonly initialLayout: 
   };
   return <section aria-label="Diff inventory" className="preview-card">
     <p>{plan.inventory.changed_files} files in {plan.inventory.changed_directories} directories</p>
+    <p>{plan.inventory.added_files} added · {plan.inventory.modified_files} modified · {plan.inventory.deleted_files} deleted · {plan.inventory.renamed_files} renamed</p>
     <p>Base {plan.scope.base_oid} · Head {plan.scope.head_oid}</p>
     <p>Evidence: coverage {plan.evidence.coverage} · mutation {plan.evidence.mutation} · hazards {plan.evidence.hazards}</p>
+    <InventoryPaths label="Configuration" paths={plan.inventory.configuration_paths.map((file) => `${file.path} (${file.kind})`)} />
+    <InventoryPaths label="Documentation" paths={plan.inventory.documentation_paths} />
+    <InventoryPaths label="Generated" paths={plan.inventory.generated_paths} />
+    <InventoryPaths label="Lockfiles" paths={plan.inventory.lockfile_paths} />
     {plan.dependency_changes.map((change) => <p key={change.manifest_path}>{change.manifest_path}: {change.status === "exact" ? "dependency changes parsed" : "unknown package-file change"}</p>)}
     {plan.language_summaries.map((summary) => <p key={summary.language}>{summary.language}: {summary.production.code} production code lines · {summary.test.code} test code lines</p>)}
     <fieldset><legend>Diff layout</legend><label><input checked={sideBySide} name="layout" onChange={() => setLayout(true)} type="radio" />Side by side</label><label><input checked={!sideBySide} name="layout" onChange={() => setLayout(false)} type="radio" />Inline</label></fieldset>
     {rawFile ? <RawReview file={rawFile} onBack={closeRaw} sideBySide={sideBySide} /> : plan.files.map((file) => <FileReview file={file} key={file.path} onRaw={openRaw} sideBySide={sideBySide} />)}
   </section>;
+}
+
+function InventoryPaths({ label, paths }: { readonly label: string; readonly paths: readonly string[] }): React.JSX.Element | null {
+  return paths.length > 0 ? <p>{label}: {paths.join(", ")}</p> : null;
 }
 
 function FileReview({ file, onRaw, sideBySide }: { readonly file: DiffFile; readonly onRaw: (path: string) => void; readonly sideBySide: boolean }): React.JSX.Element {

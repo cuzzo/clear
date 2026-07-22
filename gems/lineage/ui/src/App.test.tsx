@@ -31,7 +31,7 @@ describe("App", () => {
         api_version: "v1",
         data: {
           scope: { base_oid: "a".repeat(40), head_oid: "b".repeat(40), policy_version: "diff-risk/v1" },
-          inventory: { changed_files: 2, changed_directories: 1, by_role: {} },
+          inventory: { changed_files: 2, changed_directories: 1, added_files: 1, modified_files: 1, deleted_files: 0, renamed_files: 0, by_role: {}, configuration_paths: [{ path: "Gemfile", kind: "ruby_manifest" }], documentation_paths: ["README.md"], generated_paths: ["generated/app.ts"], lockfile_paths: ["Gemfile.lock"] },
           dependency_changes: [{ manifest_path: "Gemfile", status: "unknown_package_file" }],
           language_summaries: [{ language: "ruby", production: { code: 1, comments: 0, other: 0 }, test: { code: 0, comments: 0, other: 0 } }],
           evidence: { coverage: "unknown", mutation: "unknown", hazards: "unknown", sarif: "unknown" },
@@ -46,6 +46,11 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText(/2 files in 1 directories/)).toBeInTheDocument();
+    expect(screen.getByText(/1 added · 1 modified/)).toBeInTheDocument();
+    expect(screen.getByText(/Configuration: Gemfile/)).toBeInTheDocument();
+    expect(screen.getByText(/Documentation: README.md/)).toBeInTheDocument();
+    expect(screen.getByText(/Generated: generated\/app.ts/)).toBeInTheDocument();
+    expect(screen.getByText(/Lockfiles: Gemfile.lock/)).toBeInTheDocument();
     expect(screen.getByText(/unknown package-file change/)).toBeInTheDocument();
     expect(screen.getByText(/ruby: 1 production code lines/)).toBeInTheDocument();
     expect(screen.getByText(/Evidence: coverage unknown/)).toBeInTheDocument();
