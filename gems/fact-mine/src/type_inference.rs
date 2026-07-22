@@ -737,6 +737,9 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     pub(crate) fn visit(&mut self, node: &crate::ast::Node) {
+        if !self.is_prepass && self.current_method.is_some() {
+            self.collect_hidden_enum_observation_at_node(node);
+        }
         match node.r#type.as_str() {
             "CLASS" | "MODULE" | "INTERFACE_DECLARATION" => {
                 self.visit_class_or_module(node);
@@ -944,7 +947,6 @@ impl<'a> TypeInferenceVisitor<'a> {
                             "params": params_list,
                         });
                         self.collect_type_normalizers(body_node, &record);
-                        self.collect_hidden_enum_observations(body_node, &record);
                         self.inspect_dispatcher(body_node, node.first_lineno);
                     }
                 }
@@ -3474,17 +3476,116 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    fn collect_hidden_enum_observations(&mut self, body: &crate::ast::Node, record: &Value) {
-        let params = value_array(record.get("params"))
-            .into_iter()
-            .filter_map(|param| {
-                let name = param.get("name").and_then(Value::as_str)?.to_string();
-                Some((name, param))
-            })
-            .collect::<BTreeMap<_, _>>();
-        self.collect_hidden_enum_observations_node(body, record, &params);
+    /// Records one decision while the main normalized visitor is already at
+    /// that node.  Hidden-enum collection must not replay an entire method
+    /// body after type inference has finished walking it.
+    fn collect_hidden_enum_observation_at_node(&mut self, node: &crate::ast::Node) {
+        match node.r#type.as_str() {
+            "CASE" | "CASE2" => {
+                if let Some(condition) = child_node(node, 0) {
+                    if let Some(slot) = self.hidden_enum_slot_for_current(condition) {
+                        self.record_hidden_enum_observation(slot, case_literal_values(node), node, "case");
+                    }
+                }
+            }
+            "CALL" | "QCALL" | "OPCALL" => {
+                let name = node_symbol(node).unwrap_or_default();
+                if matches!(name.as_str(), "==" | "!=" | "===") {
+                    if let Some((receiver, _, args_node)) = match_call(node) {
+                        let arg_nodes = call_arguments(args_node);
+                        if arg_nodes.len() == 1 {
+                            let arg = arg_nodes[0];
+                            if let Some(slot) = self.hidden_enum_slot_for_current(receiver) {
+                                self.record_hidden_enum_observation(
+                                    slot,
+                                    hidden_enum_literal_values(arg),
+                                    node,
+                                    &name,
+                                );
+                            }
+                            if let Some(slot) = self.hidden_enum_slot_for_current(arg) {
+                                self.record_hidden_enum_observation(
+                                    slot,
+                                    hidden_enum_literal_values(receiver),
+                                    node,
+                                    &name,
+                                );
+                            }
+                        }
+                    }
+                } else if matches!(name.as_str(), "include?" | "member?" | "key?") {
+                    if let Some((receiver, _, args_node)) = match_call(node) {
+                        let arg_nodes = call_arguments(args_node);
+                        if arg_nodes.len() == 1 {
+                            let arg = arg_nodes[0];
+                            if let Some(slot) = self.hidden_enum_slot_for_current(arg) {
+                                self.record_hidden_enum_observation(
+                                    slot,
+                                    hidden_enum_literal_values(receiver),
+                                    node,
+                                    &name,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
+    fn hidden_enum_slot_for_current(&self, node: &crate::ast::Node) -> Option<Value> {
+        match node.r#type.as_str() {
+            "LVAR" | "DVAR" => {
+                let name = node_symbol(node).unwrap_or_else(|| node.text.trim().to_string());
+                if !self.current_params.contains(&name) {
+                    return None;
+                }
+                let owner = self.current_owners.join("::");
+                let method = self.current_method.as_deref()?;
+                let key = [
+                    "param".to_string(),
+                    self.path.to_string(),
+                    owner.clone(),
+                    self.current_method_kind.clone(),
+                    method.to_string(),
+                    self.current_method_line.to_string(),
+                    name.clone(),
+                ]
+                .join("\0");
+                Some(json!({
+                    "key": key,
+                    "kind": "param",
+                    "path": self.path,
+                    "line": self.current_method_line,
+                    "owner": owner,
+                    "method": method,
+                    "method_kind": self.current_method_kind,
+                    "slot": name,
+                    "type": self.param_types.get(&name).map(ToString::to_string).unwrap_or_default(),
+                }))
+            }
+            "IVAR" | "CVAR" => {
+                let name = node_symbol(node).unwrap_or_else(|| node.text.trim().to_string());
+                let owner = self.current_owners.join("::");
+                let key = ["state".to_string(), self.path.to_string(), owner.clone(), name.clone()].join("\0");
+                Some(json!({
+                    "key": key,
+                    "kind": "state",
+                    "path": self.path,
+                    "line": node.first_lineno,
+                    "owner": owner,
+                    "method": Value::Null,
+                    "method_kind": Value::Null,
+                    "slot": name,
+                    "type": "",
+                }))
+            }
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
     fn collect_hidden_enum_observations_node(
         &mut self,
         node: &crate::ast::Node,
@@ -3550,6 +3651,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
+    #[cfg(test)]
     fn hidden_enum_slot_for(
         &self,
         node: &crate::ast::Node,

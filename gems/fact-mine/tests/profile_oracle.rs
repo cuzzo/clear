@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 use fact_mine_rust::profile::{self, Profile};
 use fact_mine_rust::syntax::{self, Language};
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -362,6 +363,41 @@ fn native_function_pointer_calls_are_nullable_operations() -> Result<()> {
             "{fixture_name}"
         );
     }
+    Ok(())
+}
+
+#[test]
+fn hidden_enum_observations_use_the_primary_normalized_walk() -> Result<()> {
+    let document = syntax::parse_file(fixture("hidden_enum_state.rb"), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let observations = output
+        .hidden_enum_observations
+        .iter()
+        .filter(|observation| observation["kind"] == "state")
+        .collect::<Vec<_>>();
+    assert_eq!(observations.len(), 3);
+    assert!(observations.iter().all(|observation| {
+        observation["key"]
+            .as_str()
+            .is_some_and(|key| key.starts_with("state\0") && key.contains("\0Workflow\0"))
+            && observation["event"] == "decision"
+    }));
+    assert_eq!(
+        observations
+            .iter()
+            .flat_map(|observation| observation["values"].as_array().into_iter().flatten())
+            .filter_map(|value| value["value"].as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["\"complete\"", "\"draft\""])
+    );
+    assert_eq!(
+        output
+            .hidden_enum_observations
+            .iter()
+            .filter(|observation| observation["kind"] == "param")
+            .count(),
+        3
+    );
     Ok(())
 }
 
