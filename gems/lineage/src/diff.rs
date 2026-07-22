@@ -114,6 +114,7 @@ pub struct DiffFile {
     pub added_lines: AddedLines,
     pub removed_lines: AddedLines,
     pub verification: VerificationSlices,
+    pub line_annotations: Vec<LineAnnotation>,
     pub residual_lines: AddedLines,
     pub groups: Vec<DiffGroup>,
     /// Commit-matching SARIF observations. They are intentionally kept out of
@@ -202,13 +203,21 @@ pub struct VerificationSlices {
     pub unknown: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LineVerification {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum LineVerification {
     CoveredAndKilled,
     Covered,
     PartiallyCovered,
     NotCovered,
     Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct LineAnnotation {
+    pub line: u32,
+    pub verification: LineVerification,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
@@ -429,6 +438,7 @@ fn plan_file(
             &verification,
         ),
         verification,
+        line_annotations: Vec::new(),
         groups,
         sarif_findings: Vec::new(),
         base_source,
@@ -738,6 +748,14 @@ fn unknown_line_verification(
 
 fn refresh_file_verification(file: &mut DiffFile) {
     file.verification = verification_slices(file.line_verification.values().copied());
+    file.line_annotations = file
+        .line_verification
+        .iter()
+        .map(|(line, verification)| LineAnnotation {
+            line: *line,
+            verification: *verification,
+        })
+        .collect();
     let added = added_line_numbers(file.base_source.as_deref(), file.head_source.as_deref());
     file.risk = risk_summary(
         file.head_source.as_deref(),
@@ -2701,6 +2719,19 @@ mod tests {
         assert_eq!(plan.evidence.mutation, EvidenceState::Exact);
         assert_eq!(plan.files[0].verification.covered_and_killed, 1);
         assert_eq!(plan.files[0].verification.not_covered, 0);
+        assert_eq!(
+            plan.files[0].line_annotations,
+            vec![
+                LineAnnotation {
+                    line: 1,
+                    verification: LineVerification::CoveredAndKilled,
+                },
+                LineAnnotation {
+                    line: 2,
+                    verification: LineVerification::Unknown,
+                },
+            ]
+        );
     }
 
     #[test]

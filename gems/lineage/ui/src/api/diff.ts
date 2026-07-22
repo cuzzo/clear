@@ -1,4 +1,4 @@
-export type { AddedLines, DependencyChange, DiffFile, DiffGroup, DiffPlan, RiskSummary, VerificationSlices } from "../generated/diff";
+export type { AddedLines, DependencyChange, DiffFile, DiffGroup, DiffPlan, LineAnnotation, RiskSummary, VerificationSlices } from "../generated/diff";
 import type { DiffPlan } from "../generated/diff";
 
 export class DiffApiError extends Error {}
@@ -118,10 +118,15 @@ function isDiffFile(value: unknown): boolean {
     && isAddedLines(value.added_lines)
     && isAddedLines(value.removed_lines)
     && isVerification(value.verification)
+    && isArrayOf(value.line_annotations, isLineAnnotation)
     && isAddedLines(value.residual_lines)
     && isRisk(value.risk)
     && isArrayOf(value.groups, isDiffGroup)
     && isArrayOf(value.sarif_findings, isFinding);
+}
+
+function isLineAnnotation(value: unknown): boolean {
+  return isRecord(value) && typeof value.line === "number" && lineVerifications.includes(value.verification as never);
 }
 
 function isDiffGroup(value: unknown): boolean {
@@ -171,3 +176,4 @@ const dependencyStatuses = ["exact", "unknown_package_file"] as const;
 const fileChangeKinds = ["added", "modified", "deleted", "renamed"] as const;
 const sourceRoles = ["production", "test", "documentation", "configuration", "generated", "lockfile", "other"] as const;
 const visibilities = ["public", "private", "unknown"] as const;
+const lineVerifications = ["covered_and_killed", "covered", "partially_covered", "not_covered", "unknown"] as const;

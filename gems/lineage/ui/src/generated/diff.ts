@@ -10,12 +10,16 @@ export type ChangeInventory = { changed_directories: number, changed_files: numb
 
 export type ConfigFile = { path: string, kind: string, };
 
-export type DiffFile = { path: string, previous_path: string | null, change: FileChangeKind, role: SourceRole, language: string | null, semantic_classification_available: boolean, base_source: string | null, head_source: string | null, added_lines: AddedLines, removed_lines: AddedLines, verification: VerificationSlices, residual_lines: AddedLines, groups: Array<DiffGroup>,
+export type DiffFile = { path: string, previous_path: string | null, change: FileChangeKind, role: SourceRole, language: string | null, semantic_classification_available: boolean, base_source: string | null, head_source: string | null, added_lines: AddedLines, removed_lines: AddedLines, verification: VerificationSlices, line_annotations: Array<LineAnnotation>, residual_lines: AddedLines, groups: Array<DiffGroup>,
 /**
  * Commit-matching SARIF observations. They are intentionally kept out of
  * risk scoring until their artifact scope can prove completeness.
  */
 sarif_findings: Array<SarifFindingSummary>, risk: RiskSummary, };
+
+export type LineAnnotation = { line: number, verification: LineVerification, };
+
+export type LineVerification = "covered_and_killed" | "covered" | "partially_covered" | "not_covered" | "unknown";
 
 export type DiffGroup = { name: string, kind: string, start_line: number, end_line: number, base_start_line: number | null, base_end_line: number | null, visibility: Visibility, added_lines: AddedLines, verification: VerificationSlices, sarif_findings: Array<SarifFindingSummary>, risk: RiskSummary, };
 

@@ -40,3 +40,14 @@ p {
 .lineage-sarif-line {
   background: color-mix(in srgb, #d29922 22%, transparent);
 }
+
+.lineage-verification-covered-and-killed { background: color-mix(in srgb, #3fb950 18%, transparent); }
+.lineage-verification-covered { background: color-mix(in srgb, #58a6ff 16%, transparent); }
+.lineage-verification-partially-covered { background: color-mix(in srgb, #d29922 20%, transparent); }
+.lineage-verification-not-covered { background: color-mix(in srgb, #f85149 20%, transparent); }
+.lineage-verification-unknown { background: color-mix(in srgb, #8b949e 14%, transparent); }
+.lineage-verification-glyph-covered-and-killed { background: #3fb950; border-radius: 50%; }
+.lineage-verification-glyph-covered { background: #58a6ff; border-radius: 50%; }
+.lineage-verification-glyph-partially-covered { background: #d29922; border-radius: 50%; }
+.lineage-verification-glyph-not-covered { background: #f85149; border-radius: 50%; }
+.lineage-verification-glyph-unknown { background: #8b949e; border-radius: 50%; }

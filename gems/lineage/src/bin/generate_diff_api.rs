@@ -1,7 +1,8 @@
 use lineage::diff::{
     AddedLines, ChangeInventory, ConfigFile, DependencyChange, DependencyEntry, DependencyStatus,
     DiffFile, DiffGroup, DiffPlan, DiffScope, EvidenceAvailability, EvidenceScopeFingerprint,
-    EvidenceState, FileChangeKind, LanguageSummary, RiskSummary, SarifFindingSummary, SourceRole,
+    EvidenceState, FileChangeKind, LanguageSummary, LineAnnotation, LineVerification, RiskSummary,
+    SarifFindingSummary, SourceRole,
     VerificationSlices, Visibility, VisibilityVerificationSlices,
 };
 use std::path::Path;
@@ -16,6 +17,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ChangeInventory::decl(),
         ConfigFile::decl(),
         DiffFile::decl(),
+        LineAnnotation::decl(),
+        LineVerification::decl(),
         DiffGroup::decl(),
         SarifFindingSummary::decl(),
         AddedLines::decl(),

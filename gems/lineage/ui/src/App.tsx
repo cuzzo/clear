@@ -180,12 +180,12 @@ function GroupReview({ file, group, sideBySide }: { readonly file: DiffFile; rea
   return <section className="group-review"><button aria-expanded={expanded} className="disclosure" onClick={() => setExpanded(!expanded)}>{group.kind} {group.name} · {group.added_lines.code} code lines · {group.added_lines.comments} comments</button>
     <RiskMetrics risk={group.risk} verification={group.verification} />
     <FindingSummary findings={group.sarif_findings} />
-    {expanded && <DiffPreview highlights={relativeHighlights(group)} language={file.language ?? "plaintext"} modified={sourceRange(file.head_source, group.start_line, group.end_line)} original={sourceRange(file.base_source, group.base_start_line, group.base_end_line)} sideBySide={sideBySide} />}
+    {expanded && <DiffPreview annotations={relativeAnnotations(file.line_annotations, group.start_line, group.end_line)} highlights={relativeHighlights(group)} language={file.language ?? "plaintext"} modified={sourceRange(file.head_source, group.start_line, group.end_line)} original={sourceRange(file.base_source, group.base_start_line, group.base_end_line)} sideBySide={sideBySide} />}
   </section>;
 }
 
 function RawReview({ file, onBack, sideBySide }: { readonly file: DiffFile; readonly onBack: () => void; readonly sideBySide: boolean }): React.JSX.Element {
-  return <article className="file-review"><button onClick={onBack}>Back to semantic review</button><h2>Raw diff: {file.path}</h2>{file.base_source !== null && file.head_source !== null ? <DiffPreview highlights={file.sarif_findings.map(findingHighlight)} language={file.language ?? "plaintext"} modified={file.head_source} original={file.base_source} sideBySide={sideBySide} /> : <p>Binary or one-sided change.</p>}</article>;
+  return <article className="file-review"><button onClick={onBack}>Back to semantic review</button><h2>Raw diff: {file.path}</h2>{file.base_source !== null && file.head_source !== null ? <DiffPreview annotations={file.line_annotations} highlights={file.sarif_findings.map(findingHighlight)} language={file.language ?? "plaintext"} modified={file.head_source} original={file.base_source} sideBySide={sideBySide} /> : <p>Binary or one-sided change.</p>}</article>;
 }
 
 function RiskMetrics({ risk, verification }: { readonly risk: RiskSummary; readonly verification: VerificationSlices }): React.JSX.Element {
@@ -235,6 +235,12 @@ function relativeHighlights(group: DiffGroup): SourceHighlight[] {
     startLine: Math.max(1, finding.start_line - group.start_line + 1),
     endLine: Math.max(1, finding.end_line - group.start_line + 1),
   }));
+}
+
+function relativeAnnotations(annotations: readonly import("./api/diff").LineAnnotation[], startLine: number, endLine: number): import("./api/diff").LineAnnotation[] {
+  return annotations
+    .filter((annotation) => annotation.line >= startLine && annotation.line <= endLine)
+    .map((annotation) => ({ ...annotation, line: annotation.line - startLine + 1 }));
 }
 
 function findingHighlight(finding: DiffFile["sarif_findings"][number]): SourceHighlight {
