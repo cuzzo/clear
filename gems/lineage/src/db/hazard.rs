@@ -357,7 +357,6 @@ const RUST_HAZARDS: &str = hazard_contract::RUST_HAZARDS;
 const ZIG_HAZARDS: &str = hazard_contract::ZIG_HAZARDS;
 const C_HAZARDS: &str = hazard_contract::C_HAZARDS;
 const CPP_HAZARDS: &str = hazard_contract::CPP_HAZARDS;
-const CSHARP_HAZARDS: &str = hazard_contract::CSHARP_HAZARDS;
 
 fn hazard_policy(hazard_type: &str) -> Option<&'static hazard_contract::HazardPolicy> {
     hazard_contract::resolve_hazard_policy(hazard_type)
@@ -496,272 +495,6 @@ fn c_arithmetic_hazard_is_relevant(node: tree_sitter::Node, source: &[u8]) -> bo
     hazard_contract::c_arithmetic_literal_is_relevant(operator, rhs)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CSharpReflectionKind {
-    Type,
-    MethodInfo,
-    FieldInfo,
-    PropertyInfo,
-    ConstructorInfo,
-    Assembly,
-}
-
-fn csharp_reflection_type_name(type_text: &str) -> &str {
-    let type_text = type_text
-        .trim()
-        .trim_start_matches("global::")
-        .trim_end_matches('?')
-        .trim_end_matches("[]")
-        .trim();
-    let type_text = type_text.split('<').next().unwrap_or(type_text).trim();
-    type_text
-        .rsplit_once("::")
-        .map(|(_, name)| name)
-        .or_else(|| type_text.rsplit_once('.').map(|(_, name)| name))
-        .unwrap_or(type_text)
-}
-
-fn csharp_reflection_kind(type_text: &str) -> Option<CSharpReflectionKind> {
-    match csharp_reflection_type_name(type_text) {
-        "Type" => Some(CSharpReflectionKind::Type),
-        "MethodInfo" => Some(CSharpReflectionKind::MethodInfo),
-        "FieldInfo" => Some(CSharpReflectionKind::FieldInfo),
-        "PropertyInfo" => Some(CSharpReflectionKind::PropertyInfo),
-        "ConstructorInfo" => Some(CSharpReflectionKind::ConstructorInfo),
-        "Assembly" => Some(CSharpReflectionKind::Assembly),
-        _ => None,
-    }
-}
-
-fn csharp_reflection_call_parts<'tree>(
-    call: tree_sitter::Node<'tree>,
-    source: &[u8],
-) -> Option<(tree_sitter::Node<'tree>, String)> {
-    let function = call.child_by_field_name("function")?;
-    let receiver = function.child_by_field_name("expression")?;
-    let method = function.child_by_field_name("name")?;
-    Some((receiver, method.utf8_text(source).ok()?.to_string()))
-}
-
-fn csharp_reflection_result(
-    receiver: Option<CSharpReflectionKind>,
-    method: &str,
-) -> Option<CSharpReflectionKind> {
-    match (receiver, method) {
-        (Some(CSharpReflectionKind::Type), "GetType") => Some(CSharpReflectionKind::Type),
-        (Some(CSharpReflectionKind::Type), "GetMethod" | "GetMethods") => {
-            Some(CSharpReflectionKind::MethodInfo)
-        }
-        (Some(CSharpReflectionKind::Type), "GetField" | "GetFields") => {
-            Some(CSharpReflectionKind::FieldInfo)
-        }
-        (Some(CSharpReflectionKind::Type), "GetProperty" | "GetProperties") => {
-            Some(CSharpReflectionKind::PropertyInfo)
-        }
-        (Some(CSharpReflectionKind::Type), "GetConstructor" | "GetConstructors") => {
-            Some(CSharpReflectionKind::ConstructorInfo)
-        }
-        (Some(CSharpReflectionKind::Assembly), "Load" | "LoadFrom" | "LoadFile") => {
-            Some(CSharpReflectionKind::Assembly)
-        }
-        _ => None,
-    }
-}
-
-fn csharp_reflection_method_is_hazard(kind: CSharpReflectionKind, method: &str) -> bool {
-    match kind {
-        CSharpReflectionKind::Type => matches!(
-            method,
-            "GetType"
-                | "GetMethod"
-                | "GetMethods"
-                | "GetField"
-                | "GetFields"
-                | "GetProperty"
-                | "GetProperties"
-                | "GetConstructor"
-                | "GetConstructors"
-                | "CreateInstance"
-        ),
-        CSharpReflectionKind::Assembly => matches!(method, "Load" | "LoadFrom" | "LoadFile"),
-        CSharpReflectionKind::MethodInfo
-        | CSharpReflectionKind::FieldInfo
-        | CSharpReflectionKind::PropertyInfo
-        | CSharpReflectionKind::ConstructorInfo => {
-            matches!(method, "Invoke" | "GetValue" | "SetValue")
-        }
-    }
-}
-
-fn csharp_reflection_declarator_value<'tree>(
-    declarator: tree_sitter::Node<'tree>,
-) -> Option<tree_sitter::Node<'tree>> {
-    let name_id = declarator.child_by_field_name("name").map(|name| name.id());
-    let mut cursor = declarator.walk();
-    for child in declarator.children(&mut cursor) {
-        if child.is_named() && Some(child.id()) != name_id {
-            return Some(child);
-        }
-    }
-    None
-}
-
-fn csharp_reflection_bindings(
-    scope: tree_sitter::Node,
-    call: tree_sitter::Node,
-    source: &[u8],
-) -> std::collections::HashMap<String, CSharpReflectionKind> {
-    fn infer(
-        value: tree_sitter::Node,
-        source: &[u8],
-        bindings: &std::collections::HashMap<String, CSharpReflectionKind>,
-    ) -> Option<CSharpReflectionKind> {
-        if value.kind() == "typeof_expression" {
-            return Some(CSharpReflectionKind::Type);
-        }
-        if value.kind() == "identifier" {
-            return value
-                .utf8_text(source)
-                .ok()
-                .and_then(|name| bindings.get(name).copied());
-        }
-        let function = value.child_by_field_name("function")?;
-        let receiver = function.child_by_field_name("expression")?;
-        let method = function
-            .child_by_field_name("name")
-            .and_then(|name| name.utf8_text(source).ok())?;
-        let receiver_kind = receiver
-            .utf8_text(source)
-            .ok()
-            .and_then(|name| bindings.get(name).copied())
-            .or_else(|| csharp_reflection_kind(receiver.utf8_text(source).ok()?));
-        csharp_reflection_result(receiver_kind, method)
-    }
-
-    fn visit(
-        node: tree_sitter::Node,
-        scope: tree_sitter::Node,
-        call: tree_sitter::Node,
-        source: &[u8],
-        bindings: &mut std::collections::HashMap<String, CSharpReflectionKind>,
-    ) {
-        if node.start_byte() >= call.start_byte() {
-            return;
-        }
-        if node.id() != scope.id()
-            && matches!(
-                node.kind(),
-                "method_declaration"
-                    | "constructor_declaration"
-                    | "local_function_statement"
-                    | "lambda_expression"
-                    | "anonymous_method_expression"
-            )
-        {
-            return;
-        }
-        if matches!(node.kind(), "variable_declaration" | "parameter") {
-            let explicit = node
-                .child_by_field_name("type")
-                .and_then(|type_node| type_node.utf8_text(source).ok())
-                .and_then(csharp_reflection_kind);
-            if node.kind() == "parameter" {
-                if let (Some(name), Some(kind)) = (
-                    node.child_by_field_name("name")
-                        .and_then(|name| name.utf8_text(source).ok()),
-                    explicit,
-                ) {
-                    bindings.insert(name.to_string(), kind);
-                }
-            } else {
-                let mut cursor = node.walk();
-                for declarator in node
-                    .children(&mut cursor)
-                    .filter(|child| child.kind() == "variable_declarator")
-                {
-                    let Some(name) = declarator
-                        .child_by_field_name("name")
-                        .and_then(|name| name.utf8_text(source).ok())
-                    else {
-                        continue;
-                    };
-                    let inferred = csharp_reflection_declarator_value(declarator)
-                        .and_then(|value| infer(value, source, bindings));
-                    if let Some(kind) = explicit.or(inferred) {
-                        bindings.insert(name.to_string(), kind);
-                    } else {
-                        bindings.remove(name);
-                    }
-                }
-            }
-        }
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            visit(child, scope, call, source, bindings);
-        }
-    }
-
-    let mut bindings = std::collections::HashMap::new();
-    visit(scope, scope, call, source, &mut bindings);
-    bindings
-}
-
-fn csharp_reflection_call_is_typed(
-    call: tree_sitter::Node,
-    source: &[u8],
-) -> bool {
-    let Some((receiver, method)) = csharp_reflection_call_parts(call, source) else {
-        return false;
-    };
-    if receiver.kind() == "typeof_expression" {
-        return matches!(
-            method.as_str(),
-            "GetMethod"
-                | "GetMethods"
-                | "GetField"
-                | "GetFields"
-                | "GetProperty"
-                | "GetProperties"
-                | "GetConstructor"
-                | "GetConstructors"
-        );
-    }
-    if receiver.kind() == "member_access_expression"
-        && receiver
-            .child_by_field_name("expression")
-            .and_then(|expression| expression.utf8_text(source).ok())
-            .is_some_and(|name| name == "System")
-        && receiver
-            .child_by_field_name("name")
-            .and_then(|name| name.utf8_text(source).ok())
-            .is_some_and(|name| name == "Type")
-    {
-        return method == "GetType";
-    }
-    let mut scope = Some(call);
-    while let Some(node) = scope {
-        if matches!(
-            node.kind(),
-            "method_declaration" | "constructor_declaration" | "local_function_statement"
-        ) {
-            let bindings = csharp_reflection_bindings(node, call, source);
-            let kind = receiver
-                .utf8_text(source)
-                .ok()
-                .and_then(|name| csharp_reflection_kind(name))
-                .or_else(|| {
-                    receiver
-                        .utf8_text(source)
-                        .ok()
-                        .and_then(|name| bindings.get(name).copied())
-                });
-            return kind.is_some_and(|kind| csharp_reflection_method_is_hazard(kind, &method));
-        }
-        scope = node.parent();
-    }
-    false
-}
-
 fn query_hazards(
     path: &str,
     contents: &str,
@@ -817,12 +550,6 @@ fn query_hazards(
                 {
                     continue;
                 }
-                if hazard_type == "csharp_metaprogramming"
-                    && !csharp_reflection_call_is_typed(capture.node, contents.as_bytes())
-                {
-                    continue;
-                }
-
                 sites.push(HazardSite {
                     path: path.to_string(),
                     line: start_line,
@@ -940,8 +667,24 @@ pub(crate) fn scan_cpp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     query_hazards(path, contents, tree_sitter_cpp::LANGUAGE.into(), CPP_HAZARDS)
 }
 
+// C# reflection flow is owned by FactMine. Lineage keeps the same narrow site
+// shape for storage/UI consumers, but does not replay a second type/alias
+// analysis here.
 pub(crate) fn scan_csharp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_c_sharp::LANGUAGE.into(), CSHARP_HAZARDS)
+    fact_mine_rust::syntax::hazards::extract_file_hazards(
+        path,
+        contents,
+        fact_mine_rust::syntax::Language::CSharp,
+    )
+    .into_iter()
+    .map(|fact| HazardSite {
+        path: fact.path,
+        line: fact.line,
+        source: fact.snippet,
+        hazard_type: fact.hazard_type,
+        required_evidence: fact.required_evidence,
+    })
+    .collect()
 }
 
 fn site(
@@ -1104,6 +847,42 @@ mod tests {
         ));
         assert!(csharp_types.contains(&"csharp_concurrency".to_string()));
         assert!(csharp_types.contains(&"csharp_unsafe_memory".to_string()));
+    }
+
+    #[test]
+    fn lineage_csharp_reflection_scan_uses_canonical_factmine_facts() {
+        let source = r#"
+            class Demo {
+                void Run() {
+                    Type target = typeof(Demo);
+                    MethodInfo method = target.GetMethod("Run");
+                    method.Invoke(null, null);
+                    Assembly.Load("demo");
+                }
+            }
+        "#;
+        let lineage_sites = scan_csharp_sites("Demo.cs", source);
+        let reflection: Vec<_> = lineage_sites
+            .iter()
+            .filter(|site| site.hazard_type == "csharp_metaprogramming")
+            .collect();
+        assert_eq!(reflection.len(), 3, "{reflection:?}");
+        assert!(reflection.iter().any(|site| site.source.contains("target.GetMethod")));
+        assert!(reflection.iter().any(|site| site.source.contains("method.Invoke")));
+        assert!(reflection.iter().any(|site| site.source.contains("Assembly.Load")));
+
+        let shadowed = r#"
+            class Type { public object GetMethod(string name) { return null; } }
+            class Demo {
+                void Run() {
+                    Type target = new Type();
+                    target.GetMethod("Run");
+                }
+            }
+        "#;
+        assert!(!scan_csharp_sites("Shadow.cs", shadowed)
+            .iter()
+            .any(|site| site.hazard_type == "csharp_metaprogramming"));
     }
 
     #[test]
@@ -1496,7 +1275,7 @@ mod tests {
             ("zig_hazards.scm", ZIG_HAZARDS),
             ("c_hazards.scm", C_HAZARDS),
             ("cpp_hazards.scm", CPP_HAZARDS),
-            ("csharp_hazards.scm", CSHARP_HAZARDS),
+            ("csharp_hazards.scm", hazard_contract::CSHARP_HAZARDS),
         ];
         for (name, vendored_text) in vendored {
             let generated_copy = fs::read_to_string(

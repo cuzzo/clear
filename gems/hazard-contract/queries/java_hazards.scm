@@ -19,10 +19,18 @@
   name: (identifier) @name
   (#match? @name "^(getMethod|getDeclaredMethod|getField|getDeclaredField|getConstructor|getDeclaredConstructor|newInstance|invoke)$")) @hazard.java_metaprogramming
 
+;; java.lang.reflect.Field uses get/set (and primitive overloads), not
+;; Method.invoke. Keep this separate so the receiver identity remains clear.
+(method_invocation
+  object: (identifier) @field_receiver
+  name: (identifier) @field_method
+  (#eq? @field_receiver "Field")
+  (#match? @field_method "^(get|getBoolean|getByte|getChar|getDouble|getFloat|getInt|getLong|getShort|set|setBoolean|setByte|setChar|setDouble|setFloat|setInt|setLong|setShort)$")) @hazard.java_metaprogramming
+
 ;; Candidate form for declared locals and aliases. The Rust consumer retains
 ;; this capture only when the receiver is resolved to a reflection framework
 ;; type; variable spelling is deliberately irrelevant.
 (method_invocation
   object: (identifier) @typed_reflection_receiver
   name: (identifier) @typed_reflection_method
-  (#match? @typed_reflection_method "^(forName|loadClass|getMethod|getDeclaredMethod|getField|getDeclaredField|getConstructor|getDeclaredConstructor|newInstance|invoke)$")) @hazard.java_metaprogramming
+  (#match? @typed_reflection_method "^(forName|loadClass|getMethod|getDeclaredMethod|getField|getDeclaredField|getConstructor|getDeclaredConstructor|newInstance|invoke|get|getBoolean|getByte|getChar|getDouble|getFloat|getInt|getLong|getShort|set|setBoolean|setByte|setChar|setDouble|setFloat|setInt|setLong|setShort)$")) @hazard.java_metaprogramming

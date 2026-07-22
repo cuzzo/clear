@@ -395,10 +395,11 @@ fn reflection_value_kind(
     language: Language,
     type_text: &str,
     java_user_types: &std::collections::HashSet<String>,
+    csharp_user_types: &std::collections::HashSet<String>,
 ) -> Option<ReflectionValueKind> {
     let name = reflection_simple_type_name(type_text);
     match language {
-        Language::CSharp => match name {
+        Language::CSharp if !csharp_user_types.contains(name) => match name {
             "Type" => Some(ReflectionValueKind::CSharpType),
             "MethodInfo" => Some(ReflectionValueKind::CSharpMethodInfo),
             "FieldInfo" => Some(ReflectionValueKind::CSharpFieldInfo),
@@ -446,24 +447,33 @@ fn java_user_type_names(root: Node, source: &[u8]) -> std::collections::HashSet<
     names
 }
 
-fn reflection_scope(node: Node, language: Language) -> Option<Node> {
-    let scope_kinds: &[&str] = match language {
-        Language::CSharp => &[
-            "method_declaration",
-            "local_function_statement",
-            "constructor_declaration",
-        ],
-        Language::Java => &["method_declaration", "constructor_declaration"],
-        _ => &[],
-    };
-    let mut current = Some(node);
-    while let Some(candidate) = current {
-        if scope_kinds.contains(&candidate.kind()) {
-            return Some(candidate);
+fn csharp_user_type_names(root: Node, source: &[u8]) -> std::collections::HashSet<String> {
+    fn visit(node: Node, source: &[u8], names: &mut std::collections::HashSet<String>) {
+        if matches!(
+            node.kind(),
+            "class_declaration"
+                | "interface_declaration"
+                | "struct_declaration"
+                | "record_declaration"
+                | "enum_declaration"
+                | "delegate_declaration"
+        ) {
+            if let Some(name) = node
+                .child_by_field_name("name")
+                .and_then(|name| name.utf8_text(source).ok())
+            {
+                names.insert(name.to_string());
+            }
         }
-        current = candidate.parent();
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit(child, source, names);
+        }
     }
-    None
+
+    let mut names = std::collections::HashSet::new();
+    visit(root, source, &mut names);
+    names
 }
 
 fn reflection_call_parts<'tree>(
@@ -492,13 +502,15 @@ fn reflection_receiver_kind(
     language: Language,
     bindings: &std::collections::HashMap<String, ReflectionValueKind>,
     java_user_types: &std::collections::HashSet<String>,
+    csharp_user_types: &std::collections::HashSet<String>,
     source: &[u8],
 ) -> Option<ReflectionValueKind> {
     if receiver.kind() != "identifier" {
         return None;
     }
     let name = receiver.utf8_text(source).ok()?;
-    reflection_value_kind(language, name, java_user_types).or_else(|| bindings.get(name).copied())
+    reflection_value_kind(language, name, java_user_types, csharp_user_types)
+        .or_else(|| bindings.get(name).copied())
 }
 
 fn csharp_method_is_reflection(kind: ReflectionValueKind, method: &str) -> bool {
@@ -543,7 +555,27 @@ fn java_method_is_reflection(kind: ReflectionValueKind, method: &str) -> bool {
         ReflectionValueKind::JavaClassLoader => method == "loadClass",
         ReflectionValueKind::JavaMethod => method == "invoke",
         ReflectionValueKind::JavaConstructor => method == "newInstance",
-        ReflectionValueKind::JavaField => method == "invoke",
+        ReflectionValueKind::JavaField => matches!(
+            method,
+            "get"
+                | "getBoolean"
+                | "getByte"
+                | "getChar"
+                | "getDouble"
+                | "getFloat"
+                | "getInt"
+                | "getLong"
+                | "getShort"
+                | "set"
+                | "setBoolean"
+                | "setByte"
+                | "setChar"
+                | "setDouble"
+                | "setFloat"
+                | "setInt"
+                | "setLong"
+                | "setShort"
+        ),
         _ => false,
     }
 }
@@ -612,6 +644,7 @@ fn infer_reflection_value_kind(
     language: Language,
     bindings: &std::collections::HashMap<String, ReflectionValueKind>,
     java_user_types: &std::collections::HashSet<String>,
+    csharp_user_types: &std::collections::HashSet<String>,
     source: &[u8],
 ) -> Option<ReflectionValueKind> {
     if value.kind() == "parenthesized_expression" {
@@ -623,6 +656,7 @@ fn infer_reflection_value_kind(
                     language,
                     bindings,
                     java_user_types,
+                    csharp_user_types,
                     source,
                 );
             }
@@ -643,7 +677,14 @@ fn infer_reflection_value_kind(
     let receiver_kind = if language == Language::Java && method == "getClass" {
         None
     } else {
-        reflection_receiver_kind(receiver, language, bindings, java_user_types, source)
+        reflection_receiver_kind(
+            receiver,
+            language,
+            bindings,
+            java_user_types,
+            csharp_user_types,
+            source,
+        )
     };
     if language == Language::Java && method == "getClass" {
         return Some(ReflectionValueKind::JavaClass);
@@ -665,137 +706,316 @@ fn reflection_declarator_value<'tree>(declarator: Node<'tree>) -> Option<Node<'t
     None
 }
 
-fn collect_reflection_bindings(
-    scope: Node,
-    call: Node,
+type ReflectionBindings = std::collections::HashMap<String, ReflectionValueKind>;
+
+#[derive(Default)]
+struct ReflectionFlowIndex {
+    proven_calls: std::collections::HashSet<usize>,
+}
+
+fn is_reflection_scope(node: Node, language: Language) -> bool {
+    match language {
+        Language::CSharp => matches!(
+            node.kind(),
+            "method_declaration"
+                | "constructor_declaration"
+                | "local_function_statement"
+        ),
+        Language::Java => matches!(node.kind(), "method_declaration" | "constructor_declaration"),
+        _ => false,
+    }
+}
+
+fn is_nested_reflection_scope(node: Node, scope: Node, language: Language) -> bool {
+    node.id() != scope.id()
+        && (is_reflection_scope(node, language)
+            || matches!(node.kind(), "lambda_expression" | "anonymous_method_expression"))
+}
+
+fn update_reflection_binding(
+    node: Node,
     language: Language,
     source: &[u8],
+    bindings: &mut ReflectionBindings,
     java_user_types: &std::collections::HashSet<String>,
-) -> std::collections::HashMap<String, ReflectionValueKind> {
-    fn visit(
-        node: Node,
-        scope: Node,
-        call: Node,
-        language: Language,
-        source: &[u8],
-        java_user_types: &std::collections::HashSet<String>,
-        bindings: &mut std::collections::HashMap<String, ReflectionValueKind>,
-    ) {
-        if node.start_byte() >= call.start_byte() {
-            return;
-        }
-        if node.id() != scope.id()
-            && matches!(
-                node.kind(),
-                "method_declaration"
-                    | "constructor_declaration"
-                    | "local_function_statement"
-                    | "lambda_expression"
-                    | "anonymous_method_expression"
-            )
-        {
-            return;
-        }
+    csharp_user_types: &std::collections::HashSet<String>,
+) {
+    let declaration_type = match (language, node.kind()) {
+        (Language::CSharp, "variable_declaration")
+        | (Language::CSharp, "parameter")
+        | (Language::Java, "local_variable_declaration")
+        | (Language::Java, "formal_parameter") => node
+            .child_by_field_name("type")
+            .and_then(|type_node| type_node.utf8_text(source).ok()),
+        _ => None,
+    };
 
-        let declaration_type = match (language, node.kind()) {
-            (Language::CSharp, "variable_declaration")
-            | (Language::CSharp, "parameter")
+    if matches!(
+        (language, node.kind()),
+        (Language::CSharp, "variable_declaration")
             | (Language::Java, "local_variable_declaration")
-            | (Language::Java, "formal_parameter") => node
-                .child_by_field_name("type")
-                .and_then(|type_node| type_node.utf8_text(source).ok()),
-            _ => None,
-        };
-
-        if matches!(
-            (language, node.kind()),
-            (Language::CSharp, "variable_declaration")
-                | (Language::Java, "local_variable_declaration")
-        ) {
-            let explicit_kind = declaration_type
-                .and_then(|type_text| reflection_value_kind(language, type_text, java_user_types));
-            let mut cursor = node.walk();
-            for declarator in node
-                .children(&mut cursor)
-                .filter(|child| child.kind() == "variable_declarator")
-            {
-                let Some(name) = declarator
-                    .child_by_field_name("name")
-                    .and_then(|name| name.utf8_text(source).ok())
-                else {
-                    continue;
-                };
-                let inferred_kind = reflection_declarator_value(declarator).and_then(|value| {
-                    infer_reflection_value_kind(value, language, bindings, java_user_types, source)
-                });
-                if let Some(kind) = explicit_kind.or(inferred_kind) {
-                    bindings.insert(name.to_string(), kind);
-                } else {
-                    bindings.remove(name);
-                }
-            }
-        } else if matches!(
-            (language, node.kind()),
-            (Language::CSharp, "parameter") | (Language::Java, "formal_parameter")
-        ) {
-            if let (Some(name), Some(kind)) = (
-                node.child_by_field_name("name")
-                    .and_then(|name| name.utf8_text(source).ok()),
-                declaration_type.and_then(|type_text| {
-                    reflection_value_kind(language, type_text, java_user_types)
-                }),
-            ) {
-                bindings.insert(name.to_string(), kind);
-            }
-        } else if node.kind() == "assignment_expression" {
-            let Some(name) = node
-                .child_by_field_name("left")
-                .filter(|left| left.kind() == "identifier")
-                .and_then(|left| left.utf8_text(source).ok())
+    ) {
+        let explicit_kind = declaration_type.and_then(|type_text| {
+            reflection_value_kind(language, type_text, java_user_types, csharp_user_types)
+        });
+        let mut cursor = node.walk();
+        for declarator in node
+            .children(&mut cursor)
+            .filter(|child| child.kind() == "variable_declarator")
+        {
+            let Some(name) = declarator
+                .child_by_field_name("name")
+                .and_then(|name| name.utf8_text(source).ok())
             else {
-                return;
+                continue;
             };
-            let kind = node.child_by_field_name("right").and_then(|right| {
-                infer_reflection_value_kind(right, language, bindings, java_user_types, source)
+            let inferred_kind = reflection_declarator_value(declarator).and_then(|value| {
+                infer_reflection_value_kind(
+                    value,
+                    language,
+                    bindings,
+                    java_user_types,
+                    csharp_user_types,
+                    source,
+                )
             });
-            if let Some(kind) = kind {
+            if let Some(kind) = explicit_kind.or(inferred_kind) {
                 bindings.insert(name.to_string(), kind);
             } else {
                 bindings.remove(name);
             }
         }
+    } else if matches!(
+        (language, node.kind()),
+        (Language::CSharp, "parameter") | (Language::Java, "formal_parameter")
+    ) {
+        if let (Some(name), Some(kind)) = (
+            node.child_by_field_name("name")
+                .and_then(|name| name.utf8_text(source).ok()),
+            declaration_type.and_then(|type_text| {
+                reflection_value_kind(language, type_text, java_user_types, csharp_user_types)
+            }),
+        ) {
+            bindings.insert(name.to_string(), kind);
+        }
+    } else if node.kind() == "assignment_expression" {
+        let Some(name) = node
+            .child_by_field_name("left")
+            .filter(|left| left.kind() == "identifier")
+            .and_then(|left| left.utf8_text(source).ok())
+        else {
+            return;
+        };
+        let kind = node.child_by_field_name("right").and_then(|right| {
+            infer_reflection_value_kind(
+                right,
+                language,
+                bindings,
+                java_user_types,
+                csharp_user_types,
+                source,
+            )
+        });
+        if let Some(kind) = kind {
+            bindings.insert(name.to_string(), kind);
+        } else {
+            bindings.remove(name);
+        }
+    }
+}
 
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            visit(
-                child,
+fn merge_reflection_bindings(
+    branches: &[ReflectionBindings],
+) -> ReflectionBindings {
+    let Some(first) = branches.first() else {
+        return ReflectionBindings::new();
+    };
+    first
+        .iter()
+        .filter(|(name, kind)| branches.iter().all(|branch| branch.get(*name) == Some(*kind)))
+        .map(|(name, kind)| (name.clone(), *kind))
+        .collect()
+}
+
+fn process_reflection_flow_node(
+    node: Node,
+    scope: Node,
+    language: Language,
+    source: &[u8],
+    bindings: &mut ReflectionBindings,
+    index: &mut ReflectionFlowIndex,
+    java_user_types: &std::collections::HashSet<String>,
+    csharp_user_types: &std::collections::HashSet<String>,
+) {
+    if is_nested_reflection_scope(node, scope, language) {
+        return;
+    }
+
+    update_reflection_binding(
+        node,
+        language,
+        source,
+        bindings,
+        java_user_types,
+        csharp_user_types,
+    );
+
+    if matches!(node.kind(), "invocation_expression" | "method_invocation") {
+        let proven = match language {
+            Language::CSharp => csharp_reflection_call_is_proven(
+                node,
+                source,
+                bindings,
+                csharp_user_types,
+            ),
+            Language::Java => {
+                java_reflection_call_is_proven(node, source, bindings, java_user_types)
+            }
+            _ => false,
+        };
+        if proven {
+            index.proven_calls.insert(node.id());
+        }
+    }
+
+    if node.kind() == "if_statement" {
+        let mut condition_bindings = bindings.clone();
+        if let Some(condition) = node.child_by_field_name("condition") {
+            process_reflection_flow_node(
+                condition,
                 scope,
-                call,
                 language,
                 source,
+                &mut condition_bindings,
+                index,
                 java_user_types,
-                bindings,
+                csharp_user_types,
+            );
+        }
+        let mut branches = Vec::new();
+        if let Some(consequence) = node.child_by_field_name("consequence") {
+            let mut branch = condition_bindings.clone();
+            process_reflection_flow_node(
+                consequence,
+                scope,
+                language,
+                source,
+                &mut branch,
+                index,
+                java_user_types,
+                csharp_user_types,
+            );
+            branches.push(branch);
+        }
+        if let Some(alternative) = node.child_by_field_name("alternative") {
+            let mut branch = condition_bindings.clone();
+            process_reflection_flow_node(
+                alternative,
+                scope,
+                language,
+                source,
+                &mut branch,
+                index,
+                java_user_types,
+                csharp_user_types,
+            );
+            branches.push(branch);
+        } else {
+            branches.push(condition_bindings.clone());
+        }
+        *bindings = merge_reflection_bindings(&branches);
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        process_reflection_flow_node(
+            child,
+            scope,
+            language,
+            source,
+            bindings,
+            index,
+            java_user_types,
+            csharp_user_types,
+        );
+    }
+}
+
+fn build_reflection_flow_index(
+    root: Node,
+    source: &[u8],
+    language: Language,
+) -> ReflectionFlowIndex {
+    if !matches!(language, Language::CSharp | Language::Java) {
+        return ReflectionFlowIndex::default();
+    }
+    let java_user_types = java_user_type_names(root, source);
+    let csharp_user_types = csharp_user_type_names(root, source);
+    let mut index = ReflectionFlowIndex::default();
+
+    fn visit_scopes(
+        node: Node,
+        source: &[u8],
+        language: Language,
+        index: &mut ReflectionFlowIndex,
+        java_user_types: &std::collections::HashSet<String>,
+        csharp_user_types: &std::collections::HashSet<String>,
+    ) {
+        if is_reflection_scope(node, language) {
+            let mut bindings = ReflectionBindings::new();
+            process_reflection_flow_node(
+                node,
+                node,
+                language,
+                source,
+                &mut bindings,
+                index,
+                java_user_types,
+                csharp_user_types,
+            );
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                visit_scopes(
+                    child,
+                    source,
+                    language,
+                    index,
+                    java_user_types,
+                    csharp_user_types,
+                );
+            }
+            return;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit_scopes(
+                child,
+                source,
+                language,
+                index,
+                java_user_types,
+                csharp_user_types,
             );
         }
     }
 
-    let mut bindings = std::collections::HashMap::new();
-    visit(
-        scope,
-        scope,
-        call,
-        language,
+    visit_scopes(
+        root,
         source,
-        java_user_types,
-        &mut bindings,
+        language,
+        &mut index,
+        &java_user_types,
+        &csharp_user_types,
     );
-    bindings
+    index
 }
 
 fn csharp_reflection_call_is_proven(
     call: Node,
     source: &[u8],
-    bindings: &std::collections::HashMap<String, ReflectionValueKind>,
+    bindings: &ReflectionBindings,
+    csharp_user_types: &std::collections::HashSet<String>,
 ) -> bool {
     let Some((receiver, method)) = reflection_call_parts(call, Language::CSharp, source) else {
         return false;
@@ -825,11 +1045,20 @@ fn csharp_reflection_call_is_proven(
     {
         return method == "GetType";
     }
+    if receiver.kind() == "identifier"
+        && receiver
+            .utf8_text(source)
+            .ok()
+            .is_some_and(|name| name == "Type" && !csharp_user_types.contains(name))
+    {
+        return csharp_method_is_reflection(ReflectionValueKind::CSharpType, &method);
+    }
     let Some(kind) = reflection_receiver_kind(
         receiver,
         Language::CSharp,
         bindings,
         &std::collections::HashSet::new(),
+        csharp_user_types,
         source,
     ) else {
         return false;
@@ -893,36 +1122,18 @@ fn java_reflection_call_is_proven(
             return true;
         }
     }
-    let Some(kind) =
-        reflection_receiver_kind(receiver, Language::Java, bindings, java_user_types, source)
+    let Some(kind) = reflection_receiver_kind(
+        receiver,
+        Language::Java,
+        bindings,
+        java_user_types,
+        &std::collections::HashSet::new(),
+        source,
+    )
     else {
         return false;
     };
     java_method_is_reflection(kind, &method)
-}
-
-fn typed_reflection_call_is_proven(
-    call: Node,
-    root: Node,
-    source: &[u8],
-    language: Language,
-) -> bool {
-    if !matches!(language, Language::CSharp | Language::Java) {
-        return false;
-    }
-    let java_user_types = if language == Language::Java {
-        java_user_type_names(root, source)
-    } else {
-        std::collections::HashSet::new()
-    };
-    let bindings = reflection_scope(call, language)
-        .map(|scope| collect_reflection_bindings(scope, call, language, source, &java_user_types))
-        .unwrap_or_default();
-    match language {
-        Language::CSharp => csharp_reflection_call_is_proven(call, source, &bindings),
-        Language::Java => java_reflection_call_is_proven(call, source, &bindings, &java_user_types),
-        _ => false,
-    }
 }
 
 pub(crate) fn extract_hazards(
@@ -937,6 +1148,7 @@ pub(crate) fn extract_hazards(
     };
 
     let source_bytes = source.as_bytes();
+    let reflection_flow_index = build_reflection_flow_index(root, source_bytes, language);
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(query, root, source_bytes);
     let ruby_defined_methods = if language == Language::Ruby {
@@ -1000,13 +1212,13 @@ pub(crate) fn extract_hazards(
             }
             if language == Language::CSharp
                 && hazard_type == "csharp_metaprogramming"
-                && !typed_reflection_call_is_proven(cap.node, root, source_bytes, language)
+                && !reflection_flow_index.proven_calls.contains(&cap.node.id())
             {
                 continue;
             }
             if language == Language::Java
                 && hazard_type == "java_metaprogramming"
-                && !typed_reflection_call_is_proven(cap.node, root, source_bytes, language)
+                && !reflection_flow_index.proven_calls.contains(&cap.node.id())
             {
                 continue;
             }
@@ -1052,6 +1264,20 @@ pub(crate) fn extract_hazards(
     
     sites.sort_by_key(|s| (s.line, s.start_column, s.end_line, s.end_column, s.hazard_type.clone()));
     sites
+}
+
+/// Parse one source file and return the canonical hazard facts. Consumers
+/// such as Lineage use this entry point instead of reimplementing the
+/// language-specific hazard queries and flow resolution.
+pub fn extract_file_hazards(file_path: &str, source: &str, language: Language) -> Vec<HazardSite> {
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&grammar_for_language(language)).is_err() {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(source, None) else {
+        return Vec::new();
+    };
+    extract_hazards(file_path, tree.root_node(), source, language)
 }
 
 fn supports_interfaces(language: Language) -> bool {
@@ -1949,6 +2175,85 @@ local mt = {
         assert!(java_reflection
             .iter()
             .any(|hazard| hazard.snippet.contains("alias.invoke")));
+    }
+
+    #[test]
+    fn reflection_flow_index_handles_fields_shadowing_reassignment_and_branches() {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&grammar_for_language(Language::Java))
+            .unwrap();
+        let java = r#"
+            class Demo {
+                void run() throws Exception {
+                    Class target = Class.forName("Demo");
+                    Field field = target.getField("value");
+                    Object value = field.get(this);
+                    field.set(this, value);
+                }
+            }
+        "#;
+        let tree = parser.parse(java, None).unwrap();
+        let java_sites = extract_hazards("Demo.java", tree.root_node(), java, Language::Java);
+        let java_reflection: Vec<_> = java_sites
+            .iter()
+            .filter(|site| site.hazard_type == "java_metaprogramming")
+            .collect();
+        assert_eq!(java_reflection.len(), 4, "{java_reflection:?}");
+        assert!(java_reflection.iter().any(|site| site.snippet.contains("field.get")));
+        assert!(java_reflection.iter().any(|site| site.snippet.contains("field.set")));
+
+        parser
+            .set_language(&grammar_for_language(Language::CSharp))
+            .unwrap();
+        let csharp = r#"
+            class MethodInfo { public void Invoke(object a, object b) {} }
+            class Demo {
+                void Run(bool flag) {
+                    Type target = typeof(Demo);
+                    MethodInfo method = target.GetMethod("Run");
+                    method.Invoke(null, null);
+                    target = new object();
+                    target.GetMethod("Run");
+                    if (flag) { target = typeof(Demo); } else { target = new object(); }
+                    target.GetMethod("Run");
+                    void Nested() {
+                        object target = new object();
+                        target.GetMethod("Run");
+                    }
+                    Assembly.Load("demo");
+                }
+            }
+        "#;
+        let tree = parser.parse(csharp, None).unwrap();
+        let csharp_sites = extract_hazards("Demo.cs", tree.root_node(), csharp, Language::CSharp);
+        let csharp_reflection: Vec<_> = csharp_sites
+            .iter()
+            .filter(|site| site.hazard_type == "csharp_metaprogramming")
+            .collect();
+        assert_eq!(csharp_reflection.len(), 3, "{csharp_reflection:?}");
+        assert!(csharp_reflection.iter().any(|site| site.snippet.contains("target.GetMethod")));
+        assert!(csharp_reflection.iter().any(|site| site.snippet.contains("method.Invoke")));
+        assert!(csharp_reflection.iter().any(|site| site.snippet.contains("Assembly.Load")));
+        assert!(!csharp_reflection.iter().any(|site| site.snippet.contains("target.GetMethod") && site.line > 8));
+    }
+
+    #[test]
+    fn csharp_framework_like_user_types_are_not_reflection_hazards() {
+        let source = r#"
+            class Type { public object GetMethod(string name) { return null; } }
+            class MethodInfo { public void Invoke(object a, object b) {} }
+            class Demo {
+                void Run() {
+                    Type target = new Type();
+                    target.GetMethod("Run");
+                    MethodInfo method = new MethodInfo();
+                    method.Invoke(null, null);
+                }
+            }
+        "#;
+        let sites = extract_file_hazards("Shadow.cs", source, Language::CSharp);
+        assert!(!sites.iter().any(|site| site.hazard_type == "csharp_metaprogramming"));
     }
 
     #[test]
