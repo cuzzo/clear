@@ -766,7 +766,7 @@ class EvidenceOracleTest < Minitest::Test
               assert calculate() == 2
         PYTHON
         support: {"source.py" => "def calculate():\n    return 2\n"},
-        call: "assert calculate() == 2", line: 4, framework: "pytest", kind: Evidence::OracleKind::Truthiness,
+        call: "assert calculate() == 2", framework: "pytest", kind: Evidence::OracleKind::Truthiness,
         command: ["python3", "-m", "pytest", "test_example.py", "-q"],
         available: -> { command_succeeds?("python3", "-c", "import pytest") },
       },
@@ -783,7 +783,7 @@ class EvidenceOracleTest < Minitest::Test
           "source.js" => "function calculate() { return 2; }\nmodule.exports = { calculate };\n",
           "package.json" => "{\"jest\":{}}\n",
         },
-        call: "expect(calculate()).toBe(2)", line: 4, framework: "jest", kind: Evidence::OracleKind::Identity,
+        call: "expect(calculate()).toBe(2)", framework: "jest", kind: Evidence::OracleKind::Identity,
         command: [jest_bin, "test.test.js", "--runInBand"],
         available: -> { File.executable?(jest_bin) },
       },
@@ -814,7 +814,7 @@ class EvidenceOracleTest < Minitest::Test
           XML
           "src/main/java/Calculator.java" => "class Calculator { static int calculate() { return 2; } }\n",
         },
-        call: "assertEquals(2, Calculator.calculate())", line: 6, framework: "junit", kind: Evidence::OracleKind::Equality,
+        call: "assertEquals(2, Calculator.calculate())", framework: "junit", kind: Evidence::OracleKind::Equality,
         command: ["mvn", "-q", "-Dtest=CalculatorTest", "test"],
         available: -> { command_succeeds?("mvn", "-v") },
       },
@@ -836,9 +836,13 @@ class EvidenceOracleTest < Minitest::Test
         Dir.chdir(repository) do
           system("git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm fixture", exception: true)
         end
+        call = fixture.fetch(:call)
+        line = fixture.fetch(:source).lines.index { |source_line| source_line.include?(call) }
+        raise "fixture oracle line missing" if line.nil?
+
         fact_value = Evidence::OracleFact.new(
           oracle_id: "#{framework}-e2e", test_id: "#{fixture.fetch(:framework)}:CalculatorTest#value",
-          oracle_kind: fixture.fetch(:kind), oracle_span: oracle_source_span(fixture.fetch(:source), fixture.fetch(:line), fixture.fetch(:call)),
+          oracle_kind: fixture.fetch(:kind), oracle_span: oracle_source_span(fixture.fetch(:source), line + 1, call),
           framework: fixture.fetch(:framework), confidence: 1.0,
         )
         result = Evidence::OracleExecutionRunner.new.run(
