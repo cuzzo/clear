@@ -89,6 +89,13 @@ cargo run --manifest-path gems/lineage/Cargo.toml -- ui \
   --port 8080
 ```
 
+Build the embedded React/Monaco diff view after changing its Rust API contract
+or frontend source:
+
+```bash
+gems/lineage/tools/build_diff_ui.sh
+```
+
 ### Focused architecture view
 
 Generate Espalier's structured graph, ingest it transactionally, and serve the

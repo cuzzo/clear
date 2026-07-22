@@ -4,6 +4,7 @@ use crate::extract::{BoundaryExtractor, HeuristicExtractor};
 use crate::model::{BlobFile, UnitKind};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+use ts_rs::TS;
 
 pub const DIFF_API_VERSION: &str = "v1";
 pub const DIFF_POLICY_VERSION: &str = "diff-risk/v1";
@@ -14,14 +15,14 @@ pub struct RevisionFile {
     pub contents: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 pub struct DiffScope {
     pub base_oid: String,
     pub head_oid: String,
     pub policy_version: &'static str,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 pub struct DiffPlan {
     pub scope: DiffScope,
     pub inventory: ChangeInventory,
@@ -31,7 +32,7 @@ pub struct DiffPlan {
     pub files: Vec<DiffFile>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, TS)]
 pub struct ChangeInventory {
     pub changed_directories: usize,
     pub changed_files: usize,
@@ -46,14 +47,15 @@ pub struct ChangeInventory {
     pub lockfile_paths: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 pub struct ConfigFile {
     pub path: String,
     pub kind: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
 pub enum FileChangeKind {
     Added,
     Modified,
@@ -61,8 +63,9 @@ pub enum FileChangeKind {
     Renamed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
 pub enum SourceRole {
     Production,
     Test,
@@ -88,7 +91,7 @@ impl SourceRole {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 pub struct DiffFile {
     pub path: String,
     pub previous_path: Option<String>,
@@ -104,7 +107,7 @@ pub struct DiffFile {
     pub risk: RiskSummary,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 pub struct EvidenceAvailability {
     pub coverage: EvidenceState,
     pub mutation: EvidenceState,
@@ -112,13 +115,14 @@ pub struct EvidenceAvailability {
     pub sarif: EvidenceState,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
 pub enum EvidenceState {
     Unknown,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, TS)]
 pub struct VerificationSlices {
     pub covered_and_killed: usize,
     pub covered: usize,
@@ -127,7 +131,7 @@ pub struct VerificationSlices {
     pub unknown: usize,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
 pub struct RiskSummary {
     pub score: f64,
     pub not_covered: usize,
@@ -136,21 +140,21 @@ pub struct RiskSummary {
     pub tier_one_hazards: usize,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, TS)]
 pub struct AddedLines {
     pub code: usize,
     pub comments: usize,
     pub other: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 pub struct LanguageSummary {
     pub language: String,
     pub production: AddedLines,
     pub test: AddedLines,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 pub struct DiffGroup {
     pub name: String,
     pub kind: String,
@@ -164,29 +168,31 @@ pub struct DiffGroup {
     pub risk: RiskSummary,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
 pub enum Visibility {
     Public,
     Private,
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 pub struct DependencyChange {
     pub manifest_path: String,
     pub status: DependencyStatus,
     pub entries: Vec<DependencyEntry>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
 pub enum DependencyStatus {
     Exact,
     UnknownPackageFile,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 pub struct DependencyEntry {
     pub name: String,
     pub scope: String,

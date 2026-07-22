@@ -1,46 +1,5 @@
-export type ChangeKind = "added" | "modified" | "deleted" | "renamed";
-export type SourceRole = "production" | "test" | "documentation" | "configuration" | "generated" | "lockfile" | "other";
-
-export interface DiffFile {
-  readonly path: string;
-  readonly previous_path: string | null;
-  readonly change: ChangeKind;
-  readonly role: SourceRole;
-  readonly language: string | null;
-  readonly base_source: string | null;
-  readonly head_source: string | null;
-  readonly added_lines: AddedLines;
-  readonly verification: VerificationSlices;
-  readonly residual_lines: AddedLines;
-  readonly groups: readonly DiffGroup[];
-  readonly risk: RiskSummary;
-}
-
-export interface AddedLines { readonly code: number; readonly comments: number; readonly other: number }
-export interface VerificationSlices { readonly covered_and_killed: number; readonly covered: number; readonly partially_covered: number; readonly not_covered: number; readonly unknown: number }
-export interface RiskSummary { readonly score: number; readonly not_covered: number; readonly partially_covered: number; readonly added_complexity: number; readonly tier_one_hazards: number }
-
-export interface DiffGroup {
-  readonly name: string;
-  readonly kind: string;
-  readonly start_line: number;
-  readonly end_line: number;
-  readonly base_start_line: number | null;
-  readonly base_end_line: number | null;
-  readonly visibility: "public" | "private" | "unknown";
-  readonly added_lines: AddedLines;
-  readonly verification: VerificationSlices;
-  readonly risk: RiskSummary;
-}
-
-export interface DiffPlan {
-  readonly scope: { readonly base_oid: string; readonly head_oid: string; readonly policy_version: string };
-  readonly inventory: { readonly changed_directories: number; readonly changed_files: number; readonly by_role: Readonly<Record<string, number>> };
-  readonly dependency_changes: readonly { readonly manifest_path: string; readonly status: "exact" | "unknown_package_file" }[];
-  readonly language_summaries: readonly { readonly language: string; readonly production: AddedLines; readonly test: AddedLines }[];
-  readonly evidence: { readonly coverage: "unknown"; readonly mutation: "unknown"; readonly hazards: "unknown"; readonly sarif: "unknown" };
-  readonly files: readonly DiffFile[];
-}
+export type { AddedLines, DiffFile, DiffGroup, DiffPlan, RiskSummary, VerificationSlices } from "../generated/diff";
+import type { DiffPlan } from "../generated/diff";
 
 export class DiffApiError extends Error {}
 
