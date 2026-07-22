@@ -36,3 +36,7 @@ p {
   margin-top: 2rem;
   padding: 1.25rem;
 }
+
+.lineage-sarif-line {
+  background: color-mix(in srgb, #d29922 22%, transparent);
+}

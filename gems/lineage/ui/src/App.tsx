@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { DiffApiError, type AddedLines, type DiffFile, type DiffGroup, type DiffPlan, type RiskSummary, type VerificationSlices, fetchDiffPlan, revisionsFromSearch } from "./api/diff";
-import { DiffPreview } from "./monaco/DiffPreview";
+import { DiffPreview, type SourceHighlight } from "./monaco/DiffPreview";
 
 export function App(): React.JSX.Element {
   const [location, setLocation] = useState(window.location.search);
@@ -108,12 +108,12 @@ function GroupReview({ file, group, sideBySide }: { readonly file: DiffFile; rea
   return <section className="group-review"><button aria-expanded={expanded} className="disclosure" onClick={() => setExpanded(!expanded)}>{group.kind} {group.name} · {group.added_lines.code} code lines · {group.added_lines.comments} comments</button>
     <RiskMetrics risk={group.risk} verification={group.verification} />
     <FindingSummary findings={group.sarif_findings} />
-    {expanded && <DiffPreview language={file.language ?? "plaintext"} modified={sourceRange(file.head_source, group.start_line, group.end_line)} original={sourceRange(file.base_source, group.base_start_line, group.base_end_line)} sideBySide={sideBySide} />}
+    {expanded && <DiffPreview highlights={relativeHighlights(group)} language={file.language ?? "plaintext"} modified={sourceRange(file.head_source, group.start_line, group.end_line)} original={sourceRange(file.base_source, group.base_start_line, group.base_end_line)} sideBySide={sideBySide} />}
   </section>;
 }
 
 function RawReview({ file, onBack, sideBySide }: { readonly file: DiffFile; readonly onBack: () => void; readonly sideBySide: boolean }): React.JSX.Element {
-  return <article className="file-review"><button onClick={onBack}>Back to semantic review</button><h2>Raw diff: {file.path}</h2>{file.base_source !== null && file.head_source !== null ? <DiffPreview language={file.language ?? "plaintext"} modified={file.head_source} original={file.base_source} sideBySide={sideBySide} /> : <p>Binary or one-sided change.</p>}</article>;
+  return <article className="file-review"><button onClick={onBack}>Back to semantic review</button><h2>Raw diff: {file.path}</h2>{file.base_source !== null && file.head_source !== null ? <DiffPreview highlights={file.sarif_findings.map(findingHighlight)} language={file.language ?? "plaintext"} modified={file.head_source} original={file.base_source} sideBySide={sideBySide} /> : <p>Binary or one-sided change.</p>}</article>;
 }
 
 function RiskMetrics({ risk, verification }: { readonly risk: RiskSummary; readonly verification: VerificationSlices }): React.JSX.Element {
@@ -137,4 +137,20 @@ function groupOrder(left: DiffGroup, right: DiffGroup): number {
 function emptyLines(): AddedLines { return { code: 0, comments: 0, other: 0 }; }
 function addAddedLines(total: AddedLines, group: DiffGroup): AddedLines {
   return { code: total.code + group.added_lines.code, comments: total.comments + group.added_lines.comments, other: total.other + group.added_lines.other };
+}
+
+function relativeHighlights(group: DiffGroup): SourceHighlight[] {
+  return group.sarif_findings.map((finding) => ({
+    ...findingHighlight(finding),
+    startLine: Math.max(1, finding.start_line - group.start_line + 1),
+    endLine: Math.max(1, finding.end_line - group.start_line + 1),
+  }));
+}
+
+function findingHighlight(finding: DiffFile["sarif_findings"][number]): SourceHighlight {
+  return {
+    startLine: finding.start_line,
+    endLine: finding.end_line,
+    title: `${finding.tool}/${finding.rule_id}: ${finding.message}`,
+  };
 }
