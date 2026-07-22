@@ -49,3 +49,55 @@ fn binary_reports_usage_and_round_trips_actions() {
     assert_eq!(output["actions"][0]["kind"], "replace_dead_nil_check");
     assert_eq!(output["diagnostics"].as_object().unwrap().len(), 0);
 }
+
+#[test]
+fn binary_reports_causal_nullable_pressure_from_public_facts() {
+    let bin = env!("CARGO_BIN_EXE_nil-kill-infer-rust");
+    let dir = tempfile::tempdir().unwrap();
+    let input_path = dir.path().join("input.json");
+    let output_path = dir.path().join("output.json");
+    fs::write(
+        &input_path,
+        serde_json::to_vec_pretty(&json!({
+            "facts": {
+                "nullable_states": [{
+                    "state": "definitely_null",
+                    "complete": true,
+                    "place_id": "place:cache:value",
+                    "source_definition_ids": ["definition:cache_lookup"]
+                }],
+                "nullable_refinements": [{
+                    "place_id": "place:cache:value",
+                    "condition_node_id": "guard:1"
+                }],
+                "nullable_summaries": [{
+                    "owner": "Cache",
+                    "function": "lookup",
+                    "return_state": "definitely_null",
+                    "complete": true,
+                    "source_definition_ids": ["definition:cache_lookup"]
+                }]
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let run = Command::new(bin)
+        .arg(&input_path)
+        .arg(&output_path)
+        .output()
+        .unwrap();
+    assert!(run.status.success());
+
+    let output: serde_json::Value =
+        serde_json::from_slice(&fs::read(&output_path).unwrap()).unwrap();
+    let action = output["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|action| action["kind"] == "report_static_nil_pressure")
+        .unwrap();
+    assert_eq!(action["data"]["root_definition_id"], "definition:cache_lookup");
+    assert_eq!(action["data"]["pressure"], 2);
+}

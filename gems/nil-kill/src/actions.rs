@@ -103,7 +103,7 @@ pub fn replace_deterministic_guard(input: &InputState) -> Vec<Action> {
     actions
 }
 use crate::schemas::{Action, InputState, MethodRecord, SourceRecord};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub fn propose_sig(input: &InputState) -> Vec<Action> {
     let mut actions = Vec::new();
@@ -2576,8 +2576,168 @@ pub fn build_actions(input: &InputState) -> Vec<Action> {
     actions.extend(propose_false_nilable_return_actions(input));
     actions.extend(propose_forwarded_return_chain_actions(input));
     actions.extend(propose_struct_field_sig_actions(input));
+    actions.extend(report_static_nil_pressure(input));
 
     actions
+}
+
+/// Produces a review-only causal report from FactMine's public nullable
+/// facts. NilKill deliberately receives no source text, normalized AST, or
+/// CFG here: it groups only the already-proven origins and obligations.
+fn report_static_nil_pressure(input: &InputState) -> Vec<Action> {
+    let mut roots = nullable_roots(&fact_objects(input, "nullable_states"));
+    attach_guard_obligations(&mut roots, &fact_objects(input, "nullable_refinements"));
+    attach_return_obligations(&mut roots, &fact_objects(input, "nullable_summaries"));
+    attach_operation_obligations(&mut roots, &fact_objects(input, "nullable_operations"));
+    pressure_actions(roots)
+}
+
+fn nullable_roots(
+    states: &[&serde_json::Map<String, serde_json::Value>],
+) -> BTreeMap<String, PressureEvidence> {
+    let mut roots = BTreeMap::<String, PressureEvidence>::new();
+    for state in states {
+        if fact_string(state, "state") != Some("definitely_null") || !fact_bool(state, "complete") {
+            continue;
+        }
+        let Some(place_id) = fact_string(state, "place_id") else {
+            continue;
+        };
+        for root in fact_strings(state, "source_definition_ids") {
+            let evidence = roots.entry(root.to_string()).or_default();
+            evidence.places.insert(place_id.to_string());
+        }
+    }
+    roots
+}
+
+fn attach_guard_obligations(
+    roots: &mut BTreeMap<String, PressureEvidence>,
+    refinements: &[&serde_json::Map<String, serde_json::Value>],
+) {
+    for (_, evidence) in roots {
+        for refinement in refinements {
+            let Some(place_id) = fact_string(refinement, "place_id") else {
+                continue;
+            };
+            if !evidence.places.contains(place_id) {
+                continue;
+            }
+            let condition = fact_string(refinement, "condition_node_id").unwrap_or("");
+            evidence.guards.insert(format!("{place_id}:{condition}"));
+        }
+    }
+}
+
+fn attach_return_obligations(
+    roots: &mut BTreeMap<String, PressureEvidence>,
+    summaries: &[&serde_json::Map<String, serde_json::Value>],
+) {
+    for (root, evidence) in roots {
+        for summary in summaries {
+            if fact_string(summary, "return_state") == Some("definitely_null")
+                && fact_bool(summary, "complete")
+                && fact_strings(summary, "source_definition_ids").contains(&root.as_str())
+            {
+                let owner = fact_string(summary, "owner").unwrap_or("");
+                let function = fact_string(summary, "function").unwrap_or("");
+                evidence.returns.insert(format!("{owner}#{function}"));
+            }
+        }
+    }
+}
+
+fn attach_operation_obligations(
+    roots: &mut BTreeMap<String, PressureEvidence>,
+    operations: &[&serde_json::Map<String, serde_json::Value>],
+) {
+    for evidence in roots.values_mut() {
+        for operation in operations {
+            let Some(place_id) = fact_string(operation, "place_id") else {
+                continue;
+            };
+            let behavior = fact_string(operation, "nil_behavior").unwrap_or("unknown");
+            if evidence.places.contains(place_id)
+                && behavior != "safe"
+                && behavior != "unknown"
+                && fact_bool(operation, "complete")
+            {
+                let node = fact_string(operation, "node_id").unwrap_or("");
+                let kind = fact_string(operation, "operation_kind").unwrap_or("");
+                evidence.operations.insert(format!("{kind}:{node}"));
+            }
+        }
+    }
+}
+
+fn pressure_actions(roots: BTreeMap<String, PressureEvidence>) -> Vec<Action> {
+    roots
+        .into_iter()
+        .filter_map(|(root, evidence)| {
+            let pressure = evidence.guards.len() + evidence.returns.len() + evidence.operations.len();
+            (pressure > 0).then(|| {
+                let mut data = HashMap::new();
+                data.insert("root_definition_id".to_string(), serde_json::Value::String(root.clone()));
+                data.insert(
+                    "pressure".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(pressure)),
+                );
+                data.insert("guard_clusters".to_string(), json_strings(evidence.guards));
+                data.insert("nullable_returns".to_string(), json_strings(evidence.returns));
+                data.insert("unsafe_operations".to_string(), json_strings(evidence.operations));
+                Action {
+                    kind: "report_static_nil_pressure".to_string(),
+                    confidence: "review".to_string(),
+                    path: String::new(),
+                    line: 0,
+                    message: format!(
+                        "nullable root {root} creates {pressure} independently necessary obligations"
+                    ),
+                    data,
+                }
+            })
+        })
+        .collect()
+}
+
+#[derive(Default)]
+struct PressureEvidence {
+    places: BTreeSet<String>,
+    guards: BTreeSet<String>,
+    returns: BTreeSet<String>,
+    operations: BTreeSet<String>,
+}
+
+fn fact_objects<'a>(input: &'a InputState, key: &str) -> Vec<&'a serde_json::Map<String, serde_json::Value>> {
+    input
+        .facts
+        .get(key)
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_object)
+        .collect()
+}
+
+fn fact_string<'a>(fact: &'a serde_json::Map<String, serde_json::Value>, key: &str) -> Option<&'a str> {
+    fact.get(key).and_then(serde_json::Value::as_str)
+}
+
+fn fact_strings<'a>(fact: &'a serde_json::Map<String, serde_json::Value>, key: &str) -> Vec<&'a str> {
+    fact.get(key)
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .collect()
+}
+
+fn fact_bool(fact: &serde_json::Map<String, serde_json::Value>, key: &str) -> bool {
+    fact.get(key).and_then(serde_json::Value::as_bool).unwrap_or(false)
+}
+
+fn json_strings(values: BTreeSet<String>) -> serde_json::Value {
+    serde_json::Value::Array(values.into_iter().map(serde_json::Value::String).collect())
 }
 
 fn simple_high_confidence_collection_candidate(candidate: &str) -> bool {
@@ -2676,6 +2836,101 @@ mod tests {
                 && action.data.get("from").and_then(|value| value.as_str())
                     == Some("T.nilable(Token)")
         }));
+    }
+
+    #[test]
+    fn static_nil_pressure_groups_only_proven_obligations_by_root() {
+        let input = input_from_json(serde_json::json!({
+            "facts": {
+                "nullable_states": [
+                    {
+                        "state": "definitely_null",
+                        "complete": true,
+                        "place_id": "place:cache:value",
+                        "source_definition_ids": ["definition:cache_lookup"]
+                    },
+                    {
+                        "state": "unknown",
+                        "complete": false,
+                        "place_id": "place:cache:unknown",
+                        "source_definition_ids": ["definition:unknown"]
+                    },
+                    {
+                        "state": "definitely_null",
+                        "complete": true,
+                        "source_definition_ids": ["definition:missing_place"]
+                    }
+                ],
+                "nullable_refinements": [
+                    {
+                        "place_id": "place:cache:value",
+                        "condition_node_id": "guard:1"
+                    },
+                    {
+                        "condition_node_id": "missing-place"
+                    },
+                    {
+                        "place_id": "place:other:value",
+                        "condition_node_id": "other-place"
+                    },
+                    {
+                        "place_id": "place:cache:value",
+                        "condition_node_id": "guard:1"
+                    }
+                ],
+                "nullable_summaries": [
+                    {
+                        "owner": "Cache",
+                        "function": "lookup",
+                        "return_state": "definitely_null",
+                        "complete": true,
+                        "source_definition_ids": ["definition:cache_lookup"]
+                    },
+                    {
+                        "owner": "Cache",
+                        "function": "unknown_lookup",
+                        "return_state": "unknown",
+                        "complete": false,
+                        "source_definition_ids": ["definition:unknown"]
+                    }
+                ],
+                "nullable_operations": [
+                    {
+                        "place_id": "place:cache:value",
+                        "node_id": "deref:1",
+                        "operation_kind": "pointer_dereference",
+                        "nil_behavior": "undefined_behavior",
+                        "complete": true
+                    },
+                    {
+                        "node_id": "missing-place",
+                        "operation_kind": "pointer_dereference",
+                        "nil_behavior": "undefined_behavior",
+                        "complete": true
+                    },
+                    {
+                        "place_id": "place:cache:value",
+                        "node_id": "safe:1",
+                        "operation_kind": "map_read",
+                        "nil_behavior": "safe",
+                        "complete": true
+                    }
+                ]
+            }
+        }));
+
+        let actions = super::report_static_nil_pressure(&input);
+
+        assert_eq!(actions.len(), 1);
+        let action = &actions[0];
+        assert_eq!(action.kind, "report_static_nil_pressure");
+        assert_eq!(action.data["pressure"], 3);
+        assert_eq!(action.data["guard_clusters"], serde_json::json!(["place:cache:value:guard:1"]));
+        assert_eq!(action.data["nullable_returns"], serde_json::json!(["Cache#lookup"]));
+        assert_eq!(
+            action.data["unsafe_operations"],
+            serde_json::json!(["pointer_dereference:deref:1"])
+        );
     }
 
     #[test]
