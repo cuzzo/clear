@@ -71,7 +71,7 @@ pub use stack_trace::{
     ingest_stack_traces, LanguageNormalizer, RepoPathNormalizer, SentryProvider, StackIngestStats,
     StackPayload, StackTraceProvider,
 };
-pub use storage::{Storage, UnitSummary};
+pub use storage::{EvidenceArtifactScope, Storage, UnitSummary};
 pub use test_exposure::{
     ingest_test_exposure_json, parse_test_exposure_records, TestExposureIngestStats,
     TestExposureRecord,

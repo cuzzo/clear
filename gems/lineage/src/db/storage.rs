@@ -1,5 +1,6 @@
 use crate::diff::{
-    CoverageObservation, MutationKillObservation, SarifFindingSummary, SarifObservation,
+    CoverageObservation, EvidenceScopeFingerprint, MutationKillObservation, SarifFindingSummary,
+    SarifObservation, ScopedCoverageArtifact,
 };
 use crate::model::{
     CommitMetadata, CrashEvent, Event, HazardEvent, LogicalUnit, QualityEvent, QualityMetric,
@@ -7,7 +8,7 @@ use crate::model::{
 };
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 pub struct Storage {
@@ -24,6 +25,15 @@ pub struct CoverageLineBulk {
     pub is_partial: bool,
     pub coverage_percent: Option<f64>,
     pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvidenceArtifactScope {
+    pub family: String,
+    pub source: String,
+    pub scope: EvidenceScopeFingerprint,
+    pub complete: bool,
+    pub expected_lines: BTreeSet<(String, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,6 +151,16 @@ impl Storage {
             "INTEGER NOT NULL DEFAULT 0",
         )?;
         self.ensure_column("coverage_line_events", "coverage_percent", "REAL")?;
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS evidence_artifact_scopes (\
+              family TEXT NOT NULL, source TEXT NOT NULL, revision TEXT NOT NULL, \
+              selection_scope TEXT NOT NULL, mutant_corpus TEXT NOT NULL, test_set TEXT NOT NULL, \
+              complete INTEGER NOT NULL CHECK (complete IN (0, 1)), expected_lines_json TEXT NOT NULL, \
+              PRIMARY KEY(family, source, revision, selection_scope, mutant_corpus, test_set)\
+            );\
+            CREATE INDEX IF NOT EXISTS idx_evidence_artifact_scopes_lookup \
+              ON evidence_artifact_scopes(family, revision, source);",
+        )?;
         self.ensure_column(
             "ui_file_summaries",
             "partial_lines",
@@ -1008,6 +1028,96 @@ impl Storage {
             );
             let mut values = Vec::<rusqlite::types::Value>::with_capacity(paths.len() + 1);
             values.push(rusqlite::types::Value::Text(commit_hash.to_string()));
+            values.extend(paths.iter().cloned().map(rusqlite::types::Value::Text));
+            let mut statement = self.conn.prepare(&sql)?;
+            let rows = statement.query_map(rusqlite::params_from_iter(values), |row| {
+                Ok(CoverageObservation {
+                    path: row.get(0)?,
+                    line: row.get::<_, i64>(1)?.max(1) as u32,
+                    hits: row.get::<_, i64>(2)?.max(0) as u32,
+                    is_partial: row.get::<_, i64>(3)? != 0,
+                })
+            })?;
+            observations.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
+        }
+        Ok(observations)
+    }
+
+    pub fn record_evidence_artifact_scope(&self, artifact: &EvidenceArtifactScope) -> Result<()> {
+        let expected_lines =
+            serde_json::to_string(&artifact.expected_lines.iter().collect::<Vec<_>>())?;
+        self.conn.execute(
+            "INSERT INTO evidence_artifact_scopes \
+             (family, source, revision, selection_scope, mutant_corpus, test_set, complete, expected_lines_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+             ON CONFLICT(family, source, revision, selection_scope, mutant_corpus, test_set) DO UPDATE SET \
+             complete = excluded.complete, expected_lines_json = excluded.expected_lines_json",
+            params![artifact.family, artifact.source, artifact.scope.revision, artifact.scope.selection,
+                artifact.scope.mutant_corpus, artifact.scope.test_set, if artifact.complete { 1 } else { 0 }, expected_lines],
+        )?;
+        Ok(())
+    }
+
+    pub fn scoped_coverage_artifact(
+        &self,
+        source: &str,
+        scope: &EvidenceScopeFingerprint,
+        paths: &[String],
+    ) -> Result<Option<ScopedCoverageArtifact>> {
+        let encoded = self
+            .conn
+            .query_row(
+                "SELECT complete, expected_lines_json FROM evidence_artifact_scopes \
+             WHERE family = 'coverage' AND source = ?1 AND revision = ?2 AND selection_scope = ?3 \
+             AND mutant_corpus = ?4 AND test_set = ?5",
+                params![
+                    source,
+                    scope.revision,
+                    scope.selection,
+                    scope.mutant_corpus,
+                    scope.test_set
+                ],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let Some((complete, expected_lines_json)) = encoded else {
+            return Ok(None);
+        };
+        let expected_lines = serde_json::from_str::<Vec<(String, u32)>>(&expected_lines_json)?
+            .into_iter()
+            .collect();
+        let observations =
+            self.coverage_observations_for_commit_paths_source(&scope.revision, paths, source)?;
+        Ok(Some(ScopedCoverageArtifact {
+            scope: scope.clone(),
+            complete: complete != 0,
+            expected_lines,
+            observations,
+        }))
+    }
+
+    fn coverage_observations_for_commit_paths_source(
+        &self,
+        commit_hash: &str,
+        paths: &[String],
+        source: &str,
+    ) -> Result<Vec<CoverageObservation>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut observations = Vec::new();
+        for paths in paths.chunks(499) {
+            let placeholders = std::iter::repeat("?")
+                .take(paths.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT path, line, hits, is_partial FROM coverage_line_events WHERE commit_hash = ? AND source = ? AND path IN ({placeholders})"
+            );
+            let mut values = vec![
+                rusqlite::types::Value::Text(commit_hash.to_string()),
+                rusqlite::types::Value::Text(source.to_string()),
+            ];
             values.extend(paths.iter().cloned().map(rusqlite::types::Value::Text));
             let mut statement = self.conn.prepare(&sql)?;
             let rows = statement.query_map(rusqlite::params_from_iter(values), |row| {

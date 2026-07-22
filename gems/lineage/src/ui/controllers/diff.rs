@@ -12,6 +12,10 @@ pub(super) fn routes() -> Router<UiServerState> {
 struct DiffQuery {
     base: Option<String>,
     head: Option<String>,
+    coverage_source: Option<String>,
+    selection: Option<String>,
+    mutant_corpus: Option<String>,
+    test_set: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -29,6 +33,10 @@ struct DiffFileQuery {
     base: Option<String>,
     head: Option<String>,
     path: Option<String>,
+    coverage_source: Option<String>,
+    selection: Option<String>,
+    mutant_corpus: Option<String>,
+    test_set: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -62,7 +70,14 @@ async fn api_diff_plan_handler(
     });
     match result {
         Ok(mut plan) => {
-            apply_known_coverage(&state, &mut plan);
+            bind_requested_evidence_scope(
+                &mut plan,
+                &query.head,
+                &query.selection,
+                &query.mutant_corpus,
+                &query.test_set,
+            );
+            apply_known_coverage(&state, &mut plan, query.coverage_source.as_deref());
             apply_known_mutation_kills(&state, &mut plan);
             apply_known_sarif(&state, &mut plan);
             Json(ApiEnvelope {
@@ -93,7 +108,35 @@ fn apply_known_sarif(state: &UiServerState, plan: &mut crate::diff::DiffPlan) {
     crate::diff::apply_partial_sarif_findings(plan, &rows);
 }
 
-fn apply_known_coverage(state: &UiServerState, plan: &mut crate::diff::DiffPlan) {
+fn bind_requested_evidence_scope(
+    plan: &mut crate::diff::DiffPlan,
+    _head: &Option<String>,
+    selection: &Option<String>,
+    mutant_corpus: &Option<String>,
+    test_set: &Option<String>,
+) {
+    let (Some(selection), Some(mutant_corpus), Some(test_set)) =
+        (selection, mutant_corpus, test_set)
+    else {
+        return;
+    };
+    if selection.trim().is_empty() || mutant_corpus.trim().is_empty() || test_set.trim().is_empty()
+    {
+        return;
+    }
+    plan.scope.evidence_scope = crate::diff::EvidenceScopeFingerprint {
+        revision: plan.scope.head_oid.clone(),
+        selection: selection.clone(),
+        mutant_corpus: mutant_corpus.clone(),
+        test_set: test_set.clone(),
+    };
+}
+
+fn apply_known_coverage(
+    state: &UiServerState,
+    plan: &mut crate::diff::DiffPlan,
+    source: Option<&str>,
+) {
     if !state.db.exists() {
         return;
     }
@@ -105,6 +148,13 @@ fn apply_known_coverage(state: &UiServerState, plan: &mut crate::diff::DiffPlan)
         .iter()
         .map(|file| file.path.clone())
         .collect::<Vec<_>>();
+    let source = source.unwrap_or("coverage");
+    if let Ok(Some(artifact)) =
+        storage.scoped_coverage_artifact(source, &plan.scope.evidence_scope, &paths)
+    {
+        crate::diff::apply_scoped_coverage(plan, &artifact);
+        return;
+    }
     let Ok(rows) = storage.coverage_observations_for_commit_paths(&plan.scope.head_oid, &paths)
     else {
         return;
@@ -145,7 +195,14 @@ async fn api_diff_file_handler(
     });
     match result {
         Ok(mut plan) => {
-            apply_known_coverage(&state, &mut plan);
+            bind_requested_evidence_scope(
+                &mut plan,
+                &query.head,
+                &query.selection,
+                &query.mutant_corpus,
+                &query.test_set,
+            );
+            apply_known_coverage(&state, &mut plan, query.coverage_source.as_deref());
             apply_known_mutation_kills(&state, &mut plan);
             apply_known_sarif(&state, &mut plan);
             match plan.files.into_iter().find(|file| file.path == path) {
@@ -291,6 +348,10 @@ mod tests {
             Query(DiffQuery {
                 base: Some(base.clone()),
                 head: Some(head.clone()),
+                coverage_source: None,
+                selection: None,
+                mutant_corpus: None,
+                test_set: None,
             }),
         )
         .await;
@@ -301,6 +362,10 @@ mod tests {
                 base: Some(base),
                 head: Some(head),
                 path: Some("app.rb".into()),
+                coverage_source: None,
+                selection: None,
+                mutant_corpus: None,
+                test_set: None,
             }),
         )
         .await;
@@ -311,6 +376,10 @@ mod tests {
                 base: None,
                 head: None,
                 path: None,
+                coverage_source: None,
+                selection: None,
+                mutant_corpus: None,
+                test_set: None,
             }),
         )
         .await;
@@ -330,6 +399,10 @@ mod tests {
             Query(DiffQuery {
                 base: Some(base),
                 head: Some(head),
+                coverage_source: None,
+                selection: None,
+                mutant_corpus: None,
+                test_set: None,
             }),
         )
         .await;
@@ -349,6 +422,54 @@ mod tests {
             json.pointer("/data/files/0/verification/not_covered")
                 .and_then(|value| value.as_u64()),
             Some(0)
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_api_uses_complete_requested_coverage_scope_for_negative_evidence() {
+        let (_dir, state, base, head) = test_state();
+        let storage = crate::storage::Storage::open(state.db.as_ref()).unwrap();
+        storage
+            .record_coverage_line_with_source(&head, 1, "app.rb", 1, 0, false, "complete")
+            .unwrap();
+        storage
+            .record_evidence_artifact_scope(&crate::storage::EvidenceArtifactScope {
+                family: "coverage".into(),
+                source: "complete".into(),
+                scope: crate::diff::EvidenceScopeFingerprint {
+                    revision: head.clone(),
+                    selection: "all-production".into(),
+                    mutant_corpus: "mutants-1".into(),
+                    test_set: "tests-1".into(),
+                },
+                complete: true,
+                expected_lines: [("app.rb".into(), 1)].into_iter().collect(),
+            })
+            .unwrap();
+
+        let response = api_diff_plan_handler(
+            State(state),
+            Query(DiffQuery {
+                base: Some(base),
+                head: Some(head),
+                coverage_source: Some("complete".into()),
+                selection: Some("all-production".into()),
+                mutant_corpus: Some("mutants-1".into()),
+                test_set: Some("tests-1".into()),
+            }),
+        )
+        .await;
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            json.pointer("/data/evidence/coverage")
+                .and_then(|value| value.as_str()),
+            Some("exact")
+        );
+        assert_eq!(
+            json.pointer("/data/files/0/verification/not_covered")
+                .and_then(|value| value.as_u64()),
+            Some(1)
         );
     }
 
@@ -399,6 +520,10 @@ mod tests {
             Query(DiffQuery {
                 base: Some(base),
                 head: Some(head),
+                coverage_source: None,
+                selection: None,
+                mutant_corpus: None,
+                test_set: None,
             }),
         )
         .await;

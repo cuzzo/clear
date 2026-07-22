@@ -1,5 +1,6 @@
+use crate::diff::EvidenceScopeFingerprint;
 use crate::model::{QualityEvent, QualityMetric};
-use crate::storage::{Storage, CoverageLineBulk};
+use crate::storage::{CoverageLineBulk, EvidenceArtifactScope, Storage};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
@@ -46,12 +47,16 @@ pub struct CoverageIngestStats {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoverageIngestOptions {
     pub line_source: String,
+    pub evidence_scope: Option<EvidenceScopeFingerprint>,
+    pub complete: bool,
 }
 
 impl Default for CoverageIngestOptions {
     fn default() -> Self {
         Self {
             line_source: DEFAULT_COVERAGE_SOURCE.to_string(),
+            evidence_scope: None,
+            complete: false,
         }
     }
 }
@@ -186,6 +191,16 @@ fn ingest_records(
         }
     }
     stats.line_events += storage.record_coverage_lines_bulk(&bulk_lines)?;
+    if let Some(scope) = &options.evidence_scope {
+        if scope.revision != commit_hash {
+            anyhow::bail!("coverage evidence scope revision must match commit");
+        }
+        storage.record_evidence_artifact_scope(&EvidenceArtifactScope {
+            family: "coverage".into(), source: options.line_source.clone(), scope: scope.clone(),
+            complete: options.complete,
+            expected_lines: bulk_lines.iter().map(|line| (line.path.clone(), line.line)).collect(),
+        })?;
+    }
     Ok(())
 }
 
@@ -1113,6 +1128,8 @@ mod tests {
 
         let options = CoverageIngestOptions {
             line_source: "coverage:unit".to_string(),
+            evidence_scope: None,
+            complete: false,
         };
         let stats = ingest_coverage_json_with_options(
             &storage,
@@ -1174,6 +1191,8 @@ mod tests {
 
         let options = CoverageIngestOptions {
             line_source: "custom_source".to_string(),
+            evidence_scope: None,
+            complete: false,
         };
         let stats = ingest_coverage_json_with_options(
             &storage,

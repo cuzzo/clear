@@ -334,7 +334,7 @@ fn main() -> Result<()> {
                 &commit,
                 timestamp,
                 replace,
-                &CoverageIngestOptions { line_source },
+                &CoverageIngestOptions { line_source, evidence_scope: None, complete: false },
             )?;
             println!(
                 "ingested coverage: files={} units={} events={} line_events={} skipped_files={}",
