@@ -26,6 +26,19 @@ class ConstraintsDynamicProviderTest < Minitest::Test
     assert_equal canonical, packaged
   end
 
+  def test_ruby_hazard_matcher_matches_contract_vectors
+    contract = SlopCop::Constraints::FactMineProviderHelper.hazard_contract
+    vectors = contract.fetch("matcher_vectors")
+    refute_empty vectors
+
+    vectors.each do |vector|
+      actual = SlopCop::Constraints::FactMineProviderHelper.hazard_pattern_matches?(
+        vector.fetch("pattern"), vector.fetch("value")
+      )
+      assert_equal vector.fetch("matches"), actual, vector.inspect
+    end
+  end
+
   def test_ruby_provider_finds_metaprogramming_hazard
     with_file("test.rb", <<~RB) do |dir, path|
       class Foo

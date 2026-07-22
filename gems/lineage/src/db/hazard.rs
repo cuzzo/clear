@@ -349,9 +349,9 @@ fn excluded_zig_file(path: &str) -> bool {
         || matches!(name, "all-tests.zig" | "all-fuzz.zig" | "size_check.zig" | "runtime-header.zig")
 }
 
-// Both scanners consume the same dependency-free contract. The old Lineage
-// copy classified hazard names independently and could turn `unsafe_block`
-// into a race because it contains the substring "lock".
+// Both scanners consume the same contract resolver. The old Lineage copy
+// classified hazard names independently and could turn `unsafe_block` into a
+// race because it contains the substring "lock".
 const GO_HAZARDS: &str = hazard_contract::GO_HAZARDS;
 const RUST_HAZARDS: &str = hazard_contract::RUST_HAZARDS;
 const ZIG_HAZARDS: &str = hazard_contract::ZIG_HAZARDS;
@@ -359,36 +359,8 @@ const C_HAZARDS: &str = hazard_contract::C_HAZARDS;
 const CPP_HAZARDS: &str = hazard_contract::CPP_HAZARDS;
 const CSHARP_HAZARDS: &str = hazard_contract::CSHARP_HAZARDS;
 
-#[derive(Debug, Clone, serde::Deserialize)]
-struct ContractPolicy {
-    #[serde(rename = "match")]
-    pattern: String,
-    evidence_provider: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct HazardContract {
-    policies: Vec<ContractPolicy>,
-}
-
-fn hazard_policy(hazard_type: &str) -> Option<&'static ContractPolicy> {
-    static CONTRACT: std::sync::OnceLock<HazardContract> = std::sync::OnceLock::new();
-    CONTRACT
-        .get_or_init(|| {
-            hazard_contract::validate_contract()
-                .unwrap_or_else(|error| panic!("invalid bundled hazard contract: {error}"));
-            serde_json::from_str(hazard_contract::CONTRACT_JSON)
-                .expect("bundled hazard contract must be valid JSON")
-        })
-        .policies
-        .iter()
-        .find(|policy| {
-            if policy.pattern.contains('*') {
-                hazard_type.contains(policy.pattern.trim_matches('*'))
-            } else {
-                policy.pattern == hazard_type
-            }
-        })
+fn hazard_policy(hazard_type: &str) -> Option<&'static hazard_contract::HazardPolicy> {
+    hazard_contract::resolve_hazard_policy(hazard_type)
 }
 
 fn go_reflect_import_aliases(

@@ -1303,15 +1303,6 @@
           "start_column": 4
         },
         {
-          "end_column": 23,
-          "end_line": 61,
-          "hazard_type": "ruby_metaprogramming",
-          "line": 61,
-          "required_evidence": "nil-kill",
-          "source": "send(:record, name)",
-          "start_column": 4
-        },
-        {
           "end_column": 6,
           "end_line": 63,
           "hazard_type": "ruby_metaprogramming",

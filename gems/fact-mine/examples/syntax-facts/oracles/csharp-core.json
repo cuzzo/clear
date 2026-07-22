@@ -217,6 +217,24 @@
         {
           "arguments": [],
           "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "MetaprogrammingDemo",
+          "line": 71,
+          "message": "ToString",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "x",
+          "safe_navigation": false,
+          "span": [
+            71,
+            8,
+            71,
+            20
+          ]
+        },
+        {
+          "arguments": [],
+          "block": false,
           "conditional": true,
           "control": "iterates",
           "function": "Process",
@@ -352,7 +370,7 @@
           "span": [
             67,
             4,
-            71,
+            72,
             5
           ],
           "visibility": "private"
@@ -360,12 +378,12 @@
       ],
       "hazard_sites": [
         {
-          "end_column": 15,
-          "end_line": 70,
-          "hazard_type": "csharp_metaprogramming",
-          "line": 70,
+          "end_column": 20,
+          "end_line": 71,
+          "hazard_type": "csharp_dynamic_dispatch",
+          "line": 71,
           "required_evidence": "nil-kill",
-          "source": "dynamic x = 1;",
+          "source": "x.ToString();",
           "start_column": 8
         },
         {
@@ -396,7 +414,7 @@
           "span": [
             4,
             0,
-            72,
+            73,
             1
           ]
         }
@@ -530,6 +548,19 @@
             8,
             58,
             17
+          ]
+        },
+        {
+          "field": "ToString",
+          "function": "MetaprogrammingDemo",
+          "line": 71,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "x",
+          "span": [
+            71,
+            8,
+            71,
+            18
           ]
         },
         {

@@ -97,9 +97,35 @@ module SlopCop
 
       def hazard_policy(hazard_type)
         hazard_contract.fetch("policies").find do |policy|
-          pattern = policy.fetch("match")
-          pattern.include?("*") ? hazard_type.include?(pattern.delete("*")) : hazard_type == pattern
+          hazard_pattern_matches?(policy.fetch("match"), hazard_type)
         end
+      end
+
+      # The Rust resolver is authoritative for Rust consumers. Ruby cannot
+      # link that crate, so it uses the same anchored `*` semantics and the
+      # contract's matcher_vectors test suite to prevent drift.
+      def hazard_pattern_matches?(pattern, value)
+        pattern_chars = pattern.each_char.to_a
+        value_chars = value.each_char.to_a
+        current = Array.new(value_chars.length + 1, false)
+        current[0] = true
+
+        pattern_chars.each do |pattern_character|
+          next_row = Array.new(value_chars.length + 1, false)
+          if pattern_character == "*"
+            next_row[0] = current[0]
+            (1..value_chars.length).each do |index|
+              next_row[index] = current[index] || next_row[index - 1]
+            end
+          else
+            (1..value_chars.length).each do |index|
+              next_row[index] = current[index - 1] && pattern_character == value_chars[index - 1]
+            end
+          end
+          current = next_row
+        end
+
+        current[value_chars.length]
       end
 
       def required_evidence_for(hazard_type)

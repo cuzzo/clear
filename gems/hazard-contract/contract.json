@@ -177,6 +177,16 @@
       "mitigation": "exercise_concurrent_interleavings"
     },
     {
+      "match": "csharp_dynamic_dispatch",
+      "kind": "dynamic_dispatch",
+      "evidence_provider": "nil-kill",
+      "evidence_claim": "site_reached",
+      "coverage_required": false,
+      "report_required": true,
+      "label": "C# dynamic dispatch boundary",
+      "mitigation": "use_a_static_interface_or_restricted_dispatch_table"
+    },
+    {
       "match": "rust_unsafe_*",
       "kind": "unsafe_boundary",
       "evidence_provider": "miri",
@@ -233,5 +243,14 @@
     "php": "queries/php_hazards.scm",
     "kotlin": "queries/kotlin_hazards.scm",
     "swift": "queries/swift_hazards.scm"
-  }
+  },
+  "matcher_vectors": [
+    { "pattern": "go_race_*", "value": "go_race_lock", "matches": true },
+    { "pattern": "go_race_*", "value": "xgo_race_lock", "matches": false },
+    { "pattern": "*_metaprogramming", "value": "ruby_metaprogramming", "matches": true },
+    { "pattern": "*_metaprogramming", "value": "metaprogramming", "matches": false },
+    { "pattern": "*_vopr_*", "value": "zig_vopr_time", "matches": true },
+    { "pattern": "*_vopr_*", "value": "zig_vopr", "matches": false },
+    { "pattern": "c_dynamic_loading", "value": "cpp_dynamic_loading", "matches": false }
+  ]
 }

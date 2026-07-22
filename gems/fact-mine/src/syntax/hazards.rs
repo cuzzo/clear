@@ -53,51 +53,8 @@ fn get_cached_query(language: Language) -> Option<&'static Query> {
     }
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-struct HazardPolicy {
-    #[serde(rename = "match")]
-    pattern: String,
-    kind: String,
-    evidence_provider: String,
-    evidence_claim: String,
-    coverage_required: bool,
-    report_required: bool,
-    label: String,
-    mitigation: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct HazardContract {
-    policies: Vec<HazardPolicy>,
-}
-
-fn hazard_contract() -> &'static HazardContract {
-    static CONTRACT: OnceLock<HazardContract> = OnceLock::new();
-    CONTRACT.get_or_init(|| {
-        hazard_contract::validate_contract()
-            .unwrap_or_else(|error| panic!("invalid bundled hazard contract: {error}"));
-        serde_json::from_str(hazard_contract::CONTRACT_JSON)
-            .expect("bundled hazard contract must be valid JSON")
-    })
-}
-
-fn contract_pattern_matches(pattern: &str, hazard_type: &str) -> bool {
-    if pattern.contains('*') {
-        hazard_type.contains(pattern.trim_matches('*'))
-    } else {
-        hazard_type == pattern
-    }
-}
-
-/// Resolve all policy metadata from the shared contract.  The returned copy
-/// is deliberate: callers can attach or transform metadata without creating
-/// a second classifier or borrowing the global manifest.
-fn hazard_policy(hazard_type: &str) -> Option<HazardPolicy> {
-    hazard_contract()
-        .policies
-        .iter()
-        .find(|policy| contract_pattern_matches(&policy.pattern, hazard_type))
-        .cloned()
+fn hazard_policy(hazard_type: &str) -> Option<&'static hazard_contract::HazardPolicy> {
+    hazard_contract::resolve_hazard_policy(hazard_type)
 }
 
 /// FactMine is the source of the emitted evidence metadata, but the policy
@@ -107,7 +64,7 @@ fn hazard_policy(hazard_type: &str) -> Option<HazardPolicy> {
 /// target, function pointer, allowlist, or callback behavior is safe.
 pub fn required_evidence_for_hazard_type(hazard_type: &str) -> String {
     hazard_policy(hazard_type)
-        .map(|policy| policy.evidence_provider)
+        .map(|policy| policy.evidence_provider.clone())
         .unwrap_or_default()
 }
 
@@ -334,6 +291,75 @@ fn c_arithmetic_hazard_is_relevant(node: Node, source: &[u8]) -> bool {
     hazard_contract::c_arithmetic_literal_is_relevant(operator, rhs)
 }
 
+fn csharp_dynamic_call_is_declared(call: Node, source: &[u8]) -> bool {
+    let Some(function) = call.child_by_field_name("function") else {
+        return false;
+    };
+    if function.kind() != "member_access_expression" {
+        return false;
+    }
+    let Some(receiver) = function.child_by_field_name("expression") else {
+        return false;
+    };
+    if receiver.kind() != "identifier" {
+        return false;
+    }
+    let Ok(receiver_name) = receiver.utf8_text(source) else {
+        return false;
+    };
+
+    let mut scope = Some(call);
+    while let Some(node) = scope {
+        if matches!(
+            node.kind(),
+            "method_declaration" | "local_function_statement" | "constructor_declaration"
+        ) {
+            return csharp_scope_declares_dynamic(node, call, receiver_name, source);
+        }
+        scope = node.parent();
+    }
+    false
+}
+
+fn csharp_scope_declares_dynamic(scope: Node, call: Node, receiver_name: &str, source: &[u8]) -> bool {
+    fn visit(node: Node, call: Node, receiver_name: &str, source: &[u8]) -> bool {
+        if node.start_byte() >= call.start_byte() {
+            return false;
+        }
+        if node.kind() == "local_declaration_statement"
+            && node
+                .utf8_text(source)
+                .ok()
+                .and_then(|text| {
+                    let declaration = text.trim_start().strip_prefix("dynamic")?;
+                    if !declaration
+                        .chars()
+                        .next()
+                        .is_some_and(|character| character.is_whitespace())
+                    {
+                        return None;
+                    }
+                    declaration
+                        .trim_start()
+                        .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+                        .next()
+                        .filter(|name| !name.is_empty())
+                })
+                .is_some_and(|name| name == receiver_name)
+        {
+            return true;
+        }
+
+        let mut cursor = node.walk();
+        let found = node
+            .children(&mut cursor)
+            .any(|child| visit(child, call, receiver_name, source));
+        found
+    }
+
+    visit(scope, call, receiver_name, source)
+}
+
 pub(crate) fn extract_hazards(
     file_path: &str,
     root: Node,
@@ -398,6 +424,12 @@ pub(crate) fn extract_hazards(
             if matches!(language, Language::C | Language::Cpp)
                 && hazard_type.ends_with("ubsan_arithmetic")
                 && !c_arithmetic_hazard_is_relevant(cap.node, source_bytes)
+            {
+                continue;
+            }
+            if language == Language::CSharp
+                && hazard_type == "csharp_dynamic_dispatch"
+                && !csharp_dynamic_call_is_declared(cap.node, source_bytes)
             {
                 continue;
             }
@@ -1227,6 +1259,8 @@ local mt = {
                 void Test() {
                     Type.GetType(\"Bar\");
                     typeof(Foo).GetMethod(\"Bar\");
+                    dynamic value = 1;
+                    value.ToString();
                 }
             }
         ";
@@ -1237,6 +1271,25 @@ local mt = {
         let hazards = extract_hazards("test.cs", tree.root_node(), code, Language::CSharp);
         let metaprog_hazards: Vec<_> = hazards.iter().filter(|h| h.hazard_type == "csharp_metaprogramming").collect();
         assert_eq!(metaprog_hazards.len(), 2);
+        let dynamic_hazards: Vec<_> = hazards.iter().filter(|h| h.hazard_type == "csharp_dynamic_dispatch").collect();
+        assert_eq!(dynamic_hazards.len(), 1);
+        assert_eq!(dynamic_hazards[0].snippet, "value.ToString();");
+
+        let declaration_only = "class Foo { void Test() { dynamic value = 1; } }";
+        let tree = parser.parse(declaration_only, None).unwrap();
+        assert!(extract_hazards("test.cs", tree.root_node(), declaration_only, Language::CSharp)
+            .iter()
+            .all(|hazard| hazard.hazard_type != "csharp_dynamic_dispatch"));
+
+        let qualified = "class Foo { void Test() { System.Type.GetType(\"Bar\"); } }";
+        let tree = parser.parse(qualified, None).unwrap();
+        assert_eq!(
+            extract_hazards("test.cs", tree.root_node(), qualified, Language::CSharp)
+                .iter()
+                .filter(|hazard| hazard.hazard_type == "csharp_metaprogramming")
+                .count(),
+            1
+        );
     }
 
     #[test]

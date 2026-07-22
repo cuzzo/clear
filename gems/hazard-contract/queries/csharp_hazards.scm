@@ -75,6 +75,21 @@
   (#match? @method_name "^(GetType|GetMethod|GetMethods|GetField|GetFields|GetProperty|GetProperties|GetConstructor|GetConstructors|CreateInstance)$")
 )
 
+;; Fully qualified framework type names are nested member-access expressions.
+;; Keep the namespace/type pair explicit so an arbitrary `Foo.Type` is not
+;; treated as System.Type provenance.
+(
+  (invocation_expression
+    function: (member_access_expression
+      expression: (member_access_expression
+        expression: (identifier) @reflection_namespace
+        name: (identifier) @qualified_reflection_type)
+      name: (identifier) @qualified_method_name)) @hazard.csharp_metaprogramming
+  (#eq? @reflection_namespace "System")
+  (#eq? @qualified_reflection_type "Type")
+  (#eq? @qualified_method_name "GetType")
+)
+
 (
   (invocation_expression
     function: (member_access_expression
@@ -91,4 +106,13 @@
       name: (identifier) @method_name)) @hazard.csharp_metaprogramming
   (#eq? @recv_id "Activator")
   (#eq? @method_name "CreateInstance")
+)
+
+;; A `dynamic` declaration is ordinary syntax. The Rust consumer retains this
+;; capture only when the receiver identifier is declared dynamic in scope.
+(
+  (invocation_expression
+    function: (member_access_expression
+      expression: (identifier) @dynamic_receiver
+      name: (identifier) @dynamic_method)) @hazard.csharp_dynamic_dispatch
 )

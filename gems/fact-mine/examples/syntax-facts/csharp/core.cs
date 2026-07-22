@@ -68,6 +68,6 @@ class CSharpSyntaxFactsCore
     {
         System.Type.GetType("Bar");
         dynamic x = 1;
+        x.ToString();
     }
 }
-
