@@ -159,7 +159,8 @@ module Espalier
             claim_status: "observed",
             coverage_discharge: "not_applicable",
             authority: ["fact_mine_normalized_ast"],
-            scope: "function_effect_observation",
+            claim_kind: "function_effect_observation",
+            scope: { kind: "function", closed: false },
             blockers: input_blockers_for(mod)
           )
         }
@@ -228,7 +229,8 @@ module Espalier
             claim_status: "observed",
             coverage_discharge: "not_applicable",
             authority: ["fact_mine_normalized_ast", "espalier_static"],
-            scope: "function_complexity",
+            claim_kind: "function_complexity",
+            scope: { kind: "function", closed: false },
             blockers: input_blockers_for(mod) + complexity_proof_blockers(unknowns, warnings, time_complete, space_complete)
           )
         }

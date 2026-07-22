@@ -817,14 +817,15 @@ module Decomplex
 
     # Separates fact completeness, claim strength, and coverage discharge.
     # Producers must use `unknown` when FactMine supplied no completeness fact.
-    def proof_boundary(input_completeness:, claim_status:, coverage_discharge:, authority:, scope:, blockers: [])
+    def proof_boundary(input_completeness:, claim_status:, coverage_discharge:, authority:, scope:, blockers: [], claim_kind: nil)
       FactMine::ProofBoundary.build(
         input_completeness: input_completeness,
         claim_status: claim_status,
         coverage_discharge: coverage_discharge,
         authority: authority,
         scope: scope,
-        blockers: blockers
+        blockers: blockers,
+        claim_kind: claim_kind
       )
     end
 

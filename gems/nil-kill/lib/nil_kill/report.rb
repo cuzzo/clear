@@ -608,7 +608,8 @@ module NilKill
         claim_status: "proven",
         coverage_discharge: "unsatisfiable",
         authority: ["fact_mine_normalized_ast", "nil_kill_static"],
-        scope: scope,
+        claim_kind: scope,
+        scope: { kind: "local", closed: false },
         blockers: blockers
       )
     end
@@ -619,7 +620,8 @@ module NilKill
         claim_status: "review",
         coverage_discharge: "unsatisfiable",
         authority: ["fact_mine_normalized_ast", "nil_kill_static"],
-        scope: scope,
+        claim_kind: scope,
+        scope: { kind: "local", closed: false },
         blockers: blockers
       )
     end
@@ -634,6 +636,7 @@ module NilKill
         claim_status: boundary.fetch("claim_status"),
         coverage_discharge: boundary.fetch("coverage_discharge"),
         authority: boundary.fetch("authority"),
+        claim_kind: boundary.fetch("claim_kind"),
         scope: boundary.fetch("scope"),
         blockers: Array(boundary["blockers"]) + coverage.fetch(:blockers)
       )
@@ -660,7 +663,8 @@ module NilKill
         claim_status: "observed",
         coverage_discharge: "not_applicable",
         authority: ["nil_kill"],
-        scope: scope
+        claim_kind: scope,
+        scope: { kind: "local", closed: false }
       )
     end
 

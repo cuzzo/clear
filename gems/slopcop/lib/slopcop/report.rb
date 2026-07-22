@@ -248,8 +248,9 @@ module SlopCop
               claim_status: "observed",
               coverage_discharge: "satisfiable",
               authority: ["slopcop_coverage"],
-              scope: "coverage_gap",
-              blockers: ["runtime_coverage_is_observational"]
+              claim_kind: "coverage_gap",
+              scope: { kind: "project", closed: false },
+              blockers: [{ kind: "unknown" }]
             )
           )
         )
@@ -278,8 +279,9 @@ module SlopCop
               claim_status: "observed",
               coverage_discharge: "satisfiable",
               authority: ["slopcop_coverage"],
-              scope: "coverage_gap",
-              blockers: ["runtime_coverage_is_observational"]
+              claim_kind: "coverage_gap",
+              scope: { kind: "project", closed: false },
+              blockers: [{ kind: "unknown" }]
             )
           )
         )

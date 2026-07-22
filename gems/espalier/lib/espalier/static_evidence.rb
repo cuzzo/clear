@@ -344,14 +344,15 @@ module Espalier
 
     def self.source_role(path)
       text = path.to_s.tr("\\", "/")
-      parts = text.split("/").reject(&:empty?)
+      parts = text.split("/").reject(&:empty?).map(&:downcase)
       basename = parts.last.to_s
       return "vcs_metadata" if (parts & %w[.git .hg .svn]).any?
       return "vendored" if (parts & %w[vendor vendors third_party third-party]).any?
       return "generated" if (parts & %w[generated gen dist]).any?
       return "benchmark" if (parts & %w[benchmark benchmarks bench benches]).any?
       return "example" if (parts & %w[example examples sample samples]).any?
-      return "test" if (parts & %w[test tests spec specs __tests__]).any?
+      return "test" if (parts & %w[test tests spec specs __tests__ jvmtest androidtest commontest nativetest nonwasmtest wasmtest integrationtest unittest uitest functionaltest]).any?
+      return "test" if parts.any? { |part| part.end_with?("test") && part.match?(/\A(?:android|common|functional|integration|jvm|native|nonwasm|unit|ui|wasm)/) }
       return "test" if basename.match?(/(?:\A|[_\.])test(?:[_\.]|\z)|(?:\A|[_\.])spec(?:[_\.]|\z)/)
       # Test-helper products are executable support code, not production
       # library surface. Match common portable path spellings, including the

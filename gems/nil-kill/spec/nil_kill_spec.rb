@@ -375,7 +375,7 @@ RSpec.describe NilKill do
       expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "claim_status", "review")).to be_positive
       partial_boundary = described_class.new.send(:static_review_boundary, "static_nil_finding", blockers: ["dynamic dispatch"])
       expect(partial_boundary.fetch("input_completeness")).to eq("partial")
-      expect(partial_boundary.fetch("blockers")).to eq(["dynamic dispatch"])
+      expect(partial_boundary.fetch("blockers")).to eq([{ "kind" => "call_resolution" }])
     end
 
     it "does not treat complete inputs as a proven static claim" do
@@ -413,7 +413,7 @@ RSpec.describe NilKill do
     end
 
     it "conforms to the shared proof-boundary fixture" do
-      fixture_path = File.join(NilKill::ROOT, "gems/hazard-contract/fixtures/proof-boundary.v2.json")
+      fixture_path = File.join(NilKill::ROOT, "gems/hazard-contract/fixtures/proof-boundary.v3.json")
       fixture = JSON.parse(File.read(fixture_path))
       valid = fixture.fetch("valid")
 
@@ -423,7 +423,8 @@ RSpec.describe NilKill do
         coverage_discharge: valid.fetch("coverage_discharge"),
         authority: valid.fetch("authority"),
         scope: valid.fetch("scope"),
-        blockers: valid.fetch("blockers")
+        blockers: valid.fetch("blockers"),
+        claim_kind: valid.fetch("claim_kind")
       )
 
       expect(boundary).to eq(valid)

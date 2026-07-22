@@ -1,0 +1,15 @@
+{
+  "valid": {
+    "schema": "fact-mine.proof-boundary.v3",
+    "input_completeness": "partial",
+    "claim_status": "review",
+    "coverage_discharge": "unsatisfiable",
+    "authority": ["fact_mine_normalized_ast", "nil_kill_static"],
+    "claim_kind": "static_nil_pressure",
+    "scope": {"kind": "local", "closed": false},
+    "blockers": [{"kind": "unknown"}]
+  },
+  "invalid": {
+    "input_completeness": "certain"
+  }
+}

@@ -305,6 +305,9 @@ class StaticEvidenceTest < Minitest::Test
   def test_source_roles_are_language_neutral_path_facts
     assert_equal "test", Espalier::StaticEvidence.source_role("src/widget_test.go")
     assert_equal "test", Espalier::StaticEvidence.source_role("tests/test_widget.py")
+    assert_equal "test", Espalier::StaticEvidence.source_role("Tests/ArgumentParserTests/AnyArgumentTests.swift")
+    assert_equal "test", Espalier::StaticEvidence.source_role("src/jvmTest/kotlin/Foo.kt")
+    assert_equal "test", Espalier::StaticEvidence.source_role("src/nonWasmTest/kotlin/Foo.kt")
     assert_equal "benchmark", Espalier::StaticEvidence.source_role("benchmarks/widget.rs")
     assert_equal "example", Espalier::StaticEvidence.source_role("examples/widget.rb")
     assert_equal "production", Espalier::StaticEvidence.source_role("rich/console.py")

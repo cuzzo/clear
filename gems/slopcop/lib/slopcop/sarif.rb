@@ -19,14 +19,15 @@ module SlopCop
     PROOF_BOUNDARY_SUMMARY_PROPERTY = FactMine::ProofBoundary::PROOF_BOUNDARY_SUMMARY_PROPERTY
     PROOF_BOUNDARY_SCHEMA = FactMine::ProofBoundary::SCHEMA
 
-    def proof_boundary(input_completeness:, claim_status:, coverage_discharge:, authority:, scope:, blockers: [])
+    def proof_boundary(input_completeness:, claim_status:, coverage_discharge:, authority:, scope:, blockers: [], claim_kind: nil)
       FactMine::ProofBoundary.build(
         input_completeness: input_completeness,
         claim_status: claim_status,
         coverage_discharge: coverage_discharge,
         authority: authority,
         scope: scope,
-        blockers: blockers
+        blockers: blockers,
+        claim_kind: claim_kind
       )
     end
 

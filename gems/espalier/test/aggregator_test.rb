@@ -236,7 +236,7 @@ class AggregatorTest < Minitest::Test
     boundary = result.dig("properties", "fact_mine.proof_boundary")
     assert_equal "unknown", boundary.fetch("input_completeness")
     assert_equal "observed", boundary.fetch("claim_status")
-    assert_includes boundary.fetch("blockers"), "dispatch target unresolved"
+    assert_includes boundary.fetch("blockers"), { "kind" => "call_resolution" }
     assert_equal 1, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "unknown")
   end
 
@@ -258,7 +258,7 @@ class AggregatorTest < Minitest::Test
     run = JSON.parse(Espalier::Formatter.to_sarif(manifest)).fetch("runs").first
     boundary = run.fetch("results").first.dig("properties", "fact_mine.proof_boundary")
     assert_equal "partial", boundary.fetch("input_completeness")
-    assert_equal ["selected target is not a closed corpus"], boundary.fetch("blockers")
+    assert_equal [{ "kind" => "open_corpus" }], boundary.fetch("blockers")
     assert_equal 1, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "partial")
   end
 
