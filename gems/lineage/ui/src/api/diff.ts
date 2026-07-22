@@ -87,6 +87,7 @@ function isDiffFile(value: unknown): boolean {
     && isRecord(value)
     && nullableString(value.previous_path)
     && nullableString(value.language)
+    && typeof value.semantic_classification_available === "boolean"
     && nullableString(value.base_source)
     && nullableString(value.head_source)
     && isAddedLines(value.added_lines)

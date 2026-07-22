@@ -8,7 +8,7 @@ const plan = {
   dependency_changes: [{ manifest_path: "Cargo.toml", status: "exact", entries: [{ name: "serde", scope: "runtime", before: null, after: "1" }] }],
   language_summaries: [],
   evidence: { coverage: "missing", mutation: "missing", hazards: "missing", sarif: "missing" },
-  files: [{ path: "lib/example.rb", previous_path: null, change: "modified", role: "production", language: "ruby", base_source: "old", head_source: "new", added_lines: { code: 1, comments: 0, other: 0 }, verification: slices, residual_lines: { code: 1, comments: 0, other: 0 }, groups: [], sarif_findings: [], risk: { score: 0, not_covered: 0, partially_covered: 0, added_complexity: 0, tier_one_hazards: 0 } }],
+  files: [{ path: "lib/example.rb", previous_path: null, change: "modified", role: "production", language: "ruby", semantic_classification_available: true, base_source: "old", head_source: "new", added_lines: { code: 1, comments: 0, other: 0 }, verification: slices, residual_lines: { code: 1, comments: 0, other: 0 }, groups: [], sarif_findings: [], risk: { score: 0, not_covered: 0, partially_covered: 0, added_complexity: 0, tier_one_hazards: 0 } }],
 };
 
 describe("diff API", () => {

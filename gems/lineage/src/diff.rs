@@ -1,9 +1,10 @@
 //! Revision-pinned, render-independent change inventory for the diff UI.
 
-use crate::extract::{BoundaryExtractor, HeuristicExtractor};
+use crate::extract::{is_test_source_path, BoundaryExtractor, HeuristicExtractor};
 use crate::model::{BlobFile, UnitKind};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+use tree_sitter::{Language, Node, Parser};
 use ts_rs::TS;
 
 pub const DIFF_API_VERSION: &str = "v1";
@@ -98,6 +99,7 @@ pub struct DiffFile {
     pub change: FileChangeKind,
     pub role: SourceRole,
     pub language: Option<String>,
+    pub semantic_classification_available: bool,
     pub base_source: Option<String>,
     pub head_source: Option<String>,
     pub added_lines: AddedLines,
@@ -326,23 +328,31 @@ fn plan_file(
     let base_source = base_file.and_then(|file| file.contents.clone());
     let head_source = head_file.and_then(|file| file.contents.clone());
     let added_line_numbers = added_line_numbers(base_source.as_deref(), head_source.as_deref());
-    let added_lines = summarize_added_lines(head_source.as_deref(), &added_line_numbers, path);
-    let groups = semantic_groups(
-        path,
-        base_source.as_deref(),
-        head_source.as_deref(),
-        &added_line_numbers,
-    );
+    let classification = classify_source_lines(head_source.as_deref(), path);
+    let semantic_classification_available = classification.is_some();
+    let line_kinds = classification.unwrap_or_default();
+    let added_lines = summarize_added_lines(&line_kinds, &added_line_numbers);
+    let groups = semantic_classification_available
+        .then(|| {
+            semantic_groups(
+                path,
+                base_source.as_deref(),
+                head_source.as_deref(),
+                &added_line_numbers,
+                &line_kinds,
+            )
+        })
+        .unwrap_or_default();
     let verification = unavailable_verification(&added_lines);
-    let line_verification =
-        unknown_line_verification(head_source.as_deref(), &added_line_numbers, path);
+    let line_verification = unknown_line_verification(&line_kinds, &added_line_numbers);
     let mut file = DiffFile {
         path: path.to_string(),
         previous_path,
         change,
         role: source_role(path),
         language: language_for_path(path),
-        residual_lines: residual_lines(head_source.as_deref(), &added_line_numbers, path, &groups),
+        semantic_classification_available,
+        residual_lines: residual_lines(&line_kinds, &added_line_numbers, &groups),
         risk: risk_summary(head_source.as_deref(), &added_line_numbers, &verification),
         verification,
         groups,
@@ -483,25 +493,22 @@ fn spans_overlap(left_start: u32, left_end: u32, right_start: u32, right_end: u3
     left_start <= right_end && right_start <= left_end
 }
 
-fn code_line_numbers(source: Option<&str>, added: &BTreeSet<u32>, path: &str) -> BTreeSet<u32> {
-    source
-        .unwrap_or_default()
-        .lines()
+fn code_line_numbers(line_kinds: &[LineKind], added: &BTreeSet<u32>) -> BTreeSet<u32> {
+    line_kinds
+        .iter()
         .enumerate()
-        .filter_map(|(index, line)| {
+        .filter_map(|(index, kind)| {
             let line_number = index as u32 + 1;
-            (added.contains(&line_number) && matches!(line_kind(line, path), LineKind::Code))
-                .then_some(line_number)
+            (added.contains(&line_number) && *kind == LineKind::Code).then_some(line_number)
         })
         .collect()
 }
 
 fn unknown_line_verification(
-    source: Option<&str>,
+    line_kinds: &[LineKind],
     added: &BTreeSet<u32>,
-    path: &str,
 ) -> BTreeMap<u32, LineVerification> {
-    code_line_numbers(source, added, path)
+    code_line_numbers(line_kinds, added)
         .into_iter()
         .map(|line| (line, LineVerification::Unknown))
         .collect()
@@ -661,13 +668,13 @@ fn added_line_numbers(base: Option<&str>, head: Option<&str>) -> BTreeSet<u32> {
         .collect()
 }
 
-fn summarize_added_lines(source: Option<&str>, added: &BTreeSet<u32>, path: &str) -> AddedLines {
+fn summarize_added_lines(line_kinds: &[LineKind], added: &BTreeSet<u32>) -> AddedLines {
     let mut summary = AddedLines::default();
-    for (index, line) in source.unwrap_or_default().lines().enumerate() {
+    for (index, kind) in line_kinds.iter().enumerate() {
         if !added.contains(&(index as u32 + 1)) {
             continue;
         }
-        match line_kind(line, path) {
+        match kind {
             LineKind::Code => summary.code += 1,
             LineKind::Comment => summary.comments += 1,
             LineKind::Other => summary.other += 1,
@@ -681,6 +688,7 @@ fn semantic_groups(
     base_source: Option<&str>,
     head_source: Option<&str>,
     added: &BTreeSet<u32>,
+    line_kinds: &[LineKind],
 ) -> Vec<DiffGroup> {
     let Some(source) = head_source else {
         return Vec::new();
@@ -701,7 +709,7 @@ fn semantic_groups(
         .into_iter()
         .filter_map(|unit| {
             let added_lines =
-                summarize_group_lines(source, added, path, unit.start_line, unit.end_line);
+                summarize_group_lines(line_kinds, added, unit.start_line, unit.end_line);
             let base_unit = base_units
                 .as_ref()
                 .and_then(|units| matching_base_unit(units, &unit));
@@ -754,14 +762,13 @@ fn group_added_line_numbers(added: &BTreeSet<u32>, start: u32, end: u32) -> BTre
 }
 
 fn summarize_group_lines(
-    source: &str,
+    line_kinds: &[LineKind],
     added: &BTreeSet<u32>,
-    path: &str,
     start: u32,
     end: u32,
 ) -> AddedLines {
     let lines = group_added_line_numbers(added, start, end);
-    summarize_added_lines(Some(source), &lines, path)
+    summarize_added_lines(line_kinds, &lines)
 }
 
 fn visibility_for(path: &str, source: &str, unit: &crate::model::LogicalUnit) -> Visibility {
@@ -813,9 +820,8 @@ fn ruby_private_context(source: &str, start_line: u32) -> bool {
 }
 
 fn residual_lines(
-    source: Option<&str>,
+    line_kinds: &[LineKind],
     added: &BTreeSet<u32>,
-    path: &str,
     groups: &[DiffGroup],
 ) -> AddedLines {
     let assigned = groups
@@ -823,32 +829,73 @@ fn residual_lines(
         .flat_map(|group| group.start_line..=group.end_line)
         .collect();
     let residual = added.difference(&assigned).copied().collect();
-    summarize_added_lines(source, &residual, path)
+    summarize_added_lines(line_kinds, &residual)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LineKind {
     Code,
     Comment,
     Other,
 }
 
-fn line_kind(line: &str, path: &str) -> LineKind {
-    let line = line.trim();
-    if line.is_empty() || line == "end" || matches!(line, "{" | "}" | "};" | "{}") {
-        return LineKind::Other;
+fn classify_source_lines(source: Option<&str>, path: &str) -> Option<Vec<LineKind>> {
+    let source = source?;
+    let language = parser_language(path)?;
+    let mut parser = Parser::new();
+    parser.set_language(&language).ok()?;
+    let tree = parser.parse(source, None)?;
+    if tree.root_node().has_error() {
+        return None;
     }
-    if line.starts_with('#')
-        || line.starts_with("//")
-        || line.starts_with("/*")
-        || line.starts_with('*')
-        || line.starts_with("<!--")
-    {
-        return LineKind::Comment;
+    let mut lines = vec![LineKind::Other; source.lines().count()];
+    classify_node_lines(tree.root_node(), &mut lines);
+    Some(lines)
+}
+
+fn parser_language(path: &str) -> Option<Language> {
+    let extension = path.rsplit('.').next()?.to_ascii_lowercase();
+    Some(match extension.as_str() {
+        "c" | "h" => tree_sitter_c::LANGUAGE.into(),
+        "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" => tree_sitter_cpp::LANGUAGE.into(),
+        "cs" => tree_sitter_c_sharp::LANGUAGE.into(),
+        "go" => tree_sitter_go::LANGUAGE.into(),
+        "java" => tree_sitter_java::LANGUAGE.into(),
+        "js" | "jsx" | "mjs" | "cjs" => tree_sitter_javascript::LANGUAGE.into(),
+        "kt" | "kts" => tree_sitter_kotlin_ng::LANGUAGE.into(),
+        "lua" => tree_sitter_lua::LANGUAGE.into(),
+        "php" => tree_sitter_php::LANGUAGE_PHP.into(),
+        "py" | "pyi" => tree_sitter_python::LANGUAGE.into(),
+        "rb" => tree_sitter_ruby::LANGUAGE.into(),
+        "rs" => tree_sitter_rust::LANGUAGE.into(),
+        "swift" => tree_sitter_swift::LANGUAGE.into(),
+        "ts" => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        "tsx" => tree_sitter_typescript::LANGUAGE_TSX.into(),
+        "zig" => tree_sitter_zig::LANGUAGE.into(),
+        _ => return None,
+    })
+}
+
+fn classify_node_lines(node: Node<'_>, lines: &mut [LineKind]) {
+    if node.is_named() && node.child_count() == 0 {
+        let kind = node
+            .kind()
+            .contains("comment")
+            .then_some(LineKind::Comment)
+            .unwrap_or(LineKind::Code);
+        let start = node.start_position().row;
+        let end = node.end_position().row;
+        for line in start..=end.min(lines.len().saturating_sub(1)) {
+            if kind == LineKind::Code || lines[line] == LineKind::Other {
+                lines[line] = kind;
+            }
+        }
     }
-    if path.ends_with(".rb") && line == "=begin" {
-        return LineKind::Comment;
+    for index in 0..node.child_count() {
+        if let Some(child) = node.child(index) {
+            classify_node_lines(child, lines);
+        }
     }
-    LineKind::Code
 }
 
 fn file_map(files: Vec<RevisionFile>) -> BTreeMap<String, RevisionFile> {
@@ -1074,17 +1121,7 @@ fn source_role(path: &str) -> SourceRole {
 }
 
 fn is_test_path(path: &str) -> bool {
-    path.contains("/test/")
-        || path.contains("/spec/")
-        || path.starts_with("test/")
-        || path.starts_with("spec/")
-        || path.ends_with("_test.rb")
-        || path.ends_with("_spec.rb")
-        || path.ends_with("_test.go")
-        || path.ends_with(".test.ts")
-        || path.ends_with(".test.tsx")
-        || path.ends_with(".spec.ts")
-        || path.ends_with(".spec.tsx")
+    is_test_source_path(path)
 }
 
 fn is_generated(path: &str) -> bool {
@@ -1786,17 +1823,66 @@ mod tests {
 
     #[test]
     fn excludes_closure_only_lines_across_brace_languages() {
-        for (path, line) in [("main.zig", "}"), ("main.go", "}"), ("main.rs", "};")] {
-            assert!(matches!(line_kind(line, path), LineKind::Other));
+        for (path, source, closing_line) in [
+            ("main.zig", "pub fn run() void {\n}\n", 2),
+            ("main.go", "func run() {\n}\n", 2),
+            ("main.rs", "fn run() {\n}\n", 2),
+        ] {
+            assert_eq!(
+                classify_source_lines(Some(source), path).unwrap()[closing_line - 1],
+                LineKind::Other
+            );
         }
-        assert!(matches!(
-            line_kind("// intent", "main.go"),
-            LineKind::Comment
-        ));
-        assert!(matches!(
-            line_kind("return value", "main.go"),
-            LineKind::Code
-        ));
+        let lines =
+            classify_source_lines(Some("// intent\nfunc run() { return value }\n"), "main.go")
+                .unwrap();
+        assert_eq!(lines[0], LineKind::Comment);
+        assert_eq!(lines[1], LineKind::Code);
+    }
+
+    #[test]
+    fn makes_parse_errors_and_unsupported_files_raw_only() {
+        assert!(classify_source_lines(Some("def broken("), "lib/app.rb").is_none());
+        assert!(classify_source_lines(Some("# heading"), "README.md").is_none());
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            Vec::new(),
+            vec![file("lib/broken.rb", "def broken(")],
+        );
+        assert!(!plan.files[0].semantic_classification_available);
+        assert_eq!(plan.files[0].added_lines, AddedLines::default());
+        assert!(plan.files[0].groups.is_empty());
+    }
+
+    #[test]
+    fn classifies_supported_tree_sitter_languages_from_syntax() {
+        let fixtures = [
+            ("value.c", "int value(void) { return 1; }\n"),
+            ("value.cpp", "int value() { return 1; }\n"),
+            ("Value.cs", "class Value { int Get() { return 1; } }\n"),
+            ("value.go", "package value\nfunc Get() int { return 1 }\n"),
+            ("Value.java", "class Value { int get() { return 1; } }\n"),
+            ("value.js", "function value() { return 1; }\n"),
+            ("Value.kt", "fun value(): Int { return 1 }\n"),
+            ("value.lua", "function value() return 1 end\n"),
+            ("value.php", "<?php function value() { return 1; }\n"),
+            ("value.py", "def value():\n    return 1\n"),
+            ("value.rb", "def value\n  1\nend\n"),
+            ("value.rs", "fn value() -> i32 { 1 }\n"),
+            ("value.swift", "func value() -> Int { return 1 }\n"),
+            ("value.ts", "function value(): number { return 1; }\n"),
+            ("value.tsx", "const value = <div />;\n"),
+            ("value.zig", "pub fn value() i32 { return 1; }\n"),
+        ];
+        for (path, source) in fixtures {
+            assert!(
+                classify_source_lines(Some(source), path)
+                    .unwrap()
+                    .contains(&LineKind::Code),
+                "{path} should contain semantic code"
+            );
+        }
     }
 
     #[test]

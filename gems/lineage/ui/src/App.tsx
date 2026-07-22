@@ -130,11 +130,12 @@ function FileReview({ file, onRaw, sideBySide }: { readonly file: DiffFile; read
   const privateGroups = file.groups.filter((group) => group.visibility === "private");
   return <article className="file-review"><button aria-expanded={expanded} className="disclosure" onClick={() => setExpanded(!expanded)}>{file.path} · risk {file.risk.score} · {file.role} · {file.change} · {file.added_lines.code} code lines</button>
     {expanded && <div className="file-body">
+      {!file.semantic_classification_available && <p className="metrics">Semantic classification unavailable; use the raw source-ordered diff.</p>}
       <RiskMetrics risk={file.risk} verification={file.verification} />
       <FindingSummary findings={file.sarif_findings} />
-      {publicGroups.sort(groupOrder).map((group) => <GroupReview file={file} group={group} key={`${group.kind}:${group.name}:${group.start_line}`} sideBySide={sideBySide} />)}
+      {file.semantic_classification_available && publicGroups.sort(groupOrder).map((group) => <GroupReview file={file} group={group} key={`${group.kind}:${group.name}:${group.start_line}`} sideBySide={sideBySide} />)}
       <p>Other changed lines: {file.residual_lines.code} code, {file.residual_lines.comments} comments. <button onClick={() => onRaw(file.path)}>Open raw file diff</button></p>
-      {privateGroups.length > 0 && <PrivateReview file={file} groups={privateGroups} sideBySide={sideBySide} />}
+      {file.semantic_classification_available && privateGroups.length > 0 && <PrivateReview file={file} groups={privateGroups} sideBySide={sideBySide} />}
       {(file.base_source === null || file.head_source === null) && <p>Binary or one-sided change; open the raw file view for details.</p>}
     </div>}
   </article>;
