@@ -17,3 +17,4 @@ z3 = "0.12.1"
 
 [dev-dependencies]
 tempfile = "=3.10.1"
+fact-mine-rust = { path = "../fact-mine" }

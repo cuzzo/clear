@@ -554,18 +554,6 @@ impl SarifLocation {
             self.source_end_column.unwrap_or(i64::MAX),
         ]
     }
-
-    /// A source span suitable for serialization. Unlike `source_span`, this
-    /// never leaks internal unbounded-coordinate sentinels into SARIF.
-    fn source_location_span(&self) -> Option<[i64; 4]> {
-        let start_column = self.source_start_column?;
-        Some([
-            self.line,
-            start_column,
-            self.end_line.unwrap_or(self.line),
-            self.source_end_column.unwrap_or(start_column),
-        ])
-    }
 }
 
 fn build_sections(detectors: &Value, facts: &Value) -> Vec<ReportSection> {
@@ -674,7 +662,16 @@ fn finding_input_boundary(
         if let Some(files) = by_file {
             for (path, file) in files {
                 if file.get("normalized_ast_complete").and_then(Value::as_bool) != Some(true) {
-                    unknown.push(sarif::ProofBlocker::parser_recovery(path, None));
+                    let recoveries = recovery_spans(file, [1, i64::MIN, i64::MAX, i64::MAX]);
+                    if recoveries.is_empty() {
+                        unknown.push(sarif::ProofBlocker::parser_recovery(path, None));
+                    } else {
+                        unknown.extend(
+                            recoveries
+                                .into_iter()
+                                .map(|span| sarif::ProofBlocker::parser_recovery(path, Some(span))),
+                        );
+                    }
                 }
             }
         }
@@ -696,29 +693,34 @@ fn finding_input_boundary(
         };
         if evidence_requirement.scope != EvidenceScope::ClosedCorpus {
             match dependency_span(evidence_requirement.scope, file, &location) {
-                Some(span) if recovery_affects_span(file, span) => {
-                    unknown.push(sarif::ProofBlocker::parser_recovery(path, Some(span)));
+                Some(span) => {
+                    let recoveries = recovery_spans(file, span);
+                    if !recoveries.is_empty() {
+                        unknown.extend(recoveries.into_iter().map(|recovery| {
+                            sarif::ProofBlocker::parser_recovery(path, Some(recovery))
+                        }));
+                    } else if rv::array_from(file.get("parse_recovery_spans")).is_empty()
+                        && file.get("normalized_ast_complete").and_then(Value::as_bool)
+                            != Some(true)
+                    {
+                        unknown.push(sarif::ProofBlocker::parser_recovery(path, None));
+                    }
                 }
-                Some(_) => {}
                 None => unknown.push(sarif::ProofBlocker::missing_evidence(Some(
                     path.to_string(),
                 ))),
             }
         }
-        if evidence_requirement.call_resolution
-            && file
-                .get("unresolved_call_function_spans")
-                .and_then(Value::as_array)
-                .is_some_and(|spans| {
-                    spans
-                        .iter()
-                        .any(|span| span_contains_location(span, &location))
-                })
-        {
-            partial.push(sarif::ProofBlocker::call_resolution(
-                path,
-                location.source_location_span(),
-            ));
+        if evidence_requirement.call_resolution {
+            partial.extend(
+                file.get("unresolved_call_function_spans")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter(|span| span_contains_location(span, &location))
+                    .filter_map(value_span)
+                    .map(|span| sarif::ProofBlocker::call_resolution(path, Some(span))),
+            );
         }
     }
     unknown.sort();
@@ -769,15 +771,19 @@ fn value_span(span: &Value) -> Option<[i64; 4]> {
     ])
 }
 
+#[cfg(test)]
 fn recovery_affects_span(file: &Value, dependency: [i64; 4]) -> bool {
-    let recoveries = rv::array_from(file.get("parse_recovery_spans"));
-    if recoveries.is_empty() {
-        return file.get("normalized_ast_complete").and_then(Value::as_bool) != Some(true);
-    }
-    recoveries
+    !recovery_spans(file, dependency).is_empty()
+        || (rv::array_from(file.get("parse_recovery_spans")).is_empty()
+            && file.get("normalized_ast_complete").and_then(Value::as_bool) != Some(true))
+}
+
+fn recovery_spans(file: &Value, dependency: [i64; 4]) -> Vec<[i64; 4]> {
+    rv::array_from(file.get("parse_recovery_spans"))
         .iter()
         .filter_map(value_span)
-        .any(|recovery| spans_overlap(recovery, dependency))
+        .filter(|recovery| spans_overlap(*recovery, dependency))
+        .collect()
 }
 
 fn spans_overlap(left: [i64; 4], right: [i64; 4]) -> bool {
@@ -2039,7 +2045,10 @@ mod tests {
         assert_eq!(completeness, sarif::InputCompleteness::Partial);
         assert_eq!(
             blockers,
-            vec![sarif::ProofBlocker::call_resolution("clean.rb", None)]
+            vec![sarif::ProofBlocker::call_resolution(
+                "clean.rb",
+                Some([10, 0, 20, 0])
+            )]
         );
         let recovered = json!({ "at": "recovered.rb:work:3" });
         assert_eq!(
@@ -2139,6 +2148,22 @@ mod tests {
                 "scope={scope:?}"
             );
         }
+        let (completeness, blockers) = finding_input_boundary(
+            EvidenceRequirement {
+                scope: EvidenceScope::EnclosingFunction,
+                call_resolution: false,
+            },
+            &finding,
+            &facts,
+        );
+        assert_eq!(completeness, sarif::InputCompleteness::Unknown);
+        assert_eq!(
+            blockers,
+            vec![sarif::ProofBlocker::parser_recovery(
+                "recovered.rb",
+                Some([20, 0, 20, 0])
+            )]
+        );
     }
 
     #[test]

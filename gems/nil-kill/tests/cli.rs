@@ -1,5 +1,6 @@
 use serde_json::json;
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 
 #[test]
@@ -167,4 +168,62 @@ fn binary_reports_primitive_domain_from_canonical_factmine_observations() {
     assert_eq!(action["confidence"], "review");
     assert_eq!(action["path"], "src/workflow.rb");
     assert_eq!(action["data"]["values"], json!(["\"draft\"", "\"sent\""]));
+}
+
+#[test]
+fn factmine_integer_domain_reaches_nilkill_with_final_review_message() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../fact-mine/tests/fixtures/hidden_enum_symbol_integer.rb");
+    let document =
+        fact_mine_rust::syntax::parse_file(fixture, fact_mine_rust::syntax::Language::Ruby)
+            .unwrap();
+    let mined =
+        fact_mine_rust::profile::extract(&document, fact_mine_rust::profile::Profile::NilKill);
+    assert!(mined.hidden_enum_observations.iter().any(|observation| {
+        observation["values"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|value| {
+                value["kind"] == "Integer" && matches!(value["value"].as_str(), Some("1" | "2"))
+            })
+    }));
+
+    let bin = env!("CARGO_BIN_EXE_nil-kill-infer-rust");
+    let dir = tempfile::tempdir().unwrap();
+    let input_path = dir.path().join("input.json");
+    let output_path = dir.path().join("output.json");
+    fs::write(
+        &input_path,
+        serde_json::to_vec_pretty(&json!({
+            "facts": { "hidden_enum_observations": mined.hidden_enum_observations }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let run = Command::new(bin)
+        .arg(&input_path)
+        .arg(&output_path)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let output: serde_json::Value =
+        serde_json::from_slice(&fs::read(&output_path).unwrap()).unwrap();
+    let action = output["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|action| action["data"]["slot"] == "@attempt")
+        .expect("FactMine integer domain should produce a NilKill review action");
+    assert_eq!(action["confidence"], "review");
+    assert_eq!(action["data"]["values"], json!(["1", "2"]));
+    assert_eq!(
+        action["message"],
+        "state @attempt has a closed-looking Integer domain across 2 decision sites"
+    );
 }

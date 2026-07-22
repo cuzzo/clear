@@ -2680,8 +2680,8 @@ fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
             message: format!(
                 "{} {} has a closed-looking {} domain across {} decision sites",
                 domain.kind,
-                domain.literal_kind,
                 domain.slot,
+                domain.literal_kind,
                 domain.decision_sites.len()
             ),
             data: HashMap::from([
@@ -3207,7 +3207,7 @@ mod tests {
         assert_eq!(actions[0].line, 2);
         assert!(actions[0]
             .message
-            .starts_with("local String has a closed-looking status domain"));
+            .starts_with("local status has a closed-looking String domain"));
         assert_eq!(
             actions[0].data["values"],
             serde_json::json!(["\"draft\"", "\"sent\""])
@@ -3234,9 +3234,13 @@ mod tests {
     #[test]
     fn static_nil_pressure_has_no_source_analysis_dependency() {
         let manifest = include_str!("../Cargo.toml");
+        let runtime_dependencies = manifest
+            .split("[dev-dependencies]")
+            .next()
+            .unwrap_or(manifest);
 
-        assert!(!manifest.contains("tree-sitter"));
-        assert!(!manifest.contains("fact-mine"));
+        assert!(!runtime_dependencies.contains("tree-sitter"));
+        assert!(!runtime_dependencies.contains("fact-mine"));
     }
 
     #[test]

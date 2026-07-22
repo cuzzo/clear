@@ -68,8 +68,9 @@ SlopCop producer values, live in
 test compiles the versioned JSON Schema and validates those vectors, so the
 fixture is a conformance check rather than documentation alone.
 Ruby producers use `FactMine::ProofBoundary` rather than copying validation or
-summary logic. Rust producers use typed enums, so invalid values cannot escape
-in release builds.
+summary logic. Rust producers use the typed serializer in
+`hazard-contract::proof_boundary` (Decomplex only re-exports that API), so
+invalid values cannot escape in release builds.
 
 A detector creates the boundary with the finding it emits. SARIF only
 serializes it. Complete inputs do not imply a proven claim: only an explicit

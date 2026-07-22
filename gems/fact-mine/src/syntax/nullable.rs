@@ -1,5 +1,5 @@
 use crate::ast::Span;
-use crate::syntax::cfg::{ControlFlowFacts, NodeEffect};
+use crate::syntax::cfg::{ControlFlowFacts, ControlFlowNode, NodeEffect};
 use crate::syntax::redundant_nil_guard::NullableRefinementSeed;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -30,8 +30,8 @@ pub struct NullableState {
 }
 
 /// A callable-level result proven from return-node reads and nullable CFG
-/// state. A summary is emitted only for an explicit return of a tracked
-/// place; unknown return expressions stay outside this contract.
+/// state. Every explicit return participates; a return without an effect or
+/// tracked read is emitted as incomplete rather than silently omitted.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct NullableSummary {
     pub function: String,
@@ -245,13 +245,15 @@ pub(crate) fn project_summaries(
         .map(|effect| (effect.node_id.as_str(), effect))
         .collect::<BTreeMap<_, _>>();
     let mut returns = BTreeMap::<(String, String), Vec<&NullableState>>::new();
+    let mut return_nodes = BTreeMap::<(String, String), Vec<&ControlFlowNode>>::new();
     let mut return_effects = BTreeMap::<(String, String), Vec<&NodeEffect>>::new();
 
     for node in facts.nodes.iter().filter(|node| node.role == "return") {
+        let key = (node.owner.clone(), node.function.clone());
+        return_nodes.entry(key.clone()).or_default().push(node);
         let Some(effect) = effects.get(node.id.as_str()) else {
             continue;
         };
-        let key = (node.owner.clone(), node.function.clone());
         return_effects.entry(key.clone()).or_default().push(*effect);
         for place_id in &effect.reads {
             if let Some(state) = states_by_node.get(&(node.id.as_str(), place_id.as_str())) {
@@ -260,19 +262,29 @@ pub(crate) fn project_summaries(
         }
     }
 
-    returns
+    return_nodes
         .into_iter()
-        .map(|((owner, function), states)| {
+        .map(|((owner, function), nodes)| {
+            let states = returns
+                .remove(&(owner.clone(), function.clone()))
+                .unwrap_or_default();
             let effects = return_effects
-                .get(&(owner.clone(), function.clone()))
-                .expect("return state was collected from a return effect");
+                .remove(&(owner.clone(), function.clone()))
+                .unwrap_or_default();
             let state = join_projected_states(states.iter().map(|state| state.state.as_str()));
+            let every_return_has_effect = nodes
+                .iter()
+                .all(|node| effects.iter().any(|effect| effect.node_id == node.id));
+            let every_return_has_tracked_read =
+                effects.iter().all(|effect| !effect.reads.is_empty());
             let every_read_modeled = effects.iter().all(|effect| {
                 effect.reads.iter().all(|place_id| {
                     states_by_node.contains_key(&(effect.node_id.as_str(), place_id.as_str()))
                 })
             });
-            let complete = every_read_modeled
+            let complete = every_return_has_effect
+                && every_return_has_tracked_read
+                && every_read_modeled
                 && effects
                     .iter()
                     .all(|effect| effect.complete && !effect.unknown_call)
@@ -295,6 +307,11 @@ pub(crate) fn project_summaries(
                         .flat_map(|effect| effect.unknown_reasons.iter().cloned()),
                 )
                 .chain((!every_read_modeled).then_some("unmodeled_return_read".to_string()))
+                .chain((!every_return_has_effect).then_some("return_without_effect".to_string()))
+                .chain(
+                    (!every_return_has_tracked_read)
+                        .then_some("return_without_tracked_read".to_string()),
+                )
                 .chain(
                     effects
                         .iter()
@@ -1000,6 +1017,64 @@ mod tests {
             ["null-write", "present-write"]
         );
         assert_eq!(definition_state_from_name("not-a-state"), None);
+    }
+
+    #[test]
+    fn summary_is_incomplete_when_any_return_has_no_effect_or_tracked_read() {
+        let return_node = |id: &str| ControlFlowNode {
+            id: id.to_string(),
+            file: "demo.c".to_string(),
+            function: "load".to_string(),
+            owner: "Cache".to_string(),
+            kind: "jump".to_string(),
+            role: "return".to_string(),
+            line: 1,
+            span: [1, 0, 1, 1],
+            source: "return value;".to_string(),
+        };
+        let facts = ControlFlowFacts {
+            nodes: vec![return_node("modeled"), return_node("missing-effect")],
+            effects: vec![NodeEffect {
+                node_id: "modeled".to_string(),
+                reads: vec!["value".to_string()],
+                complete: true,
+                ..NodeEffect::default()
+            }],
+            ..ControlFlowFacts::default()
+        };
+        let rows = project_summaries(
+            &facts,
+            &[NullableState {
+                node_id: "modeled".to_string(),
+                place_id: "value".to_string(),
+                state: "definitely_non_null".to_string(),
+                source_definition_ids: vec!["value-write".to_string()],
+                complete: true,
+                unknown_reasons: Vec::new(),
+            }],
+        );
+
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].complete);
+        assert!(rows[0]
+            .unknown_reasons
+            .contains(&"return_without_effect".to_string()));
+
+        let no_read_facts = ControlFlowFacts {
+            nodes: vec![return_node("literal-return")],
+            effects: vec![NodeEffect {
+                node_id: "literal-return".to_string(),
+                complete: true,
+                ..NodeEffect::default()
+            }],
+            ..ControlFlowFacts::default()
+        };
+        let rows = project_summaries(&no_read_facts, &[]);
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].complete);
+        assert!(rows[0]
+            .unknown_reasons
+            .contains(&"return_without_tracked_read".to_string()));
     }
 
     #[test]

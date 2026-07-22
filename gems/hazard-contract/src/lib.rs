@@ -8,6 +8,263 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::OnceLock;
 
+/// Versioned proof-boundary payload shared by Rust SARIF producers.
+/// Ruby producers use the matching `FactMine::ProofBoundary` implementation.
+pub mod proof_boundary {
+    use serde_json::{json, Value};
+
+    pub const PROPERTY: &str = "fact_mine.proof_boundary";
+    pub const SUMMARY_PROPERTY: &str = "fact_mine.proof_boundary_summary";
+    pub const SCHEMA: &str = "fact-mine.proof-boundary.v3";
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum InputCompleteness {
+        Complete,
+        Partial,
+        Unknown,
+    }
+
+    impl InputCompleteness {
+        const fn as_str(self) -> &'static str {
+            match self {
+                Self::Complete => "complete",
+                Self::Partial => "partial",
+                Self::Unknown => "unknown",
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum ClaimStatus {
+        Proven,
+        Observed,
+        Review,
+    }
+
+    impl ClaimStatus {
+        const fn as_str(self) -> &'static str {
+            match self {
+                Self::Proven => "proven",
+                Self::Observed => "observed",
+                Self::Review => "review",
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum CoverageDischarge {
+        Satisfiable,
+        Unsatisfiable,
+        NotApplicable,
+        Unknown,
+    }
+
+    impl CoverageDischarge {
+        const fn as_str(self) -> &'static str {
+            match self {
+                Self::Satisfiable => "satisfiable",
+                Self::Unsatisfiable => "unsatisfiable",
+                Self::NotApplicable => "not_applicable",
+                Self::Unknown => "unknown",
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum ProofScopeKind {
+        ReportedSpan,
+        Function,
+        Owner,
+        File,
+        Project,
+        ClosedBuildTarget,
+        Local,
+    }
+
+    impl ProofScopeKind {
+        const fn as_str(self) -> &'static str {
+            match self {
+                Self::ReportedSpan => "reported_span",
+                Self::Function => "function",
+                Self::Owner => "owner",
+                Self::File => "file",
+                Self::Project => "project",
+                Self::ClosedBuildTarget => "closed_build_target",
+                Self::Local => "local",
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+    pub enum ProofBlockerKind {
+        ParserRecovery,
+        CallResolution,
+        MissingEvidence,
+        OpenCorpus,
+        UnsupportedLanguage,
+        Unknown,
+    }
+
+    impl ProofBlockerKind {
+        const fn as_str(self) -> &'static str {
+            match self {
+                Self::ParserRecovery => "parser_recovery",
+                Self::CallResolution => "call_resolution",
+                Self::MissingEvidence => "missing_evidence",
+                Self::OpenCorpus => "open_corpus",
+                Self::UnsupportedLanguage => "unsupported_language",
+                Self::Unknown => "unknown",
+            }
+        }
+    }
+
+    /// A canonical reason why a detector cannot make a stronger claim.
+    #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+    pub struct ProofBlocker {
+        kind: ProofBlockerKind,
+        path: Option<String>,
+        span: Option<[i64; 4]>,
+    }
+
+    impl ProofBlocker {
+        pub fn parser_recovery(path: impl Into<String>, span: Option<[i64; 4]>) -> Self {
+            Self {
+                kind: ProofBlockerKind::ParserRecovery,
+                path: Some(path.into()),
+                span,
+            }
+        }
+
+        pub fn call_resolution(path: impl Into<String>, span: Option<[i64; 4]>) -> Self {
+            Self {
+                kind: ProofBlockerKind::CallResolution,
+                path: Some(path.into()),
+                span,
+            }
+        }
+
+        pub fn missing_evidence(path: Option<String>) -> Self {
+            Self {
+                kind: ProofBlockerKind::MissingEvidence,
+                path,
+                span: None,
+            }
+        }
+
+        pub const fn open_corpus() -> Self {
+            Self {
+                kind: ProofBlockerKind::OpenCorpus,
+                path: None,
+                span: None,
+            }
+        }
+
+        pub const fn unknown() -> Self {
+            Self {
+                kind: ProofBlockerKind::Unknown,
+                path: None,
+                span: None,
+            }
+        }
+
+        fn value(self) -> Value {
+            let mut value = json!({ "kind": self.kind.as_str() });
+            if let Some(path) = self.path {
+                value["path"] = json!(path);
+            }
+            if let Some(span) = self.span {
+                value["span"] = json!(span);
+            }
+            value
+        }
+    }
+
+    /// Serializes the complete v3 boundary; callers cannot provide free-form
+    /// enum values or reconstruct blocker strings at the presentation layer.
+    pub fn build(
+        input_completeness: InputCompleteness,
+        claim_status: ClaimStatus,
+        coverage_discharge: CoverageDischarge,
+        authority: &[&str],
+        claim_kind: &str,
+        scope: ProofScopeKind,
+        closed: bool,
+        blockers: Vec<ProofBlocker>,
+    ) -> Value {
+        let blockers = blockers
+            .into_iter()
+            .map(ProofBlocker::value)
+            .collect::<Vec<_>>();
+        json!({
+            "schema": SCHEMA,
+            "input_completeness": input_completeness.as_str(),
+            "claim_status": claim_status.as_str(),
+            "coverage_discharge": coverage_discharge.as_str(),
+            "authority": authority,
+            "claim_kind": claim_kind,
+            "scope": { "kind": scope.as_str(), "closed": closed },
+            "blockers": blockers,
+        })
+    }
+
+    /// Summarizes each proof dimension independently.
+    pub fn summary(results: &[Value]) -> Value {
+        let mut complete = 0usize;
+        let mut partial = 0usize;
+        let mut input_unknown = 0usize;
+        let mut proven = 0usize;
+        let mut observed = 0usize;
+        let mut review = 0usize;
+        let mut satisfiable = 0usize;
+        let mut unsatisfiable = 0usize;
+        let mut not_applicable = 0usize;
+        let mut discharge_unknown = 0usize;
+        let mut results_with_boundary = 0usize;
+        for result in results {
+            let Some(boundary) = result
+                .pointer(&format!("/properties/{PROPERTY}"))
+                .and_then(Value::as_object)
+            else {
+                continue;
+            };
+            results_with_boundary += 1;
+            match boundary.get("input_completeness").and_then(Value::as_str) {
+                Some("complete") => complete += 1,
+                Some("partial") => partial += 1,
+                _ => input_unknown += 1,
+            }
+            match boundary.get("claim_status").and_then(Value::as_str) {
+                Some("proven") => proven += 1,
+                Some("observed") => observed += 1,
+                _ => review += 1,
+            }
+            match boundary.get("coverage_discharge").and_then(Value::as_str) {
+                Some("satisfiable") => satisfiable += 1,
+                Some("unsatisfiable") => unsatisfiable += 1,
+                Some("not_applicable") => not_applicable += 1,
+                _ => discharge_unknown += 1,
+            }
+        }
+        json!({
+            "schema": SCHEMA,
+            "result_count": results.len(),
+            "results_with_boundary": results_with_boundary,
+            "input_completeness": {
+                "complete": complete,
+                "partial": partial,
+                "unknown": input_unknown,
+            },
+            "claim_status": { "proven": proven, "observed": observed, "review": review },
+            "coverage_discharge": {
+                "satisfiable": satisfiable,
+                "unsatisfiable": unsatisfiable,
+                "not_applicable": not_applicable,
+                "unknown": discharge_unknown,
+            },
+        })
+    }
+}
+
 pub const CONTRACT_JSON: &str = include_str!("../contract.json");
 
 pub const C_HAZARDS: &str = include_str!("../queries/c_hazards.scm");

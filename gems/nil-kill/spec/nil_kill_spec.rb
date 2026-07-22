@@ -435,6 +435,26 @@ RSpec.describe NilKill do
       expect(result.dig("properties", "fact_mine.proof_boundary", "input_completeness")).to eq("complete")
     end
 
+    it "keeps static primitive-domain actions review-only in SARIF" do
+      action = {
+        "kind" => "report_static_primitive_domain",
+        "confidence" => "review",
+        "path" => "job.rb",
+        "line" => 8,
+        "message" => "state @attempt has a closed-looking Integer domain across 2 decision sites",
+        "data" => { "slot" => "@attempt", "values" => ["1", "2"] }
+      }
+
+      result = described_class.new.send(:sarif_action_result, action, {})
+      boundary = result.dig("properties", "fact_mine.proof_boundary")
+      expect(boundary).to include(
+        "input_completeness" => "unknown",
+        "claim_status" => "observed",
+        "coverage_discharge" => "not_applicable",
+        "claim_kind" => "nil_kill_action"
+      )
+    end
+
     it "conforms to the shared proof-boundary fixture" do
       fixture_path = File.join(NilKill::ROOT, "gems/hazard-contract/fixtures/proof-boundary.v3.json")
       fixture = JSON.parse(File.read(fixture_path))
