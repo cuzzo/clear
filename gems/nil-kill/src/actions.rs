@@ -2955,6 +2955,32 @@ mod tests {
     }
 
     #[test]
+    fn static_nil_pressure_disappears_when_the_root_is_total_or_unknown() {
+        for state in ["definitely_non_null", "unknown"] {
+            let input = input_from_json(serde_json::json!({
+                "methods": [],
+                "facts": {
+                    "nullable_states": [{
+                        "state": state,
+                        "complete": state == "definitely_non_null",
+                        "place_id": "place:cache:value",
+                        "source_definition_ids": ["definition:cache_lookup"]
+                    }],
+                    "nullable_operations": [{
+                        "place_id": "place:cache:value",
+                        "node_id": "deref:1",
+                        "operation_kind": "pointer_dereference",
+                        "nil_behavior": "undefined_behavior",
+                        "complete": true
+                    }]
+                }
+            }));
+
+            assert!(report_static_nil_pressure(&input).is_empty(), "{state}");
+        }
+    }
+
+    #[test]
     fn strong_static_return_can_remove_false_nilability() {
         let input = input_from_json(serde_json::json!({
             "methods": [],
