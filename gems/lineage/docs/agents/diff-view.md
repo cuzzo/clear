@@ -2,10 +2,12 @@
 
 ## Status
 
-Proposed. This is a Lineage UI feature, not a replacement for GitHub's Files
-Changed view. It explains the review risk of a revision pair using the same
-line-level coverage, mutation, hazard, and SARIF evidence already shown in the
-source view.
+Implemented through delivery slice 6. This is a Lineage UI feature, not a
+replacement for GitHub's Files Changed view. It explains the review risk of a
+revision pair using the same line-level coverage, mutation, hazard, and SARIF
+evidence already shown in the source view. Assertion observations (slice 7)
+and migration of the existing source, dashboard, and architecture routes
+(slice 8) remain separately planned work.
 
 ## Product decision
 
@@ -328,6 +330,26 @@ configuration rules in one audited place. It supports monorepos: matching is
 performed per path and nearest manifest root, not only at repository root.
 Repository configuration can add custom manifests, change a category, or
 disable an overly broad rule.
+
+The shipped override file is revision-scoped: Lineage reads
+`.lineage/diff.toml` from the selected immutable head revision. It supports
+auditable exact-path and directory-prefix source-role overrides; overrides win
+over catalog and convention classification:
+
+```toml
+[[overrides]]
+prefix = "services/generated/"
+role = "generated"
+
+[[overrides]]
+path = "spec/production_contract_spec.rb"
+role = "production"
+```
+
+Valid roles are `production`, `test`, `documentation`, `configuration`,
+`generated`, `lockfile`, and `other`. Absolute paths, traversal components,
+empty entries, and unknown roles are ignored. The longest matching prefix
+wins; an exact path wins over any prefix.
 
 ### Dependency changes
 
@@ -842,6 +864,31 @@ claims. Required tests include:
    keep the explicit unavailable state.
 8. Migrate source view, dashboard, and architecture view to React/Monaco in
    separately testable parity slices; remove Askama only after route parity.
+
+### Delivered scope
+
+- [x] React/Vite/Monaco project, Rust-generated API declarations, embedded
+  hashed assets, and revision-pinned diff routes.
+- [x] Rename-aware inventory, semantic line classification, source roles,
+  language summaries, AST grouping, residual raw links, and the published
+  `diff-risk/v1` formula.
+- [x] Broad configuration/lockfile catalog, parser-backed static dependency
+  adapters, and conservative unknown package-file results for dynamic or
+  invalid manifests.
+- [x] Revision/corpus-scoped coverage and mutation slices, exact line rails,
+  stale/partial/missing evidence states, and risk-ranked semantic Monaco
+  review in inline or split layouts.
+- [x] Complete two-sided SARIF lifecycle comparison (`new`, `persisted`,
+  `moved`, and `resolved`), stale artifact detection, and all head findings as
+  Monaco overlays.
+- [x] Revision-scoped repository source-role overrides and deterministic
+  URL-backed large-diff file pagination.
+- [ ] Assertion observations require the separate `test-observations/v1`
+  producer; the UI deliberately continues to show `unavailable` rather than
+  inventing a count.
+- [ ] Existing source/dashboard/architecture routes remain on the planned
+  incremental React migration path and are not part of the delivered diff
+  view.
 
 ## Acceptance criteria
 
