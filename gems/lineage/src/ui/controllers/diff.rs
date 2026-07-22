@@ -38,13 +38,35 @@ async fn api_diff_plan_handler(
         return invalid_request("base and head revisions are required");
     };
     match GitProvider::open(state.repo.as_ref()).and_then(|repo| repo.diff_plan(&base, &head)) {
-        Ok(plan) => Json(ApiEnvelope {
-            api_version: crate::diff::DIFF_API_VERSION,
-            data: plan,
-        })
-        .into_response(),
+        Ok(mut plan) => {
+            apply_known_coverage(&state, &mut plan);
+            Json(ApiEnvelope {
+                api_version: crate::diff::DIFF_API_VERSION,
+                data: plan,
+            })
+            .into_response()
+        }
         Err(error) => error_json(StatusCode::BAD_REQUEST, error),
     }
+}
+
+fn apply_known_coverage(state: &UiServerState, plan: &mut crate::diff::DiffPlan) {
+    if !state.db.exists() {
+        return;
+    }
+    let Ok(storage) = crate::storage::Storage::open_existing(state.db.as_ref()) else {
+        return;
+    };
+    let paths = plan
+        .files
+        .iter()
+        .map(|file| file.path.clone())
+        .collect::<Vec<_>>();
+    let Ok(rows) = storage.coverage_observations_for_commit_paths(&plan.scope.head_oid, &paths)
+    else {
+        return;
+    };
+    crate::diff::apply_partial_coverage(plan, &rows);
 }
 
 async fn api_diff_file_handler(
@@ -58,14 +80,17 @@ async fn api_diff_file_handler(
         return invalid_request("path is required");
     };
     match GitProvider::open(state.repo.as_ref()).and_then(|repo| repo.diff_plan(&base, &head)) {
-        Ok(plan) => match plan.files.into_iter().find(|file| file.path == path) {
-            Some(file) => Json(ApiEnvelope {
-                api_version: crate::diff::DIFF_API_VERSION,
-                data: file,
-            })
-            .into_response(),
-            None => StatusCode::NOT_FOUND.into_response(),
-        },
+        Ok(mut plan) => {
+            apply_known_coverage(&state, &mut plan);
+            match plan.files.into_iter().find(|file| file.path == path) {
+                Some(file) => Json(ApiEnvelope {
+                    api_version: crate::diff::DIFF_API_VERSION,
+                    data: file,
+                })
+                .into_response(),
+                None => StatusCode::NOT_FOUND.into_response(),
+            }
+        }
         Err(error) => error_json(StatusCode::BAD_REQUEST, error),
     }
 }
@@ -87,6 +112,7 @@ fn invalid_request(message: &str) -> Response<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
     use tempfile::tempdir;
 
     #[test]
@@ -172,5 +198,40 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn plan_api_marks_commit_matching_coverage_as_partial_evidence() {
+        let (_dir, state, base, head) = test_state();
+        let storage = crate::storage::Storage::open(state.db.as_ref()).unwrap();
+        storage
+            .record_coverage_line_with_source(&head, 1, "app.rb", 1, 1, false, "test")
+            .unwrap();
+
+        let response = api_diff_plan_handler(
+            State(state),
+            Query(DiffQuery {
+                base: Some(base),
+                head: Some(head),
+            }),
+        )
+        .await;
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            json.pointer("/data/evidence/coverage")
+                .and_then(|value| value.as_str()),
+            Some("partial")
+        );
+        assert_eq!(
+            json.pointer("/data/files/0/verification/covered")
+                .and_then(|value| value.as_u64()),
+            Some(1)
+        );
+        assert_eq!(
+            json.pointer("/data/files/0/verification/not_covered")
+                .and_then(|value| value.as_u64()),
+            Some(0)
+        );
     }
 }

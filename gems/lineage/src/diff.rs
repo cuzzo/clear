@@ -119,7 +119,19 @@ pub struct EvidenceAvailability {
 #[serde(rename_all = "snake_case")]
 #[ts(rename_all = "snake_case")]
 pub enum EvidenceState {
+    Exact,
+    Stale,
+    Missing,
+    Partial,
     Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoverageObservation {
+    pub path: String,
+    pub line: u32,
+    pub hits: u32,
+    pub is_partial: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, TS)]
@@ -317,11 +329,71 @@ fn change_kind(
 
 fn unavailable_evidence() -> EvidenceAvailability {
     EvidenceAvailability {
-        coverage: EvidenceState::Unknown,
-        mutation: EvidenceState::Unknown,
-        hazards: EvidenceState::Unknown,
-        sarif: EvidenceState::Unknown,
+        coverage: EvidenceState::Missing,
+        mutation: EvidenceState::Missing,
+        hazards: EvidenceState::Missing,
+        sarif: EvidenceState::Missing,
     }
+}
+
+/// Applies commit-matching coverage rows conservatively. Existing coverage
+/// storage has no corpus-completeness fingerprint, so observations are partial:
+/// they can establish known execution but never establish an uncovered line.
+pub fn apply_partial_coverage(plan: &mut DiffPlan, observations: &[CoverageObservation]) {
+    if observations.is_empty() {
+        return;
+    }
+    let rows = observations
+        .iter()
+        .filter(|row| row.hits > 0)
+        .map(|row| ((row.path.as_str(), row.line), row.is_partial))
+        .collect::<BTreeMap<_, _>>();
+    if rows.is_empty() {
+        return;
+    }
+    plan.evidence.coverage = EvidenceState::Partial;
+    for file in &mut plan.files {
+        let added = added_line_numbers(file.base_source.as_deref(), file.head_source.as_deref());
+        let code = code_line_numbers(file.head_source.as_deref(), &added, &file.path);
+        apply_partial_verification(&mut file.verification, &code, &rows, &file.path);
+        file.risk = risk_summary(file.head_source.as_deref(), &added, &file.verification);
+        for group in &mut file.groups {
+            let lines = group_added_line_numbers(&code, group.start_line, group.end_line);
+            apply_partial_verification(&mut group.verification, &lines, &rows, &file.path);
+            group.risk = risk_summary(file.head_source.as_deref(), &lines, &group.verification);
+        }
+    }
+}
+
+fn code_line_numbers(source: Option<&str>, added: &BTreeSet<u32>, path: &str) -> BTreeSet<u32> {
+    source
+        .unwrap_or_default()
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let line_number = index as u32 + 1;
+            (added.contains(&line_number) && matches!(line_kind(line, path), LineKind::Code))
+                .then_some(line_number)
+        })
+        .collect()
+}
+
+fn apply_partial_verification(
+    verification: &mut VerificationSlices,
+    code_lines: &BTreeSet<u32>,
+    observations: &BTreeMap<(&str, u32), bool>,
+    path: &str,
+) {
+    let (covered, partial) = code_lines.iter().fold((0, 0), |(covered, partial), line| {
+        match observations.get(&(path, *line)) {
+            Some(true) => (covered, partial + 1),
+            Some(false) => (covered + 1, partial),
+            None => (covered, partial),
+        }
+    });
+    verification.covered += covered;
+    verification.partially_covered += partial;
+    verification.unknown = verification.unknown.saturating_sub(covered + partial);
 }
 
 fn risk_summary(
@@ -338,7 +410,6 @@ fn risk_summary(
     let tier_one_hazards = 0;
     RiskSummary {
         score: verification.not_covered as f64
-            + verification.partially_covered as f64 * 0.5
             + added_complexity as f64 * 2.0
             + tier_one_hazards as f64 * 8.0,
         not_covered: verification.not_covered,
@@ -1314,6 +1385,41 @@ mod tests {
                 ("hidden", Visibility::Private)
             ]
         );
+    }
+
+    #[test]
+    fn applies_matching_coverage_as_partial_without_inventing_negative_evidence() {
+        let mut plan = build_diff_plan(
+            "base",
+            "head",
+            Vec::new(),
+            vec![file("lib/app.rb", "def run\n  value\nend\n")],
+        );
+        apply_partial_coverage(
+            &mut plan,
+            &[
+                CoverageObservation {
+                    path: "lib/app.rb".into(),
+                    line: 1,
+                    hits: 1,
+                    is_partial: false,
+                },
+                CoverageObservation {
+                    path: "lib/app.rb".into(),
+                    line: 2,
+                    hits: 1,
+                    is_partial: true,
+                },
+            ],
+        );
+
+        let file = &plan.files[0];
+        assert_eq!(plan.evidence.coverage, EvidenceState::Partial);
+        assert_eq!(file.verification.covered, 1);
+        assert_eq!(file.verification.partially_covered, 1);
+        assert_eq!(file.verification.unknown, 0);
+        assert_eq!(file.verification.not_covered, 0);
+        assert_eq!(file.risk.not_covered, 0);
     }
 
     #[test]

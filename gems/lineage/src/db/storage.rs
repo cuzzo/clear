@@ -1,3 +1,4 @@
+use crate::diff::CoverageObservation;
 use crate::model::{
     CommitMetadata, CrashEvent, Event, HazardEvent, LogicalUnit, QualityEvent, QualityMetric,
     SarifArtifact, SarifFinding, TestExposureEvent,
@@ -75,7 +76,7 @@ impl Storage {
         // Check if schema needs to be initialized by verifying if logical_units table exists
         let has_schema = {
             let mut stmt = storage.conn.prepare(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='logical_units'"
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='logical_units'",
             )?;
             stmt.exists([])?
         };
@@ -115,9 +116,8 @@ impl Storage {
     }
 
     fn init_schema_impl(&self) -> Result<()> {
-        self.conn.execute_batch(
-            include_str!("../../sql/storage/init_schema.sql"),
-        )?;
+        self.conn
+            .execute_batch(include_str!("../../sql/storage/init_schema.sql"))?;
         self.ensure_logical_unit_column("start_line", "INTEGER DEFAULT 1")?;
         self.ensure_logical_unit_column("current_line_cov", "REAL DEFAULT 0.0")?;
         self.ensure_logical_unit_column("current_integration_cov", "REAL DEFAULT 0.0")?;
@@ -128,7 +128,11 @@ impl Storage {
         self.ensure_logical_unit_column("current_mutant_verified_tests", "INTEGER DEFAULT 0")?;
         self.ensure_logical_unit_column("current_mutant_killed_tests", "INTEGER DEFAULT 0")?;
         self.ensure_logical_unit_column("last_test_exposure_at", "INTEGER DEFAULT 0")?;
-        self.ensure_column("test_exposure_events", "mutation_kind", "TEXT NOT NULL DEFAULT ''")?;
+        self.ensure_column(
+            "test_exposure_events",
+            "mutation_kind",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
         self.ensure_column(
             "coverage_line_events",
             "is_partial",
@@ -174,10 +178,12 @@ impl Storage {
     }
 
     pub fn refresh_current_sarif_findings_view(&self) -> Result<()> {
-        let _ = self.conn.execute("DROP VIEW IF EXISTS current_sarif_findings", []);
-        self.conn.execute_batch(
-            include_str!("../../sql/storage/refresh_current_sarif_findings_view.sql"),
-        )?;
+        let _ = self
+            .conn
+            .execute("DROP VIEW IF EXISTS current_sarif_findings", []);
+        self.conn.execute_batch(include_str!(
+            "../../sql/storage/refresh_current_sarif_findings_view.sql"
+        ))?;
         Ok(())
     }
 
@@ -198,9 +204,9 @@ impl Storage {
     }
 
     fn ensure_natural_key_indexes(&self) -> Result<()> {
-        self.conn.execute_batch(
-            include_str!("../../sql/storage/ensure_natural_key_indexes.sql"),
-        )?;
+        self.conn.execute_batch(include_str!(
+            "../../sql/storage/ensure_natural_key_indexes.sql"
+        ))?;
         Ok(())
     }
 
@@ -271,7 +277,14 @@ impl Storage {
     pub fn upsert_logical_unit(&self, unit: &LogicalUnit, created_at: i64) -> Result<()> {
         self.conn.execute(
             include_str!("../../sql/storage/upsert_logical_unit.sql"),
-            params![unit.id, unit.name, unit.kind.as_str(), unit.path, created_at, unit.start_line],
+            params![
+                unit.id,
+                unit.name,
+                unit.kind.as_str(),
+                unit.path,
+                created_at,
+                unit.start_line
+            ],
         )?;
         Ok(())
     }
@@ -285,11 +298,13 @@ impl Storage {
         let target_commit = match commit_hash {
             Some(hash) => Some(hash.to_string()),
             None => {
-                let mut stmt = self.conn.prepare(
-                    "SELECT commit_hash FROM metadata ORDER BY timestamp DESC LIMIT 1"
-                )?;
+                let mut stmt = self
+                    .conn
+                    .prepare("SELECT commit_hash FROM metadata ORDER BY timestamp DESC LIMIT 1")?;
                 let mut rows = stmt.query([])?;
-                rows.next()?.map(|row| row.get::<_, String>(0)).transpose()?
+                rows.next()?
+                    .map(|row| row.get::<_, String>(0))
+                    .transpose()?
             }
         };
 
@@ -300,46 +315,58 @@ impl Storage {
                     if let Some(previous) = state.get("previous").and_then(|p| p.as_object()) {
                         let mut results = Vec::new();
                         for (_id, val) in previous {
-                            let Some(uname) = val.get("name").and_then(|n| n.as_str()) else { continue; };
-                            
+                            let Some(uname) = val.get("name").and_then(|n| n.as_str()) else {
+                                continue;
+                            };
+
                             // Check if name matches (exactly or qualified suffix)
                             let name_matches = uname == name
                                 || uname.ends_with(&format!(".{name}"))
                                 || uname.ends_with(&format!("::{name}"))
                                 || uname.ends_with(&format!("#{name}"));
-                                
+
                             if name_matches {
-                                let Some(upath) = val.get("path").and_then(|p| p.as_str()) else { continue; };
-                                let Some(ustart) = val.get("start_line").and_then(|l| l.as_u64()) else { continue; };
+                                let Some(upath) = val.get("path").and_then(|p| p.as_str()) else {
+                                    continue;
+                                };
+                                let Some(ustart) = val.get("start_line").and_then(|l| l.as_u64())
+                                else {
+                                    continue;
+                                };
                                 results.push((upath.to_string(), ustart as u32));
                             }
                         }
-                        
+
                         if !results.is_empty() {
                             // Sort results to prioritize proximity to current_path if provided
                             if let Some(cur_path) = current_path {
-                                let normalized_cur = cur_path.trim().trim_start_matches("./").trim_matches('/');
+                                let normalized_cur =
+                                    cur_path.trim().trim_start_matches("./").trim_matches('/');
                                 let cur_dir = if let Some(idx) = normalized_cur.rfind('/') {
                                     &normalized_cur[..idx]
                                 } else {
                                     ""
                                 };
                                 results.sort_by(|a, b| {
-                                    let a_norm = a.0.trim().trim_start_matches("./").trim_matches('/');
-                                    let b_norm = b.0.trim().trim_start_matches("./").trim_matches('/');
-                                    
+                                    let a_norm =
+                                        a.0.trim().trim_start_matches("./").trim_matches('/');
+                                    let b_norm =
+                                        b.0.trim().trim_start_matches("./").trim_matches('/');
+
                                     let a_exact = a_norm == normalized_cur;
                                     let b_exact = b_norm == normalized_cur;
                                     if a_exact != b_exact {
                                         return b_exact.cmp(&a_exact);
                                     }
-                                    
-                                    let a_in_dir = !cur_dir.is_empty() && a_norm.starts_with(&format!("{}/", cur_dir));
-                                    let b_in_dir = !cur_dir.is_empty() && b_norm.starts_with(&format!("{}/", cur_dir));
+
+                                    let a_in_dir = !cur_dir.is_empty()
+                                        && a_norm.starts_with(&format!("{}/", cur_dir));
+                                    let b_in_dir = !cur_dir.is_empty()
+                                        && b_norm.starts_with(&format!("{}/", cur_dir));
                                     if a_in_dir != b_in_dir {
                                         return b_in_dir.cmp(&a_in_dir);
                                     }
-                                    
+
                                     a.0.cmp(&b.0).then(a.1.cmp(&b.1))
                                 });
                             } else {
@@ -369,11 +396,15 @@ impl Storage {
             None
         };
 
-        let mut stmt = self.conn.prepare(
-            include_str!("../../sql/storage/find_definitions.sql"),
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare(include_str!("../../sql/storage/find_definitions.sql"))?;
         let rows = stmt.query_map(params![name], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, u32>(2)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, u32>(2)?,
+            ))
         })?;
         let mut results = Vec::new();
         for row in rows {
@@ -398,19 +429,19 @@ impl Storage {
             results.sort_by(|a, b| {
                 let a_norm = a.0.trim().trim_start_matches("./").trim_matches('/');
                 let b_norm = b.0.trim().trim_start_matches("./").trim_matches('/');
-                
+
                 let a_exact = a_norm == normalized_cur;
                 let b_exact = b_norm == normalized_cur;
                 if a_exact != b_exact {
                     return b_exact.cmp(&a_exact); // exact match first
                 }
-                
+
                 let a_in_dir = !cur_dir.is_empty() && a_norm.starts_with(&format!("{}/", cur_dir));
                 let b_in_dir = !cur_dir.is_empty() && b_norm.starts_with(&format!("{}/", cur_dir));
                 if a_in_dir != b_in_dir {
                     return b_in_dir.cmp(&a_in_dir); // same directory first
                 }
-                
+
                 a.0.cmp(&b.0).then(a.1.cmp(&b.1))
             });
         } else {
@@ -441,18 +472,18 @@ impl Storage {
     }
 
     pub fn unit_ids_for_current_path(&self, path: &str) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare_cached(
-            include_str!("../../sql/storage/unit_ids_for_current_path.sql"),
-        )?;
+        let mut stmt = self.conn.prepare_cached(include_str!(
+            "../../sql/storage/unit_ids_for_current_path.sql"
+        ))?;
         let rows = stmt.query_map(params![path], |row| row.get::<_, String>(0))?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     pub fn resolve_current_path(&self, path: &str) -> Result<Option<String>> {
         let normalized = path.trim_start_matches("./");
-        let mut stmt = self.conn.prepare_cached(
-            include_str!("../../sql/storage/resolve_current_path.sql"),
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare_cached(include_str!("../../sql/storage/resolve_current_path.sql"))?;
         let exact = stmt
             .query_map(params![normalized], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -461,9 +492,9 @@ impl Storage {
         }
 
         let suffix = format!("%/{normalized}");
-        let mut stmt = self.conn.prepare_cached(
-            include_str!("../../sql/storage/resolve_current_path_2.sql"),
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare_cached(include_str!("../../sql/storage/resolve_current_path_2.sql"))?;
         let candidates = stmt
             .query_map(params![suffix], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -474,14 +505,19 @@ impl Storage {
         })
     }
 
-    pub fn resolve_unit_id(&self, observed_id: &str, path: &str, name: &str) -> Result<Option<String>> {
+    pub fn resolve_unit_id(
+        &self,
+        observed_id: &str,
+        path: &str,
+        name: &str,
+    ) -> Result<Option<String>> {
         if self.logical_unit_exists(observed_id)? {
             return Ok(Some(observed_id.to_string()));
         }
 
-        let mut stmt = self.conn.prepare(
-            include_str!("../../sql/storage/resolve_unit_id.sql"),
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare(include_str!("../../sql/storage/resolve_unit_id.sql"))?;
         let mut rows = stmt.query(params![path, name])?;
         Ok(rows.next()?.map(|row| row.get(0)).transpose()?)
     }
@@ -501,16 +537,18 @@ impl Storage {
             self.existing_quality_event(&event.unit_id, &event.commit_hash, event.metric_type)?
         {
             let merged_value = previous_new_value.max(event.new_value);
-            self.conn.prepare_cached(
-                &format!("UPDATE logical_units SET {column} = ?2 WHERE id = ?1"),
-            )?.execute(params![event.unit_id, merged_value])?;
+            self.conn
+                .prepare_cached(&format!(
+                    "UPDATE logical_units SET {column} = ?2 WHERE id = ?1"
+                ))?
+                .execute(params![event.unit_id, merged_value])?;
             if (previous_new_value - merged_value).abs() < 0.0001 {
                 return Ok(false);
             }
 
-            self.conn.prepare_cached(
-                include_str!("../../sql/storage/record_quality_metric.sql"),
-            )?.execute(params![id, event.timestamp, merged_value])?;
+            self.conn
+                .prepare_cached(include_str!("../../sql/storage/record_quality_metric.sql"))?
+                .execute(params![id, event.timestamp, merged_value])?;
             return Ok(true);
         }
 
@@ -521,19 +559,23 @@ impl Storage {
             return Ok(false);
         }
 
-        self.conn.prepare_cached(
-            include_str!("../../sql/storage/record_quality_metric_2.sql"),
-        )?.execute(params![
-            event.unit_id,
-            event.commit_hash,
-            event.timestamp,
-            event.metric_type.as_str(),
-            old_value,
-            event.new_value
-        ])?;
-        self.conn.prepare_cached(
-            &format!("UPDATE logical_units SET {column} = ?2 WHERE id = ?1"),
-        )?.execute(params![event.unit_id, event.new_value])?;
+        self.conn
+            .prepare_cached(include_str!(
+                "../../sql/storage/record_quality_metric_2.sql"
+            ))?
+            .execute(params![
+                event.unit_id,
+                event.commit_hash,
+                event.timestamp,
+                event.metric_type.as_str(),
+                old_value,
+                event.new_value
+            ])?;
+        self.conn
+            .prepare_cached(&format!(
+                "UPDATE logical_units SET {column} = ?2 WHERE id = ?1"
+            ))?
+            .execute(params![event.unit_id, event.new_value])?;
         Ok(true)
     }
 
@@ -543,9 +585,9 @@ impl Storage {
         commit_hash: &str,
         metric: QualityMetric,
     ) -> Result<Option<(i64, f64)>> {
-        let mut stmt = self.conn.prepare_cached(
-            include_str!("../../sql/storage/existing_quality_event.sql"),
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare_cached(include_str!("../../sql/storage/existing_quality_event.sql"))?;
         Ok(stmt
             .query_row(params![unit_id, commit_hash, metric.as_str()], |row| {
                 Ok((row.get(0)?, row.get(1)?))
@@ -583,11 +625,13 @@ impl Storage {
         test_type: &str,
         test_id: &str,
     ) -> Result<usize> {
-        let mut stmt = self.conn.prepare(
-            include_str!("../../sql/storage/delete_test_exposure_for_commit_test.sql"),
-        )?;
+        let mut stmt = self.conn.prepare(include_str!(
+            "../../sql/storage/delete_test_exposure_for_commit_test.sql"
+        ))?;
         let unit_ids = stmt
-            .query_map(params![commit_hash, test_type, test_id], |row| row.get::<_, String>(0))?
+            .query_map(params![commit_hash, test_type, test_id], |row| {
+                row.get::<_, String>(0)
+            })?
             .collect::<Result<Vec<_>, _>>()?;
         let deleted = self.conn.execute(
             include_str!("../../sql/storage/delete_test_exposure_for_commit_test_2.sql"),
@@ -730,14 +774,19 @@ impl Storage {
             .current_unit_spans_for_path(path)?
             .into_iter()
             .filter(|span| span.path == path && line >= span.start_line && line <= span.end_line)
-            .min_by_key(|span| (span.end_line.saturating_sub(span.start_line), span.id.clone()))
+            .min_by_key(|span| {
+                (
+                    span.end_line.saturating_sub(span.start_line),
+                    span.id.clone(),
+                )
+            })
             .map(|span| span.id))
     }
 
     pub fn current_unit_spans_for_path(&self, path: &str) -> Result<Vec<CurrentUnitSpan>> {
-        let mut stmt = self.conn.prepare(
-            include_str!("../../sql/storage/current_unit_spans_for_path.sql"),
-        )?;
+        let mut stmt = self.conn.prepare(include_str!(
+            "../../sql/storage/current_unit_spans_for_path.sql"
+        ))?;
         let rows = stmt.query_map(params![path], |row| {
             Ok(CurrentUnitSpan {
                 id: row.get(0)?,
@@ -749,11 +798,10 @@ impl Storage {
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
-
     pub fn current_unit_spans(&self) -> Result<Vec<CurrentUnitSpan>> {
-        let mut stmt = self.conn.prepare(
-            include_str!("../../sql/storage/current_unit_spans.sql"),
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare(include_str!("../../sql/storage/current_unit_spans.sql"))?;
         let rows = stmt.query_map([], |row| {
             Ok(CurrentUnitSpan {
                 id: row.get(0)?,
@@ -770,7 +818,8 @@ impl Storage {
             return Ok(Vec::new());
         }
         let mut sql = String::new();
-        sql.push_str(r#"
+        sql.push_str(
+            r#"
             WITH latest_events AS (
               SELECT *
               FROM (
@@ -781,14 +830,16 @@ impl Storage {
                        ) AS rank
                 FROM events e
                 WHERE e.unit_id IN (
-        "#);
+        "#,
+        );
         for i in 0..ids.len() {
             if i > 0 {
                 sql.push_str(", ");
             }
             sql.push_str(&format!("?{}", i + 1));
         }
-        sql.push_str(r#"
+        sql.push_str(
+            r#"
                 )
               )
               WHERE rank = 1
@@ -801,20 +852,23 @@ impl Storage {
               FROM logical_units u
               LEFT JOIN latest_events le ON le.unit_id = u.id
               WHERE u.id IN (
-        "#);
+        "#,
+        );
         for i in 0..ids.len() {
             if i > 0 {
                 sql.push_str(", ");
             }
             sql.push_str(&format!("?{}", i + 1));
         }
-        sql.push_str(r#"
+        sql.push_str(
+            r#"
               )
             )
             SELECT id, current_path, start_line, end_line
             FROM current_units
             WHERE current_path <> ''
-        "#);
+        "#,
+        );
 
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(ids), |row| {
@@ -832,11 +886,10 @@ impl Storage {
         Ok(out)
     }
 
-
     pub fn sarif_findings_for_path(&self, path: &str) -> Result<Vec<SarifFinding>> {
-        let mut stmt = self.conn.prepare(
-            include_str!("../../sql/storage/sarif_findings_for_path.sql"),
-        )?;
+        let mut stmt = self.conn.prepare(include_str!(
+            "../../sql/storage/sarif_findings_for_path.sql"
+        ))?;
         let rows = stmt.query_map(params![path], |row| {
             Ok(SarifFinding {
                 artifact_id: row.get(0)?,
@@ -866,34 +919,41 @@ impl Storage {
     }
 
     pub fn sarif_finding_counts_by_file(&self) -> Result<HashMap<String, i64>> {
-        let mut stmt = self.conn.prepare(
-            include_str!("../../sql/storage/sarif_finding_counts_by_file.sql"),
-        )?;
-        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+        let mut stmt = self.conn.prepare(include_str!(
+            "../../sql/storage/sarif_finding_counts_by_file.sql"
+        ))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
         Ok(rows.collect::<std::result::Result<HashMap<_, _>, _>>()?)
     }
 
     pub fn sarif_lifecycle_summary(&self) -> Result<SarifLifecycleSummary> {
-        self.conn.query_row(
-            include_str!("../../sql/storage/sarif_lifecycle_summary.sql"),
-            [],
-            |row| {
-                Ok(SarifLifecycleSummary {
-                    new_findings: row.get(0)?,
-                    resolved_findings: row.get(1)?,
-                    persisted_findings: row.get(2)?,
-                })
-            },
-        ).map_err(Into::into)
+        self.conn
+            .query_row(
+                include_str!("../../sql/storage/sarif_lifecycle_summary.sql"),
+                [],
+                |row| {
+                    Ok(SarifLifecycleSummary {
+                        new_findings: row.get(0)?,
+                        resolved_findings: row.get(1)?,
+                        persisted_findings: row.get(2)?,
+                    })
+                },
+            )
+            .map_err(Into::into)
     }
 
     fn refresh_current_quality_metrics(&self) -> Result<()> {
-        self.conn.execute_batch(
-            include_str!("../../sql/storage/refresh_current_quality_metrics.sql"),
-        )?;
+        self.conn.execute_batch(include_str!(
+            "../../sql/storage/refresh_current_quality_metrics.sql"
+        ))?;
         for (metric, column) in [
             (QualityMetric::LineCoverage, "current_line_cov"),
-            (QualityMetric::IntegrationCoverage, "current_integration_cov"),
+            (
+                QualityMetric::IntegrationCoverage,
+                "current_integration_cov",
+            ),
             (QualityMetric::MutantCoverage, "current_mutant_cov"),
             (QualityMetric::GateStatus, "is_hard_gated"),
         ] {
@@ -916,7 +976,49 @@ impl Storage {
         line: u32,
         hits: u32,
     ) -> Result<bool> {
-        self.record_coverage_line_with_source(commit_hash, timestamp, path, line, hits, false, "coverage")
+        self.record_coverage_line_with_source(
+            commit_hash,
+            timestamp,
+            path,
+            line,
+            hits,
+            false,
+            "coverage",
+        )
+    }
+
+    pub fn coverage_observations_for_commit_paths(
+        &self,
+        commit_hash: &str,
+        paths: &[String],
+    ) -> Result<Vec<CoverageObservation>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut observations = Vec::new();
+        for paths in paths.chunks(500) {
+            let placeholders = std::iter::repeat("?")
+                .take(paths.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT path, line, MAX(hits), MAX(is_partial) FROM coverage_line_events WHERE commit_hash = ? AND path IN ({placeholders}) GROUP BY path, line"
+            );
+            let mut values = Vec::<rusqlite::types::Value>::with_capacity(paths.len() + 1);
+            values.push(rusqlite::types::Value::Text(commit_hash.to_string()));
+            values.extend(paths.iter().cloned().map(rusqlite::types::Value::Text));
+            let mut statement = self.conn.prepare(&sql)?;
+            let rows = statement.query_map(rusqlite::params_from_iter(values), |row| {
+                Ok(CoverageObservation {
+                    path: row.get(0)?,
+                    line: row.get::<_, i64>(1)?.max(1) as u32,
+                    hits: row.get::<_, i64>(2)?.max(0) as u32,
+                    is_partial: row.get::<_, i64>(3)? != 0,
+                })
+            })?;
+            observations.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
+        }
+        Ok(observations)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -931,7 +1033,14 @@ impl Storage {
         source: &str,
     ) -> Result<bool> {
         self.record_coverage_line_with_details(
-            commit_hash, timestamp, path, line, hits, is_partial, None, source,
+            commit_hash,
+            timestamp,
+            path,
+            line,
+            hits,
+            is_partial,
+            None,
+            source,
         )
     }
 
@@ -947,25 +1056,25 @@ impl Storage {
         coverage_percent: Option<f64>,
         source: &str,
     ) -> Result<bool> {
-        let changed = self.conn.prepare_cached(
-            include_str!("../../sql/storage/record_coverage_line_with_details.sql"),
-        )?.execute(params![
-            commit_hash,
-            timestamp,
-            path,
-            line,
-            hits,
-            if is_partial { 1 } else { 0 },
-            coverage_percent,
-            source
-        ])?;
+        let changed = self
+            .conn
+            .prepare_cached(include_str!(
+                "../../sql/storage/record_coverage_line_with_details.sql"
+            ))?
+            .execute(params![
+                commit_hash,
+                timestamp,
+                path,
+                line,
+                hits,
+                if is_partial { 1 } else { 0 },
+                coverage_percent,
+                source
+            ])?;
         Ok(changed > 0)
     }
 
-    pub fn record_coverage_lines_bulk(
-        &self,
-        lines: &[CoverageLineBulk],
-    ) -> Result<usize> {
+    pub fn record_coverage_lines_bulk(&self, lines: &[CoverageLineBulk]) -> Result<usize> {
         if lines.is_empty() {
             return Ok(0);
         }
@@ -1006,7 +1115,11 @@ impl Storage {
                 params.push(rusqlite::types::Value::Text(row.path.clone()));
                 params.push(rusqlite::types::Value::Integer(row.line as i64));
                 params.push(rusqlite::types::Value::Integer(row.hits as i64));
-                params.push(rusqlite::types::Value::Integer(if row.is_partial { 1 } else { 0 }));
+                params.push(rusqlite::types::Value::Integer(if row.is_partial {
+                    1
+                } else {
+                    0
+                }));
                 if let Some(pct) = row.coverage_percent {
                     params.push(rusqlite::types::Value::Real(pct));
                 } else {
@@ -1015,7 +1128,8 @@ impl Storage {
                 params.push(rusqlite::types::Value::Text(row.source.clone()));
             }
 
-            let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+            let param_refs: Vec<&dyn rusqlite::ToSql> =
+                params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
 
             let changed = stmt.execute(&param_refs[..])?;
             total_changed += changed;
@@ -1042,9 +1156,9 @@ impl Storage {
     }
 
     pub fn insert_crash_event(&self, event: &CrashEvent) -> Result<bool> {
-        let mut stmt = self.conn.prepare(
-            include_str!("../../sql/storage/insert_crash_event.sql"),
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare(include_str!("../../sql/storage/insert_crash_event.sql"))?;
         let existing = stmt
             .query_row(
                 params![
@@ -1149,7 +1263,11 @@ impl Storage {
              CREATE INDEX IF NOT EXISTS idx_unit_hotness_path ON unit_hotness(path, is_active);
              CREATE INDEX IF NOT EXISTS idx_unit_hotness_source ON unit_hotness(source, is_active);",
         )?;
-        self.ensure_column("unit_hotness", "resolution", "TEXT NOT NULL DEFAULT 'declared'")?;
+        self.ensure_column(
+            "unit_hotness",
+            "resolution",
+            "TEXT NOT NULL DEFAULT 'declared'",
+        )?;
         Ok(())
     }
 
@@ -1189,7 +1307,17 @@ impl Storage {
         self.ensure_unit_hotness_table()?;
         self.conn.execute(
             include_str!("../../sql/storage/insert_unit_hotness.sql"),
-            params![path, function, line, flat_share, cum_share, tier, source, commit_hash, resolution],
+            params![
+                path,
+                function,
+                line,
+                flat_share,
+                cum_share,
+                tier,
+                source,
+                commit_hash,
+                resolution
+            ],
         )?;
         Ok(())
     }
@@ -1265,9 +1393,9 @@ impl Storage {
     }
 
     fn refresh_test_exposure_summary(&self, unit_id: &str) -> Result<()> {
-        let mut latest_stmt = self.conn.prepare(
-            include_str!("../../sql/storage/refresh_test_exposure_summary.sql"),
-        )?;
+        let mut latest_stmt = self.conn.prepare(include_str!(
+            "../../sql/storage/refresh_test_exposure_summary.sql"
+        ))?;
         let mut latest_rows = latest_stmt.query(params![unit_id])?;
         let Some(latest_row) = latest_rows.next()? else {
             return Ok(());
@@ -1290,15 +1418,13 @@ impl Storage {
             params![unit_id, latest_commit],
             |row| row.get(0),
         )?;
-        let mut type_stmt = self.conn.prepare(
-            include_str!("../../sql/storage/refresh_test_exposure_summary_5.sql"),
-        )?;
+        let mut type_stmt = self.conn.prepare(include_str!(
+            "../../sql/storage/refresh_test_exposure_summary_5.sql"
+        ))?;
         let type_rows = type_stmt.query_map(params![unit_id, latest_commit], |row| {
             row.get::<_, String>(0)
         })?;
-        let test_types = type_rows
-            .collect::<Result<Vec<_>, _>>()?
-            .join(",");
+        let test_types = type_rows.collect::<Result<Vec<_>, _>>()?.join(",");
 
         self.conn.execute(
             include_str!("../../sql/storage/refresh_test_exposure_summary_6.sql"),
@@ -1321,9 +1447,9 @@ impl Storage {
 
     pub fn refresh_ui_summaries(&self) -> Result<()> {
         self.begin_transaction()?;
-        let result = self.conn.execute_batch(
-            include_str!("../../sql/storage/refresh_ui_summaries.sql"),
-        );
+        let result = self
+            .conn
+            .execute_batch(include_str!("../../sql/storage/refresh_ui_summaries.sql"));
         if let Err(error) = result {
             let _ = self.rollback_transaction();
             return Err(error.into());
@@ -1334,7 +1460,8 @@ impl Storage {
 
     pub fn top_units(&self, limit: usize, only_prefixes: &[String]) -> Result<Vec<UnitSummary>> {
         let mut sql = String::new();
-        sql.push_str(r#"
+        sql.push_str(
+            r#"
             WITH db_clock AS (
               SELECT COALESCE(MAX(timestamp), 0) AS observed_at
               FROM (
@@ -1378,7 +1505,8 @@ impl Storage {
               )
               GROUP BY c.unit_id
             )
-        "#);
+        "#,
+        );
 
         let raw_summaries: Vec<UnitSummary> = if only_prefixes.is_empty() {
             sql.push_str(r#"
@@ -1472,14 +1600,16 @@ impl Storage {
             })?;
             rows.collect::<Result<Vec<_>, _>>()?
         } else {
-            sql.push_str(r#"
+            sql.push_str(
+                r#"
                 , filtered_units AS (
                   SELECT u.*,
                          COALESCE(le.path, u.original_path) AS current_path
                   FROM logical_units u
                   LEFT JOIN latest_events le ON le.unit_id = u.id
                   WHERE 
-            "#);
+            "#,
+            );
             for i in 0..only_prefixes.len() {
                 if i > 0 {
                     sql.push_str(" OR ");
@@ -1609,16 +1739,15 @@ impl Storage {
 }
 
 fn configure_connection(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        include_str!("../../sql/storage/configure_connection.sql"),
-    )?;
+    conn.execute_batch(include_str!("../../sql/storage/configure_connection.sql"))?;
     Ok(())
 }
 
-fn apply_decayed_risk(conn: &Connection, summaries: &mut HashMap<String, UnitSummary>) -> Result<()> {
-    let mut stmt = conn.prepare(
-        include_str!("../../sql/storage/apply_decayed_risk.sql"),
-    )?;
+fn apply_decayed_risk(
+    conn: &Connection,
+    summaries: &mut HashMap<String, UnitSummary>,
+) -> Result<()> {
+    let mut stmt = conn.prepare(include_str!("../../sql/storage/apply_decayed_risk.sql"))?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -1900,17 +2029,19 @@ mod tests {
             "def run\n1\nend",
         );
         storage.upsert_logical_unit(&unit, 10).unwrap();
-        assert!(storage.insert_crash_event(&CrashEvent {
-            unit_id: unit.id,
-            commit_hash: "abc".into(),
-            timestamp: 10,
-            error_class: "RuntimeError".into(),
-            provider_id: "evt-1".into(),
-            is_verified: true,
-            path: "src/a.rb".into(),
-            line: 2,
-            function: "run".into(),
-        }).unwrap());
+        assert!(storage
+            .insert_crash_event(&CrashEvent {
+                unit_id: unit.id,
+                commit_hash: "abc".into(),
+                timestamp: 10,
+                error_class: "RuntimeError".into(),
+                provider_id: "evt-1".into(),
+                is_verified: true,
+                path: "src/a.rb".into(),
+                line: 2,
+                function: "run".into(),
+            })
+            .unwrap());
 
         assert_eq!(storage.count_rows("crash_events").unwrap(), 1);
     }
@@ -2045,7 +2176,15 @@ mod tests {
                 WHERE id = ?1
                 "#,
                 rusqlite::params![unit.id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .unwrap();
 
@@ -2163,7 +2302,9 @@ mod tests {
         storage.upsert_logical_unit(&unit, 10).unwrap();
 
         // Check finding it before move/events
-        let defs = storage.find_definitions("my_test_func", None, None).unwrap();
+        let defs = storage
+            .find_definitions("my_test_func", None, None)
+            .unwrap();
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].0, "src/a.rb");
         assert_eq!(defs[0].1, 10);
@@ -2193,7 +2334,9 @@ mod tests {
             .unwrap();
 
         // Check finding it after move event
-        let defs_after = storage.find_definitions("my_test_func", None, None).unwrap();
+        let defs_after = storage
+            .find_definitions("my_test_func", None, None)
+            .unwrap();
         assert_eq!(defs_after.len(), 1);
         assert_eq!(defs_after[0].0, "src/b.rb");
         assert_eq!(defs_after[0].1, 15);
@@ -2202,7 +2345,7 @@ mod tests {
     #[test]
     fn test_find_definitions_from_engine_state() {
         let storage = Storage::open_memory().unwrap();
-        
+
         // Save engine state for commit "c1"
         let state_json = r#"{
             "previous": {
@@ -2219,22 +2362,28 @@ mod tests {
             }
         }"#;
         storage.save_engine_state("c1", state_json).unwrap();
-        
+
         // Query definitions with different names
         // Exact name
-        let defs_exact = storage.find_definitions("MyClass.my_method", Some("c1"), None).unwrap();
+        let defs_exact = storage
+            .find_definitions("MyClass.my_method", Some("c1"), None)
+            .unwrap();
         assert_eq!(defs_exact.len(), 1);
         assert_eq!(defs_exact[0].0, "src/my_class.rb");
         assert_eq!(defs_exact[0].1, 42);
-        
+
         // Short name suffix
-        let defs_suffix = storage.find_definitions("my_method", Some("c1"), None).unwrap();
+        let defs_suffix = storage
+            .find_definitions("my_method", Some("c1"), None)
+            .unwrap();
         assert_eq!(defs_suffix.len(), 1);
         assert_eq!(defs_suffix[0].0, "src/my_class.rb");
         assert_eq!(defs_suffix[0].1, 42);
-        
+
         // Different suffix separator or non-matching name
-        let defs_non_match = storage.find_definitions("other_method", Some("c1"), None).unwrap();
+        let defs_non_match = storage
+            .find_definitions("other_method", Some("c1"), None)
+            .unwrap();
         assert!(defs_non_match.is_empty());
     }
 
@@ -2258,16 +2407,31 @@ mod tests {
         let unit_id = unit.id.clone();
         storage.upsert_logical_unit(&unit, 10).unwrap();
 
-        let spans = storage.current_unit_spans_for_path("src/worker.rb").unwrap();
+        let spans = storage
+            .current_unit_spans_for_path("src/worker.rb")
+            .unwrap();
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].id, unit_id);
-        assert_eq!(spans[0].start_line, 7, "must fall back to logical_units.start_line, not 1");
-        assert_eq!(spans[0].end_line, 7, "no end_line column on logical_units to recover the true extent");
+        assert_eq!(
+            spans[0].start_line, 7,
+            "must fall back to logical_units.start_line, not 1"
+        );
+        assert_eq!(
+            spans[0].end_line, 7,
+            "no end_line column on logical_units to recover the true extent"
+        );
 
         assert_eq!(
-            storage.current_unit_id_for_path_line("src/worker.rb", 7).unwrap(),
+            storage
+                .current_unit_id_for_path_line("src/worker.rb", 7)
+                .unwrap(),
             Some(unit_id)
         );
-        assert_eq!(storage.current_unit_id_for_path_line("src/worker.rb", 1).unwrap(), None);
+        assert_eq!(
+            storage
+                .current_unit_id_for_path_line("src/worker.rb", 1)
+                .unwrap(),
+            None
+        );
     }
 }

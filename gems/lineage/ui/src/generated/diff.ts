@@ -30,7 +30,7 @@ export type FileChangeKind = "added" | "modified" | "deleted" | "renamed";
 
 export type SourceRole = "production" | "test" | "documentation" | "configuration" | "generated" | "lockfile" | "other";
 
-export type EvidenceState = "unknown";
+export type EvidenceState = "exact" | "stale" | "missing" | "partial" | "unknown";
 
 export type Visibility = "public" | "private" | "unknown";
 
