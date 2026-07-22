@@ -122,6 +122,8 @@ pub struct ProfileOutput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nullable_refinements: Vec<syntax::nullable::NullableRefinement>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nullable_states: Vec<syntax::nullable::NullableState>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dispatcher_inferences: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hash_record_member_calls: Vec<serde_json::Value>,
@@ -991,6 +993,11 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         } else {
             Vec::new()
         },
+        nullable_states: if nil_kill {
+            document.nullable_states.clone()
+        } else {
+            Vec::new()
+        },
         dispatcher_inferences,
         hash_record_member_calls,
         param_origins,
@@ -1055,6 +1062,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut hash_record_escape_sites = Vec::new();
     let mut hidden_enum_observations = Vec::new();
     let mut nullable_refinements = Vec::new();
+    let mut nullable_states = Vec::new();
     let mut dispatcher_inferences = Vec::new();
     let mut hash_record_member_calls = Vec::new();
     let mut param_origins = Vec::new();
@@ -1123,6 +1131,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
             hash_record_escape_sites.extend(output.hash_record_escape_sites);
             hidden_enum_observations.extend(output.hidden_enum_observations);
             nullable_refinements.extend(output.nullable_refinements);
+            nullable_states.extend(output.nullable_states);
             dispatcher_inferences.extend(output.dispatcher_inferences);
             hash_record_member_calls.extend(output.hash_record_member_calls);
             param_origins.extend(output.param_origins);
@@ -1203,6 +1212,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         hash_record_escape_sites,
         hidden_enum_observations,
         nullable_refinements,
+        nullable_states,
         dispatcher_inferences,
         hash_record_member_calls,
         param_origins,
@@ -6011,6 +6021,7 @@ pub(crate) mod tests {
             clone_candidates: vec![],
             redundant_nil_guards: vec![],
             nullable_refinements: vec![],
+            nullable_states: vec![],
             immutable_struct_readers: Default::default(),
             immutable_struct_reader_types: Default::default(),
             type_aliases: Default::default(),

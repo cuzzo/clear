@@ -119,6 +119,28 @@ fn nullable_refinements_are_a_stable_nil_kill_public_fact() -> Result<()> {
 }
 
 #[test]
+fn nullable_states_follow_exact_nil_writes_and_direct_aliases() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_states.c"), Language::C)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let mut actual = output
+        .nullable_states
+        .iter()
+        .map(|row| json!({"complete": row.complete, "state": row.state}))
+        .collect::<Vec<_>>();
+    actual.sort_by_key(|row| row["state"].as_str().unwrap_or_default().to_string());
+    let expected: Vec<Value> =
+        serde_json::from_str(&fs::read_to_string(fixture("nullable_states.json"))?)?;
+
+    assert_eq!(actual, expected);
+    assert!(output
+        .nullable_states
+        .iter()
+        .filter(|row| row.state == "definitely_null")
+        .all(|row| row.source_definition_ids.len() == 1 && row.unknown_reasons.is_empty()));
+    Ok(())
+}
+
+#[test]
 fn typescript_variable_bound_callables_are_emitted_as_project_methods() -> Result<()> {
     let document = syntax::parse_file(fixture("typescript_callable.ts"), Language::TypeScript)?;
     let output = profile::extract(&document, Profile::Espalier);

@@ -318,6 +318,8 @@ pub struct Document {
     pub redundant_nil_guards: Vec<redundant_nil_guard::RedundantNilGuardRow>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nullable_refinements: Vec<nullable::NullableRefinement>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nullable_states: Vec<nullable::NullableState>,
     #[serde(default)]
     pub immutable_struct_readers: BTreeMap<String, Vec<String>>,
     #[serde(default)]

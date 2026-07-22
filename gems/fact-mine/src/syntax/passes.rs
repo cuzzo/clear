@@ -48,6 +48,7 @@ pub(crate) struct StatefulSyntaxMetadata {
     pub(crate) clone_candidates: Vec<CloneCandidate>,
     pub(crate) redundant_nil_guards: Vec<redundant_nil_guard::RedundantNilGuardRow>,
     pub(crate) nullable_refinements: Vec<nullable::NullableRefinement>,
+    pub(crate) nullable_states: Vec<nullable::NullableState>,
     pub(crate) syntax: SyntaxMetadata,
 }
 
@@ -150,6 +151,7 @@ impl<'a> StatefulSyntaxPass<'a> {
         );
         let nullable_refinements =
             nullable::project_refinements(&nil_guard_facts.refinements, &control_flow);
+        let nullable_states = nullable::project_states(&control_flow);
 
         StatefulSyntaxMetadata {
             local_complexity_scores: complexity::local_complexity_scores_from_methods(
@@ -164,6 +166,7 @@ impl<'a> StatefulSyntaxPass<'a> {
             clone_candidates,
             redundant_nil_guards: nil_guard_facts.redundant_guards,
             nullable_refinements,
+            nullable_states,
             syntax,
         }
     }

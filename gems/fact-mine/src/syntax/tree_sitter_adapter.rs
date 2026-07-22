@@ -147,6 +147,7 @@ fn parse_normalized_file(
         clone_candidates: metadata.clone_candidates,
         redundant_nil_guards: metadata.redundant_nil_guards,
         nullable_refinements: metadata.nullable_refinements,
+        nullable_states: metadata.nullable_states,
         immutable_struct_readers: metadata.syntax.immutable_struct_readers,
         immutable_struct_reader_types: metadata.syntax.immutable_struct_reader_types,
         type_aliases: metadata.syntax.type_aliases,
