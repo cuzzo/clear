@@ -648,6 +648,9 @@ fn dependency_change(file: &DiffFile) -> Option<DependencyChange> {
         "package.json" | _ if file.path.ends_with("/package.json") => {
             Some(package_json_dependencies(file))
         }
+        "Cargo.toml" | _ if file.path.ends_with("/Cargo.toml") => {
+            Some(cargo_toml_dependencies(file))
+        }
         path if is_manifest_path(path) => Some(DependencyChange {
             manifest_path: file.path.clone(),
             status: DependencyStatus::UnknownPackageFile,
@@ -655,6 +658,23 @@ fn dependency_change(file: &DiffFile) -> Option<DependencyChange> {
         }),
         _ => None,
     }
+}
+
+fn cargo_toml_dependencies(file: &DiffFile) -> DependencyChange {
+    let before = file
+        .base_source
+        .as_deref()
+        .map(parse_cargo_toml)
+        .transpose();
+    let after = file
+        .head_source
+        .as_deref()
+        .map(parse_cargo_toml)
+        .transpose();
+    let (Ok(before), Ok(after)) = (before, after) else {
+        return unknown_dependency_change(file);
+    };
+    exact_dependency_change(file, before.unwrap_or_default(), after.unwrap_or_default())
 }
 
 fn package_json_dependencies(file: &DiffFile) -> DependencyChange {
@@ -669,14 +689,24 @@ fn package_json_dependencies(file: &DiffFile) -> DependencyChange {
         .map(parse_package_json)
         .transpose();
     let (Ok(before), Ok(after)) = (before, after) else {
-        return DependencyChange {
-            manifest_path: file.path.clone(),
-            status: DependencyStatus::UnknownPackageFile,
-            entries: Vec::new(),
-        };
+        return unknown_dependency_change(file);
     };
-    let before = before.unwrap_or_default();
-    let after = after.unwrap_or_default();
+    exact_dependency_change(file, before.unwrap_or_default(), after.unwrap_or_default())
+}
+
+fn unknown_dependency_change(file: &DiffFile) -> DependencyChange {
+    DependencyChange {
+        manifest_path: file.path.clone(),
+        status: DependencyStatus::UnknownPackageFile,
+        entries: Vec::new(),
+    }
+}
+
+fn exact_dependency_change(
+    file: &DiffFile,
+    before: BTreeMap<(String, String), String>,
+    after: BTreeMap<(String, String), String>,
+) -> DependencyChange {
     let names = before
         .keys()
         .chain(after.keys())
@@ -720,6 +750,37 @@ fn parse_package_json(contents: &str) -> Result<BTreeMap<(String, String), Strin
         }
     }
     Ok(dependencies)
+}
+
+fn parse_cargo_toml(contents: &str) -> Result<BTreeMap<(String, String), String>, ()> {
+    let value: toml::Value = contents.parse().map_err(|_| ())?;
+    let root = value.as_table().ok_or(())?;
+    let mut dependencies = BTreeMap::new();
+    for scope in ["dependencies", "dev-dependencies", "build-dependencies"] {
+        let Some(entries) = root.get(scope) else {
+            continue;
+        };
+        let entries = entries.as_table().ok_or(())?;
+        for (name, value) in entries {
+            dependencies.insert(
+                (scope.to_string(), name.clone()),
+                cargo_dependency_requirement(value)?,
+            );
+        }
+    }
+    Ok(dependencies)
+}
+
+fn cargo_dependency_requirement(value: &toml::Value) -> Result<String, ()> {
+    match value {
+        toml::Value::String(version) => Ok(version.clone()),
+        toml::Value::Table(table) => table
+            .get("version")
+            .and_then(toml::Value::as_str)
+            .map(str::to_string)
+            .ok_or(()),
+        _ => Err(()),
+    }
 }
 
 fn source_role(path: &str) -> SourceRole {
@@ -960,6 +1021,63 @@ mod tests {
             .entries
             .iter()
             .any(|entry| entry.name == "zod" && entry.before.is_none()));
+    }
+
+    #[test]
+    fn reports_static_cargo_toml_dependency_changes_exactly() {
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            vec![file(
+                "gems/lineage/Cargo.toml",
+                "[dependencies]\nserde = \"1\"\n[dev-dependencies]\ntempfile = \"3\"\n",
+            )],
+            vec![file(
+                "gems/lineage/Cargo.toml",
+                "[dependencies]\nserde = { version = \"1.0\" }\ntoml = \"0.8\"\n",
+            )],
+        );
+
+        let change = &plan.dependency_changes[0];
+        assert_eq!(change.status, DependencyStatus::Exact);
+        assert!(change.entries.iter().any(|entry| entry.name == "serde"
+            && entry.before.as_deref() == Some("1")
+            && entry.after.as_deref() == Some("1.0")));
+        assert!(change.entries.iter().any(|entry| entry.name == "toml"));
+        assert!(change.entries.iter().any(|entry| entry.name == "tempfile"
+            && entry.scope == "dev-dependencies"
+            && entry.after.is_none()));
+    }
+
+    #[test]
+    fn reports_dynamic_cargo_toml_dependencies_as_unknown() {
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            vec![file(
+                "Cargo.toml",
+                "[dependencies]\nserde = { workspace = true }\n",
+            )],
+            vec![file(
+                "Cargo.toml",
+                "[dependencies]\nserde = { workspace = true }\n",
+            )],
+        );
+
+        assert_eq!(plan.dependency_changes.len(), 0);
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            vec![file("Cargo.toml", "[dependencies]\nserde = \"1\"\n")],
+            vec![file(
+                "Cargo.toml",
+                "[dependencies]\nserde = { workspace = true }\n",
+            )],
+        );
+        assert_eq!(
+            plan.dependency_changes[0].status,
+            DependencyStatus::UnknownPackageFile
+        );
     }
 
     #[test]
