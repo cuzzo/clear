@@ -63,7 +63,7 @@ function DiffReview({ initialLayout, plan, rawPath }: { readonly initialLayout: 
     <p>{plan.inventory.changed_files} files in {plan.inventory.changed_directories} directories</p>
     <p>{plan.inventory.added_files} added · {plan.inventory.modified_files} modified · {plan.inventory.deleted_files} deleted · {plan.inventory.renamed_files} renamed</p>
     <p>Base {plan.scope.base_oid} · Head {plan.scope.head_oid}</p>
-    <p>Evidence: coverage {plan.evidence.coverage} · mutation {plan.evidence.mutation} · hazards {plan.evidence.hazards}</p>
+    <p>Evidence: coverage {plan.evidence.coverage} · mutation {plan.evidence.mutation} · hazards {plan.evidence.hazards} · SARIF {plan.evidence.sarif}</p>
     <InventoryPaths label="Configuration" paths={plan.inventory.configuration_paths.map((file) => `${file.path} (${file.kind})`)} />
     <InventoryPaths label="Documentation" paths={plan.inventory.documentation_paths} />
     <InventoryPaths label="Generated" paths={plan.inventory.generated_paths} />
@@ -86,6 +86,7 @@ function FileReview({ file, onRaw, sideBySide }: { readonly file: DiffFile; read
   return <article className="file-review"><button aria-expanded={expanded} className="disclosure" onClick={() => setExpanded(!expanded)}>{file.path} · risk {file.risk.score} · {file.role} · {file.change} · {file.added_lines.code} code lines</button>
     {expanded && <div className="file-body">
       <RiskMetrics risk={file.risk} verification={file.verification} />
+      <FindingSummary findings={file.sarif_findings} />
       {publicGroups.sort(groupOrder).map((group) => <GroupReview file={file} group={group} key={`${group.kind}:${group.name}:${group.start_line}`} sideBySide={sideBySide} />)}
       <p>Other changed lines: {file.residual_lines.code} code, {file.residual_lines.comments} comments. <button onClick={() => onRaw(file.path)}>Open raw file diff</button></p>
       {privateGroups.length > 0 && <PrivateReview file={file} groups={privateGroups} sideBySide={sideBySide} />}
@@ -106,6 +107,7 @@ function GroupReview({ file, group, sideBySide }: { readonly file: DiffFile; rea
   const [expanded, setExpanded] = useState(false);
   return <section className="group-review"><button aria-expanded={expanded} className="disclosure" onClick={() => setExpanded(!expanded)}>{group.kind} {group.name} · {group.added_lines.code} code lines · {group.added_lines.comments} comments</button>
     <RiskMetrics risk={group.risk} verification={group.verification} />
+    <FindingSummary findings={group.sarif_findings} />
     {expanded && <DiffPreview language={file.language ?? "plaintext"} modified={sourceRange(file.head_source, group.start_line, group.end_line)} original={sourceRange(file.base_source, group.base_start_line, group.base_end_line)} sideBySide={sideBySide} />}
   </section>;
 }
@@ -116,6 +118,11 @@ function RawReview({ file, onBack, sideBySide }: { readonly file: DiffFile; read
 
 function RiskMetrics({ risk, verification }: { readonly risk: RiskSummary; readonly verification: VerificationSlices }): React.JSX.Element {
   return <p className="metrics">{risk.not_covered} not covered · {risk.partially_covered} partial · +{risk.added_complexity} complexity · +{risk.tier_one_hazards} tier-1 hazards · {verification.unknown} unknown evidence</p>;
+}
+
+function FindingSummary({ findings }: { readonly findings: DiffFile["sarif_findings"] }): React.JSX.Element | null {
+  if (findings.length === 0) return null;
+  return <p className="metrics">SARIF findings (partial): {findings.map((finding) => `${finding.tool}/${finding.rule_id} line ${finding.start_line}: ${finding.message}`).join(" · ")}</p>;
 }
 
 function sourceRange(source: string | null, start: number | null, end: number | null): string {

@@ -104,6 +104,9 @@ pub struct DiffFile {
     pub verification: VerificationSlices,
     pub residual_lines: AddedLines,
     pub groups: Vec<DiffGroup>,
+    /// Commit-matching SARIF observations. They are intentionally kept out of
+    /// risk scoring until their artifact scope can prove completeness.
+    pub sarif_findings: Vec<SarifFindingSummary>,
     pub risk: RiskSummary,
 }
 
@@ -138,6 +141,23 @@ pub struct CoverageObservation {
 pub struct MutationKillObservation {
     pub path: String,
     pub line: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct SarifFindingSummary {
+    pub source: String,
+    pub tool: String,
+    pub rule_id: String,
+    pub level: String,
+    pub message: String,
+    pub start_line: u32,
+    pub end_line: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SarifObservation {
+    pub path: String,
+    pub finding: SarifFindingSummary,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, TS)]
@@ -183,6 +203,7 @@ pub struct DiffGroup {
     pub visibility: Visibility,
     pub added_lines: AddedLines,
     pub verification: VerificationSlices,
+    pub sarif_findings: Vec<SarifFindingSummary>,
     pub risk: RiskSummary,
 }
 
@@ -303,6 +324,7 @@ fn plan_file(
         risk: risk_summary(head_source.as_deref(), &added_line_numbers, &verification),
         verification,
         groups,
+        sarif_findings: Vec::new(),
         base_source,
         head_source,
         added_lines,
@@ -391,6 +413,47 @@ pub fn apply_partial_mutation_kills(plan: &mut DiffPlan, observations: &[Mutatio
             apply_kill_verification(&mut group.verification, &lines, &kills, &file.path);
         }
     }
+}
+
+/// Attaches SARIF rows only when they were produced for the immutable head
+/// revision. A finding is evidence of a reported location, not evidence that
+/// all hazards were searched for, so it remains partial and does not affect
+/// the H1 risk term.
+pub fn apply_partial_sarif_findings(plan: &mut DiffPlan, observations: &[SarifObservation]) {
+    if observations.is_empty() {
+        return;
+    }
+    plan.evidence.sarif = EvidenceState::Partial;
+    plan.evidence.hazards = EvidenceState::Partial;
+    for file in &mut plan.files {
+        let findings = observations
+            .iter()
+            .filter(|observation| observation.path == file.path)
+            .map(|observation| observation.finding.clone())
+            .collect::<Vec<_>>();
+        if findings.is_empty() {
+            continue;
+        }
+        file.sarif_findings = findings.clone();
+        for group in &mut file.groups {
+            group.sarif_findings = findings
+                .iter()
+                .filter(|finding| {
+                    spans_overlap(
+                        finding.start_line,
+                        finding.end_line,
+                        group.start_line,
+                        group.end_line,
+                    )
+                })
+                .cloned()
+                .collect();
+        }
+    }
+}
+
+fn spans_overlap(left_start: u32, left_end: u32, right_start: u32, right_end: u32) -> bool {
+    left_start <= right_end && right_start <= left_end
 }
 
 fn code_line_numbers(source: Option<&str>, added: &BTreeSet<u32>, path: &str) -> BTreeSet<u32> {
@@ -583,6 +646,7 @@ fn semantic_groups(
                     visibility,
                     risk,
                     verification,
+                    sarif_findings: Vec::new(),
                     added_lines,
                 }
             })
@@ -1516,6 +1580,53 @@ mod tests {
             line_kind("return value", "main.go"),
             LineKind::Code
         ));
+    }
+
+    #[test]
+    fn attaches_partial_sarif_findings_only_to_matching_file_and_group_spans() {
+        let mut plan = build_diff_plan(
+            "base",
+            "head",
+            Vec::new(),
+            vec![file(
+                "lib/app.rb",
+                "def first\n  value\nend\n\ndef second\n  other\nend\n",
+            )],
+        );
+        apply_partial_sarif_findings(
+            &mut plan,
+            &[
+                SarifObservation {
+                    path: "lib/app.rb".into(),
+                    finding: sarif_finding(2, 2, "first"),
+                },
+                SarifObservation {
+                    path: "other.rb".into(),
+                    finding: sarif_finding(1, 1, "other"),
+                },
+            ],
+        );
+
+        let file = &plan.files[0];
+        assert_eq!(plan.evidence.sarif, EvidenceState::Partial);
+        assert_eq!(plan.evidence.hazards, EvidenceState::Partial);
+        assert_eq!(file.sarif_findings.len(), 1);
+        assert_eq!(file.sarif_findings[0].message, "first");
+        assert_eq!(file.groups[0].sarif_findings.len(), 1);
+        assert!(file.groups[1].sarif_findings.is_empty());
+        assert_eq!(file.risk.tier_one_hazards, 0);
+    }
+
+    fn sarif_finding(start_line: u32, end_line: u32, message: &str) -> SarifFindingSummary {
+        SarifFindingSummary {
+            source: "scanner".into(),
+            tool: "Scanner".into(),
+            rule_id: "scanner.rule".into(),
+            level: "warning".into(),
+            message: message.into(),
+            start_line,
+            end_line,
+        }
     }
 
     #[test]

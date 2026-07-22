@@ -41,6 +41,7 @@ async fn api_diff_plan_handler(
         Ok(mut plan) => {
             apply_known_coverage(&state, &mut plan);
             apply_known_mutation_kills(&state, &mut plan);
+            apply_known_sarif(&state, &mut plan);
             Json(ApiEnvelope {
                 api_version: crate::diff::DIFF_API_VERSION,
                 data: plan,
@@ -49,6 +50,24 @@ async fn api_diff_plan_handler(
         }
         Err(error) => error_json(StatusCode::BAD_REQUEST, error),
     }
+}
+
+fn apply_known_sarif(state: &UiServerState, plan: &mut crate::diff::DiffPlan) {
+    if !state.db.exists() {
+        return;
+    }
+    let Ok(storage) = crate::storage::Storage::open_existing(state.db.as_ref()) else {
+        return;
+    };
+    let paths = plan
+        .files
+        .iter()
+        .map(|file| file.path.clone())
+        .collect::<Vec<_>>();
+    let Ok(rows) = storage.sarif_observations_for_commit_paths(&plan.scope.head_oid, &paths) else {
+        return;
+    };
+    crate::diff::apply_partial_sarif_findings(plan, &rows);
 }
 
 fn apply_known_coverage(state: &UiServerState, plan: &mut crate::diff::DiffPlan) {
@@ -104,6 +123,7 @@ async fn api_diff_file_handler(
         Ok(mut plan) => {
             apply_known_coverage(&state, &mut plan);
             apply_known_mutation_kills(&state, &mut plan);
+            apply_known_sarif(&state, &mut plan);
             match plan.files.into_iter().find(|file| file.path == path) {
                 Some(file) => Json(ApiEnvelope {
                     api_version: crate::diff::DIFF_API_VERSION,
@@ -252,6 +272,75 @@ mod tests {
         );
         assert_eq!(
             json.pointer("/data/files/0/verification/not_covered")
+                .and_then(|value| value.as_u64()),
+            Some(0)
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_api_attaches_only_head_matching_sarif_as_partial_evidence() {
+        let (_dir, state, base, head) = test_state();
+        let storage = crate::storage::Storage::open(state.db.as_ref()).unwrap();
+        let artifact_id = storage
+            .insert_sarif_artifact(&crate::model::SarifArtifact {
+                source: "scanner".into(),
+                tool_name: "Scanner".into(),
+                run_format: "sarif".into(),
+                artifact_path: "scan.sarif#0".into(),
+                artifact_sha256: "head".into(),
+                commit_hash: head.clone(),
+                timestamp: 1,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .insert_sarif_finding(&crate::model::SarifFinding {
+                artifact_id,
+                finding_key: "head-finding".into(),
+                source: "scanner".into(),
+                tool_name: "Scanner".into(),
+                run_format: "sarif".into(),
+                commit_hash: head.clone(),
+                timestamp: 1,
+                rule_id: "scanner.rule".into(),
+                level: "warning".into(),
+                message: "head finding".into(),
+                path: "app.rb".into(),
+                start_line: 1,
+                start_column: None,
+                end_line: None,
+                end_column: None,
+                category: "hazard".into(),
+                is_dark_arm: false,
+                unit_id: None,
+                fingerprint: "head-finding".into(),
+                properties_json: "{}".into(),
+                raw_json: "{}".into(),
+            })
+            .unwrap();
+
+        let response = api_diff_plan_handler(
+            State(state),
+            Query(DiffQuery {
+                base: Some(base),
+                head: Some(head),
+            }),
+        )
+        .await;
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            json.pointer("/data/evidence/sarif")
+                .and_then(|value| value.as_str()),
+            Some("partial")
+        );
+        assert_eq!(
+            json.pointer("/data/files/0/sarif_findings/0/message")
+                .and_then(|value| value.as_str()),
+            Some("head finding")
+        );
+        assert_eq!(
+            json.pointer("/data/files/0/risk/tier_one_hazards")
                 .and_then(|value| value.as_u64()),
             Some(0)
         );

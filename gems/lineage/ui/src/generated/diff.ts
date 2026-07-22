@@ -8,9 +8,16 @@ export type ChangeInventory = { changed_directories: number, changed_files: numb
 
 export type ConfigFile = { path: string, kind: string, };
 
-export type DiffFile = { path: string, previous_path: string | null, change: FileChangeKind, role: SourceRole, language: string | null, base_source: string | null, head_source: string | null, added_lines: AddedLines, verification: VerificationSlices, residual_lines: AddedLines, groups: Array<DiffGroup>, risk: RiskSummary, };
+export type DiffFile = { path: string, previous_path: string | null, change: FileChangeKind, role: SourceRole, language: string | null, base_source: string | null, head_source: string | null, added_lines: AddedLines, verification: VerificationSlices, residual_lines: AddedLines, groups: Array<DiffGroup>,
+/**
+ * Commit-matching SARIF observations. They are intentionally kept out of
+ * risk scoring until their artifact scope can prove completeness.
+ */
+sarif_findings: Array<SarifFindingSummary>, risk: RiskSummary, };
 
-export type DiffGroup = { name: string, kind: string, start_line: number, end_line: number, base_start_line: number | null, base_end_line: number | null, visibility: Visibility, added_lines: AddedLines, verification: VerificationSlices, risk: RiskSummary, };
+export type DiffGroup = { name: string, kind: string, start_line: number, end_line: number, base_start_line: number | null, base_end_line: number | null, visibility: Visibility, added_lines: AddedLines, verification: VerificationSlices, sarif_findings: Array<SarifFindingSummary>, risk: RiskSummary, };
+
+export type SarifFindingSummary = { source: string, tool: string, rule_id: string, level: string, message: string, start_line: number, end_line: number, };
 
 export type AddedLines = { code: number, comments: number, other: number, };
 

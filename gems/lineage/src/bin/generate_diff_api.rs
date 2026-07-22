@@ -1,7 +1,7 @@
 use lineage::diff::{
     AddedLines, ChangeInventory, ConfigFile, DependencyChange, DependencyEntry, DependencyStatus,
     DiffFile, DiffGroup, DiffPlan, DiffScope, EvidenceAvailability, EvidenceState, FileChangeKind,
-    LanguageSummary, RiskSummary, SourceRole, VerificationSlices, Visibility,
+    LanguageSummary, RiskSummary, SarifFindingSummary, SourceRole, VerificationSlices, Visibility,
 };
 use std::path::Path;
 use ts_rs::TS;
@@ -15,6 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ConfigFile::decl(),
         DiffFile::decl(),
         DiffGroup::decl(),
+        SarifFindingSummary::decl(),
         AddedLines::decl(),
         VerificationSlices::decl(),
         RiskSummary::decl(),
@@ -30,7 +31,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ]
     .join("\n\n")
     .replacen("type ", "export type ", 1)
-    .replace("\ntype ", "\nexport type ");
+    .replace("\ntype ", "\nexport type ")
+    .lines()
+    .map(str::trim_end)
+    .collect::<Vec<_>>()
+    .join("\n");
     std::fs::create_dir_all(output.parent().expect("generated parent"))?;
     std::fs::write(
         output,

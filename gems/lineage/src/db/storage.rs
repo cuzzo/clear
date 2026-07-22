@@ -1,4 +1,6 @@
-use crate::diff::{CoverageObservation, MutationKillObservation};
+use crate::diff::{
+    CoverageObservation, MutationKillObservation, SarifFindingSummary, SarifObservation,
+};
 use crate::model::{
     CommitMetadata, CrashEvent, Event, HazardEvent, LogicalUnit, QualityEvent, QualityMetric,
     SarifArtifact, SarifFinding, TestExposureEvent,
@@ -1046,6 +1048,52 @@ impl Storage {
                 Ok(MutationKillObservation {
                     path: row.get(0)?,
                     line: row.get::<_, i64>(1)?.max(1) as u32,
+                })
+            })?;
+            observations.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
+        }
+        Ok(observations)
+    }
+
+    /// Reads only SARIF rows that declare the requested immutable revision.
+    /// The diff layer treats these as partial, because a stored artifact does
+    /// not itself establish analyzer/configuration completeness.
+    pub fn sarif_observations_for_commit_paths(
+        &self,
+        commit_hash: &str,
+        paths: &[String],
+    ) -> Result<Vec<SarifObservation>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut observations = Vec::new();
+        for paths in paths.chunks(500) {
+            let placeholders = std::iter::repeat("?")
+                .take(paths.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT path, source, tool_name, rule_id, level, message, start_line, \
+                 COALESCE(end_line, start_line) FROM sarif_findings \
+                 WHERE commit_hash = ? AND path IN ({placeholders}) \
+                 ORDER BY path, start_line, rule_id, finding_key"
+            );
+            let mut values = Vec::<rusqlite::types::Value>::with_capacity(paths.len() + 1);
+            values.push(rusqlite::types::Value::Text(commit_hash.to_string()));
+            values.extend(paths.iter().cloned().map(rusqlite::types::Value::Text));
+            let mut statement = self.conn.prepare(&sql)?;
+            let rows = statement.query_map(rusqlite::params_from_iter(values), |row| {
+                Ok(SarifObservation {
+                    path: row.get(0)?,
+                    finding: SarifFindingSummary {
+                        source: row.get(1)?,
+                        tool: row.get(2)?,
+                        rule_id: row.get(3)?,
+                        level: row.get(4)?,
+                        message: row.get(5)?,
+                        start_line: row.get::<_, i64>(6)?.max(1) as u32,
+                        end_line: row.get::<_, i64>(7)?.max(1) as u32,
+                    },
                 })
             })?;
             observations.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
