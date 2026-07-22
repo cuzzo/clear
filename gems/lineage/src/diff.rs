@@ -27,6 +27,7 @@ pub struct DiffPlan {
     pub inventory: ChangeInventory,
     pub dependency_changes: Vec<DependencyChange>,
     pub language_summaries: Vec<LanguageSummary>,
+    pub evidence: EvidenceAvailability,
     pub files: Vec<DiffFile>,
 }
 
@@ -98,6 +99,28 @@ pub struct DiffFile {
     pub head_source: Option<String>,
     pub added_lines: AddedLines,
     pub groups: Vec<DiffGroup>,
+    pub risk: RiskSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EvidenceAvailability {
+    pub coverage: EvidenceState,
+    pub mutation: EvidenceState,
+    pub hazards: EvidenceState,
+    pub sarif: EvidenceState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceState {
+    Unknown,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct RiskSummary {
+    pub score: usize,
+    pub added_complexity: usize,
+    pub tier_one_hazards: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -165,53 +188,17 @@ pub fn build_diff_plan(
     let base = file_map(base_files);
     let head = file_map(head_files);
     let renamed = renamed_paths(&base, &head);
-    let mut files = Vec::new();
-
-    let paths = base
-        .keys()
-        .chain(head.keys())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    for path in paths {
-        let base_file = base.get(&path);
-        let head_file = head.get(&path);
-        if base_file == head_file {
-            continue;
-        }
-
-        let previous_path = renamed
-            .iter()
-            .find_map(|(old, new)| (new == &path).then(|| old.clone()));
-        if head_file.is_none() && renamed.contains_key(&path) {
-            continue;
-        }
-        let change = match (base_file, head_file, previous_path.as_ref()) {
-            (None, Some(_), Some(_)) => FileChangeKind::Renamed,
-            (None, Some(_), None) => FileChangeKind::Added,
-            (Some(_), None, _) => FileChangeKind::Deleted,
-            (Some(_), Some(_), _) => FileChangeKind::Modified,
-            (None, None, _) => unreachable!("paths come from one snapshot"),
-        };
-        let display_path = path.as_str();
-        let role = source_role(display_path);
-        let base_source = base_file.and_then(|file| file.contents.clone());
-        let head_source = head_file.and_then(|file| file.contents.clone());
-        let added_line_numbers = added_line_numbers(base_source.as_deref(), head_source.as_deref());
-        let added_lines = summarize_added_lines(head_source.as_deref(), &added_line_numbers, display_path);
-        let groups = semantic_groups(display_path, head_source.as_deref(), &added_line_numbers);
-        files.push(DiffFile {
-            path: display_path.to_string(),
-            previous_path,
-            change,
-            role,
-            language: language_for_path(display_path),
-            base_source,
-            head_source,
-            added_lines,
-            groups,
-        });
-    }
-    files.sort_by(|left, right| left.path.cmp(&right.path));
+    let mut files = changed_paths(&base, &head)
+        .into_iter()
+        .filter_map(|path| plan_file(&path, &base, &head, &renamed))
+        .collect::<Vec<_>>();
+    files.sort_by(|left, right| {
+        right
+            .risk
+            .score
+            .cmp(&left.risk.score)
+            .then_with(|| left.path.cmp(&right.path))
+    });
     let inventory = build_inventory(&files);
     let dependency_changes = dependency_changes(&files);
     let language_summaries = language_summaries(&files);
@@ -225,19 +212,119 @@ pub fn build_diff_plan(
         inventory,
         dependency_changes,
         language_summaries,
+        evidence: unavailable_evidence(),
         files,
     }
+}
+
+fn changed_paths(
+    base: &BTreeMap<String, RevisionFile>,
+    head: &BTreeMap<String, RevisionFile>,
+) -> BTreeSet<String> {
+    base.keys().chain(head.keys()).cloned().collect()
+}
+
+fn plan_file(
+    path: &str,
+    base: &BTreeMap<String, RevisionFile>,
+    head: &BTreeMap<String, RevisionFile>,
+    renamed: &BTreeMap<String, String>,
+) -> Option<DiffFile> {
+    let base_file = base.get(path);
+    let head_file = head.get(path);
+    if base_file == head_file || is_renamed_source(path, renamed) {
+        return None;
+    }
+    let previous_path = previous_path(path, renamed);
+    let change = change_kind(base_file, head_file, previous_path.as_ref());
+    let base_source = base_file.and_then(|file| file.contents.clone());
+    let head_source = head_file.and_then(|file| file.contents.clone());
+    let added_line_numbers = added_line_numbers(base_source.as_deref(), head_source.as_deref());
+    let added_lines = summarize_added_lines(head_source.as_deref(), &added_line_numbers, path);
+
+    Some(DiffFile {
+        path: path.to_string(),
+        previous_path,
+        change,
+        role: source_role(path),
+        language: language_for_path(path),
+        groups: semantic_groups(path, head_source.as_deref(), &added_line_numbers),
+        risk: risk_summary(head_source.as_deref(), &added_line_numbers, &added_lines),
+        base_source,
+        head_source,
+        added_lines,
+    })
+}
+
+fn is_renamed_source(path: &str, renamed: &BTreeMap<String, String>) -> bool {
+    renamed.contains_key(path)
+}
+
+fn previous_path(path: &str, renamed: &BTreeMap<String, String>) -> Option<String> {
+    renamed
+        .iter()
+        .find_map(|(old, new)| (new == path).then(|| old.clone()))
+}
+
+fn change_kind(
+    base_file: Option<&RevisionFile>,
+    head_file: Option<&RevisionFile>,
+    previous_path: Option<&String>,
+) -> FileChangeKind {
+    match (base_file, head_file, previous_path) {
+        (None, Some(_), Some(_)) => FileChangeKind::Renamed,
+        (None, Some(_), None) => FileChangeKind::Added,
+        (Some(_), None, _) => FileChangeKind::Deleted,
+        (Some(_), Some(_), _) => FileChangeKind::Modified,
+        (None, None, _) => unreachable!("paths come from one snapshot"),
+    }
+}
+
+fn unavailable_evidence() -> EvidenceAvailability {
+    EvidenceAvailability {
+        coverage: EvidenceState::Unknown,
+        mutation: EvidenceState::Unknown,
+        hazards: EvidenceState::Unknown,
+        sarif: EvidenceState::Unknown,
+    }
+}
+
+fn risk_summary(source: Option<&str>, added: &BTreeSet<u32>, lines: &AddedLines) -> RiskSummary {
+    let added_complexity = source
+        .unwrap_or_default()
+        .lines()
+        .enumerate()
+        .filter(|(index, line)| added.contains(&(*index as u32 + 1)) && is_decision_line(line))
+        .count();
+    RiskSummary {
+        score: lines.code + added_complexity,
+        added_complexity,
+        tier_one_hazards: 0,
+    }
+}
+
+fn is_decision_line(line: &str) -> bool {
+    let line = line.trim();
+    [
+        "if ", "unless ", "while ", "for ", "case ", "match ", " rescue ", "&&", "||",
+    ]
+    .iter()
+    .any(|token| line.starts_with(token) || line.contains(token))
 }
 
 fn language_summaries(files: &[DiffFile]) -> Vec<LanguageSummary> {
     let mut summaries = BTreeMap::<String, LanguageSummary>::new();
     for file in files {
-        let Some(language) = &file.language else { continue };
-        let summary = summaries.entry(language.clone()).or_insert_with(|| LanguageSummary {
-            language: language.clone(),
-            production: AddedLines::default(),
-            test: AddedLines::default(),
-        });
+        let Some(language) = &file.language else {
+            continue;
+        };
+        let summary = summaries
+            .entry(language.clone())
+            .or_insert_with(|| LanguageSummary {
+                language: language.clone(),
+                production: AddedLines::default(),
+                test: AddedLines::default(),
+            });
         match file.role {
             SourceRole::Production => add_lines(&mut summary.production, &file.added_lines),
             SourceRole::Test => add_lines(&mut summary.test, &file.added_lines),
@@ -262,7 +349,10 @@ fn added_line_numbers(base: Option<&str>, head: Option<&str>) -> BTreeSet<u32> {
         .lines()
         .enumerate()
         .filter_map(|(index, line)| match remaining.get_mut(line) {
-            Some(count) if *count > 0 => { *count -= 1; None }
+            Some(count) if *count > 0 => {
+                *count -= 1;
+                None
+            }
             _ => Some(index as u32 + 1),
         })
         .collect()
@@ -271,7 +361,9 @@ fn added_line_numbers(base: Option<&str>, head: Option<&str>) -> BTreeSet<u32> {
 fn summarize_added_lines(source: Option<&str>, added: &BTreeSet<u32>, path: &str) -> AddedLines {
     let mut summary = AddedLines::default();
     for (index, line) in source.unwrap_or_default().lines().enumerate() {
-        if !added.contains(&(index as u32 + 1)) { continue; }
+        if !added.contains(&(index as u32 + 1)) {
+            continue;
+        }
         match line_kind(line, path) {
             LineKind::Code => summary.code += 1,
             LineKind::Comment => summary.comments += 1,
@@ -282,38 +374,81 @@ fn summarize_added_lines(source: Option<&str>, added: &BTreeSet<u32>, path: &str
 }
 
 fn semantic_groups(path: &str, source: Option<&str>, added: &BTreeSet<u32>) -> Vec<DiffGroup> {
-    let Some(source) = source else { return Vec::new() };
+    let Some(source) = source else {
+        return Vec::new();
+    };
     let extractor = HeuristicExtractor::default();
-    let file = BlobFile { path: path.to_string(), contents: source.to_string() };
-    extractor.extract_units(&file).into_iter().map(|unit| DiffGroup {
-        name: unit.name,
-        kind: unit.kind.as_str().to_string(),
-        start_line: unit.start_line,
-        end_line: unit.end_line,
-        visibility: visibility_for(&unit.signature, unit.kind),
-        added_lines: summarize_group_lines(source, added, path, unit.start_line, unit.end_line),
-    }).collect()
+    let file = BlobFile {
+        path: path.to_string(),
+        contents: source.to_string(),
+    };
+    extractor
+        .extract_units(&file)
+        .into_iter()
+        .map(|unit| DiffGroup {
+            name: unit.name,
+            kind: unit.kind.as_str().to_string(),
+            start_line: unit.start_line,
+            end_line: unit.end_line,
+            visibility: visibility_for(&unit.signature, unit.kind),
+            added_lines: summarize_group_lines(source, added, path, unit.start_line, unit.end_line),
+        })
+        .collect()
 }
 
-fn summarize_group_lines(source: &str, added: &BTreeSet<u32>, path: &str, start: u32, end: u32) -> AddedLines {
-    let lines = added.iter().copied().filter(|line| *line >= start && *line <= end).collect();
+fn summarize_group_lines(
+    source: &str,
+    added: &BTreeSet<u32>,
+    path: &str,
+    start: u32,
+    end: u32,
+) -> AddedLines {
+    let lines = added
+        .iter()
+        .copied()
+        .filter(|line| *line >= start && *line <= end)
+        .collect();
     summarize_added_lines(Some(source), &lines, path)
 }
 
 fn visibility_for(signature: &str, kind: UnitKind) -> Visibility {
-    if kind != UnitKind::Function { return Visibility::Unknown; }
-    if signature.contains("private") { Visibility::Private }
-    else if signature.contains("public") || signature.contains("pub ") || signature.starts_with("def ") { Visibility::Public }
-    else { Visibility::Unknown }
+    if kind != UnitKind::Function {
+        return Visibility::Unknown;
+    }
+    if signature.contains("private") {
+        Visibility::Private
+    } else if signature.contains("public")
+        || signature.contains("pub ")
+        || signature.starts_with("def ")
+    {
+        Visibility::Public
+    } else {
+        Visibility::Unknown
+    }
 }
 
-enum LineKind { Code, Comment, Other }
+enum LineKind {
+    Code,
+    Comment,
+    Other,
+}
 
 fn line_kind(line: &str, path: &str) -> LineKind {
     let line = line.trim();
-    if line.is_empty() || line == "end" || matches!(line, "{" | "}" | "};" | "{}") { return LineKind::Other; }
-    if line.starts_with('#') || line.starts_with("//") || line.starts_with("/*") || line.starts_with('*') || line.starts_with("<!--") { return LineKind::Comment; }
-    if path.ends_with(".rb") && line == "=begin" { return LineKind::Comment; }
+    if line.is_empty() || line == "end" || matches!(line, "{" | "}" | "};" | "{}") {
+        return LineKind::Other;
+    }
+    if line.starts_with('#')
+        || line.starts_with("//")
+        || line.starts_with("/*")
+        || line.starts_with('*')
+        || line.starts_with("<!--")
+    {
+        return LineKind::Comment;
+    }
+    if path.ends_with(".rb") && line == "=begin" {
+        return LineKind::Comment;
+    }
     LineKind::Code
 }
 
@@ -778,12 +913,53 @@ mod tests {
     }
 
     #[test]
+    fn ranks_changed_files_by_added_meaningful_code_and_decisions() {
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            vec![file("lib/safe.rb", "def safe\nend\n")],
+            vec![
+                file("lib/safe.rb", "def safe\n  value\nend\n"),
+                file(
+                    "lib/risky.rb",
+                    "def risky\n  if condition\n    value\n  end\nend\n",
+                ),
+            ],
+        );
+
+        assert_eq!(plan.files[0].path, "lib/risky.rb");
+        assert_eq!(plan.files[0].risk.added_complexity, 1);
+        assert_eq!(plan.files[0].risk.score, 4);
+        assert_eq!(plan.files[1].path, "lib/safe.rb");
+        assert_eq!(plan.files[1].risk.score, 1);
+    }
+
+    #[test]
+    fn marks_evidence_unknown_without_revision_scoped_artifacts() {
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            Vec::new(),
+            vec![file("lib/app.rb", "def app\nend\n")],
+        );
+
+        assert_eq!(plan.evidence, unavailable_evidence());
+        assert_eq!(plan.files[0].risk.tier_one_hazards, 0);
+    }
+
+    #[test]
     fn excludes_closure_only_lines_across_brace_languages() {
         for (path, line) in [("main.zig", "}"), ("main.go", "}"), ("main.rs", "};")] {
             assert!(matches!(line_kind(line, path), LineKind::Other));
         }
-        assert!(matches!(line_kind("// intent", "main.go"), LineKind::Comment));
-        assert!(matches!(line_kind("return value", "main.go"), LineKind::Code));
+        assert!(matches!(
+            line_kind("// intent", "main.go"),
+            LineKind::Comment
+        ));
+        assert!(matches!(
+            line_kind("return value", "main.go"),
+            LineKind::Code
+        ));
     }
 
     #[test]

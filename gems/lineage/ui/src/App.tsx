@@ -33,6 +33,7 @@ function DiffReview({ plan }: { readonly plan: DiffPlan }): React.JSX.Element {
   return <section aria-label="Diff inventory" className="preview-card">
     <p>{plan.inventory.changed_files} files in {plan.inventory.changed_directories} directories</p>
     <p>Base {plan.scope.base_oid} · Head {plan.scope.head_oid}</p>
+    <p>Evidence: coverage {plan.evidence.coverage} · mutation {plan.evidence.mutation} · hazards {plan.evidence.hazards}</p>
     {plan.dependency_changes.map((change) => <p key={change.manifest_path}>{change.manifest_path}: {change.status === "exact" ? "dependency changes parsed" : "unknown package-file change"}</p>)}
     {plan.language_summaries.map((summary) => <p key={summary.language}>{summary.language}: {summary.production.code} production code lines · {summary.test.code} test code lines</p>)}
     <fieldset><legend>Diff layout</legend><label><input checked={sideBySide} name="layout" onChange={() => setSideBySide(true)} type="radio" />Side by side</label><label><input checked={!sideBySide} name="layout" onChange={() => setSideBySide(false)} type="radio" />Inline</label></fieldset>
@@ -43,7 +44,7 @@ function DiffReview({ plan }: { readonly plan: DiffPlan }): React.JSX.Element {
 function FileReview({ file, sideBySide }: { readonly file: DiffPlan["files"][number]; readonly sideBySide: boolean }): React.JSX.Element {
   const publicGroups = file.groups.filter((group) => group.visibility !== "private");
   const privateGroups = file.groups.filter((group) => group.visibility === "private");
-  return <details><summary>{file.path} · {file.role} · {file.change} · {file.added_lines.code} code lines</summary>
+  return <details><summary>{file.path} · risk {file.risk.score} · {file.role} · {file.change} · {file.added_lines.code} code lines</summary>
     {publicGroups.map((group) => <GroupReview file={file} group={group} key={`${group.kind}:${group.name}:${group.start_line}`} sideBySide={sideBySide} />)}
     {file.base_source !== null && file.head_source !== null && publicGroups.length === 0 && <DiffPreview language={file.language ?? "plaintext"} modified={file.head_source} original={file.base_source} sideBySide={sideBySide} />}
     {file.base_source === null || file.head_source === null ? <p>Binary or one-sided change; open the raw file view for details.</p> : null}

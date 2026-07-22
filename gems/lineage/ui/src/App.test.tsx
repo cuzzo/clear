@@ -31,9 +31,10 @@ describe("App", () => {
           inventory: { changed_files: 2, changed_directories: 1, by_role: {} },
           dependency_changes: [{ manifest_path: "Gemfile", status: "unknown_package_file" }],
           language_summaries: [{ language: "ruby", production: { code: 1, comments: 0, other: 0 }, test: { code: 0, comments: 0, other: 0 } }],
+          evidence: { coverage: "unknown", mutation: "unknown", hazards: "unknown", sarif: "unknown" },
           files: [
-            { path: "lib/app.rb", role: "production", change: "modified", language: "ruby", previous_path: null, base_source: "old", head_source: "new", added_lines: { code: 1, comments: 0, other: 0 }, groups: [{ name: "run", kind: "function", start_line: 1, end_line: 2, visibility: "public", added_lines: { code: 1, comments: 0, other: 0 } }, { name: "hide", kind: "function", start_line: 3, end_line: 4, visibility: "private", added_lines: { code: 2, comments: 1, other: 0 } }] },
-            { path: "logo.png", role: "other", change: "added", language: null, previous_path: null, base_source: null, head_source: null, added_lines: { code: 0, comments: 0, other: 0 }, groups: [] },
+            { path: "lib/app.rb", role: "production", change: "modified", language: "ruby", previous_path: null, base_source: "old", head_source: "new", added_lines: { code: 1, comments: 0, other: 0 }, risk: { score: 2, added_complexity: 1, tier_one_hazards: 0 }, groups: [{ name: "run", kind: "function", start_line: 1, end_line: 2, visibility: "public", added_lines: { code: 1, comments: 0, other: 0 } }, { name: "hide", kind: "function", start_line: 3, end_line: 4, visibility: "private", added_lines: { code: 2, comments: 1, other: 0 } }] },
+            { path: "logo.png", role: "other", change: "added", language: null, previous_path: null, base_source: null, head_source: null, added_lines: { code: 0, comments: 0, other: 0 }, risk: { score: 0, added_complexity: 0, tier_one_hazards: 0 }, groups: [] },
           ],
         },
       }),
@@ -44,6 +45,7 @@ describe("App", () => {
     expect(await screen.findByText(/2 files in 1 directories/)).toBeInTheDocument();
     expect(screen.getByText(/unknown package-file change/)).toBeInTheDocument();
     expect(screen.getByText(/ruby: 1 production code lines/)).toBeInTheDocument();
+    expect(screen.getByText(/Evidence: coverage unknown/)).toBeInTheDocument();
     expect(screen.getByText(/1 private changes/)).toBeInTheDocument();
     expect(screen.getByText(/Binary or one-sided change/)).toBeInTheDocument();
     expect(diffPreview).toHaveBeenCalledTimes(2);

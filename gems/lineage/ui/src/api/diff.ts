@@ -11,6 +11,7 @@ export interface DiffFile {
   readonly head_source: string | null;
   readonly added_lines: AddedLines;
   readonly groups: readonly DiffGroup[];
+  readonly risk: { readonly score: number; readonly added_complexity: number; readonly tier_one_hazards: number };
 }
 
 export interface AddedLines { readonly code: number; readonly comments: number; readonly other: number }
@@ -29,6 +30,7 @@ export interface DiffPlan {
   readonly inventory: { readonly changed_directories: number; readonly changed_files: number; readonly by_role: Readonly<Record<string, number>> };
   readonly dependency_changes: readonly { readonly manifest_path: string; readonly status: "exact" | "unknown_package_file" }[];
   readonly language_summaries: readonly { readonly language: string; readonly production: AddedLines; readonly test: AddedLines }[];
+  readonly evidence: { readonly coverage: "unknown"; readonly mutation: "unknown"; readonly hazards: "unknown"; readonly sarif: "unknown" };
   readonly files: readonly DiffFile[];
 }
 
