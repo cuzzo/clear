@@ -1869,16 +1869,6 @@ impl<'a> Extractor<'a> {
         call: &NormalizedCallProjection,
         block: bool,
     ) -> bool {
-        if call.receiver == "self"
-            && call
-                .message
-                .chars()
-                .next()
-                .is_some_and(|ch| ch.is_ascii_uppercase())
-            && call.arguments.is_empty()
-        {
-            return true;
-        }
         if constant_receiver(&call.receiver)
             && !call.receiver.contains('(')
             && call.arguments.is_empty()
@@ -3455,7 +3445,7 @@ mod tests {
         let behavior = CustomBehavior::default();
         let extractor = Extractor::new(Path::new("test.rb"), &[], &behavior);
         let call = NormalizedCallProjection {
-            receiver: "self".to_string(),
+            receiver: "MyOwner".to_string(),
             message: "MyConstant".to_string(),
             arguments: Vec::new(),
             access_span: [1, 0, 1, 10],
@@ -3463,6 +3453,15 @@ mod tests {
         };
         let node = mock_node("LVAR", vec![], "");
         assert!(extractor.suppress_call_site(&node, &call, false));
+
+        let exported_self_method = NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "ExportedMethod".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 0, 1, 10],
+            span: [1, 0, 1, 10],
+        };
+        assert!(!extractor.suppress_call_site(&node, &exported_self_method, false));
     }
 
     #[test]

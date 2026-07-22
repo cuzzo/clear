@@ -894,7 +894,21 @@ impl<'source> TreeSitterNormalizer<'source> {
             .named_field(node, "condition")
             .or_else(|| self.named_field(node, "predicate"))
             .or_else(|| self.first_named(node))?;
-        let condition = optional_node(self.normalize_node(condition_raw));
+        let condition = self.normalize_node(condition_raw);
+        let condition = if let Some(initializer) = self
+            .normalization_adapter
+            .if_initializer(node, self.source)
+            .and_then(|initializer| self.normalize_node(initializer))
+        {
+            Some(self.wrap(
+                "BEGIN",
+                vec![Child::Node(Box::new(initializer)), optional_node(condition)],
+                node,
+            ))
+        } else {
+            condition
+        };
+        let condition = optional_node(condition);
         let positive_raw = self
             .named_field(node, "consequence")
             .or_else(|| self.named_field(node, "body"))
@@ -5080,6 +5094,21 @@ impl<'source> TreeSitterNormalizer<'source> {
             return true;
         }
 
+        // Some grammars (notably Go) wrap `receiver.member()` in a call node
+        // whose first named child is the member selector and whose second
+        // child is the argument list. The outer call node has no `.` token of
+        // its own, so checking only its direct children silently degrades a
+        // zero-argument method invocation into a property read.
+        if raw_named.len() >= 2
+            && self.dotted_call(raw_named[0])
+            && raw_named[1..].iter().all(|child| {
+                self.normalization_adapter
+                    .is_call_block_or_arg_kind(child.kind())
+            })
+        {
+            return true;
+        }
+
         if !node
             .children(&mut node.walk())
             .any(|child| self.member_access_operator(node_text(child, self.source)))
@@ -5118,6 +5147,16 @@ impl<'source> TreeSitterNormalizer<'source> {
         if raw_named.len() == 1
             && node_text(node, self.source) == node_text(raw_named[0], self.source)
             && self.dotted_call(raw_named[0])
+        {
+            return self.dotted_call_parts(raw_named[0], block);
+        }
+
+        if raw_named.len() >= 2
+            && self.dotted_call(raw_named[0])
+            && raw_named[1..].iter().all(|child| {
+                self.normalization_adapter
+                    .is_call_block_or_arg_kind(child.kind())
+            })
         {
             return self.dotted_call_parts(raw_named[0], block);
         }

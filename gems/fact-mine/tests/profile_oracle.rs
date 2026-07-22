@@ -1056,6 +1056,81 @@ func run(value worker) {
 }
 
 #[test]
+fn go_zero_argument_receiver_calls_are_not_degraded_to_property_reads() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    tmp.write_all(
+        br#"package sample
+
+type pool struct{}
+
+func (p *pool) IsClosed() bool { return false }
+func (p *pool) Running() int { return 0 }
+
+func (p *pool) ready() bool {
+    return !p.IsClosed() && p.Running() > 0
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.message == "IsClosed" || call.message == "Running")
+        .collect::<Vec<_>>();
+
+    assert_eq!(calls.len(), 2, "{calls:#?}");
+    assert!(calls.iter().any(|call| {
+        call.receiver == "self"
+            && call.message == "IsClosed"
+            && call.argument_count == 0
+    }));
+    assert!(calls.iter().any(|call| {
+        call.receiver == "self"
+            && call.message == "Running"
+            && call.argument_count == 0
+    }));
+    Ok(())
+}
+
+#[test]
+fn go_if_initializer_calls_remain_in_the_normalized_condition_sequence() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    tmp.write_all(
+        br#"package sample
+
+type pool struct{}
+
+func (p *pool) Next() *int { return nil }
+
+func (p *pool) ready() bool {
+    if next := p.Next(); next != nil {
+        return true
+    }
+    return false
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.message == "Next")
+        .collect::<Vec<_>>();
+
+    assert_eq!(calls.len(), 1, "{calls:#?}");
+    assert_eq!(calls[0].receiver, "self");
+    assert_eq!(calls[0].function, "ready");
+    assert_eq!(calls[0].argument_count, 0);
+    Ok(())
+}
+
+#[test]
 fn go_local_bindings_retain_provable_interface_types() -> Result<()> {
     use std::io::Write;
 

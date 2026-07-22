@@ -20,10 +20,12 @@
     "exact_project_targets": 0,
     "functions_with_unresolved_calls": 0,
     "modeled_without_project_target": 0,
-    "normalized_calls_without_raw_span": 3,
+    "normalized_calls_without_raw_span": 1,
     "outside_executable_function": 0,
     "owners_with_supertypes": 0,
-    "raw_calls_not_normalized": 2,
+    "raw_calls_not_normalized": 0,
+    "raw_calls_not_normalized_inside_function": 0,
+    "raw_calls_not_normalized_outside_function": 0,
     "raw_parser_call_sites": 3,
     "semantically_accounted_call_percent": 0.0,
     "semantically_accounted_call_sites": 0,
@@ -202,6 +204,8 @@
   "fields": [],
   "hash_shapes": [],
   "methods": [],
+  "nullable_operations": [],
+  "nullable_summaries": [],
   "owners": [
     {
       "confidence": "high",
@@ -219,6 +223,7 @@
       ]
     }
   ],
+  "presence_correlations": [],
   "signatures": {},
   "state_param_origins": {},
   "state_protocols": {},

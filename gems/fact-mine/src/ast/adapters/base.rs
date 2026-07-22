@@ -308,6 +308,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         self.if_node_kind(kind).then_some("IF")
     }
 
+    /// Some languages allow a statement before an `if` predicate (for
+    /// example Go's `if value := next(); value != nil`).  The normalizer must
+    /// retain it in the condition sequence so its calls and local writes are
+    /// not silently lost.
+    fn if_initializer<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
     fn conditional_keyword_node_type(&self, keyword: &str) -> Option<&'static str> {
         match keyword {
             "if" => Some("IF"),

@@ -33,7 +33,7 @@ pub(crate) mod visibility;
 pub(crate) mod zig;
 
 use crate::ast::RawNode;
-pub use crate::ast::{Child, Node, Span};
+pub use crate::ast::{Child, Node, RawCallSite, Span};
 use crate::parallel;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -245,6 +245,11 @@ pub struct Document {
     pub source_digest: String,
     #[serde(default)]
     pub raw_call_spans: Vec<Span>,
+    /// Parser-classified calls retained with grammar-node kinds for
+    /// normalization-loss accounting. This is diagnostic evidence, not a
+    /// second call extractor.
+    #[serde(default)]
+    pub raw_call_sites: Vec<RawCallSite>,
     #[serde(default)]
     pub symbol_scope: SymbolScope,
     #[serde(default)]

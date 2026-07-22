@@ -421,6 +421,20 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
 
     let raw_parser_call_sites = output.call_resolution_coverage.raw_parser_call_sites;
     let raw_calls_not_normalized = output.call_resolution_coverage.raw_calls_not_normalized;
+    let raw_calls_not_normalized_inside_function = output
+        .call_resolution_coverage
+        .raw_calls_not_normalized_inside_function;
+    let raw_calls_not_normalized_outside_function = output
+        .call_resolution_coverage
+        .raw_calls_not_normalized_outside_function;
+    let raw_calls_not_normalized_by_kind = output
+        .call_resolution_coverage
+        .raw_calls_not_normalized_by_kind
+        .clone();
+    let raw_call_normalization_gap_samples = output
+        .call_resolution_coverage
+        .raw_call_normalization_gap_samples
+        .clone();
     let normalized_calls_without_raw_span = output
         .call_resolution_coverage
         .normalized_calls_without_raw_span;
@@ -428,6 +442,18 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
         summarize_call_resolution(&output.owners, &output.methods, &output.calls);
     output.call_resolution_coverage.raw_parser_call_sites = raw_parser_call_sites;
     output.call_resolution_coverage.raw_calls_not_normalized = raw_calls_not_normalized;
+    output
+        .call_resolution_coverage
+        .raw_calls_not_normalized_inside_function = raw_calls_not_normalized_inside_function;
+    output
+        .call_resolution_coverage
+        .raw_calls_not_normalized_outside_function = raw_calls_not_normalized_outside_function;
+    output
+        .call_resolution_coverage
+        .raw_calls_not_normalized_by_kind = raw_calls_not_normalized_by_kind;
+    output
+        .call_resolution_coverage
+        .raw_call_normalization_gap_samples = raw_call_normalization_gap_samples;
     output
         .call_resolution_coverage
         .normalized_calls_without_raw_span = normalized_calls_without_raw_span;

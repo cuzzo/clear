@@ -297,6 +297,18 @@ pub struct CallResolutionCounts {
     pub calls_with_project_candidate_set: usize,
 }
 
+/// A bounded diagnostic sample of a parser call with no matched normalized
+/// call. Consumers must not treat it as a hazard; it exists to make extractor
+/// coverage regressions reviewable at an anchored source location.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RawCallNormalizationGap {
+    pub path: String,
+    pub language: String,
+    pub span: [usize; 4],
+    pub kind: String,
+    pub inside_executable_function: bool,
+}
+
 /// Honest call-target coverage for one merged profile.
 ///
 /// `eligible_call_sites` contains calls whose source is an emitted executable
@@ -311,6 +323,22 @@ pub struct CallResolutionCoverage {
     pub raw_parser_call_sites: usize,
     /// Parser call spans for which normalization emitted no call record.
     pub raw_calls_not_normalized: usize,
+    /// The executable-function subset of `raw_calls_not_normalized`. These
+    /// calls can affect function-scoped consumers; top-level/declaration calls
+    /// are retained separately so a source-scope policy is not misreported as
+    /// a function extractor defect.
+    pub raw_calls_not_normalized_inside_function: usize,
+    /// Raw parser calls outside every extracted executable function.
+    pub raw_calls_not_normalized_outside_function: usize,
+    /// Grammar-node kinds for the raw-call subset with no normalized call at
+    /// the same span. This exposes extractor loss without treating every
+    /// syntax-level representation difference as an analyzer defect.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub raw_calls_not_normalized_by_kind: BTreeMap<String, usize>,
+    /// Representative unmatched parser calls, capped so coverage diagnostics
+    /// cannot dominate ordinary FactMine profile artifacts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raw_call_normalization_gap_samples: Vec<RawCallNormalizationGap>,
     /// Normalized calls without an identical parser-call span (for example,
     /// language-defined synthetic/operator calls).
     pub normalized_calls_without_raw_span: usize,
@@ -945,12 +973,62 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         .copied()
         .collect::<BTreeSet<_>>();
     let normalized_call_spans = calls.iter().map(|call| call.span).collect::<BTreeSet<_>>();
+    let (raw_calls_not_normalized, normalized_calls_without_raw_span) =
+        unmatched_call_spans(&raw_call_spans, &normalized_call_spans);
+    let raw_call_kinds = document
+        .raw_call_sites
+        .iter()
+        .map(|site| (site.span, site.kind.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let raw_calls_not_normalized_inside_function = raw_calls_not_normalized
+        .iter()
+        .filter(|span| {
+            document
+                .function_defs
+                .iter()
+                .any(|function| span_contains(function.span, **span))
+        })
+        .count();
+    let raw_calls_not_normalized_by_kind = raw_calls_not_normalized
+        .iter()
+        .map(|span| {
+            raw_call_kinds
+                .get(span)
+                .copied()
+                .unwrap_or("unknown_raw_call_kind")
+                .to_string()
+        })
+        .fold(BTreeMap::new(), |mut counts, kind| {
+            *counts.entry(kind).or_default() += 1;
+            counts
+        });
+    let raw_call_normalization_gap_samples = raw_calls_not_normalized
+        .iter()
+        .take(32)
+        .map(|span| RawCallNormalizationGap {
+            path: path.clone(),
+            language: language.clone(),
+            span: *span,
+            kind: raw_call_kinds
+                .get(span)
+                .copied()
+                .unwrap_or("unknown_raw_call_kind")
+                .to_string(),
+            inside_executable_function: document
+                .function_defs
+                .iter()
+                .any(|function| span_contains(function.span, *span)),
+        })
+        .collect();
     let call_resolution_coverage = CallResolutionCoverage {
         raw_parser_call_sites: raw_call_spans.len(),
-        raw_calls_not_normalized: raw_call_spans.difference(&normalized_call_spans).count(),
-        normalized_calls_without_raw_span: normalized_call_spans
-            .difference(&raw_call_spans)
-            .count(),
+        raw_calls_not_normalized: raw_calls_not_normalized.len(),
+        raw_calls_not_normalized_inside_function,
+        raw_calls_not_normalized_outside_function: raw_calls_not_normalized.len()
+            - raw_calls_not_normalized_inside_function,
+        raw_calls_not_normalized_by_kind,
+        raw_call_normalization_gap_samples,
+        normalized_calls_without_raw_span: normalized_calls_without_raw_span.len(),
         ..CallResolutionCoverage::default()
     };
 
@@ -1090,6 +1168,10 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut import_facts = Vec::new();
     let mut raw_parser_call_sites = 0usize;
     let mut raw_calls_not_normalized = 0usize;
+    let mut raw_calls_not_normalized_inside_function = 0usize;
+    let mut raw_calls_not_normalized_outside_function = 0usize;
+    let mut raw_calls_not_normalized_by_kind = BTreeMap::new();
+    let mut raw_call_normalization_gap_samples = Vec::new();
     let mut normalized_calls_without_raw_span = 0usize;
 
     for output in outputs {
@@ -1097,6 +1179,23 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         import_facts.extend(output.imports);
         raw_parser_call_sites += output.call_resolution_coverage.raw_parser_call_sites;
         raw_calls_not_normalized += output.call_resolution_coverage.raw_calls_not_normalized;
+        raw_calls_not_normalized_inside_function += output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function;
+        raw_calls_not_normalized_outside_function += output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_outside_function;
+        for (kind, count) in output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_by_kind
+        {
+            *raw_calls_not_normalized_by_kind.entry(kind).or_default() += count;
+        }
+        raw_call_normalization_gap_samples.extend(
+            output
+                .call_resolution_coverage
+                .raw_call_normalization_gap_samples,
+        );
         normalized_calls_without_raw_span += output
             .call_resolution_coverage
             .normalized_calls_without_raw_span;
@@ -1186,6 +1285,21 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut call_resolution_coverage = summarize_call_resolution(&owners, &methods, &calls);
     call_resolution_coverage.raw_parser_call_sites = raw_parser_call_sites;
     call_resolution_coverage.raw_calls_not_normalized = raw_calls_not_normalized;
+    call_resolution_coverage.raw_calls_not_normalized_inside_function =
+        raw_calls_not_normalized_inside_function;
+    call_resolution_coverage.raw_calls_not_normalized_outside_function =
+        raw_calls_not_normalized_outside_function;
+    call_resolution_coverage.raw_calls_not_normalized_by_kind = raw_calls_not_normalized_by_kind;
+    raw_call_normalization_gap_samples.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.span.cmp(&right.span))
+            .then_with(|| left.kind.cmp(&right.kind))
+    });
+    raw_call_normalization_gap_samples.dedup();
+    raw_call_normalization_gap_samples.truncate(64);
+    call_resolution_coverage.raw_call_normalization_gap_samples =
+        raw_call_normalization_gap_samples;
     call_resolution_coverage.normalized_calls_without_raw_span = normalized_calls_without_raw_span;
     state_accesses.sort_by(|a, b| a.id.cmp(&b.id));
     state_accesses.dedup_by(|a, b| a.id == b.id);
@@ -1935,6 +2049,75 @@ fn percentage(numerator: usize, denominator: usize) -> f64 {
         return 0.0;
     }
     ((numerator as f64 * 10_000.0 / denominator as f64).round()) / 100.0
+}
+
+fn span_contains(outer: [usize; 4], inner: [usize; 4]) -> bool {
+    (outer[0], outer[1]) <= (inner[0], inner[1])
+        && (inner[2], inner[3]) <= (outer[2], outer[3])
+}
+
+/// Match parser and normalized calls structurally, not only by an identical
+/// range. Language adapters may deliberately retain a callable access span
+/// (`receiver.member`) instead of the enclosing invocation (`receiver.member()`)
+/// while preserving the same semantic call. Process smallest parser spans
+/// first and consume one normalized span per parser span so an inner call never
+/// masks a missing outer call.
+fn unmatched_call_spans(
+    raw: &BTreeSet<[usize; 4]>,
+    normalized: &BTreeSet<[usize; 4]>,
+) -> (Vec<[usize; 4]>, Vec<[usize; 4]>) {
+    let mut raw_spans = raw.iter().copied().collect::<Vec<_>>();
+    raw_spans.sort_by_key(span_extent);
+    let mut unused_normalized = normalized.iter().copied().collect::<BTreeSet<_>>();
+    let mut unmatched_raw = Vec::new();
+
+    for raw_span in raw_spans {
+        let match_span = unused_normalized
+            .iter()
+            .copied()
+            .filter(|normalized_span| spans_overlap(raw_span, *normalized_span))
+            .min_by_key(|normalized_span| call_span_match_rank(raw_span, *normalized_span));
+        if let Some(normalized_span) = match_span {
+            unused_normalized.remove(&normalized_span);
+        } else {
+            unmatched_raw.push(raw_span);
+        }
+    }
+
+    (unmatched_raw, unused_normalized.into_iter().collect())
+}
+
+fn span_extent(span: &[usize; 4]) -> (usize, usize, usize, usize) {
+    (
+        span[2].saturating_sub(span[0]),
+        span[3].saturating_sub(span[1]),
+        span[0],
+        span[1],
+    )
+}
+
+fn spans_overlap(left: [usize; 4], right: [usize; 4]) -> bool {
+    (left[0], left[1]) < (right[2], right[3]) && (right[0], right[1]) < (left[2], left[3])
+}
+
+fn call_span_match_rank(raw: [usize; 4], normalized: [usize; 4]) -> (u8, usize, usize, usize, usize) {
+    let relation = if raw == normalized {
+        0
+    } else if span_contains(raw, normalized) {
+        1
+    } else if span_contains(normalized, raw) {
+        2
+    } else {
+        3
+    };
+    let normalized_extent = span_extent(&normalized);
+    (
+        relation,
+        normalized_extent.0,
+        normalized_extent.1,
+        normalized_extent.2,
+        normalized_extent.3,
+    )
 }
 
 fn resolve_project_calls(
@@ -5964,6 +6147,7 @@ pub(crate) mod tests {
             language: Language::Ruby,
             source_digest: String::new(),
             raw_call_spans: Vec::new(),
+            raw_call_sites: Vec::new(),
             symbol_scope: syntax::SymbolScope::default(),
             function_defs: vec![syntax::FunctionDef {
                 file: "test.rb".to_string(),
@@ -6073,6 +6257,92 @@ pub(crate) mod tests {
             receiver_state_field("this.name", &document),
             Some("name".to_string())
         );
+    }
+
+    #[test]
+    fn raw_call_loss_is_grouped_by_parser_node_kind_and_survives_merge() {
+        let mut document = test_document();
+        let span = [4, 2, 4, 9];
+        document.raw_call_spans = vec![span];
+        document.raw_call_sites = vec![crate::ast::RawCallSite {
+            span,
+            kind: "call_expression".to_string(),
+        }];
+
+        let output = extract(&document, Profile::Espalier);
+        assert_eq!(output.call_resolution_coverage.raw_calls_not_normalized, 1);
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_inside_function,
+            0
+        );
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_outside_function,
+            1
+        );
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_by_kind
+                .get("call_expression"),
+            Some(&1)
+        );
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_call_normalization_gap_samples,
+            vec![RawCallNormalizationGap {
+                path: "test.rb".to_string(),
+                language: "ruby".to_string(),
+                span,
+                kind: "call_expression".to_string(),
+                inside_executable_function: false,
+            }]
+        );
+
+        let merged = merge(vec![output], Profile::Espalier);
+        assert_eq!(
+            merged
+                .call_resolution_coverage
+                .raw_calls_not_normalized_by_kind
+                .get("call_expression"),
+            Some(&1)
+        );
+        assert_eq!(
+            merged
+                .call_resolution_coverage
+                .raw_call_normalization_gap_samples
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn call_coverage_matches_access_spans_without_hiding_missing_outer_calls() {
+        let raw = BTreeSet::from([
+            [1, 0, 1, 20], // outer_call(inner())
+            [1, 11, 1, 18], // inner()
+        ]);
+        let normalized = BTreeSet::from([[1, 11, 1, 16]]); // inner callable access
+
+        let (unmatched_raw, unmatched_normalized) = unmatched_call_spans(&raw, &normalized);
+
+        assert_eq!(unmatched_raw, vec![[1, 0, 1, 20]]);
+        assert!(unmatched_normalized.is_empty());
+    }
+
+    #[test]
+    fn call_coverage_matches_a_normalized_access_within_its_parser_call() {
+        let raw = BTreeSet::from([[1, 0, 1, 16]]); // receiver.member()
+        let normalized = BTreeSet::from([[1, 0, 1, 15]]); // receiver.member
+
+        let (unmatched_raw, unmatched_normalized) = unmatched_call_spans(&raw, &normalized);
+
+        assert!(unmatched_raw.is_empty());
+        assert!(unmatched_normalized.is_empty());
     }
 
     pub(crate) fn extracts_methods_impl() {

@@ -39,6 +39,15 @@ pub struct RawNode {
     pub children: Vec<RawNode>,
 }
 
+/// A source-parser node that the active adapter classifies as a call before
+/// normalized extraction. Kept as parser evidence so coverage can distinguish
+/// a deliberate language representation difference from a dropped call.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct RawCallSite {
+    pub span: Span,
+    pub kind: String,
+}
+
 pub fn normalize_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -141,31 +150,32 @@ pub fn normalize_tree(root: TreeSitterNode<'_>, source: &str, language: Language
     TreeSitterNormalizer::new(source, language).normalize(root)
 }
 
-pub(crate) fn raw_call_spans(
+pub(crate) fn raw_call_sites(
     root: TreeSitterNode<'_>,
     source: &str,
     language: Language,
-) -> Vec<Span> {
+) -> Vec<RawCallSite> {
     fn visit(
         node: TreeSitterNode<'_>,
         normalizer: &TreeSitterNormalizer<'_>,
-        spans: &mut std::collections::BTreeSet<Span>,
+        sites: &mut std::collections::BTreeMap<Span, String>,
     ) {
         if normalizer.call_node(node) {
-            let start = node.start_position();
-            let end = node.end_position();
-            spans.insert([start.row + 1, start.column, end.row + 1, end.column]);
+            sites.insert(span(node), node.kind().to_string());
         }
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
-            visit(child, normalizer, spans);
+            visit(child, normalizer, sites);
         }
     }
 
     let normalizer = TreeSitterNormalizer::new(source, language);
-    let mut spans = std::collections::BTreeSet::new();
-    visit(root, &normalizer, &mut spans);
-    spans.into_iter().collect()
+    let mut sites = std::collections::BTreeMap::new();
+    visit(root, &normalizer, &mut sites);
+    sites
+        .into_iter()
+        .map(|(span, kind)| RawCallSite { span, kind })
+        .collect()
 }
 
 pub(crate) fn symbol_scope(

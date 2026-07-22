@@ -31,10 +31,12 @@
     "exact_project_targets": 0,
     "functions_with_unresolved_calls": 0,
     "modeled_without_project_target": 0,
-    "normalized_calls_without_raw_span": 5,
+    "normalized_calls_without_raw_span": 2,
     "outside_executable_function": 0,
     "owners_with_supertypes": 0,
-    "raw_calls_not_normalized": 3,
+    "raw_calls_not_normalized": 0,
+    "raw_calls_not_normalized_inside_function": 0,
+    "raw_calls_not_normalized_outside_function": 0,
     "raw_parser_call_sites": 15,
     "semantically_accounted_call_percent": 0.0,
     "semantically_accounted_call_sites": 0,
@@ -1044,6 +1046,48 @@
     }
   ],
   "hash_shapes": [],
+  "hidden_enum_observations": [
+    {
+      "event": "blocker",
+      "key": "local\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000instance\u0000union_match_default_body\u000011\u0000schema",
+      "kind": "local",
+      "line": 11,
+      "method": "union_match_default_body",
+      "method_kind": "instance",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "reason": "nonliteral_assignment",
+      "site": {
+        "code": "schema = union_schemas[facts.expr_type_sym]",
+        "kind": "assignment",
+        "line": 13,
+        "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+      },
+      "slot": "schema",
+      "type": "",
+      "values": []
+    },
+    {
+      "event": "blocker",
+      "key": "local\u0000/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000instance\u0000union_match_default_body\u000011\u0000all_variants",
+      "kind": "local",
+      "line": 11,
+      "method": "union_match_default_body",
+      "method_kind": "instance",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "reason": "nonliteral_assignment",
+      "site": {
+        "code": "all_variants = schema&.variants&.keys&.map(&:to_s)&.sort || []",
+        "kind": "assignment",
+        "line": 14,
+        "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+      },
+      "slot": "all_variants",
+      "type": "",
+      "values": []
+    }
+  ],
   "methods": [
     {
       "complexity_signals": {
@@ -1124,6 +1168,50 @@
       "visibility": "public"
     }
   ],
+  "nullable_operations": [],
+  "nullable_states": [
+    {
+      "complete": false,
+      "node_id": "cfg:MIRLoweringControlFlow#missing?:stmt:1:20:4",
+      "place_id": "place:MIRLoweringControlFlow#missing?:local:required",
+      "source_definition_ids": [],
+      "state": "unknown",
+      "unknown_reasons": [
+        "unresolved_nullable_producer"
+      ]
+    },
+    {
+      "complete": false,
+      "node_id": "cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4",
+      "place_id": "place:MIRLoweringControlFlow#union_match_default_body:local:facts",
+      "source_definition_ids": [],
+      "state": "unknown",
+      "unknown_reasons": [
+        "unresolved_nullable_producer"
+      ]
+    },
+    {
+      "complete": false,
+      "node_id": "cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4",
+      "place_id": "place:MIRLoweringControlFlow#union_match_default_body:local:schema",
+      "source_definition_ids": [],
+      "state": "unknown",
+      "unknown_reasons": [
+        "unresolved_nullable_producer"
+      ]
+    },
+    {
+      "complete": false,
+      "node_id": "cfg:MIRLoweringControlFlow#union_match_default_body:stmt:4:15:4",
+      "place_id": "place:MIRLoweringControlFlow#union_match_default_body:local:all_variants",
+      "source_definition_ids": [],
+      "state": "unknown",
+      "unknown_reasons": [
+        "unresolved_nullable_producer"
+      ]
+    }
+  ],
+  "nullable_summaries": [],
   "owners": [
     {
       "confidence": "high",
@@ -1529,6 +1617,7 @@
       "unknown_reasons": []
     }
   ],
+  "presence_correlations": [],
   "return_direct_usage_sites": [
     {
       "code": "extend T::Sig",
