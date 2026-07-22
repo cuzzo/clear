@@ -2930,6 +2930,31 @@ mod tests {
     }
 
     #[test]
+    fn static_nil_pressure_uses_nullable_public_facts_not_hazard_sites() {
+        let input = input_from_json(serde_json::json!({
+            "methods": [],
+            "facts": {
+                "hazard_sites": [{
+                    "hazard_type": "c_null_pointer_dereference",
+                    "path": "cache.c",
+                    "line": 12,
+                    "evidence": "nil-kill"
+                }]
+            }
+        }));
+
+        assert!(report_static_nil_pressure(&input).is_empty());
+    }
+
+    #[test]
+    fn static_nil_pressure_has_no_source_analysis_dependency() {
+        let manifest = include_str!("../Cargo.toml");
+
+        assert!(!manifest.contains("tree-sitter"));
+        assert!(!manifest.contains("fact-mine"));
+    }
+
+    #[test]
     fn strong_static_return_can_remove_false_nilability() {
         let input = input_from_json(serde_json::json!({
             "methods": [],
