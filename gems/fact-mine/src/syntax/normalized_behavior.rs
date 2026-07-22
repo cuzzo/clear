@@ -735,6 +735,22 @@ pub(crate) fn configured_collection_operation(
     })
 }
 
+/// Maps only explicit native nullability annotations to a CFG contract.
+/// Ordinary pointer spelling is intentionally absent: it says nothing about
+/// the current value and must remain unknown without another proven source.
+pub(crate) fn native_pointer_nullability_contract(type_name: &str) -> Option<&'static str> {
+    let normalized = type_name.to_ascii_lowercase();
+    let nullable = normalized.contains("_nullable") || normalized.contains("__nullable");
+    let non_null = normalized.contains("_nonnull")
+        || normalized.contains("__nonnull")
+        || normalized.contains("gsl::not_null<");
+    match (nullable, non_null) {
+        (true, false) => Some("nullable_declared_type"),
+        (false, true) => Some("non_null_declared_type"),
+        _ => None,
+    }
+}
+
 pub(crate) trait NormalizedLanguageBehavior: Sync {
     fn nullable_operation(&self, _node: &Node) -> Option<NormalizedNullableOperation> {
         None
@@ -755,6 +771,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// the language boundary while the normalized call identity is still
     /// available; CFG consumers receive only the contract fact.
     fn nullable_call_result_contract(&self, _node: &Node) -> Option<&'static str> {
+        None
+    }
+
+    /// A reviewed declaration-level nullability contract. This stays at the
+    /// language boundary: the CFG sees the resulting contract but never has
+    /// to interpret native annotation spellings.
+    fn nullable_declared_type_contract(&self, _type_name: &str) -> Option<&'static str> {
         None
     }
     /// The configuration key for this source language. Keeping this at the
@@ -1933,6 +1956,7 @@ mod tests {
         assert!(b.literal_receiver_type(&node).is_none());
         assert_eq!(b.parameter_list_source("("), "");
         assert!(b.parameter_name_from_signature("").is_none());
+        assert!(b.nullable_declared_type_contract("Widget * _Nullable").is_none());
         assert!(b.literal_state_refs(&node, "text").is_empty());
         assert!(b.nil_guard_fact("msg", "sub").is_none());
         assert!(!b.local_flow_declaration_keyword("key"));
@@ -2174,6 +2198,27 @@ mod tests {
             configured_intrinsic_operation("javascript", Some("Object"), "keys"),
             None,
             "generic JavaScript object operations may invoke proxy or getter hooks"
+        );
+    }
+
+    #[test]
+    fn native_pointer_nullability_requires_an_explicit_unambiguous_annotation() {
+        assert_eq!(
+            native_pointer_nullability_contract("Widget * _Nullable"),
+            Some("nullable_declared_type")
+        );
+        assert_eq!(
+            native_pointer_nullability_contract("Widget * __nonnull"),
+            Some("non_null_declared_type")
+        );
+        assert_eq!(
+            native_pointer_nullability_contract("gsl::not_null<Widget *>"),
+            Some("non_null_declared_type")
+        );
+        assert_eq!(native_pointer_nullability_contract("Widget *"), None);
+        assert_eq!(
+            native_pointer_nullability_contract("Widget * _Nullable _Nonnull"),
+            None
         );
     }
 }

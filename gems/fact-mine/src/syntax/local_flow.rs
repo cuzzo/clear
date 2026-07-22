@@ -342,11 +342,21 @@ impl<'a> LocalFlow<'a> {
         } else {
             format!("{owner}::{name}")
         };
+        let identity_suffix = format!("\0{name}\0{line}");
         self.method_param_types
             .get(&line_key)
             .or_else(|| self.method_param_types.get(&null_key))
             .or_else(|| self.method_param_types.get(&colon_key))
             .or_else(|| self.method_param_types.get(name))
+            .or_else(|| {
+                let mut candidates = self
+                    .method_param_types
+                    .iter()
+                    .filter(|(key, _)| key.ends_with(&identity_suffix))
+                    .map(|(_, types)| types);
+                let candidate = candidates.next()?;
+                candidates.next().is_none().then_some(candidate)
+            })
             .cloned()
             .unwrap_or_default()
     }
@@ -1060,6 +1070,34 @@ struct BoundaryText {
 mod tests {
     use super::*;
     use crate::syntax::Language;
+
+    #[test]
+    fn parameter_types_reconcile_only_a_unique_name_and_line_identity() {
+        let entry = BTreeMap::from([("value".to_string(), "gsl::not_null<Widget *>".to_string())]);
+        let mut types = BTreeMap::new();
+        types.insert("fixture\0load\012".to_string(), entry.clone());
+        let flow = LocalFlow::new(
+            "fixture.cpp".to_string(),
+            Vec::new(),
+            BTreeMap::new(),
+            types,
+            crate::syntax::normalized_behavior::behavior(Language::Cpp),
+        );
+        assert_eq!(flow.param_types_for("(top-level)", "load", 12), entry);
+
+        let mut ambiguous = flow.method_param_types.clone();
+        ambiguous.insert("other\0load\012".to_string(), BTreeMap::new());
+        let ambiguous_flow = LocalFlow::new(
+            "fixture.cpp".to_string(),
+            Vec::new(),
+            BTreeMap::new(),
+            ambiguous,
+            crate::syntax::normalized_behavior::behavior(Language::Cpp),
+        );
+        assert!(ambiguous_flow
+            .param_types_for("(top-level)", "load", 12)
+            .is_empty());
+    }
 
     #[test]
     fn test_empty_node() {

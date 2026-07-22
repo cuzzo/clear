@@ -181,6 +181,26 @@ fn nullable_states_preserve_go_and_cpp_null_literals() -> Result<()> {
 }
 
 #[test]
+fn native_declared_non_null_contracts_reach_public_nullable_states() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_annotations.cpp"), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("non_null_parameter")
+            && state.place_id.ends_with(":value")
+            && state.state == "definitely_non_null"
+            && state.complete
+    }));
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("non_null_local")
+            && state.place_id.ends_with(":value")
+            && state.state == "definitely_non_null"
+            && state.complete
+    }));
+    Ok(())
+}
+
+#[test]
 fn nullable_operations_join_native_dereferences_to_proven_null_states() -> Result<()> {
     for (name, language, behavior) in [
         ("nullable_operations.c", Language::C, "undefined_behavior"),

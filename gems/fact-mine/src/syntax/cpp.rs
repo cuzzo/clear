@@ -7,7 +7,7 @@ use super::normalized_behavior::{
     balanced_selector_name, configured_collection_operation, configured_intrinsic_call_complexity,
     configured_non_call_construct, configured_semantic_symbol_call_complexity,
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
-    eliminable_guard_from_call, exact_direct_call_name, nil_guard_from_predicates, scip_descriptor_owner,
+    eliminable_guard_from_call, exact_direct_call_name, native_pointer_nullability_contract, nil_guard_from_predicates, scip_descriptor_owner,
     scip_global_parts, type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
     NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedNullableOperation,
     NormalizedSemanticEffect,
@@ -272,6 +272,10 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
             }
             _ => None,
         })
+    }
+
+    fn nullable_declared_type_contract(&self, type_name: &str) -> Option<&'static str> {
+        native_pointer_nullability_contract(type_name)
     }
 
     fn external_symbol_call_complexity(
@@ -744,6 +748,18 @@ mod tests {
             ..node("FCALL", "static_cast<int *>(value)")
         };
         assert_eq!(behavior.nullable_call_result_contract(&malformed_cast), None);
+        assert_eq!(
+            behavior.nullable_declared_type_contract("gsl::not_null<Widget *>"),
+            Some("non_null_declared_type")
+        );
+        assert_eq!(
+            behavior.nullable_declared_type_contract("std::unique_ptr<Widget>"),
+            None
+        );
+        assert_eq!(
+            behavior.declared_local_type("gsl::not_null<Widget *> value = load_widget()", "value"),
+            Some("gsl::not_null<Widget *>".to_string())
+        );
     }
 
     #[test]

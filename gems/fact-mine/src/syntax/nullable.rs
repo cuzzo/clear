@@ -545,11 +545,13 @@ fn definition_state(
             DefinitionState::DefinitelyNull,
             BTreeSet::from([node_id.to_string()]),
         )
-    } else if effect.write_nullable_contracts.contains_key(place_id) {
-        DefinitionResult::new(
-            DefinitionState::MaybeNull,
-            BTreeSet::from([node_id.to_string()]),
-        )
+    } else if let Some(contract) = effect.write_nullable_contracts.get(place_id) {
+        let state = if contract == "non_null_declared_type" {
+            DefinitionState::DefinitelyNonNull
+        } else {
+            DefinitionState::MaybeNull
+        };
+        DefinitionResult::new(state, BTreeSet::from([node_id.to_string()]))
     } else if !effect.complete || effect.unknown_call {
         DefinitionResult::unknown()
     } else if effect
@@ -656,6 +658,16 @@ mod tests {
         cycle_write
             .write_sources
             .insert("cycle".to_string(), "cycle".to_string());
+        let mut nullable_annotation = effect("nullable-annotation", "nullable");
+        nullable_annotation.write_nullable_contracts.insert(
+            "nullable".to_string(),
+            "nullable_declared_type".to_string(),
+        );
+        let mut non_null_annotation = effect("non-null-annotation", "non-null");
+        non_null_annotation.write_nullable_contracts.insert(
+            "non-null".to_string(),
+            "non_null_declared_type".to_string(),
+        );
         let facts = ControlFlowFacts {
             effects: vec![
                 null_write,
@@ -663,6 +675,8 @@ mod tests {
                 alias_write,
                 wrong_write,
                 cycle_write,
+                nullable_annotation,
+                non_null_annotation,
             ],
             reachability: vec![
                 reachable("read-null", true),
@@ -674,6 +688,8 @@ mod tests {
                 reachable("read-missing", true),
                 reachable("read-wrong", true),
                 reachable("read-cycle", true),
+                reachable("read-nullable-annotation", true),
+                reachable("read-non-null-annotation", true),
             ],
             reaching_definitions: vec![
                 reaching("read-null", "p", &["null-write"]),
@@ -687,6 +703,16 @@ mod tests {
                 reaching("read-wrong", "p", &["wrong-write"]),
                 reaching("cycle-write", "cycle", &["cycle-write"]),
                 reaching("read-cycle", "cycle", &["cycle-write"]),
+                reaching(
+                    "read-nullable-annotation",
+                    "nullable",
+                    &["nullable-annotation"],
+                ),
+                reaching(
+                    "read-non-null-annotation",
+                    "non-null",
+                    &["non-null-annotation"],
+                ),
             ],
             ..ControlFlowFacts::default()
         };
@@ -713,6 +739,14 @@ mod tests {
         assert_eq!(states[&key("read-missing", "p")].state, "unknown");
         assert_eq!(states[&key("read-wrong", "p")].state, "unknown");
         assert_eq!(states[&key("read-cycle", "cycle")].state, "unknown");
+        assert_eq!(
+            states[&key("read-nullable-annotation", "nullable")].state,
+            "maybe_null"
+        );
+        assert_eq!(
+            states[&key("read-non-null-annotation", "non-null")].state,
+            "definitely_non_null"
+        );
     }
 
     fn key(node_id: &str, place_id: &str) -> (String, String) {

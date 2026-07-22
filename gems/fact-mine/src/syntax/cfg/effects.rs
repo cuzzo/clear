@@ -92,6 +92,10 @@ pub(crate) fn extract(
                 if behavior.declared_type_hint_complete(type_name) {
                     raw.write_type_hints
                         .insert(name.clone(), format!("declared:{type_name}"));
+                    if let Some(contract) = behavior.nullable_declared_type_contract(type_name) {
+                        raw.write_nullable_contracts
+                            .insert(name.clone(), contract.to_string());
+                    }
                 }
             }
         }
@@ -130,7 +134,10 @@ pub(crate) fn extract(
                                 raw.writes.insert(name.clone());
                                 raw.record_place(name.clone(), "local");
                                 raw.write_type_hints
-                                    .insert(name, format!("declared:{type_name}"));
+                                    .insert(name.clone(), format!("declared:{type_name}"));
+                                if let Some(contract) = behavior.nullable_declared_type_contract(&type_name) {
+                                    raw.write_nullable_contracts.insert(name, contract.to_string());
+                                }
                             }
                         }
                     }

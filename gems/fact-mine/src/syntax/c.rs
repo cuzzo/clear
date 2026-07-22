@@ -5,7 +5,7 @@ use super::cfg::ControlFlowProfile;
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     configured_intrinsic_call_complexity, eliminable_guard_from_call, exact_direct_call_name,
-    nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts, NormalizedCallComplexity,
+    native_pointer_nullability_contract, nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts, NormalizedCallComplexity,
     NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedNullableOperation, NormalizedOwner,
     NormalizedSemanticEffect,
@@ -116,6 +116,14 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
             "realloc" => Some("nullable_reallocation_preserves_input"),
             _ => None,
         })
+    }
+
+    fn nullable_declared_type_contract(&self, type_name: &str) -> Option<&'static str> {
+        native_pointer_nullability_contract(type_name)
+    }
+
+    fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
+        super::normalized_behavior::type_before_local_name(source, name)
     }
 
     fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
@@ -538,6 +546,18 @@ mod tests {
         assert_eq!(
             behavior.nullable_call_result_contract(&node("CALL", "object.malloc()")),
             None
+        );
+        assert_eq!(
+            behavior.nullable_declared_type_contract("Widget * _Nullable"),
+            Some("nullable_declared_type")
+        );
+        assert_eq!(
+            behavior.nullable_declared_type_contract("Widget *"),
+            None
+        );
+        assert_eq!(
+            behavior.declared_local_type("Widget * _Nullable value = load_widget()", "value"),
+            Some("Widget * _Nullable".to_string())
         );
     }
 
