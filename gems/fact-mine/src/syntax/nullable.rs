@@ -245,17 +245,17 @@ pub(crate) fn project_summaries(
         .map(|effect| (effect.node_id.as_str(), effect))
         .collect::<BTreeMap<_, _>>();
     let mut returns = BTreeMap::<(String, String), Vec<&NullableState>>::new();
+    let mut return_effects = BTreeMap::<(String, String), Vec<&NodeEffect>>::new();
 
     for node in facts.nodes.iter().filter(|node| node.role == "return") {
         let Some(effect) = effects.get(node.id.as_str()) else {
             continue;
         };
+        let key = (node.owner.clone(), node.function.clone());
+        return_effects.entry(key.clone()).or_default().push(*effect);
         for place_id in &effect.reads {
             if let Some(state) = states_by_node.get(&(node.id.as_str(), place_id.as_str())) {
-                returns
-                    .entry((node.owner.clone(), node.function.clone()))
-                    .or_default()
-                    .push(state);
+                returns.entry(key.clone()).or_default().push(state);
             }
         }
     }
@@ -263,8 +263,20 @@ pub(crate) fn project_summaries(
     returns
         .into_iter()
         .map(|((owner, function), states)| {
+            let effects = return_effects
+                .get(&(owner.clone(), function.clone()))
+                .expect("return state was collected from a return effect");
             let state = join_projected_states(states.iter().map(|state| state.state.as_str()));
-            let complete = states.iter().all(|state| state.complete)
+            let every_read_modeled = effects.iter().all(|effect| {
+                effect.reads.iter().all(|place_id| {
+                    states_by_node.contains_key(&(effect.node_id.as_str(), place_id.as_str()))
+                })
+            });
+            let complete = every_read_modeled
+                && effects
+                    .iter()
+                    .all(|effect| effect.complete && !effect.unknown_call)
+                && states.iter().all(|state| state.complete)
                 && !matches!(state, DefinitionState::Unknown);
             let source_definition_ids = states
                 .iter()
@@ -275,6 +287,26 @@ pub(crate) fn project_summaries(
             let unknown_reasons = states
                 .iter()
                 .flat_map(|state| state.unknown_reasons.iter().cloned())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .chain(
+                    effects
+                        .iter()
+                        .flat_map(|effect| effect.unknown_reasons.iter().cloned()),
+                )
+                .chain((!every_read_modeled).then_some("unmodeled_return_read".to_string()))
+                .chain(
+                    effects
+                        .iter()
+                        .filter(|effect| !effect.complete)
+                        .map(|_| "incomplete_return_effect".to_string()),
+                )
+                .chain(
+                    effects
+                        .iter()
+                        .filter(|effect| effect.unknown_call)
+                        .map(|_| "unknown_return_call".to_string()),
+                )
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .collect();
@@ -880,6 +912,7 @@ mod tests {
             effects: vec![NodeEffect {
                 node_id: "return".to_string(),
                 reads: vec!["value".to_string()],
+                complete: true,
                 ..NodeEffect::default()
             }],
             ..ControlFlowFacts::default()
@@ -958,6 +991,10 @@ mod tests {
         );
 
         assert_eq!(rows[0].return_state, "maybe_null");
+        assert!(!rows[0].complete);
+        assert!(rows[0]
+            .unknown_reasons
+            .contains(&"unmodeled_return_read".to_string()));
         assert_eq!(
             rows[0].source_definition_ids,
             ["null-write", "present-write"]

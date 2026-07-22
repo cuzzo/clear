@@ -6105,6 +6105,12 @@ fn hidden_enum_literal_values(node: &crate::ast::Node) -> Vec<Value> {
                 vec![json!({ "kind": "String", "value": value })]
             }
         }
+        "INT" | "INTEGER" | "INTEGER_LITERAL" => node
+            .text
+            .parse::<i64>()
+            .ok()
+            .map(|value| vec![json!({ "kind": "Integer", "value": value.to_string() })])
+            .unwrap_or_default(),
         "ARRAY" | "LIST" => child_nodes(node)
             .into_iter()
             .flat_map(|child| hidden_enum_literal_values(child))
@@ -6123,6 +6129,12 @@ fn hidden_enum_literal_values(node: &crate::ast::Node) -> Vec<Value> {
 /// slot does not prove that the slot is a scalar string domain.
 fn hidden_enum_scalar_literal_values(node: &crate::ast::Node) -> Vec<Value> {
     match node.r#type.as_str() {
+        "INT" | "INTEGER" | "INTEGER_LITERAL" => node
+            .text
+            .parse::<i64>()
+            .ok()
+            .map(|value| vec![json!({ "kind": "Integer", "value": value.to_string() })])
+            .unwrap_or_default(),
         "SYM" | "SYMBOL" | "LIT" | "STR" | "STRING" | "STRING_LITERAL" => {
             hidden_enum_literal_values(node)
         }

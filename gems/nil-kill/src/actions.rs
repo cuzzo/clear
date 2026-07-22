@@ -2590,6 +2590,7 @@ struct PrimitiveDomain {
     path: String,
     line: i64,
     kind: String,
+    literal_kind: String,
     slot: String,
     blocked: bool,
     strong_decision: bool,
@@ -2644,13 +2645,13 @@ fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
                 domain.strong_decision |= site
                     .and_then(|site| fact_string(site, "kind"))
                     .is_some_and(|kind| matches!(kind, "case" | "switch"));
-                add_string_domain_values(&mut domain.values, observation);
+                add_primitive_domain_values(domain, observation);
             }
             Some("producer") => {
                 if let Some(site_id) = site_id {
                     domain.producer_sites.insert(site_id);
                 }
-                add_string_domain_values(&mut domain.values, observation);
+                add_primitive_domain_values(domain, observation);
             }
             Some("blocker") => domain.blocked = true,
             _ => {}
@@ -2665,8 +2666,8 @@ fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
             path: domain.path,
             line: domain.line,
             message: format!(
-                "{} {} has a closed-looking string domain across {} decision sites",
-                domain.kind,
+                "{} {} has a closed-looking {} domain across {} decision sites",
+                domain.kind, domain.literal_kind,
                 domain.slot,
                 domain.decision_sites.len()
             ),
@@ -2682,8 +2683,8 @@ fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
         .collect()
 }
 
-fn add_string_domain_values(
-    values: &mut BTreeSet<String>,
+fn add_primitive_domain_values(
+    domain: &mut PrimitiveDomain,
     observation: &serde_json::Map<String, serde_json::Value>,
 ) {
     for value in observation
@@ -2692,10 +2693,21 @@ fn add_string_domain_values(
         .into_iter()
         .flatten()
     {
-        if value.get("kind").and_then(serde_json::Value::as_str) == Some("String") {
-            if let Some(value) = value.get("value").and_then(serde_json::Value::as_str) {
-                values.insert(value.to_string());
-            }
+        let Some(kind) = value.get("kind").and_then(serde_json::Value::as_str) else {
+            domain.blocked = true;
+            continue;
+        };
+        if !matches!(kind, "String" | "Symbol" | "Integer") {
+            domain.blocked = true;
+            continue;
+        }
+        if !domain.literal_kind.is_empty() && domain.literal_kind != kind {
+            domain.blocked = true;
+            continue;
+        }
+        domain.literal_kind = kind.to_string();
+        if let Some(value) = value.get("value").and_then(serde_json::Value::as_str) {
+            domain.values.insert(value.to_string());
         }
     }
 }

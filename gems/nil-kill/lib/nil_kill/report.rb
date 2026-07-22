@@ -596,15 +596,10 @@ module NilKill
 
     def static_proven_boundary(evidence, scope)
       blockers = Array(evidence["blockers"])
-      input_completeness = if evidence["complete"] == true
-        "complete"
-      elsif evidence["complete"] == false || !blockers.empty?
-        "partial"
-      else
-        "unknown"
-      end
       NilKill::Sarif.proof_boundary(
-        input_completeness: input_completeness,
+        # A fact's local proof completeness is not corpus/input completeness.
+        # Only `input_coverage` may set this boundary dimension.
+        input_completeness: "unknown",
         claim_status: "proven",
         coverage_discharge: "unsatisfiable",
         authority: ["fact_mine_normalized_ast", "nil_kill_static"],

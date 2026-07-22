@@ -1,4 +1,4 @@
-# SARIF proof-boundary contract (v2)
+# SARIF proof-boundary contract (v3)
 
 Consumers of FactMine-derived facts publish this contract on individual SARIF
 results. It separates three questions that must not share a scalar tier: are
@@ -11,13 +11,14 @@ Every participating result has a `fact_mine.proof_boundary` property:
 
 ```json
 {
-  "schema": "fact-mine.proof-boundary.v2",
+  "schema": "fact-mine.proof-boundary.v3",
   "input_completeness": "complete | partial | unknown",
   "claim_status": "proven | observed | review",
   "coverage_discharge": "satisfiable | unsatisfiable | not_applicable | unknown",
   "authority": ["fact_mine_normalized_ast"],
-  "scope": "detector_local",
-  "blockers": []
+  "claim_kind": "redundant_nil_guard",
+  "scope": {"kind": "function", "closed": false},
+  "blockers": [{"kind": "parser_recovery", "path": "lib/example.rb", "span": [12, 0, 12, 0]}]
 }
 ```
 
@@ -27,8 +28,13 @@ Every participating result has a `fact_mine.proof_boundary` property:
   intentionally left for review. An observed AST pattern is not a proof.
 - `coverage_discharge` says whether coverage could satisfy the concern. It is
   independent of both proof and input completeness.
-- `authority` identifies the fact producers actually used; `scope` prevents a
-  local observation from being mistaken for a global semantic guarantee.
+- `claim_kind` identifies the detector conclusion independently of its proof
+  extent. `scope.kind` is one of `reported_span`, `function`, `owner`, `file`,
+  `project`, `closed_build_target`, or `local`; `closed` says whether the
+  selected extent was proven closed.
+- `blockers` are typed (`parser_recovery`, `call_resolution`,
+  `missing_evidence`, `open_corpus`, `unsupported_language`, or `unknown`) and
+  retain a source `path` and four-element Tree-sitter `span` when available.
 
 ## Run summary
 
@@ -55,8 +61,8 @@ them with a global scan-completeness flag.
 ## Ownership and conformance
 
 The machine-readable contract is
-`gems/hazard-contract/proof-boundary.v2.schema.json`; matching valid and
-invalid vectors live in `gems/hazard-contract/fixtures/proof-boundary.v2.json`.
+`gems/hazard-contract/proof-boundary.v3.schema.json`; matching valid and
+invalid vectors live in `gems/hazard-contract/fixtures/proof-boundary.v3.json`.
 Ruby producers use `FactMine::ProofBoundary` rather than copying validation or
 summary logic. Rust producers use typed enums, so invalid values cannot escape
 in release builds.

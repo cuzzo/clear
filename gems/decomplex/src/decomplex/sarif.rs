@@ -99,7 +99,7 @@ pub fn proof_boundary(
     let blockers = blockers
         .into_iter()
         .map(|blocker| {
-            let kind = if blocker.starts_with("parser_recovery") {
+            let value = if blocker.starts_with("parser_recovery") {
                 "parser_recovery"
             } else if blocker.starts_with("unresolved_call_resolution") {
                 "call_resolution"
@@ -110,7 +110,18 @@ pub fn proof_boundary(
             } else {
                 "unknown"
             };
-            json!({ "kind": kind })
+            let mut result = json!({ "kind": value });
+            if let Some(path) = blocker.strip_prefix("parser_recovery_dependency:") {
+                result["path"] = json!(path);
+            } else if let Some(location) = blocker.strip_prefix("unresolved_call_resolution:") {
+                if let Some((path, line)) = location.rsplit_once(':') {
+                    if let Ok(line) = line.parse::<i64>() {
+                        result["path"] = json!(path);
+                        result["span"] = json!([line, 0, line, 0]);
+                    }
+                }
+            }
+            result
         })
         .collect::<Vec<_>>();
     json!({
@@ -535,6 +546,32 @@ mod tests {
                 vec!["unresolved_call".to_string()],
             ),
             fixture["valid"]
+        );
+    }
+
+    #[test]
+    fn proof_boundary_retains_blocker_location() {
+        let boundary = proof_boundary(
+            InputCompleteness::Partial,
+            ClaimStatus::Review,
+            CoverageDischarge::Unsatisfiable,
+            &["fact_mine_normalized_ast"],
+            "test_claim",
+            ProofScopeKind::Function,
+            false,
+            vec!["unresolved_call_resolution:lib/example.rb:12".to_string()],
+        );
+        assert_eq!(
+            boundary.pointer("/blockers/0/kind"),
+            Some(&json!("call_resolution"))
+        );
+        assert_eq!(
+            boundary.pointer("/blockers/0/path"),
+            Some(&json!("lib/example.rb"))
+        );
+        assert_eq!(
+            boundary.pointer("/blockers/0/span"),
+            Some(&json!([12, 0, 12, 0]))
         );
     }
 }
