@@ -309,6 +309,33 @@ fn java_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
 }
 
 #[test]
+fn csharp_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_csharp.cs"), Language::CSharp)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("NullableCSharp#Unsafe:local:value")
+            && state.state == "definitely_null"
+            && state.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "receiver_member_access"
+            && operation.nil_behavior == "null_reference_exception"
+            && operation.state_at_operation == "definitely_null"
+            && operation.complete
+            && operation.place_id.contains("NullableCSharp#Unsafe:local:value")
+    }));
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement.place_id.contains("NullableCSharp#Guarded:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    Ok(())
+}
+
+#[test]
 fn go_map_lookup_exports_presence_without_proving_payload_non_null() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_presence.go"), Language::Go)?;
     let output = profile::extract(&document, Profile::NilKill);

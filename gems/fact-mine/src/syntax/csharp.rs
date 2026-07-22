@@ -9,7 +9,8 @@ use super::normalized_behavior::{
     configured_semantic_symbol_parametric_cost, eliminable_guard_from_call,
     nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
     type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
-    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
+    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedNullableOperation,
+    NormalizedSemanticEffect,
 };
 use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata, StateDeclaration};
 use crate::ast::{Node, Span};
@@ -203,6 +204,20 @@ const CSHARP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct CSharpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
+    fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
+        (node.r#type == "CALL")
+            .then(|| node.children.first().and_then(crate::ast::node))
+            .flatten()
+            .filter(|receiver| receiver.r#type == "LVAR")
+            .map(|receiver| receiver.text.trim().to_string())
+            .filter(|subject| !subject.is_empty())
+            .map(|subject| NormalizedNullableOperation {
+                subject,
+                operation_kind: "receiver_member_access",
+                nil_behavior: "null_reference_exception",
+            })
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,
