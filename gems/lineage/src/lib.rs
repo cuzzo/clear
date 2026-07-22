@@ -73,8 +73,8 @@ pub use mutant::{
     MutantFact, MutantIngestOptions, MutantIngestStats,
 };
 pub use pipeline::{
-    latest_run_directory, load_config, ArtifactCompression, ArtifactKind, LineageConfig,
-    RunManifest,
+    execute_profile, latest_run_directory, load_config, load_run_manifest, read_manifest_artifact,
+    ArtifactCompression, ArtifactKind, LineageConfig, RunManifest,
 };
 pub use quality::{
     coverage_records_to_test_exposure_json, ingest_coverage_json,

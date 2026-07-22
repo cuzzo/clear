@@ -1,14 +1,15 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use lineage::{
-    build_structured_diff, coverage_records_to_test_exposure_json, ingest_architecture_json,
-    ingest_coverage_json_with_options, ingest_hazards, ingest_hotness_json,
-    ingest_mutant_facts_json_with_options, ingest_sarif_paths, ingest_stack_traces,
-    ingest_test_exposure_json, parse_coverage_input, render_structured_diff_json,
+    build_structured_diff, coverage_records_to_test_exposure_json, execute_profile,
+    ingest_architecture_json, ingest_coverage_json_with_options, ingest_hazards,
+    ingest_hotness_json, ingest_mutant_facts_json_with_options, ingest_sarif_paths,
+    ingest_stack_traces, ingest_test_exposure_json, latest_run_directory, load_config,
+    load_run_manifest, parse_coverage_input, read_manifest_artifact, render_structured_diff_json,
     render_structured_diff_text, resolve_coverage_record_paths, serve_lsp, serve_mcp,
-    serve_ui_with_overlays, CoverageIngestOptions, DiffRequest, EvidenceScopeFingerprint,
-    GitProvider, HeuristicExtractor, LineageEngine, MutantIngestOptions, RepoPathNormalizer,
-    SentryProvider, Storage,
+    serve_ui_with_overlays, ArtifactKind, CoverageIngestOptions, DiffRequest,
+    EvidenceScopeFingerprint, GitProvider, HeuristicExtractor, LineageEngine, MutantIngestOptions,
+    RepoPathNormalizer, SentryProvider, Storage,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -23,6 +24,15 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run a configured verification profile, stage its artifacts, and ingest them.
+    Ci {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+        #[arg(long, default_value = "ci")]
+        profile: String,
+    },
     /// Print a revision-pinned, evidence-aware architectural diff.
     Diff {
         #[arg(long, default_value = ".")]
@@ -229,7 +239,12 @@ enum Command {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
         #[arg(long)]
-        input: PathBuf,
+        input: Option<PathBuf>,
+        /// Ingest a lineage-run/v1 manifest. Defaults to .lineage/artifacts/latest/manifest.json.
+        #[arg(long)]
+        run: Option<PathBuf>,
+        #[arg(long)]
+        latest_run: bool,
         #[arg(long, default_value = "sentry")]
         provider: String,
         #[arg(long)]
@@ -261,6 +276,20 @@ struct DiffCommandRequest {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Ci { repo, db, profile } => {
+            let config = load_config(&repo)?;
+            let git = GitProvider::open(&repo)?;
+            let revision = git.resolve_commit("HEAD")?;
+            let manifest = execute_profile(&repo, &config, &profile, &revision)?;
+            let run = latest_run_directory(&repo, &config).join("manifest.json");
+            ingest_run_manifest(&db, &repo, &run)?;
+            println!(
+                "lineage ci: profile={} revision={} artifacts={}",
+                profile,
+                manifest.revision,
+                manifest.artifacts.len()
+            );
+        }
         Command::Diff {
             repo,
             db,
@@ -636,9 +665,20 @@ fn main() -> Result<()> {
             db,
             repo,
             input,
+            run,
+            latest_run,
             provider,
             replace,
         } => {
+            if run.is_some() || latest_run || input.is_none() {
+                let run = match run {
+                    Some(run) => run,
+                    None => latest_run_directory(&repo, &load_config(&repo)?).join("manifest.json"),
+                };
+                ingest_run_manifest(&db, &repo, &run)?;
+                return Ok(());
+            }
+            let input = input.expect("input checked above");
             let storage = Storage::open(&db)?;
             let git = GitProvider::open(&repo)?;
             let extractor = HeuristicExtractor::default();
@@ -689,6 +729,73 @@ fn execute_diff(request: DiffCommandRequest) -> Result<String> {
         DiffFormat::Text => Ok(render_structured_diff_text(&plan, request.full)),
         DiffFormat::Json => Ok(format!("{}\n", render_structured_diff_json(&plan)?)),
     }
+}
+
+fn ingest_run_manifest(
+    db: &std::path::Path,
+    repo: &std::path::Path,
+    manifest_path: &std::path::Path,
+) -> Result<()> {
+    let manifest = load_run_manifest(manifest_path)?;
+    let run_directory = manifest_path
+        .parent()
+        .context("run manifest has no parent directory")?;
+    let storage = Storage::open(db)?;
+    let git = GitProvider::open(repo)?;
+    let extractor = HeuristicExtractor::default();
+    let normalizer = RepoPathNormalizer::new(repo);
+    for artifact in &manifest.artifacts {
+        let payload = read_manifest_artifact(run_directory, artifact)?;
+        match artifact.kind {
+            ArtifactKind::Coverage => {
+                ingest_coverage_json_with_options(
+                    &storage,
+                    std::str::from_utf8(&payload)?,
+                    &artifact.format,
+                    &manifest.revision,
+                    None,
+                    true,
+                    &CoverageIngestOptions::default(),
+                )?;
+            }
+            ArtifactKind::Mutants => {
+                ingest_mutant_facts_json_with_options(
+                    &storage,
+                    &normalizer,
+                    &git,
+                    &extractor,
+                    std::str::from_utf8(&payload)?,
+                    &manifest.revision,
+                    None,
+                    "unit",
+                    &MutantIngestOptions::default(),
+                )?;
+            }
+            ArtifactKind::Sarif => {
+                let unpacked = run_directory
+                    .join("unpacked")
+                    .join(&artifact.path)
+                    .with_extension("json");
+                fs::create_dir_all(unpacked.parent().expect("unpacked artifact parent exists"))?;
+                fs::write(&unpacked, payload)?;
+                ingest_sarif_paths(
+                    &storage,
+                    repo,
+                    &[unpacked],
+                    &artifact.producer,
+                    &manifest.revision,
+                    None,
+                    true,
+                )?;
+            }
+        }
+    }
+    println!(
+        "ingested run {} with {} artifacts",
+        manifest.revision,
+        manifest.artifacts.len()
+    );
+    Ok(())
 }
 
 fn print_json_summary(units: &[lineage::UnitSummary]) {

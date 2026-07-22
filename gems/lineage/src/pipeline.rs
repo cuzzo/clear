@@ -1,13 +1,13 @@
 //! Typed configuration and manifest contracts for the Lineage evidence pipeline.
 
 use anyhow::{bail, Context, Result};
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::{read::GzDecoder, write::GzEncoder};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
@@ -177,6 +177,41 @@ pub fn validate_config(config: LineageConfig) -> Result<LineageConfig> {
 
 pub fn latest_run_directory(repo: &Path, config: &LineageConfig) -> PathBuf {
     repo.join(&config.artifacts.directory).join("latest")
+}
+
+pub fn load_run_manifest(path: &Path) -> Result<RunManifest> {
+    let manifest: RunManifest = serde_json::from_slice(&fs::read(path)?)?;
+    if manifest.version != RUN_MANIFEST_VERSION {
+        bail!("unsupported run manifest version {:?}", manifest.version);
+    }
+    for artifact in &manifest.artifacts {
+        validate_relative_path(&artifact.path, "run manifest artifact path")?;
+    }
+    Ok(manifest)
+}
+
+pub fn read_manifest_artifact(
+    run_directory: &Path,
+    artifact: &ManifestArtifact,
+) -> Result<Vec<u8>> {
+    let path = run_directory.join(&artifact.path);
+    let encoded = fs::read(&path).with_context(|| format!("read artifact {}", path.display()))?;
+    let bytes = if artifact
+        .path
+        .extension()
+        .is_some_and(|extension| extension == "gz")
+    {
+        let mut decoder = GzDecoder::new(encoded.as_slice());
+        let mut bytes = Vec::new();
+        decoder.read_to_end(&mut bytes)?;
+        bytes
+    } else {
+        encoded
+    };
+    if hex::encode(Sha256::digest(&bytes)) != artifact.content_hash {
+        bail!("artifact hash mismatch for {}", artifact.path.display());
+    }
+    Ok(bytes)
 }
 
 /// Executes one configured profile and replaces the bounded `latest` run.
