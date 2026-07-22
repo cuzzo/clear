@@ -291,9 +291,10 @@ impl<'source> TreeSitterNormalizer<'source> {
             .normalization_adapter
             .check_node_role(node, "variable_declarator")
         {
-            if !self.has_assignment_operator_child(node) {
+            if self.assignment_right(node).is_none() {
                 return Some(self.wrap(&kind_type(node.kind()), Vec::new(), node));
             }
+            return self.normalize_assignment(node);
         }
         if self
             .normalization_adapter

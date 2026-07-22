@@ -10,7 +10,7 @@ use super::normalized_behavior::{
     configured_semantic_symbol_upper_bound, eliminable_guard_from_call,
     method_param_types_from_signatures, nil_guard_from_predicates, type_before_parameter_name,
     BlockCallSemantics, NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
-    NormalizedNilGuardFact, NormalizedSemanticEffect, SyntaxMetadata,
+    NormalizedNilGuardFact, NormalizedNullableOperation, NormalizedSemanticEffect, SyntaxMetadata,
 };
 use super::StateDeclaration;
 use super::{CallSite, ExternalCallComplexity, FunctionDef};
@@ -215,6 +215,20 @@ const JAVA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct JavaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
+    fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
+        (node.r#type == "CALL")
+            .then(|| node.children.first().and_then(crate::ast::node))
+            .flatten()
+            .filter(|receiver| receiver.r#type == "LVAR")
+            .map(|receiver| receiver.text.trim().to_string())
+            .filter(|subject| !subject.is_empty())
+            .map(|subject| NormalizedNullableOperation {
+                subject,
+                operation_kind: "receiver_member_access",
+                nil_behavior: "null_pointer_exception",
+            })
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,

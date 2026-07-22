@@ -117,7 +117,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
                     | "next"
                     | "continue_statement"
             ),
-            "nil" => matches!(kind, "nil" | "none" | "null"),
+            "nil" => matches!(kind, "nil" | "none" | "null" | "null_literal"),
             "true" => kind == "true",
             "false" => kind == "false",
             "identifier" => matches!(
