@@ -40,16 +40,17 @@ export function App(): React.JSX.Element {
       <RevisionControls revisions={revisions} />
       {!revisions && <p role="status">Add immutable base and head revisions to the URL to begin review.</p>}
       {error && <p role="alert">{error}</p>}
-      {plan && <DiffReview initialLayout={initialLayout} page={pageFromSearch(location)} plan={plan} rawPath={query.get("presentation") === "raw" ? query.get("path") : null} />}
+      {plan && <DiffReview initialLayout={initialLayout} page={pageFromSearch(location)} plan={plan} rawPath={query.get("presentation") === "raw" ? query.get("path") : null} selectedGroup={query.get("group")} />}
     </main>
   );
 }
 
-function DiffReview({ initialLayout, page, plan, rawPath }: { readonly initialLayout: "inline" | "split"; readonly page: number; readonly plan: DiffPlan; readonly rawPath: string | null }): React.JSX.Element {
+function DiffReview({ initialLayout, page, plan, rawPath, selectedGroup }: { readonly initialLayout: "inline" | "split"; readonly page: number; readonly plan: DiffPlan; readonly rawPath: string | null; readonly selectedGroup: string | null }): React.JSX.Element {
   const [sideBySide, setSideBySide] = useState(() => initialLayout === "split");
   const rawFile = rawPath ? plan.files.find((file) => file.path === rawPath) : undefined;
   const pageCount = Math.max(1, Math.ceil(plan.files.length / FILES_PER_PAGE));
-  const selectedPage = Math.min(page, pageCount);
+  const anchoredFileIndex = selectedGroup === null ? -1 : plan.files.findIndex((file) => file.groups.some((group) => groupIdentity(file, group) === selectedGroup));
+  const selectedPage = anchoredFileIndex >= 0 ? Math.floor(anchoredFileIndex / FILES_PER_PAGE) + 1 : Math.min(page, pageCount);
   const visibleFiles = plan.files.slice((selectedPage - 1) * FILES_PER_PAGE, selectedPage * FILES_PER_PAGE);
   useEffect(() => setSideBySide(initialLayout === "split"), [initialLayout]);
   const setLayout = (next: boolean) => {
@@ -64,6 +65,7 @@ function DiffReview({ initialLayout, page, plan, rawPath }: { readonly initialLa
     nextQuery.set("presentation", "raw");
     nextQuery.set("path", path);
     nextQuery.set("focus", "residual");
+    nextQuery.delete("group");
     window.history.replaceState({}, "", `${window.location.pathname}?${nextQuery}`);
     window.dispatchEvent(new PopStateEvent("popstate"));
   };
@@ -78,6 +80,20 @@ function DiffReview({ initialLayout, page, plan, rawPath }: { readonly initialLa
   const selectPage = (nextPage: number) => {
     const nextQuery = new URLSearchParams(window.location.search);
     if (nextPage === 1) nextQuery.delete("page"); else nextQuery.set("page", String(nextPage));
+    nextQuery.delete("group");
+    nextQuery.delete("path");
+    window.history.pushState({}, "", `${window.location.pathname}?${nextQuery}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
+  const selectGroup = (file: DiffFile, group: DiffGroup | null) => {
+    const nextQuery = new URLSearchParams(window.location.search);
+    if (group === null) {
+      nextQuery.delete("group");
+      nextQuery.delete("path");
+    } else {
+      nextQuery.set("group", groupIdentity(file, group));
+      nextQuery.set("path", file.path);
+    }
     window.history.pushState({}, "", `${window.location.pathname}?${nextQuery}`);
     window.dispatchEvent(new PopStateEvent("popstate"));
   };
@@ -95,7 +111,7 @@ function DiffReview({ initialLayout, page, plan, rawPath }: { readonly initialLa
     {plan.dependency_changes.map((change) => <DependencySummary change={change} key={change.manifest_path} />)}
     {plan.language_summaries.map((summary) => <LanguageSummaryCard key={summary.language} summary={summary} />)}
     <fieldset><legend>Diff layout</legend><label><input checked={sideBySide} name="layout" onChange={() => setLayout(true)} type="radio" />Side by side</label><label><input checked={!sideBySide} name="layout" onChange={() => setLayout(false)} type="radio" />Inline</label></fieldset>
-    {rawFile ? <RawReview file={rawFile} headOid={plan.scope.head_oid} onBack={closeRaw} sideBySide={sideBySide} /> : <><PageControls onPage={selectPage} page={selectedPage} pageCount={pageCount} totalFiles={plan.files.length} />{visibleFiles.map((file) => <FileReview file={file} headOid={plan.scope.head_oid} key={file.path} onRaw={openRaw} sideBySide={sideBySide} />)}</>}
+    {rawFile ? <RawReview file={rawFile} headOid={plan.scope.head_oid} onBack={closeRaw} sideBySide={sideBySide} /> : <><PageControls onPage={selectPage} page={selectedPage} pageCount={pageCount} totalFiles={plan.files.length} />{visibleFiles.map((file) => <FileReview file={file} headOid={plan.scope.head_oid} key={file.path} onGroupChange={selectGroup} onRaw={openRaw} selectedGroup={selectedGroup} sideBySide={sideBySide} />)}</>}
   </section>;
 }
 
@@ -139,6 +155,7 @@ function RevisionControls({ revisions }: { readonly revisions: DiffRequest | nul
     }
     next.delete("presentation");
     next.delete("path");
+    next.delete("group");
     window.history.pushState({}, "", `${window.location.pathname}?${next}`);
     window.dispatchEvent(new PopStateEvent("popstate"));
   };
@@ -171,37 +188,47 @@ function InventoryPaths({ label, paths }: { readonly label: string; readonly pat
   return paths.length > 0 ? <p>{label}: {paths.join(", ")}</p> : null;
 }
 
-function FileReview({ file, headOid, onRaw, sideBySide }: { readonly file: DiffFile; readonly headOid: string; readonly onRaw: (path: string) => void; readonly sideBySide: boolean }): React.JSX.Element {
+function FileReview({ file, headOid, onGroupChange, onRaw, selectedGroup, sideBySide }: { readonly file: DiffFile; readonly headOid: string; readonly onGroupChange: (file: DiffFile, group: DiffGroup | null) => void; readonly onRaw: (path: string) => void; readonly selectedGroup: string | null; readonly sideBySide: boolean }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const publicGroups = file.groups.filter((group) => group.visibility !== "private" && (group.kind === "function" || group.kind === "class" || group.kind === "module"));
   const privateGroups = file.groups.filter((group) => group.visibility === "private");
+  useEffect(() => {
+    if (selectedGroup !== null && file.groups.some((group) => groupIdentity(file, group) === selectedGroup)) setExpanded(true);
+  }, [file, selectedGroup]);
   return <article className="file-review"><button aria-expanded={expanded} className="disclosure" onClick={() => setExpanded(!expanded)}>{file.path} · risk {file.risk.score} · {file.role} · {file.change} · {file.added_lines.code} code lines</button> <a href={sourceUrl(file.path, headOid)}>Open source</a>
     {expanded && <div className="file-body">
       {!file.semantic_classification_available && <p className="metrics">Semantic classification unavailable; use the raw source-ordered diff.</p>}
       <RiskMetrics risk={file.risk} verification={file.verification} />
       <FindingSummary findings={file.sarif_findings} />
-      {file.semantic_classification_available && publicGroups.sort(groupOrder).map((group) => <GroupReview file={file} group={group} key={`${group.kind}:${group.name}:${group.start_line}`} sideBySide={sideBySide} />)}
+      {file.semantic_classification_available && publicGroups.sort(groupOrder).map((group) => <GroupReview file={file} group={group} key={`${group.kind}:${group.name}:${group.start_line}`} onGroupChange={onGroupChange} selectedGroup={selectedGroup} sideBySide={sideBySide} />)}
       <p>Other changed lines: {file.residual_lines.code} code, {file.residual_lines.comments} comments. <button onClick={() => onRaw(file.path)}>Open raw file diff</button></p>
       {(file.removed_lines.code > 0 || file.removed_lines.comments > 0) && <details><summary>Removals</summary><p>{file.removed_lines.code} code lines and {file.removed_lines.comments} comments removed; review in the raw diff.</p></details>}
-      {file.semantic_classification_available && privateGroups.length > 0 && <PrivateReview file={file} groups={privateGroups} sideBySide={sideBySide} />}
+      {file.semantic_classification_available && privateGroups.length > 0 && <PrivateReview file={file} groups={privateGroups} onGroupChange={onGroupChange} selectedGroup={selectedGroup} sideBySide={sideBySide} />}
       {(file.base_source === null || file.head_source === null) && <p>Binary or one-sided change; open the raw file view for details.</p>}
     </div>}
   </article>;
 }
 
-function PrivateReview({ file, groups, sideBySide }: { readonly file: DiffFile; readonly groups: readonly DiffGroup[]; readonly sideBySide: boolean }): React.JSX.Element {
+function PrivateReview({ file, groups, onGroupChange, selectedGroup, sideBySide }: { readonly file: DiffFile; readonly groups: readonly DiffGroup[]; readonly onGroupChange: (file: DiffFile, group: DiffGroup | null) => void; readonly selectedGroup: string | null; readonly sideBySide: boolean }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const added = groups.reduce(addAddedLines, emptyLines());
   const verification = groups.reduce(addVerification, emptyVerification());
   const hazards = groups.reduce((total, group) => total + group.risk.tier_one_hazards, 0);
   return <section><button aria-expanded={expanded} className="disclosure" onClick={() => setExpanded(!expanded)}>Private changes ({groups.length} functions, {added.code} code, +{groups.reduce((total, group) => total + group.risk.added_complexity, 0)} complexity, +{hazards} tier-1 hazards, <VerificationSummary verification={verification} />)</button>
-    {expanded && groups.slice().sort(groupOrder).map((group) => <GroupReview file={file} group={group} key={`${group.kind}:${group.name}:${group.start_line}`} sideBySide={sideBySide} />)}
+    {expanded && groups.slice().sort(groupOrder).map((group) => <GroupReview file={file} group={group} key={`${group.kind}:${group.name}:${group.start_line}`} onGroupChange={onGroupChange} selectedGroup={selectedGroup} sideBySide={sideBySide} />)}
   </section>;
 }
 
-function GroupReview({ file, group, sideBySide }: { readonly file: DiffFile; readonly group: DiffGroup; readonly sideBySide: boolean }): React.JSX.Element {
-  const [expanded, setExpanded] = useState(false);
-  return <section className="group-review"><button aria-expanded={expanded} className="disclosure" onClick={() => setExpanded(!expanded)}>{group.kind} {group.name} · {group.added_lines.code} code lines · {group.added_lines.comments} comments</button>
+function GroupReview({ file, group, onGroupChange, selectedGroup, sideBySide }: { readonly file: DiffFile; readonly group: DiffGroup; readonly onGroupChange: (file: DiffFile, group: DiffGroup | null) => void; readonly selectedGroup: string | null; readonly sideBySide: boolean }): React.JSX.Element {
+  const identity = groupIdentity(file, group);
+  const [expanded, setExpanded] = useState(() => selectedGroup === identity);
+  useEffect(() => setExpanded(selectedGroup === identity), [identity, selectedGroup]);
+  const toggle = () => {
+    const next = !expanded;
+    setExpanded(next);
+    onGroupChange(file, next ? group : null);
+  };
+  return <section className="group-review"><button aria-expanded={expanded} className="disclosure" onClick={toggle}>{group.kind} {group.name} · {group.added_lines.code} code lines · {group.added_lines.comments} comments</button>
     <RiskMetrics risk={group.risk} verification={group.verification} />
     <FindingSummary findings={group.sarif_findings} />
     {expanded && <DiffPreview annotations={relativeAnnotations(file.line_annotations, group.start_line, group.end_line)} highlights={relativeHighlights(group)} language={file.language ?? "plaintext"} modified={sourceRange(file.head_source, group.start_line, group.end_line)} original={sourceRange(file.base_source, group.base_start_line, group.base_end_line)} sideBySide={sideBySide} />}
@@ -278,4 +305,8 @@ function findingHighlight(finding: DiffFile["sarif_findings"][number]): SourceHi
 function sourceUrl(path: string, commit: string): string {
   const query = new URLSearchParams({ path, commit });
   return `/?${query}#L1`;
+}
+
+export function groupIdentity(file: DiffFile, group: DiffGroup): string {
+  return `${file.path}:${group.kind}:${group.name}:${group.start_line}`;
 }

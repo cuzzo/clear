@@ -85,6 +85,7 @@ describe("App", () => {
     expect(diffPreview).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /function run/ }));
     expect(diffPreview).toHaveBeenCalledTimes(1);
+    expect(window.location.search).toContain("group=lib%2Fapp.rb%3Afunction%3Arun%3A1");
     fireEvent.click(screen.getByRole("button", { name: /function fresh/ }));
     expect(diffPreview.mock.calls.at(-1)?.[0].original).toBe("");
     fireEvent.click(screen.getByRole("button", { name: /Private changes/ }));
