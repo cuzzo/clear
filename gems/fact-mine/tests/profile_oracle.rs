@@ -470,6 +470,51 @@ fn hidden_enum_observations_keep_same_spelled_locals_in_distinct_callables() -> 
 }
 
 #[test]
+fn hidden_enum_observations_scale_with_geometric_file_and_callable_growth() -> Result<()> {
+    use std::io::Write;
+
+    let dir = tempfile::tempdir()?;
+    for size in [1_usize, 4, 16] {
+        let mut outputs = Vec::new();
+        for file_index in 0..size {
+            let path = dir.path().join(format!("workflow_{size}_{file_index}.rb"));
+            let mut source = std::fs::File::create(&path)?;
+            source.write_all(format!("class Workflow{file_index}\n").as_bytes())?;
+            for callable_index in 0..size {
+                source.write_all(
+                    format!(
+                        "  def transition_{callable_index}\n    state = \"draft\"\n    state == \"draft\"\n  end\n"
+                    )
+                    .as_bytes(),
+                )?;
+            }
+            source.write_all(b"end\n")?;
+            let document = syntax::parse_file(path, Language::Ruby)?;
+            outputs.push(profile::extract(&document, Profile::NilKill));
+        }
+
+        let output = profile::merge(outputs, Profile::NilKill);
+        let locals = output
+            .hidden_enum_observations
+            .iter()
+            .filter(|observation| observation["kind"] == "local")
+            .collect::<Vec<_>>();
+        let callable_count = size * size;
+        assert_eq!(locals.len(), callable_count * 2, "size={size}");
+        assert_eq!(
+            locals
+                .iter()
+                .filter_map(|observation| observation["key"].as_str())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            callable_count,
+            "size={size}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn native_deliberate_domains_do_not_emit_hidden_enum_observations() -> Result<()> {
     for (fixture_name, language) in [
         ("go/core.go", Language::Go),
