@@ -2787,13 +2787,13 @@ fn attach_operation_obligations(
             {
                 let node = fact_string(operation, "node_id").unwrap_or("");
                 let kind = fact_string(operation, "operation_kind").unwrap_or("");
-                evidence.operations.insert(
-                    format!("{kind}:{node}"),
-                    OperationLocation {
-                        path: fact_string(operation, "path").unwrap_or("").to_string(),
-                        line: fact_span_line(operation),
-                    },
-                );
+                let location = OperationLocation {
+                    path: fact_string(operation, "path").unwrap_or("").to_string(),
+                    line: fact_span_line(operation),
+                };
+                if location.is_real_source_location() {
+                    evidence.operations.insert(format!("{kind}:{node}"), location);
+                }
             }
         }
     }
@@ -2804,13 +2804,8 @@ fn pressure_actions(roots: BTreeMap<String, PressureEvidence>) -> Vec<Action> {
         .into_iter()
         .filter_map(|(root, evidence)| {
             let pressure = evidence.guards.len() + evidence.returns.len() + evidence.operations.len();
+            let location = evidence.operations.values().next().cloned()?;
             (pressure > 0).then(|| {
-                let location = evidence
-                    .operations
-                    .values()
-                    .find(|location| !location.path.is_empty())
-                    .cloned()
-                    .unwrap_or_default();
                 let mut data = HashMap::new();
                 data.insert("root_definition_id".to_string(), serde_json::Value::String(root.clone()));
                 data.insert(
@@ -2850,6 +2845,12 @@ struct PressureEvidence {
 struct OperationLocation {
     path: String,
     line: i64,
+}
+
+impl OperationLocation {
+    fn is_real_source_location(&self) -> bool {
+        !self.path.is_empty() && self.line > 0
+    }
 }
 
 fn fact_objects<'a>(input: &'a InputState, key: &str) -> Vec<&'a serde_json::Map<String, serde_json::Value>> {
@@ -3338,6 +3339,49 @@ mod tests {
             action.data["unsafe_operations"],
             serde_json::json!(["pointer_dereference:deref:1"])
         );
+    }
+
+    #[test]
+    fn static_nil_pressure_requires_an_anchored_unsafe_operation() {
+        let input = input_from_json(serde_json::json!({
+            "facts": {
+                "nullable_states": [
+                    {
+                        "state": "definitely_null",
+                        "complete": true,
+                        "place_id": "place:cleanup:sentinel",
+                        "source_definition_ids": ["definition:cleanup_sentinel"]
+                    },
+                    {
+                        "state": "maybe_null",
+                        "complete": true,
+                        "place_id": "place:missing:location",
+                        "source_definition_ids": ["definition:missing_location"]
+                    }
+                ],
+                "nullable_refinements": [
+                    {
+                        "place_id": "place:cleanup:sentinel",
+                        "condition_node_id": "guard:cleanup"
+                    },
+                    {
+                        "place_id": "place:cleanup:sentinel",
+                        "condition_node_id": "guard:release"
+                    }
+                ],
+                "nullable_operations": [
+                    {
+                        "place_id": "place:missing:location",
+                        "node_id": "deref:unknown-location",
+                        "operation_kind": "pointer_dereference",
+                        "nil_behavior": "undefined_behavior",
+                        "complete": true
+                    }
+                ]
+            }
+        }));
+
+        assert!(super::report_static_nil_pressure(&input).is_empty());
     }
 
     #[test]
