@@ -1,5 +1,7 @@
 //! Revision-pinned, render-independent change inventory for the diff UI.
 
+use crate::extract::{BoundaryExtractor, HeuristicExtractor};
+use crate::model::{BlobFile, UnitKind};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -24,6 +26,7 @@ pub struct DiffPlan {
     pub scope: DiffScope,
     pub inventory: ChangeInventory,
     pub dependency_changes: Vec<DependencyChange>,
+    pub language_summaries: Vec<LanguageSummary>,
     pub files: Vec<DiffFile>,
 }
 
@@ -93,6 +96,40 @@ pub struct DiffFile {
     pub language: Option<String>,
     pub base_source: Option<String>,
     pub head_source: Option<String>,
+    pub added_lines: AddedLines,
+    pub groups: Vec<DiffGroup>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct AddedLines {
+    pub code: usize,
+    pub comments: usize,
+    pub other: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LanguageSummary {
+    pub language: String,
+    pub production: AddedLines,
+    pub test: AddedLines,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DiffGroup {
+    pub name: String,
+    pub kind: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub visibility: Visibility,
+    pub added_lines: AddedLines,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    Public,
+    Private,
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -157,19 +194,27 @@ pub fn build_diff_plan(
         };
         let display_path = path.as_str();
         let role = source_role(display_path);
+        let base_source = base_file.and_then(|file| file.contents.clone());
+        let head_source = head_file.and_then(|file| file.contents.clone());
+        let added_line_numbers = added_line_numbers(base_source.as_deref(), head_source.as_deref());
+        let added_lines = summarize_added_lines(head_source.as_deref(), &added_line_numbers, display_path);
+        let groups = semantic_groups(display_path, head_source.as_deref(), &added_line_numbers);
         files.push(DiffFile {
             path: display_path.to_string(),
             previous_path,
             change,
             role,
             language: language_for_path(display_path),
-            base_source: base_file.and_then(|file| file.contents.clone()),
-            head_source: head_file.and_then(|file| file.contents.clone()),
+            base_source,
+            head_source,
+            added_lines,
+            groups,
         });
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
     let inventory = build_inventory(&files);
     let dependency_changes = dependency_changes(&files);
+    let language_summaries = language_summaries(&files);
 
     DiffPlan {
         scope: DiffScope {
@@ -179,8 +224,97 @@ pub fn build_diff_plan(
         },
         inventory,
         dependency_changes,
+        language_summaries,
         files,
     }
+}
+
+fn language_summaries(files: &[DiffFile]) -> Vec<LanguageSummary> {
+    let mut summaries = BTreeMap::<String, LanguageSummary>::new();
+    for file in files {
+        let Some(language) = &file.language else { continue };
+        let summary = summaries.entry(language.clone()).or_insert_with(|| LanguageSummary {
+            language: language.clone(),
+            production: AddedLines::default(),
+            test: AddedLines::default(),
+        });
+        match file.role {
+            SourceRole::Production => add_lines(&mut summary.production, &file.added_lines),
+            SourceRole::Test => add_lines(&mut summary.test, &file.added_lines),
+            _ => {}
+        }
+    }
+    summaries.into_values().collect()
+}
+
+fn add_lines(target: &mut AddedLines, source: &AddedLines) {
+    target.code += source.code;
+    target.comments += source.comments;
+    target.other += source.other;
+}
+
+fn added_line_numbers(base: Option<&str>, head: Option<&str>) -> BTreeSet<u32> {
+    let mut remaining = BTreeMap::<&str, usize>::new();
+    for line in base.unwrap_or_default().lines() {
+        *remaining.entry(line).or_default() += 1;
+    }
+    head.unwrap_or_default()
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| match remaining.get_mut(line) {
+            Some(count) if *count > 0 => { *count -= 1; None }
+            _ => Some(index as u32 + 1),
+        })
+        .collect()
+}
+
+fn summarize_added_lines(source: Option<&str>, added: &BTreeSet<u32>, path: &str) -> AddedLines {
+    let mut summary = AddedLines::default();
+    for (index, line) in source.unwrap_or_default().lines().enumerate() {
+        if !added.contains(&(index as u32 + 1)) { continue; }
+        match line_kind(line, path) {
+            LineKind::Code => summary.code += 1,
+            LineKind::Comment => summary.comments += 1,
+            LineKind::Other => summary.other += 1,
+        }
+    }
+    summary
+}
+
+fn semantic_groups(path: &str, source: Option<&str>, added: &BTreeSet<u32>) -> Vec<DiffGroup> {
+    let Some(source) = source else { return Vec::new() };
+    let extractor = HeuristicExtractor::default();
+    let file = BlobFile { path: path.to_string(), contents: source.to_string() };
+    extractor.extract_units(&file).into_iter().map(|unit| DiffGroup {
+        name: unit.name,
+        kind: unit.kind.as_str().to_string(),
+        start_line: unit.start_line,
+        end_line: unit.end_line,
+        visibility: visibility_for(&unit.signature, unit.kind),
+        added_lines: summarize_group_lines(source, added, path, unit.start_line, unit.end_line),
+    }).collect()
+}
+
+fn summarize_group_lines(source: &str, added: &BTreeSet<u32>, path: &str, start: u32, end: u32) -> AddedLines {
+    let lines = added.iter().copied().filter(|line| *line >= start && *line <= end).collect();
+    summarize_added_lines(Some(source), &lines, path)
+}
+
+fn visibility_for(signature: &str, kind: UnitKind) -> Visibility {
+    if kind != UnitKind::Function { return Visibility::Unknown; }
+    if signature.contains("private") { Visibility::Private }
+    else if signature.contains("public") || signature.contains("pub ") || signature.starts_with("def ") { Visibility::Public }
+    else { Visibility::Unknown }
+}
+
+enum LineKind { Code, Comment, Other }
+
+fn line_kind(line: &str, path: &str) -> LineKind {
+    let line = line.trim();
+    if line.is_empty() || line == "end" || matches!(line, "{" | "}" | "};" | "{}") { return LineKind::Other; }
+    if line.starts_with('#') || line.starts_with("//") || line.starts_with("/*") || line.starts_with('*') || line.starts_with("<!--") { return LineKind::Comment; }
+    if path.ends_with(".rb") && line == "=begin" { return LineKind::Comment; }
+    LineKind::Code
 }
 
 fn file_map(files: Vec<RevisionFile>) -> BTreeMap<String, RevisionFile> {
@@ -612,6 +746,44 @@ mod tests {
             plan.dependency_changes[0].status,
             DependencyStatus::UnknownPackageFile
         );
+    }
+
+    #[test]
+    fn summarizes_meaningful_added_lines_and_symbol_groups() {
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            vec![file("lib/app.rb", "def run\nend\n")],
+            vec![file(
+                "lib/app.rb",
+                "# prepares output\ndef run\n  work\nend\n",
+            )],
+        );
+
+        let changed = &plan.files[0];
+        assert_eq!(
+            changed.added_lines,
+            AddedLines {
+                code: 1,
+                comments: 1,
+                other: 0
+            }
+        );
+        assert_eq!(changed.groups.len(), 1);
+        assert_eq!(changed.groups[0].kind, "function");
+        assert_eq!(changed.groups[0].visibility, Visibility::Public);
+        assert_eq!(changed.groups[0].added_lines.code, 1);
+        assert_eq!(plan.language_summaries[0].language, "ruby");
+        assert_eq!(plan.language_summaries[0].production.comments, 1);
+    }
+
+    #[test]
+    fn excludes_closure_only_lines_across_brace_languages() {
+        for (path, line) in [("main.zig", "}"), ("main.go", "}"), ("main.rs", "};")] {
+            assert!(matches!(line_kind(line, path), LineKind::Other));
+        }
+        assert!(matches!(line_kind("// intent", "main.go"), LineKind::Comment));
+        assert!(matches!(line_kind("return value", "main.go"), LineKind::Code));
     }
 
     #[test]

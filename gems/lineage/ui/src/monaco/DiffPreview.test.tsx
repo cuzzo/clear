@@ -35,4 +35,10 @@ describe("DiffPreview", () => {
       renderSideBySide: true,
     });
   });
+
+  it("passes the requested inline layout through to Monaco", () => {
+    render(<DiffPreview language="ruby" modified="new" original="old" sideBySide={false} />);
+
+    expect(diffEditor.mock.calls[0]?.[0].options.renderSideBySide).toBe(false);
+  });
 });

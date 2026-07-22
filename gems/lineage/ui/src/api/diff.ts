@@ -9,12 +9,26 @@ export interface DiffFile {
   readonly language: string | null;
   readonly base_source: string | null;
   readonly head_source: string | null;
+  readonly added_lines: AddedLines;
+  readonly groups: readonly DiffGroup[];
+}
+
+export interface AddedLines { readonly code: number; readonly comments: number; readonly other: number }
+
+export interface DiffGroup {
+  readonly name: string;
+  readonly kind: string;
+  readonly start_line: number;
+  readonly end_line: number;
+  readonly visibility: "public" | "private" | "unknown";
+  readonly added_lines: AddedLines;
 }
 
 export interface DiffPlan {
   readonly scope: { readonly base_oid: string; readonly head_oid: string; readonly policy_version: string };
   readonly inventory: { readonly changed_directories: number; readonly changed_files: number; readonly by_role: Readonly<Record<string, number>> };
   readonly dependency_changes: readonly { readonly manifest_path: string; readonly status: "exact" | "unknown_package_file" }[];
+  readonly language_summaries: readonly { readonly language: string; readonly production: AddedLines; readonly test: AddedLines }[];
   readonly files: readonly DiffFile[];
 }
 

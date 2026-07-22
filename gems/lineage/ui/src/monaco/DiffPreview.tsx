@@ -4,9 +4,10 @@ export interface DiffPreviewProps {
   readonly language: string;
   readonly modified: string;
   readonly original: string;
+  readonly sideBySide?: boolean;
 }
 
-export function DiffPreview({ language, modified, original }: DiffPreviewProps): React.JSX.Element {
+export function DiffPreview({ language, modified, original, sideBySide = true }: DiffPreviewProps): React.JSX.Element {
   return (
     <DiffEditor
       height="18rem"
@@ -16,7 +17,7 @@ export function DiffPreview({ language, modified, original }: DiffPreviewProps):
         automaticLayout: true,
         minimap: { enabled: false },
         readOnly: true,
-        renderSideBySide: true,
+        renderSideBySide: sideBySide,
       }}
       original={original}
       theme="vs-dark"
