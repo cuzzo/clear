@@ -243,9 +243,15 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         let subjects = targets.children.iter().filter_map(crate::ast::node)
             .filter(|target| target.r#type == "LVAR")
             .map(|target| target.text.trim().to_string()).collect::<Vec<_>>();
-        let lookup = source.children.first().and_then(crate::ast::node)?;
-        (subjects.len() == 2 && lookup.r#type == "INDEX_EXPRESSION").then(|| NormalizedPresenceCorrelation {
-            value_subject: subjects[0].clone(), presence_subject: subjects[1].clone(), semantics: "map_lookup",
+        let producer = source.children.first().and_then(crate::ast::node)?;
+        let semantics = match producer.r#type.as_str() {
+            "INDEX_EXPRESSION" => "map_lookup",
+            "TYPE_ASSERTION_EXPRESSION" => "type_assertion",
+            "UNARY_EXPRESSION" if producer.text.trim_start().starts_with("<-") => "channel_receive",
+            _ => return None,
+        };
+        (subjects.len() == 2).then(|| NormalizedPresenceCorrelation {
+            value_subject: subjects[0].clone(), presence_subject: subjects[1].clone(), semantics,
         })
     }
 

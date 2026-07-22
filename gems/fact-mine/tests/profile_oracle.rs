@@ -217,6 +217,23 @@ fn go_map_lookup_exports_presence_without_proving_payload_non_null() -> Result<(
 }
 
 #[test]
+fn go_type_assertions_and_channel_receives_export_presence_without_payload_proofs() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_go_presence_pairs.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let semantics = output
+        .presence_correlations
+        .iter()
+        .map(|correlation| correlation.semantics.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(semantics, vec!["channel_receive", "type_assertion"]);
+    assert!(output
+        .nullable_states
+        .iter()
+        .all(|state| !state.place_id.ends_with(":result") || state.state != "definitely_non_null"));
+    Ok(())
+}
+
+#[test]
 fn go_nullable_operations_distinguish_pointer_selectors_and_function_values() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_go_operations.go"), Language::Go)?;
     let output = profile::extract(&document, Profile::NilKill);
