@@ -67,14 +67,20 @@ module SlopCop
           path = hazard[:path]
           lines = additions[path]
           next unless lines&.include?(hazard[:line])
-          next unless hazard.fetch(:coverage_required, true)
-          next if covered?(evidence, hazard)
+          next unless hazard.fetch(:report_required, true)
+
+          if hazard.fetch(:coverage_required, true)
+            next if covered?(evidence, hazard)
+            message = "changed #{hazard[:label]} has no #{hazard[:required_evidence]} coverage evidence"
+          else
+            message = "changed #{hazard[:label]} requires review; #{hazard[:evidence_claim]} evidence cannot satisfy this hazard"
+          end
 
           out << Finding.new(
             path: path,
             line: hazard[:line],
             rule_id: rule_id_for(hazard[:required_evidence]),
-            message: "changed #{hazard[:label]} has no #{hazard[:required_evidence]} coverage evidence",
+            message: message,
             source: hazard[:source],
             hazard_type: hazard[:hazard_type],
             required_evidence: hazard[:required_evidence],

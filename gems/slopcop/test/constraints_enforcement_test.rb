@@ -105,8 +105,8 @@ class ConstraintsEnforcementTest < Minitest::Test
   end
 
   def test_multiple_hazards_are_retained
-    # Multiple sanitizer hazards are retained. Dynamic-boundary
-    # sites intentionally do not become line-coverage failures.
+    # Multiple sanitizer hazards are retained. Review-only dynamic-boundary
+    # sites are reported separately from coverage-satisfiable hazards.
     with_file("test.c", "void f(void) {\n  malloc(1);\n  memcpy(dst, src, n);\n}") do |dir, path|
       provider = SlopCop::Constraints::CProvider
       no_evidence = SlopCop::Constraints::Evidence.from_specs([], repo: dir)

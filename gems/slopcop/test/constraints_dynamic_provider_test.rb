@@ -41,11 +41,13 @@ class ConstraintsDynamicProviderTest < Minitest::Test
       assert_includes types, "ruby_metaprogramming"
       assert_equal 2, hazards.size
       
-      # Dynamic boundaries are review findings, not claims that nil-kill can
-      # prove safety, so they are not converted into line-coverage failures.
+      # Dynamic boundaries remain visible as review findings. Nil-kill evidence
+      # records reachability but cannot satisfy the review requirement.
       evidence = SlopCop::Constraints::Evidence.from_specs([], repo: dir)
       findings = SlopCop::Constraints::RubyProvider.findings(repo: dir, additions: { path => [3] }, evidence: evidence)
-      assert_empty findings
+      assert_equal 1, findings.size
+      assert_includes findings.first.message, "requires review"
+      assert_equal "nil-kill", findings.first.required_evidence
 
       # Write covered evidence (Cobertura XML covering line 3)
       xml_content = <<~XML
@@ -70,7 +72,8 @@ class ConstraintsDynamicProviderTest < Minitest::Test
 
       covered_evidence = SlopCop::Constraints::Evidence.from_specs(["nil-kill:#{xml_path}"], repo: dir)
       covered_findings = SlopCop::Constraints::RubyProvider.findings(repo: dir, additions: { path => [3] }, evidence: covered_evidence)
-      assert_empty covered_findings
+      assert_equal 1, covered_findings.size
+      assert_includes covered_findings.first.message, "requires review"
     end
   end
 

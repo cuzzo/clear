@@ -344,6 +344,18 @@ pub struct HazardSite {
     pub hazard_type: String,
     pub required_evidence: String,
     #[serde(default)]
+    pub hazard_kind: String,
+    #[serde(default)]
+    pub evidence_claim: String,
+    #[serde(default = "default_true")]
+    pub coverage_required: bool,
+    #[serde(default = "default_true")]
+    pub report_required: bool,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub mitigation: String,
+    #[serde(default)]
     pub provider: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_column: Option<u32>,
@@ -351,6 +363,10 @@ pub struct HazardSite {
     pub end_line: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_column: Option<u32>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Minimal, adapter-proven facts needed to canonicalize source symbols.

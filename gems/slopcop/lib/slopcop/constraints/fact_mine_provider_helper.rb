@@ -120,22 +120,26 @@ module SlopCop
                          end
           abs_files.include?(site_abs_path) && match_hazard
         end.map do |site|
-          policy = hazard_policy(site.fetch("hazard_type"))
+          hazard_type = site.fetch("hazard_type")
+          policy = hazard_policy(hazard_type)
+          raise "hazard site #{hazard_type.inspect} has no hazard-contract policy" unless policy
+
           emitted_evidence = site.fetch("required_evidence", nil).to_s
           {
             path: Pathname.new(File.expand_path(site["path"], repo)).relative_path_from(Pathname.new(repo)).to_s,
             line: site["line"],
             source: site["source"].to_s.strip,
-            hazard_type: site["hazard_type"],
+            hazard_type: hazard_type,
             # FactMine's site is authoritative. The contract is only a
             # validation/default for older precomputed facts; provider
             # configuration must never overwrite this value.
-            required_evidence: emitted_evidence.empty? ? policy&.fetch("evidence_provider", "") : emitted_evidence,
-            label: site["label"] || policy&.fetch("label", "hazard site"),
-            hazard_kind: site["hazard_kind"] || policy&.fetch("kind", "unknown"),
-            evidence_claim: site["evidence_claim"] || policy&.fetch("evidence_claim", "site_reached"),
-            coverage_required: policy.nil? ? true : policy.fetch("coverage_required", true),
-            mitigation: policy&.fetch("mitigation", "review the hazard contract")
+            required_evidence: emitted_evidence.empty? ? policy.fetch("evidence_provider") : emitted_evidence,
+            label: site["label"] || policy.fetch("label"),
+            hazard_kind: site["hazard_kind"] || policy.fetch("kind"),
+            evidence_claim: site["evidence_claim"] || policy.fetch("evidence_claim"),
+            coverage_required: site.key?("coverage_required") ? site["coverage_required"] : policy.fetch("coverage_required"),
+            report_required: site.key?("report_required") ? site["report_required"] : policy.fetch("report_required"),
+            mitigation: site["mitigation"] || policy.fetch("mitigation")
           }
         end
       end
@@ -151,17 +155,23 @@ module SlopCop
           path = hazard[:path]
           lines = additions[path]
           next unless lines
-          next unless hazard.fetch(:coverage_required, true)
-          
+          next unless hazard.fetch(:report_required, true)
+
           changed = lines.to_set
           next unless changed.include?(hazard[:line])
-          next if LanguageProvider.covered?(evidence, hazard)
+
+          if hazard.fetch(:coverage_required, true)
+            next if LanguageProvider.covered?(evidence, hazard)
+            message = "changed #{hazard[:label]} has no #{hazard[:required_evidence]} coverage evidence"
+          else
+            message = "changed #{hazard[:label]} requires review; #{hazard[:evidence_claim]} evidence cannot satisfy this hazard"
+          end
 
           out << Finding.new(
             path: path,
             line: hazard[:line],
             rule_id: provider.rule_id_for(hazard[:required_evidence]),
-            message: "changed #{hazard[:label]} has no #{hazard[:required_evidence]} coverage evidence",
+            message: message,
             source: hazard[:source],
             hazard_type: hazard[:hazard_type],
             required_evidence: hazard[:required_evidence],

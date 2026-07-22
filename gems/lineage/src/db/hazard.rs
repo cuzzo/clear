@@ -375,6 +375,8 @@ fn hazard_policy(hazard_type: &str) -> Option<&'static ContractPolicy> {
     static CONTRACT: std::sync::OnceLock<HazardContract> = std::sync::OnceLock::new();
     CONTRACT
         .get_or_init(|| {
+            hazard_contract::validate_contract()
+                .unwrap_or_else(|error| panic!("invalid bundled hazard contract: {error}"));
             serde_json::from_str(hazard_contract::CONTRACT_JSON)
                 .expect("bundled hazard contract must be valid JSON")
         })
@@ -387,6 +389,139 @@ fn hazard_policy(hazard_type: &str) -> Option<&'static ContractPolicy> {
                 policy.pattern == hazard_type
             }
         })
+}
+
+fn go_reflect_import_aliases(
+    root: tree_sitter::Node,
+    source: &[u8],
+) -> std::collections::HashSet<String> {
+    fn visit(node: tree_sitter::Node, source: &[u8], aliases: &mut std::collections::HashSet<String>) {
+        if node.kind() == "import_spec"
+            && node
+                .child_by_field_name("path")
+                .and_then(|path| path.utf8_text(source).ok())
+                .is_some_and(|path| path.trim_matches('"') == "reflect")
+        {
+            let alias = node
+                .child_by_field_name("name")
+                .and_then(|name| name.utf8_text(source).ok())
+                .unwrap_or("reflect");
+            if alias != "_" && alias != "." {
+                aliases.insert(alias.to_string());
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit(child, source, aliases);
+        }
+    }
+
+    let mut aliases = std::collections::HashSet::new();
+    visit(root, source, &mut aliases);
+    aliases
+}
+
+fn go_identifier_is_binding(node: tree_sitter::Node, source: &[u8], name: &str) -> bool {
+    let text = node.utf8_text(source).unwrap_or("");
+    let left_side = match node.kind() {
+        "short_var_declaration" | "range_clause" => text.split(":=").next().unwrap_or(text),
+        "var_declaration" | "const_declaration" => text
+            .strip_prefix("var")
+            .or_else(|| text.strip_prefix("const"))
+            .unwrap_or(text)
+            .split('=').next().unwrap_or(text),
+        "type_declaration" => text.strip_prefix("type").unwrap_or(text),
+        _ => return false,
+    };
+    left_side
+        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+        .any(|word| word == name)
+}
+
+fn go_block_shadows_reflect(
+    block: tree_sitter::Node,
+    call: tree_sitter::Node,
+    source: &[u8],
+    alias: &str,
+) -> bool {
+    fn visit(
+        node: tree_sitter::Node,
+        call: tree_sitter::Node,
+        source: &[u8],
+        alias: &str,
+        block: tree_sitter::Node,
+    ) -> bool {
+        if node.id() != block.id() && node.kind() == "block" {
+            return false;
+        }
+        if node.id() != call.id()
+            && node.start_byte() <= call.start_byte()
+            && go_identifier_is_binding(node, source, alias)
+        {
+            return true;
+        }
+        let mut cursor = node.walk();
+        let found = node
+            .children(&mut cursor)
+            .any(|child| visit(child, call, source, alias, block));
+        found
+    }
+
+    visit(block, call, source, alias, block)
+}
+
+fn go_reflection_call_is_imported_and_unshadowed(
+    call: tree_sitter::Node,
+    source: &[u8],
+    aliases: &std::collections::HashSet<String>,
+) -> bool {
+    let Some(function) = call.child_by_field_name("function") else {
+        return false;
+    };
+    if function.kind() != "selector_expression" {
+        return false;
+    }
+    let Some(package) = function.child_by_field_name("operand") else {
+        return false;
+    };
+    let Ok(package_name) = package.utf8_text(source) else {
+        return false;
+    };
+    if !aliases.contains(package_name) {
+        return false;
+    }
+
+    let mut current = Some(call);
+    while let Some(node) = current {
+        if node.kind() == "block" && go_block_shadows_reflect(node, call, source, package_name) {
+            return false;
+        }
+        if matches!(node.kind(), "function_declaration" | "method_declaration")
+            && node
+                .child_by_field_name("parameters")
+                .and_then(|parameters| parameters.utf8_text(source).ok())
+                .is_some_and(|text| {
+                    text.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+                        .any(|word| word == package_name)
+                })
+        {
+            return false;
+        }
+        current = node.parent();
+    }
+    true
+}
+
+fn c_arithmetic_hazard_is_relevant(node: tree_sitter::Node, source: &[u8]) -> bool {
+    let operator = node
+        .child_by_field_name("operator")
+        .and_then(|operator| operator.utf8_text(source).ok())
+        .unwrap_or("");
+    let rhs = node
+        .child_by_field_name("right")
+        .and_then(|right| right.utf8_text(source).ok())
+        .unwrap_or("");
+    hazard_contract::c_arithmetic_literal_is_relevant(operator, rhs)
 }
 
 fn query_hazards(
@@ -426,12 +561,24 @@ fn query_hazards(
                     .trim()
                     .to_string();
                 
-                let Some(policy) = hazard_policy(hazard_type) else {
-                    // Unknown query captures are not silently assigned a
-                    // guessed provider. Add the policy before adding a new
-                    // hazard query.
+                let policy = hazard_policy(hazard_type).unwrap_or_else(|| {
+                    panic!("hazard query capture {hazard_type:?} has no contract policy")
+                });
+
+                if hazard_type == "go_reflection"
+                    && !go_reflection_call_is_imported_and_unshadowed(
+                        capture.node,
+                        contents.as_bytes(),
+                        &go_reflect_import_aliases(tree.root_node(), contents.as_bytes()),
+                    )
+                {
                     continue;
-                };
+                }
+                if matches!(hazard_type, "c_ubsan_arithmetic" | "cpp_ubsan_arithmetic")
+                    && !c_arithmetic_hazard_is_relevant(capture.node, contents.as_bytes())
+                {
+                    continue;
+                }
 
                 sites.push(HazardSite {
                     path: path.to_string(),
@@ -560,14 +707,15 @@ fn site(
     source: &str,
     hazard_type: &str,
 ) -> HazardSite {
+    let policy = hazard_policy(hazard_type).unwrap_or_else(|| {
+        panic!("synthetic hazard {hazard_type:?} has no contract policy")
+    });
     HazardSite {
         path: path.to_string(),
         line,
         source: source.trim().to_string(),
         hazard_type: hazard_type.to_string(),
-        required_evidence: hazard_policy(hazard_type)
-            .map(|policy| policy.evidence_provider.clone())
-            .unwrap_or_default(),
+        required_evidence: policy.evidence_provider.clone(),
     }
 }
 
@@ -650,6 +798,21 @@ mod tests {
         assert_eq!(stats.scanned_files, 1);
         assert_eq!(stats.hazards, 3);
         assert_eq!(storage.count_rows("unit_hazards").unwrap(), 3);
+    }
+
+    #[test]
+    fn go_reflection_requires_the_reflect_import_alias_and_not_a_local_shadow() {
+        let aliased = scan_go_sites(
+            "worker.go",
+            "package demo\nimport r \"reflect\"\nfunc run(value interface{}, name string) {\n  r.ValueOf(value).MethodByName(name).Call(nil)\n}",
+        );
+        assert!(aliased.iter().any(|site| site.hazard_type == "go_reflection"));
+
+        let shadowed = scan_go_sites(
+            "worker.go",
+            "package demo\nimport \"reflect\"\nfunc run(value interface{}, name string) {\n  reflect := fakeReflect{}\n  reflect.ValueOf(value).MethodByName(name).Call(nil)\n}",
+        );
+        assert!(!shadowed.iter().any(|site| site.hazard_type == "go_reflection"));
     }
 
     #[test]

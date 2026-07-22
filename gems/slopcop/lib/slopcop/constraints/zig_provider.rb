@@ -87,14 +87,20 @@ module SlopCop
       def add_callback_finding(out, evidence, cb_sites, path, line)
         site = cb_sites[[path, line]]
         return unless site
-        return unless site.fetch(:coverage_required, true)
-        return if LanguageProvider.covered?(evidence, site)
+        return unless site.fetch(:report_required, true)
+
+        if site.fetch(:coverage_required, true)
+          return if LanguageProvider.covered?(evidence, site)
+          message = "changed #{site[:label]} has no #{site[:required_evidence]} coverage evidence"
+        else
+          message = "changed #{site[:label]} requires review; #{site[:evidence_claim]} evidence cannot satisfy this hazard"
+        end
 
         out << Finding.new(
           path: path,
           line: line,
           rule_id: "slopcop-zig-callback-uncovered",
-          message: "changed #{site[:label]} has no #{site[:required_evidence]} coverage evidence",
+          message: message,
           source: site[:source],
           hazard_type: site[:hazard_type],
           required_evidence: site[:required_evidence],
@@ -277,15 +283,19 @@ module SlopCop
 
       def hazard_site(site, hazard_type)
         policy = FactMineProviderHelper.hazard_policy(hazard_type)
+        raise "hazard site #{hazard_type.inspect} has no hazard-contract policy" unless policy
+
         {
           path: site[:file],
           line: site[:line],
           source: site[:source].to_s.strip,
           hazard_type: hazard_type,
-          required_evidence: FactMineProviderHelper.required_evidence_for(hazard_type),
-          label: policy&.fetch("label", "hazard site"),
-          hazard_kind: policy&.fetch("kind", "unknown"),
-          coverage_required: policy.nil? ? true : policy.fetch("coverage_required", true)
+          required_evidence: policy.fetch("evidence_provider"),
+          label: policy.fetch("label"),
+          hazard_kind: policy.fetch("kind"),
+          coverage_required: policy.fetch("coverage_required"),
+          report_required: policy.fetch("report_required"),
+          evidence_claim: policy.fetch("evidence_claim")
         }
       end
     end

@@ -44,7 +44,6 @@
     function: (selector_expression
       operand: (identifier) @pkg
       field: (field_identifier) @constructor)) @hazard.go_reflection
-  (#eq? @pkg "reflect")
   (#match? @constructor "^(ValueOf|TypeOf|New|PtrTo|SliceOf)$")
 )
 
@@ -56,7 +55,6 @@
           operand: (identifier) @pkg
           field: (field_identifier) @constructor))
       field: (field_identifier) @method)) @hazard.go_reflection
-  (#eq? @pkg "reflect")
   (#eq? @constructor "ValueOf")
   (#match? @method "^(MethodByName|FieldByName|FieldByIndex|Call)$")
 )

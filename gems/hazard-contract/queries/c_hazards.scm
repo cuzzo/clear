@@ -26,13 +26,25 @@
   (#match? @func "^(dlopen|dlsym|dlclose|dlerror|LoadLibraryA|LoadLibraryW|LoadLibraryExA|LoadLibraryExW|FreeLibrary|GetProcAddress)$")
 )
 
-;; Keep literal operands: x / 0, x % 0, and an oversized literal shift are
-;; sanitizer-relevant UB. The operand type determines whether a shift count
-;; is oversized, so the query intentionally keeps both literal and dynamic
-;; right operands for UBSan to validate.
+;; Dynamic divisors and shift counts are sanitizer-relevant. Literal zero
+;; divisors and literal shift counts >= 32 remain explicit exceptions: safe
+;; literals such as 2 and 3 must not become false positives.
 (
   (binary_expression operator: _ @op right: (_) @rhs) @hazard.c_ubsan_arithmetic
   (#match? @op "^(/|%|<<|>>)$")
+  (#not-match? @rhs "^[0-9]+[uUlL]*$")
+)
+
+(
+  (binary_expression operator: _ @op right: (number_literal) @rhs) @hazard.c_ubsan_arithmetic
+  (#match? @op "^(/|%)$")
+  (#match? @rhs "^0([uUlL]*|[xX]0[uUlL]*)$")
+)
+
+(
+  (binary_expression operator: _ @op right: (number_literal) @rhs) @hazard.c_ubsan_arithmetic
+  (#match? @op "^(<<|>>)$")
+  (#match? @rhs "^(3[2-9]|[4-9][0-9]|[1-9][0-9]{2,}|0[xX]([2-9A-Fa-f][0-9A-Fa-f]*|1[0-9A-Fa-f]+))[uUlL]*$")
 )
 
 ;; Only pointer-target casts carry alignment/strict-aliasing UB; value casts

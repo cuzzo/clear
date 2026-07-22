@@ -24,16 +24,24 @@ module SlopCop
           changed = lines.to_set
           line = hazard[:line] || hazard["line"]
           next unless changed.include?(line)
-          next if hazard.key?(:coverage_required) && !hazard[:coverage_required]
-          next if hazard.key?("coverage_required") && !hazard["coverage_required"]
-          next if covered?(evidence, hazard)
-
           req_ev = hazard[:required_evidence] || hazard["required_evidence"]
+          report_required = hazard.key?(:report_required) ? hazard[:report_required] : hazard.fetch("report_required", true)
+          next unless report_required
+
+          coverage_required = hazard.key?(:coverage_required) ? hazard[:coverage_required] : hazard.fetch("coverage_required", true)
+          if coverage_required
+            next if covered?(evidence, hazard)
+            message = "changed #{hazard[:label] || hazard["label"]} has no #{req_ev} coverage evidence"
+          else
+            claim = hazard[:evidence_claim] || hazard["evidence_claim"] || "site_reached"
+            message = "changed #{hazard[:label] || hazard["label"]} requires review; #{claim} evidence cannot satisfy this hazard"
+          end
+
           out << Finding.new(
             path: path,
             line: line,
             rule_id: provider.rule_id_for(req_ev),
-            message: "changed #{hazard[:label] || hazard["label"]} has no #{req_ev} coverage evidence",
+            message: message,
             source: hazard[:source] || hazard["source"],
             hazard_type: hazard[:hazard_type] || hazard["hazard_type"],
             required_evidence: req_ev,

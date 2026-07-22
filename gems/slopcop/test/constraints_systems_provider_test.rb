@@ -164,11 +164,12 @@ class ConstraintsSystemsProviderTest < Minitest::Test
         additions: { path => [5] },
         evidence: SlopCop::Constraints::Evidence.from_specs([], repo: dir)
       )
-      assert_empty findings
+      assert_equal 1, findings.size
+      assert_includes findings.first.message, "requires review"
     end
   end
 
-  def test_go_provider_surfaces_fact_mine_callback_alias_hazard
+  def test_go_provider_does_not_flag_typed_callback_alias_as_a_review_hazard
     with_file("src/dispatch.go", <<~GO) do |dir, path|
       package main
 
@@ -178,10 +179,7 @@ class ConstraintsSystemsProviderTest < Minitest::Test
       }
     GO
       hazards = SlopCop::Constraints::GoProvider.scan_hazards(repo: dir, paths: [path])
-      cb = hazards.find { |hazard| hazard[:hazard_type] == "go_callback_invocation" }
-
-      refute_nil cb
-      assert_equal 5, cb[:line]
+      refute hazards.any? { |hazard| hazard[:hazard_type] == "go_callback_invocation" }
 
       findings = SlopCop::Constraints::GoProvider.findings(
         repo: dir,

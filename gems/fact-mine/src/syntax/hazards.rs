@@ -61,6 +61,7 @@ struct HazardPolicy {
     evidence_provider: String,
     evidence_claim: String,
     coverage_required: bool,
+    report_required: bool,
     label: String,
     mitigation: String,
 }
@@ -73,6 +74,8 @@ struct HazardContract {
 fn hazard_contract() -> &'static HazardContract {
     static CONTRACT: OnceLock<HazardContract> = OnceLock::new();
     CONTRACT.get_or_init(|| {
+        hazard_contract::validate_contract()
+            .unwrap_or_else(|error| panic!("invalid bundled hazard contract: {error}"));
         serde_json::from_str(hazard_contract::CONTRACT_JSON)
             .expect("bundled hazard contract must be valid JSON")
     })
@@ -108,27 +111,80 @@ pub fn required_evidence_for_hazard_type(hazard_type: &str) -> String {
         .unwrap_or_default()
 }
 
-fn ruby_defined_method_names(root: Node, source: &[u8]) -> std::collections::HashSet<String> {
-    fn visit(node: Node, source: &[u8], names: &mut std::collections::HashSet<String>) {
-        if node.kind() == "method" {
+type RubyScopeKey = (usize, usize, usize, usize);
+
+fn ruby_scope_key(node: Node) -> RubyScopeKey {
+    let start = node.start_position();
+    let end = node.end_position();
+    (start.row, start.column, end.row, end.column)
+}
+
+fn ruby_defined_method_names_by_scope(
+    root: Node,
+    source: &[u8],
+) -> std::collections::HashMap<RubyScopeKey, std::collections::HashSet<String>> {
+    fn collect_direct_methods(
+        node: Node,
+        source: &[u8],
+        names: &mut std::collections::HashSet<String>,
+    ) {
+        if matches!(node.kind(), "class" | "module") {
+            return;
+        }
+        if matches!(node.kind(), "method" | "singleton_method") {
             if let Some(name) = node.child_by_field_name("name") {
                 if let Ok(text) = name.utf8_text(source) {
                     names.insert(text.to_string());
                 }
             }
+            return;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            visit(child, source, names);
+            collect_direct_methods(child, source, names);
         }
     }
 
-    let mut names = std::collections::HashSet::new();
-    visit(root, source, &mut names);
-    names
+    fn visit(
+        node: Node,
+        source: &[u8],
+        scopes: &mut std::collections::HashMap<RubyScopeKey, std::collections::HashSet<String>>,
+    ) {
+        if matches!(node.kind(), "class" | "module") {
+            let mut names = std::collections::HashSet::new();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_direct_methods(child, source, &mut names);
+            }
+            scopes.insert(ruby_scope_key(node), names);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit(child, source, scopes);
+        }
+    }
+
+    let mut scopes = std::collections::HashMap::new();
+    visit(root, source, &mut scopes);
+    scopes
 }
 
-fn ruby_call_is_user_defined(node: Node, source: &[u8], defined: &std::collections::HashSet<String>) -> bool {
+fn ruby_scope_for_call(node: Node) -> Option<Node> {
+    let mut current = node.parent();
+    while let Some(ancestor) = current {
+        if matches!(ancestor.kind(), "class" | "module") {
+            return Some(ancestor);
+        }
+        current = ancestor.parent();
+    }
+    None
+}
+
+fn ruby_call_is_user_defined(
+    node: Node,
+    source: &[u8],
+    defined_by_scope: &std::collections::HashMap<RubyScopeKey, std::collections::HashSet<String>>,
+) -> bool {
     if node.kind() != "call" {
         return false;
     }
@@ -138,27 +194,144 @@ fn ruby_call_is_user_defined(node: Node, source: &[u8], defined: &std::collectio
     if receiver.kind() != "self" {
         return false;
     }
-    node.child_by_field_name("method")
+    let method = node
+        .child_by_field_name("method")
         .and_then(|method| method.utf8_text(source).ok())
-        .is_some_and(|method| defined.contains(method))
+        .unwrap_or("");
+    ruby_scope_for_call(node)
+        .and_then(|scope| defined_by_scope.get(&ruby_scope_key(scope)))
+        .is_some_and(|defined| defined.contains(method))
 }
 
-fn go_has_reflect_import(root: Node, source: &[u8]) -> bool {
-    fn visit(node: Node, source: &[u8]) -> bool {
+fn go_reflect_import_aliases(
+    root: Node,
+    source: &[u8],
+) -> std::collections::HashSet<String> {
+    fn visit(node: Node, source: &[u8], aliases: &mut std::collections::HashSet<String>) {
         if node.kind() == "import_spec"
             && node
                 .child_by_field_name("path")
                 .and_then(|path| path.utf8_text(source).ok())
                 .is_some_and(|path| path.trim_matches('"') == "reflect")
         {
+            let alias = node
+                .child_by_field_name("name")
+                .and_then(|name| name.utf8_text(source).ok())
+                .unwrap_or("reflect");
+            if alias != "_" && alias != "." {
+                aliases.insert(alias.to_string());
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit(child, source, aliases);
+        }
+    }
+
+    let mut aliases = std::collections::HashSet::new();
+    visit(root, source, &mut aliases);
+    aliases
+}
+
+fn go_identifier_is_binding(node: Node, source: &[u8], name: &str) -> bool {
+    let text = node.utf8_text(source).unwrap_or("");
+    let left_side = match node.kind() {
+        "short_var_declaration" | "range_clause" => text.split(":=").next().unwrap_or(text),
+        "var_declaration" | "const_declaration" => text
+            .strip_prefix("var")
+            .or_else(|| text.strip_prefix("const"))
+            .unwrap_or(text)
+            .split('=').next().unwrap_or(text),
+        "type_declaration" => text.strip_prefix("type").unwrap_or(text),
+        _ => return false,
+    };
+    left_side
+        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+        .any(|word| word == name)
+}
+
+fn go_block_shadows_reflect(
+    block: Node,
+    call: Node,
+    source: &[u8],
+    alias: &str,
+) -> bool {
+    fn visit(node: Node, call: Node, source: &[u8], alias: &str, block: Node) -> bool {
+        if node.id() != block.id() && node.kind() == "block" {
+            return false;
+        }
+        if node.id() != call.id()
+            && node.start_byte() <= call.start_byte()
+            && go_identifier_is_binding(node, source, alias)
+        {
             return true;
         }
         let mut cursor = node.walk();
-        let found = node.children(&mut cursor).any(|child| visit(child, source));
+        let found = node
+            .children(&mut cursor)
+            .any(|child| visit(child, call, source, alias, block));
         found
     }
 
-    visit(root, source)
+    visit(block, call, source, alias, block)
+}
+
+fn go_function_parameters_shadow_reflect(node: Node, source: &[u8], alias: &str) -> bool {
+    node.child_by_field_name("parameters")
+        .and_then(|parameters| parameters.utf8_text(source).ok())
+        .is_some_and(|text| {
+            text.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+                .any(|word| word == alias)
+        })
+}
+
+fn go_reflection_call_is_imported_and_unshadowed(
+    call: Node,
+    source: &[u8],
+    aliases: &std::collections::HashSet<String>,
+) -> bool {
+    let Some(function) = call.child_by_field_name("function") else {
+        return false;
+    };
+    let Some(selector) = (function.kind() == "selector_expression").then_some(function) else {
+        return false;
+    };
+    let Some(package) = selector.child_by_field_name("operand") else {
+        return false;
+    };
+    let Ok(package_name) = package.utf8_text(source) else {
+        return false;
+    };
+    if !aliases.contains(package_name) {
+        return false;
+    }
+
+    let mut current = Some(call);
+    while let Some(node) = current {
+        if node.kind() == "block" && go_block_shadows_reflect(node, call, source, package_name) {
+            return false;
+        }
+        if matches!(node.kind(), "function_declaration" | "method_declaration")
+            && go_function_parameters_shadow_reflect(node, source, package_name)
+        {
+            return false;
+        }
+        current = node.parent();
+    }
+
+    true
+}
+
+fn c_arithmetic_hazard_is_relevant(node: Node, source: &[u8]) -> bool {
+    let operator = node
+        .child_by_field_name("operator")
+        .and_then(|operator| operator.utf8_text(source).ok())
+        .unwrap_or("");
+    let rhs = node
+        .child_by_field_name("right")
+        .and_then(|right| right.utf8_text(source).ok())
+        .unwrap_or("");
+    hazard_contract::c_arithmetic_literal_is_relevant(operator, rhs)
 }
 
 pub(crate) fn extract_hazards(
@@ -176,11 +349,15 @@ pub(crate) fn extract_hazards(
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(query, root, source_bytes);
     let ruby_defined_methods = if language == Language::Ruby {
-        ruby_defined_method_names(root, source_bytes)
+        ruby_defined_method_names_by_scope(root, source_bytes)
+    } else {
+        std::collections::HashMap::new()
+    };
+    let go_reflect_aliases = if language == Language::Go {
+        go_reflect_import_aliases(root, source_bytes)
     } else {
         std::collections::HashSet::new()
     };
-    let go_has_reflect = language != Language::Go || go_has_reflect_import(root, source_bytes);
     
     let mut sites = Vec::new();
     let mut recorded_lines = std::collections::HashSet::new();
@@ -208,7 +385,20 @@ pub(crate) fn extract_hazards(
             {
                 continue;
             }
-            if language == Language::Go && hazard_type == "go_reflection" && !go_has_reflect {
+            if language == Language::Go
+                && hazard_type == "go_reflection"
+                && !go_reflection_call_is_imported_and_unshadowed(
+                    cap.node,
+                    source_bytes,
+                    &go_reflect_aliases,
+                )
+            {
+                continue;
+            }
+            if matches!(language, Language::C | Language::Cpp)
+                && hazard_type.ends_with("ubsan_arithmetic")
+                && !c_arithmetic_hazard_is_relevant(cap.node, source_bytes)
+            {
                 continue;
             }
             
@@ -219,7 +409,9 @@ pub(crate) fn extract_hazards(
                 .trim()
                 .to_string();
 
-            let required_evidence = required_evidence_for_hazard_type(&hazard_type);
+            let policy = hazard_policy(&hazard_type).unwrap_or_else(|| {
+                panic!("hazard query capture {hazard_type:?} has no contract policy")
+            });
 
             let start_col = cap.node.start_position().column as u32;
             let end_line = (cap.node.end_position().row + 1) as u32;
@@ -233,7 +425,13 @@ pub(crate) fn extract_hazards(
                     line,
                     snippet: line_text,
                     hazard_type,
-                    required_evidence,
+                    required_evidence: policy.evidence_provider.clone(),
+                    hazard_kind: policy.kind.clone(),
+                    evidence_claim: policy.evidence_claim.clone(),
+                    coverage_required: policy.coverage_required,
+                    report_required: policy.report_required,
+                    label: policy.label.clone(),
+                    mitigation: policy.mitigation.clone(),
                     provider: language.as_str().to_string(),
                     start_column: Some(start_col),
                     end_line: Some(end_line),
@@ -722,14 +920,22 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
             };
             
             let hazard_type = format!("{}_callback_invocation", document.language.as_str());
-            let required_evidence = required_evidence_for_hazard_type(&hazard_type);
+            let policy = hazard_policy(&hazard_type).unwrap_or_else(|| {
+                panic!("callback hazard {hazard_type:?} has no contract policy")
+            });
             
             callback_hazards.push(HazardSite {
                 path: call.file.clone(),
                 line: call.line as u32,
                 snippet,
                 hazard_type,
-                required_evidence,
+                required_evidence: policy.evidence_provider.clone(),
+                hazard_kind: policy.kind.clone(),
+                evidence_claim: policy.evidence_claim.clone(),
+                coverage_required: policy.coverage_required,
+                report_required: policy.report_required,
+                label: policy.label.clone(),
+                mitigation: policy.mitigation.clone(),
                 provider: document.language.as_str().to_string(),
                 start_column: Some(call.span[1] as u32),
                 end_line: Some(call.span[2] as u32),
@@ -834,6 +1040,17 @@ mod tests {
             Language::Ruby,
         );
         assert!(shadowed.is_empty(), "user-defined Ruby send must not be treated as Kernel.send");
+
+        let cross_scope_code = "class Shadowed\n  def send(value)\n  end\n  def run\n    self.send(:hello)\n  end\nend\nclass Real\n  def run\n    self.send(:hello)\n  end\nend";
+        let cross_scope_tree = parser.parse(cross_scope_code, None).unwrap();
+        let cross_scope = extract_hazards(
+            "cross_scope.rb",
+            cross_scope_tree.root_node(),
+            cross_scope_code,
+            Language::Ruby,
+        );
+        assert_eq!(cross_scope.len(), 1);
+        assert_eq!(cross_scope[0].line, 10);
     }
 
     #[test]
@@ -1036,6 +1253,16 @@ local mt = {
         let tree = parser.parse(go_without_import, None).unwrap();
         assert!(extract_hazards("test.go", tree.root_node(), go_without_import, Language::Go).is_empty());
 
+        let aliased_go = "package demo\nimport r \"reflect\"\nfunc run(value interface{}, name string) {\n  r.ValueOf(value).MethodByName(name).Call(nil)\n}";
+        let tree = parser.parse(aliased_go, None).unwrap();
+        assert!(extract_hazards("test.go", tree.root_node(), aliased_go, Language::Go)
+            .iter()
+            .any(|hazard| hazard.hazard_type == "go_reflection"));
+
+        let shadowed_go = "package demo\nimport \"reflect\"\nfunc run(value interface{}, name string) {\n  reflect := fakeReflect{}\n  reflect.ValueOf(value).MethodByName(name).Call(nil)\n}";
+        let tree = parser.parse(shadowed_go, None).unwrap();
+        assert!(extract_hazards("test.go", tree.root_node(), shadowed_go, Language::Go).is_empty());
+
         let c_code = "void load(void) { void *handle = dlopen(\"plugin.so\", 0); void *symbol = dlsym(handle, \"run\"); }";
         parser.set_language(&grammar_for_language(Language::C)).unwrap();
         let tree = parser.parse(c_code, None).unwrap();
@@ -1046,6 +1273,17 @@ local mt = {
                 .filter(|hazard| hazard.hazard_type == "c_dynamic_loading")
                 .count(),
             2
+        );
+
+        let c_ub_code = "void ub(int x) { int a = x / 0; int b = x % 0; int c = x << 64; int d = x / 2; int e = x << 3; }";
+        let tree = parser.parse(c_ub_code, None).unwrap();
+        let c_ub_hazards = extract_hazards("test.c", tree.root_node(), c_ub_code, Language::C);
+        assert_eq!(
+            c_ub_hazards
+                .iter()
+                .filter(|hazard| hazard.hazard_type == "c_ubsan_arithmetic")
+                .count(),
+            3
         );
     }
 
@@ -1256,7 +1494,7 @@ local mt = {
         assert_eq!(kt_service_metaprog.len(), 0);
 
         // C/C++ pointer member access and value casts are not sanitizer
-        // hazards; arithmetic operations and pointer casts are.
+        // hazards; dynamic arithmetic operations and pointer casts are.
         let c_precision = check_all("
             int scale(struct Cfg *cfg, int n, int d) {
                 int half = n / 2;
@@ -1269,9 +1507,7 @@ local mt = {
         ", ".c", Language::C);
         assert!(c_precision.iter().all(|h| h.hazard_type != "c_asan_pointer"));
         let c_arith: Vec<_> = c_precision.iter().filter(|h| h.hazard_type == "c_ubsan_arithmetic").collect();
-        assert_eq!(c_arith.len(), 3);
-        assert!(c_arith.iter().any(|h| h.snippet.contains("n / 2")));
-        assert!(c_arith.iter().any(|h| h.snippet.contains("n << 3")));
+        assert_eq!(c_arith.len(), 1);
         assert!(c_arith.iter().any(|h| h.snippet.contains("n / d")));
         let c_casts: Vec<_> = c_precision.iter().filter(|h| h.hazard_type == "c_ubsan_cast").collect();
         assert_eq!(c_casts.len(), 1);
@@ -1287,8 +1523,7 @@ local mt = {
         ", ".cpp", Language::Cpp);
         assert!(cpp_precision.iter().all(|h| h.hazard_type != "cpp_asan_pointer_or_cast" || h.snippet.contains("reinterpret_cast")));
         let cpp_arith: Vec<_> = cpp_precision.iter().filter(|h| h.hazard_type == "cpp_ubsan_arithmetic").collect();
-        assert_eq!(cpp_arith.len(), 2);
-        assert!(cpp_arith.iter().any(|h| h.snippet.contains("n / 2")));
+        assert_eq!(cpp_arith.len(), 1);
         assert!(cpp_arith.iter().any(|h| h.snippet.contains("n / d")));
         let cpp_casts: Vec<_> = cpp_precision.iter().filter(|h| h.hazard_type == "cpp_ubsan_cast").collect();
         assert!(cpp_casts.iter().all(|h| h.snippet.contains("reinterpret_cast")));
@@ -1535,6 +1770,30 @@ local mt = {
             Language::C,
         );
         assert_eq!(c_member.len(), 1);
+    }
+
+    #[test]
+    fn local_hazard_query_copies_match_the_contract_resources() {
+        let queries = [
+            ("c", include_str!("c_hazards.scm"), hazard_contract::C_HAZARDS),
+            ("cpp", include_str!("cpp_hazards.scm"), hazard_contract::CPP_HAZARDS),
+            ("csharp", include_str!("csharp_hazards.scm"), hazard_contract::CSHARP_HAZARDS),
+            ("go", include_str!("go_hazards.scm"), hazard_contract::GO_HAZARDS),
+            ("rust", include_str!("rust_hazards.scm"), hazard_contract::RUST_HAZARDS),
+            ("zig", include_str!("zig_hazards.scm"), hazard_contract::ZIG_HAZARDS),
+            ("ruby", include_str!("ruby_hazards.scm"), hazard_contract::RUBY_HAZARDS),
+            ("python", include_str!("python_hazards.scm"), hazard_contract::PYTHON_HAZARDS),
+            ("javascript", include_str!("javascript_hazards.scm"), hazard_contract::JAVASCRIPT_HAZARDS),
+            ("typescript", include_str!("typescript_hazards.scm"), hazard_contract::TYPESCRIPT_HAZARDS),
+            ("lua", include_str!("lua_hazards.scm"), hazard_contract::LUA_HAZARDS),
+            ("java", include_str!("java_hazards.scm"), hazard_contract::JAVA_HAZARDS),
+            ("php", include_str!("php_hazards.scm"), hazard_contract::PHP_HAZARDS),
+            ("kotlin", include_str!("kotlin_hazards.scm"), hazard_contract::KOTLIN_HAZARDS),
+            ("swift", include_str!("swift_hazards.scm"), hazard_contract::SWIFT_HAZARDS),
+        ];
+        for (language, local, canonical) in queries {
+            assert_eq!(local, canonical, "FactMine {language} hazard query drifted from hazard-contract");
+        }
     }
 
 }
