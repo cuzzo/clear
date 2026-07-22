@@ -232,6 +232,19 @@ class EvidenceReportTest < Minitest::Test
                  contributions.completeness.to_h)
   end
 
+  def test_unverified_oracle_control_is_not_published_as_strengthening_evidence
+    corpus = complete_corpus
+    contributions = Evidence::ContributionAnalyzer.new(corpus).analyze
+    subsumption = Evidence::SubsumptionAnalyzer.new(corpus).analyze(contributions: contributions)
+    oracle = oracle_analysis(scope: corpus.evidence_scope, control_verified: false)
+    report = Evidence::ReportBuilder.new(corpus).build(
+      contributions: contributions, subsumption: subsumption, oracle_sensitivity: oracle,
+    )
+
+    refute_includes report.findings.map(&:kind), Evidence::ReviewFindingKind::StrengthensExistingOracle
+    assert_nil report.vectors.find { |vector| vector.test_id == "t1" }&.oracle_dependent_kill_ratio
+  end
+
   def test_high_cost_findings_require_comparable_runtime_measurements
     corpus = complete_corpus
     contributions = Evidence::ContributionAnalyzer.new(corpus).analyze
@@ -324,7 +337,7 @@ class EvidenceReportTest < Minitest::Test
     Evidence::StabilityAnalyzer.new(corpus).analyze(trials)
   end
 
-  def oracle_analysis(scope: nil)
+  def oracle_analysis(scope: nil, control_verified: true)
     fact = Evidence::OracleFact.new(
       oracle_id: "o1",
       test_id: "t1",
@@ -344,6 +357,12 @@ class EvidenceReportTest < Minitest::Test
         oracle_id: "o1", mutation: Evidence::OracleMutationKind::DisableOracle,
         recognized: true, applied: true, reason: "fixture",
       )],
+      execution_results: [{
+        "disabled_rewrite" => {"oracle_id" => "o1", "applied" => true},
+        "control_rewrite" => {"applied" => true},
+        "control_outcome" => control_verified ? "ASSERTION_FAILURE" : "PASSED",
+        "control_verified" => control_verified,
+      }],
       scope: scope,
     )
   end

@@ -40,7 +40,7 @@ module TestMiser
 
       sig { params(result: OracleSensitivity).returns(T::Boolean) }
       def allows_oracle?(result)
-        result.complete
+        result.complete && result.control_verified
       end
 
       sig { params(counterfactual: T.nilable(CounterfactualResult)).returns(T::Boolean) }

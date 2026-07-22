@@ -229,7 +229,7 @@ class TestMiserTest < Minitest::Test
         #!/usr/bin/env ruby
         require "json"
         puts JSON.generate("documents" => [{"calls" => [
-          {"message" => "assert_equal", "receiver" => "self", "owner" => "ExampleTest", "span" => [10, 4, 10, 67]}
+          {"message" => "assert_equal", "receiver" => "self", "owner" => "ExampleTest", "function" => "test_value", "span" => [10, 4, 10, 67]}
         ]}])
       RUBY
       FileUtils.chmod(0755, provider)
@@ -244,10 +244,10 @@ class TestMiserTest < Minitest::Test
         "repository" => File.expand_path("../../..", __dir__),
         "revision" => "HEAD",
         "source_path" => "gems/test-miser/test/fixtures/collector/setup.rb",
-        "test_id" => "t1",
+        "test_id" => "minitest:ExampleTest#test_value",
         "language" => "ruby",
         "test_command" => command,
-        "original_kills" => {"t1" => []},
+        "original_kills" => {"minitest:ExampleTest#test_value" => []},
         "trial_count" => 2,
         "min_trials" => 2,
         "allow_dirty" => true,

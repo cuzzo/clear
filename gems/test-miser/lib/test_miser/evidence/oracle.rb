@@ -270,7 +270,6 @@ module TestMiser
         "assert_output" => OracleKind::SubprocessOutput,
       }.freeze, T::Hash[String, OracleKind])
       RSPEC = T.let({
-        "expect" => OracleKind::Equality,
         "eq" => OracleKind::Equality,
         "eql" => OracleKind::Equality,
         "be_nil" => OracleKind::NullCheck,
@@ -278,9 +277,7 @@ module TestMiser
         "have_received" => OracleKind::MockVerification,
       }.freeze, T::Hash[String, OracleKind])
       PYTEST = T.let({
-        "assert" => OracleKind::Truthiness,
-        "assert_equal" => OracleKind::Equality,
-        "assert_raises" => OracleKind::ExceptionExpectation,
+        "raises" => OracleKind::ExceptionExpectation,
       }.freeze, T::Hash[String, OracleKind])
       UNITTEST = T.let({
         "assertEqual" => OracleKind::Equality,
@@ -299,7 +296,6 @@ module TestMiser
         "assertThrows" => OracleKind::ExceptionExpectation,
       }.freeze, T::Hash[String, OracleKind])
       JEST = T.let({
-        "expect" => OracleKind::Equality,
         "toEqual" => OracleKind::Equality,
         "toStrictEqual" => OracleKind::Equality,
         "toBe" => OracleKind::Identity,
@@ -340,19 +336,32 @@ module TestMiser
                 when "jest" then JEST
                 else {}
                 end
-        return nil unless framework_receiver_allowed?(framework, call)
+        return nil unless call.is_a?(Hash) && framework_receiver_allowed?(framework, call)
 
-        message = call.is_a?(Hash) ? call["message"] : call
-        table[message.to_s]
+        table[call["message"].to_s]
       end
 
       sig { params(framework: String, call: T.untyped).returns(T::Boolean) }
       def self.framework_receiver_allowed?(framework, call)
-        return true unless call.is_a?(Hash)
+        return false unless call.is_a?(Hash)
 
         receiver = call["receiver"].to_s
         owner = call["owner"].to_s
-        return false unless receiver.empty? || %w[self this].include?(receiver)
+        receiver_allowed = case framework
+                           when "junit"
+                             receiver.empty? || %w[
+                               self this Assert Assertions org.junit.Assert org.junit.jupiter.api.Assertions
+                             ].include?(receiver)
+                           when "jest"
+                             receiver.empty? || receiver == "self" || receiver.match?(/\Aexpect\(.*\)\z/)
+                           when "rspec"
+                             receiver.empty? || %w[self this].include?(receiver) || receiver.match?(/\Aexpect\(.*\)\z/)
+                           when "pytest"
+                             receiver.empty? || %w[self this pytest].include?(receiver)
+                           else
+                             receiver.empty? || %w[self this].include?(receiver)
+                           end
+        return false unless receiver_allowed
 
         return owner.empty? || owner.end_with?("Test") if framework == "minitest"
         return owner.empty? || owner.end_with?("TestCase") if framework == "unittest"
@@ -384,14 +393,16 @@ module TestMiser
         raise InvalidOracleFacts, "FactMine failed for #{source_path}: #{stderr}" unless status.success?
 
         payload = JSON.parse(stdout)
-        framework = OracleFramework.detect(File.read(source_path), language, override: @framework)
+        source = File.read(source_path)
+        framework = OracleFramework.detect(source, language, override: @framework)
         return [] if framework.nil?
         calls = Array(payload["documents"]).flat_map { |document| Array(document["calls"]) }
         calls.filter_map.with_index do |call, index|
+          next unless belongs_to_test?(call, test_id, source, framework)
           kind = OracleFramework.kind(framework, call)
           next if kind.nil?
 
-          span = factmine_span(call["span"])
+          span = oracle_span(call, calls, framework)
           OracleFact.new(
             oracle_id: "factmine:#{Digest::SHA256.hexdigest("#{source_path}:#{index}:#{span.to_h}")[0, 16]}",
             test_id: test_id,
@@ -407,6 +418,63 @@ module TestMiser
       end
 
       private
+
+      sig { params(call: T.untyped, test_id: String, source: String, framework: String).returns(T::Boolean) }
+      def belongs_to_test?(call, test_id, source, framework)
+        explicit_test_id = call["test_id"].to_s
+        return true if !explicit_test_id.empty? && explicit_test_id == test_id
+
+        owner = call["owner"].to_s
+        function = call["function"].to_s
+
+        if framework == "rspec"
+          match = test_id.match(/\Arspec:\d+:.+:(\d+)\//)
+          return false if match.nil?
+
+          start_line = Integer(match[1])
+          call_line = Integer(call["line"] || Array(call["span"]).first || 0)
+          lines = source.lines
+          next_test_line = lines.each_index.filter_map do |index|
+            index + 1 if index + 1 > start_line && lines.fetch(index).match?(/^\s*(?:it|specify)\b/)
+          end.min
+          return call_line >= start_line && (next_test_line.nil? || call_line < next_test_line)
+        end
+
+        return false if owner.empty? || function.empty? || function == "(top-level)"
+
+        expected_ids = case framework
+                       when "minitest", "unittest", "junit"
+                         ["#{framework}:#{owner}##{function}"]
+                       when "pytest"
+                         ["#{framework}:#{owner}::#{function}", "#{framework}:#{function}"]
+                       else
+                         []
+                       end
+        expected_ids.include?(test_id)
+      end
+
+      sig { params(call: T.untyped, calls: T::Array[T.untyped], framework: String).returns(SourceSpan) }
+      def oracle_span(call, calls, framework)
+        current = factmine_span(call["span"])
+        return current unless %w[rspec jest].include?(framework)
+
+        call_line = Integer(call["line"] || Array(call["span"]).first || 0)
+        call_start = Array(call["span"])[1].to_i
+        expect_call = calls.select do |candidate|
+          candidate["message"].to_s == "expect" &&
+            Integer(candidate["line"] || Array(candidate["span"]).first || 0) == call_line &&
+            Array(candidate["span"])[1].to_i < call_start
+        end.max_by { |candidate| Array(candidate["span"])[1].to_i }
+        return current if expect_call.nil?
+
+        expect_span = factmine_span(expect_call["span"])
+        SourceSpan.new(
+          start_line: expect_span.start_line,
+          start_column: expect_span.start_column,
+          end_line: current.end_line,
+          end_column: current.end_column,
+        )
+      end
 
       sig { params(raw: T.untyped).returns(SourceSpan) }
       def factmine_span(raw)
@@ -457,15 +525,43 @@ module TestMiser
 
         calls = []
         walk_tree(tree.root_node) do |node|
-          calls << node if node.kind == "call" ||
-            (node.kind == "body_statement" && node.children.any? { |child| child.kind == "argument_list" } && node.children.first&.kind == "identifier")
+          calls << node if node.kind == "assert_statement" || node.kind == "call" ||
+            framework_body_statement?(node, framework)
         end
         calls.filter_map.with_index do |node, index|
-          method_node = node.child_by_field_name("method") || node.child_by_field_name("function") || node.children.find { |child| child.kind == "identifier" }
-          kind = OracleFramework.kind(framework, method_node&.text)
+          next unless source_test_contains?(test_id, source, node.start_point.row + 1, framework)
+          kind = if framework == "pytest" && node.kind == "assert_statement"
+            OracleKind::Truthiness
+          else
+            method_node = if node.kind == "body_statement"
+              body_method_node(node, framework)
+            else
+              node.child_by_field_name("method") || node.child_by_field_name("function") || node.children.find { |child| child.kind == "identifier" }
+            end
+            receiver = node.child_by_field_name("receiver")&.text.to_s
+            receiver = "expect(...)" if framework == "rspec" && node.kind == "body_statement"
+            OracleFramework.kind(framework, {"message" => method_node&.text, "receiver" => receiver})
+          end
           next if kind.nil?
 
           span = tree_span(node)
+          if %w[rspec jest].include?(framework)
+            expect_node = calls.select do |candidate|
+              candidate_method = candidate.child_by_field_name("method") || candidate.child_by_field_name("function") || candidate.children.find { |child| child.kind == "identifier" }
+              candidate_method&.text == "expect" && candidate.start_point.row == node.start_point.row && candidate.start_byte < node.start_byte
+            end.max_by(&:start_byte)
+            unless expect_node.nil?
+              expect_span = tree_span(expect_node)
+              span = SourceSpan.new(
+                start_line: expect_span.start_line,
+                start_column: expect_span.start_column,
+                end_line: span.end_line,
+                end_column: span.end_column,
+                start_offset: expect_span.start_offset,
+                end_offset: span.end_offset,
+              )
+            end
+          end
           OracleFact.new(
             oracle_id: "tree-sitter:#{Digest::SHA256.hexdigest("#{source_path}:#{index}:#{node.start_byte}")[0, 16]}",
             test_id: test_id,
@@ -481,6 +577,87 @@ module TestMiser
       end
 
       private
+
+      sig { params(node: T.untyped, framework: String).returns(T::Boolean) }
+      def framework_body_statement?(node, framework)
+        return false unless node.kind == "body_statement"
+
+        !body_method_node(node, framework).nil?
+      end
+
+      sig { params(node: T.untyped, framework: String).returns(T.untyped) }
+      def body_method_node(node, framework)
+        node.children.each do |child|
+          candidates = if child.kind == "identifier"
+            [child]
+          elsif child.kind == "argument_list"
+            child.children.select { |nested| nested.kind == "identifier" }
+          else
+            []
+          end
+          receiver = framework == "rspec" ? "expect(...)" : ""
+          match = candidates.find do |candidate|
+            !OracleFramework.kind(framework, {"message" => candidate.text, "receiver" => receiver}).nil?
+          end
+          return match unless match.nil?
+        end
+        nil
+      end
+
+      sig { params(test_id: String, source: String, line: Integer, framework: String).returns(T::Boolean) }
+      def source_test_contains?(test_id, source, line, framework)
+        if framework == "minitest"
+          match = test_id.match(/\Aminitest:.+#(.+)\z/)
+          return false if match.nil?
+
+          method = Regexp.escape(T.must(match[1]))
+          lines = source.lines
+          start = lines.each_index.find { |index| lines.fetch(index).match?(/^\s*def\s+#{method}\b/) }
+          return false if start.nil?
+
+          next_method = lines.each_index.find { |index| index > start && lines.fetch(index).match?(/^\s*def\b/) }
+          return line >= start + 1 && (next_method.nil? || line < next_method + 1)
+        end
+
+        if framework == "rspec"
+          match = test_id.match(/\Arspec:\d+:.+:(\d+)\//)
+          return false if match.nil?
+
+          start_line = Integer(match[1])
+          lines = source.lines
+          next_test = lines.each_index.filter_map do |index|
+            index + 1 if index + 1 > start_line && lines.fetch(index).match?(/^\s*(?:it|specify)\b/)
+          end.min
+          return line >= start_line && (next_test.nil? || line < next_test)
+        end
+
+        if %w[pytest unittest].include?(framework)
+          method = T.must(T.must(test_id.delete_prefix("#{framework}:").split("::").last).split("#").last)
+          lines = source.lines
+          start = lines.each_index.find { |index| lines.fetch(index).match?(/^\s*(?:async\s+)?def\s+#{Regexp.escape(method)}\b/) }
+          return false if start.nil?
+
+          next_method = lines.each_index.find { |index| index > start && lines.fetch(index).match?(/^\s*(?:async\s+)?def\b/) }
+          return line >= start + 1 && (next_method.nil? || line < next_method + 1)
+        end
+
+        if framework == "junit"
+          method = T.must(test_id.split("#").last)
+          lines = source.lines
+          method_pattern = /\b#{Regexp.escape(method)}\s*\(/
+          start = lines.each_index.find do |index|
+            lines.fetch(index).match?(/^\s*(?:(?:@\w+(?:\([^)]*\))?|public|private|protected|static|final|override|suspend)\s+)*(?:fun\s+)?(?:[\w<>,.?]+\s+)?#{method_pattern}/)
+          end
+          return false if start.nil?
+
+          next_test = lines.each_index.find do |index|
+            index > start && lines.fetch(index).match?(/^\s*@(?:Test|ParameterizedTest)\b/)
+          end
+          return line >= start + 1 && (next_test.nil? || line < next_test + 1)
+        end
+
+        false
+      end
 
       sig { params(node: T.untyped, block: T.proc.params(node: T.untyped).void).void }
       def walk_tree(node, &block)
@@ -621,16 +798,143 @@ module TestMiser
         line.byteslice(0, [column - 1, 0].max).to_s.bytesize
       end
 
+      sig { params(original: String, language: String, framework: String).returns(String) }
+      def disable_replacement(original, language, framework)
+        if language.downcase == "ruby" && framework == "minitest"
+          return evaluate_arguments(original, "assert_equal", 1, language) if original.match?(/\bassert_equal\b/)
+          return evaluate_arguments(original, "assert_same", 1, language) if original.match?(/\bassert_same\b/)
+          return evaluate_arguments(original, "assert", 0, language) if original.match?(/(?:\A|\.)assert\b/)
+          return evaluate_arguments(original, "assert_nil", 0, language) if original.match?(/\bassert_nil\b/)
+          return evaluate_arguments(original, "refute_nil", 0, language) if original.match?(/\brefute_nil\b/)
+          return evaluate_arguments(original, "refute", 0, language) if original.match?(/(?:\A|\.)refute\b/)
+        end
+
+        if language.downcase == "ruby" && framework == "rspec"
+          return evaluate_arguments(original, "expect", 0, language) if original.match?(/\bexpect\s*\(/)
+        end
+
+        if language.downcase == "python" && framework == "pytest" && original.lstrip.start_with?("assert")
+          return original.lstrip.delete_prefix("assert").strip
+        end
+
+        if language.downcase == "python" && framework == "unittest"
+          %w[assertEqual assertIs assertTrue assertFalse assertIsNone].each do |method|
+            return evaluate_arguments(original, method, method == "assertEqual" ? 1 : 0, language) if original.match?(/\b#{method}\b/)
+          end
+        end
+
+        if %w[javascript typescript].include?(language.downcase) && framework == "jest"
+          return evaluate_arguments(original, "expect", 0, language) if original.match?(/\bexpect\s*\(/)
+        end
+
+        if %w[java kotlin].include?(language.downcase) && framework == "junit"
+          return evaluate_arguments(original, "assertEquals", 1, language) if original.match?(/\bassertEquals\b/)
+          return evaluate_arguments(original, "assertSame", 1, language) if original.match?(/\bassertSame\b/)
+          return evaluate_arguments(original, "assertTrue", 0, language) if original.match?(/\bassertTrue\b/)
+          return evaluate_arguments(original, "assertFalse", 0, language) if original.match?(/\bassertFalse\b/)
+          return evaluate_arguments(original, "assertNull", 0, language) if original.match?(/\bassertNull\b/)
+        end
+
+        raise ArgumentError, "no safe oracle-disabling adapter for #{framework}/#{language}"
+      end
+
+      sig { params(original: String, method: String, actual_index: Integer, language: String).returns(String) }
+      def evaluate_arguments(original, method, actual_index, language)
+        arguments = call_arguments(original, method)
+        raise ArgumentError, "oracle call has no argument at index #{actual_index}" if arguments.fetch(actual_index, "").strip.empty?
+
+        return arguments.fetch(actual_index).strip if arguments.length == 1 || %w[java kotlin].include?(language.downcase)
+
+        case language.downcase
+        when "ruby"
+          "begin #{arguments.map(&:strip).join('; ')} end"
+        when "python"
+          "(#{arguments.map(&:strip).join(', ')})"
+        when "javascript", "typescript"
+          "[#{arguments.map(&:strip).join(', ')}]"
+        else
+          arguments.fetch(actual_index).strip
+        end
+      end
+
+      sig { params(original: String, method: String).returns(T::Array[String]) }
+      def call_arguments(original, method)
+        text = original.strip
+        prefix = /\A(?:[A-Za-z_$][\w$:.]*\.)?#{Regexp.escape(method)}\b/
+        match = prefix.match(text)
+        raise ArgumentError, "could not locate #{method} call" if match.nil?
+
+        rest = text.byteslice(match.end(0)..).to_s.lstrip
+        if rest.start_with?("(")
+          inner, = balanced_parentheses(rest)
+          split_arguments(inner)
+        else
+          split_arguments(rest)
+        end
+      end
+
+      sig { params(text: String).returns([String, String]) }
+      def balanced_parentheses(text)
+        depth = 0
+        quote = T.let(nil, T.nilable(String))
+        escape = T.let(false, T::Boolean)
+        text.each_char.with_index do |character, index|
+          if quote
+            if escape
+              escape = false
+            elsif character == "\\"
+              escape = true
+            elsif character == quote
+              quote = nil
+            end
+          elsif %w[\" '].include?(character)
+            quote = character
+          elsif character == "("
+            depth += 1
+          elsif character == ")"
+            depth -= 1
+            return [text.byteslice(1...index).to_s, text.byteslice((index + 1)..).to_s] if depth.zero?
+          end
+        end
+        raise ArgumentError, "unbalanced oracle call"
+      end
+
+      sig { params(text: String).returns(T::Array[String]) }
+      def split_arguments(text)
+        arguments = []
+        start = 0
+        depth = 0
+        quote = T.let(nil, T.nilable(String))
+        escape = T.let(false, T::Boolean)
+        text.each_char.with_index do |character, index|
+          if quote
+            if escape
+              escape = false
+            elsif character == "\\"
+              escape = true
+            elsif character == quote
+              quote = nil
+            end
+          elsif %w[\" '].include?(character)
+            quote = character
+          elsif "([{<".include?(character)
+            depth += 1
+          elsif ")]} >".delete(" ").include?(character)
+            depth -= 1 if depth.positive?
+          elsif character == "," && depth.zero?
+            arguments << text.byteslice(start...index).to_s
+            start = index + 1
+          end
+        end
+        arguments << text.byteslice(start..).to_s
+        arguments
+      end
+
       sig { params(mutation: OracleMutationKind, original: String, language: String, framework: String).returns(String) }
       def replacement_for(mutation, original, language, framework)
         case mutation
         when OracleMutationKind::DisableOracle
-          return "nil" if language.downcase == "ruby" && %w[minitest rspec].include?(framework)
-          return "pass" if language.downcase == "python" && %w[pytest unittest].include?(framework)
-          return "void 0" if %w[javascript typescript].include?(language.downcase) && framework == "jest"
-          return ";" if %w[java kotlin].include?(language.downcase) && framework == "junit"
-
-          raise ArgumentError, "no safe oracle-disabling adapter for #{framework}/#{language}"
+          disable_replacement(original, language, framework)
         when OracleMutationKind::NegateBoolean
           if language.downcase == "ruby" && framework == "minitest"
             return original.sub(/\bassert_equal\b/, "refute_equal") if original.match?(/\bassert_equal\b/)
@@ -730,6 +1034,7 @@ module TestMiser
       const :trial, Integer, default: 0
       const :trial_id, String, default: "legacy"
       const :environment_fingerprint, T.nilable(String), default: nil
+      const :outcome, T.nilable(TestOutcome), default: nil
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
@@ -742,6 +1047,7 @@ module TestMiser
           "trial" => trial.zero? && trial_id == "legacy" ? nil : trial,
           "trial_id" => trial_id == "legacy" ? nil : trial_id,
           "environment_fingerprint" => environment_fingerprint,
+          "outcome" => outcome&.serialize,
         }.compact
       end
     end
@@ -755,6 +1061,7 @@ module TestMiser
       const :oracle_dependent_kills, T::Array[String]
       const :persists_without_oracle, T::Array[String]
       const :complete, T::Boolean
+      const :control_verified, T::Boolean, default: false
       const :unknown_reason, T.nilable(String)
       const :observed_trials, Integer, default: 0
       const :trial_ids, T::Array[String], default: []
@@ -769,6 +1076,7 @@ module TestMiser
           "oracle_dependent_kills" => oracle_dependent_kills,
           "persists_without_oracle" => persists_without_oracle,
           "complete" => complete,
+          "control_verified" => control_verified,
           "unknown_reason" => unknown_reason,
           "observed_trials" => observed_trials,
           "trial_ids" => trial_ids,
@@ -823,6 +1131,7 @@ module TestMiser
         duplicate_rewrites = rewrites.group_by(&:oracle_id).select { |_id, rows| rows.length > 1 }.keys.sort
         raise InvalidOracleFacts, "duplicate oracle rewrite IDs: #{duplicate_rewrites.join(', ')}" unless duplicate_rewrites.empty?
         rewrite_by_id = rewrites.to_h { |rewrite| [rewrite.oracle_id, rewrite] }
+        execution_by_id = execution_results.group_by { |row| row.dig("disabled_rewrite", "oracle_id") }
         results = facts.facts.map do |fact|
           original_known = original_kills.key?(fact.test_id)
           original = original_kills.fetch(fact.test_id, []).uniq.sort
@@ -831,6 +1140,7 @@ module TestMiser
           end
           trials = fact_trials.select { |trial| original.include?(trial.mutant_id) }
           expected_trial_ids = trial_ids || trials.map(&:trial_id).uniq.sort
+          control_verified, control_reason = control_evidence(execution_by_id.fetch(fact.oracle_id, []))
           result_for(
             fact,
             original,
@@ -839,6 +1149,8 @@ module TestMiser
             original_known: original_known,
             expected_trial_ids: expected_trial_ids,
             min_trials: min_trials,
+            control_verified: control_verified,
+            control_reason: control_reason,
           )
         end.freeze
         OracleSensitivityAnalysis.new(results: results, scope: scope, execution_results: execution_results)
@@ -858,13 +1170,16 @@ module TestMiser
             original_known: T::Boolean,
             expected_trial_ids: T::Array[String],
             min_trials: Integer,
+            control_verified: T::Boolean,
+            control_reason: T.nilable(String),
           ).returns(OracleSensitivity)
         end
-        def result_for(fact, original, trials, rewrite, original_known:, expected_trial_ids:, min_trials:)
+        def result_for(fact, original, trials, rewrite, original_known:, expected_trial_ids:, min_trials:, control_verified:, control_reason:)
           reason = original_known ? nil : "original kill attribution is missing"
           reason ||= rewrite_reason(rewrite)
+          reason ||= control_reason
           reason ||= trial_reason(original, trials, expected_trial_ids, min_trials)
-          complete = reason.nil?
+          complete = reason.nil? && control_verified
           disabled_kills = original.select do |mutant_id|
             expected_trial_ids.all? do |run_id|
               row = trials.find { |trial| trial.trial_id == run_id && trial.mutant_id == mutant_id }
@@ -881,11 +1196,26 @@ module TestMiser
             oracle_dependent_kills: complete ? (original - disabled_kills).sort.freeze : [].freeze,
             persists_without_oracle: complete ? (original & disabled_kills).sort.freeze : [].freeze,
             complete: complete,
+            control_verified: control_verified,
             unknown_reason: reason,
             observed_trials: trials.map(&:trial_id).uniq.length,
             trial_ids: trials.map(&:trial_id).uniq.sort,
             stable: stable,
           )
+        end
+
+        sig { params(rows: T::Array[T::Hash[String, T.untyped]]).returns([T::Boolean, T.nilable(String)]) }
+        def control_evidence(rows)
+          return [false, "oracle control experiment is missing"] if rows.empty?
+          return [false, "oracle control experiment has duplicate results"] if rows.length > 1
+
+          row = rows.fetch(0)
+          verified = row["control_verified"] == true &&
+            row["control_outcome"] == TestOutcome::AssertionFailure.serialize &&
+            row.dig("control_rewrite", "applied") == true
+          return [true, nil] if verified
+
+          [false, "oracle control experiment did not fail on correct production code"]
         end
 
         sig { params(rewrite: T.nilable(OracleRewrite)).returns(T.nilable(String)) }
@@ -905,6 +1235,9 @@ module TestMiser
           return "oracle-disabled attribution is incomplete" if expected_trial_ids.empty?
           return "oracle-disabled trials do not contain the required repeated-trial matrix" if expected_trial_ids.length < min_trials
           return "oracle-disabled trials did not execute" unless trials.all?(&:executed)
+          return "oracle-disabled trials had a non-assertion outcome" if trials.any? do |trial|
+            trial.outcome && ![TestOutcome::Passed, TestOutcome::AssertionFailure].include?(trial.outcome)
+          end
           return "oracle-disabled attribution is incomplete" unless original.all? do |mutant_id|
             expected_trial_ids.all? { |run_id| trials.any? { |trial| trial.mutant_id == mutant_id && trial.trial_id == run_id } }
           end
@@ -962,6 +1295,8 @@ module TestMiser
       const :disabled_trials, T::Array[OracleTrial]
       const :run_id, String
       const :environment_fingerprint, String
+      const :revision, String
+      const :source_path, String
 
       sig { returns(T::Boolean) }
       def control_verified?
@@ -980,6 +1315,8 @@ module TestMiser
           "control_outcome" => control_outcome&.serialize,
           "control_verified" => control_verified?,
           "disabled_trials" => disabled_trials.map(&:to_h),
+          "revision" => revision,
+          "source_path" => source_path,
         }
       end
     end
@@ -998,27 +1335,27 @@ module TestMiser
       def run(request)
         raise ArgumentError, "trial_count must be positive" unless request.trial_count.positive?
         ensure_clean_repository!(request)
-        original_source = File.read(File.join(request.repository, request.source_path))
-        disable_plan = request.plan.mutation == OracleMutationKind::DisableOracle ? request.plan : OracleMutationPlanner.plan(request.fact).first
-        control_plan = request.control_plan
-        control_plan ||= request.plan unless request.plan.mutation == OracleMutationKind::DisableOracle
-        control_plan ||= OracleMutationPlanner.control_plan(request.fact)
-        disabled_source, disabled_rewrite = @adapter.rewrite(
-          fact: request.fact, plan: T.must(disable_plan), source: original_source, language: request.language,
-        )
-        control_source, control_rewrite = if control_plan
-          @adapter.rewrite(fact: request.fact, plan: control_plan, source: original_source, language: request.language)
-        else
-          [original_source, nil]
-        end
-        environment = Digest::SHA256.hexdigest("#{request.repository}:#{request.revision}:#{request.language}")
         run_id = "oracle-#{SecureRandom.uuid}"
 
         Dir.mktmpdir("test-miser-oracle-") do |directory|
           archive_revision(request, directory)
           target = File.join(directory, request.source_path)
-          FileUtils.mkdir_p(File.dirname(target))
-          File.write(target, original_source)
+          raise InvalidOracleFacts, "#{request.revision} does not contain #{request.source_path}" unless File.file?(target)
+
+          original_source = File.read(target)
+          disable_plan = request.plan.mutation == OracleMutationKind::DisableOracle ? request.plan : OracleMutationPlanner.plan(request.fact).first
+          control_plan = request.control_plan
+          control_plan ||= request.plan unless request.plan.mutation == OracleMutationKind::DisableOracle
+          control_plan ||= OracleMutationPlanner.control_plan(request.fact)
+          disabled_source, disabled_rewrite = @adapter.rewrite(
+            fact: request.fact, plan: T.must(disable_plan), source: original_source, language: request.language,
+          )
+          control_source, control_rewrite = if control_plan
+            @adapter.rewrite(fact: request.fact, plan: control_plan, source: original_source, language: request.language)
+          else
+            [original_source, nil]
+          end
+          environment = Digest::SHA256.hexdigest("#{request.revision}:#{request.language}:#{Digest::SHA256.hexdigest(original_source)}")
           baseline = @command_runner.run(request.baseline_test_command || request.test_command, chdir: directory, limits: request.limits)
           baseline_outcome = @parser.parse(baseline)
           disabled_control_outcome = TestOutcome::InfrastructureFailure
@@ -1038,10 +1375,11 @@ module TestMiser
                     oracle_id: request.fact.oracle_id,
                     mutant_id: mutant_id,
                     killed: outcome == TestOutcome::AssertionFailure,
-                    executed: outcome != TestOutcome::InfrastructureFailure,
+                    executed: [TestOutcome::Passed, TestOutcome::AssertionFailure].include?(outcome),
                     trial: index,
                     trial_id: "#{run_id}-#{index}",
                     environment_fingerprint: environment,
+                    outcome: outcome,
                   )
                 end
               end
@@ -1061,6 +1399,8 @@ module TestMiser
             disabled_trials: disabled_trials.freeze,
             run_id: run_id,
             environment_fingerprint: environment,
+            revision: request.revision,
+            source_path: request.source_path,
           )
         end
       end

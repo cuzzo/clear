@@ -91,6 +91,7 @@ class EvidenceOracleTest < Minitest::Test
       original_kills: {"t1" => %w[m1 m2], "t2" => ["m3"], "t3" => ["m4"], "t4" => ["m7"], "t5" => %w[m5 m6], "t6" => []},
       disabled_trials: trials,
       rewrites: rewrites,
+      execution_results: facts.facts.map { |oracle| execution_result(oracle.oracle_id) },
     )
     o1 = analysis.results.find { |result| result.oracle_id == "o1" }
     o2 = analysis.results.find { |result| result.oracle_id == "o2" }
@@ -190,19 +191,40 @@ class EvidenceOracleTest < Minitest::Test
     skip "FactMine binary missing" unless File.executable?(binary)
 
     source_path = File.expand_path("fixtures/collector/setup.rb", __dir__)
+    test_id = "minitest:TestMiserCollectorFixtureTest#test_true_a"
     facts = Evidence::FactMineOracleFactProvider.new(binary: binary).facts(
-      test_id: "t1", source_path: source_path, language: "ruby",
+      test_id: test_id, source_path: source_path, language: "ruby",
     )
-    assert_equal 2, facts.length
+    assert_equal 1, facts.length
     assert facts.all? { |oracle| oracle.oracle_kind == Evidence::OracleKind::Equality }
+    rspec_path = File.expand_path("fixtures/rspec_collector/spec/example_spec.rb", __dir__)
+    rspec_test_id = "rspec:0:#{rspec_path}:8/TestMiserRspecFixture recognizes a positive value"
+    rspec_facts = Evidence::FactMineOracleFactProvider.new(binary: binary).facts(
+      test_id: rspec_test_id, source_path: rspec_path, language: "ruby",
+    )
+    assert_equal 1, rspec_facts.length
+    assert_equal Evidence::OracleKind::Equality, rspec_facts.fetch(0).oracle_kind
+    assert_equal 4, rspec_facts.fetch(0).oracle_span.start_column
+    assert_equal 51, rspec_facts.fetch(0).oracle_span.end_column
+    java_path = File.expand_path("../examples/java/src/test/java/dev/testmiser/ClassifierTest.java", __dir__)
+    java_facts = Evidence::FactMineOracleFactProvider.new(binary: binary).facts(
+      test_id: "junit:ClassifierTest#positivePrimary", source_path: java_path, language: "java",
+    )
+    assert_equal 1, java_facts.length
+    assert_equal Evidence::OracleKind::Equality, java_facts.fetch(0).oracle_kind
     grammar = ENV["DECOMPLEX_TS_RUBY_PATH"]
     skip "Tree-sitter Ruby grammar missing" unless grammar && File.file?(grammar)
     tree_facts = Evidence::TreeSitterOracleFactProvider.new.facts(
-      test_id: "t1", source_path: source_path, language: "ruby",
+      test_id: test_id, source_path: source_path, language: "ruby",
     )
-    assert_equal 2, tree_facts.length
+    assert_equal 1, tree_facts.length
     assert tree_facts.all? { |oracle| oracle.framework == "minitest" }
-
+    rspec_tree_facts = Evidence::TreeSitterOracleFactProvider.new.facts(
+      test_id: rspec_test_id, source_path: rspec_path, language: "ruby",
+    )
+    assert_equal 1, rspec_tree_facts.length
+    assert_equal 5, rspec_tree_facts.fetch(0).oracle_span.start_column
+    assert_equal 52, rspec_tree_facts.fetch(0).oracle_span.end_column
     source = "assert_equal 1, 1\n"
     fact_value = Evidence::OracleFact.new(
       oracle_id: "ruby", test_id: "t1", oracle_kind: Evidence::OracleKind::Equality,
@@ -224,6 +246,18 @@ class EvidenceOracleTest < Minitest::Test
     assert_nil Evidence::OracleFramework.kind("rspec", "expectation")
   end
 
+  def test_python_tree_sitter_attribution_requires_the_requested_test
+    provider = Evidence::TreeSitterOracleFactProvider.new
+    source = "import pytest\n\ndef test_value():\n    assert calculate()\n\ndef test_other():\n    assert other()\n"
+    assert provider.send(:source_test_contains?, "pytest:module::test_value", source, 4, "pytest")
+    assert provider.send(:source_test_contains?, "pytest:test_value", source, 4, "pytest")
+    refute provider.send(:source_test_contains?, "pytest:module::test_missing", source, 4, "pytest")
+    refute provider.send(:source_test_contains?, "pytest:module::test_value", source, 7, "pytest")
+    java_source = "class ExampleTest {\n  @Test void first() { assertEquals(1, value()); }\n  @Test void second() { assertEquals(2, other()); }\n}\n"
+    assert provider.send(:source_test_contains?, "junit:ExampleTest#first", java_source, 2, "junit")
+    refute provider.send(:source_test_contains?, "junit:ExampleTest#first", java_source, 3, "junit")
+  end
+
   def test_framework_detection_and_call_tables_are_language_specific
     assert_equal "unittest", Evidence::OracleFramework.detect("import unittest\nclass T(unittest.TestCase): pass", "python")
     assert_equal "pytest", Evidence::OracleFramework.detect("import pytest\ndef test_value(): pass", "python")
@@ -232,7 +266,27 @@ class EvidenceOracleTest < Minitest::Test
     assert_equal Evidence::OracleKind::Equality, Evidence::OracleFramework.kind(
       "unittest", {"message" => "assertEqual", "receiver" => "self", "owner" => "ExampleTestCase"},
     )
-    assert_equal Evidence::OracleKind::Equality, Evidence::OracleFramework.kind("jest", "toEqual")
+    assert_equal Evidence::OracleKind::Equality, Evidence::OracleFramework.kind(
+      "jest", {"message" => "toEqual", "receiver" => "expect(actual)", "owner" => "example.test"},
+    )
+    assert_equal Evidence::OracleKind::Equality, Evidence::OracleFramework.kind(
+      "junit", {"message" => "assertEquals", "receiver" => "Assert", "owner" => "ExampleTest"},
+    )
+    assert_equal Evidence::OracleKind::Equality, Evidence::OracleFramework.kind(
+      "junit", {"message" => "assertEquals", "receiver" => "org.junit.jupiter.api.Assertions", "owner" => "ExampleTest"},
+    )
+    assert_equal Evidence::OracleKind::ExceptionExpectation, Evidence::OracleFramework.kind(
+      "pytest", {"message" => "raises", "receiver" => "pytest", "owner" => "module"},
+    )
+    assert_nil Evidence::OracleFramework.kind(
+      "jest", {"message" => "toEqual", "receiver" => "Production.expect", "owner" => "example.test"},
+    )
+    assert_nil Evidence::OracleFramework.kind(
+      "rspec", {"message" => "eq", "receiver" => "Production.expect", "owner" => "example_spec"},
+    )
+    assert_nil Evidence::OracleFramework.kind("jest", "toEqual")
+    assert_nil Evidence::OracleFramework.kind("rspec", "expect")
+    assert_nil Evidence::OracleFramework.kind("pytest", "assert")
     assert_nil Evidence::OracleFramework.kind("unknown", "assert_equal")
   end
 
@@ -245,6 +299,13 @@ class EvidenceOracleTest < Minitest::Test
       ["python", "pytest", "assert actual == expected"] => "assert not (actual == expected)",
       ["javascript", "jest", "expect(actual).toEqual(expected)"] => "expect(actual).not.toEqual(expected)",
       ["java", "junit", "assertEquals(actual, expected)"] => "assertNotEquals(actual, expected)",
+      ["ruby", "minitest", "assert actual"] => "refute actual",
+      ["ruby", "minitest", "refute actual"] => "assert actual",
+      ["ruby", "rspec", "expect(actual).to eql(expected)"] => "expect(actual).to_not eql(expected)",
+      ["python", "unittest", "self.assertTrue(actual)"] => "self.assertFalse(actual)",
+      ["python", "unittest", "self.assertFalse(actual)"] => "self.assertTrue(actual)",
+      ["java", "junit", "assertTrue(actual)"] => "assertFalse(actual)",
+      ["java", "junit", "assertFalse(actual)"] => "assertTrue(actual)",
     }.each do |(language, framework, source), expected|
       fact_value = source_fact(framework, source)
       plan = Evidence::OracleMutationPlan.new(
@@ -256,8 +317,33 @@ class EvidenceOracleTest < Minitest::Test
       assert result.applied
     end
 
-    [["javascript", "jest", "void 0", "expect(actual).toEqual(expected)"],
-     ["java", "junit", ";", "assertEquals(actual, expected)"],].each do |language, framework, expected, source|
+    [["javascript", "jest", "actual", "expect(actual).toEqual(expected)"],
+     ["java", "junit", "actual", "assertEquals(expected, actual)"],].each do |language, framework, expected, source|
+      fact_value = source_fact(framework, source)
+      plan = Evidence::OracleMutationPlanner.plan(fact_value).first
+      rewritten, result = adapter.rewrite(fact: fact_value, plan: plan, source: source, language: language)
+      assert_equal expected, rewritten
+      assert result.applied
+    end
+
+    [["ruby", "rspec", "actual", "expect(actual).to eq(expected)"],
+     ["python", "pytest", "actual", "assert actual"],
+     ["python", "unittest", "actual", "self.assertTrue(actual)"],
+     ["javascript", "jest", "actual", "expect(actual).toBe(expected)"],
+     ["java", "junit", "actual", "assertTrue(actual)"],].each do |language, framework, expected, source|
+      fact_value = source_fact(framework, source)
+      plan = Evidence::OracleMutationPlanner.plan(fact_value).first
+      rewritten, result = adapter.rewrite(fact: fact_value, plan: plan, source: source, language: language)
+      assert_equal expected, rewritten
+      assert result.applied
+    end
+
+    [["ruby", "minitest", "assert actual", "actual"],
+     ["ruby", "minitest", "assert_nil actual", "actual"],
+     ["ruby", "minitest", "refute_nil actual", "actual"],
+     ["ruby", "minitest", "refute actual", "actual"],
+     ["python", "unittest", "self.assertFalse(actual)", "actual"],
+     ["java", "junit", "assertFalse(actual)", "actual"],].each do |language, framework, source, expected|
       fact_value = source_fact(framework, source)
       plan = Evidence::OracleMutationPlanner.plan(fact_value).first
       rewritten, result = adapter.rewrite(fact: fact_value, plan: plan, source: source, language: language)
@@ -286,16 +372,16 @@ class EvidenceOracleTest < Minitest::Test
       def runner.capture3(*_args)
         payload = {
           "documents" => [{"calls" => [
-            {"message" => "assert_equal", "receiver" => "self", "owner" => "ExampleTest", "span" => [1, 0, 1, 10]},
-            {"message" => "assert_equal", "receiver" => "Production.new", "owner" => "ExampleTest", "span" => [1, 0, 1, 10]},
-            {"message" => "equalize", "receiver" => "self", "owner" => "ExampleTest", "span" => [1, 0, 1, 10]},
+            {"message" => "assert_equal", "receiver" => "self", "owner" => "ExampleTest", "function" => "test_value", "span" => [1, 0, 1, 10]},
+            {"message" => "assert_equal", "receiver" => "Production.new", "owner" => "ExampleTest", "function" => "test_value", "span" => [1, 0, 1, 10]},
+            {"message" => "equalize", "receiver" => "self", "owner" => "ExampleTest", "function" => "test_value", "span" => [1, 0, 1, 10]},
           ]}],
         }
         [JSON.generate(payload), "", Evidence::CommandResult.new(status: 0, stdout: "", stderr: "")]
       end
 
       facts = Evidence::FactMineOracleFactProvider.new(binary: "unused", runner: runner).facts(
-        test_id: "t1", source_path: source_path, language: "ruby",
+        test_id: "minitest:ExampleTest#test_value", source_path: source_path, language: "ruby",
       )
       assert_equal 1, facts.length
       assert_equal Evidence::OracleKind::Equality, facts.fetch(0).oracle_kind
@@ -314,8 +400,29 @@ class EvidenceOracleTest < Minitest::Test
     rewritten, result = Evidence::ConservativeOracleRewriteAdapter.new.rewrite(
       fact: fact_value, plan: plan, source: source, language: "ruby",
     )
-    assert_equal "nil", rewritten
+    assert_equal "begin 1; 1 end", rewritten
     assert result.applied
+
+    unrecognized = Evidence::OracleMutationPlan.new(
+      oracle_id: "o1", mutation: Evidence::OracleMutationKind::DisableOracle, recognized: false, reason: "fixture",
+    )
+    rewritten, result = Evidence::ConservativeOracleRewriteAdapter.new.rewrite(
+      fact: fact_value, plan: unrecognized, source: source, language: "ruby",
+    )
+    assert_equal source, rewritten
+    refute result.applied
+
+    invalid_span_fact = source_fact("minitest", source)
+    invalid_span_fact = Evidence::OracleFact.new(
+      oracle_id: invalid_span_fact.oracle_id, test_id: invalid_span_fact.test_id, oracle_kind: invalid_span_fact.oracle_kind,
+      oracle_span: Evidence::SourceSpan.new(start_line: 99, start_column: 1, end_line: 99, end_column: 2),
+      framework: invalid_span_fact.framework, confidence: invalid_span_fact.confidence,
+    )
+    rewritten, result = Evidence::ConservativeOracleRewriteAdapter.new.rewrite(
+      fact: invalid_span_fact, plan: plan, source: source, language: "ruby",
+    )
+    assert_equal source, rewritten
+    refute result.applied
 
     unknown = fact_value.with(framework: "custom")
     rewritten, result = Evidence::ConservativeOracleRewriteAdapter.new.rewrite(
@@ -324,6 +431,14 @@ class EvidenceOracleTest < Minitest::Test
     assert_equal source, rewritten
     refute result.applied
     assert_includes result.reason, "no safe oracle-disabling adapter"
+
+    source = "assert_equal expected, calculate()\n"
+    fact_value = source_fact("minitest", source)
+    rewritten, result = Evidence::ConservativeOracleRewriteAdapter.new.rewrite(
+      fact: fact_value, plan: plan, source: source, language: "ruby",
+    )
+    assert_includes rewritten, "calculate()"
+    assert result.applied
   end
 
   def test_artifact_parser_covers_rows_and_rejects_invalid_offsets
@@ -336,6 +451,26 @@ class EvidenceOracleTest < Minitest::Test
     invalid["oracle_span"]["start_offset"] = 3
     invalid["oracle_span"]["end_offset"] = 2
     assert_raises(Evidence::InvalidOracleFacts) { Evidence::OracleFacts.from_rows([invalid]) }
+
+    invalid = fact_payload
+    invalid["oracle_span"] = "not-a-span"
+    assert_raises(Evidence::InvalidOracleFacts) { Evidence::OracleFacts.from_rows([invalid]) }
+    invalid = fact_payload
+    invalid["oracle_span"]["end_line"] = 0
+    assert_raises(Evidence::InvalidOracleFacts) { Evidence::OracleFacts.from_rows([invalid]) }
+  end
+
+  def test_factmine_rejects_invalid_json
+    runner = Object.new
+    def runner.capture3(*_args)
+      ["not-json", "", Evidence::CommandResult.new(status: 0, stdout: "", stderr: "")]
+    end
+    path = File.expand_path("fixtures/collector/setup.rb", __dir__)
+    assert_raises(Evidence::InvalidOracleFacts) do
+      Evidence::FactMineOracleFactProvider.new(binary: "unused", runner: runner).facts(
+        test_id: "minitest:TestMiserCollectorFixtureTest#test_true_a", source_path: path, language: "ruby",
+      )
+    end
   end
 
   def test_execution_rejects_dirty_repository_before_running_commands
@@ -348,6 +483,34 @@ class EvidenceOracleTest < Minitest::Test
     assert_raises(Evidence::InvalidOracleFacts) { Evidence::OracleExecutionRunner.new.run(request) }
   end
 
+  def test_execution_uses_the_requested_revision_instead_of_a_dirty_worktree_source
+    Dir.mktmpdir do |repository|
+      File.write(File.join(repository, "test.rb"), "assert_equal 1, 1\n")
+      Dir.chdir(repository) do
+        system("git init -q && git config user.email t@t && git config user.name t", exception: true)
+        system("git add -A && git commit -qm init", exception: true)
+      end
+      revision = Dir.chdir(repository) { `git rev-parse HEAD`.strip }
+      File.write(File.join(repository, "test.rb"), "assert_equal 2, 2\n")
+      fact_value = Evidence::OracleFact.new(
+        oracle_id: "o1", test_id: "t1", oracle_kind: Evidence::OracleKind::Snapshot,
+        oracle_span: Evidence::SourceSpan.new(start_line: 1, start_column: 1, end_line: 1, end_column: 18),
+        framework: "minitest", confidence: 1.0,
+      )
+      adapter = RevisionRecordingAdapter.new
+      request = Evidence::OracleExecutionRequest.new(
+        repository: repository, revision: revision, source_path: "test.rb", test_command: ["control"],
+        test_id: "t1", fact: fact_value, plan: Evidence::OracleMutationPlanner.plan(fact_value).first,
+        language: "ruby", allow_dirty: true,
+      )
+
+      Evidence::OracleExecutionRunner.new(command_runner: OracleFakeRunner.new, adapter: adapter).run(request)
+      assert_equal 1, adapter.sources.length
+      assert_includes adapter.sources.fetch(0), "assert_equal 1, 1"
+      refute_includes adapter.sources.fetch(0), "assert_equal 2, 2"
+    end
+  end
+
   def test_repeated_oracle_trials_require_a_complete_stable_matrix
     fact_value = fact("o1", kind: Evidence::OracleKind::Equality)
     rows = (1..3).map do |index|
@@ -356,7 +519,7 @@ class EvidenceOracleTest < Minitest::Test
     result = Evidence::OracleSensitivityAnalyzer.analyze(
       facts: Evidence::OracleFacts.new(facts: [fact_value]), original_kills: {"t1" => ["m1"]},
       disabled_trials: rows, rewrites: [rewrite("o1", recognized: true, applied: true)],
-      trial_ids: rows.map(&:trial_id), min_trials: 3,
+      trial_ids: rows.map(&:trial_id), min_trials: 3, execution_results: [execution_result("o1")],
     ).results.fetch(0)
     assert result.complete
     assert result.stable
@@ -367,10 +530,59 @@ class EvidenceOracleTest < Minitest::Test
     flaky_result = Evidence::OracleSensitivityAnalyzer.analyze(
       facts: Evidence::OracleFacts.new(facts: [fact_value]), original_kills: {"t1" => ["m1"]},
       disabled_trials: [flaky, *rows.drop(1)], rewrites: [rewrite("o1", recognized: true, applied: true)],
-      trial_ids: rows.map(&:trial_id), min_trials: 3,
+      trial_ids: rows.map(&:trial_id), min_trials: 3, execution_results: [execution_result("o1")],
     ).results.fetch(0)
     refute flaky_result.complete
     assert_equal "oracle-disabled results are flaky", flaky_result.unknown_reason
+  end
+
+  def test_unverified_control_cannot_produce_oracle_findings
+    fact_value = fact("o1", kind: Evidence::OracleKind::Equality)
+    result = Evidence::OracleSensitivityAnalyzer.analyze(
+      facts: Evidence::OracleFacts.new(facts: [fact_value]),
+      original_kills: {"t1" => ["m1"]},
+      disabled_trials: [trial("t1", "o1", "m1", killed: false, trial_id: "run-1")],
+      rewrites: [rewrite("o1", recognized: true, applied: true)],
+      trial_ids: ["run-1"], min_trials: 1,
+      execution_results: [execution_result("o1", control_verified: false)],
+    ).results.fetch(0)
+
+    refute result.complete
+    refute result.control_verified
+    assert_equal "oracle control experiment did not fail on correct production code", result.unknown_reason
+    assert_empty result.oracle_dependent_kills
+    assert_empty result.persists_without_oracle
+  end
+
+  def test_non_assertion_trial_outcomes_are_incomplete
+    fact_value = fact("o1", kind: Evidence::OracleKind::Equality)
+    result = Evidence::OracleSensitivityAnalyzer.analyze(
+      facts: Evidence::OracleFacts.new(facts: [fact_value]),
+      original_kills: {"t1" => ["m1"]},
+      disabled_trials: [trial(
+        "t1", "o1", "m1", killed: false, executed: false, trial_id: "run-1", outcome: Evidence::TestOutcome::TimedOut,
+      )],
+      rewrites: [rewrite("o1", recognized: true, applied: true)],
+      trial_ids: ["run-1"], min_trials: 1,
+      execution_results: [execution_result("o1")],
+    ).results.fetch(0)
+
+    refute result.complete
+    assert_equal "oracle-disabled trials did not execute", result.unknown_reason
+    assert_empty result.oracle_dependent_kills
+
+    result = Evidence::OracleSensitivityAnalyzer.analyze(
+      facts: Evidence::OracleFacts.new(facts: [fact_value]),
+      original_kills: {"t1" => ["m1"]},
+      disabled_trials: [trial(
+        "t1", "o1", "m1", killed: false, executed: true, trial_id: "run-1", outcome: Evidence::TestOutcome::Crash,
+      )],
+      rewrites: [rewrite("o1", recognized: true, applied: true)],
+      trial_ids: ["run-1"], min_trials: 1,
+      execution_results: [execution_result("o1")],
+    ).results.fetch(0)
+    refute result.complete
+    assert_equal "oracle-disabled trials had a non-assertion outcome", result.unknown_reason
   end
 
   def test_oracle_execution_requires_mutated_oracle_control_failure
@@ -438,6 +650,15 @@ class EvidenceOracleTest < Minitest::Test
     )
   end
 
+  def execution_result(oracle_id, control_verified: true)
+    {
+      "disabled_rewrite" => {"oracle_id" => oracle_id, "applied" => true},
+      "control_rewrite" => {"applied" => true},
+      "control_outcome" => control_verified ? "ASSERTION_FAILURE" : "PASSED",
+      "control_verified" => control_verified,
+    }
+  end
+
   def rewrite(id, recognized:, applied:)
     Evidence::OracleRewrite.new(
       oracle_id: id,
@@ -448,7 +669,7 @@ class EvidenceOracleTest < Minitest::Test
     )
   end
 
-  def trial(test_id, oracle_id, mutant_id, killed:, executed: true, trial: 0, trial_id: "legacy")
+  def trial(test_id, oracle_id, mutant_id, killed:, executed: true, trial: 0, trial_id: "legacy", outcome: nil)
     Evidence::OracleTrial.new(
       test_id: test_id,
       oracle_id: oracle_id,
@@ -457,6 +678,7 @@ class EvidenceOracleTest < Minitest::Test
       executed: executed,
       trial: trial,
       trial_id: trial_id,
+      outcome: outcome,
     )
   end
 
@@ -468,17 +690,35 @@ class EvidenceOracleTest < Minitest::Test
       when "baseline"
         Evidence::CommandResult.new(status: 0, stdout: "", stderr: "")
       when "control"
-        source = File.read(File.join(chdir, "lib/test.rb"))
-        if source.include?("nil")
-          Evidence::CommandResult.new(status: 0, stdout: "", stderr: "")
-        else
+        source_path = File.file?(File.join(chdir, "lib/test.rb")) ? "lib/test.rb" : "test.rb"
+        source = File.read(File.join(chdir, source_path))
+        if source.include?("refute_equal")
           Evidence::CommandResult.new(status: 1, stdout: "", stderr: "Minitest::Assertion")
+        else
+          Evidence::CommandResult.new(status: 0, stdout: "", stderr: "")
         end
       when "mutant"
         Evidence::CommandResult.new(status: 1, stdout: "", stderr: "Minitest::Assertion")
       else
         Evidence::CommandResult.new(status: 1, stdout: "", stderr: "Minitest::Assertion")
       end
+    end
+  end
+
+  class RevisionRecordingAdapter
+    include Evidence::OracleRewriteAdapter
+
+    attr_reader :sources
+
+    def initialize
+      @sources = []
+    end
+
+    def rewrite(fact:, plan:, source:, language:)
+      @sources << source
+      [source, Evidence::OracleRewrite.new(
+        oracle_id: fact.oracle_id, mutation: plan.mutation, recognized: true, applied: true, reason: "fixture",
+      )]
     end
   end
 

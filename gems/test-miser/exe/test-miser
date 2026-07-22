@@ -218,6 +218,7 @@ begin
           test_id: row.fetch("test_id"), oracle_id: row.fetch("oracle_id"), mutant_id: row.fetch("mutant_id"),
           killed: row.fetch("killed"), executed: row.fetch("executed"), trial: Integer(row.fetch("trial", 0)),
           trial_id: row.fetch("trial_id", "legacy"), environment_fingerprint: row["environment_fingerprint"],
+          outcome: row["outcome"] && TestMiser::Evidence::TestOutcome.deserialize(row.fetch("outcome")),
         )
       end
       rewrites = Array(payload.fetch("rewrites", [])).map do |row|
@@ -229,6 +230,7 @@ begin
       oracle_sensitivity = TestMiser::Evidence::OracleSensitivityAnalyzer.analyze(
         facts: facts, original_kills: original_kills, disabled_trials: disabled_trials, rewrites: rewrites,
         scope: report_scope, trial_ids: payload["trial_ids"], min_trials: Integer(payload.fetch("min_trials", 1)),
+        execution_results: Array(payload.fetch("execution_results", [])),
       )
     end
     counterfactual = nil
