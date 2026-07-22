@@ -14,7 +14,7 @@ use super::normalized_behavior::{
     NormalizedStateRead,
 };
 use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata};
-use crate::ast::{Node, Span};
+use crate::ast::{Child, Node, Span};
 use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
 use crate::type_inference::TypeExpr;
 
@@ -185,6 +185,13 @@ pub(crate) struct CppNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
+        if node.r#type == "VCALL" {
+            return local_call_subject(node).map(|subject| NormalizedNullableOperation {
+                subject,
+                operation_kind: "function_pointer_call",
+                nil_behavior: "undefined_behavior",
+            });
+        }
         let subject = (node.r#type == "POINTER_EXPRESSION")
             .then(|| node.children.first().and_then(crate::ast::node))
             .flatten()
@@ -197,6 +204,10 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
             operation_kind: "pointer_dereference",
             nil_behavior: "undefined_behavior",
         })
+    }
+
+    fn function_value_calls_are_local_reads(&self) -> bool {
+        true
     }
 
     fn external_symbol_call_complexity(
@@ -477,6 +488,13 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
     }
 }
 
+fn local_call_subject(node: &Node) -> Option<String> {
+    match node.children.first()? {
+        Child::Symbol(subject) | Child::String(subject) => (!subject.trim().is_empty()).then(|| subject.trim().to_string()),
+        _ => None,
+    }
+}
+
 static BEHAVIOR: CppNormalizedBehavior = CppNormalizedBehavior;
 
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
@@ -587,6 +605,21 @@ mod tests {
             last_column: 20,
             text: text.to_string(),
         }
+    }
+
+    #[test]
+    fn function_pointer_operations_require_a_symbol_callee() {
+        let callback = Node {
+            children: vec![Child::Symbol("callback".to_string())],
+            ..node("VCALL", "callback()")
+        };
+        assert_eq!(local_call_subject(&callback), Some("callback".to_string()));
+        let malformed = Node {
+            children: vec![Child::Nil],
+            ..node("VCALL", "callback()")
+        };
+        assert_eq!(local_call_subject(&malformed), None);
+        assert_eq!(CppNormalizedBehavior.function_value_calls_are_local_reads(), true);
     }
 
     #[test]
