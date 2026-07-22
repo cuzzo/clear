@@ -46,7 +46,9 @@ function isDiffPlan(value: Record<string, unknown>): value is DiffPlan {
 }
 
 function isScope(value: unknown): boolean {
-  return hasStrings(value, ["base_oid", "head_oid", "policy_version"]);
+  return hasStrings(value, ["base_oid", "head_oid", "policy_version"])
+    && isRecord(value)
+    && hasStrings(value.evidence_scope, ["revision", "selection", "mutant_corpus", "test_set"]);
 }
 
 function isInventory(value: unknown): boolean {

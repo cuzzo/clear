@@ -1,8 +1,8 @@
 use lineage::diff::{
     AddedLines, ChangeInventory, ConfigFile, DependencyChange, DependencyEntry, DependencyStatus,
-    DiffFile, DiffGroup, DiffPlan, DiffScope, EvidenceAvailability, EvidenceState, FileChangeKind,
-    LanguageSummary, RiskSummary, SarifFindingSummary, SourceRole, VerificationSlices, Visibility,
-    VisibilityVerificationSlices,
+    DiffFile, DiffGroup, DiffPlan, DiffScope, EvidenceAvailability, EvidenceScopeFingerprint,
+    EvidenceState, FileChangeKind, LanguageSummary, RiskSummary, SarifFindingSummary, SourceRole,
+    VerificationSlices, Visibility, VisibilityVerificationSlices,
 };
 use std::path::Path;
 use ts_rs::TS;
@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let declarations = [
         DiffPlan::decl(),
         DiffScope::decl(),
+        EvidenceScopeFingerprint::decl(),
         ChangeInventory::decl(),
         ConfigFile::decl(),
         DiffFile::decl(),

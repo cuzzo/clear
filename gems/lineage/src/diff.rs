@@ -20,7 +20,16 @@ pub struct RevisionFile {
 pub struct DiffScope {
     pub base_oid: String,
     pub head_oid: String,
+    pub evidence_scope: EvidenceScopeFingerprint,
     pub policy_version: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct EvidenceScopeFingerprint {
+    pub revision: String,
+    pub selection: String,
+    pub mutant_corpus: String,
+    pub test_set: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -143,6 +152,14 @@ pub struct CoverageObservation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopedCoverageArtifact {
+    pub scope: EvidenceScopeFingerprint,
+    pub complete: bool,
+    pub expected_lines: BTreeSet<(String, u32)>,
+    pub observations: Vec<CoverageObservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MutationKillObservation {
     pub path: String,
     pub line: u32,
@@ -179,6 +196,7 @@ enum LineVerification {
     CoveredAndKilled,
     Covered,
     PartiallyCovered,
+    NotCovered,
     Unknown,
 }
 
@@ -270,6 +288,8 @@ pub fn build_diff_plan(
     base_files: Vec<RevisionFile>,
     head_files: Vec<RevisionFile>,
 ) -> DiffPlan {
+    let base_oid = base_oid.into();
+    let head_oid = head_oid.into();
     let base = file_map(base_files);
     let head = file_map(head_files);
     let renamed = renamed_paths(&base, &head);
@@ -293,8 +313,14 @@ pub fn build_diff_plan(
 
     DiffPlan {
         scope: DiffScope {
-            base_oid: base_oid.into(),
-            head_oid: head_oid.into(),
+            base_oid,
+            evidence_scope: EvidenceScopeFingerprint {
+                revision: head_oid.clone(),
+                selection: "unknown".into(),
+                mutant_corpus: "unknown".into(),
+                test_set: "unknown".into(),
+            },
+            head_oid,
             policy_version: DIFF_POLICY_VERSION,
         },
         inventory,
@@ -303,6 +329,14 @@ pub fn build_diff_plan(
         evidence: unavailable_evidence(),
         files,
     }
+}
+
+/// Binds a plan to the explicit selection that its evidence artifacts must
+/// share. Callers that only have legacy event rows leave the default unknown
+/// scope in place and therefore cannot manufacture exact findings.
+pub fn with_evidence_scope(mut plan: DiffPlan, scope: EvidenceScopeFingerprint) -> DiffPlan {
+    plan.scope.evidence_scope = scope;
+    plan
 }
 
 fn changed_paths(
@@ -430,6 +464,47 @@ pub fn apply_partial_coverage(plan: &mut DiffPlan, observations: &[CoverageObser
     plan.language_summaries = language_summaries(&plan.files);
 }
 
+/// Applies a complete, revision and corpus scoped coverage artifact. Unlike
+/// legacy ledger rows, this contract carries explicit expected membership, so
+/// a zero-hit observation can become a truthful not-covered finding.
+pub fn apply_scoped_coverage(plan: &mut DiffPlan, artifact: &ScopedCoverageArtifact) {
+    if artifact.scope != plan.scope.evidence_scope {
+        plan.evidence.coverage = EvidenceState::Stale;
+        return;
+    }
+    let expected = plan
+        .files
+        .iter()
+        .flat_map(|file| {
+            file.line_verification
+                .keys()
+                .map(|line| (file.path.clone(), *line))
+        })
+        .collect::<BTreeSet<_>>();
+    if !artifact.complete || artifact.expected_lines != expected {
+        apply_partial_coverage(plan, &artifact.observations);
+        return;
+    }
+    let rows = artifact
+        .observations
+        .iter()
+        .map(|row| ((row.path.as_str(), row.line), (row.hits, row.is_partial)))
+        .collect::<BTreeMap<_, _>>();
+    for file in &mut plan.files {
+        for (line, state) in &mut file.line_verification {
+            *state = match rows.get(&(file.path.as_str(), *line)) {
+                Some((hits, true)) if *hits > 0 => LineVerification::PartiallyCovered,
+                Some((hits, false)) if *hits > 0 => LineVerification::Covered,
+                Some(_) => LineVerification::NotCovered,
+                None => LineVerification::Unknown,
+            };
+        }
+        refresh_file_verification(file);
+    }
+    plan.evidence.coverage = EvidenceState::Exact;
+    plan.language_summaries = language_summaries(&plan.files);
+}
+
 /// Upgrades only already-observed covered lines. The mutation event ledger has
 /// no corpus-completeness fingerprint, so this remains partial attribution.
 pub fn apply_partial_mutation_kills(plan: &mut DiffPlan, observations: &[MutationKillObservation]) {
@@ -540,6 +615,7 @@ fn verification_slices(states: impl IntoIterator<Item = LineVerification>) -> Ve
             LineVerification::CoveredAndKilled => slices.covered_and_killed += 1,
             LineVerification::Covered => slices.covered += 1,
             LineVerification::PartiallyCovered => slices.partially_covered += 1,
+            LineVerification::NotCovered => slices.not_covered += 1,
             LineVerification::Unknown => slices.unknown += 1,
         }
     }
@@ -640,6 +716,7 @@ fn add_verification_slice(target: &mut VerificationSlices, state: LineVerificati
         LineVerification::CoveredAndKilled => target.covered_and_killed += 1,
         LineVerification::Covered => target.covered += 1,
         LineVerification::PartiallyCovered => target.partially_covered += 1,
+        LineVerification::NotCovered => target.not_covered += 1,
         LineVerification::Unknown => target.unknown += 1,
     }
 }
@@ -1781,6 +1858,69 @@ mod tests {
         assert_eq!(file.verification.unknown, 0);
         assert_eq!(file.verification.not_covered, 0);
         assert_eq!(file.risk.not_covered, 0);
+    }
+
+    #[test]
+    fn requires_complete_matching_scope_before_reporting_not_covered() {
+        let scope = EvidenceScopeFingerprint {
+            revision: "head".into(),
+            selection: "production".into(),
+            mutant_corpus: "mutants-v1".into(),
+            test_set: "suite-v1".into(),
+        };
+        let mut plan = with_evidence_scope(
+            build_diff_plan(
+                "base",
+                "head",
+                Vec::new(),
+                vec![file("lib/app.rb", "def run\n  value\nend\n")],
+            ),
+            scope.clone(),
+        );
+        let expected = plan.files[0]
+            .line_verification
+            .keys()
+            .map(|line| ("lib/app.rb".to_string(), *line))
+            .collect();
+        apply_scoped_coverage(
+            &mut plan,
+            &ScopedCoverageArtifact {
+                scope,
+                complete: true,
+                expected_lines: expected,
+                observations: vec![CoverageObservation {
+                    path: "lib/app.rb".into(),
+                    line: 1,
+                    hits: 0,
+                    is_partial: false,
+                }],
+            },
+        );
+        assert_eq!(plan.evidence.coverage, EvidenceState::Exact);
+        assert_eq!(plan.files[0].verification.not_covered, 1);
+        assert_eq!(plan.files[0].verification.unknown, 1);
+
+        let mut stale = build_diff_plan(
+            "base",
+            "head",
+            Vec::new(),
+            vec![file("lib/app.rb", "value\n")],
+        );
+        apply_scoped_coverage(
+            &mut stale,
+            &ScopedCoverageArtifact {
+                scope: EvidenceScopeFingerprint {
+                    revision: "elsewhere".into(),
+                    selection: "production".into(),
+                    mutant_corpus: "mutants-v1".into(),
+                    test_set: "suite-v1".into(),
+                },
+                complete: true,
+                expected_lines: BTreeSet::new(),
+                observations: Vec::new(),
+            },
+        );
+        assert_eq!(stale.evidence.coverage, EvidenceState::Stale);
     }
 
     #[test]

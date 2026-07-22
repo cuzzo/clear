@@ -74,6 +74,7 @@ function DiffReview({ initialLayout, plan, rawPath }: { readonly initialLayout: 
     <p>{plan.inventory.changed_files} files in {plan.inventory.changed_directories} directories</p>
     <p>{plan.inventory.added_files} added · {plan.inventory.modified_files} modified · {plan.inventory.deleted_files} deleted · {plan.inventory.renamed_files} renamed</p>
     <p>Base {plan.scope.base_oid} · Head {plan.scope.head_oid}</p>
+    <p>Evidence scope: {plan.scope.evidence_scope.selection} · {plan.scope.evidence_scope.mutant_corpus} · {plan.scope.evidence_scope.test_set}</p>
     <p>Evidence: coverage {plan.evidence.coverage} · mutation {plan.evidence.mutation} · hazards {plan.evidence.hazards} · SARIF {plan.evidence.sarif}</p>
     <InventoryPaths label="Configuration" paths={plan.inventory.configuration_paths.map((file) => `${file.path} (${file.kind})`)} />
     <InventoryPaths label="Documentation" paths={plan.inventory.documentation_paths} />

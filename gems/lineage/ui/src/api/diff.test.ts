@@ -3,7 +3,7 @@ import { DiffApiError, fetchDiffPlan, revisionsFromSearch } from "./diff";
 
 const slices = { covered_and_killed: 0, covered: 0, partially_covered: 0, not_covered: 0, unknown: 0 };
 const plan = {
-  scope: { base_oid: "a".repeat(40), head_oid: "b".repeat(40), policy_version: "diff-risk/v1" },
+  scope: { base_oid: "a".repeat(40), head_oid: "b".repeat(40), evidence_scope: { revision: "b".repeat(40), selection: "production", mutant_corpus: "mutants", test_set: "suite" }, policy_version: "diff-risk/v1" },
   inventory: { changed_directories: 1, changed_files: 1, added_files: 0, modified_files: 1, deleted_files: 0, renamed_files: 0, by_role: {}, configuration_paths: [], documentation_paths: [], generated_paths: [], lockfile_paths: [] },
   dependency_changes: [{ manifest_path: "Cargo.toml", status: "exact", entries: [{ name: "serde", scope: "runtime", before: null, after: "1" }] }],
   language_summaries: [],

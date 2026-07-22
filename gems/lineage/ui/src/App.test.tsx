@@ -35,7 +35,7 @@ describe("App", () => {
       json: async () => ({
         api_version: "v1",
         data: {
-          scope: { base_oid: "a".repeat(40), head_oid: "b".repeat(40), policy_version: "diff-risk/v1" },
+          scope: { base_oid: "a".repeat(40), head_oid: "b".repeat(40), evidence_scope: { revision: "b".repeat(40), selection: "production", mutant_corpus: "mutants", test_set: "suite" }, policy_version: "diff-risk/v1" },
           inventory: { changed_files: 2, changed_directories: 1, added_files: 1, modified_files: 1, deleted_files: 0, renamed_files: 0, by_role: {}, configuration_paths: [{ path: "Gemfile", kind: "ruby_manifest" }], documentation_paths: ["README.md"], generated_paths: ["generated/app.ts"], lockfile_paths: ["Gemfile.lock"] },
           dependency_changes: [{ manifest_path: "Gemfile", status: "unknown_package_file", entries: [] }, { manifest_path: "Cargo.toml", status: "exact", entries: [{ name: "serde", scope: "runtime", before: null, after: "1" }] }, { manifest_path: "package.json", status: "exact", entries: [] }],
           language_summaries: [{ language: "ruby", production: { code: 1, comments: 0, other: 0 }, test: { code: 0, comments: 0, other: 0 }, production_verification: verification, production_by_visibility: visibility, test_assertions: null }],

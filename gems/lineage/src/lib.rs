@@ -43,7 +43,8 @@ pub use architecture::{
     state_access, ArchitectureIngestStats,
 };
 pub use diff::{
-    build_diff_plan, ChangeInventory, DependencyChange, DiffFile, DiffPlan, DiffScope, RevisionFile,
+    build_diff_plan, with_evidence_scope, ChangeInventory, DependencyChange, DiffFile, DiffPlan,
+    DiffScope, EvidenceScopeFingerprint, RevisionFile,
 };
 pub use engine::{EngineStats, LineageEngine};
 pub use extract::{BoundaryExtractor, HeuristicExtractor, SourceFilter};

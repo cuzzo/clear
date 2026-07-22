@@ -2,7 +2,9 @@
 
 export type DiffPlan = { scope: DiffScope, inventory: ChangeInventory, dependency_changes: Array<DependencyChange>, language_summaries: Array<LanguageSummary>, evidence: EvidenceAvailability, files: Array<DiffFile>, };
 
-export type DiffScope = { base_oid: string, head_oid: string, policy_version: string, };
+export type DiffScope = { base_oid: string, head_oid: string, evidence_scope: EvidenceScopeFingerprint, policy_version: string, };
+
+export type EvidenceScopeFingerprint = { revision: string, selection: string, mutant_corpus: string, test_set: string, };
 
 export type ChangeInventory = { changed_directories: number, changed_files: number, added_files: number, modified_files: number, deleted_files: number, renamed_files: number, by_role: { [key in string]?: number }, configuration_paths: Array<ConfigFile>, documentation_paths: Array<string>, generated_paths: Array<string>, lockfile_paths: Array<string>, };
 
