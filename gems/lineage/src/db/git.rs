@@ -77,6 +77,34 @@ impl GitProvider {
         Ok(build_diff_plan(base_oid, head_oid, base, head))
     }
 
+    /// Resolves a review pair to immutable object IDs. With no explicit base,
+    /// the default is the merge base of the selected head and its first parent.
+    /// For ordinary commits that is the first parent itself; using Git's merge
+    /// base operation keeps the contract coherent for merge commits as well.
+    pub fn diff_revisions(
+        &self,
+        base_revision: Option<&str>,
+        head_revision: Option<&str>,
+    ) -> Result<(String, String)> {
+        let head_revision = head_revision.filter(|revision| !revision.trim().is_empty());
+        let base_revision = base_revision.filter(|revision| !revision.trim().is_empty());
+        let head_oid = self.resolve_commit(head_revision.unwrap_or("HEAD"))?;
+        let base_oid = match base_revision {
+            Some(base) => self.resolve_commit(base)?,
+            None => self.default_diff_base(&head_oid)?,
+        };
+        Ok((base_oid, head_oid))
+    }
+
+    fn default_diff_base(&self, head_oid: &str) -> Result<String> {
+        let repo = Repository::open(&self.path)?;
+        let head = repo.find_commit(git2::Oid::from_str(head_oid)?)?;
+        let parent = head
+            .parent(0)
+            .with_context(|| "a diff requires a head commit with a first parent")?;
+        Ok(repo.merge_base(head.id(), parent.id())?.to_string())
+    }
+
     fn revision_snapshot(&self, commit_hash: &str) -> Result<Vec<RevisionFile>> {
         let repo = Repository::open(&self.path)?;
         let commit = repo.find_commit(git2::Oid::from_str(commit_hash)?)?;
@@ -526,6 +554,25 @@ mod tests {
         assert_eq!(changes_c4.deleted, vec!["src/utils.rs".to_string()]);
         assert!(changes_c4.added_or_modified.is_empty());
 
+        Ok(())
+    }
+
+    #[test]
+    fn default_diff_pair_uses_resolved_head_and_first_parent_merge_base() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path())?;
+        let base = create_commit(&repo, "base", &[("app.rb", "puts :base\n")])?;
+        let head = create_commit(&repo, "head", &[("app.rb", "puts :head\n")])?;
+        let provider = GitProvider::open(dir.path())?;
+
+        assert_eq!(
+            provider.diff_revisions(None, None)?,
+            (base.clone(), head.clone())
+        );
+        assert_eq!(
+            provider.diff_revisions(Some(&base), Some("HEAD"))?,
+            (base, head)
+        );
         Ok(())
     }
 

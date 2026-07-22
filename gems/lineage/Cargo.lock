@@ -1014,6 +1014,7 @@ dependencies = [
  "tree-sitter-typescript",
  "tree-sitter-zig",
  "ts-rs",
+ "url",
 ]
 
 [[package]]

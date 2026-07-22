@@ -1,4 +1,5 @@
 use super::super::*;
+use axum::response::Redirect;
 
 pub(super) fn routes() -> Router<UiServerState> {
     Router::new()
@@ -14,6 +15,15 @@ struct DiffQuery {
 }
 
 #[derive(Debug, Deserialize)]
+struct DiffPageQuery {
+    base: Option<String>,
+    head: Option<String>,
+    presentation: Option<String>,
+    layout: Option<String>,
+    path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct DiffFileQuery {
     base: Option<String>,
     head: Option<String>,
@@ -26,18 +36,30 @@ struct ApiEnvelope<T> {
     data: T,
 }
 
-async fn diff_page_handler() -> Response<Body> {
-    super::assets::diff_index_response()
+async fn diff_page_handler(
+    State(state): State<UiServerState>,
+    Query(query): Query<DiffPageQuery>,
+) -> Response<Body> {
+    let result = GitProvider::open(state.repo.as_ref())
+        .and_then(|repo| repo.diff_revisions(query.base.as_deref(), query.head.as_deref()));
+    match result {
+        Ok((base, head)) if requires_canonical_redirect(&query, &base, &head) => {
+            Redirect::temporary(&canonical_diff_location(&query, &base, &head)).into_response()
+        }
+        Ok(_) => super::assets::diff_index_response(),
+        Err(error) => error_json(StatusCode::BAD_REQUEST, error),
+    }
 }
 
 async fn api_diff_plan_handler(
     State(state): State<UiServerState>,
     Query(query): Query<DiffQuery>,
 ) -> Response<Body> {
-    let Some((base, head)) = revisions(query.base, query.head) else {
-        return invalid_request("base and head revisions are required");
-    };
-    match GitProvider::open(state.repo.as_ref()).and_then(|repo| repo.diff_plan(&base, &head)) {
+    let result = GitProvider::open(state.repo.as_ref()).and_then(|repo| {
+        let (base, head) = repo.diff_revisions(query.base.as_deref(), query.head.as_deref())?;
+        repo.diff_plan(&base, &head)
+    });
+    match result {
         Ok(mut plan) => {
             apply_known_coverage(&state, &mut plan);
             apply_known_mutation_kills(&state, &mut plan);
@@ -113,13 +135,14 @@ async fn api_diff_file_handler(
     State(state): State<UiServerState>,
     Query(query): Query<DiffFileQuery>,
 ) -> Response<Body> {
-    let Some((base, head)) = revisions(query.base, query.head) else {
-        return invalid_request("base and head revisions are required");
-    };
     let Some(path) = query.path.filter(|path| !path.is_empty()) else {
         return invalid_request("path is required");
     };
-    match GitProvider::open(state.repo.as_ref()).and_then(|repo| repo.diff_plan(&base, &head)) {
+    let result = GitProvider::open(state.repo.as_ref()).and_then(|repo| {
+        let (base, head) = repo.diff_revisions(query.base.as_deref(), query.head.as_deref())?;
+        repo.diff_plan(&base, &head)
+    });
+    match result {
         Ok(mut plan) => {
             apply_known_coverage(&state, &mut plan);
             apply_known_mutation_kills(&state, &mut plan);
@@ -137,10 +160,26 @@ async fn api_diff_file_handler(
     }
 }
 
-fn revisions(base: Option<String>, head: Option<String>) -> Option<(String, String)> {
-    let base = base.filter(|revision| !revision.trim().is_empty())?;
-    let head = head.filter(|revision| !revision.trim().is_empty())?;
-    Some((base, head))
+fn requires_canonical_redirect(query: &DiffPageQuery, base: &str, head: &str) -> bool {
+    query.base.as_deref() != Some(base) || query.head.as_deref() != Some(head)
+}
+
+fn canonical_diff_location(query: &DiffPageQuery, base: &str, head: &str) -> String {
+    let mut output = vec![("base", base.to_string()), ("head", head.to_string())];
+    for (name, value) in [
+        ("presentation", query.presentation.as_deref()),
+        ("layout", query.layout.as_deref()),
+        ("path", query.path.as_deref()),
+    ] {
+        if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+            output.push((name, value.to_string()));
+        }
+    }
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    for (name, value) in output {
+        serializer.append_pair(name, &value);
+    }
+    format!("/diff?{}", serializer.finish())
 }
 
 fn invalid_request(message: &str) -> Response<Body> {
@@ -158,13 +197,19 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn revision_queries_require_two_nonblank_revisions() {
+    fn canonical_locations_pin_oids_and_preserve_view_options() {
+        let query = DiffPageQuery {
+            base: Some("HEAD".into()),
+            head: None,
+            presentation: Some("raw".into()),
+            layout: Some("inline".into()),
+            path: Some("lib/app.rb".into()),
+        };
+        assert!(requires_canonical_redirect(&query, "a", "b"));
         assert_eq!(
-            revisions(Some("base".into()), Some("head".into())),
-            Some(("base".into(), "head".into()))
+            canonical_diff_location(&query, "a", "b"),
+            "/diff?base=a&head=b&presentation=raw&layout=inline&path=lib%2Fapp.rb"
         );
-        assert_eq!(revisions(Some(" ".into()), Some("head".into())), None);
-        assert_eq!(revisions(Some("base".into()), None), None);
     }
 
     #[test]
@@ -206,6 +251,32 @@ mod tests {
             overlays: Arc::new(UiOverlays::default()),
         };
         (dir, state, base, head)
+    }
+
+    #[tokio::test]
+    async fn diff_page_redirects_default_pair_to_immutable_oids() {
+        let (_dir, state, base, head) = test_state();
+        let response = diff_page_handler(
+            State(state),
+            Query(DiffPageQuery {
+                base: None,
+                head: None,
+                presentation: Some("semantic".into()),
+                layout: None,
+                path: None,
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::LOCATION)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            format!("/diff?base={base}&head={head}&presentation=semantic")
+        );
     }
 
     #[tokio::test]
