@@ -3549,7 +3549,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         let Some(value) = child_node(node, 1) else {
             return;
         };
-        let values = hidden_enum_literal_values(value);
+        let values = hidden_enum_scalar_literal_values(value);
         if values.is_empty() {
             self.record_hidden_enum_event(
                 slot,
@@ -6189,6 +6189,26 @@ fn hidden_enum_literal_values(node: &crate::ast::Node) -> Vec<Value> {
             .into_iter()
             .flat_map(|child| hidden_enum_literal_values(child))
             .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// A producer proves a state domain only when the assigned value itself is a
+/// scalar literal. Collection literals are useful *decision* evidence (for
+/// example, `allowed.include?(state)`), but assigning a collection to a state
+/// slot does not prove that the slot is a scalar string domain.
+fn hidden_enum_scalar_literal_values(node: &crate::ast::Node) -> Vec<Value> {
+    match node.r#type.as_str() {
+        "SYM" | "SYMBOL" | "LIT" | "STR" | "STRING" | "STRING_LITERAL" => {
+            hidden_enum_literal_values(node)
+        }
+        "PAREN" => {
+            let values = child_nodes(node)
+                .into_iter()
+                .flat_map(hidden_enum_scalar_literal_values)
+                .collect::<Vec<_>>();
+            (values.len() == 1).then_some(values).unwrap_or_default()
+        }
         _ => Vec::new(),
     }
 }

@@ -1,6 +1,7 @@
 class Workflow
   def load(input)
     @state = "draft"
+    @state = ["queued", "sent"]
     @state = input
   end
 

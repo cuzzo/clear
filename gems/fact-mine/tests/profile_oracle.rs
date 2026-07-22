@@ -428,6 +428,15 @@ fn hidden_enum_observations_mark_nonliteral_state_writes_open_world() -> Result<
     assert!(events.contains(&("producer", None)));
     assert!(events.contains(&("blocker", Some("nonliteral_assignment"))));
     assert!(events.contains(&("decision", None)));
+    assert_eq!(
+        output
+            .hidden_enum_observations
+            .iter()
+            .filter(|observation| observation["event"] == "producer")
+            .count(),
+        1,
+        "a collection assignment is an open-world blocker, not a scalar producer"
+    );
     Ok(())
 }
 
