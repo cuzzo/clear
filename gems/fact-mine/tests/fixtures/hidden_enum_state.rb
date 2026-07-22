@@ -1,4 +1,8 @@
 class Workflow
+  def initialize
+    @state = "draft"
+  end
+
   def draft!
     @state = "draft"
   end

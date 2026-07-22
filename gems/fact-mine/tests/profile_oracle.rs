@@ -375,13 +375,22 @@ fn hidden_enum_observations_use_the_primary_normalized_walk() -> Result<()> {
         .iter()
         .filter(|observation| observation["kind"] == "state")
         .collect::<Vec<_>>();
-    assert_eq!(observations.len(), 3);
-    assert!(observations.iter().all(|observation| {
-        observation["key"]
-            .as_str()
-            .is_some_and(|key| key.starts_with("state\0") && key.contains("\0Workflow\0"))
-            && observation["event"] == "decision"
-    }));
+    assert_eq!(observations.len(), 5);
+    assert!(observations
+        .iter()
+        .filter(|observation| observation["event"] == "decision")
+        .all(|observation| {
+            observation["key"]
+                .as_str()
+                .is_some_and(|key| key.starts_with("state\0") && key.contains("\0Workflow\0"))
+        }));
+    assert_eq!(
+        observations
+            .iter()
+            .filter(|observation| observation["event"] == "producer")
+            .count(),
+        2
+    );
     assert_eq!(
         observations
             .iter()
@@ -398,6 +407,27 @@ fn hidden_enum_observations_use_the_primary_normalized_walk() -> Result<()> {
             .count(),
         3
     );
+    Ok(())
+}
+
+#[test]
+fn hidden_enum_observations_mark_nonliteral_state_writes_open_world() -> Result<()> {
+    let document = syntax::parse_file(fixture("hidden_enum_open_world.rb"), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let events = output
+        .hidden_enum_observations
+        .iter()
+        .filter(|observation| observation["kind"] == "state")
+        .map(|observation| {
+            (
+                observation["event"].as_str().unwrap_or_default(),
+                observation["reason"].as_str(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    assert!(events.contains(&("producer", None)));
+    assert!(events.contains(&("blocker", Some("nonliteral_assignment"))));
+    assert!(events.contains(&("decision", None)));
     Ok(())
 }
 

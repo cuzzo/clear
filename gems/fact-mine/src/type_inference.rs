@@ -3481,6 +3481,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     /// body after type inference has finished walking it.
     fn collect_hidden_enum_observation_at_node(&mut self, node: &crate::ast::Node) {
         match node.r#type.as_str() {
+            "IASGN" | "CVASGN" => self.collect_hidden_enum_state_write(node),
             "CASE" | "CASE2" => {
                 if let Some(condition) = child_node(node, 0) {
                     if let Some(slot) = self.hidden_enum_slot_for_current(condition) {
@@ -3534,6 +3535,42 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
+    /// Records an exact literal producer or an explicit open-world blocker for
+    /// a stable state slot. This runs as part of the primary normalized walk:
+    /// hidden-domain evidence must not reconstruct assignments in NilKill or
+    /// replay a second source traversal after type inference.
+    fn collect_hidden_enum_state_write(&mut self, node: &crate::ast::Node) {
+        let Some(name) = node_symbol(node) else {
+            return;
+        };
+        let Some(slot) = self.hidden_enum_state_slot(&name, node.first_lineno) else {
+            return;
+        };
+        let Some(value) = child_node(node, 1) else {
+            return;
+        };
+        let values = hidden_enum_literal_values(value);
+        if values.is_empty() {
+            self.record_hidden_enum_event(
+                slot,
+                values,
+                node,
+                "assignment",
+                "blocker",
+                Some("nonliteral_assignment"),
+            );
+        } else {
+            self.record_hidden_enum_event(
+                slot,
+                values,
+                node,
+                "assignment",
+                "producer",
+                None,
+            );
+        }
+    }
+
     fn hidden_enum_slot_for_current(&self, node: &crate::ast::Node) -> Option<Value> {
         match node.r#type.as_str() {
             "LVAR" | "DVAR" => {
@@ -3565,24 +3602,37 @@ impl<'a> TypeInferenceVisitor<'a> {
                     "type": self.param_types.get(&name).map(ToString::to_string).unwrap_or_default(),
                 }))
             }
-            "IVAR" | "CVAR" => {
-                let name = node_symbol(node).unwrap_or_else(|| node.text.trim().to_string());
-                let owner = self.current_owners.join("::");
-                let key = ["state".to_string(), self.path.to_string(), owner.clone(), name.clone()].join("\0");
-                Some(json!({
-                    "key": key,
-                    "kind": "state",
-                    "path": self.path,
-                    "line": node.first_lineno,
-                    "owner": owner,
-                    "method": Value::Null,
-                    "method_kind": Value::Null,
-                    "slot": name,
-                    "type": "",
-                }))
-            }
+            "IVAR" | "CVAR" => self.hidden_enum_state_slot(
+                &node_symbol(node).unwrap_or_else(|| node.text.trim().to_string()),
+                node.first_lineno,
+            ),
             _ => None,
         }
+    }
+
+    fn hidden_enum_state_slot(&self, name: &str, line: usize) -> Option<Value> {
+        if name.is_empty() {
+            return None;
+        }
+        let owner = self.current_owners.join("::");
+        let key = [
+            "state".to_string(),
+            self.path.to_string(),
+            owner.clone(),
+            name.to_string(),
+        ]
+        .join("\0");
+        Some(json!({
+            "key": key,
+            "kind": "state",
+            "path": self.path,
+            "line": line,
+            "owner": owner,
+            "method": Value::Null,
+            "method_kind": Value::Null,
+            "slot": name,
+            "type": "",
+        }))
     }
 
     #[cfg(test)]
@@ -3716,6 +3766,18 @@ impl<'a> TypeInferenceVisitor<'a> {
         site: &crate::ast::Node,
         kind: &str,
     ) {
+        self.record_hidden_enum_event(slot, values, site, kind, "decision", None);
+    }
+
+    fn record_hidden_enum_event(
+        &mut self,
+        slot: Value,
+        values: Vec<Value>,
+        site: &crate::ast::Node,
+        kind: &str,
+        event: &str,
+        reason: Option<&str>,
+    ) {
         let values = values
             .into_iter()
             .filter(|value| {
@@ -3723,12 +3785,15 @@ impl<'a> TypeInferenceVisitor<'a> {
                 !raw.is_empty() && raw.len() <= 80
             })
             .collect::<Vec<_>>();
-        if values.is_empty() {
+        if event != "blocker" && values.is_empty() {
             return;
         }
         let mut obs = slot;
-        object_insert(&mut obs, "event", json!("decision"));
+        object_insert(&mut obs, "event", json!(event));
         object_insert(&mut obs, "values", json!(values));
+        if let Some(reason) = reason {
+            object_insert(&mut obs, "reason", json!(reason));
+        }
 
         let first_line = site.text.lines().next().unwrap_or("").trim().to_string();
         object_insert(
