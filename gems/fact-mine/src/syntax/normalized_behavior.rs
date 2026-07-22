@@ -743,6 +743,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     fn presence_correlation(&self, _node: &Node) -> Option<NormalizedPresenceCorrelation> {
         None
     }
+
+    /// Whether a normalized bare call can read a local function value in this
+    /// language. Most adapters reserve VCALL for lexical dispatch; Go uses it
+    /// for both, so its CFG needs a local read when a matching place exists.
+    fn function_value_calls_are_local_reads(&self) -> bool {
+        false
+    }
     /// The configuration key for this source language. Keeping this at the
     /// adapter boundary ensures Fact-Mine owns native spellings while every
     /// downstream consumer sees only normalized complexity facts.

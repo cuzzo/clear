@@ -99,7 +99,7 @@ pub(crate) fn extract(
             match find_syntax_node(&method.node, node.span, &node.role) {
                 Some(syntax_node) => {
                     let target = effect_target(syntax_node, &node.role, profile);
-                    collect(target, &mut raw);
+                    collect(target, &mut raw, behavior.function_value_calls_are_local_reads());
                     apply_normalized_local_contract(method, node, &mut raw);
                     let declared_candidates = raw
                         .writes
@@ -329,7 +329,7 @@ fn effect_target<'a>(node: &'a Node, role: &str, profile: &ControlFlowProfile) -
 fn collect_control_bindings(node: &Node, role: &str, effect: &mut RawEffect) {
     if role == "for_loop" && node.r#type == "FOR" {
         if let Some(target) = node.children.first().and_then(ast::node) {
-            collect(target, effect);
+            collect(target, effect, false);
         }
         return;
     }
@@ -348,7 +348,7 @@ fn collect_scope_bindings(scope: Option<&Node>, effect: &mut RawEffect) {
         None
     };
     if let Some(args) = args {
-        collect(args, effect);
+        collect(args, effect, false);
     }
 }
 
@@ -366,7 +366,7 @@ fn collect_nested_bindings(node: &Node, effect: &mut RawEffect) {
     }
 }
 
-fn collect(node: &Node, effect: &mut RawEffect) {
+fn collect(node: &Node, effect: &mut RawEffect, function_value_calls_are_local_reads: bool) {
     if NESTED_SCOPE_TYPES.contains(&node.r#type.as_str()) {
         return;
     }
@@ -388,7 +388,7 @@ fn collect(node: &Node, effect: &mut RawEffect) {
                 } else if let Some(producer_span) = direct_call_result_span(rhs) {
                     effect.write_call_sources.insert(name, producer_span);
                 }
-                collect(rhs, effect);
+                collect(rhs, effect, function_value_calls_are_local_reads);
             }
         } else {
             effect.complete = false;
@@ -403,12 +403,20 @@ fn collect(node: &Node, effect: &mut RawEffect) {
             effect.reads.insert(name.clone());
             effect.record_place(name, place_kind_for_node(&node.r#type));
         }
+    } else if node.r#type == "VCALL" && function_value_calls_are_local_reads {
+        // A normalized bare invocation stores its callee as a symbol, not an
+        // LVAR child. Record that symbol as a local-value read so a function
+        // value invocation can use the existing reaching-definition lattice.
+        if let Some(Child::Symbol(name) | Child::String(name)) = node.children.first() {
+            effect.reads.insert(name.clone());
+            effect.record_place(name.clone(), "local");
+        }
     }
     if CALL_TYPES.contains(&node.r#type.as_str()) {
         effect.unknown_call = true;
     }
     for child in node.children.iter().filter_map(ast::node) {
-        collect(child, effect);
+        collect(child, effect, function_value_calls_are_local_reads);
     }
 }
 
@@ -550,6 +558,33 @@ fn find_syntax_node<'a>(node: &'a Node, span: Span, role: &str) -> Option<&'a No
     preferred_kind
         .and_then(|kind| find_by_span_and_kind(node, span, kind))
         .or_else(|| find_by_span(node, span, role == "linear_statement"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn go_style_function_value_calls_are_local_reads_only_with_the_descriptor() {
+        let call = Node {
+            r#type: "VCALL".to_string(),
+            children: vec![Child::Symbol("callback".to_string())],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 10,
+            text: "callback()".to_string(),
+        };
+        let mut enabled = RawEffect::default();
+        collect(&call, &mut enabled, true);
+        assert!(enabled.reads.contains("callback"));
+        assert!(enabled.unknown_call);
+
+        let mut disabled = RawEffect::default();
+        collect(&call, &mut disabled, false);
+        assert!(disabled.reads.is_empty());
+        assert!(disabled.unknown_call);
+    }
 }
 
 fn find_by_span_and_kind<'a>(node: &'a Node, span: Span, kind: &str) -> Option<&'a Node> {

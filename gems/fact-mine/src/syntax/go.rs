@@ -14,7 +14,7 @@ use super::normalized_behavior::{
     NormalizedStateWrite, SyntaxMetadata,
 };
 use super::{CallSite, ExternalCallComplexity, FunctionDef};
-use crate::ast::{Node, Span};
+use crate::ast::{Child, Node, Span};
 use crate::type_inference::TypeExpr;
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
@@ -192,18 +192,29 @@ pub(crate) struct GoNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
-        let subject = (node.r#type == "UNARY_EXPRESSION" && node.text.trim_start().starts_with('*'))
-            .then(|| node.children.first().and_then(crate::ast::node))
-            .flatten()
-            .filter(|subject| subject.r#type == "LVAR")?
-            .text
-            .trim()
-            .to_string();
-        (!subject.is_empty()).then_some(NormalizedNullableOperation {
-            subject,
-            operation_kind: "pointer_dereference",
-            nil_behavior: "panic",
-        })
+        let (subject, operation_kind) = match node.r#type.as_str() {
+            "UNARY_EXPRESSION" if node.text.trim_start().starts_with('*') => (
+                local_subject(node.children.first().and_then(crate::ast::node))?,
+                "pointer_dereference",
+            ),
+            // Go field and method selectors both panic when their receiver is
+            // a nil pointer. The generic extractor later joins this local
+            // subject to CFG state; value receivers simply remain non-nil or
+            // unknown rather than becoming findings.
+            "CALL" => (
+                local_subject(node.children.first().and_then(crate::ast::node))?,
+                "pointer_selector",
+            ),
+            // A bare local call can be a function value. Keeping the
+            // descriptor local to the normalized VCALL shape avoids treating
+            // declarations or named package functions as nullable values.
+            "VCALL" => (
+                local_symbol(node.children.first())?,
+                "function_value_call",
+            ),
+            _ => return None,
+        };
+        Some(NormalizedNullableOperation { subject, operation_kind, nil_behavior: "panic" })
     }
 
     fn presence_correlation(&self, node: &Node) -> Option<NormalizedPresenceCorrelation> {
@@ -218,6 +229,10 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         (subjects.len() == 2 && lookup.r#type == "INDEX_EXPRESSION").then(|| NormalizedPresenceCorrelation {
             value_subject: subjects[0].clone(), presence_subject: subjects[1].clone(), semantics: "map_lookup",
         })
+    }
+
+    fn function_value_calls_are_local_reads(&self) -> bool {
+        true
     }
 
     fn external_symbol_call_complexity(
@@ -752,6 +767,19 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
 
     fn untyped_type(&self) -> String {
         "any".to_string()
+    }
+}
+
+fn local_subject(node: Option<&Node>) -> Option<String> {
+    node.filter(|node| node.r#type == "LVAR")
+        .map(|node| node.text.trim().to_string())
+        .filter(|subject| !subject.is_empty())
+}
+
+fn local_symbol(child: Option<&Child>) -> Option<String> {
+    match child? {
+        Child::Symbol(symbol) | Child::String(symbol) => (!symbol.trim().is_empty()).then(|| symbol.trim().to_string()),
+        _ => None,
     }
 }
 
@@ -1407,6 +1435,14 @@ mod tests {
             ),
             Some("callback_once".to_string())
         );
+    }
+
+    #[test]
+    fn function_value_operation_subjects_require_locals_and_symbols() {
+        assert_eq!(local_symbol(Some(&Child::Symbol("callback".to_string()))), Some("callback".to_string()));
+        assert_eq!(local_symbol(Some(&Child::Nil)), None);
+        assert_eq!(local_subject(Some(&node("LVAR", "callback"))), Some("callback".to_string()));
+        assert_eq!(local_subject(Some(&node("CONST", "Callback"))), None);
     }
 
     // Real bug, found auditing mapstructure's DecoderConfig: a plain

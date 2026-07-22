@@ -217,6 +217,20 @@ fn go_map_lookup_exports_presence_without_proving_payload_non_null() -> Result<(
 }
 
 #[test]
+fn go_nullable_operations_distinguish_pointer_selectors_and_function_values() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_go_operations.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let operations = output
+        .nullable_operations
+        .iter()
+        .filter(|operation| operation.state_at_operation == "definitely_null" && operation.complete)
+        .map(|operation| (operation.operation_kind.as_str(), operation.nil_behavior.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(operations, vec![("function_value_call", "panic"), ("pointer_selector", "panic")]);
+    Ok(())
+}
+
+#[test]
 fn typescript_variable_bound_callables_are_emitted_as_project_methods() -> Result<()> {
     let document = syntax::parse_file(fixture("typescript_callable.ts"), Language::TypeScript)?;
     let output = profile::extract(&document, Profile::Espalier);
