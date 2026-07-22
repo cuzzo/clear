@@ -227,6 +227,20 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
                 nil_behavior: "undefined_behavior",
             });
         }
+        if node.r#type == "CALL" {
+            return node
+                .children
+                .first()
+                .and_then(crate::ast::node)
+                .filter(|receiver| receiver.r#type == "LVAR")
+                .map(|receiver| receiver.text.trim().to_string())
+                .filter(|subject| !subject.is_empty())
+                .map(|subject| NormalizedNullableOperation {
+                subject,
+                operation_kind: "pointer_selector",
+                nil_behavior: "undefined_behavior",
+            });
+        }
         let subject = (node.r#type == "POINTER_EXPRESSION")
             .then(|| node.children.first().and_then(crate::ast::node))
             .flatten()
@@ -247,9 +261,15 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
 
     fn nullable_call_result_contract(&self, node: &Node) -> Option<&'static str> {
         let call = nullable_contract_call(node);
+        if call.r#type == "NEW_EXPRESSION" && call.text.contains("std::nothrow") {
+            return Some("nullable_nothrow_allocation");
+        }
         exact_direct_call_name(call).and_then(|name| match name {
             "malloc" | "calloc" => Some("nullable_allocation"),
             "realloc" => Some("nullable_reallocation_preserves_input"),
+            name if name.starts_with("dynamic_cast<") && name.contains('*') => {
+                Some("nullable_pointer_dynamic_cast")
+            }
             _ => None,
         })
     }

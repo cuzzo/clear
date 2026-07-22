@@ -314,6 +314,36 @@ fn cpp_allocator_contracts_seed_maybe_null_operation_states() -> Result<()> {
 }
 
 #[test]
+fn cpp_special_nullable_sources_preserve_throwing_new_as_unknown() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_cpp_special_sources.cpp"), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let complete = output
+        .nullable_operations
+        .iter()
+        .filter(|operation| operation.complete)
+        .map(|operation| {
+            (
+                operation.operation_kind.as_str(),
+                operation.state_at_operation.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        complete,
+        vec![
+            ("pointer_selector", "maybe_null"),
+            ("pointer_dereference", "maybe_null"),
+        ]
+    );
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "pointer_dereference"
+            && operation.state_at_operation == "unknown"
+            && !operation.complete
+    }));
+    Ok(())
+}
+
+#[test]
 fn typescript_variable_bound_callables_are_emitted_as_project_methods() -> Result<()> {
     let document = syntax::parse_file(fixture("typescript_callable.ts"), Language::TypeScript)?;
     let output = profile::extract(&document, Profile::Espalier);

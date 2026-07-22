@@ -103,7 +103,8 @@ pub(crate) fn extract(
                     collect(target, &mut raw, behavior.function_value_calls_are_local_reads());
                     for (name, producer_span) in raw.write_call_sources.clone() {
                         let contract = [
-                            find_by_span(target, producer_span, true),
+                            find_by_span_and_kind(target, producer_span, "FCALL")
+                                .or_else(|| find_by_span(target, producer_span, true)),
                             direct_call_result_node(target),
                         ]
                         .into_iter()
@@ -478,7 +479,7 @@ fn direct_call_result_span(node: &Node) -> Option<Span> {
                 .then(|| direct_call_result_span(only))
                 .flatten()
         }
-        "CALL" | "QCALL" | "FCALL" | "VCALL" => Some([
+        "CALL" | "QCALL" | "FCALL" | "VCALL" | "NEW_EXPRESSION" => Some([
             node.first_lineno,
             node.first_column,
             node.last_lineno,
@@ -489,7 +490,7 @@ fn direct_call_result_span(node: &Node) -> Option<Span> {
 }
 
 fn direct_call_result_node(node: &Node) -> Option<&Node> {
-    if matches!(node.r#type.as_str(), "CALL" | "QCALL" | "FCALL" | "VCALL") {
+    if matches!(node.r#type.as_str(), "CALL" | "QCALL" | "FCALL" | "VCALL" | "NEW_EXPRESSION") {
         return Some(node);
     }
     if matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
