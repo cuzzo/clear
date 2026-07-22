@@ -672,6 +672,10 @@ jobs:
         with:
           sarif_file: tmp/test-miser-corpus/lineage/weak-tests.sarif
           category: test-miser-canonical
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/test-miser-corpus/lineage/evidence.sarif
+          category: test-miser-evidence
       - uses: actions/upload-artifact@v4
         with:
           name: test-miser-corpus-${{ needs.plan.outputs.head_sha }}
@@ -686,6 +690,34 @@ jobs:
     if: always() && needs.plan.result != 'skipped'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: test-miser-ruby-merged-*
+          path: tmp/summary-input
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: test-miser-rust-*
+          path: tmp/summary-input
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: test-miser-go-*
+          path: tmp/summary-input
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: test-miser-zig-*-of-*
+          path: tmp/summary-input
+      - name: Publish advisory mutation summary
+        continue-on-error: true
+        run: |
+          ruby tools/test_miser_step_summary.rb tmp/summary-input >> "$GITHUB_STEP_SUMMARY"
       - name: Verify requested mutation jobs
         env:
           PLAN_RESULT: ${{ needs.plan.result }}

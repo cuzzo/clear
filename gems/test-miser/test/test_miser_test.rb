@@ -221,6 +221,69 @@ class TestMiserTest < Minitest::Test
     end
   end
 
+  def test_cli_evidence_executes_factmine_disable_and_control_experiments
+    executable = File.expand_path("../exe/test-miser", __dir__)
+    Dir.mktmpdir("test-miser-oracle-cli") do |dir|
+      provider = File.join(dir, "fact-mine")
+      File.write(provider, <<~RUBY)
+        #!/usr/bin/env ruby
+        require "json"
+        puts JSON.generate("documents" => [{"calls" => [
+          {"message" => "assert_equal", "receiver" => "self", "owner" => "ExampleTest", "function" => "test_value", "span" => [10, 4, 10, 67]}
+        ]}])
+      RUBY
+      FileUtils.chmod(0755, provider)
+      config_path = File.join(dir, "oracle.json")
+      command = [
+        "ruby", "-e",
+        "path = 'gems/test-miser/test/fixtures/collector/setup.rb'; if File.read(path).include?('refute_equal'); warn 'Minitest::Assertion'; exit 1; end",
+      ]
+      File.write(config_path, JSON.generate(
+        "provider" => "factmine",
+        "binary" => provider,
+        "repository" => File.expand_path("../../..", __dir__),
+        "revision" => "HEAD",
+        "source_path" => "gems/test-miser/test/fixtures/collector/setup.rb",
+        "test_id" => "minitest:ExampleTest#test_value",
+        "language" => "ruby",
+        "test_command" => command,
+        "original_kills" => {"minitest:ExampleTest#test_value" => []},
+        "trial_count" => 2,
+        "min_trials" => 2,
+        "allow_dirty" => true,
+      ))
+
+      stdout, stderr, status = Open3.capture3(
+        "ruby", executable, "evidence", "--format", "json", "--oracle-execute", config_path, FIXTURE,
+      )
+      payload = JSON.parse(stdout)
+
+      assert status.success?, stderr
+      executions = payload.dig("oracle_sensitivity", "execution_results")
+      assert_equal 1, executions.length
+      assert_equal "DISABLE_ORACLE", executions.fetch(0).dig("disabled_rewrite", "mutation")
+      assert_equal "NEGATE_BOOLEAN", executions.fetch(0).dig("control_rewrite", "mutation")
+      assert_equal true, executions.fetch(0).fetch("control_verified")
+      expected_revision = Open3.capture3("git", "rev-parse", "HEAD", chdir: File.expand_path("../../..", __dir__)).first.strip
+      assert_equal expected_revision, payload.dig("scope", "revision")
+    end
+  end
+
+  def test_cli_rejects_symbolic_revision_in_precomputed_oracle_evidence
+    executable = File.expand_path("../exe/test-miser", __dir__)
+    Dir.mktmpdir("test-miser-oracle-input") do |dir|
+      input_path = File.join(dir, "oracle.json")
+      File.write(input_path, JSON.generate("revision" => "HEAD", "facts" => [], "original_kills" => {}))
+
+      _stdout, stderr, status = Open3.capture3(
+        "ruby", executable, "evidence", "--oracle-input", input_path, FIXTURE,
+      )
+
+      refute status.success?
+      assert_includes stderr, "resolved commit revision"
+    end
+  end
+
   def test_mutant_collector_records_individual_killers
     executable = File.expand_path("../exe/test-miser-mutant", __dir__)
     setup = File.expand_path("fixtures/collector/setup", __dir__)
@@ -333,8 +396,9 @@ class TestMiserTest < Minitest::Test
       facts = Dir[File.join(lineage, "mutant-facts-*.json")].map { |path| JSON.parse(File.read(path)) }
       assert_equal %w[ruby zig], facts.map { |payload| payload.fetch("language") }.sort
       assert_equal 2, manifest_payload.dig("lineage", "mutant_facts").length
-      assert_equal ["lineage/weak-tests.sarif"], manifest_payload.dig("lineage", "sarif")
+      assert_equal %w[lineage/evidence.sarif lineage/weak-tests.sarif], manifest_payload.dig("lineage", "sarif")
       assert File.file?(File.join(lineage, "weak-tests.sarif"))
+      assert File.file?(File.join(lineage, "evidence.sarif"))
 
       materialized = File.join(dir, manifest_payload.dig("lineage", "mutant_facts").first)
       File.open(materialized, "a") { |file| file.write("tampered") }

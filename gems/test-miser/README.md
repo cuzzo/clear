@@ -77,6 +77,8 @@ Minimal input:
 ```sh
 bundle exec test-miser mutation-report.json
 bundle exec test-miser --format json mutation-report.json
+bundle exec test-miser evidence --new-test test:new --baseline-test test:old \
+  --runtime test:new=42.0 --format json mutation-report.json -o evidence.json
 bundle exec test-miser shard-0.json shard-1.json -o test-miser-report.md
 bundle exec test-miser infer --root . -o test-miser.sarif mutant-facts.json
 bundle exec test-miser adapt pit mutations.xml target/surefire-reports -o mutant-facts.json
@@ -85,6 +87,14 @@ bundle exec test-miser adapt mull-gtest mull.sqlite gtest.json -o mutant-facts.j
 bundle exec test-miser adapt muter muter.json muter_logs -o mutant-facts.json
 bundle exec test-miser-merge -o merged-mutants.json shard-*.json
 ```
+
+`evidence` emits the versioned `test-quality-evidence/v1` artifact. It contains
+per-test marginal contribution, cohort-versus-baseline detection, dynamic
+subsumption-frontier evidence, named findings, and a cost context vector. The
+artifact never turns runtime, coverage, or provenance into a scalar quality
+score. Contribution, dominance, equality, and subsumption findings are emitted
+only for complete attribution; incomplete or unknown corpora remain explicit
+in the artifact.
 
 `infer` makes SARIF the default output. It uses explicit test file/line metadata
 when present, otherwise scans the named test file for common test declarations.

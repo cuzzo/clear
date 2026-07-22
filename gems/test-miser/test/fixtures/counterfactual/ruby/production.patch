@@ -1,0 +1,10 @@
+diff --git a/lib/calculator.rb b/lib/calculator.rb
+--- a/lib/calculator.rb
++++ b/lib/calculator.rb
+@@ -1,5 +1,5 @@
+ module Calculator
+   def self.value
+-    "old"
++    "new"
+   end
+ end

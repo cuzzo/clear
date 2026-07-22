@@ -9,6 +9,7 @@ require_relative "analyzer"
 require_relative "location_resolver"
 require_relative "mutation_report"
 require_relative "reporter"
+require_relative "evidence/report"
 
 module TestMiser
   class CorpusError < StandardError; end
@@ -222,6 +223,27 @@ module TestMiser
         "runs" => sarif_runs
       })
       written << File.expand_path(sarif_path)
+
+      evidence_runs = @payload.fetch("inventories").keys.filter_map do |suite|
+        facts = facts_for(suite)
+        report = MutationReport.new(facts, source: "mutation corpus #{suite}")
+        corpus = Evidence::Corpus.from_report(report)
+        scope = corpus.evidence_scope(revision: @commit)
+        contributions = Evidence::ContributionAnalyzer.new(corpus, scope: scope).analyze
+        subsumption = Evidence::SubsumptionAnalyzer.new(corpus, scope: scope).analyze(contributions: contributions)
+        evidence = Evidence::ReportBuilder.new(corpus, scope: scope).build(
+          contributions: contributions,
+          subsumption: subsumption,
+        )
+        JSON.parse(evidence.sarif).fetch("runs").first
+      end
+      evidence_path = File.join(directory, "evidence.sarif")
+      ZstdJSON.write(evidence_path, {
+        "$schema" => "https://json.schemastore.org/sarif-2.1.0.json",
+        "version" => "2.1.0",
+        "runs" => evidence_runs,
+      })
+      written << File.expand_path(evidence_path)
       written
     end
 

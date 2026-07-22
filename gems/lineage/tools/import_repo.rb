@@ -67,6 +67,7 @@ options = {
   hazards: true,
   sarif_inputs: [],
   coverage_inputs: [],
+  mutation_corpus: nil,
   exclude: [],
   host: "127.0.0.1",
   port: 8080,
@@ -95,6 +96,7 @@ OptionParser.new do |parser|
   parser.on("--no-hazards", "Skip hazard discovery/ingestion") { options[:hazards] = false }
   parser.on("--coverage=PATH", "Additional coverage artifact. May be repeated") { |value| options[:coverage_inputs] << value }
   parser.on("--sarif-input=PATH", "Additional SARIF file/directory to ingest. May be repeated") { |value| options[:sarif_inputs] << value }
+  parser.on("--mutation-corpus=PATH", "Test Miser mutation-corpus.json.zst or materialized directory to ingest") { |value| options[:mutation_corpus] = value }
   parser.on("--sql-queries=PATH", "SQL file/directory to analyze with SQL-COV EXPLAIN") { |value| options[:sql_queries] = value }
   parser.on("--sql-setup=PATH", "Schema/setup SQL executed before SQL-COV EXPLAIN") { |value| options[:sql_setup] = value }
   parser.on("--sql-database=URL", "Database URL/path for SQL-COV. Default: sqlite::memory:") { |value| options[:sql_database] = value }
@@ -519,6 +521,19 @@ if options[:lints]
     ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", lint_dir, "--source", "lint", "--commit", commit]
     ingest << "--replace" if options[:replace]
     run_command("ingest-lint-sarif", ingest, chdir: repo, log_dir: log_dir, optional: true)
+  end
+end
+
+if options[:mutation_corpus]
+  sarif_threads << Thread.new do
+    corpus_path = File.expand_path(options[:mutation_corpus], repo)
+    mode = File.directory?(corpus_path) ? "--materialized" : "--corpus"
+    cmd = [
+      "ruby", File.join(TOOL_ROOT, "gems/lineage/tools/ingest_mutation_corpus.rb"),
+      "--db=#{db}", "--repo=#{repo}", "#{mode}=#{corpus_path}",
+      "--lineage-bin=#{lineage_bin}",
+    ]
+    run_command("ingest-mutation-corpus", cmd, chdir: repo, log_dir: log_dir)
   end
 end
 
