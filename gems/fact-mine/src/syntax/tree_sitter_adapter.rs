@@ -43,7 +43,8 @@ fn parse_normalized_file(
     let started = Instant::now();
     let raw_call_sites =
         crate::ast::raw_call_sites(parsed.tree.root_node(), &parsed.source, language);
-    let parse_recovered = parsed.tree.root_node().has_error();
+    let parse_recovery_spans = parse_recovery_spans(parsed.tree.root_node());
+    let parse_recovered = !parse_recovery_spans.is_empty();
     let normalized_root = normalize_tree(parsed.tree.root_node(), &parsed.source, language);
     let (mut namespace, mut explicit_imports) =
         crate::ast::symbol_scope(parsed.tree.root_node(), &parsed.source, language);
@@ -102,6 +103,7 @@ fn parse_normalized_file(
         language,
         source_digest: format!("sha256:{:x}", Sha256::digest(parsed.source.as_bytes())),
         parse_recovered,
+        parse_recovery_spans,
         raw_call_sites,
         symbol_scope: SymbolScope {
             canonical: matches!(
@@ -187,6 +189,26 @@ fn parse_normalized_file(
         total_started.elapsed(),
     );
     Ok(document)
+}
+
+fn parse_recovery_spans(root: tree_sitter::Node<'_>) -> Vec<[usize; 4]> {
+    fn visit(node: tree_sitter::Node<'_>, spans: &mut Vec<[usize; 4]>) {
+        if node.is_error() || node.is_missing() {
+            let start = node.start_position();
+            let end = node.end_position();
+            spans.push([start.row + 1, start.column, end.row + 1, end.column]);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit(child, spans);
+        }
+    }
+
+    let mut spans = Vec::new();
+    visit(root, &mut spans);
+    spans.sort_unstable();
+    spans.dedup();
+    spans
 }
 
 fn python_module_namespace(file: &std::path::Path) -> String {

@@ -234,10 +234,17 @@ fn build_profile(
         let document = syntax::parse_file(file.clone(), language)?;
         Ok((
             profile::extract(&document, selected_profile),
-            document.parse_recovered.then(|| file.to_string_lossy().to_string()),
+            document.parse_recovered.then(|| profile::ParseRecovery {
+                path: file.to_string_lossy().to_string(),
+                spans: document.parse_recovery_spans,
+            }),
         ))
     })?;
     let parse_recovery_files = all_outputs
+        .iter()
+        .filter_map(|(_, recovered)| recovered.as_ref().map(|recovery| recovery.path.clone()))
+        .collect();
+    let parse_recoveries = all_outputs
         .iter()
         .filter_map(|(_, recovered)| recovered.clone())
         .collect();
@@ -249,8 +256,34 @@ fn build_profile(
         selected_files: files.len(),
         parsed_files: files.len(),
         parse_recovery_files,
+        parse_recoveries,
     };
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn profile_reports_parser_recovery_locations() {
+        let mut file = tempfile::NamedTempFile::new().expect("tempfile");
+        file.write_all(b"def broken(\n").expect("write source");
+
+        let profile = build_profile(
+            &[file.path().to_path_buf()],
+            Some(Language::Ruby),
+            Profile::Espalier,
+        )
+        .expect("build profile");
+
+        assert_eq!(profile.input_coverage.selected_files, 1);
+        assert_eq!(profile.input_coverage.parsed_files, 1);
+        assert_eq!(profile.input_coverage.parse_recovery_files.len(), 1);
+        assert_eq!(profile.input_coverage.parse_recoveries.len(), 1);
+        assert!(!profile.input_coverage.parse_recoveries[0].spans.is_empty());
+    }
 }
 
 fn render_call_resolution(coverage: &profile::CallResolutionCoverage) -> String {

@@ -248,6 +248,10 @@ pub struct Document {
     /// complete input coverage.
     #[serde(default)]
     pub parse_recovered: bool,
+    /// Exact parser recovery locations. Keeping these with the document makes
+    /// incomplete input coverage auditable instead of a file-level guess.
+    #[serde(default)]
+    pub parse_recovery_spans: Vec<[usize; 4]>,
     /// Parser-classified calls retained with grammar-node kinds for
     /// normalization-loss accounting. This is diagnostic evidence, not a
     /// second call extractor.
@@ -810,6 +814,15 @@ mod tests {
         let doc = document("def broken(\n", Language::Ruby);
 
         assert!(doc.parse_recovered);
+        assert!(!doc.parse_recovery_spans.is_empty());
+    }
+
+    #[test]
+    fn parses_rust_raw_identifier_without_recovery() {
+        let doc = document("fn sample() { let raw = 1; let _ = raw; }\n", Language::Rust);
+
+        assert!(!doc.parse_recovered);
+        assert!(doc.parse_recovery_spans.is_empty());
     }
 
     #[test]

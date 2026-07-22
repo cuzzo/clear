@@ -154,12 +154,23 @@ pub struct InputCoverage {
     pub parsed_files: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parse_recovery_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parse_recoveries: Vec<ParseRecovery>,
 }
 
 impl InputCoverage {
     pub fn is_empty(&self) -> bool {
-        self.selected_files == 0 && self.parsed_files == 0 && self.parse_recovery_files.is_empty()
+        self.selected_files == 0
+            && self.parsed_files == 0
+            && self.parse_recovery_files.is_empty()
+            && self.parse_recoveries.is_empty()
     }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ParseRecovery {
+    pub path: String,
+    pub spans: Vec<[usize; 4]>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -6143,6 +6154,7 @@ pub(crate) mod tests {
             language: Language::Ruby,
             source_digest: String::new(),
             parse_recovered: false,
+            parse_recovery_spans: Vec::new(),
             raw_call_sites: Vec::new(),
             symbol_scope: syntax::SymbolScope::default(),
             function_defs: vec![syntax::FunctionDef {
