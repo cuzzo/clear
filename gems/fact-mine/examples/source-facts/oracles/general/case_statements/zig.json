@@ -372,6 +372,78 @@
         "source": "x == 1"
       }
     ],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:i32#method_case_no_val:entry:0:9:0",
+        "kind": "entry",
+        "line": 9
+      },
+      {
+        "id": "cfg:i32#method_case_no_val:exit:2:13:1",
+        "kind": "exit",
+        "line": 13
+      },
+      {
+        "id": "cfg:i32#method_case_no_val:stmt:1:10:4",
+        "kind": "statement",
+        "line": 10
+      },
+      {
+        "id": "cfg:i32#method_case_one_pattern:entry:0:15:0",
+        "kind": "entry",
+        "line": 15
+      },
+      {
+        "id": "cfg:i32#method_case_one_pattern:exit:2:20:1",
+        "kind": "exit",
+        "line": 20
+      },
+      {
+        "id": "cfg:i32#method_case_one_pattern:stmt:1:16:4",
+        "kind": "statement",
+        "line": 16
+      },
+      {
+        "id": "cfg:i32#method_eight:entry:0:1:0",
+        "kind": "entry",
+        "line": 1
+      },
+      {
+        "id": "cfg:i32#method_eight:exit:2:7:1",
+        "kind": "exit",
+        "line": 7
+      },
+      {
+        "id": "cfg:i32#method_eight:stmt:1:2:4",
+        "kind": "statement",
+        "line": 2
+      }
+    ],
     "decisions": [
       {
         "enclosing_span": [
@@ -406,7 +478,28 @@
         "predicate": "x"
       }
     ],
+    "def_use": [
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 1,
@@ -435,6 +528,17 @@
         ],
         "visibility": "private"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -546,8 +650,75 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:i32#method_case_no_val:local:x"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:i32#method_case_no_val:local:x"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:i32#method_case_one_pattern:local:x"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:i32#method_case_one_pattern:local:x"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:i32#method_eight:local:x"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:i32#method_eight:local:x"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:i32#method_eight:local:x",
+        "kind": "local",
+        "name": "x"
+      },
+      {
+        "id": "place:i32#method_case_one_pattern:local:x",
+        "kind": "local",
+        "name": "x"
+      },
+      {
+        "id": "place:i32#method_case_no_val:local:x",
+        "kind": "local",
+        "name": "x"
+      }
+    ],
     "predicate_bodies": [
       {
         "body": "if (x == 1) { action_one(); }",
@@ -691,6 +862,22 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

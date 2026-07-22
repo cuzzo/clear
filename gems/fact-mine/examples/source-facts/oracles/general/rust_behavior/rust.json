@@ -31,9 +31,7 @@
         {
           "co_uses": [],
           "dependencies": [],
-          "reads": [
-            "methods"
-          ],
+          "reads": [],
           "writes": [
             "methods"
           ]
@@ -584,6 +582,153 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "short_circuit"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:RustSourceFactBehavior#none_ready:entry:0:27:4",
+        "kind": "entry",
+        "line": 27
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#none_ready:exit:2:29:5",
+        "kind": "exit",
+        "line": 29
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#none_ready:stmt:1:28:8",
+        "kind": "statement",
+        "line": 28
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:entry:0:7:4",
+        "kind": "entry",
+        "line": 7
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:exit:8:25:5",
+        "kind": "exit",
+        "line": 25
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:stmt:1:8:8",
+        "kind": "statement",
+        "line": 8
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:stmt:2:9:8",
+        "kind": "statement",
+        "line": 9
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:stmt:3.then.0:13:12",
+        "kind": "statement",
+        "line": 13
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:stmt:3:10:8",
+        "kind": "statement",
+        "line": 10
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:stmt:4.then.0:17:12",
+        "kind": "statement",
+        "line": 17
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:stmt:4.then.1:18:12",
+        "kind": "statement",
+        "line": 18
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:stmt:4.then.2:19:12",
+        "kind": "statement",
+        "line": 19
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:stmt:4.then.3:20:12",
+        "kind": "statement",
+        "line": 20
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:stmt:4:12:8",
+        "kind": "branch",
+        "line": 12
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:stmt:5:16:8",
+        "kind": "branch",
+        "line": 16
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:stmt:6:23:8",
+        "kind": "statement",
+        "line": 23
+      },
+      {
+        "id": "cfg:RustSourceFactBehavior#update:stmt:7:24:8",
+        "kind": "statement",
+        "line": 24
+      }
+    ],
     "decisions": [
       {
         "enclosing_span": [
@@ -602,7 +747,49 @@
         "predicate": "local.is_some() && enabled"
       }
     ],
+    "def_use": [
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 27,
@@ -624,6 +811,25 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -723,9 +929,7 @@
             "end_line": 9,
             "index": 1,
             "line": 9,
-            "reads": [
-              "methods"
-            ],
+            "reads": [],
             "source": "let mut methods: Vec<String> = Vec::new();",
             "span": [
               9,
@@ -852,6 +1056,117 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:RustSourceFactBehavior#none_ready:local:&self"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:RustSourceFactBehavior#update:local:&mut self",
+          "place:RustSourceFactBehavior#update:local:enabled",
+          "place:RustSourceFactBehavior#update:local:input"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:RustSourceFactBehavior#update:local:String",
+          "place:RustSourceFactBehavior#update:local:new"
+        ],
+        "writes": [
+          "place:RustSourceFactBehavior#update:local:String",
+          "place:RustSourceFactBehavior#update:local:result"
+        ]
+      },
+      {
+        "reads": [
+          "place:RustSourceFactBehavior#update:local:methods"
+        ],
+        "writes": [
+          "place:RustSourceFactBehavior#update:local:methods"
+        ]
+      },
+      {
+        "reads": [
+          "place:RustSourceFactBehavior#update:local:panic"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:RustSourceFactBehavior#update:local:input"
+        ],
+        "writes": [
+          "place:RustSourceFactBehavior#update:local:local"
+        ]
+      },
+      {
+        "reads": [
+          "place:RustSourceFactBehavior#update:local:local"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:RustSourceFactBehavior#update:local:fs",
+          "place:RustSourceFactBehavior#update:local:read_to_string",
+          "place:RustSourceFactBehavior#update:local:std"
+        ],
+        "writes": [
+          "place:RustSourceFactBehavior#update:local:fs",
+          "place:RustSourceFactBehavior#update:local:std"
+        ]
+      },
+      {
+        "reads": [
+          "place:RustSourceFactBehavior#update:local:println",
+          "place:RustSourceFactBehavior#update:local:result"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:RustSourceFactBehavior#update:local:local"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:RustSourceFactBehavior#update:local:enabled",
+          "place:RustSourceFactBehavior#update:local:local"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:RustSourceFactBehavior#update:local:result"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "impl",
@@ -900,6 +1215,78 @@
           "local.is_some()"
         ],
         "line": 19
+      }
+    ],
+    "places": [
+      {
+        "id": "place:RustSourceFactBehavior#update:local:local",
+        "kind": "local",
+        "name": "local"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:fs",
+        "kind": "local",
+        "name": "fs"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:std",
+        "kind": "local",
+        "name": "std"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#none_ready:local:&self",
+        "kind": "local",
+        "name": "&self"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:&mut self",
+        "kind": "local",
+        "name": "&mut self"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:enabled",
+        "kind": "local",
+        "name": "enabled"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:input",
+        "kind": "local",
+        "name": "input"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:new",
+        "kind": "local",
+        "name": "new"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:panic",
+        "kind": "local",
+        "name": "panic"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:println",
+        "kind": "local",
+        "name": "println"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:read_to_string",
+        "kind": "local",
+        "name": "read_to_string"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:String",
+        "kind": "local",
+        "name": "String"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:result",
+        "kind": "local",
+        "name": "result"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:methods",
+        "kind": "local",
+        "name": "methods"
       }
     ],
     "predicate_bodies": [
@@ -984,6 +1371,42 @@
           "value"
         ]
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

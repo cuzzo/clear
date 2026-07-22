@@ -194,8 +194,90 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:(top-level)#method_two:entry:0:1:0",
+        "kind": "entry",
+        "line": 1
+      },
+      {
+        "id": "cfg:(top-level)#method_two:exit:4:11:1",
+        "kind": "exit",
+        "line": 11
+      },
+      {
+        "id": "cfg:(top-level)#method_two:stmt:1.else.0:7:6",
+        "kind": "statement",
+        "line": 7
+      },
+      {
+        "id": "cfg:(top-level)#method_two:stmt:1.then.0:5:24",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:(top-level)#method_two:stmt:1:2:4",
+        "kind": "statement",
+        "line": 2
+      },
+      {
+        "id": "cfg:(top-level)#method_two:stmt:2:5:4",
+        "kind": "branch",
+        "line": 5
+      },
+      {
+        "id": "cfg:(top-level)#method_two:stmt:3:10:4",
+        "kind": "statement",
+        "line": 10
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 1,
@@ -204,6 +286,15 @@
         "params": [],
         "visibility": "private"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -281,8 +372,84 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:(top-level)#method_two:local:e"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:(top-level)#method_two:local:value"
+        ],
+        "writes": [
+          "place:(top-level)#method_two:local:_"
+        ]
+      },
+      {
+        "reads": [
+          "place:(top-level)#method_two:local:Err",
+          "place:(top-level)#method_two:local:blk"
+        ],
+        "writes": [
+          "place:(top-level)#method_two:local:blk",
+          "place:(top-level)#method_two:local:result"
+        ]
+      },
+      {
+        "reads": [
+          "place:(top-level)#method_two:local:result"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      }
+    ],
     "owners": [],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:(top-level)#method_two:local:Err",
+        "kind": "local",
+        "name": "Err"
+      },
+      {
+        "id": "place:(top-level)#method_two:local:e",
+        "kind": "local",
+        "name": "e"
+      },
+      {
+        "id": "place:(top-level)#method_two:local:value",
+        "kind": "local",
+        "name": "value"
+      },
+      {
+        "id": "place:(top-level)#method_two:local:blk",
+        "kind": "local",
+        "name": "blk"
+      },
+      {
+        "id": "place:(top-level)#method_two:local:result",
+        "kind": "local",
+        "name": "result"
+      },
+      {
+        "id": "place:(top-level)#method_two:local:_",
+        "kind": "local",
+        "name": "_"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -341,6 +508,22 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

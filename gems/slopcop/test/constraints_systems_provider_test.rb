@@ -67,7 +67,7 @@ class ConstraintsSystemsProviderTest < Minitest::Test
   end
 
   def test_cpp_provider_finds_sanitizer_hazard_families
-    with_file("src/runtime.cpp", <<~CPP) do |_dir, path|
+    with_file("src/runtime.cpp", <<~CPP) do |dir, path|
       #include <atomic>
       void run(char *dst, char *src, int n) {
           std::atomic<int> ready;
@@ -78,7 +78,7 @@ class ConstraintsSystemsProviderTest < Minitest::Test
           delete[] buf;
       }
     CPP
-      hazards = SlopCop::Constraints::CppProvider.scan_file(path, File.read(File.join(_dir, path)))
+      hazards = SlopCop::Constraints::CppProvider.scan_hazards(repo: dir, paths: [path])
       types = hazards.map { |hazard| hazard[:hazard_type] }
 
       assert_includes types, "cpp_tsan_concurrency"
@@ -107,6 +107,86 @@ class ConstraintsSystemsProviderTest < Minitest::Test
 
       assert_includes types, "csharp_concurrency"
       assert_includes types, "csharp_unsafe_memory"
+    end
+  end
+
+  def test_plain_pointer_use_literal_arithmetic_and_value_casts_are_not_hazards
+    with_file("src/plain.c", <<~C) do |dir, path|
+      int scale(struct Cfg *cfg, int n) {
+          int half = n / 2;
+          int mask = n << 3;
+          int total = (int)cfg->count;
+          return half + mask + total + *cfg->values;
+      }
+    C
+      hazards = SlopCop::Constraints::CProvider.scan_hazards(repo: dir, paths: [path])
+      types = hazards.map { |hazard| hazard[:hazard_type] }
+
+      refute_includes types, "c_asan_pointer"
+      refute_includes types, "c_ubsan_arithmetic"
+      refute_includes types, "c_ubsan_cast"
+    end
+
+    with_file("src/plain.cpp", <<~CPP) do |dir, path|
+      int scale(Cfg *cfg, int n) {
+          int checked = static_cast<int>(n);
+          return checked + cfg->count + n / 2;
+      }
+    CPP
+      hazards = SlopCop::Constraints::CppProvider.scan_hazards(repo: dir, paths: [path])
+      types = hazards.map { |hazard| hazard[:hazard_type] }
+
+      refute_includes types, "cpp_asan_pointer_or_cast"
+      refute_includes types, "cpp_ubsan_cast"
+      refute_includes types, "cpp_ubsan_arithmetic"
+    end
+  end
+
+  def test_systems_providers_surface_fact_mine_callback_hazards
+    with_file("src/handler.c", <<~C) do |dir, path|
+      struct Handler {
+          void (*cb)(void);
+      };
+      void run(struct Handler *h) {
+          h->cb();
+      }
+    C
+      hazards = SlopCop::Constraints::CProvider.scan_hazards(repo: dir, paths: [path])
+      cb = hazards.find { |hazard| hazard[:hazard_type] == "c_callback_invocation" }
+
+      refute_nil cb
+      assert_equal 5, cb[:line]
+      assert_equal "nil-kill", cb[:required_evidence]
+      assert_equal "slopcop-c-callback-uncovered", SlopCop::Constraints::CProvider.rule_id_for("nil-kill")
+
+      findings = SlopCop::Constraints::CProvider.findings(
+        repo: dir,
+        additions: { path => [5] },
+        evidence: SlopCop::Constraints::Evidence.from_specs([], repo: dir)
+      )
+      assert_equal 1, findings.size
+      assert_includes findings.first.message, "requires review"
+    end
+  end
+
+  def test_go_provider_does_not_flag_typed_callback_alias_as_a_review_hazard
+    with_file("src/dispatch.go", <<~GO) do |dir, path|
+      package main
+
+      func run(cb func()) {
+          myCb := cb
+          myCb()
+      }
+    GO
+      hazards = SlopCop::Constraints::GoProvider.scan_hazards(repo: dir, paths: [path])
+      refute hazards.any? { |hazard| hazard[:hazard_type] == "go_callback_invocation" }
+
+      findings = SlopCop::Constraints::GoProvider.findings(
+        repo: dir,
+        additions: { path => [5] },
+        evidence: SlopCop::Constraints::Evidence.from_specs([], repo: dir)
+      )
+      assert_empty findings
     end
   end
 

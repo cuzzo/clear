@@ -47,8 +47,59 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:(top-level)#MyFunc:entry:0:1:0",
+        "kind": "entry",
+        "line": 1
+      },
+      {
+        "id": "cfg:(top-level)#MyFunc:exit:2:5:1",
+        "kind": "exit",
+        "line": 5
+      },
+      {
+        "id": "cfg:(top-level)#MyFunc:stmt:1:4:4",
+        "kind": "statement",
+        "line": 4
+      },
+      {
+        "id": "cfg:(top-level)#OtherFunc:entry:0:7:0",
+        "kind": "entry",
+        "line": 7
+      },
+      {
+        "id": "cfg:(top-level)#OtherFunc:exit:1:7:22",
+        "kind": "exit",
+        "line": 7
+      }
+    ],
     "decisions": [],
+    "def_use": [],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [],
     "functions": [
       {
         "line": 1,
@@ -64,6 +115,13 @@
         "params": [],
         "visibility": "private"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -114,6 +172,28 @@
         "statements": []
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "struct",
@@ -122,6 +202,7 @@
       }
     ],
     "path_conditions": [],
+    "places": [],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -153,6 +234,14 @@
         "writes": []
       }
     ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [],
     "redundant_nil_guards": [],
     "semantic_effects": [],
     "state_declarations": [],

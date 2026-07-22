@@ -364,6 +364,18 @@
           "visibility": "public"
         }
       ],
+      "hazard_sites": [
+        {
+          "end_column": 20,
+          "end_line": 15,
+          "hazard_type": "c_callback_invocation",
+          "line": 15,
+          "required_evidence": "nil-kill",
+          "source": "self.callback(...)",
+          "start_column": 2
+        }
+      ],
+      "imports": [],
       "language": "c",
       "owners": [
         {

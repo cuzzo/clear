@@ -1,18 +1,44 @@
 {
   "array_shapes": [],
+  "call_resolution_coverage": {
+    "accounted_call_percent": 0.0,
+    "calls_with_project_candidate_set": 0,
+    "declared_supertype_edges": 0,
+    "eligible_call_sites": 0,
+    "exact_project_target_percent": 0.0,
+    "exact_project_targets": 0,
+    "functions_with_unresolved_calls": 0,
+    "modeled_without_project_target": 0,
+    "normalized_calls_without_raw_span": 0,
+    "outside_executable_function": 0,
+    "owners_with_supertypes": 0,
+    "raw_calls_not_normalized": 0,
+    "raw_parser_call_sites": 1,
+    "semantically_accounted_call_percent": 0.0,
+    "semantically_accounted_call_sites": 0,
+    "total_call_sites": 0,
+    "unresolved_call_percent": 0.0,
+    "unresolved_call_sites": 0,
+    "unresolved_with_ambiguous_inherited_targets": 0,
+    "unresolved_with_unique_inherited_target": 0
+  },
   "calls": [
     {
+      "argument_count": 1,
       "conditional": false,
       "confidence": "partial",
       "function": "(top-level)",
-      "id": "edge:cebb9c2d26f6f0e8",
+      "id": "edge:32f7ae34c97f05b8",
+      "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 2,
       "message": "attr_accessor",
       "owner": "Calculator",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "receiver": "self",
-      "source": "fn:736040629b8b4788",
+      "receiver_binding_kind": "implicit",
+      "receiver_kind": "value",
+      "source": "fn:e15b261be3125599",
       "span": [
         2,
         2,
@@ -22,16 +48,118 @@
       "unresolved_reason": "target_not_defined_in_document"
     }
   ],
+  "complexity_facts": [
+    {
+      "allocations": [],
+      "block_invocations": [],
+      "call_contexts": [
+        {
+          "argument_cardinality_relation": "same",
+          "argument_progress": "unknown",
+          "argument_size_domains": [
+            [
+              "param:Calculator#add:value"
+            ]
+          ],
+          "evidence_gap": "unresolved_call_target",
+          "execution_multiplicity": "O(1)",
+          "line": 5,
+          "message": "+",
+          "parameter_arguments": [
+            "value"
+          ],
+          "power": 0,
+          "receiver_size_domains": [],
+          "span": [
+            5,
+            13,
+            5,
+            34
+          ],
+          "symbolic_execution": {
+            "complete": true,
+            "factors": [],
+            "logarithmic": false
+          }
+        }
+      ],
+      "collection_parameters": [],
+      "deferred_regions": [],
+      "function": "add",
+      "iterations": [],
+      "line": 4,
+      "owner": "Calculator",
+      "parameters": [
+        "value"
+      ],
+      "path": "examples/profile/ruby_calculator.rb",
+      "recursion": {
+        "calls": 0,
+        "halving_calls": 0,
+        "loop_contained_shrinking_calls": 0,
+        "shrinking_calls": 0,
+        "unknown_progress_calls": 0,
+        "visited_guarded_calls": 0
+      },
+      "size_domains": [
+        {
+          "id": "param:Calculator#add:value",
+          "name": "value",
+          "path": "examples/profile/ruby_calculator.rb",
+          "source_kind": "parameter",
+          "span": [
+            4,
+            2,
+            6,
+            5
+          ]
+        },
+        {
+          "id": "state:Calculator:@total",
+          "name": "@total",
+          "path": "examples/profile/ruby_calculator.rb",
+          "source_kind": "state",
+          "span": [
+            5,
+            4,
+            5,
+            34
+          ]
+        }
+      ],
+      "span": [
+        4,
+        2,
+        6,
+        5
+      ],
+      "state_cursor_domains": [],
+      "state_progress": [
+        {
+          "direction": "advance",
+          "line": 5,
+          "span": [
+            5,
+            4,
+            5,
+            34
+          ],
+          "state_domain": "state:Calculator:@total"
+        }
+      ],
+      "state_replays": []
+    }
+  ],
   "fields": [
     {
       "declared_type": null,
-      "id": "state:45b35020fc10ea6f",
+      "id": "state:9401a0fe39c9038e",
       "language": "ruby",
       "line": 5,
       "name": "total",
       "owner": "Calculator",
-      "owner_id": "owner:4b045cb69a6f8a63",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "owner_id": "owner:c89bc43899119c68",
+      "path": "examples/profile/ruby_calculator.rb",
       "source": "syntax",
       "span": [
         5,
@@ -42,13 +170,75 @@
       "static_origin": "state_write"
     }
   ],
+  "flow_local_types": [
+    {
+      "complete": false,
+      "file": "examples/profile/ruby_calculator.rb",
+      "function": "add",
+      "line": 5,
+      "name": "@total",
+      "node_id": "cfg:Calculator#add:stmt:1:5:4",
+      "owner": "Calculator",
+      "place_id": "place:Calculator#add:instance_field:@total",
+      "reaching_definitions": [],
+      "resolved_types": [],
+      "span": [
+        5,
+        4,
+        5,
+        34
+      ],
+      "types": []
+    },
+    {
+      "complete": false,
+      "file": "examples/profile/ruby_calculator.rb",
+      "function": "add",
+      "line": 5,
+      "name": "value",
+      "node_id": "cfg:Calculator#add:stmt:1:5:4",
+      "owner": "Calculator",
+      "place_id": "place:Calculator#add:local:value",
+      "reaching_definitions": [
+        "cfg:Calculator#add:entry:0:4:2"
+      ],
+      "resolved_types": [],
+      "span": [
+        5,
+        4,
+        5,
+        34
+      ],
+      "types": []
+    },
+    {
+      "complete": false,
+      "file": "examples/profile/ruby_calculator.rb",
+      "function": "result",
+      "line": 9,
+      "name": "@total",
+      "node_id": "cfg:Calculator#result:stmt:1:9:4",
+      "owner": "Calculator",
+      "place_id": "place:Calculator#result:instance_field:@total",
+      "reaching_definitions": [],
+      "resolved_types": [],
+      "span": [
+        9,
+        4,
+        9,
+        10
+      ],
+      "types": []
+    }
+  ],
   "hash_shapes": [],
   "methods": [
     {
       "complexity_signals": {
         "boolean_ops": 1
       },
-      "id": "fn:e726a8cb5d1043bf",
+      "dispatch_name": "add",
+      "id": "fn:b4b63e5d9de70e44",
       "key": [
         "Calculator",
         "add",
@@ -61,11 +251,11 @@
       "name": "add",
       "normalized_source": "def add(value) @total = (@total || 0) + value end",
       "owner": "Calculator",
-      "owner_id": "owner:4b045cb69a6f8a63",
+      "owner_id": "owner:c89bc43899119c68",
       "params": [
         "value"
       ],
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "raw_source": "def add(value)\n    @total = (@total || 0) + value\n  end",
       "signature": "",
       "source": {},
@@ -78,7 +268,8 @@
       "visibility": "public"
     },
     {
-      "id": "fn:e4bc7514d4fff252",
+      "dispatch_name": "result",
+      "id": "fn:02c66c914712165d",
       "key": [
         "Calculator",
         "result",
@@ -91,9 +282,9 @@
       "name": "result",
       "normalized_source": "def result @total end",
       "owner": "Calculator",
-      "owner_id": "owner:4b045cb69a6f8a63",
+      "owner_id": "owner:c89bc43899119c68",
       "params": [],
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "raw_source": "def result\n    @total\n  end",
       "signature": "",
       "source": {},
@@ -104,17 +295,77 @@
         5
       ],
       "visibility": "public"
+    },
+    {
+      "dispatch_name": "total",
+      "id": "fn:588c35772c399506",
+      "key": [
+        "Calculator",
+        "total",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "ruby",
+      "line": 2,
+      "local_complexity": 0.0,
+      "name": "total",
+      "normalized_source": "attr_accessor :total",
+      "owner": "Calculator",
+      "owner_id": "owner:c89bc43899119c68",
+      "params": [],
+      "path": "examples/profile/ruby_calculator.rb",
+      "raw_source": "attr_accessor :total",
+      "signature": "",
+      "source": {},
+      "span": [
+        2,
+        2,
+        2,
+        22
+      ],
+      "visibility": "public"
+    },
+    {
+      "dispatch_name": "total=",
+      "id": "fn:bc2167e86fe1e86f",
+      "key": [
+        "Calculator",
+        "total=",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "ruby",
+      "line": 2,
+      "local_complexity": 0.0,
+      "name": "total=",
+      "normalized_source": "attr_accessor :total",
+      "owner": "Calculator",
+      "owner_id": "owner:c89bc43899119c68",
+      "params": [
+        "value"
+      ],
+      "path": "examples/profile/ruby_calculator.rb",
+      "raw_source": "attr_accessor :total",
+      "signature": "",
+      "source": {},
+      "span": [
+        2,
+        2,
+        2,
+        22
+      ],
+      "visibility": "public"
     }
   ],
   "owners": [
     {
       "confidence": "high",
-      "id": "owner:4b045cb69a6f8a63",
+      "id": "owner:c89bc43899119c68",
       "kind": "class",
       "language": "ruby",
       "line": 1,
       "name": "Calculator",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "span": [
         1,
         0,
@@ -130,12 +381,12 @@
       "confidence": "high",
       "field": "total",
       "function": "add",
-      "function_id": "fn:e726a8cb5d1043bf",
-      "id": "edge:0fd334b1095d3d2a",
+      "function_id": "fn:b4b63e5d9de70e44",
+      "id": "edge:5c77df72bc6857e8",
       "kind": "reads",
       "line": 5,
       "owner": "Calculator",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "receiver": "self",
       "span": [
         5,
@@ -143,19 +394,19 @@
         5,
         20
       ],
-      "state_id": "state:45b35020fc10ea6f"
+      "state_id": "state:9401a0fe39c9038e"
     },
     {
       "conditional": false,
       "confidence": "high",
       "field": "total",
       "function": "result",
-      "function_id": "fn:e4bc7514d4fff252",
-      "id": "edge:73594ef170faf329",
+      "function_id": "fn:02c66c914712165d",
+      "id": "edge:766d575d6dfd5769",
       "kind": "reads",
       "line": 9,
       "owner": "Calculator",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "receiver": "self",
       "span": [
         9,
@@ -163,19 +414,19 @@
         9,
         10
       ],
-      "state_id": "state:45b35020fc10ea6f"
+      "state_id": "state:9401a0fe39c9038e"
     },
     {
       "conditional": false,
       "confidence": "high",
       "field": "total",
       "function": "add",
-      "function_id": "fn:e726a8cb5d1043bf",
-      "id": "edge:42a4ddc6eb248bf5",
+      "function_id": "fn:b4b63e5d9de70e44",
+      "id": "edge:f14dbb90ca9496a1",
       "kind": "writes",
       "line": 5,
       "owner": "Calculator",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "receiver": "self",
       "span": [
         5,
@@ -183,7 +434,7 @@
         5,
         34
       ],
-      "state_id": "state:45b35020fc10ea6f"
+      "state_id": "state:9401a0fe39c9038e"
     }
   ],
   "state_param_origin_records": [
@@ -195,7 +446,7 @@
       "line": 5,
       "owner": "Calculator",
       "param": "value",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_calculator.rb",
+      "path": "examples/profile/ruby_calculator.rb",
       "span": [
         5,
         4,

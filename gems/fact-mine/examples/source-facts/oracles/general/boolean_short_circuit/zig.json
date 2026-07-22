@@ -130,6 +130,34 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:bool#method_seven:entry:0:1:0",
+        "kind": "entry",
+        "line": 1
+      },
+      {
+        "id": "cfg:bool#method_seven:exit:2:5:1",
+        "kind": "exit",
+        "line": 5
+      },
+      {
+        "id": "cfg:bool#method_seven:stmt:1:2:4",
+        "kind": "statement",
+        "line": 2
+      }
+    ],
     "decisions": [
       {
         "enclosing_span": [
@@ -148,7 +176,22 @@
         "predicate": "x and y"
       }
     ],
+    "def_use": [
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 1,
@@ -161,6 +204,11 @@
         ],
         "visibility": "private"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -217,8 +265,47 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:bool#method_seven:local:x",
+          "place:bool#method_seven:local:y",
+          "place:bool#method_seven:local:z"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:bool#method_seven:local:x",
+          "place:bool#method_seven:local:y",
+          "place:bool#method_seven:local:z"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:bool#method_seven:local:x",
+        "kind": "local",
+        "name": "x"
+      },
+      {
+        "id": "place:bool#method_seven:local:y",
+        "kind": "local",
+        "name": "y"
+      },
+      {
+        "id": "place:bool#method_seven:local:z",
+        "kind": "local",
+        "name": "z"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -255,6 +342,16 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

@@ -615,8 +615,190 @@
         "source": "node.kind == :owner"
       }
     ],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#component_list:entry:0:17:2",
+        "kind": "entry",
+        "line": 17
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#component_list:exit:2:19:5",
+        "kind": "exit",
+        "line": 19
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#component_list:stmt:1:18:4",
+        "kind": "statement",
+        "line": 18
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#filtered:entry:0:8:2",
+        "kind": "entry",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#filtered:exit:3:11:5",
+        "kind": "exit",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#filtered:stmt:0.loop.0:9:26",
+        "kind": "statement",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#filtered:stmt:1.loop.0:10:33",
+        "kind": "statement",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#filtered:stmt:1:9:4",
+        "kind": "loop",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#filtered:stmt:2:10:4",
+        "kind": "loop",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#nodes:entry:0:21:2",
+        "kind": "entry",
+        "line": 21
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#nodes:exit:2:23:5",
+        "kind": "exit",
+        "line": 23
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#nodes:stmt:1:22:4",
+        "kind": "statement",
+        "line": 22
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#owner_nodes:entry:0:13:2",
+        "kind": "entry",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#owner_nodes:exit:2:15:5",
+        "kind": "exit",
+        "line": 15
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#owner_nodes:stmt:1:14:4",
+        "kind": "statement",
+        "line": 14
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#self.build:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#self.build:exit:2:6:5",
+        "kind": "exit",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#self.build:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 13,
@@ -659,6 +841,26 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -845,6 +1047,106 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactImplicitSelfChainStateReads#component_list:local:adjacency"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactImplicitSelfChainStateReads#component_list:local:adjacency"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactImplicitSelfChainStateReads#filtered:local:items"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactImplicitSelfChainStateReads#filtered:local:node"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactImplicitSelfChainStateReads#filtered:local:item"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactImplicitSelfChainStateReads#filtered:local:node"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactImplicitSelfChainStateReads#filtered:local:items"
+        ],
+        "writes": [
+          "place:SourceFactImplicitSelfChainStateReads#filtered:local:item"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactImplicitSelfChainStateReads#nodes:instance_field:@nodes"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactImplicitSelfChainStateReads#owner_nodes:local:node"
+        ],
+        "writes": [
+          "place:SourceFactImplicitSelfChainStateReads#owner_nodes:local:node"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactImplicitSelfChainStateReads#self.build:local:manifest"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactImplicitSelfChainStateReads#self.build:local:manifest"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -853,6 +1155,43 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactImplicitSelfChainStateReads#filtered:local:item",
+        "kind": "local",
+        "name": "item"
+      },
+      {
+        "id": "place:SourceFactImplicitSelfChainStateReads#owner_nodes:local:node",
+        "kind": "local",
+        "name": "node"
+      },
+      {
+        "id": "place:SourceFactImplicitSelfChainStateReads#component_list:local:adjacency",
+        "kind": "local",
+        "name": "adjacency"
+      },
+      {
+        "id": "place:SourceFactImplicitSelfChainStateReads#nodes:instance_field:@nodes",
+        "kind": "instance_field",
+        "name": "@nodes"
+      },
+      {
+        "id": "place:SourceFactImplicitSelfChainStateReads#self.build:local:manifest",
+        "kind": "local",
+        "name": "manifest"
+      },
+      {
+        "id": "place:SourceFactImplicitSelfChainStateReads#filtered:local:items",
+        "kind": "local",
+        "name": "items"
+      },
+      {
+        "id": "place:SourceFactImplicitSelfChainStateReads#filtered:local:node",
+        "kind": "local",
+        "name": "node"
+      }
+    ],
     "predicate_bodies": [
       {
         "body": "nodes.select { |node| node.kind == :owner }",
@@ -987,6 +1326,35 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

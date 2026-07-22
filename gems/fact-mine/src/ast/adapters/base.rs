@@ -62,6 +62,17 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         Vec::new()
     }
 
+    /// Pre-parse source transformation, fed to tree-sitter's `parse()` call
+    /// only - never used for digests, snippets, or spans, which always read
+    /// the untouched original source. Defaults to a no-op; override only
+    /// where a reproduced grammar-corruption gap requires rewriting what the
+    /// parser sees. MUST be byte-length preserving (same total length, same
+    /// line/column layout everywhere) - callers rely on original-source spans
+    /// staying valid against whatever tree-sitter produces from this buffer.
+    fn source_preprocessing(&self, _source: &str) -> Option<String> {
+        None
+    }
+
     fn scope_locals(
         &self,
         _node: TreeSitterNode<'_>,
@@ -1305,6 +1316,22 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
         None
+    }
+
+    /// Extra raw nodes to fold into a class's scanned body, for grammars
+    /// where the class declaration's members live outside its body block
+    /// (for example Kotlin's `class Widget(private var count: Int) { .. }`:
+    /// `count` is a `class_parameter` of a sibling `primary_constructor`
+    /// node, not a child of `class_body`, so it is invisible to
+    /// `collect_owner_fields_from_children` unless surfaced here).
+    /// Defaults to none for every language; only overridden where a real
+    /// gap was found and reproduced with a fixture, not speculatively.
+    fn supplementary_class_body_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        Vec::new()
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {

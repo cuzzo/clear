@@ -97,6 +97,10 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         }
     }
 
+    fn function_dispatch_kind_from_node(&self, _name: &str, node: &Node, owner: &str) -> String {
+        javascript::function_dispatch_kind_from_node(node, owner)
+    }
+
     fn parameter_name_from_signature(&self, param: &str) -> Option<String> {
         let mut text = param.split('=').next().unwrap_or(param).trim();
         for prefix in ["public ", "private ", "protected ", "readonly "] {
@@ -145,6 +149,10 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         )
     }
 
+    fn treats_object_literal_binding_as_owner(&self) -> bool {
+        true
+    }
+
     fn wrap_branch_predicate(&self, branch: &Node) -> bool {
         let _ = branch;
         true
@@ -169,6 +177,14 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         _span_source: &str,
     ) -> bool {
         call.receiver == "self" && call.message == "callback"
+    }
+
+    // call_parts defaults every receiver-less call's receiver to "self" (a
+    // Ruby-implicit-dispatch convention); TS has no implicit self dispatch,
+    // so that default would otherwise read as a phantom field access on the
+    // called name.
+    fn suppress_method_call_state_read(&self, call: &NormalizedCallProjection) -> bool {
+        call.receiver == "self"
     }
 
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
@@ -244,7 +260,22 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
             _ => false,
         });
 
-        if in_method {
+        // `constructor(private readonly foo: Foo)`: a parameter-property
+        // (TypeScript's own version of the identically-shaped Kotlin
+        // primary-constructor-property gap already fixed this session)
+        // normalizes as REQUIRED_PARAMETER/OPTIONAL_PARAMETER, only when it
+        // actually carries an accessibility/readonly modifier (a plain
+        // parameter with none is just a parameter, not state). Checked
+        // ahead of the in_method branching below: a constructor's own
+        // parameters live inside its DEFN subtree, so this walk visits them
+        // with in_method already true, even though they are a declaration
+        // site, not a use inside the method body.
+        let is_parameter_property =
+            has_modifier && matches!(node.r#type.as_str(), "REQUIRED_PARAMETER" | "OPTIONAL_PARAMETER");
+
+        if is_parameter_property {
+            // fall through to the shared structured-children extraction below
+        } else if in_method {
             if node.r#type != "ATTRASGN" && node.r#type != "IASGN" {
                 return None;
             }
@@ -293,6 +324,30 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
                 child_nodes.remove(0);
             } else {
                 break;
+            }
+        }
+
+        // An initializer collapses `name[: Type] = value` into a single
+        // LASGN child carrying the whole thing as one blob (no separate
+        // type_annotation sibling survives), so it must be parsed from its
+        // own text instead of split across child_nodes.
+        if let Some(lasgn) = child_nodes.iter().find(|c| c.r#type == "LASGN") {
+            let before_eq = lasgn.text.split('=').next().unwrap_or(&lasgn.text).trim();
+            let (raw_name, type_text) = before_eq
+                .split_once(':')
+                .map(|(n, t)| (n.trim(), Some(t.trim().to_string()).filter(|t| !t.is_empty())))
+                .unwrap_or((before_eq, None));
+            let name = raw_name.strip_prefix("this.").unwrap_or(raw_name);
+            if is_simple_name(name) {
+                return Some(StateDeclaration {
+                    field: name.to_string(),
+                    owner: String::new(),
+                    r#type: type_text,
+                    immutable: false,
+                    file: String::new(),
+                    line: node.first_lineno,
+                    span: span(node),
+                });
             }
         }
 

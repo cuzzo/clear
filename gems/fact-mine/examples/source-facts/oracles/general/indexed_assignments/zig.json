@@ -11,32 +11,12 @@
               "obj"
             ]
           ],
-          "dependencies": [
-            [
-              "self.cache",
-              "key"
-            ],
-            [
-              "self.cache",
-              "obj"
-            ],
-            [
-              "status",
-              "key"
-            ],
-            [
-              "status",
-              "obj"
-            ]
-          ],
+          "dependencies": [],
           "reads": [
             "key",
             "obj"
           ],
-          "writes": [
-            "self.cache",
-            "status"
-          ]
+          "writes": []
         },
         {
           "co_uses": [],
@@ -227,8 +207,69 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:(top-level)#method_six:entry:0:1:0",
+        "kind": "entry",
+        "line": 1
+      },
+      {
+        "id": "cfg:(top-level)#method_six:exit:4:5:1",
+        "kind": "exit",
+        "line": 5
+      },
+      {
+        "id": "cfg:(top-level)#method_six:stmt:1:2:4",
+        "kind": "statement",
+        "line": 2
+      },
+      {
+        "id": "cfg:(top-level)#method_six:stmt:2:3:4",
+        "kind": "statement",
+        "line": 3
+      },
+      {
+        "id": "cfg:(top-level)#method_six:stmt:3:4:4",
+        "kind": "statement",
+        "line": 4
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 1,
@@ -241,6 +282,13 @@
         ],
         "visibility": "private"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -265,24 +313,7 @@
                 "obj"
               ]
             ],
-            "dependencies": [
-              [
-                "self.cache",
-                "key"
-              ],
-              [
-                "self.cache",
-                "obj"
-              ],
-              [
-                "status",
-                "key"
-              ],
-              [
-                "status",
-                "obj"
-              ]
-            ],
+            "dependencies": [],
             "end_line": 2,
             "index": 0,
             "line": 2,
@@ -297,10 +328,7 @@
               2,
               33
             ],
-            "writes": [
-              "self.cache",
-              "status"
-            ]
+            "writes": []
           },
           {
             "co_uses": [],
@@ -354,8 +382,56 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:(top-level)#method_six:local:index",
+          "place:(top-level)#method_six:local:key",
+          "place:(top-level)#method_six:local:obj"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:(top-level)#method_six:local:key",
+          "place:(top-level)#method_six:local:obj"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:(top-level)#method_six:local:index"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      }
+    ],
     "owners": [],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:(top-level)#method_six:local:index",
+        "kind": "local",
+        "name": "index"
+      },
+      {
+        "id": "place:(top-level)#method_six:local:key",
+        "kind": "local",
+        "name": "key"
+      },
+      {
+        "id": "place:(top-level)#method_six:local:obj",
+        "kind": "local",
+        "name": "obj"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -379,6 +455,18 @@
           "self.cache[index].status"
         ]
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

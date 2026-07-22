@@ -1464,9 +1464,12 @@ fn profile_oracle_matches_ruby_output() -> Result<()> {
             Profile::Espalier
         };
         let actual = profile::extract(&document, selected_profile);
-        let actual_json = serde_json::to_value(&actual)?;
+        let mut actual_json = serde_json::to_value(&actual)?;
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        profile::normalize_paths(&mut actual_json, &manifest_dir);
 
-        let expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
+        let mut expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
+        profile::normalize_paths(&mut expected, &manifest_dir);
 
         let normalized = normalize_for_oracle(&actual_json, &expected);
         let expected_normalized = normalize_for_oracle(&expected, &expected);
@@ -1486,23 +1489,13 @@ fn profile_oracle_matches_ruby_output() -> Result<()> {
     Ok(())
 }
 
-/// Normalize a profile JSON value to match oracle expectations.
-/// Only compares keys present in expected; sorts arrays for determinism.
 fn normalize_for_oracle(value: &Value, expected: &Value) -> Value {
     match (value, expected) {
         (Value::Object(actual_map), Value::Object(expected_map)) => {
             let mut out = serde_json::Map::new();
             for key in expected_map.keys() {
                 if let Some(actual_val) = actual_map.get(key) {
-                    let mut normalized = normalize_for_oracle(actual_val, &expected_map[key]);
-                    // Normalize paths to be relative (strip absolute prefixes)
-                    if key == "path" || key == "id" {
-                        if let Value::String(path) = &normalized {
-                            if let Some(idx) = path.find("examples/profile/") {
-                                normalized = Value::String(path[idx..].to_string());
-                            }
-                        }
-                    }
+                    let normalized = normalize_for_oracle(actual_val, &expected_map[key]);
                     out.insert(key.clone(), normalized);
                 }
             }

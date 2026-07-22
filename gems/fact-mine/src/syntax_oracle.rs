@@ -155,6 +155,28 @@ fn project_document_with_metadata(document: &Document, metadata: &SyntaxFactMeta
             "line": site.line,
             "span": site.span,
         })).collect()),
+        "hazard_sites": sorted(document.hazard_sites.iter().map(|site| json!({
+            "path": site.path,
+            "line": site.line,
+            "source": site.snippet,
+            "hazard_type": site.hazard_type,
+            "required_evidence": site.required_evidence,
+            "hazard_kind": site.hazard_kind,
+            "evidence_claim": site.evidence_claim,
+            "coverage_required": site.coverage_required,
+            "report_required": site.report_required,
+            "label": site.label,
+            "mitigation": site.mitigation,
+            "start_column": site.start_column,
+            "end_line": site.end_line,
+            "end_column": site.end_column,
+        })).collect()),
+        "imports": sorted(document.imports.iter().map(|import| json!({
+            "alias": import.alias,
+            "target": import.target,
+            "kind": import.kind,
+            "line": import.line,
+        })).collect()),
         "control_flow_nodes": sorted(syntax::cfg::projection::project_nodes(&document.control_flow_nodes)),
         "control_flow_edges": sorted(syntax::cfg::projection::project_edges(&document.control_flow_edges)),
         "control_flow_metrics": sorted(document.control_flow_metrics.iter().map(|metric| json!({
@@ -465,6 +487,7 @@ mod tests {
             state_declarations: Vec::new(),
             state_reads: Vec::new(),
             state_writes: Vec::new(),
+            chained_self_reads: Vec::new(),
             decision_sites: Vec::new(),
             branch_decisions: Vec::new(),
             branch_arms: Vec::new(),
@@ -497,6 +520,8 @@ mod tests {
             method_param_types: BTreeMap::new(),
             method_local_types: BTreeMap::new(),
             state_param_origins: Vec::new(),
+            hazard_sites: Vec::new(),
+            imports: Vec::new(),
         };
         let projected = project_document(&doc);
         assert_eq!(projected["file"], "gems/fact-mine/examples/test.rb");
@@ -517,6 +542,7 @@ mod tests {
             state_declarations: Vec::new(),
             state_reads: Vec::new(),
             state_writes: Vec::new(),
+            chained_self_reads: Vec::new(),
             decision_sites: Vec::new(),
             branch_decisions: Vec::new(),
             branch_arms: Vec::new(),
@@ -572,6 +598,8 @@ mod tests {
             .collect(),
             method_local_types: BTreeMap::new(),
             state_param_origins: Vec::new(),
+            hazard_sites: Vec::new(),
+            imports: Vec::new(),
         };
 
         let metadata = SyntaxFactMetadata::from_documents(&[doc.clone()]);

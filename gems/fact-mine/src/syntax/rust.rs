@@ -406,7 +406,11 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
     }
 
     fn function_visibility(&self, _name: &str, node: &Node, _lines: &[String]) -> String {
-        if node.text.trim_start().starts_with("pub ") {
+        let text = node.text.trim_start();
+        if text.starts_with("pub(") {
+            // pub(crate) / pub(super) / pub(in path): crate-scoped, not public.
+            "crate".to_string()
+        } else if text.starts_with("pub ") {
             "public".to_string()
         } else {
             "private".to_string()
@@ -582,6 +586,27 @@ fn owner_after_keyword(text: &str, keyword: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn function_visibility_distinguishes_crate_scope() {
+        let b = behavior();
+        assert_eq!(
+            b.function_visibility("f", &node("FN", "pub fn f() {}"), &[]),
+            "public"
+        );
+        assert_eq!(
+            b.function_visibility("f", &node("FN", "pub(crate) fn f() {}"), &[]),
+            "crate"
+        );
+        assert_eq!(
+            b.function_visibility("f", &node("FN", "pub(super) fn f() {}"), &[]),
+            "crate"
+        );
+        assert_eq!(
+            b.function_visibility("f", &node("FN", "fn f() {}"), &[]),
+            "private"
+        );
+    }
 
     fn node(kind: &str, text: &str) -> Node {
         Node {

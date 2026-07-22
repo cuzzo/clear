@@ -1128,6 +1128,115 @@ impl Storage {
         Ok(changed > 0)
     }
 
+    /// unit_hotness postdates many deployed databases and Storage::open only
+    /// initializes brand-new files, so every hotness path self-heals the
+    /// table (idempotent, matching the ensure_column migration style).
+    fn ensure_unit_hotness_table(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS unit_hotness (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               path TEXT,
+               function TEXT NOT NULL,
+               line INTEGER,
+               flat_share REAL NOT NULL DEFAULT 0,
+               cum_share REAL NOT NULL DEFAULT 0,
+               tier TEXT NOT NULL CHECK (tier IN ('critical', 'warm', 'cold')),
+               source TEXT NOT NULL,
+               commit_hash TEXT,
+               is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+               resolution TEXT NOT NULL DEFAULT 'declared'
+             );
+             CREATE INDEX IF NOT EXISTS idx_unit_hotness_path ON unit_hotness(path, is_active);
+             CREATE INDEX IF NOT EXISTS idx_unit_hotness_source ON unit_hotness(source, is_active);",
+        )?;
+        self.ensure_column("unit_hotness", "resolution", "TEXT NOT NULL DEFAULT 'declared'")?;
+        Ok(())
+    }
+
+    /// (name, path, start_line) for every logical unit: the symbol inventory
+    /// hotness resolution matches profiler frames against.
+    pub fn unit_symbol_index(&self) -> Result<Vec<(String, String, i64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name, original_path, start_line FROM logical_units")?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn deactivate_hotness_for_source(&self, source: &str) -> Result<usize> {
+        self.ensure_unit_hotness_table()?;
+        Ok(self.conn.execute(
+            "UPDATE unit_hotness SET is_active = 0 WHERE source = ?1 AND is_active = 1",
+            params![source],
+        )?)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_unit_hotness(
+        &self,
+        path: Option<&str>,
+        function: &str,
+        line: Option<i64>,
+        flat_share: f64,
+        cum_share: f64,
+        tier: &str,
+        source: &str,
+        commit_hash: Option<&str>,
+        resolution: &str,
+    ) -> Result<()> {
+        self.ensure_unit_hotness_table()?;
+        self.conn.execute(
+            include_str!("../../sql/storage/insert_unit_hotness.sql"),
+            params![path, function, line, flat_share, cum_share, tier, source, commit_hash, resolution],
+        )?;
+        Ok(())
+    }
+
+    pub fn active_hotness(&self) -> Result<Vec<crate::model::HotnessRow>> {
+        self.ensure_unit_hotness_table()?;
+        let mut stmt = self
+            .conn
+            .prepare(include_str!("../../sql/ui/runtime/top_hotness.sql"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(crate::model::HotnessRow {
+                    path: row.get(0)?,
+                    function: row.get(1)?,
+                    line: row.get(2)?,
+                    flat_share: row.get(3)?,
+                    cum_share: row.get(4)?,
+                    tier: row.get(5)?,
+                    source: row.get(6)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn hotness_for_path(&self, path: &str) -> Result<Vec<crate::model::HotnessRow>> {
+        self.ensure_unit_hotness_table()?;
+        let mut stmt = self
+            .conn
+            .prepare(include_str!("../../sql/ui/runtime/apply_hotness.sql"))?;
+        let path_owned = path.to_string();
+        let rows = stmt
+            .query_map(params![path], move |row| {
+                Ok(crate::model::HotnessRow {
+                    path: Some(path_owned.clone()),
+                    function: row.get(0)?,
+                    line: row.get(1)?,
+                    flat_share: row.get(2)?,
+                    cum_share: row.get(3)?,
+                    tier: row.get(4)?,
+                    source: row.get(5)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     pub fn deactivate_active_hazards(&self, language: &str) -> Result<usize> {
         Ok(self.conn.execute(
             "UPDATE unit_hazards SET is_active = 0 WHERE language = ?1 AND is_active = 1",
@@ -1563,6 +1672,7 @@ fn checked_table(table: &str) -> Result<&str> {
         | "crash_events"
         | "test_exposure_events"
         | "unit_hazards"
+        | "unit_hotness"
         | "coverage_line_events"
         | "sarif_artifacts"
         | "sarif_findings"
@@ -2126,5 +2236,38 @@ mod tests {
         // Different suffix separator or non-matching name
         let defs_non_match = storage.find_definitions("other_method", Some("c1"), None).unwrap();
         assert!(defs_non_match.is_empty());
+    }
+
+    #[test]
+    fn current_unit_spans_for_path_falls_back_to_logical_units_start_line() {
+        // Same first-commit gap as file_units in ui/lsp.rs: a unit's
+        // creating commit records no `events` row, so `le.*` is NULL until
+        // a later commit changes/moves/fixes it. Without a fallback to
+        // logical_units.start_line, every fresh unit collapses to line 1.
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/worker.rb",
+            1,
+            7,
+            9,
+            "def run",
+            "def run\n  1\nend",
+        );
+        let unit_id = unit.id.clone();
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+
+        let spans = storage.current_unit_spans_for_path("src/worker.rb").unwrap();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].id, unit_id);
+        assert_eq!(spans[0].start_line, 7, "must fall back to logical_units.start_line, not 1");
+        assert_eq!(spans[0].end_line, 7, "no end_line column on logical_units to recover the true extent");
+
+        assert_eq!(
+            storage.current_unit_id_for_path_line("src/worker.rb", 7).unwrap(),
+            Some(unit_id)
+        );
+        assert_eq!(storage.current_unit_id_for_path_line("src/worker.rb", 1).unwrap(), None);
     }
 }

@@ -55,6 +55,26 @@
         },
         {
           "arguments": [
+            "\"Bar\""
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "MetaprogrammingDemo",
+          "line": 69,
+          "message": "GetType",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "System.Type",
+          "safe_navigation": false,
+          "span": [
+            69,
+            8,
+            69,
+            34
+          ]
+        },
+        {
+          "arguments": [
             "\"not ready\""
           ],
           "block": false,
@@ -197,6 +217,24 @@
         {
           "arguments": [],
           "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "MetaprogrammingDemo",
+          "line": 71,
+          "message": "ToString",
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "x",
+          "safe_navigation": false,
+          "span": [
+            71,
+            8,
+            71,
+            20
+          ]
+        },
+        {
+          "arguments": [],
+          "block": false,
           "conditional": true,
           "control": "iterates",
           "function": "Process",
@@ -323,6 +361,48 @@
             5
           ],
           "visibility": "private"
+        },
+        {
+          "line": 67,
+          "name": "MetaprogrammingDemo",
+          "owner": "CSharpSyntaxFactsCore",
+          "params": [],
+          "span": [
+            67,
+            4,
+            72,
+            5
+          ],
+          "visibility": "private"
+        }
+      ],
+      "hazard_sites": [
+        {
+          "end_column": 20,
+          "end_line": 71,
+          "hazard_type": "csharp_dynamic_dispatch",
+          "line": 71,
+          "required_evidence": "nil-kill",
+          "source": "x.ToString();",
+          "start_column": 8
+        },
+        {
+          "end_column": 25,
+          "end_line": 21,
+          "hazard_type": "csharp_callback_invocation",
+          "line": 21,
+          "required_evidence": "nil-kill",
+          "source": "self.callback(...)",
+          "start_column": 8
+        },
+        {
+          "end_column": 34,
+          "end_line": 69,
+          "hazard_type": "csharp_metaprogramming",
+          "line": 69,
+          "required_evidence": "nil-kill",
+          "source": "System.Type.GetType(\"Bar\");",
+          "start_column": 8
         }
       ],
       "language": "csharp",
@@ -334,7 +414,7 @@
           "span": [
             4,
             0,
-            66,
+            73,
             1
           ]
         }
@@ -363,6 +443,18 @@
             12,
             44,
             42
+          ]
+        },
+        {
+          "detail": "GetType",
+          "function": "MetaprogrammingDemo",
+          "kind": "metaprogramming",
+          "line": 69,
+          "span": [
+            69,
+            8,
+            69,
+            34
           ]
         }
       ],
@@ -456,6 +548,19 @@
             8,
             58,
             17
+          ]
+        },
+        {
+          "field": "ToString",
+          "function": "MetaprogrammingDemo",
+          "line": 71,
+          "owner": "CSharpSyntaxFactsCore",
+          "receiver": "x",
+          "span": [
+            71,
+            8,
+            71,
+            18
           ]
         },
         {

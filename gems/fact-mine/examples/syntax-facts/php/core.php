@@ -56,5 +56,18 @@ class PhpSyntaxFactsCore
     {
         return $this->count > 0;
     }
+
+    public function metaprogrammingDemo(): void
+    {
+        eval('1+1');
+        $f = 'bar';
+        $$f = 1;
+        new ReflectionClass('Foo');
+    }
+
+    public function __get($name)
+    {
+        return null;
+    }
 }
 

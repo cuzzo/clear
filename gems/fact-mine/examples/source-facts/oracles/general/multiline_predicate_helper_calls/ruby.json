@@ -303,6 +303,64 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactMultilinePredicateHelperCalls#data_carrier?:entry:0:12:2",
+        "kind": "entry",
+        "line": 12
+      },
+      {
+        "id": "cfg:SourceFactMultilinePredicateHelperCalls#data_carrier?:exit:2:14:5",
+        "kind": "exit",
+        "line": 14
+      },
+      {
+        "id": "cfg:SourceFactMultilinePredicateHelperCalls#data_carrier?:stmt:1:13:4",
+        "kind": "statement",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactMultilinePredicateHelperCalls#summarize:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactMultilinePredicateHelperCalls#summarize:exit:3:10:5",
+        "kind": "exit",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactMultilinePredicateHelperCalls#summarize:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactMultilinePredicateHelperCalls#summarize:stmt:2:9:4",
+        "kind": "statement",
+        "line": 9
+      }
+    ],
     "decisions": [
       {
         "enclosing_span": [
@@ -321,7 +379,30 @@
         "predicate": "state_count.zero? && public_methods.positive?"
       }
     ],
+    "def_use": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 12,
@@ -343,6 +424,15 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -457,6 +547,52 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactMultilinePredicateHelperCalls#data_carrier?:local:public_methods",
+          "place:SourceFactMultilinePredicateHelperCalls#data_carrier?:local:state_count"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactMultilinePredicateHelperCalls#data_carrier?:local:public_methods",
+          "place:SourceFactMultilinePredicateHelperCalls#data_carrier?:local:state_count"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactMultilinePredicateHelperCalls#summarize:local:public_funcs",
+          "place:SourceFactMultilinePredicateHelperCalls#summarize:local:state_names"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactMultilinePredicateHelperCalls#summarize:local:public_funcs",
+          "place:SourceFactMultilinePredicateHelperCalls#summarize:local:state_names"
+        ],
+        "writes": [
+          "place:SourceFactMultilinePredicateHelperCalls#summarize:local:data_carrier"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactMultilinePredicateHelperCalls#summarize:local:data_carrier"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -465,6 +601,33 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactMultilinePredicateHelperCalls#data_carrier?:local:public_methods",
+        "kind": "local",
+        "name": "public_methods"
+      },
+      {
+        "id": "place:SourceFactMultilinePredicateHelperCalls#data_carrier?:local:state_count",
+        "kind": "local",
+        "name": "state_count"
+      },
+      {
+        "id": "place:SourceFactMultilinePredicateHelperCalls#summarize:local:public_funcs",
+        "kind": "local",
+        "name": "public_funcs"
+      },
+      {
+        "id": "place:SourceFactMultilinePredicateHelperCalls#summarize:local:state_names",
+        "kind": "local",
+        "name": "state_names"
+      },
+      {
+        "id": "place:SourceFactMultilinePredicateHelperCalls#summarize:local:data_carrier",
+        "kind": "local",
+        "name": "data_carrier"
+      }
+    ],
     "predicate_bodies": [
       {
         "body": "state_count.zero? && public_methods.positive?",
@@ -520,6 +683,22 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

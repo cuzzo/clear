@@ -9,6 +9,13 @@ impl AstNormalizationAdapter for JavaAstAdapter {
         true
     }
 
+    // constructor_declaration has no return type or repeated method name, so
+    // it needs its own arm alongside method_declaration; its body is still
+    // reachable as constructor_body via the ordinary "body" field.
+    fn function_kind(&self, kind: &str) -> bool {
+        matches!(kind, "method_declaration" | "constructor_declaration")
+    }
+
     fn symbol_scope(
         &self,
         root: TreeSitterNode<'_>,

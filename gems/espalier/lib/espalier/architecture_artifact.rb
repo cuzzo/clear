@@ -2,6 +2,7 @@
 
 require "digest"
 require "open3"
+require "set"
 require "time"
 
 module Espalier
@@ -20,9 +21,12 @@ module Espalier
       calls = Array(evidence.dig("facts", "calls"))
       accesses = Array(evidence.dig("facts", "state_accesses"))
 
+      heuristic_owner_ids = owners.reject { |owner| high_confidence_owner?(owner) }
+                                   .map { |owner| owner["id"] }.to_set
+
       nodes = []
-      owners.each { |owner| nodes << owner_node(owner, root) }
-      methods.each { |method| nodes << function_node(method, root) }
+      owners.each { |owner| nodes << owner_node(owner, root) if high_confidence_owner?(owner) }
+      methods.each { |method| nodes << function_node(method, root, heuristic_owner_ids) }
       fields.each { |field| nodes << state_node(field, root) }
 
       nodes_by_id = nodes.to_h { |node| [node["id"], node] }
@@ -81,12 +85,27 @@ module Espalier
           "root" => root.to_s,
           "complete" => evidence.dig("corpus", "complete") == true,
           "completeness_reason" => evidence.dig("corpus", "reason"),
+          "languages" => Array(evidence["languages"]).uniq,
           "language_capabilities" => evidence["language_capabilities"] || {}
         },
         "nodes" => nodes.sort_by { |node| [node["kind"], node["path"].to_s, node["start_line"].to_i, node["id"]] },
         "edges" => edges.sort_by { |edge| [edge["source"], edge["target"], edge["kind"], edge["id"]] },
-        "pressure" => pressure.sort_by { |row| [-row["score"], row["node_id"]] }
+        "pressure" => pressure.sort_by { |row| [-row["score"], row["node_id"]] },
+        "hazards" => Array(evidence.dig("facts", "hazards")).map { |h|
+          h.merge("path" => relative_path(h["path"], root))
+        }.sort_by { |h| [h["path"].to_s, h["line"].to_i, h["hazard_type"].to_s] }
       }
+    end
+
+    # FactMine tags an owner "partial" when it could not find a real
+    # struct/class/interface declaration and instead guessed one from
+    # surrounding context (a typed parameter, a naming convention). That
+    # guess is useful as a hint but is not a declared type - rendering it as
+    # a first-class owner node makes a heuristic indistinguishable from a
+    # real one, and can fabricate an architectural entity (and misattribute
+    # unrelated free functions to it) out of nothing but a naming coincidence.
+    def high_confidence_owner?(owner)
+      (owner["confidence"] || "high") == "high"
     end
 
     def owner_node(owner, root)
@@ -98,9 +117,11 @@ module Espalier
       )
     end
 
-    def function_node(method, root)
+    def function_node(method, root, heuristic_owner_ids = Set.new)
+      owner_id = method["owner_id"]
+      owner_id = nil if heuristic_owner_ids.include?(owner_id)
       base_node(method, "function", root).merge(
-        "owner_id" => method["owner_id"],
+        "owner_id" => owner_id,
         "metadata" => {
           "visibility" => method["visibility"] || "public",
           "signature" => method["signature"],

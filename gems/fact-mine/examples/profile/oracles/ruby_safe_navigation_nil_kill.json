@@ -1,7 +1,2193 @@
 {
+  "array_shapes": [
+    {
+      "code": "params(\n      node: AST::MatchStatement,\n      facts: MatchLoweringFacts,\n      arms: T::Array[UnionMatchArmPlan],\n    )",
+      "line": 5,
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "size": 0,
+      "tuple_types": [
+        "T.untyped",
+        "T.untyped",
+        "T.untyped"
+      ]
+    },
+    {
+      "code": "T.bind(self, MIRLowering)",
+      "line": 12,
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "size": 0,
+      "tuple_types": [
+        "T.untyped",
+        "MIRLowering"
+      ]
+    }
+  ],
+  "call_resolution_coverage": {
+    "accounted_call_percent": 0.0,
+    "calls_with_project_candidate_set": 0,
+    "declared_supertype_edges": 0,
+    "eligible_call_sites": 0,
+    "exact_project_target_percent": 0.0,
+    "exact_project_targets": 0,
+    "functions_with_unresolved_calls": 0,
+    "modeled_without_project_target": 0,
+    "normalized_calls_without_raw_span": 5,
+    "outside_executable_function": 0,
+    "owners_with_supertypes": 0,
+    "raw_calls_not_normalized": 3,
+    "raw_parser_call_sites": 15,
+    "semantically_accounted_call_percent": 0.0,
+    "semantically_accounted_call_sites": 0,
+    "total_call_sites": 0,
+    "unresolved_call_percent": 0.0,
+    "unresolved_call_sites": 0,
+    "unresolved_with_ambiguous_inherited_targets": 0,
+    "unresolved_with_unique_inherited_target": 0
+  },
+  "calls": [
+    {
+      "argument_count": 1,
+      "conditional": false,
+      "confidence": "partial",
+      "function": "(top-level)",
+      "id": "edge:7b0515a548c9d614",
+      "implicit_receiver": true,
+      "kind": "unresolved_call",
+      "line": 2,
+      "message": "extend",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "self",
+      "receiver_binding_kind": "implicit",
+      "receiver_kind": "value",
+      "source": "fn:91d9d9a6eeda5c2a",
+      "span": [
+        2,
+        2,
+        2,
+        15
+      ],
+      "unresolved_reason": "target_not_defined_in_document"
+    },
+    {
+      "argument_count": 0,
+      "conditional": false,
+      "confidence": "partial",
+      "function": "(top-level)",
+      "id": "edge:a34b224c826a5d90",
+      "implicit_receiver": true,
+      "kind": "unresolved_call",
+      "line": 4,
+      "message": "sig",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "self",
+      "receiver_binding_kind": "implicit",
+      "receiver_kind": "value",
+      "source": "fn:91d9d9a6eeda5c2a",
+      "span": [
+        4,
+        2,
+        4,
+        5
+      ],
+      "unresolved_reason": "target_not_defined_in_document"
+    },
+    {
+      "argument_count": 1,
+      "complexity_bound_quality": "upper_bound_declared_receiver",
+      "complexity_provenance": "language_stdlib_registry",
+      "conditional": true,
+      "confidence": "partial",
+      "function": "(top-level)",
+      "id": "edge:2b7bf67bcdb65d15",
+      "kind": "external_call",
+      "known_space_complexity": "O(1)",
+      "known_time_complexity": "O(1)",
+      "line": 8,
+      "message": "[]",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "T::Array",
+      "receiver_binding_kind": "type",
+      "receiver_kind": "type",
+      "source": "fn:91d9d9a6eeda5c2a",
+      "span": [
+        8,
+        12,
+        8,
+        39
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "argument_count": 3,
+      "conditional": true,
+      "confidence": "partial",
+      "function": "(top-level)",
+      "id": "edge:ba0cae20ce7a2a65",
+      "implicit_receiver": true,
+      "kind": "unresolved_call",
+      "line": 5,
+      "message": "params",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "self",
+      "receiver_binding_kind": "implicit",
+      "receiver_kind": "value",
+      "source": "fn:91d9d9a6eeda5c2a",
+      "span": [
+        5,
+        4,
+        9,
+        5
+      ],
+      "unresolved_reason": "target_not_defined_in_document"
+    },
+    {
+      "argument_count": 1,
+      "conditional": true,
+      "confidence": "partial",
+      "function": "(top-level)",
+      "id": "edge:837e80a42529c213",
+      "kind": "external_call",
+      "line": 5,
+      "message": "returns",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "params( node: AST::MatchStatement, facts: MatchLoweringFacts, arms: T::Array[UnionMatchArmPlan], )",
+      "receiver_binding_kind": "unbound",
+      "receiver_call_span": [
+        5,
+        4,
+        9,
+        5
+      ],
+      "receiver_kind": "value",
+      "source": "fn:91d9d9a6eeda5c2a",
+      "span": [
+        5,
+        4,
+        9,
+        24
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "argument_count": 2,
+      "complexity_bound_quality": "upper_bound_declared_receiver",
+      "complexity_provenance": "language_stdlib_registry",
+      "conditional": false,
+      "confidence": "partial",
+      "function": "union_match_default_body",
+      "id": "edge:9a03cada03345b35",
+      "kind": "external_call",
+      "known_space_complexity": "O(1)",
+      "known_time_complexity": "O(1)",
+      "line": 12,
+      "message": "bind",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "T",
+      "receiver_binding_kind": "type",
+      "receiver_kind": "type",
+      "source": "fn:870869be8ea36bbd",
+      "span": [
+        12,
+        4,
+        12,
+        29
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "argument_count": 0,
+      "conditional": false,
+      "confidence": "partial",
+      "function": "union_match_default_body",
+      "id": "edge:2702383c132ca9cf",
+      "implicit_receiver": true,
+      "kind": "unresolved_call",
+      "line": 13,
+      "message": "union_schemas",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "self",
+      "receiver_binding_kind": "implicit",
+      "receiver_kind": "value",
+      "source": "fn:870869be8ea36bbd",
+      "span": [
+        13,
+        13,
+        13,
+        26
+      ],
+      "unresolved_reason": "target_not_defined_in_document"
+    },
+    {
+      "argument_count": 0,
+      "conditional": false,
+      "confidence": "partial",
+      "function": "union_match_default_body",
+      "id": "edge:c542973fb5c36ec0",
+      "kind": "external_call",
+      "line": 13,
+      "message": "expr_type_sym",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "facts",
+      "receiver_binding_kind": "parameter",
+      "receiver_kind": "value",
+      "receiver_symbol_origin": "unqualified_declared_type",
+      "receiver_type": "MatchLoweringFacts",
+      "receiver_type_origin": "declared_parameter",
+      "source": "fn:870869be8ea36bbd",
+      "span": [
+        13,
+        27,
+        13,
+        46
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "argument_count": 1,
+      "conditional": false,
+      "confidence": "partial",
+      "function": "union_match_default_body",
+      "id": "edge:f10062392d8cf010",
+      "kind": "external_call",
+      "line": 13,
+      "message": "[]",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "union_schemas",
+      "receiver_binding_kind": "unbound",
+      "receiver_call_span": [
+        13,
+        13,
+        13,
+        26
+      ],
+      "receiver_kind": "value",
+      "source": "fn:870869be8ea36bbd",
+      "span": [
+        13,
+        13,
+        13,
+        47
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "argument_count": 0,
+      "conditional": false,
+      "confidence": "partial",
+      "function": "union_match_default_body",
+      "id": "edge:7a889eb841551e81",
+      "kind": "external_call",
+      "line": 14,
+      "message": "variants",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "schema",
+      "receiver_binding_kind": "unbound",
+      "receiver_definition_call_spans": [
+        [
+          13,
+          13,
+          13,
+          47
+        ]
+      ],
+      "receiver_kind": "value",
+      "source": "fn:870869be8ea36bbd",
+      "span": [
+        14,
+        19,
+        14,
+        35
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "argument_count": 0,
+      "conditional": false,
+      "confidence": "partial",
+      "function": "union_match_default_body",
+      "id": "edge:92a99b420fbd802c",
+      "kind": "external_call",
+      "line": 14,
+      "message": "keys",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "schema&.variants",
+      "receiver_binding_kind": "unbound",
+      "receiver_call_span": [
+        14,
+        19,
+        14,
+        35
+      ],
+      "receiver_kind": "value",
+      "source": "fn:870869be8ea36bbd",
+      "span": [
+        14,
+        19,
+        14,
+        41
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "argument_count": 1,
+      "conditional": false,
+      "confidence": "partial",
+      "function": "union_match_default_body",
+      "id": "edge:e83d21a88a399e54",
+      "kind": "external_call",
+      "line": 14,
+      "message": "map",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "schema&.variants&.keys",
+      "receiver_binding_kind": "unbound",
+      "receiver_call_span": [
+        14,
+        19,
+        14,
+        41
+      ],
+      "receiver_kind": "value",
+      "source": "fn:870869be8ea36bbd",
+      "span": [
+        14,
+        19,
+        14,
+        54
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "argument_count": 0,
+      "conditional": false,
+      "confidence": "partial",
+      "function": "union_match_default_body",
+      "id": "edge:ecfa5ba2b8e83bf9",
+      "kind": "external_call",
+      "line": 14,
+      "message": "sort",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "schema&.variants&.keys&.map(&:to_s)",
+      "receiver_binding_kind": "unbound",
+      "receiver_call_span": [
+        14,
+        19,
+        14,
+        54
+      ],
+      "receiver_kind": "value",
+      "source": "fn:870869be8ea36bbd",
+      "span": [
+        14,
+        19,
+        14,
+        60
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "argument_count": 0,
+      "conditional": false,
+      "confidence": "partial",
+      "function": "(top-level)",
+      "id": "edge:2c02c8959c8d4c86",
+      "implicit_receiver": true,
+      "kind": "unresolved_call",
+      "line": 18,
+      "message": "sig",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "self",
+      "receiver_binding_kind": "implicit",
+      "receiver_kind": "value",
+      "source": "fn:91d9d9a6eeda5c2a",
+      "span": [
+        18,
+        2,
+        18,
+        5
+      ],
+      "unresolved_reason": "target_not_defined_in_document"
+    },
+    {
+      "argument_count": 1,
+      "conditional": true,
+      "confidence": "partial",
+      "function": "(top-level)",
+      "id": "edge:73862c6f05bad739",
+      "implicit_receiver": true,
+      "kind": "unresolved_call",
+      "line": 18,
+      "message": "params",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "self",
+      "receiver_binding_kind": "implicit",
+      "receiver_kind": "value",
+      "source": "fn:91d9d9a6eeda5c2a",
+      "span": [
+        18,
+        8,
+        18,
+        32
+      ],
+      "unresolved_reason": "target_not_defined_in_document"
+    },
+    {
+      "argument_count": 1,
+      "conditional": true,
+      "confidence": "partial",
+      "function": "(top-level)",
+      "id": "edge:3358eff9e35eb10a",
+      "kind": "external_call",
+      "line": 18,
+      "message": "returns",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "params(required: String)",
+      "receiver_binding_kind": "unbound",
+      "receiver_call_span": [
+        18,
+        8,
+        18,
+        32
+      ],
+      "receiver_kind": "value",
+      "source": "fn:91d9d9a6eeda5c2a",
+      "span": [
+        18,
+        8,
+        18,
+        52
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "argument_count": 0,
+      "conditional": false,
+      "confidence": "partial",
+      "function": "missing?",
+      "id": "edge:e3223b4a641db6a6",
+      "kind": "external_call",
+      "line": 20,
+      "message": "nil?",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "required",
+      "receiver_binding_kind": "parameter",
+      "receiver_kind": "value",
+      "receiver_symbol_origin": "unqualified_declared_type",
+      "receiver_type": "String",
+      "receiver_type_origin": "declared_parameter",
+      "source": "fn:4c6945d1a79599a2",
+      "span": [
+        20,
+        4,
+        20,
+        17
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    }
+  ],
+  "collection_index_lookups": [
+    {
+      "code": "union_schemas[facts.expr_type_sym]",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "index": "facts.expr_type_sym",
+      "index_type": null,
+      "line": 13,
+      "lookup_type": null,
+      "origin": {
+        "callee": "union_schemas",
+        "code": "union_schemas",
+        "kind": "forwarded return",
+        "line": 13,
+        "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+      },
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "union_schemas",
+      "receiver_type": null,
+      "status": "unknown receiver type"
+    }
+  ],
+  "complexity_facts": [
+    {
+      "allocations": [],
+      "block_invocations": [],
+      "call_contexts": [
+        {
+          "argument_cardinality_relation": "same",
+          "argument_progress": "unknown",
+          "argument_size_domains": [
+            [],
+            []
+          ],
+          "execution_multiplicity": "O(1)",
+          "known_space_complexity": "O(1)",
+          "known_time_complexity": "O(1)",
+          "line": 12,
+          "message": "bind",
+          "parameter_arguments": [],
+          "power": 0,
+          "receiver_size_domains": [],
+          "span": [
+            12,
+            4,
+            12,
+            29
+          ],
+          "symbolic_execution": {
+            "complete": true,
+            "factors": [],
+            "logarithmic": false
+          }
+        },
+        {
+          "argument_cardinality_relation": "same",
+          "argument_progress": "unknown",
+          "argument_size_domains": [
+            [
+              "param:MIRLoweringControlFlow#union_match_default_body:facts"
+            ]
+          ],
+          "evidence_gap": "unresolved_receiver_type",
+          "execution_multiplicity": "O(1)",
+          "line": 13,
+          "message": "[]",
+          "parameter_arguments": [
+            "facts"
+          ],
+          "power": 0,
+          "receiver_size_domains": [],
+          "span": [
+            13,
+            13,
+            13,
+            47
+          ],
+          "symbolic_execution": {
+            "complete": true,
+            "factors": [],
+            "logarithmic": false
+          }
+        },
+        {
+          "argument_cardinality_relation": "same",
+          "argument_progress": "unknown",
+          "argument_size_domains": [],
+          "evidence_gap": "unresolved_call_target",
+          "execution_multiplicity": "O(1)",
+          "line": 13,
+          "message": "union_schemas",
+          "parameter_arguments": [],
+          "power": 0,
+          "receiver_size_domains": [],
+          "span": [
+            13,
+            13,
+            13,
+            26
+          ],
+          "symbolic_execution": {
+            "complete": true,
+            "factors": [],
+            "logarithmic": false
+          }
+        },
+        {
+          "argument_cardinality_relation": "same",
+          "argument_progress": "unknown",
+          "argument_size_domains": [],
+          "evidence_gap": "unmodeled_typed_operation",
+          "execution_multiplicity": "O(1)",
+          "line": 13,
+          "message": "expr_type_sym",
+          "parameter_arguments": [
+            "facts"
+          ],
+          "power": 0,
+          "receiver_size_domains": [
+            "param:MIRLoweringControlFlow#union_match_default_body:facts"
+          ],
+          "span": [
+            13,
+            27,
+            13,
+            46
+          ],
+          "symbolic_execution": {
+            "complete": true,
+            "factors": [],
+            "logarithmic": false
+          }
+        }
+      ],
+      "collection_parameters": [
+        "arms"
+      ],
+      "deferred_regions": [],
+      "function": "union_match_default_body",
+      "iterations": [],
+      "line": 11,
+      "owner": "MIRLoweringControlFlow",
+      "parameters": [
+        "arms",
+        "facts",
+        "node"
+      ],
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "recursion": {
+        "calls": 0,
+        "halving_calls": 0,
+        "loop_contained_shrinking_calls": 0,
+        "shrinking_calls": 0,
+        "unknown_progress_calls": 0,
+        "visited_guarded_calls": 0
+      },
+      "size_domains": [
+        {
+          "id": "param:MIRLoweringControlFlow#union_match_default_body:arms",
+          "name": "arms",
+          "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+          "source_kind": "parameter",
+          "span": [
+            11,
+            2,
+            16,
+            5
+          ]
+        },
+        {
+          "id": "param:MIRLoweringControlFlow#union_match_default_body:facts",
+          "name": "facts",
+          "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+          "source_kind": "parameter",
+          "span": [
+            11,
+            2,
+            16,
+            5
+          ]
+        },
+        {
+          "id": "param:MIRLoweringControlFlow#union_match_default_body:node",
+          "name": "node",
+          "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+          "source_kind": "parameter",
+          "span": [
+            11,
+            2,
+            16,
+            5
+          ]
+        }
+      ],
+      "span": [
+        11,
+        2,
+        16,
+        5
+      ],
+      "state_cursor_domains": [],
+      "state_progress": [],
+      "state_replays": []
+    },
+    {
+      "allocations": [],
+      "block_invocations": [],
+      "call_contexts": [
+        {
+          "argument_cardinality_relation": "same",
+          "argument_progress": "unknown",
+          "argument_size_domains": [],
+          "evidence_gap": "unmodeled_typed_operation",
+          "execution_multiplicity": "O(1)",
+          "line": 20,
+          "message": "nil?",
+          "parameter_arguments": [
+            "required"
+          ],
+          "power": 0,
+          "receiver_size_domains": [
+            "param:MIRLoweringControlFlow#missing?:required"
+          ],
+          "span": [
+            20,
+            4,
+            20,
+            17
+          ],
+          "symbolic_execution": {
+            "complete": true,
+            "factors": [],
+            "logarithmic": false
+          }
+        }
+      ],
+      "collection_parameters": [],
+      "deferred_regions": [],
+      "function": "missing?",
+      "iterations": [],
+      "line": 19,
+      "owner": "MIRLoweringControlFlow",
+      "parameters": [
+        "required"
+      ],
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "recursion": {
+        "calls": 0,
+        "halving_calls": 0,
+        "loop_contained_shrinking_calls": 0,
+        "shrinking_calls": 0,
+        "unknown_progress_calls": 0,
+        "visited_guarded_calls": 0
+      },
+      "size_domains": [
+        {
+          "id": "param:MIRLoweringControlFlow#missing?:required",
+          "name": "required",
+          "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+          "source_kind": "parameter",
+          "span": [
+            19,
+            2,
+            21,
+            5
+          ]
+        }
+      ],
+      "span": [
+        19,
+        2,
+        21,
+        5
+      ],
+      "state_cursor_domains": [],
+      "state_progress": [],
+      "state_replays": []
+    }
+  ],
   "dead_nil_checks": [
     {
-      "code": "required.nil?"
+      "code": "required.nil?",
+      "kind": "nil_check",
+      "line": 20,
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "reason": "required is provably non-nil; .nil? is always false"
+    }
+  ],
+  "declaration_type_pressures": [
+    {
+      "collection_depth": 0,
+      "declaration_kind": "method_signature",
+      "declaration_name": "missing?",
+      "declared_type": {
+        "data": "String",
+        "kind": "Primitive"
+      },
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000missing?\u000019\u0000sorbet\u0000param:required",
+      "language": "ruby",
+      "line": 19,
+      "nested_union_width": 0,
+      "nilable": false,
+      "nilable_collection": false,
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "slot": "param:required",
+      "union_width": 0,
+      "unknown_leaves": 0
+    },
+    {
+      "collection_depth": 0,
+      "declaration_kind": "method_signature",
+      "declaration_name": "missing?",
+      "declared_type": {
+        "data": "T::Boolean",
+        "kind": "Primitive"
+      },
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000missing?\u000019\u0000sorbet\u0000return",
+      "language": "ruby",
+      "line": 19,
+      "nested_union_width": 0,
+      "nilable": false,
+      "nilable_collection": false,
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "slot": "return",
+      "union_width": 0,
+      "unknown_leaves": 0
+    },
+    {
+      "collection_depth": 1,
+      "declaration_kind": "method_signature",
+      "declaration_name": "union_match_default_body",
+      "declared_type": {
+        "data": {
+          "data": "UnionMatchArmPlan",
+          "kind": "Primitive"
+        },
+        "kind": "Array"
+      },
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet\u0000param:arms",
+      "language": "ruby",
+      "line": 11,
+      "nested_union_width": 0,
+      "nilable": false,
+      "nilable_collection": false,
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "slot": "param:arms",
+      "union_width": 0,
+      "unknown_leaves": 0
+    },
+    {
+      "collection_depth": 0,
+      "declaration_kind": "method_signature",
+      "declaration_name": "union_match_default_body",
+      "declared_type": {
+        "data": "MatchLoweringFacts",
+        "kind": "Primitive"
+      },
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet\u0000param:facts",
+      "language": "ruby",
+      "line": 11,
+      "nested_union_width": 0,
+      "nilable": false,
+      "nilable_collection": false,
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "slot": "param:facts",
+      "union_width": 0,
+      "unknown_leaves": 0
+    },
+    {
+      "collection_depth": 0,
+      "declaration_kind": "method_signature",
+      "declaration_name": "union_match_default_body",
+      "declared_type": {
+        "data": "AST::MatchStatement",
+        "kind": "Primitive"
+      },
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet\u0000param:node",
+      "language": "ruby",
+      "line": 11,
+      "nested_union_width": 0,
+      "nilable": false,
+      "nilable_collection": false,
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "slot": "param:node",
+      "union_width": 0,
+      "unknown_leaves": 0
+    },
+    {
+      "collection_depth": 0,
+      "declaration_kind": "method_signature",
+      "declaration_name": "union_match_default_body",
+      "declared_type": {
+        "kind": "Untyped"
+      },
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet\u0000return",
+      "language": "ruby",
+      "line": 11,
+      "nested_union_width": 0,
+      "nilable": false,
+      "nilable_collection": false,
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "slot": "return",
+      "union_width": 0,
+      "unknown_leaves": 1
+    }
+  ],
+  "fields": [],
+  "flow_local_types": [
+    {
+      "complete": true,
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "missing?",
+      "line": 20,
+      "name": "required",
+      "node_id": "cfg:MIRLoweringControlFlow#missing?:stmt:1:20:4",
+      "owner": "MIRLoweringControlFlow",
+      "place_id": "place:MIRLoweringControlFlow#missing?:local:required",
+      "reaching_definitions": [
+        "cfg:MIRLoweringControlFlow#missing?:entry:0:19:2"
+      ],
+      "resolved_types": [
+        {
+          "data": "String",
+          "kind": "Primitive"
+        }
+      ],
+      "span": [
+        20,
+        4,
+        20,
+        17
+      ],
+      "types": [
+        "declared:String"
+      ]
+    },
+    {
+      "complete": true,
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "union_match_default_body",
+      "line": 13,
+      "name": "facts",
+      "node_id": "cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4",
+      "owner": "MIRLoweringControlFlow",
+      "place_id": "place:MIRLoweringControlFlow#union_match_default_body:local:facts",
+      "reaching_definitions": [
+        "cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2"
+      ],
+      "resolved_types": [
+        {
+          "data": "MatchLoweringFacts",
+          "kind": "Primitive"
+        }
+      ],
+      "span": [
+        13,
+        4,
+        13,
+        47
+      ],
+      "types": [
+        "declared:MatchLoweringFacts"
+      ]
+    },
+    {
+      "complete": false,
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "union_match_default_body",
+      "line": 14,
+      "name": "schema",
+      "node_id": "cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4",
+      "owner": "MIRLoweringControlFlow",
+      "place_id": "place:MIRLoweringControlFlow#union_match_default_body:local:schema",
+      "reaching_definitions": [
+        "cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4"
+      ],
+      "resolved_types": [],
+      "span": [
+        14,
+        4,
+        14,
+        66
+      ],
+      "types": []
+    },
+    {
+      "complete": false,
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "union_match_default_body",
+      "line": 15,
+      "name": "all_variants",
+      "node_id": "cfg:MIRLoweringControlFlow#union_match_default_body:stmt:4:15:4",
+      "owner": "MIRLoweringControlFlow",
+      "place_id": "place:MIRLoweringControlFlow#union_match_default_body:local:all_variants",
+      "reaching_definitions": [
+        "cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4"
+      ],
+      "resolved_types": [],
+      "span": [
+        15,
+        4,
+        15,
+        16
+      ],
+      "types": []
+    }
+  ],
+  "hash_record_escape_sites": [
+    {
+      "code": "node: AST::MatchStatement",
+      "escapes_collection": true,
+      "line": 6,
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "reason": "array_literal"
+    },
+    {
+      "code": "facts: MatchLoweringFacts",
+      "escapes_collection": true,
+      "line": 7,
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "reason": "array_literal"
+    },
+    {
+      "code": "arms: T::Array[UnionMatchArmPlan]",
+      "escapes_collection": true,
+      "line": 8,
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "reason": "array_literal"
+    },
+    {
+      "code": "required: String",
+      "escapes_collection": true,
+      "line": 18,
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "reason": "array_literal"
+    }
+  ],
+  "hash_shapes": [],
+  "methods": [
+    {
+      "complexity_signals": {
+        "boolean_ops": 1,
+        "rescues": 2
+      },
+      "dispatch_name": "union_match_default_body",
+      "id": "fn:870869be8ea36bbd",
+      "key": [
+        "MIRLoweringControlFlow",
+        "union_match_default_body",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "ruby",
+      "line": 11,
+      "local_complexity": 3.5,
+      "name": "union_match_default_body",
+      "normalized_source": "def union_match_default_body(node, facts, arms) T.bind(self, MIRLowering) rescue nil schema = union_schemas[facts.expr_type_sym] all_variants = schema&.variants&.keys&.map(&:to_s)&.sort || [] all_variants end",
+      "owner": "MIRLoweringControlFlow",
+      "owner_id": "owner:1764295d8fbc4733",
+      "params": [
+        "node",
+        "facts",
+        "arms"
+      ],
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "raw_source": "def union_match_default_body(node, facts, arms)\n    T.bind(self, MIRLowering) rescue nil\n    schema = union_schemas[facts.expr_type_sym]\n    all_variants = schema&.variants&.keys&.map(&:to_s)&.sort || []\n    all_variants\n  end",
+      "signature": "sig do params( node: AST::MatchStatement, facts: MatchLoweringFacts, arms: T::Array[UnionMatchArmPlan], ).returns(T.untyped) end",
+      "source": {
+        "sig": "sig do params( node: AST::MatchStatement, facts: MatchLoweringFacts, arms: T::Array[UnionMatchArmPlan], ).returns(T.untyped) end",
+        "signature": "sig do params( node: AST::MatchStatement, facts: MatchLoweringFacts, arms: T::Array[UnionMatchArmPlan], ).returns(T.untyped) end",
+        "source": "annotation",
+        "type_system": "sorbet"
+      },
+      "span": [
+        11,
+        2,
+        16,
+        5
+      ],
+      "visibility": "public"
+    },
+    {
+      "dispatch_name": "missing?",
+      "id": "fn:4c6945d1a79599a2",
+      "key": [
+        "MIRLoweringControlFlow",
+        "missing?",
+        "instance"
+      ],
+      "kind": "instance",
+      "language": "ruby",
+      "line": 19,
+      "local_complexity": 0.0,
+      "name": "missing?",
+      "normalized_source": "def missing?(required) required.nil? end",
+      "owner": "MIRLoweringControlFlow",
+      "owner_id": "owner:1764295d8fbc4733",
+      "params": [
+        "required"
+      ],
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "raw_source": "def missing?(required)\n    required.nil?\n  end",
+      "signature": "sig { params(required: String).returns(T::Boolean) }",
+      "source": {
+        "sig": "sig { params(required: String).returns(T::Boolean) }",
+        "signature": "sig { params(required: String).returns(T::Boolean) }",
+        "source": "annotation",
+        "type_system": "sorbet"
+      },
+      "span": [
+        19,
+        2,
+        21,
+        5
+      ],
+      "visibility": "public"
+    }
+  ],
+  "owners": [
+    {
+      "confidence": "high",
+      "id": "owner:1764295d8fbc4733",
+      "kind": "module",
+      "language": "ruby",
+      "line": 1,
+      "name": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "span": [
+        1,
+        0,
+        22,
+        3
+      ]
+    }
+  ],
+  "param_origins": [
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "extend",
+      "code": "T::Sig",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 2,
+      "origin_kind": "unknown",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": null,
+      "slot": "0",
+      "source_method": null,
+      "type": null,
+      "unknown_reasons": [
+        "operation unresolved constant T::Sig"
+      ]
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "sig",
+      "code": "sig",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 4,
+      "origin_kind": "untyped_return",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": null,
+      "slot": "0",
+      "source_method": "sig",
+      "type": null,
+      "unknown_reasons": []
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "returns",
+      "code": "T.untyped",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 5,
+      "origin_kind": "untyped_return",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "params(\n      node: AST::MatchStatement,\n      facts: MatchLoweringFacts,\n      arms: T::Array[UnionMatchArmPlan],\n    )",
+      "slot": "0",
+      "source_method": "untyped",
+      "type": null,
+      "unknown_reasons": []
+    },
+    {
+      "arg_kind": "keyword",
+      "array_element_shape": null,
+      "callee": "params",
+      "code": "AST::MatchStatement",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 5,
+      "origin_kind": "unknown",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": null,
+      "slot": "node",
+      "source_method": null,
+      "type": null,
+      "unknown_reasons": [
+        "operation unresolved constant AST::MatchStatement"
+      ]
+    },
+    {
+      "arg_kind": "keyword",
+      "array_element_shape": null,
+      "callee": "params",
+      "code": "MatchLoweringFacts",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 5,
+      "origin_kind": "unknown",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": null,
+      "slot": "facts",
+      "source_method": null,
+      "type": null,
+      "unknown_reasons": [
+        "operation unresolved constant MatchLoweringFacts"
+      ]
+    },
+    {
+      "arg_kind": "keyword",
+      "array_element_shape": null,
+      "callee": "params",
+      "code": "T::Array[UnionMatchArmPlan]",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 5,
+      "origin_kind": "untyped_return",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": null,
+      "slot": "arms",
+      "source_method": "[]",
+      "type": null,
+      "unknown_reasons": []
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "[]",
+      "code": "UnionMatchArmPlan",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 8,
+      "origin_kind": "unknown",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "T::Array",
+      "slot": "0",
+      "source_method": null,
+      "type": null,
+      "unknown_reasons": [
+        "operation unresolved constant UnionMatchArmPlan"
+      ]
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "untyped",
+      "code": "",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 9,
+      "origin_kind": "static",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "T",
+      "slot": "0",
+      "source_method": null,
+      "type": {
+        "data": {
+          "kind": "Untyped"
+        },
+        "kind": "Array"
+      },
+      "unknown_reasons": []
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "bind",
+      "code": "self",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 12,
+      "origin_kind": "unknown",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "T",
+      "slot": "0",
+      "source_method": null,
+      "type": null,
+      "unknown_reasons": [
+        "operation SELF"
+      ]
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "bind",
+      "code": "MIRLowering",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 12,
+      "origin_kind": "unknown",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "T",
+      "slot": "1",
+      "source_method": null,
+      "type": null,
+      "unknown_reasons": [
+        "operation unresolved constant MIRLowering"
+      ]
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "[]",
+      "code": "facts.expr_type_sym",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 13,
+      "origin_kind": "untyped_return",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "union_schemas",
+      "slot": "0",
+      "source_method": "expr_type_sym",
+      "type": null,
+      "unknown_reasons": []
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "union_schemas",
+      "code": "union_schemas",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 13,
+      "origin_kind": "untyped_return",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": null,
+      "slot": "0",
+      "source_method": "union_schemas",
+      "type": null,
+      "unknown_reasons": []
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "expr_type_sym",
+      "code": "",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 13,
+      "origin_kind": "static",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "facts",
+      "slot": "0",
+      "source_method": null,
+      "type": {
+        "data": {
+          "kind": "Untyped"
+        },
+        "kind": "Array"
+      },
+      "unknown_reasons": []
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "sort",
+      "code": "",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 14,
+      "origin_kind": "static",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "schema&.variants&.keys&.map(&:to_s)",
+      "slot": "0",
+      "source_method": null,
+      "type": {
+        "data": {
+          "kind": "Untyped"
+        },
+        "kind": "Array"
+      },
+      "unknown_reasons": []
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "map",
+      "code": "&:to_s",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 14,
+      "origin_kind": "unknown",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "schema&.variants&.keys",
+      "slot": "0",
+      "source_method": null,
+      "type": null,
+      "unknown_reasons": [
+        "literal/static expression Symbol",
+        "operation BLOCK_PASS"
+      ]
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "keys",
+      "code": "",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 14,
+      "origin_kind": "static",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "schema&.variants",
+      "slot": "0",
+      "source_method": null,
+      "type": {
+        "data": {
+          "kind": "Untyped"
+        },
+        "kind": "Array"
+      },
+      "unknown_reasons": []
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "variants",
+      "code": "",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 14,
+      "origin_kind": "static",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "schema",
+      "slot": "0",
+      "source_method": null,
+      "type": {
+        "data": {
+          "kind": "Untyped"
+        },
+        "kind": "Array"
+      },
+      "unknown_reasons": []
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "sig",
+      "code": "sig",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 18,
+      "origin_kind": "untyped_return",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": null,
+      "slot": "0",
+      "source_method": "sig",
+      "type": null,
+      "unknown_reasons": []
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "returns",
+      "code": "T::Boolean",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 18,
+      "origin_kind": "unknown",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "params(required: String)",
+      "slot": "0",
+      "source_method": null,
+      "type": null,
+      "unknown_reasons": [
+        "operation unresolved constant T::Boolean"
+      ]
+    },
+    {
+      "arg_kind": "keyword",
+      "array_element_shape": null,
+      "callee": "params",
+      "code": "String",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 18,
+      "origin_kind": "static",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": null,
+      "slot": "required",
+      "source_method": null,
+      "type": {
+        "data": "T.class_of(String)",
+        "kind": "Primitive"
+      },
+      "unknown_reasons": []
+    },
+    {
+      "arg_kind": "positional",
+      "array_element_shape": null,
+      "callee": "nil?",
+      "code": "",
+      "enclosing_scope": "MIRLoweringControlFlow",
+      "hash_shape": null,
+      "line": 20,
+      "origin_kind": "static",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "required",
+      "slot": "0",
+      "source_method": null,
+      "type": {
+        "data": {
+          "kind": "Untyped"
+        },
+        "kind": "Array"
+      },
+      "unknown_reasons": []
+    }
+  ],
+  "return_direct_usage_sites": [
+    {
+      "code": "extend T::Sig",
+      "context": "statement",
+      "current_method": null,
+      "handler_line": null,
+      "line": 2,
+      "name": "extend",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "sig",
+      "context": "statement",
+      "current_method": null,
+      "handler_line": null,
+      "line": 4,
+      "name": "sig",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "params(",
+      "context": "statement",
+      "current_method": null,
+      "handler_line": null,
+      "line": 5,
+      "name": "returns",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "params(",
+      "context": "value",
+      "current_method": null,
+      "handler_line": null,
+      "line": 5,
+      "name": "params",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "T::Array[UnionMatchArmPlan]",
+      "context": "value",
+      "current_method": null,
+      "handler_line": null,
+      "line": 8,
+      "name": "[]",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "(T.untyped)",
+      "context": "return",
+      "current_method": null,
+      "handler_line": null,
+      "line": 9,
+      "name": "untyped",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "union_schemas[facts.expr_type_sym]",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 13,
+      "name": "[]",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "union_schemas",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 13,
+      "name": "union_schemas",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "facts.expr_type_sym",
+      "context": "return",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 13,
+      "name": "expr_type_sym",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "schema&.variants&.keys&.map(&:to_s)&.sort",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 14,
+      "name": "sort",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "schema&.variants&.keys&.map(&:to_s)",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 14,
+      "name": "map",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "schema&.variants&.keys",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 14,
+      "name": "keys",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "schema&.variants",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 14,
+      "name": "variants",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "sig",
+      "context": "statement",
+      "current_method": null,
+      "handler_line": null,
+      "line": 18,
+      "name": "sig",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "params(required: String).returns(T::Boolean)",
+      "context": "statement",
+      "current_method": null,
+      "handler_line": null,
+      "line": 18,
+      "name": "returns",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "params(required: String)",
+      "context": "value",
+      "current_method": null,
+      "handler_line": null,
+      "line": 18,
+      "name": "params",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "required.nil?",
+      "context": "return",
+      "current_method": "missing?",
+      "handler_line": null,
+      "line": 20,
+      "name": "nil?",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    }
+  ],
+  "return_origins": [
+    {
+      "array_element_shape": null,
+      "blockers": [],
+      "candidate_type": {
+        "data": {
+          "kind": "Untyped"
+        },
+        "kind": "Array"
+      },
+      "class": "MIRLoweringControlFlow",
+      "confidence": "weak",
+      "control_shape": "branchless",
+      "end_line": 16,
+      "hash_shape": null,
+      "implicit": true,
+      "kind": "instance",
+      "line": 11,
+      "method": "union_match_default_body",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "return_syntax": "implicit",
+      "sources": [
+        {
+          "code": "all_variants",
+          "flow_complete": false,
+          "kind": "static",
+          "line": 15,
+          "type": {
+            "data": {
+              "kind": "Untyped"
+            },
+            "kind": "Array"
+          }
+        }
+      ]
+    },
+    {
+      "array_element_shape": null,
+      "blockers": [],
+      "candidate_type": {
+        "data": "T::Boolean",
+        "kind": "Primitive"
+      },
+      "class": "MIRLoweringControlFlow",
+      "confidence": "strong",
+      "control_shape": "branchless",
+      "end_line": 21,
+      "hash_shape": null,
+      "implicit": true,
+      "kind": "instance",
+      "line": 19,
+      "method": "missing?",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "return_syntax": "implicit",
+      "sources": [
+        {
+          "callee": "nil?",
+          "code": "required.nil?",
+          "kind": "typed_call",
+          "line": 20,
+          "stdlib": null,
+          "type": {
+            "data": "T::Boolean",
+            "kind": "Primitive"
+          }
+        }
+      ]
+    }
+  ],
+  "return_usage_sites": [
+    {
+      "code": "extend T::Sig",
+      "context": "statement",
+      "current_method": null,
+      "handler_line": null,
+      "line": 2,
+      "name": "extend",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "sig",
+      "context": "statement",
+      "current_method": null,
+      "handler_line": null,
+      "line": 4,
+      "name": "sig",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "params(",
+      "context": "statement",
+      "current_method": null,
+      "handler_line": null,
+      "line": 5,
+      "name": "returns",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "params(",
+      "context": "value",
+      "current_method": null,
+      "handler_line": null,
+      "line": 5,
+      "name": "params",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "T::Array[UnionMatchArmPlan]",
+      "context": "value",
+      "current_method": null,
+      "handler_line": null,
+      "line": 8,
+      "name": "[]",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "(T.untyped)",
+      "context": "value",
+      "current_method": null,
+      "handler_line": null,
+      "line": 9,
+      "name": "untyped",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "union_schemas[facts.expr_type_sym]",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 13,
+      "name": "[]",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "union_schemas",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 13,
+      "name": "union_schemas",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "facts.expr_type_sym",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 13,
+      "name": "expr_type_sym",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "schema&.variants&.keys&.map(&:to_s)&.sort",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 14,
+      "name": "sort",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "schema&.variants&.keys&.map(&:to_s)",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 14,
+      "name": "map",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "schema&.variants&.keys",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 14,
+      "name": "keys",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "schema&.variants",
+      "context": "value",
+      "current_method": "union_match_default_body",
+      "handler_line": null,
+      "line": 14,
+      "name": "variants",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "sig",
+      "context": "statement",
+      "current_method": null,
+      "handler_line": null,
+      "line": 18,
+      "name": "sig",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "params(required: String).returns(T::Boolean)",
+      "context": "statement",
+      "current_method": null,
+      "handler_line": null,
+      "line": 18,
+      "name": "returns",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "params(required: String)",
+      "context": "value",
+      "current_method": null,
+      "handler_line": null,
+      "line": 18,
+      "name": "params",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    },
+    {
+      "code": "required.nil?",
+      "context": "return",
+      "current_method": "missing?",
+      "handler_line": null,
+      "line": 20,
+      "name": "nil?",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb"
+    }
+  ],
+  "signatures": {
+    "MIRLoweringControlFlow\u0000missing?": "sig { params(required: String).returns(T::Boolean) }",
+    "MIRLoweringControlFlow\u0000union_match_default_body": "sig do params( node: AST::MatchStatement, facts: MatchLoweringFacts, arms: T::Array[UnionMatchArmPlan], ).returns(T.untyped) end"
+  },
+  "state_param_origins": {},
+  "state_protocols": {},
+  "state_types": {},
+  "type_definitions": [
+    {
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000union_match_default_body\u000011\u0000sorbet",
+      "kind": "method_signature",
+      "language": "ruby",
+      "line": 11,
+      "name": "union_match_default_body",
+      "owner": "MIRLoweringControlFlow",
+      "params": [
+        {
+          "name": "node",
+          "type": {
+            "data": "AST::MatchStatement",
+            "kind": "Primitive"
+          }
+        },
+        {
+          "name": "facts",
+          "type": {
+            "data": "MatchLoweringFacts",
+            "kind": "Primitive"
+          }
+        },
+        {
+          "name": "arms",
+          "type": {
+            "data": {
+              "data": "UnionMatchArmPlan",
+              "kind": "Primitive"
+            },
+            "kind": "Array"
+          }
+        }
+      ],
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "return_type": {
+        "kind": "Untyped"
+      },
+      "signature": "sig do params( node: AST::MatchStatement, facts: MatchLoweringFacts, arms: T::Array[UnionMatchArmPlan], ).returns(T.untyped) end",
+      "type_system": "sorbet"
+    },
+    {
+      "id": "ruby\u0000examples/profile/ruby_safe_navigation_nil_kill.rb\u0000MIRLoweringControlFlow\u0000method_signature\u0000missing?\u000019\u0000sorbet",
+      "kind": "method_signature",
+      "language": "ruby",
+      "line": 19,
+      "name": "missing?",
+      "owner": "MIRLoweringControlFlow",
+      "params": [
+        {
+          "name": "required",
+          "type": {
+            "data": "String",
+            "kind": "Primitive"
+          }
+        }
+      ],
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "return_dispatch_owner": "T::Boolean",
+      "return_type": {
+        "data": "T::Boolean",
+        "kind": "Primitive"
+      },
+      "signature": "sig { params(required: String).returns(T::Boolean) }",
+      "type_system": "sorbet"
+    }
+  ],
+  "type_dependencies": [
+    {
+      "candidate": false,
+      "candidate_kind": "parameter",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "missing?",
+      "id": "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required",
+      "kind": "definition",
+      "line": 19,
+      "name": "required",
+      "owner": "MIRLoweringControlFlow",
+      "requirements": [],
+      "resolved": true,
+      "span": [
+        19,
+        2,
+        21,
+        5
+      ]
+    },
+    {
+      "candidate": false,
+      "candidate_kind": "parameter",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "union_match_default_body",
+      "id": "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:arms",
+      "kind": "definition",
+      "line": 11,
+      "name": "arms",
+      "owner": "MIRLoweringControlFlow",
+      "requirements": [],
+      "resolved": true,
+      "span": [
+        11,
+        2,
+        16,
+        5
+      ]
+    },
+    {
+      "candidate": false,
+      "candidate_kind": "parameter",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "union_match_default_body",
+      "id": "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts",
+      "kind": "definition",
+      "line": 11,
+      "name": "facts",
+      "owner": "MIRLoweringControlFlow",
+      "requirements": [],
+      "resolved": true,
+      "span": [
+        11,
+        2,
+        16,
+        5
+      ]
+    },
+    {
+      "candidate": false,
+      "candidate_kind": "parameter",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "union_match_default_body",
+      "id": "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:node",
+      "kind": "definition",
+      "line": 11,
+      "name": "node",
+      "owner": "MIRLoweringControlFlow",
+      "requirements": [],
+      "resolved": true,
+      "span": [
+        11,
+        2,
+        16,
+        5
+      ]
+    },
+    {
+      "candidate": true,
+      "candidate_kind": "local",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "union_match_default_body",
+      "id": "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema",
+      "kind": "definition",
+      "line": 13,
+      "name": "schema",
+      "owner": "MIRLoweringControlFlow",
+      "requirements": [],
+      "resolved": false,
+      "span": [
+        13,
+        4,
+        13,
+        47
+      ]
+    },
+    {
+      "candidate": true,
+      "candidate_kind": "local",
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "union_match_default_body",
+      "id": "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants",
+      "kind": "definition",
+      "line": 14,
+      "name": "all_variants",
+      "owner": "MIRLoweringControlFlow",
+      "requirements": [],
+      "resolved": false,
+      "span": [
+        14,
+        4,
+        14,
+        66
+      ]
+    },
+    {
+      "candidate": false,
+      "candidate_kind": null,
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "missing?",
+      "id": "type-read:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:stmt:1:20:4:place:MIRLoweringControlFlow#missing?:local:required",
+      "kind": "flow_read",
+      "line": 20,
+      "name": "required",
+      "owner": "MIRLoweringControlFlow",
+      "requirements": [
+        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required"
+      ],
+      "resolved": true,
+      "span": [
+        20,
+        4,
+        20,
+        17
+      ],
+      "types": [
+        "declared:String"
+      ]
+    },
+    {
+      "candidate": false,
+      "candidate_kind": null,
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "union_match_default_body",
+      "id": "type-read:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:facts",
+      "kind": "flow_read",
+      "line": 13,
+      "name": "facts",
+      "owner": "MIRLoweringControlFlow",
+      "requirements": [
+        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts"
+      ],
+      "resolved": true,
+      "span": [
+        13,
+        4,
+        13,
+        47
+      ],
+      "types": [
+        "declared:MatchLoweringFacts"
+      ]
+    },
+    {
+      "candidate": false,
+      "candidate_kind": null,
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "union_match_default_body",
+      "id": "type-read:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema",
+      "kind": "flow_read",
+      "line": 14,
+      "name": "schema",
+      "owner": "MIRLoweringControlFlow",
+      "requirements": [
+        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema"
+      ],
+      "resolved": false,
+      "span": [
+        14,
+        4,
+        14,
+        66
+      ],
+      "types": []
+    },
+    {
+      "candidate": false,
+      "candidate_kind": null,
+      "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "function": "union_match_default_body",
+      "id": "type-read:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:4:15:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants",
+      "kind": "flow_read",
+      "line": 15,
+      "name": "all_variants",
+      "owner": "MIRLoweringControlFlow",
+      "requirements": [
+        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants"
+      ],
+      "resolved": false,
+      "span": [
+        15,
+        4,
+        15,
+        16
+      ],
+      "types": []
     }
   ]
 }

@@ -9,6 +9,21 @@ impl AstNormalizationAdapter for CppAstAdapter {
         super::c::preprocessor_callable_names(root, source)
     }
 
+    fn source_preprocessing(&self, source: &str) -> Option<String> {
+        Some(super::c::strip_linkage_macros_before_type_name(source))
+    }
+
+    // Unlike C (where a bare `struct` is plain data and owner attribution
+    // for its functions comes from a separate textual heuristic in
+    // syntax/c.rs), C++ structs and classes are the same construct modulo
+    // default visibility - methods are routinely defined directly inside a
+    // `struct` body. The shared default class_node (base.rs) only matches
+    // `class_specifier`, so every struct-with-methods was invisible as an
+    // owner and its methods fell back to a file-stem pseudo-owner.
+    fn class_node(&self, node: TreeSitterNode<'_>) -> bool {
+        matches!(node.kind(), "class_specifier" | "struct_specifier")
+    }
+
     fn declaration_namespaces(
         &self,
         root: TreeSitterNode<'_>,
@@ -85,12 +100,31 @@ impl AstNormalizationAdapter for CppAstAdapter {
                 let mut stack = vec![decl];
                 while !stack.is_empty() {
                     let child = stack.remove(0);
+                    if child.kind() == "operator_name" {
+                        return Some(super::super::node_text(child, source).to_string());
+                    }
+                    if child.kind() == "operator_cast" {
+                        let cast_type = child
+                            .child_by_field_name("type")
+                            .map(|type_node| super::super::node_text(type_node, source))
+                            .unwrap_or_default();
+                        return Some(format!("operator {cast_type}").trim_end().to_string());
+                    }
                     if child.kind() == "identifier"
                         || child.kind() == "field_identifier"
                         || child.kind() == "qualified_identifier"
                         || child.kind() == "destructor_name"
                     {
                         return Some(super::super::node_text(child, source).to_string());
+                    }
+                    // Parameters live inside the same declarator subtree as
+                    // the name (function_declarator's "parameters" field) -
+                    // stop before descending into them, or an unmatched
+                    // shape here (e.g. a future declarator variant) would
+                    // fall through to whatever identifier appears first in
+                    // the parameter list instead of the function's own name.
+                    if child.kind() == "parameter_list" {
+                        continue;
                     }
                     stack.extend(named_children(child));
                 }

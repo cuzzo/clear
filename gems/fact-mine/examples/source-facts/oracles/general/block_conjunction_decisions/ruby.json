@@ -375,6 +375,56 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactBlockConjunctionDecisions#fallback:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactBlockConjunctionDecisions#fallback:exit:2:9:5",
+        "kind": "exit",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactBlockConjunctionDecisions#fallback:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactBlockConjunctionDecisions#filter_paths:entry:0:11:2",
+        "kind": "entry",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactBlockConjunctionDecisions#filter_paths:exit:2:13:5",
+        "kind": "exit",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactBlockConjunctionDecisions#filter_paths:stmt:1:12:4",
+        "kind": "statement",
+        "line": 12
+      }
+    ],
     "decisions": [
       {
         "enclosing_span": [
@@ -410,7 +460,25 @@
         "predicate": "in_scope?(rel) && current_file?(rel) && source_file?(rel)"
       }
     ],
+    "def_use": [
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 11,
@@ -430,6 +498,14 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -507,6 +583,47 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactBlockConjunctionDecisions#fallback:local:files"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBlockConjunctionDecisions#fallback:local:files",
+          "place:SourceFactBlockConjunctionDecisions#fallback:local:rel"
+        ],
+        "writes": [
+          "place:SourceFactBlockConjunctionDecisions#fallback:local:rel"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactBlockConjunctionDecisions#filter_paths:local:hash"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBlockConjunctionDecisions#filter_paths:local:hash",
+          "place:SourceFactBlockConjunctionDecisions#filter_paths:local:rel"
+        ],
+        "writes": [
+          "place:SourceFactBlockConjunctionDecisions#filter_paths:local:_",
+          "place:SourceFactBlockConjunctionDecisions#filter_paths:local:rel"
+        ]
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -515,6 +632,33 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactBlockConjunctionDecisions#filter_paths:local:hash",
+        "kind": "local",
+        "name": "hash"
+      },
+      {
+        "id": "place:SourceFactBlockConjunctionDecisions#filter_paths:local:_",
+        "kind": "local",
+        "name": "_"
+      },
+      {
+        "id": "place:SourceFactBlockConjunctionDecisions#filter_paths:local:rel",
+        "kind": "local",
+        "name": "rel"
+      },
+      {
+        "id": "place:SourceFactBlockConjunctionDecisions#fallback:local:files",
+        "kind": "local",
+        "name": "files"
+      },
+      {
+        "id": "place:SourceFactBlockConjunctionDecisions#fallback:local:rel",
+        "kind": "local",
+        "name": "rel"
+      }
+    ],
     "predicate_bodies": [
       {
         "body": "files.select do |rel| in_scope?(rel) && current_file?(rel) && source_file?(rel) end",
@@ -652,6 +796,20 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

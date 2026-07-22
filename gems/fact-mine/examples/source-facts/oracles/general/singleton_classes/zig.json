@@ -74,8 +74,56 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:(top-level)#method_five:entry:0:1:0",
+        "kind": "entry",
+        "line": 1
+      },
+      {
+        "id": "cfg:(top-level)#method_five:exit:3:6:1",
+        "kind": "exit",
+        "line": 6
+      },
+      {
+        "id": "cfg:(top-level)#method_five:stmt:1:2:4",
+        "kind": "statement",
+        "line": 2
+      },
+      {
+        "id": "cfg:(top-level)#method_five:stmt:2:5:4",
+        "kind": "statement",
+        "line": 5
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {}
+    ],
     "functions": [
       {
         "line": 1,
@@ -91,6 +139,12 @@
         "params": [],
         "visibility": "private"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -157,6 +211,30 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:(top-level)#method_five:local:Obj"
+        ]
+      },
+      {
+        "reads": [
+          "place:(top-level)#method_five:local:Obj"
+        ],
+        "writes": [
+          "place:(top-level)#method_five:local:_"
+        ]
+      }
+    ],
     "owners": [
       {
         "kind": "struct",
@@ -165,6 +243,18 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:(top-level)#method_five:local:Obj",
+        "kind": "local",
+        "name": "Obj"
+      },
+      {
+        "id": "place:(top-level)#method_five:local:_",
+        "kind": "local",
+        "name": "_"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -195,6 +285,15 @@
         "reads": [],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

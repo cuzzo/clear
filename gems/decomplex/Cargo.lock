@@ -115,6 +115,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
+ "streaming-iterator",
  "tree-sitter",
  "tree-sitter-c",
  "tree-sitter-c-sharp",

@@ -20,6 +20,20 @@ const TYPESCRIPT_TERNARY_KINDS: &[&str] = &[
 pub(crate) struct TypeScriptAstAdapter;
 
 impl AstNormalizationAdapter for TypeScriptAstAdapter {
+    // `abstract class Foo { ... }` is a distinct grammar node
+    // (abstract_class_declaration), not `class_declaration` - the default
+    // class_node matcher never recognized it, so an abstract base class
+    // (arguably the single most architecturally important class in a
+    // typical OO codebase - every concrete subclass extends it) was
+    // dropped as an owner entirely, and its own methods/state fell back to
+    // whatever unrelated owner the extractor happened to be tracking.
+    fn class_node(&self, node: TreeSitterNode<'_>) -> bool {
+        matches!(
+            node.kind(),
+            "class" | "class_definition" | "class_declaration" | "class_specifier" | "abstract_class_declaration"
+        )
+    }
+
     fn function_kind(&self, kind: &str) -> bool {
         matches!(
             kind,
@@ -347,6 +361,51 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
         (node.kind() == "for_in_statement")
             .then(|| node.child_by_field_name("right"))
             .flatten()
+    }
+
+    // `constructor(private count: number) { ... }`: parameter normalization
+    // (normalize_parameter_init, shared/generic) wraps every parameter as a
+    // bare `LASGN(Symbol(name), default?)`, discarding the accessibility
+    // modifier and type annotation before the syntax layer ever runs - so
+    // there is nothing left by then to recognize as a property, regardless
+    // of any field-declaration matching added there. Re-supply the raw
+    // constructor parameter nodes here instead, so they get normalized
+    // through the ordinary (structure-preserving) generic path - ast/
+    // normalizer.rs's ast::normalize_class already folds this into the
+    // class's scanned body - and property-shaped parameters (those with an
+    // accessibility_modifier child) are then recognized by
+    // syntax/typescript.rs's state_declaration_from_node.
+    fn supplementary_class_body_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        let Some(body) = named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "class_body")
+        else {
+            return Vec::new();
+        };
+        let Some(constructor) = named_children(body).into_iter().find(|member| {
+            member.kind() == "method_definition"
+                && member
+                    .child_by_field_name("name")
+                    .is_some_and(|name| name.kind() == "property_identifier" && node_text(name, _source) == "constructor")
+        }) else {
+            return Vec::new();
+        };
+        let Some(parameters) = constructor.child_by_field_name("parameters") else {
+            return Vec::new();
+        };
+        named_children(parameters)
+            .into_iter()
+            .filter(|param| matches!(param.kind(), "required_parameter" | "optional_parameter"))
+            .filter(|param| {
+                named_children(*param)
+                    .iter()
+                    .any(|child| child.kind() == "accessibility_modifier" || node_text(*child, _source) == "readonly")
+            })
+            .collect()
     }
 }
 

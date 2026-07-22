@@ -3,7 +3,7 @@
     {
       "code": "T.any(Schemas::EnumSchema, Schemas::StructSchema)",
       "line": 6,
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "size": 0,
       "tuple_types": [
         "Schemas::EnumSchema",
@@ -11,19 +11,44 @@
       ]
     }
   ],
+  "call_resolution_coverage": {
+    "accounted_call_percent": 0.0,
+    "calls_with_project_candidate_set": 0,
+    "declared_supertype_edges": 0,
+    "eligible_call_sites": 0,
+    "exact_project_target_percent": 0.0,
+    "exact_project_targets": 0,
+    "functions_with_unresolved_calls": 0,
+    "modeled_without_project_target": 0,
+    "normalized_calls_without_raw_span": 3,
+    "outside_executable_function": 0,
+    "owners_with_supertypes": 0,
+    "raw_calls_not_normalized": 2,
+    "raw_parser_call_sites": 3,
+    "semantically_accounted_call_percent": 0.0,
+    "semantically_accounted_call_sites": 0,
+    "total_call_sites": 0,
+    "unresolved_call_percent": 0.0,
+    "unresolved_call_sites": 0,
+    "unresolved_with_ambiguous_inherited_targets": 0,
+    "unresolved_with_unique_inherited_target": 0
+  },
   "calls": [
     {
+      "argument_count": 0,
       "conditional": false,
       "confidence": "partial",
       "function": "(top-level)",
-      "id": "edge:beab494f7c5451e2",
+      "id": "edge:83b665a49e685e36",
       "kind": "external_call",
       "line": 4,
       "message": "type_alias",
       "owner": "Demo",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "receiver": "T",
-      "source": "fn:a4f16908d1ca0abc",
+      "receiver_binding_kind": "type",
+      "receiver_kind": "type",
+      "source": "fn:0372f2d939681931",
       "span": [
         4,
         12,
@@ -33,17 +58,24 @@
       "unresolved_reason": "receiver_requires_corpus_resolution"
     },
     {
+      "argument_count": 1,
+      "complexity_bound_quality": "upper_bound_declared_receiver",
+      "complexity_provenance": "language_stdlib_registry",
       "conditional": true,
       "confidence": "partial",
       "function": "(top-level)",
-      "id": "edge:ddcb74a4f9f53f77",
+      "id": "edge:c4ea3e6aae6d0ae3",
       "kind": "external_call",
+      "known_space_complexity": "O(1)",
+      "known_time_complexity": "O(1)",
       "line": 4,
       "message": "[]",
       "owner": "Demo",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "receiver": "T::Array",
-      "source": "fn:a4f16908d1ca0abc",
+      "receiver_binding_kind": "type",
+      "receiver_kind": "type",
+      "source": "fn:0372f2d939681931",
       "span": [
         4,
         27,
@@ -53,17 +85,20 @@
       "unresolved_reason": "receiver_requires_corpus_resolution"
     },
     {
+      "argument_count": 0,
       "conditional": false,
       "confidence": "partial",
       "function": "(top-level)",
-      "id": "edge:7d2185a3d4415574",
+      "id": "edge:e01a6684bb0bbe20",
       "kind": "external_call",
       "line": 5,
       "message": "type_alias",
       "owner": "Demo",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "receiver": "T",
-      "source": "fn:a4f16908d1ca0abc",
+      "receiver_binding_kind": "type",
+      "receiver_kind": "type",
+      "source": "fn:0372f2d939681931",
       "span": [
         5,
         14,
@@ -73,17 +108,24 @@
       "unresolved_reason": "receiver_requires_corpus_resolution"
     },
     {
+      "argument_count": 2,
+      "complexity_bound_quality": "upper_bound_declared_receiver",
+      "complexity_provenance": "language_stdlib_registry",
       "conditional": true,
       "confidence": "partial",
       "function": "(top-level)",
-      "id": "edge:b81839abd4b0a9da",
+      "id": "edge:ffa598aa0528895e",
       "kind": "external_call",
+      "known_space_complexity": "O(1)",
+      "known_time_complexity": "O(1)",
       "line": 6,
       "message": "any",
       "owner": "Demo",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "receiver": "T",
-      "source": "fn:a4f16908d1ca0abc",
+      "receiver_binding_kind": "type",
+      "receiver_kind": "type",
+      "source": "fn:0372f2d939681931",
       "span": [
         6,
         4,
@@ -100,7 +142,61 @@
       "origin": {
         "kind": "hash literal"
       },
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb"
+      "path": "examples/profile/ruby_type_aliases.rb"
+    }
+  ],
+  "declaration_type_pressures": [
+    {
+      "collection_depth": 1,
+      "declaration_kind": "type_alias",
+      "declaration_name": "RawBody",
+      "declared_type": {
+        "data": {
+          "data": "AST::Node",
+          "kind": "Primitive"
+        },
+        "kind": "Array"
+      },
+      "id": "ruby\u0000examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00004\u0000sorbet\u0000alias_target",
+      "language": "ruby",
+      "line": 4,
+      "nested_union_width": 0,
+      "nilable": false,
+      "nilable_collection": false,
+      "owner": "Demo",
+      "path": "examples/profile/ruby_type_aliases.rb",
+      "slot": "alias_target",
+      "union_width": 0,
+      "unknown_leaves": 0
+    },
+    {
+      "collection_depth": 0,
+      "declaration_kind": "type_alias",
+      "declaration_name": "ScopeType",
+      "declared_type": {
+        "data": [
+          {
+            "data": "Schemas::EnumSchema",
+            "kind": "Primitive"
+          },
+          {
+            "data": "Schemas::StructSchema",
+            "kind": "Primitive"
+          }
+        ],
+        "kind": "Union"
+      },
+      "id": "ruby\u0000examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00005\u0000sorbet\u0000alias_target",
+      "language": "ruby",
+      "line": 5,
+      "nested_union_width": 0,
+      "nilable": false,
+      "nilable_collection": false,
+      "owner": "Demo",
+      "path": "examples/profile/ruby_type_aliases.rb",
+      "slot": "alias_target",
+      "union_width": 2,
+      "unknown_leaves": 0
     }
   ],
   "fields": [],
@@ -109,12 +205,12 @@
   "owners": [
     {
       "confidence": "high",
-      "id": "owner:9aa2b17c9a0ef3e7",
+      "id": "owner:0ac3079501ab632a",
       "kind": "module",
       "language": "ruby",
       "line": 3,
       "name": "Demo",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "span": [
         3,
         0,
@@ -129,25 +225,25 @@
   "state_types": {},
   "type_definitions": [
     {
-      "id": "ruby\u0000/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00004\u0000sorbet",
+      "id": "ruby\u0000examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000RawBody\u00004\u0000sorbet",
       "kind": "type_alias",
       "language": "ruby",
       "line": 4,
       "name": "RawBody",
       "owner": "Demo",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "source": "syntax",
       "target": "T::Array[AST::Node]",
       "type_system": "sorbet"
     },
     {
-      "id": "ruby\u0000/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00005\u0000sorbet",
+      "id": "ruby\u0000examples/profile/ruby_type_aliases.rb\u0000Demo\u0000type_alias\u0000ScopeType\u00005\u0000sorbet",
       "kind": "type_alias",
       "language": "ruby",
       "line": 5,
       "name": "ScopeType",
       "owner": "Demo",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_type_aliases.rb",
+      "path": "examples/profile/ruby_type_aliases.rb",
       "source": "syntax",
       "target": "T.any(Schemas::EnumSchema, Schemas::StructSchema)",
       "type_system": "sorbet"

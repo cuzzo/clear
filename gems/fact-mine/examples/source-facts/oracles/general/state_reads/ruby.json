@@ -278,6 +278,80 @@
         "source": "status == :idle"
       }
     ],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactStateReads#initialize:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactStateReads#initialize:exit:3:7:5",
+        "kind": "exit",
+        "line": 7
+      },
+      {
+        "id": "cfg:SourceFactStateReads#initialize:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactStateReads#initialize:stmt:2:6:4",
+        "kind": "statement",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactStateReads#inspect_profile:entry:0:9:2",
+        "kind": "entry",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactStateReads#inspect_profile:exit:4:13:5",
+        "kind": "exit",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactStateReads#inspect_profile:stmt:1:10:4",
+        "kind": "statement",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactStateReads#inspect_profile:stmt:2:11:4",
+        "kind": "statement",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactStateReads#inspect_profile:stmt:3:12:4",
+        "kind": "statement",
+        "line": 12
+      }
+    ],
     "decisions": [
       {
         "enclosing_span": [
@@ -297,7 +371,32 @@
         "predicate": "account.active? && status == :idle && name"
       }
     ],
+    "def_use": [
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 4,
@@ -317,6 +416,17 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -469,6 +579,66 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactStateReads#initialize:instance_field:@status"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactStateReads#initialize:local:user"
+        ],
+        "writes": [
+          "place:SourceFactStateReads#initialize:instance_field:@user"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactStateReads#initialize:local:user"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactStateReads#inspect_profile:local:account"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactStateReads#inspect_profile:instance_field:@user"
+        ],
+        "writes": [
+          "place:SourceFactStateReads#inspect_profile:local:name"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactStateReads#inspect_profile:instance_field:@status"
+        ],
+        "writes": [
+          "place:SourceFactStateReads#inspect_profile:local:status"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactStateReads#inspect_profile:local:account",
+          "place:SourceFactStateReads#inspect_profile:local:name",
+          "place:SourceFactStateReads#inspect_profile:local:status"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -477,6 +647,48 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactStateReads#inspect_profile:local:name",
+        "kind": "local",
+        "name": "name"
+      },
+      {
+        "id": "place:SourceFactStateReads#inspect_profile:local:status",
+        "kind": "local",
+        "name": "status"
+      },
+      {
+        "id": "place:SourceFactStateReads#initialize:local:user",
+        "kind": "local",
+        "name": "user"
+      },
+      {
+        "id": "place:SourceFactStateReads#initialize:instance_field:@user",
+        "kind": "instance_field",
+        "name": "@user"
+      },
+      {
+        "id": "place:SourceFactStateReads#initialize:instance_field:@status",
+        "kind": "instance_field",
+        "name": "@status"
+      },
+      {
+        "id": "place:SourceFactStateReads#inspect_profile:instance_field:@status",
+        "kind": "instance_field",
+        "name": "@status"
+      },
+      {
+        "id": "place:SourceFactStateReads#inspect_profile:instance_field:@user",
+        "kind": "instance_field",
+        "name": "@user"
+      },
+      {
+        "id": "place:SourceFactStateReads#inspect_profile:local:account",
+        "kind": "local",
+        "name": "account"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -514,6 +726,25 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

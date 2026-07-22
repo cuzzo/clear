@@ -140,8 +140,82 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactOperatorMutationLocals#append_all:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactOperatorMutationLocals#append_all:exit:4:8:5",
+        "kind": "exit",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactOperatorMutationLocals#append_all:stmt:1.loop.0:6:24",
+        "kind": "statement",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactOperatorMutationLocals#append_all:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactOperatorMutationLocals#append_all:stmt:2:6:4",
+        "kind": "loop",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactOperatorMutationLocals#append_all:stmt:3:7:4",
+        "kind": "statement",
+        "line": 7
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 4,
@@ -152,6 +226,14 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -236,6 +318,45 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactOperatorMutationLocals#append_all:local:items"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactOperatorMutationLocals#append_all:local:item",
+          "place:SourceFactOperatorMutationLocals#append_all:local:out"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactOperatorMutationLocals#append_all:local:out"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactOperatorMutationLocals#append_all:local:items"
+        ],
+        "writes": [
+          "place:SourceFactOperatorMutationLocals#append_all:local:item"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactOperatorMutationLocals#append_all:local:out"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -244,6 +365,23 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactOperatorMutationLocals#append_all:local:items",
+        "kind": "local",
+        "name": "items"
+      },
+      {
+        "id": "place:SourceFactOperatorMutationLocals#append_all:local:out",
+        "kind": "local",
+        "name": "out"
+      },
+      {
+        "id": "place:SourceFactOperatorMutationLocals#append_all:local:item",
+        "kind": "local",
+        "name": "item"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -264,14 +402,27 @@
         "writes": []
       }
     ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {}
+    ],
     "redundant_nil_guards": [],
     "semantic_effects": [
       {
         "detail": "<<",
         "function": "append_all",
         "kind": "hidden_mutation",
-        "line": 6,
-        "receiver_scope": "owned_local"
+        "line": 6
       }
     ],
     "state_declarations": [],

@@ -491,6 +491,7 @@
           "visibility": "private"
         }
       ],
+      "hazard_sites": [],
       "language": "rust",
       "owners": [
         {

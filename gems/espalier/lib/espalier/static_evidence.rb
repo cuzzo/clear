@@ -451,6 +451,7 @@ module Espalier
       param_origins = Array(facts["param_origins"])
       noreturn_methods = Array(facts["noreturn_methods"])
       hash_record_escape_sites = Array(facts["hash_record_escape_sites"])
+      hazard_sites = Array(facts["hazard_sites"])
       type_normalizers = Array(facts["type_normalizers"])
       rescue_handlers = Array(facts["rescue_handlers"])
       return_usage_sites = Array(facts["return_usage_sites"])
@@ -525,6 +526,7 @@ module Espalier
         "generated_at" => Time.now.utc.iso8601,
         "root" => @root,
         "vcs" => @vcs&.to_s,
+        "languages" => project_languages.map(&:to_s),
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
         "corpus" => corpus_metadata,
@@ -578,6 +580,7 @@ module Espalier
           "hash_record_member_calls" => hash_record_member_calls.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
           "struct_field_hash_shapes" => facts["struct_field_hash_shapes"] || {},
           "struct_field_array_shapes" => facts["struct_field_array_shapes"] || {},
+          "hazards" => hazard_sites.sort_by { |h| [h["path"].to_s, h["line"].to_i, h["hazard_type"].to_s] },
         },
         "summary" => {
           "files" => files.size,
@@ -611,6 +614,7 @@ module Espalier
           "rbi_field_types" => rbi_field_types.size,
           "ivar_protocols" => state_protocols.size,
           "ivar_param_origins" => state_param_origins.size,
+          "hazards" => hazard_sites.size,
         },
         "language_capabilities" => languages_for(files).to_h do |language|
           [language, Languages.capability_for(language)]

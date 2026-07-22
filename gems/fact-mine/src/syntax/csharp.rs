@@ -33,6 +33,29 @@ pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     nominal::parse(source, &CSHARP_NOMINAL_TYPE_SYNTAX)
 }
 
+/// Everything before a field/property declarator's own `=` initializer (if
+/// any) - never a comparison/lambda-arrow/compound-assignment operator
+/// that merely contains `=`, since those can appear inside a declared
+/// generic type's default or an expression-bodied member and are not the
+/// declarator's own initializer boundary.
+fn declarator_before_initializer(text: &str) -> &str {
+    let bytes = text.as_bytes();
+    for (index, &byte) in bytes.iter().enumerate() {
+        if byte != b'=' {
+            continue;
+        }
+        let previous = index.checked_sub(1).and_then(|i| bytes.get(i)).copied();
+        let next = bytes.get(index + 1).copied();
+        if matches!(previous, Some(b'=' | b'!' | b'<' | b'>' | b'+' | b'-' | b'*' | b'/'))
+            || matches!(next, Some(b'=' | b'>'))
+        {
+            continue;
+        }
+        return &text[..index];
+    }
+    text
+}
+
 fn scip_dotnet_parts(symbol: &str) -> Option<(&str, &str)> {
     let (package, _version, descriptor) = scip_global_parts(symbol, "scip-dotnet", "nuget")?;
     Some((package, descriptor))
@@ -239,6 +262,13 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         span: Span,
     ) -> Vec<crate::syntax::normalized_behavior::NormalizedStateWrite> {
         let mut writes = Vec::new();
+        if let Some(field) = interlocked_ref_argument_field(node) {
+            writes.push(crate::syntax::normalized_behavior::NormalizedStateWrite {
+                receiver: "self".to_string(),
+                field,
+                span,
+            });
+        }
         if node.r#type == "OBJECT_CREATION_EXPRESSION" {
             let mut type_name = ".literal".to_string();
             for child in &node.children {
@@ -283,14 +313,20 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
     }
 
     fn function_visibility(&self, _name: &str, node: &Node, _lines: &[String]) -> String {
-        let text = node.text.trim_start();
-        if text.starts_with("public ") {
-            "public".to_string()
-        } else if text.starts_with("protected ") {
-            "protected".to_string()
-        } else {
-            "private".to_string()
+        let header = node.text.split('(').next().unwrap_or("");
+        let tokens: Vec<&str> = header.split_whitespace().take(8).collect();
+        if tokens.contains(&"internal") {
+            return "internal".to_string();
         }
+        for token in &tokens {
+            match *token {
+                "public" => return "public".to_string(),
+                "protected" => return "protected".to_string(),
+                "private" => return "private".to_string(),
+                _ => {}
+            }
+        }
+        "private".to_string()
     }
 
     fn parameter_type_from_signature(&self, parameter: &str) -> Option<String> {
@@ -333,7 +369,17 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         if node.r#type != "FIELD_DECLARATION" && node.r#type != "PROPERTY_DECLARATION" {
             return None;
         }
-        let decl_part = node.text.split('{').next().unwrap_or(&node.text);
+        // A field with an initializer that contains no literal `{` at all
+        // (`static readonly Lazy<T> _x = new Lazy<T>(..., Mode.Value);`)
+        // was not truncated by the existing brace-split, so the "last
+        // identifier" grab reached all the way into the initializer
+        // expression and returned its trailing token instead of the
+        // field's own name. Truncate at the declarator's own `=` first -
+        // an initializer is never part of the name/type being declared.
+        let decl_part = declarator_before_initializer(&node.text)
+            .split('{')
+            .next()
+            .unwrap_or(&node.text);
         decl_part
             .trim_end_matches(';')
             .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
@@ -497,6 +543,48 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
     }
 }
 
+// Interlocked.Increment/Decrement take their operand by `ref`, mutating the
+// caller's variable directly - unlike an ordinary call argument, this is a
+// write to whatever field is passed, not a read.
+fn interlocked_ref_argument_field(node: &Node) -> Option<String> {
+    if node.r#type != "CALL" {
+        return None;
+    }
+    let method = node.children.iter().find_map(|c| match c {
+        crate::ast::Child::Symbol(s) => Some(s.as_str()),
+        _ => None,
+    })?;
+    if !matches!(method, "Increment" | "Decrement") {
+        return None;
+    }
+    let receiver_matches = node.children.iter().any(|c| match c {
+        crate::ast::Child::Node(n) if n.r#type == "CALL" || n.r#type == "LVAR" => {
+            n.text == "Interlocked" || n.text.ends_with(".Interlocked")
+        }
+        _ => false,
+    });
+    if !receiver_matches {
+        return None;
+    }
+    let argument = node.children.iter().find_map(|c| match c {
+        crate::ast::Child::Node(n) if n.r#type == "LIST" => n.children.iter().find_map(|a| match a {
+            crate::ast::Child::Node(a) if a.r#type == "ARGUMENT" => Some(a.text.trim()),
+            _ => None,
+        }),
+        _ => None,
+    })?;
+    let reference = argument
+        .strip_prefix("ref ")
+        .or_else(|| argument.strip_prefix("out "))?
+        .trim();
+    let field = reference.strip_prefix("this.").unwrap_or(reference);
+    field
+        .starts_with('_')
+        .then_some(field)
+        .filter(|field| field.len() > 1)
+        .map(str::to_string)
+}
+
 static BEHAVIOR: CSharpNormalizedBehavior = CSharpNormalizedBehavior;
 
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
@@ -596,6 +684,14 @@ mod tests {
         assert_eq!(
             b.function_visibility("Foo", &node("DEFN", "void Foo()"), &[]),
             "private"
+        );
+        assert_eq!(
+            b.function_visibility("Foo", &node("DEFN", "internal void Foo()"), &[]),
+            "internal"
+        );
+        assert_eq!(
+            b.function_visibility("Foo", &node("DEFN", "protected internal void Foo()"), &[]),
+            "internal"
         );
 
         assert!(b.property_read_call(

@@ -1,13 +1,256 @@
 {
+  "local_flow": [
+    {
+      "boundaries": [],
+      "method": "append",
+      "statements": [
+        {
+          "co_uses": [
+            [
+              "item",
+              "items"
+            ]
+          ],
+          "dependencies": [],
+          "reads": [
+            "item",
+            "items"
+          ],
+          "writes": []
+        }
+      ]
+    }
+  ],
+  "path_condition": {
+    "neglected": [],
+    "scattered": []
+  },
   "syntax": {
+    "branch_arms": [],
+    "branch_decisions": [],
+    "calls": [],
+    "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "id",
+          "argument_list(id)"
+        ],
+        "child_masses": [
+          1,
+          2
+        ],
+        "fingerprint": "call(lit id argument_list(id))",
+        "line": 5,
+        "mass": 4,
+        "method_name": "append",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(id)",
+        "line": 5,
+        "mass": 2,
+        "method_name": "append",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [],
+        "child_masses": [],
+        "fingerprint": "method(id body(parameters(id id) call(lit id argument_list(id))))",
+        "line": 4,
+        "mass": 9,
+        "method_name": "append",
+        "node_name": "defn"
+      }
+    ],
+    "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactMutationReceiverScope#append:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactMutationReceiverScope#append:exit:2:6:5",
+        "kind": "exit",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactMutationReceiverScope#append:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      }
+    ],
+    "decisions": [],
+    "def_use": [
+      {},
+      {}
+    ],
+    "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {}
+    ],
+    "functions": [
+      {
+        "line": 4,
+        "name": "append",
+        "owner": "SourceFactMutationReceiverScope",
+        "params": [
+          "items",
+          "item"
+        ],
+        "visibility": "public"
+      }
+    ],
+    "liveness": [
+      {},
+      {},
+      {}
+    ],
+    "local_complexity_scores": [
+      {
+        "id": "SourceFactMutationReceiverScope#append",
+        "score": 0.0,
+        "signals": {}
+      }
+    ],
+    "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactMutationReceiverScope#append",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "append",
+        "owner": "SourceFactMutationReceiverScope",
+        "statements": [
+          {
+            "co_uses": [
+              [
+                "item",
+                "items"
+              ]
+            ],
+            "dependencies": [],
+            "end_line": 5,
+            "index": 0,
+            "line": 5,
+            "reads": [
+              "item",
+              "items"
+            ],
+            "source": "items << item",
+            "span": [
+              5,
+              4,
+              5,
+              17
+            ],
+            "writes": []
+          }
+        ]
+      }
+    ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactMutationReceiverScope#append:local:item",
+          "place:SourceFactMutationReceiverScope#append:local:items"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactMutationReceiverScope#append:local:item",
+          "place:SourceFactMutationReceiverScope#append:local:items"
+        ],
+        "writes": []
+      }
+    ],
+    "owners": [
+      {
+        "kind": "class",
+        "line": 3,
+        "name": "SourceFactMutationReceiverScope"
+      }
+    ],
+    "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactMutationReceiverScope#append:local:item",
+        "kind": "local",
+        "name": "item"
+      },
+      {
+        "id": "place:SourceFactMutationReceiverScope#append:local:items",
+        "kind": "local",
+        "name": "items"
+      }
+    ],
+    "predicate_bodies": [],
+    "protocol_call_paths": [
+      {
+        "calls": [],
+        "line": 4,
+        "name": "append",
+        "owner": "SourceFactMutationReceiverScope"
+      }
+    ],
+    "protocol_method_effects": [
+      {
+        "line": 4,
+        "name": "append",
+        "owner": "SourceFactMutationReceiverScope",
+        "reads": [],
+        "writes": []
+      }
+    ],
+    "reachability": [
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {}
+    ],
+    "redundant_nil_guards": [],
     "semantic_effects": [
       {
         "detail": "<<",
         "function": "append",
         "kind": "hidden_mutation",
-        "line": 5,
-        "receiver_scope": "parameter"
+        "line": 5
       }
-    ]
+    ],
+    "state_declarations": [],
+    "state_param_origins": [],
+    "state_reads": [],
+    "state_writes": []
   }
 }

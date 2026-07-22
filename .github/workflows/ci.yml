@@ -95,7 +95,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ruby-coverage-unit
-          path: coverage/.resultset.json
+          path: |
+            coverage/.resultset.json
+            coverage/coverage.xml
           include-hidden-files: true
           retention-days: 7
       - uses: codecov/codecov-action@v5
@@ -457,8 +459,10 @@ jobs:
           mkdir -p tmp/fact-mine-rust-coverage
           cargo llvm-cov clean --manifest-path gems/fact-mine/Cargo.toml
           cargo llvm-cov --no-report --manifest-path gems/fact-mine/Cargo.toml --all-features
+          cargo build --release --manifest-path gems/fact-mine/Cargo.toml
           cargo build --release --manifest-path gems/nil-kill/Cargo.toml
           cargo build --release --manifest-path gems/decomplex/Cargo.toml
+          cargo build --release --manifest-path gems/lineage/Cargo.toml
           FACT_MINE_RUST_BINARY=${{ github.workspace }}/gems/fact-mine/target/llvm-cov-target/debug/fact-mine-rust \
           NIL_KILL_INFER_RUST_BINARY=${{ github.workspace }}/gems/nil-kill/target/release/nil-kill-infer-rust \
           DECOMPLEX_RUST_BINARY=${{ github.workspace }}/gems/decomplex/target/release/decomplex-rust \
@@ -1499,13 +1503,23 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  zig-constraint-sarif:
-    name: Zig constraint coverage SARIF
+  slopcop-constraint-sarif:
+    # Coverage evidence supplied: loom + vopr (zig kcov artifacts) and
+    # nil-kill (ruby unit cobertura). Sanitizer-evidence constraints
+    # (race/concurrency/tsan/asan/lsan/ubsan/miri/hammer) have no kcov
+    # artifacts here - zig-tsan and zig-hammer run the real sanitizers but do
+    # not emit line coverage - so their findings stay advisory warnings that
+    # cannot be suppressed by evidence. The job intentionally runs without
+    # --strict for that reason; wire per-suite kcov artifacts before making
+    # any sanitizer constraint blocking.
+    name: SlopCop constraint coverage SARIF
     runs-on: ubuntu-latest
     needs:
       - changes
       - zig-special-coverage
-    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.changes.outputs.run_zig == 'true' && needs.zig-special-coverage.result == 'success' }}
+      - sarif-rust-binaries
+      - ruby-unit
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && (needs.zig-special-coverage.result == 'success' || needs.zig-special-coverage.result == 'skipped') && needs.sarif-rust-binaries.result == 'success' && (needs.ruby-unit.result == 'success' || needs.ruby-unit.result == 'skipped') }}
     permissions:
       contents: read
       security-events: write
@@ -1517,39 +1531,122 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
       - name: Download specialized Zig coverage artifacts
+        if: ${{ needs.zig-special-coverage.result == 'success' }}
         uses: actions/download-artifact@v4
         with:
           pattern: zig-coverage-*
           path: tmp/zig-special-coverage-artifacts
+      - name: Download Ruby coverage artifact
+        if: ${{ needs.ruby-unit.result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ruby-coverage-unit
+          path: tmp/ruby-coverage-unit
       - name: Generate SlopCop constraint SARIF
         run: |
+          chmod +x tmp/sarif-binaries/fact-mine-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
           mkdir -p tmp
           args=()
-          while IFS= read -r path; do
-            args+=(--coverage="loom:${path}")
-          done < <(find tmp/zig-special-coverage-artifacts -path '*zig-coverage-loom-*/*cobertura.xml' -type f | sort)
-          while IFS= read -r path; do
-            args+=(--coverage="vopr:${path}")
-          done < <(find tmp/zig-special-coverage-artifacts -path '*zig-coverage-vopr-*/*cobertura.xml' -type f | sort)
-          bundle exec ruby gems/slopcop/exe/slopcop constraints \
+          if [ -d tmp/zig-special-coverage-artifacts ]; then
+            while IFS= read -r path; do
+              args+=(--coverage="loom:${path}")
+            done < <(find tmp/zig-special-coverage-artifacts -path '*zig-coverage-loom-*/*cobertura.xml' -type f | sort)
+            while IFS= read -r path; do
+              args+=(--coverage="vopr:${path}")
+            done < <(find tmp/zig-special-coverage-artifacts -path '*zig-coverage-vopr-*/*cobertura.xml' -type f | sort)
+          fi
+          if [ -d tmp/ruby-coverage-unit ]; then
+            while IFS= read -r path; do
+              args+=(--coverage="nil-kill:${path}")
+            done < <(find tmp/ruby-coverage-unit \( -name 'cobertura.xml' -o -name 'coverage.xml' \) -type f | sort)
+          fi
+          FACT_MINE_RUST_BINARY=tmp/sarif-binaries/fact-mine-rust bundle exec ruby gems/slopcop/exe/slopcop constraints \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
             "${args[@]}" \
-            --sarif=tmp/slopcop-zig-constraints.sarif \
-            --markdown=tmp/slopcop-zig-constraints.md
+            --sarif=tmp/slopcop-constraints.sarif \
+            --markdown=tmp/slopcop-constraints.md
       - name: Upload SlopCop constraint SARIF
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: tmp/slopcop-zig-constraints.sarif
+          sarif_file: tmp/slopcop-constraints.sarif
+          category: slopcop-constraints
       - uses: actions/upload-artifact@v4
         with:
-          name: slopcop-zig-constraints
+          name: slopcop-constraints
           path: |
-            tmp/slopcop-zig-constraints.sarif
-            tmp/slopcop-zig-constraints.md
+            tmp/slopcop-constraints.sarif
+            tmp/slopcop-constraints.md
+          if-no-files-found: error
+          retention-days: 7
+
+  architecture-sarif:
+    # Architecture findings on changed files: dependency cycles
+    # (espalier/tools/cycle_report.rb), cross-module private reach-through
+    # (espalier/tools/reach_through_report.rb), and cross-module change
+    # coupling (lineage/tools/change_coupling.rb). All three are advisory
+    # (warning/note level); they annotate PRs and feed the Lineage ledger via
+    # SARIF, they do not block merges.
+    name: Architecture SARIF
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - sarif-rust-binaries
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true') && needs.sarif-rust-binaries.result == 'success' }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+      - name: Generate architecture SARIFs
+        run: |
+          chmod +x tmp/sarif-binaries/fact-mine-rust
+          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
+          mkdir -p tmp
+          export FACT_MINE_RUST_BINARY=$PWD/tmp/sarif-binaries/fact-mine-rust
+          base="origin/${{ github.event.pull_request.base.ref }}"
+          ruby gems/espalier/tools/cycle_report.rb . \
+            --base="$base" --sarif=tmp/arch-cycles.sarif
+          ruby gems/espalier/tools/reach_through_report.rb . \
+            --base="$base" --sarif=tmp/arch-reach-through.sarif
+          ruby gems/lineage/tools/change_coupling.rb . 8 \
+            --base="$base" --sarif=tmp/arch-change-coupling.sarif
+      - name: Upload cycles SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/arch-cycles.sarif
+          category: architecture-cycles
+      - name: Upload reach-through SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/arch-reach-through.sarif
+          category: architecture-reach-through
+      - name: Upload change-coupling SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/arch-change-coupling.sarif
+          category: architecture-change-coupling
+      - uses: actions/upload-artifact@v4
+        with:
+          name: architecture-sarifs
+          path: tmp/arch-*.sarif
           if-no-files-found: error
           retention-days: 7
 

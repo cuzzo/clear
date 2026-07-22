@@ -24,9 +24,49 @@ fn run() -> Result<()> {
     let command = parse_args(std::env::args().skip(1).collect())?;
     match command {
         Command::SyntaxFacts { language, files } => {
-            let language = Language::parse(&language)?;
-            let facts = syntax_oracle::project_files(&files, language)
-                .with_context(|| "failed to project syntax facts")?;
+            let facts = match language {
+                Some(language) => {
+                    let language = Language::parse(&language)?;
+                    syntax_oracle::project_files(&files, language)
+                        .with_context(|| "failed to project syntax facts")?
+                }
+                None => {
+                    // No explicit language: infer per file extension, batch per
+                    // language, and merge the document lists.
+                    let mut batches: std::collections::BTreeMap<&'static str, Vec<PathBuf>> =
+                        std::collections::BTreeMap::new();
+                    for file in &files {
+                        let extension = file
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .unwrap_or("");
+                        let language = Language::for_extension(extension).with_context(|| {
+                            format!(
+                                "cannot infer language for {} (pass --language to override)",
+                                file.display()
+                            )
+                        })?;
+                        batches.entry(language.as_str()).or_default().push(file.clone());
+                    }
+                    let mut merged: Option<serde_json::Value> = None;
+                    for (language_name, batch) in batches {
+                        let language = Language::parse(language_name)?;
+                        let chunk = syntax_oracle::project_files(&batch, language)
+                            .with_context(|| "failed to project syntax facts")?;
+                        match merged.as_mut() {
+                            None => merged = Some(chunk),
+                            Some(out) => {
+                                let docs = chunk["documents"].as_array().cloned().unwrap_or_default();
+                                out["documents"]
+                                    .as_array_mut()
+                                    .expect("documents array")
+                                    .extend(docs);
+                            }
+                        }
+                    }
+                    merged.unwrap_or_else(|| serde_json::json!({ "documents": [] }))
+                }
+            };
             println!("{}", serde_json::to_string(&facts)?);
         }
         Command::Profile {
@@ -36,6 +76,7 @@ fn run() -> Result<()> {
             language_override,
             scip_indexes,
             complexity_summaries,
+            portable,
         } => {
             let profile = match profile.as_str() {
                 "espalier" => Profile::Espalier,
@@ -56,9 +97,15 @@ fn run() -> Result<()> {
             for summary in complexity_summaries {
                 fact_mine_rust::external_summary::apply_file(&mut merged, &summary)?;
             }
-            let json = serde_json::to_string_pretty(&merged)?;
+            let mut value = serde_json::to_value(&merged)?;
+            if portable {
+                if let Ok(current_dir) = std::env::current_dir() {
+                    fact_mine_rust::profile::normalize_paths(&mut value, &current_dir);
+                }
+            }
+            let json = serde_json::to_string_pretty(&value)?;
             if let Some(ref output_path) = output {
-                fs::write(output_path, json)?;
+                fs::write(output_path, &json)?;
             } else {
                 println!("{}", json);
             }
@@ -85,7 +132,59 @@ fn run() -> Result<()> {
             let rendered = match format.as_str() {
                 "json" => serde_json::to_string_pretty(&merged.call_resolution_coverage)?,
                 "text" => render_call_resolution(&merged.call_resolution_coverage),
-                other => bail!("unsupported call-resolution format: {other}; use text or json"),
+                // Corpus-resolved call edges plus the method index needed to
+                // join them: the architecture layer consumes this directly.
+                "edges" => {
+                    let method_index: std::collections::BTreeMap<&str, &fact_mine_rust::profile::MethodRecord> =
+                        merged.methods.iter().map(|method| (method.id.as_str(), method)).collect();
+                    let edges = merged
+                        .calls
+                        .iter()
+                        .filter_map(|call| {
+                            let target = call.target.as_deref()?;
+                            let target_method = method_index.get(target)?;
+                            let source_method = method_index.get(call.source.as_str());
+                            Some(serde_json::json!({
+                                "source": call.source,
+                                "source_owner": call.owner,
+                                "source_function": call.function,
+                                "source_path": call.path,
+                                "line": call.line,
+                                "receiver": call.receiver,
+                                "message": call.message,
+                                "target": target,
+                                "target_owner": target_method.owner,
+                                "target_name": target_method.name,
+                                "target_path": target_method.path,
+                                "target_line": target_method.line,
+                                "target_visibility": target_method.visibility,
+                                "source_resolved": source_method.is_some(),
+                            }))
+                        })
+                        .collect::<Vec<_>>();
+                    let methods = merged
+                        .methods
+                        .iter()
+                        .map(|method| {
+                            serde_json::json!({
+                                "id": method.id,
+                                "owner": method.owner,
+                                "name": method.name,
+                                "path": method.path,
+                                "line": method.line,
+                                "visibility": method.visibility,
+                                "language": method.language,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    serde_json::to_string(&serde_json::json!({
+                        "format": "fact-mine.call-edges.v1",
+                        "edges": edges,
+                        "methods": methods,
+                        "coverage": merged.call_resolution_coverage,
+                    }))?
+                }
+                other => bail!("unsupported call-resolution format: {other}; use text, json, or edges"),
             };
             if let Some(ref output_path) = output {
                 fs::write(output_path, rendered)?;
@@ -233,7 +332,7 @@ fn percent(numerator: usize, denominator: usize) -> f64 {
 
 enum Command {
     SyntaxFacts {
-        language: String,
+        language: Option<String>,
         files: Vec<PathBuf>,
     },
     Profile {
@@ -243,6 +342,7 @@ enum Command {
         language_override: Option<String>,
         scip_indexes: Vec<PathBuf>,
         complexity_summaries: Vec<PathBuf>,
+        portable: bool,
     },
     CallResolution {
         files: Vec<PathBuf>,
@@ -314,12 +414,16 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             })
         }
         "syntax-facts" => {
-            let mut language = "ruby".to_string();
+            let mut language = None;
             let mut files = Vec::new();
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
                     "--language" => {
-                        language = iter.next().with_context(|| "--language requires a value")?;
+                        language =
+                            Some(iter.next().with_context(|| "--language requires a value")?);
+                    }
+                    other if other.starts_with("--language=") => {
+                        language = Some(other.strip_prefix("--language=").unwrap().to_string());
                     }
                     other if other.starts_with("--") => bail!("unsupported option: {other}"),
                     path => files.push(PathBuf::from(path)),
@@ -339,6 +443,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut files = Vec::new();
             let mut scip_indexes = Vec::new();
             let mut complexity_summaries = Vec::new();
+            let mut portable = false;
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
                     "--output" => {
@@ -378,6 +483,9 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                             other.strip_prefix("--complexity-summary=").unwrap(),
                         ));
                     }
+                    "--portable" => {
+                        portable = true;
+                    }
                     other if other.starts_with("--") => bail!("unsupported option: {other}"),
                     path => files.push(PathBuf::from(path)),
                 }
@@ -392,6 +500,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 language_override,
                 scip_indexes,
                 complexity_summaries,
+                portable,
             })
         }
         "call-resolution" => {

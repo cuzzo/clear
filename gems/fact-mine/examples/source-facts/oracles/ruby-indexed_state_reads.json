@@ -361,8 +361,74 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactIndexedStateReads#label:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactIndexedStateReads#label:exit:2:8:5",
+        "kind": "exit",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactIndexedStateReads#label:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactIndexedStateReads#lineage_summary:entry:0:10:2",
+        "kind": "entry",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactIndexedStateReads#lineage_summary:exit:2:13:5",
+        "kind": "exit",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactIndexedStateReads#lineage_summary:stmt:1:11:4",
+        "kind": "statement",
+        "line": 11
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 10,
@@ -380,6 +446,14 @@
         "params": [],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -452,6 +526,39 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactIndexedStateReads#label:instance_field:@data"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactIndexedStateReads#lineage_summary:local:out"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactIndexedStateReads#lineage_summary:instance_field:@lineage",
+          "place:SourceFactIndexedStateReads#lineage_summary:local:out"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -460,6 +567,23 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactIndexedStateReads#lineage_summary:instance_field:@lineage",
+        "kind": "instance_field",
+        "name": "@lineage"
+      },
+      {
+        "id": "place:SourceFactIndexedStateReads#lineage_summary:local:out",
+        "kind": "local",
+        "name": "out"
+      },
+      {
+        "id": "place:SourceFactIndexedStateReads#label:instance_field:@data",
+        "kind": "instance_field",
+        "name": "@data"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -500,6 +624,19 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

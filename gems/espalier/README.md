@@ -139,6 +139,18 @@ Nil-kill evidence is the most important external input today because it
 helps Espalier distinguish broad untyped surfaces from intentional typed
 interfaces.
 
+## Ranking Big-O by Runtime Criticality
+
+Espalier's Big-O bounds are static. Feed a runtime profile through Lineage
+to rank them by what actually runs hot: convert profiler output with
+`gems/lineage/tools/pprof_to_hotness.rb`, ingest with `lineage
+ingest-hotness`, and the Expensive Operations view sorts by Big-O first,
+then measured share; critical functions get a flame icon in the file view.
+Profile representative workloads, not unit tests, and build perf-profiled
+binaries with DWARF (`cargo build --profile profiling`; do not strip). See
+[profiling-data-integration.md](../lineage/docs/agents/profiling-data-integration.md)
+for recipes and known gaps.
+
 ## Supported Languages Roadmap
 
 Espalier uses [Tree-Sitter](https://github.com/tree-sitter/tree-sitter)

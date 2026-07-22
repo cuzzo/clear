@@ -136,8 +136,82 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:anytype#method_three:entry:0:1:0",
+        "kind": "entry",
+        "line": 1
+      },
+      {
+        "id": "cfg:anytype#method_three:exit:2:3:1",
+        "kind": "exit",
+        "line": 3
+      },
+      {
+        "id": "cfg:anytype#method_three:stmt:1:2:4",
+        "kind": "statement",
+        "line": 2
+      },
+      {
+        "id": "cfg:(top-level)#method_with_empty_block:entry:0:5:0",
+        "kind": "entry",
+        "line": 5
+      },
+      {
+        "id": "cfg:(top-level)#method_with_empty_block:exit:3:8:1",
+        "kind": "exit",
+        "line": 8
+      },
+      {
+        "id": "cfg:(top-level)#method_with_empty_block:stmt:1:6:4",
+        "kind": "statement",
+        "line": 6
+      },
+      {
+        "id": "cfg:(top-level)#method_with_empty_block:stmt:2:7:4",
+        "kind": "statement",
+        "line": 7
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 1,
@@ -155,6 +229,15 @@
         "params": [],
         "visibility": "private"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -250,8 +333,63 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:anytype#method_three:local:f"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:(top-level)#method_with_empty_block:local:_"
+        ],
+        "writes": [
+          "place:(top-level)#method_with_empty_block:local:arr"
+        ]
+      },
+      {
+        "reads": [
+          "place:(top-level)#method_with_empty_block:local:arr"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:anytype#method_three:local:f",
+        "kind": "local",
+        "name": "f"
+      },
+      {
+        "id": "place:(top-level)#method_with_empty_block:local:_",
+        "kind": "local",
+        "name": "_"
+      },
+      {
+        "id": "place:(top-level)#method_with_empty_block:local:arr",
+        "kind": "local",
+        "name": "arr"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -295,6 +433,19 @@
         "reads": [],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

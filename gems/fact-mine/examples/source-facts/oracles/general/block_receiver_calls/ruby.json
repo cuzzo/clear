@@ -264,8 +264,106 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactBlockReceiverCalls#collect:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactBlockReceiverCalls#collect:exit:4:11:5",
+        "kind": "exit",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactBlockReceiverCalls#collect:loop:1.loop.1:8:6",
+        "kind": "loop",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactBlockReceiverCalls#collect:stmt:1.loop.0:7:6",
+        "kind": "statement",
+        "line": 7
+      },
+      {
+        "id": "cfg:SourceFactBlockReceiverCalls#collect:stmt:1.loop.1.loop.0:8:35",
+        "kind": "statement",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactBlockReceiverCalls#collect:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactBlockReceiverCalls#collect:stmt:2:6:4",
+        "kind": "loop",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactBlockReceiverCalls#collect:stmt:3:10:4",
+        "kind": "statement",
+        "line": 10
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 4,
@@ -276,6 +374,16 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -360,6 +468,60 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactBlockReceiverCalls#collect:local:items"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBlockReceiverCalls#collect:local:item"
+        ],
+        "writes": [
+          "place:SourceFactBlockReceiverCalls#collect:local:child"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactBlockReceiverCalls#collect:local:item",
+          "place:SourceFactBlockReceiverCalls#collect:local:names"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBlockReceiverCalls#collect:local:child"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactBlockReceiverCalls#collect:local:names"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactBlockReceiverCalls#collect:local:items"
+        ],
+        "writes": [
+          "place:SourceFactBlockReceiverCalls#collect:local:child",
+          "place:SourceFactBlockReceiverCalls#collect:local:item"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactBlockReceiverCalls#collect:local:names"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -368,6 +530,28 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactBlockReceiverCalls#collect:local:items",
+        "kind": "local",
+        "name": "items"
+      },
+      {
+        "id": "place:SourceFactBlockReceiverCalls#collect:local:names",
+        "kind": "local",
+        "name": "names"
+      },
+      {
+        "id": "place:SourceFactBlockReceiverCalls#collect:local:child",
+        "kind": "local",
+        "name": "child"
+      },
+      {
+        "id": "place:SourceFactBlockReceiverCalls#collect:local:item",
+        "kind": "local",
+        "name": "item"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -391,6 +575,24 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

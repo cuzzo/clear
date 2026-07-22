@@ -61,6 +61,9 @@ class RubySyntaxFactsCore
     send(:record, name)
     $GLOBAL_STATE
     $1
+    $~
+    $&
+    $+
     { count: }
     `ls`
     `ls #{@count}`

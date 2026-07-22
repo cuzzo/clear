@@ -300,7 +300,22 @@ impl<'source> TreeSitterNormalizer<'source> {
             .check_node_role(node, "expression_list")
         {
             if self.single_short_var_lhs(node) {
-                return Some(self.wrap(&kind_type(node.kind()), Vec::new(), node));
+                // `x := expr` declares a local: expose the write and its value
+                // source so dataflow facts see the binding.
+                let target = self.named_children(node).into_iter().next()?;
+                let right = node
+                    .next_named_sibling()
+                    .map(|rhs| {
+                        let named = self.named_children(rhs);
+                        if named.len() == 1 { named[0] } else { rhs }
+                    })
+                    .and_then(|child| self.normalize_node(child));
+                let source = node.parent().unwrap_or(node);
+                return Some(self.wrap(
+                    "LASGN",
+                    vec![Child::String(self.target_name(target)), optional_node(right)],
+                    source,
+                ));
             }
         }
         if self.call_node(node) {
@@ -513,6 +528,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .named_field(node, "body")
             .or_else(|| self.block_child(node))
             .and_then(|body| self.normalize_body(body));
+        let body = self.with_supplementary_class_body(node, body);
         Some(self.wrap(
             "CLASS",
             vec![
@@ -522,6 +538,38 @@ impl<'source> TreeSitterNormalizer<'source> {
             ],
             node,
         ))
+    }
+
+    /// Splices `supplementary_class_body_nodes` (normalized individually)
+    /// into `body`'s children, or creates a body from just those nodes if
+    /// there was none. A no-op whenever the hook returns nothing, which is
+    /// every language except the ones that override it.
+    fn with_supplementary_class_body(
+        &mut self,
+        node: TreeSitterNode<'_>,
+        body: Option<Node>,
+    ) -> Option<Node> {
+        let extra = self
+            .normalization_adapter
+            .supplementary_class_body_nodes(node, self.source);
+        if extra.is_empty() {
+            return body;
+        }
+        let mut children: Vec<Child> = extra
+            .into_iter()
+            .filter_map(|extra_node| self.normalize_node(extra_node))
+            .map(|extra_node| Child::Node(Box::new(extra_node)))
+            .collect();
+        // `body` may come back as a bare single-statement node rather than
+        // a container (normalize_body elides the wrapper when the body has
+        // exactly one statement) - always build a fresh BLOCK around it
+        // rather than mutating its children directly, or the extra nodes
+        // end up nested *inside* that one statement (e.g. as if they were
+        // part of a function's own body) instead of alongside it.
+        if let Some(existing) = body {
+            children.insert(0, Child::Node(Box::new(existing)));
+        }
+        Some(self.wrap("BLOCK", children, node))
     }
 
     pub(in crate::ast) fn normalize_class_like_owner(

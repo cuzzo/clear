@@ -105,9 +105,18 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
         node: TreeSitterNode<'tree>,
         _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
-        (node.kind() == "property_declaration")
-            .then(|| node.child_by_field_name("value"))
-            .flatten()
+        if node.kind() != "property_declaration" {
+            return None;
+        }
+        // Block-bodied properties (get/set) have no `value` field - only
+        // expression-bodied ones do. accessor_list's own blocks (empty for
+        // an auto-property's `get;`/`set;`) normalize through the ordinary
+        // statement path once reached.
+        node.child_by_field_name("value").or_else(|| {
+            named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "accessor_list")
+        })
     }
 
     fn hash_literal_target<'tree>(

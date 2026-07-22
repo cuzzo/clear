@@ -7,6 +7,8 @@ pub(crate) mod cpp;
 pub(crate) mod csharp;
 pub(crate) mod effects;
 pub(crate) mod go;
+pub mod hazards;
+pub(crate) mod imports;
 pub(crate) mod java;
 pub(crate) mod javascript;
 pub(crate) mod kotlin;
@@ -258,6 +260,11 @@ pub struct Document {
     pub state_reads: Vec<StateRead>,
     #[serde(default)]
     pub state_writes: Vec<StateWrite>,
+    /// Reads through a chained self-attribute receiver (`self.spec.namespace`)
+    /// whose actual runtime type is unproven, so they are kept separate from
+    /// `state_reads` rather than unsoundly attributed to a specific owner.
+    #[serde(default)]
+    pub chained_self_reads: Vec<StateRead>,
     #[serde(default)]
     pub decision_sites: Vec<DecisionSite>,
     #[serde(default)]
@@ -322,6 +329,44 @@ pub struct Document {
     pub method_local_types: BTreeMap<String, BTreeMap<String, String>>,
     #[serde(default)]
     pub state_param_origins: Vec<StateParamOrigin>,
+    #[serde(default)]
+    pub hazard_sites: Vec<HazardSite>,
+    #[serde(default)]
+    pub imports: Vec<imports::ImportFact>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HazardSite {
+    pub path: String,
+    pub line: u32,
+    #[serde(rename = "source")]
+    pub snippet: String,
+    pub hazard_type: String,
+    pub required_evidence: String,
+    #[serde(default)]
+    pub hazard_kind: String,
+    #[serde(default)]
+    pub evidence_claim: String,
+    #[serde(default = "default_true")]
+    pub coverage_required: bool,
+    #[serde(default = "default_true")]
+    pub report_required: bool,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub mitigation: String,
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_column: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_column: Option<u32>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Minimal, adapter-proven facts needed to canonicalize source symbols.
@@ -361,6 +406,40 @@ pub struct FunctionDef {
     pub callback_params: Vec<String>,
     #[serde(default)]
     pub signature: String,
+}
+
+impl FunctionDef {
+    /// A definition synthesized from a declaration macro (e.g. Ruby attr_*).
+    /// Lives here so passes never construct parser-internal body nodes.
+    pub(crate) fn synthetic_accessor(
+        file: String,
+        name: String,
+        owner: String,
+        line: usize,
+        span: Span,
+        params: Vec<String>,
+    ) -> Self {
+        Self {
+            file,
+            name,
+            owner,
+            dispatch_kind: "instance".to_string(),
+            line,
+            span,
+            body: RawNode {
+                kind: "SYNTHETIC_ACCESSOR".to_string(),
+                text: String::new(),
+                span,
+                named: false,
+                field_name: None,
+                children: Vec::new(),
+            },
+            visibility: Some("public".to_string()),
+            params,
+            callback_params: Vec::new(),
+            signature: String::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -41,8 +41,34 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:Child#method_one:entry:0:4:8",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:Child#method_one:exit:1:4:31",
+        "kind": "exit",
+        "line": 4
+      }
+    ],
     "decisions": [],
+    "def_use": [],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {}
+    ],
+    "flow_types": [],
     "functions": [
       {
         "line": 4,
@@ -53,6 +79,10 @@
         ],
         "visibility": "private"
       }
+    ],
+    "liveness": [
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -72,6 +102,18 @@
         "statements": []
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:Child#method_one:local:&self"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "impl",
@@ -85,6 +127,13 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:Child#method_one:local:&self",
+        "kind": "local",
+        "name": "&self"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -103,6 +152,11 @@
         "writes": []
       }
     ],
+    "reachability": [
+      {},
+      {}
+    ],
+    "reaching_definitions": [],
     "redundant_nil_guards": [],
     "semantic_effects": [],
     "state_declarations": [],

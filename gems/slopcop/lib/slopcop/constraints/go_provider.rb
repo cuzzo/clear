@@ -1,11 +1,26 @@
 # frozen_string_literal: true
 
 require_relative "finding"
+require_relative "fact_mine_provider_helper"
 
 module SlopCop
   module Constraints
     module GoProvider
       module_function
+
+      # Every category below is detected by FactMine's tree-sitter query
+      # (gems/fact-mine/src/syntax/go_hazards.scm), the same source of
+      # truth Lineage's own hazard ingestion uses - not reimplemented here
+      # as a second, independent string-needle classifier that can drift
+      # from it.
+      SYSTEMS_HAZARD_CATEGORIES = [
+        { hazard_type: "go_race_goroutine" },
+        { hazard_type: "go_race_atomic" },
+        { hazard_type: "go_race_lock" },
+        { hazard_type: "go_concurrency_waitgroup" },
+        { hazard_type: "go_concurrency_channel" },
+        { hazard_type: "go_reflection" }
+      ].freeze
 
       def rules
         [
@@ -26,34 +41,51 @@ module SlopCop
               "text" => "A changed Go channel or wait-group site was not reached by concurrency coverage."
             },
             "defaultConfiguration" => { "level" => "warning" }
+          },
+          {
+            "id" => "slopcop-go-callback-uncovered",
+            "name" => "Go callback coverage missing",
+            "shortDescription" => { "text" => "Go callback invocation lacks test-tracing coverage evidence" },
+            "fullDescription" => {
+              "text" => "A changed Go callback or function-value invocation site was not reached by test-tracing coverage evidence."
+            },
+            "defaultConfiguration" => { "level" => "warning" }
           }
         ]
       end
 
       def findings(repo:, additions:, evidence:)
         repo = File.expand_path(repo)
-        additions.each_with_object([]) do |(path, lines), out|
-          next unless source_path?(path)
+        changed_files = additions.keys.select { |path| source_path?(path) }
+        return [] if changed_files.empty?
 
-          lines.each do |line|
-            source = source_line(repo, path, line)
-            next if source.empty?
+        hazards = FactMineProviderHelper.scan_multi_hazards_via_fact_mine(
+          changed_files, repo: repo, language_extension: ".go", categories: all_categories
+        )
 
-            scan_line(path, line, source).each do |hazard|
-              next if covered?(evidence, hazard)
+        hazards.each_with_object([]) do |hazard, out|
+          path = hazard[:path]
+          lines = additions[path]
+          next unless lines&.include?(hazard[:line])
+          next unless hazard.fetch(:report_required, true)
 
-              out << Finding.new(
-                path: path,
-                line: line,
-                rule_id: rule_id_for(hazard[:required_evidence]),
-                message: "changed #{hazard[:label]} has no #{hazard[:required_evidence]} coverage evidence",
-                source: source.strip,
-                hazard_type: hazard[:hazard_type],
-                required_evidence: hazard[:required_evidence],
-                severity: "warning"
-              )
-            end
+          if hazard.fetch(:coverage_required, true)
+            next if covered?(evidence, hazard)
+            message = "changed #{hazard[:label]} has no #{hazard[:required_evidence]} coverage evidence"
+          else
+            message = "changed #{hazard[:label]} requires review; #{hazard[:evidence_claim]} evidence cannot satisfy this hazard"
           end
+
+          out << Finding.new(
+            path: path,
+            line: hazard[:line],
+            rule_id: rule_id_for(hazard[:required_evidence]),
+            message: message,
+            source: hazard[:source],
+            hazard_type: hazard[:hazard_type],
+            required_evidence: hazard[:required_evidence],
+            severity: "warning"
+          )
         end
       end
 
@@ -63,31 +95,28 @@ module SlopCop
 
       def scan_hazards(repo:, paths: nil)
         repo = File.expand_path(repo)
+        # scan_multi_hazards_via_fact_mine globs by extension alone when no
+        # explicit file list is given - it doesn't know this provider also
+        # excludes _test.go and vendor/, so that filtering must happen here
+        # and an explicit (possibly empty) list passed through either way.
         files = if paths && !Array(paths).empty?
                   Array(paths).select { |path| source_path?(path) }
                 else
                   Dir.chdir(repo) { Dir["**/*.go"] }.select { |path| source_path?(path) }
                 end
-        files.flat_map do |path|
-          File.readlines(File.join(repo, path)).each_with_index.flat_map do |source, index|
-            scan_line(path, index + 1, source).map do |hazard|
-              hazard.merge(path: path, line: index + 1, source: source.strip)
-            end
-          end
-        end.sort_by { |site| [site[:path], site[:line], site[:hazard_type]] }
+        return [] if files.empty?
+
+        hazards = FactMineProviderHelper.scan_multi_hazards_via_fact_mine(
+          files, repo: repo, language_extension: ".go", categories: all_categories
+        )
+        hazards.uniq { |h| [h[:path], h[:line], h[:hazard_type]] }
+               .sort_by { |site| [site[:path], site[:line], site[:hazard_type]] }
       end
 
-      def scan_line(path, line, source)
-        code = strip_comment(source)
-        return [] if code.strip.empty?
-
-        hazards = []
-        hazards << hazard(path, line, "go_race_goroutine", "race", "goroutine launch") if goroutine_site?(code)
-        hazards << hazard(path, line, "go_race_atomic", "race", "atomic operation") if atomic_site?(code)
-        hazards << hazard(path, line, "go_race_lock", "race", "lock/sync primitive") if lock_site?(code)
-        hazards << hazard(path, line, "go_concurrency_waitgroup", "concurrency", "wait group operation") if waitgroup_site?(code)
-        hazards << hazard(path, line, "go_concurrency_channel", "concurrency", "channel operation") if channel_site?(code)
-        hazards
+      def all_categories
+        SYSTEMS_HAZARD_CATEGORIES + [
+          { hazard_type: "go_callback_invocation" }
+        ]
       end
 
       def covered?(evidence, hazard)
@@ -98,60 +127,9 @@ module SlopCop
       end
 
       def rule_id_for(required_evidence)
+        return "slopcop-go-callback-uncovered" if required_evidence == "nil-kill"
+
         required_evidence == "race" ? "slopcop-go-race-uncovered" : "slopcop-go-concurrency-uncovered"
-      end
-
-      def hazard(path, line, hazard_type, required_evidence, label)
-        {
-          path: path,
-          line: line,
-          hazard_type: hazard_type,
-          required_evidence: required_evidence,
-          label: label
-        }
-      end
-
-      def goroutine_site?(code)
-        code.lstrip.start_with?("go ") || code.include?("; go ")
-      end
-
-      def atomic_site?(code)
-        code.include?("atomic.")
-      end
-
-      def lock_site?(code)
-        [
-          "sync.Mutex",
-          "sync.RWMutex",
-          "sync.Map",
-          "sync.Once",
-          "sync.Cond",
-          ".Lock(",
-          ".Unlock(",
-          ".RLock(",
-          ".RUnlock("
-        ].any? { |needle| code.include?(needle) }
-      end
-
-      def waitgroup_site?(code)
-        ["sync.WaitGroup", ".Add(", ".Done(", ".Wait("].any? { |needle| code.include?(needle) }
-      end
-
-      def channel_site?(code)
-        code.include?("make(chan") ||
-          code.include?("select {") ||
-          code.include?("<-")
-      end
-
-      def strip_comment(source)
-        source.split("//", 2).first.to_s
-      end
-
-      def source_line(repo, path, line)
-        file = File.join(repo, path)
-        return "" unless File.file?(file)
-
-        File.readlines(file)[line.to_i - 1].to_s.rstrip
       end
     end
   end

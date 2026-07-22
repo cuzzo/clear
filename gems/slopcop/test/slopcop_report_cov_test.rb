@@ -629,54 +629,33 @@ class SlopcopReportCovTest < Minitest::Test
   end
 
   # --- LanguageProvider Tests ---
+  # scan_hazards is now provider-owned (FactMine-backed - see
+  # ConstraintsSystemsProviderTest and ConstraintsGoProviderTest for
+  # per-provider coverage); LanguageProvider.findings is the remaining
+  # shared logic (line-matching against `additions`, coverage gating via
+  # Evidence, Finding construction), tested here against a stubbed
+  # scan_hazards so it doesn't depend on any provider's real detection.
   def test_language_provider_finding_generation
     provider = SlopCop::Constraints::RustProvider
     evidence = SlopCop::Constraints::Evidence.allocate
     evidence.stub :known_type?, false do
-      # Mock source_contents
-      SlopCop::Constraints::LanguageProvider.stub :source_contents, "unsafe { ptr.read() }" do
+      hazards = [
+        { path: "src/lib.rs", line: 1, source: "unsafe { ptr.read() }", hazard_type: "rust_unsafe_block", required_evidence: "miri", label: "unsafe block" },
+        { path: "src/lib.rs", line: 1, source: "unsafe { ptr.read() }", hazard_type: "rust_unsafe_operation", required_evidence: "miri", label: "unsafe operation inside unsafe context" },
+        { path: "src/lib.rs", line: 5, source: "let x = 1;", hazard_type: "rust_unsafe_block", required_evidence: "miri", label: "unsafe block" }
+      ]
+      provider.stub :scan_hazards, hazards do
         res = SlopCop::Constraints::LanguageProvider.findings(
           provider,
           repo: Dir.tmpdir,
           additions: { "src/lib.rs" => [1] },
           evidence: evidence
         )
-        assert_equal 2, res.size # unsafe block and operation
+        assert_equal 2, res.size # only the two hazards on the changed line (1), not line 5
         assert_equal "src/lib.rs", res.first.path
         assert_equal 1, res.first.line
       end
     end
-  end
-
-  def test_language_provider_scan_hazards_empty_paths
-    provider = SlopCop::Constraints::RustProvider
-    Dir.mktmpdir do |dir|
-      FileUtils.mkdir_p(File.join(dir, "src"))
-      File.write(File.join(dir, "src/lib.rs"), "const x = 1;\n")
-      provider.stub :scan_file, [] do
-        hazards = SlopCop::Constraints::LanguageProvider.scan_hazards(provider, repo: dir)
-        assert_empty hazards
-      end
-    end
-  end
-
-  def test_language_provider_c_style_code_block_comment
-    in_block = { active: true }
-    res = SlopCop::Constraints::LanguageProvider.c_style_code("comment block */ code", in_block)
-    assert_equal "code", res.strip
-    refute in_block[:active]
-
-    in_block2 = { active: false }
-    res2 = SlopCop::Constraints::LanguageProvider.c_style_code("code /* comment", in_block2)
-    assert_equal "code", res2.strip
-    assert in_block2[:active]
-  end
-
-  def test_language_provider_token_and_any_include
-    lp = SlopCop::Constraints::LanguageProvider
-    assert lp.token?("const foo = 1;", "foo")
-    refute lp.token?("const foo_bar = 1;", "foo")
-    assert lp.any_include?("foo", ["foo", "bar"])
   end
 
   # --- ZigProvider Tests ---

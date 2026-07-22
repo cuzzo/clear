@@ -9,12 +9,16 @@ pub mod engine;
 pub mod architecture;
 #[path = "db/extract.rs"]
 pub mod extract;
+#[path = "db/hotness.rs"]
+pub mod hotness;
 #[path = "db/git.rs"]
 pub mod git;
 #[path = "db/hazard.rs"]
 pub mod hazard;
 #[path = "ui/lsp.rs"]
 pub mod lsp;
+#[path = "ui/mcp.rs"]
+pub mod mcp;
 #[path = "db/model.rs"]
 pub mod model;
 #[path = "db/mutant.rs"]
@@ -38,10 +42,12 @@ pub use architecture::{architecture_search, ingest_architecture_json, node_neigh
 pub use extract::{BoundaryExtractor, HeuristicExtractor, SourceFilter};
 pub use git::GitProvider;
 pub use hazard::{ingest_hazards, HazardIngestStats};
+pub use hotness::{ingest_hotness_json, HotnessIngestStats};
 pub use lsp::{
     diagnostics_for_annotations, gutter_items_for_annotations, serve_lsp, GutterItem,
     GutterUpdateParams,
 };
+pub use mcp::serve_mcp;
 pub use model::{
     BlobFile, CommitMetadata, CrashEvent, Event, EventType, LogicalUnit, QualityEvent,
     HazardEvent, QualityMetric, SarifArtifact, SarifFinding, TestExposureEvent, UnitKind,

@@ -68,6 +68,7 @@ options = {
   sarif_inputs: [],
   coverage_inputs: [],
   mutation_corpus: nil,
+  hotness_inputs: [],
   exclude: [],
   host: "127.0.0.1",
   port: 8080,
@@ -97,6 +98,7 @@ OptionParser.new do |parser|
   parser.on("--coverage=PATH", "Additional coverage artifact. May be repeated") { |value| options[:coverage_inputs] << value }
   parser.on("--sarif-input=PATH", "Additional SARIF file/directory to ingest. May be repeated") { |value| options[:sarif_inputs] << value }
   parser.on("--mutation-corpus=PATH", "Test Miser mutation-corpus.json.zst or materialized directory to ingest") { |value| options[:mutation_corpus] = value }
+  parser.on("--hotness=PATH", "profile-hotness/v1 JSON (see tools/pprof_to_hotness.rb). May be repeated") { |value| options[:hotness_inputs] << value }
   parser.on("--sql-queries=PATH", "SQL file/directory to analyze with SQL-COV EXPLAIN") { |value| options[:sql_queries] = value }
   parser.on("--sql-setup=PATH", "Schema/setup SQL executed before SQL-COV EXPLAIN") { |value| options[:sql_setup] = value }
   parser.on("--sql-database=URL", "Database URL/path for SQL-COV. Default: sqlite::memory:") { |value| options[:sql_database] = value }
@@ -467,26 +469,6 @@ if options[:coverage]
 end
 
 langs = source_languages(repo)
-if options[:hazards]
-  provider_by_lang = {
-    zig: "zig",
-    go: "go",
-    rust: "rust",
-    c: "c",
-    cpp: "cpp",
-    csharp: "csharp",
-  }
-  threads = []
-  provider_by_lang.each do |lang, provider|
-    next unless langs.include?(lang)
-
-    threads << Thread.new do
-      cmd = [lineage_bin, "ingest-hazards", "--db", db, "--repo", repo, "--provider", provider, "--commit", commit]
-      run_command("hazards-#{provider}", cmd, chdir: repo, log_dir: log_dir, optional: true)
-    end
-  end
-  threads.each(&:value)
-end
 
 sarif_threads = []
 
@@ -521,6 +503,13 @@ if options[:lints]
     ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", lint_dir, "--source", "lint", "--commit", commit]
     ingest << "--replace" if options[:replace]
     run_command("ingest-lint-sarif", ingest, chdir: repo, log_dir: log_dir, optional: true)
+  end
+end
+
+options[:hotness_inputs].each do |hotness_input|
+  sarif_threads << Thread.new do
+    ingest = [lineage_bin, "ingest-hotness", "--db", db, "--repo", repo, "--input", File.expand_path(hotness_input, repo)]
+    run_command("ingest-hotness", ingest, chdir: repo, log_dir: log_dir, optional: true)
   end
 end
 

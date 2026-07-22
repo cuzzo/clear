@@ -129,6 +129,10 @@ pub struct ProfileOutput {
     pub struct_field_hash_shapes: BTreeMap<String, serde_json::Value>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub struct_field_array_shapes: BTreeMap<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hazard_sites: Vec<syntax::HazardSite>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imports: Vec<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -984,6 +988,20 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         tuple_arrays,
         struct_field_hash_shapes: struct_field_hash_shapes_out,
         struct_field_array_shapes: struct_field_array_shapes_out,
+        hazard_sites: document.hazard_sites.clone(),
+        imports: document
+            .imports
+            .iter()
+            .map(|import| {
+                serde_json::json!({
+                    "path": document.file,
+                    "alias": import.alias,
+                    "target": import.target,
+                    "kind": import.kind,
+                    "line": import.line,
+                })
+            })
+            .collect(),
     }
 }
 
@@ -1033,11 +1051,15 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut tuple_arrays = Vec::new();
     let mut struct_field_hash_shapes = BTreeMap::new();
     let mut struct_field_array_shapes = BTreeMap::new();
+    let mut hazard_sites = Vec::new();
+    let mut import_facts = Vec::new();
     let mut raw_parser_call_sites = 0usize;
     let mut raw_calls_not_normalized = 0usize;
     let mut normalized_calls_without_raw_span = 0usize;
 
     for output in outputs {
+        hazard_sites.extend(output.hazard_sites);
+        import_facts.extend(output.imports);
         raw_parser_call_sites += output.call_resolution_coverage.raw_parser_call_sites;
         raw_calls_not_normalized += output.call_resolution_coverage.raw_calls_not_normalized;
         normalized_calls_without_raw_span += output
@@ -1175,6 +1197,8 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         tuple_arrays,
         struct_field_hash_shapes,
         struct_field_array_shapes,
+        hazard_sites,
+        imports: import_facts,
     }
 }
 
@@ -2856,8 +2880,48 @@ fn attach_return_type_dependencies(
     }
 }
 
+// Java/C#/Kotlin/PHP nest a leading annotation/attribute inside the
+// declaration node itself, so `fn_def.line` can point at `@Override` rather
+// than the header; its own balanced parens would otherwise satisfy the
+// bailout below on the first line.
+fn skip_annotation_lines(lines: &[String], mut idx: usize) -> usize {
+    while idx < lines.len() {
+        let trimmed = lines[idx].trim();
+        if trimmed.is_empty() {
+            idx += 1;
+            continue;
+        }
+        if !(trimmed.starts_with('@') || trimmed.starts_with('[') || trimmed.starts_with("#[")) {
+            break;
+        }
+        let mut depth: i32 = 0;
+        let mut balanced_at = None;
+        for (offset, line) in lines[idx..std::cmp::min(lines.len(), idx + 20)]
+            .iter()
+            .enumerate()
+        {
+            for c in line.chars() {
+                match c {
+                    '(' | '[' => depth += 1,
+                    ')' | ']' => depth -= 1,
+                    _ => {}
+                }
+            }
+            if depth <= 0 {
+                balanced_at = Some(offset);
+                break;
+            }
+        }
+        match balanced_at {
+            Some(offset) => idx += offset + 1,
+            None => break,
+        }
+    }
+    idx
+}
+
 fn get_def_header(lines: &[String], start_line_1indexed: usize) -> String {
-    let start_idx = start_line_1indexed.saturating_sub(1);
+    let start_idx = skip_annotation_lines(lines, start_line_1indexed.saturating_sub(1));
     if start_idx >= lines.len() {
         return String::new();
     }
@@ -2883,6 +2947,30 @@ fn get_def_header(lines: &[String], start_line_1indexed: usize) -> String {
         }
         if !has_parens {
             break;
+        }
+    }
+    header
+}
+
+/// Truncates a declaration header at its own body-opening `{`, tracking
+/// paren AND bracket depth so a parameter type's own braces (Go's
+/// `interface{}`, a C# anonymous-object-adjacent `{}`, etc.) - whether
+/// inside the parameter list's `(...)` or, for a generic Go function, its
+/// type-parameter list's `[...]` (`func F[T interface{ ~int }](x T)`) - are
+/// not mistaken for it. Naively splitting on the first `{`, or tracking
+/// only paren depth, cuts the signature off mid-declaration for any
+/// function whose type/value parameters include one.
+fn header_before_body_brace(header: &str) -> &str {
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+    for (index, ch) in header.char_indices() {
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth -= 1,
+            '{' if paren_depth <= 0 && bracket_depth <= 0 => return &header[..index],
+            _ => {}
         }
     }
     header
@@ -2988,12 +3076,17 @@ fn extract_methods(
                 .local_complexity_scores
                 .get(&format!("{}#{}", owner, name));
 
+            // dispatch_kind "top" means owner is only the file-stem
+            // fallback, not a real enclosing type - resolving it by name
+            // alone would link to an unrelated class that happens to share
+            // the file's name (e.g. Foo.h declaring `class Foo`).
+            let structural_owner = if kind == "top" { "" } else { owner.as_str() };
             MethodRecord {
                 id: function_id(language, path, fn_def),
                 semantic_symbol: None,
-                owner_id: owner_id(language, path, &owner, owner_span(document, &owner)),
+                owner_id: owner_id(language, path, structural_owner, owner_span(document, structural_owner)),
                 key: vec![owner.clone(), name.clone(), kind.clone()],
-                symbol_owner: canonical_symbol_owner(document, &owner, Some(fn_def.span)),
+                symbol_owner: canonical_symbol_owner(document, structural_owner, Some(fn_def.span)),
                 lexical_symbol: (kind == "top"
                     && document.symbol_scope.canonical
                     && declaration_namespace(document, fn_def.span).is_some())
@@ -3179,10 +3272,7 @@ fn method_signature(lines: &[String], fn_def: &syntax::FunctionDef, language: &s
         // (`name (arg)`), which loses return annotations required by CFG/DFG.
         // Their declaration header is the source of truth for static facts.
         "c" | "cpp" | "csharp" | "go" | "java" | "kotlin" | "php" | "rust" | "swift" | "zig" => {
-            get_def_header(lines, fn_def.line)
-                .split('{')
-                .next()
-                .unwrap_or_default()
+            header_before_body_brace(&get_def_header(lines, fn_def.line))
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ")
@@ -5882,6 +5972,7 @@ pub(crate) mod tests {
             call_receiver_projections: vec![],
             state_reads: vec![],
             state_writes: vec![],
+            chained_self_reads: vec![],
             decision_sites: vec![],
             branch_decisions: vec![],
             branch_arms: vec![],
@@ -5913,6 +6004,8 @@ pub(crate) mod tests {
             type_alias_lines: Default::default(),
             method_param_types: Default::default(),
             method_local_types: Default::default(),
+            hazard_sites: vec![],
+            imports: vec![],
         }
     }
 
@@ -5941,6 +6034,46 @@ pub(crate) mod tests {
         assert_eq!(method.owner, "Greeter");
         assert_eq!(method.kind, "instance");
         assert_eq!(method.signature, "def hello(name)");
+    }
+
+    #[test]
+    fn top_level_function_whose_fallback_owner_name_collides_with_a_real_owner_is_not_linked_to_it() {
+        let mut doc = test_document();
+        doc.function_defs.push(syntax::FunctionDef {
+            file: "test.rb".to_string(),
+            name: "helper".to_string(),
+            owner: "Greeter".to_string(),
+            dispatch_kind: "top".to_string(),
+            line: 20,
+            span: [20, 0, 20, 20],
+            body: crate::ast::RawNode {
+                kind: "function".to_string(),
+                text: "def helper".to_string(),
+                span: [20, 0, 20, 20],
+                named: true,
+                field_name: None,
+                children: vec![],
+            },
+            visibility: Some("public".to_string()),
+            params: Vec::new(),
+            callback_params: Vec::new(),
+            signature: "def helper".to_string(),
+        });
+        let output = extract(&doc, Profile::Espalier);
+
+        let real_member = output.methods.iter().find(|m| m.name == "hello").expect("real method");
+        let free_function = output.methods.iter().find(|m| m.name == "helper").expect("free function");
+
+        assert_eq!(free_function.owner, "Greeter", "the display owner (file-stem fallback) is unchanged");
+        assert_ne!(
+            free_function.owner_id, real_member.owner_id,
+            "a free function must never share owner_id with an unrelated real owner of the same name"
+        );
+        assert!(
+            free_function.symbol_owner.is_none(),
+            "a free function has no real owning type, so symbol_owner must not fabricate one, got {:?}",
+            free_function.symbol_owner
+        );
     }
 
     pub(crate) fn extracts_fields_impl() {
@@ -6920,6 +7053,43 @@ def py_fn(a: int) -> str:
     fn test_profile_extra_coverage() {
         test_profile_extra_coverage_impl();
     }
+
+    // Real bug, found auditing mapstructure's Decode/decodeSlice: a
+    // parameter typed `interface{}` (Go's idiom for "any value", the whole
+    // point of this library) has its own `{}` inside the parameter list,
+    // and the old naive `.split('{').next()` truncated the signature right
+    // there, dropping the closing `)`, the return type, and any params
+    // after it - breaking captured signatures for the majority of a
+    // reflection-heavy codebase's public API.
+    #[test]
+    fn header_before_body_brace_skips_braces_inside_the_parameter_list() {
+        assert_eq!(
+            super::header_before_body_brace(
+                "func Decode(input interface{}, output interface{}) error {\n\tbody\n}"
+            ),
+            "func Decode(input interface{}, output interface{}) error "
+        );
+        assert_eq!(
+            super::header_before_body_brace("func Simple() error {\n\tbody\n}"),
+            "func Simple() error "
+        );
+    }
+
+    // Real bug: a generic Go function's type-parameter list uses `[...]`,
+    // not `(...)` - `func F[T interface{ ~int }](x T) error {` has its own
+    // `{}` inside the *bracket* list, before the parameter list even
+    // starts. Tracking only paren depth treated that brace as the body
+    // opener at bracket-depth-only position, truncating the signature to
+    // "func F[T interface" and losing the parameter list and return type.
+    #[test]
+    fn header_before_body_brace_skips_braces_inside_a_generic_type_parameter_list() {
+        assert_eq!(
+            super::header_before_body_brace(
+                "func F[T interface{ ~int }](x T) error {\n\treturn nil\n}"
+            ),
+            "func F[T interface{ ~int }](x T) error "
+        );
+    }
 }
 
 pub fn run_profile_tests() {
@@ -7337,5 +7507,53 @@ impl<'a> StateParamVisitor<'a> {
                 self.collect_origins_from_stmt(child_node, fn_def);
             }
         }
+    }
+}
+
+fn normalize_string(s: &str, root: &std::path::Path) -> String {
+    if s.contains('\x00') {
+        let parts: Vec<String> = s.split('\x00').map(|part| normalize_string(part, root)).collect();
+        parts.join("\x00")
+    } else if s.contains(':') {
+        let parts: Vec<String> = s.split(':').map(|part| {
+            let path = std::path::Path::new(part);
+            if path.is_absolute() {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    return rel.to_string_lossy().to_string();
+                }
+            }
+            part.to_string()
+        }).collect();
+        parts.join(":")
+    } else {
+        let path = std::path::Path::new(s);
+        if path.is_absolute() {
+            if let Ok(rel) = path.strip_prefix(root) {
+                return rel.to_string_lossy().to_string();
+            }
+        }
+        s.to_string()
+    }
+}
+
+pub fn normalize_paths(v: &mut serde_json::Value, root: &std::path::Path) {
+    match v {
+        serde_json::Value::Object(map) => {
+            for (key, val) in map.iter_mut() {
+                if key == "path" || key == "file" || key == "id" {
+                    if let serde_json::Value::String(s) = val {
+                        *val = serde_json::Value::String(normalize_string(s, root));
+                    }
+                } else {
+                    normalize_paths(val, root);
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for val in arr {
+                normalize_paths(val, root);
+            }
+        }
+        _ => {}
     }
 }

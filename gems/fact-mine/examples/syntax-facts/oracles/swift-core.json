@@ -285,6 +285,22 @@
       "file": "gems/fact-mine/examples/syntax-facts/swift/core.swift",
       "functions": [
         {
+          "line": 11,
+          "name": "init",
+          "owner": "SwiftSyntaxFactsCore",
+          "params": [
+            "status",
+            "sink"
+          ],
+          "span": [
+            11,
+            2,
+            14,
+            3
+          ],
+          "visibility": "public"
+        },
+        {
           "line": 16,
           "name": "process",
           "owner": "SwiftSyntaxFactsCore",
@@ -556,7 +572,7 @@
         },
         {
           "field": "sink",
-          "function": "(top-level)",
+          "function": "init",
           "line": 13,
           "owner": "SwiftSyntaxFactsCore",
           "receiver": "self",
@@ -569,7 +585,7 @@
         },
         {
           "field": "status",
-          "function": "(top-level)",
+          "function": "init",
           "line": 12,
           "owner": "SwiftSyntaxFactsCore",
           "receiver": "self",

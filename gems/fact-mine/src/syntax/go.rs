@@ -310,7 +310,7 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         }
         type_name(&node.text).map(|name| NormalizedOwner {
             name,
-            kind: if node.text.contains(" interface") || node.text.contains("interface {") {
+            kind: if is_interface_declaration(&node.text) {
                 "interface".to_string()
             } else {
                 "owner".to_string()
@@ -330,18 +330,34 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         if node.r#type != "FIELD_DECLARATION" {
             return None;
         }
-        let name = first_lvar_child_name(node)?;
-        let ty = node
-            .text
-            .trim_start()
-            .strip_prefix(&name)
-            .unwrap_or("")
-            .trim()
+        if let Some(name) = first_lvar_child_name(node) {
+            let ty = strip_struct_tag(
+                node.text.trim_start().strip_prefix(&name).unwrap_or("").trim(),
+            )
             .to_string();
-        (!ty.is_empty()).then(|| super::StateDeclaration {
+            return (!ty.is_empty()).then(|| super::StateDeclaration {
+                field: name,
+                owner: String::new(),
+                r#type: Some(ty),
+                immutable: false,
+                file: String::new(),
+                line: node.first_lineno,
+                span: span(node),
+            });
+        }
+        // Embedded field (`type Embedded struct { Basic }`, possibly
+        // `*Basic` or `pkg.Basic`): there is no separate name token at
+        // all - the type itself IS the field's access name (`e.Basic`).
+        // Without this, an anonymous embed vanished from state extraction
+        // entirely, not just under the wrong name, since neither this
+        // function nor field_name_from_declaration (unset for Go) had
+        // anything to find.
+        let embedded_type = strip_struct_tag(node.text.trim());
+        let name = embedded_type.trim_start_matches('*').rsplit('.').next()?.to_string();
+        (simple_identifier(&name)).then(|| super::StateDeclaration {
             field: name,
             owner: String::new(),
-            r#type: Some(ty),
+            r#type: Some(embedded_type.to_string()),
             immutable: false,
             file: String::new(),
             line: node.first_lineno,
@@ -478,7 +494,7 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     }
 
     fn owner_kind(&self, node: &Node, default_kind: &str) -> String {
-        if node.text.contains(" interface") || node.text.contains("interface {") {
+        if is_interface_declaration(&node.text) {
             "interface".to_string()
         } else {
             default_kind.to_string()
@@ -903,6 +919,20 @@ fn span(node: &Node) -> Span {
     ]
 }
 
+// A struct tag is a trailing backtick-quoted string on the field's own
+// declaration line, not part of its type - Go itself never allows a
+// backtick inside the tag string, so the last two backticks always bound
+// exactly one tag.
+fn strip_struct_tag(text: &str) -> &str {
+    let trimmed = text.trim_end();
+    if trimmed.ends_with('`') {
+        if let Some(start) = trimmed[..trimmed.len() - 1].rfind('`') {
+            return trimmed[..start].trim_end();
+        }
+    }
+    trimmed
+}
+
 fn first_lvar_child_name(node: &Node) -> Option<String> {
     node.children.iter().find_map(|child| match child {
         crate::ast::Child::Node(child) if child.r#type == "LVAR" => {
@@ -915,6 +945,18 @@ fn first_lvar_child_name(node: &Node) -> Option<String> {
         }
         _ => None,
     })
+}
+
+// A struct with any `interface{}`-typed field anywhere in its body (a
+// common idiom - mapstructure's own DecoderConfig has one) was
+// misclassified as an interface itself, because callers searched the
+// declaration's *entire* text for the substring "interface" rather than
+// just its own `type Name struct|interface {` header. Truncating to the
+// header before the first `{` excludes the body, where a field's type
+// happens to contain the same word.
+fn is_interface_declaration(text: &str) -> bool {
+    let header = text.split('{').next().unwrap_or(text);
+    header.contains(" interface") || header.trim_end().ends_with("interface")
 }
 
 fn type_name(text: &str) -> Option<String> {
@@ -1335,5 +1377,19 @@ mod tests {
             ),
             Some("callback_once".to_string())
         );
+    }
+
+    // Real bug, found auditing mapstructure's DecoderConfig: a plain
+    // struct with an `interface{}`-typed field anywhere in its body was
+    // classified as an interface itself, because the check searched the
+    // whole declaration text for the substring "interface" rather than
+    // just its own `type Name struct|interface {` header.
+    #[test]
+    fn struct_with_interface_typed_field_is_not_classified_as_interface() {
+        let text = "type DecoderConfig struct {\n\tResult interface{}\n\tName string\n}\n";
+        assert!(!is_interface_declaration(text), "a struct field's own type must not leak into the declaration kind");
+
+        let real_interface = "type DecodeHookFunc interface {\n\tDecode(from, to reflect.Value) error\n}\n";
+        assert!(is_interface_declaration(real_interface));
     }
 }

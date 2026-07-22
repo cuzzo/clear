@@ -1123,6 +1123,18 @@ fn project_source_syntax(fixture: &Path, language: Language, expected: &Value) -
                     "local_contract_assignments",
                 ][..],
                 "local_complexity_scores" => &["id", "score", "signals"][..],
+                "control_flow_nodes" => &["id", "kind", "line", "label"][..],
+                "control_flow_edges" => &["source", "target", "kind"][..],
+                "control_flow_metrics" => &["id", "cyclomatic", "npath"][..],
+                "places" => &["id", "kind", "name"][..],
+                "node_effects" => &["id", "reads", "writes"][..],
+                "reachability" => &["source", "target"][..],
+                "dominators" => &["node", "dominator"][..],
+                "reaching_definitions" => &["line", "var", "def_line"][..],
+                "def_use" => &["def_line", "var", "use_line"][..],
+                "liveness" => &["line", "live_vars"][..],
+                "flow_types" => &["id", "type_text"][..],
+                "hazard_sites" => &["line", "source", "hazard_type", "required_evidence", "start_column", "end_line", "end_column"][..],
                 _ => bail!("unsupported source syntax section: {key}"),
             };
             out.insert(key.clone(), rows(field(&document, key), keys));

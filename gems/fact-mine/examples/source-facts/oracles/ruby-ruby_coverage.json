@@ -1499,8 +1499,398 @@
         "source": "@x == 2"
       }
     ],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "yield_return"
+      },
+      {
+        "kind": "yield_return"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_default"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "rescue_handler"
+      },
+      {
+        "kind": "try_body"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "rescue_handler"
+      },
+      {
+        "kind": "try_body"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {},
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#initialize:entry:0:13:4",
+        "kind": "entry",
+        "line": 13
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#initialize:exit:3:16:7",
+        "kind": "exit",
+        "line": 16
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#initialize:stmt:1:14:6",
+        "kind": "statement",
+        "line": 14
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#initialize:stmt:2:15:6",
+        "kind": "statement",
+        "line": 15
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#method_missing:entry:0:19:4",
+        "kind": "entry",
+        "line": 19
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#method_missing:exit:5:24:7",
+        "kind": "exit",
+        "line": 24
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#method_missing:stmt:1:20:6",
+        "kind": "statement",
+        "line": 20
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#method_missing:stmt:2:21:6",
+        "kind": "statement",
+        "line": 21
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#method_missing:stmt:3:22:6",
+        "kind": "callback",
+        "line": 22
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#method_missing:stmt:4:23:6",
+        "kind": "callback",
+        "line": 23
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#respond_to_missing?:entry:0:26:4",
+        "kind": "entry",
+        "line": 26
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#respond_to_missing?:exit:3:31:7",
+        "kind": "exit",
+        "line": 31
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#respond_to_missing?:stmt:0.then.0:28:8",
+        "kind": "statement",
+        "line": 28
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#respond_to_missing?:stmt:1:27:6",
+        "kind": "branch",
+        "line": 27
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#respond_to_missing?:stmt:2:30:6",
+        "kind": "statement",
+        "line": 30
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:branch:0.else.0.else.0:38:6",
+        "kind": "branch",
+        "line": 38
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:branch:0.else.0:36:6",
+        "kind": "branch",
+        "line": 36
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:entry:0:33:4",
+        "kind": "entry",
+        "line": 33
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:exit:9:70:7",
+        "kind": "exit",
+        "line": 70
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:0.else.0.else.0.else.0:41:8",
+        "kind": "statement",
+        "line": 41
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:0.else.0.else.0.then.0:39:8",
+        "kind": "statement",
+        "line": 39
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:0.else.0.then.0:37:8",
+        "kind": "statement",
+        "line": 37
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:0.then.0:35:8",
+        "kind": "statement",
+        "line": 35
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:1.case0.0:46:8",
+        "kind": "statement",
+        "line": 46
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:1:34:6",
+        "kind": "branch",
+        "line": 34
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:2.rescue0.0:51:27",
+        "kind": "statement",
+        "line": 51
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:2.rescue0.1:52:8",
+        "kind": "statement",
+        "line": 52
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:2.try.0:50:8",
+        "kind": "statement",
+        "line": 50
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:2:44:6",
+        "kind": "case",
+        "line": 44
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:3.rescue0.0:58:8",
+        "kind": "statement",
+        "line": 58
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:3.try.0:56:8",
+        "kind": "statement",
+        "line": 56
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:3:50:8",
+        "kind": "exception",
+        "line": 50
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:4.loop.0:61:6",
+        "kind": "statement",
+        "line": 61
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:4:56:8",
+        "kind": "exception",
+        "line": 56
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:5.loop.0:62:6",
+        "kind": "statement",
+        "line": 62
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:5:61:6",
+        "kind": "loop",
+        "line": 61
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:6:62:6",
+        "kind": "loop",
+        "line": 62
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:7:63:6",
+        "kind": "statement",
+        "line": 63
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#some_call:stmt:8:65:6",
+        "kind": "statement",
+        "line": 65
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 13,
@@ -1543,6 +1933,47 @@
         "params": [],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -1928,6 +2359,188 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:RubyCoverageParent::RubyCoverageChild#initialize:global:$global_var"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:RubyCoverageParent::RubyCoverageChild#initialize:instance_field:@x"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:RubyCoverageParent::RubyCoverageChild#method_missing:local:args",
+          "place:RubyCoverageParent::RubyCoverageChild#method_missing:local:symbol",
+          "place:RubyCoverageParent::RubyCoverageChild#method_missing:local:val"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:RubyCoverageParent::RubyCoverageChild#method_missing:local:args",
+          "place:RubyCoverageParent::RubyCoverageChild#method_missing:local:symbol"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:RubyCoverageParent::RubyCoverageChild#method_missing:local:symbol"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:RubyCoverageParent::RubyCoverageChild#respond_to_missing?:local:include_private",
+          "place:RubyCoverageParent::RubyCoverageChild#respond_to_missing?:local:symbol"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:RubyCoverageParent::RubyCoverageChild#some_call:instance_field:@x"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:RubyCoverageParent::RubyCoverageChild#some_call:instance_field:@x"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:RubyCoverageParent::RubyCoverageChild#some_call:instance_field:@x"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:RubyCoverageParent::RubyCoverageChild#some_call:local:e"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -1969,6 +2582,53 @@
           "self.some_call == 1"
         ],
         "line": 37
+      }
+    ],
+    "places": [
+      {
+        "id": "place:RubyCoverageParent::RubyCoverageChild#initialize:instance_field:@x",
+        "kind": "instance_field",
+        "name": "@x"
+      },
+      {
+        "id": "place:RubyCoverageParent::RubyCoverageChild#initialize:global:$global_var",
+        "kind": "global",
+        "name": "$global_var"
+      },
+      {
+        "id": "place:RubyCoverageParent::RubyCoverageChild#method_missing:local:args",
+        "kind": "local",
+        "name": "args"
+      },
+      {
+        "id": "place:RubyCoverageParent::RubyCoverageChild#method_missing:local:symbol",
+        "kind": "local",
+        "name": "symbol"
+      },
+      {
+        "id": "place:RubyCoverageParent::RubyCoverageChild#method_missing:local:val",
+        "kind": "local",
+        "name": "val"
+      },
+      {
+        "id": "place:RubyCoverageParent::RubyCoverageChild#respond_to_missing?:local:include_private",
+        "kind": "local",
+        "name": "include_private"
+      },
+      {
+        "id": "place:RubyCoverageParent::RubyCoverageChild#respond_to_missing?:local:symbol",
+        "kind": "local",
+        "name": "symbol"
+      },
+      {
+        "id": "place:RubyCoverageParent::RubyCoverageChild#some_call:instance_field:@x",
+        "kind": "instance_field",
+        "name": "@x"
+      },
+      {
+        "id": "place:RubyCoverageParent::RubyCoverageChild#some_call:local:e",
+        "kind": "local",
+        "name": "e"
       }
     ],
     "predicate_bodies": [],
@@ -2103,6 +2763,55 @@
         "reads": [],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

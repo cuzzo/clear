@@ -206,6 +206,30 @@ Spot checks:
 
 Remaining caveat: Swift needs coverage ingestion and better function/owner extraction before architecture metrics should be treated as strong signal.
 
+**Root cause found and fixed (2026-07-21):** minimal-fixture validation (a
+6-line `struct Widget { var count: Int; init(...) { ... }; mutating func
+increment() { ... } }`, not a repo clone) confirmed `init` was dropped from
+`function_defs` entirely - `fact_mine_rust::syntax::parse_files` on this
+fixture returned only `increment`, never `init`. Since constructors are
+where most instance state gets initialized, this also underrepresented
+Swift's real state-write edges (the CLI spot check that found this saw 1
+edge produced vs 4 for an equivalent C# class). Root cause: Swift's `init`
+has no separate "function" keyword (raw tree-sitter kind
+`init_declaration`, distinct from `function_declaration`), so the
+extractor's function-kind recognition never matched it. Fixed by widening
+`SwiftAstAdapter::function_kind`
+(`gems/fact-mine/src/ast/adapters/swift.rs`) to include
+`init_declaration`. Verified against real, unmodified production code, not
+just the fixture: re-running Espalier over
+`swift-argument-parser/Sources/ArgumentParser/` (shallow clone, not
+committed to this repo) found **147 real `init` declarations** now
+correctly recognized as functions across the codebase, and the existing
+`gems/fact-mine` oracle fixture for Swift (`examples/syntax-facts/oracles/
+swift-core.json`) updated to reflect `sink`/`status` writes now correctly
+attributed to `init` instead of the wrong `"(top-level)"`. Regression test:
+`gems/fact-mine/tests/architecture_extraction_multilang_test.rs`
+(`swift_init_is_recognized_as_a_function`).
+
 ### Kotlin / Okio
 
 Status: usable static ingestion, moderate Decomplex signal.
@@ -219,6 +243,46 @@ Spot checks:
 - Nil-kill untyped signatures point at equality/select APIs where extraction needs stronger Kotlin typing rules.
 
 Remaining caveat: no coverage was generated, SlopCop is empty, and Kotlin parser extraction needs more language-specific tuning before architecture metrics are high confidence.
+
+**Root cause found and fixed (2026-07-21):** minimal-fixture validation (a
+5-line `class Widget(private var count: Int) { fun increment() { count +=
+1 } }`, not a repo clone) confirmed why: Kotlin's `AstNormalizationAdapter`
+(`gems/fact-mine/src/ast/adapters/kotlin.rs`) had no handling for
+primary-constructor-declared properties - the single most idiomatic way
+Kotlin declares instance state. The raw tree-sitter `class_parameter` node
+never got recognized as a field/property declaration, so no
+`StateDeclaration` was ever produced for it, and `count += 1` inside a
+method produced zero state-write edges. This was likely the dominant cause
+of Kotlin's "sparse" architecture signal, more than general parser
+immaturity.
+
+Root cause: `class_parameter` is a child of `primary_constructor`, which
+is a *sibling* of `class_body` in tree-sitter-kotlin's grammar - not a
+descendant of it - so it was structurally invisible to the class-body scan
+regardless of any per-language field-detection logic. Fixed via a new
+opt-in `AstNormalizationAdapter` hook, `supplementary_class_body_nodes`
+(`gems/fact-mine/src/ast/adapters/base.rs` + `normalize_class` in
+`ast/normalizer.rs`), that folds extra raw nodes into a class's scanned
+body before the existing field-collection walk runs. It defaults to
+returning nothing for every language (zero behavior change for anyone but
+Kotlin) and is overridden in `gems/fact-mine/src/ast/adapters/kotlin.rs` to
+surface `var`/`val` primary-constructor parameters specifically. Kotlin's
+pre-existing `state_declaration_from_node` text heuristic
+(`gems/fact-mine/src/syntax/kotlin.rs`) then picks the resulting node up
+unchanged - no changes needed there.
+
+Verified against real, unmodified production code, not just the fixture:
+`Pipe(internal val maxBufferSize: Long)` in Okio's own
+`okio/src/jvmMain/kotlin/okio/Pipe.kt` (shallow clone, not committed to
+this repo) now correctly produces a `state` node for `maxBufferSize`
+owned by `Pipe`, and a broader sweep of Okio's `commonMain/kotlin/okio/`
+directory found 51 owners, 83 states, and 667 functions (state extraction
+was near-zero for this style of declaration before the fix). Regression
+test: `gems/fact-mine/tests/architecture_extraction_multilang_test.rs`
+(`kotlin_primary_constructor_property_is_recognized_as_state`). C# and Lua
+were also validated with equivalent minimal fixtures in the same test file
+and found to already work correctly - architecture extraction was not
+broadly broken for those two.
 
 ## Cross-Cutting Assessment
 
@@ -237,3 +301,115 @@ Espalier is useful where class/function ownership extraction is mature. It is sp
 - Improve C/C++ native build-aware lint/coverage collection; static parser output alone is not enough for high-confidence systems-language review.
 - Add coverage ingestion recipes for Lua, C#, Java, Swift, and Kotlin validation repos.
 - Continue adding language-specific ownership/type extraction only when a spot check finds a concrete false positive or missing high-value signal.
+
+## Second Validation Round (2026-07-21): Mini-Corpus Audit and Fixes
+
+Following the first pass above, a second round audited Espalier/Decomplex
+output against the `gems/lineage/docs/agents/cross-lang-support.md`
+mini-corpus repositories (already on disk, real production code, not
+synthetic fixtures) across all eight of those languages plus a systemic
+Decomplex issue. Every language produced at least one real, verifiable bug
+- not vague noise. All fixes below are in `gems/fact-mine` (the shared
+extraction layer every analyzer consumes) or `gems/decomplex`, are covered
+by regression tests, and were re-verified against the real repository that
+surfaced them after fixing.
+
+### Fixed and verified
+
+- **Decomplex `derived-state-staleness` (systemic, cross-language):** three
+  distinct root causes in `fact-mine`'s shared dataflow scanner
+  (`src/syntax/local_flow.rs`) were each independently rediscoverable in a
+  different language - a bare co-declared variable with no initializer of
+  its own misread as a *read* of its declaration statement (C, `wrk`); an
+  empty-init `for (; cond; step)` loop's condition-only reads misattributed
+  as writes (C, `wrk`); a call whose receiver starts with `self.`/`this.`
+  misread as a state write because of a keyword argument's `=` (Python,
+  `requests`). Verified eliminating the exact reported false positives in
+  `wrk` (4→0) and `cJSON` (1→0), with `requests` down from 9→7 (one
+  distinct fourth root cause - nested attribute mutation, `self.a.b = x`
+  misattributed to `self.a` - remains open, not reproduced cleanly within
+  budget).
+- **Kotlin:** primary-constructor properties (`class Widget(private var
+  count: Int)`) produced zero state declarations - `class_parameter` is a
+  child of `primary_constructor`, a *sibling* of `class_body`, structurally
+  unreachable by the class-body scan. Fixed via a new opt-in
+  `AstNormalizationAdapter` hook, `supplementary_class_body_nodes`
+  (defaults to a no-op for every other language).
+- **Swift:** `init` was dropped from `function_defs` entirely (`init` has
+  no separate "function" keyword in the grammar). Fixed by widening
+  `function_kind`. Verified: 147 real `init`s recognized across
+  `swift-argument-parser`.
+- **TypeScript:** constructor-parameter properties had the same bug as
+  Kotlin, but for a different structural reason - the constructor is a
+  normal class member (reachable), but parameter normalization
+  (`normalize_parameter_init`, shared/generic) discards modifier/type
+  structure before the syntax layer ever runs. Fixed by reusing
+  `supplementary_class_body_nodes` to re-supply the raw parameter nodes
+  through the structure-preserving generic normalization path instead.
+  Separately, `abstract class Foo` was dropped as an owner entirely
+  (distinct grammar node, not `class_declaration`) - fixed by widening
+  `class_node`. Verified on real Zod (`ZodType`, its core abstract base
+  class, now recognized) and a minimal DI-container reproduction.
+- **Go:** (1) any struct with an `interface{}`-typed field *anywhere in its
+  body* was classified as an interface itself (substring search over the
+  whole declaration, not just its own header) - fixed by truncating the
+  search to the header before the first `{`. (2) function signatures
+  truncated mid-word at any `interface{}` parameter (same "first brace"
+  assumption, applied to signature-header truncation) - fixed with a
+  paren-depth-aware brace finder. (3) embedded fields (`type Embedded
+  struct { Basic; Vunique string }`) vanished from state extraction
+  entirely - an anonymous embed has no separate name token, so neither
+  `state_declaration_from_node`'s LVAR-name lookup nor
+  `field_name_from_declaration` (unset for Go) had anything to find; fixed
+  by deriving the name from the embedded type reference itself. Verified
+  on real `mapstructure`: `DecoderConfig` no longer misclassified,
+  `Decode`/`decodeSlice` signatures now complete, `Embedded`/
+  `EmbeddedPointer`/`EmbeddedAndNamed` all correctly capture their embedded
+  fields.
+- **Java:** the state-declaration text heuristic had no node-type guard at
+  all (every other language's version restricts to
+  `FIELD_DECLARATION`-shaped nodes) - any node whose text loosely resembled
+  `word word ... = ...` matched, including comments (`// TODO this seems
+  wrong` parsed as a field literally named `wrong`). Fixed by adding the
+  same guard other languages already have. Verified: 0 comment-derived
+  bogus states remain in `commons-cli` (previously ~14). A second, distinct
+  Java issue - fields with initializers missing at their real declaration
+  line, appearing instead as a phantom duplicate at the corresponding
+  setter's assignment line - was confirmed still present and is not yet
+  root-caused.
+- **C#:** a field whose initializer contains no literal `{` at all
+  (`static readonly Lazy<T> _x = new Lazy<T>(GetAllOptions,
+  LazyThreadSafetyMode.ExecutionAndPublication);`) was never truncated by
+  the existing brace-based name search, so it read past the field's own
+  name into the initializer and returned its trailing identifier instead.
+  Fixed by truncating at the declarator's own `=` first. This turned out
+  to be broader than the reported case: *any* C# field with a plain
+  literal initializer (`int x = 1;`) was silently producing zero state
+  declarations at all before this fix, not just a garbled name - confirmed
+  via a corrected `type_metadata/csharp` oracle fixture. Verified on real
+  `SmartEnum.cs`: all four `Lazy<T>` fields now keep their own names.
+
+### Found, not yet fixed
+
+- **C:** Espalier's owner-fallback heuristic fabricates a bogus "owner"
+  node (confidence: partial) for the majority of real functions in both
+  `cJSON` and `wrk` - traced to Espalier's own Ruby architecture-building
+  layer (`gems/espalier/lib/espalier/architecture_artifact.rb` and
+  whatever upstream analyzer synthesizes these pseudo-owners), not
+  `fact-mine`'s extraction - a separate investigation domain from the
+  Rust-side fixes above, not yet started.
+- **C++:** operator overloads (`operator=`, `operator()`, `operator
+  bool`) extract the wrong token as the function name (the parameter name
+  or return type instead of the operator); template specializations split
+  into a clean-named empty owner plus an angle-bracket-garbled owner
+  holding all real methods; macro tokens before a class name (visibility
+  macros) create phantom owner nodes, and in one case (plog's `Logger`)
+  swallow all of the real class's methods entirely.
+- **JavaScript:** object-literal "instance" state detection only catches
+  fields set via direct assignment (`obj.x = value`) - misses
+  increment-mutated (`res.lastId++`), method-mutated (`.unshift()`), and
+  init-only fields on the same object.
+- **Python:** (1) `self.x: Type = value` (annotated) produces *two* state
+  nodes (`x` and `@x`) instead of one, at a ~48% duplication rate in one
+  sampled repo. (2) `Enum`/`IntEnum` member values produce zero state
+  nodes at all.

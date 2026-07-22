@@ -38,9 +38,6 @@
   (#match? @hazard.cpp_asan_raw_memory_api "string_view")
 )
 
-(field_expression operator: "->") @hazard.cpp_asan_pointer_or_cast
-(pointer_expression operator: "*") @hazard.cpp_asan_pointer_or_cast
-
 (
   (call_expression function: (template_function name: (identifier) @cast)) @hazard.cpp_asan_pointer_or_cast
   (#match? @cast "^(reinterpret_cast|const_cast)$")
@@ -60,13 +57,43 @@
 (delete_expression) @hazard.cpp_lsan_lifetime
 
 (
-  (binary_expression operator: _ @op) @hazard.cpp_ubsan_arithmetic
-  (#match? @op "^(/|%|<<|>>)$")
+  (call_expression function: (identifier) @func) @hazard.cpp_dynamic_loading
+  (#match? @func "^(dlopen|dlsym|dlclose|dlerror|LoadLibraryA|LoadLibraryW|LoadLibraryExA|LoadLibraryExW|FreeLibrary|GetProcAddress)$")
 )
 
-(cast_expression) @hazard.cpp_ubsan_cast
+(
+  (call_expression function: (qualified_identifier) @func) @hazard.cpp_dynamic_loading
+  (#match? @func "^(::)?(dlopen|dlsym|dlclose|dlerror|LoadLibraryA|LoadLibraryW|LoadLibraryExA|LoadLibraryExW|FreeLibrary|GetProcAddress)$")
+)
+
+;; Dynamic divisors and shift counts are sanitizer-relevant. Literal zero
+;; divisors and literal shift counts >= 32 remain explicit exceptions: safe
+;; literals such as 2 and 3 must not become false positives.
+(
+  (binary_expression operator: _ @op right: (_) @rhs) @hazard.cpp_ubsan_arithmetic
+  (#match? @op "^(/|%|<<|>>)$")
+  (#not-match? @rhs "^[0-9]+[uUlL]*$")
+)
+
+(
+  (binary_expression operator: _ @op right: (number_literal) @rhs) @hazard.cpp_ubsan_arithmetic
+  (#match? @op "^(/|%)$")
+  (#match? @rhs "^0([uUlL]*|[xX]0[uUlL]*)$")
+)
+
+(
+  (binary_expression operator: _ @op right: (number_literal) @rhs) @hazard.cpp_ubsan_arithmetic
+  (#match? @op "^(<<|>>)$")
+  (#match? @rhs "^(3[2-9]|[4-9][0-9]|[1-9][0-9]{2,}|0[xX]([2-9A-Fa-f][0-9A-Fa-f]*|1[0-9A-Fa-f]+))[uUlL]*$")
+)
+
+;; Only pointer-target C-style casts and the type-punning named casts carry
+;; UB risk; static_cast and dynamic_cast are checked conversions.
+(cast_expression
+  type: (type_descriptor
+    declarator: (abstract_pointer_declarator))) @hazard.cpp_ubsan_cast
 
 (
   (call_expression function: (template_function name: (identifier) @cast)) @hazard.cpp_ubsan_cast
-  (#match? @cast "^(static_cast|dynamic_cast|reinterpret_cast|const_cast)$")
+  (#match? @cast "^(reinterpret_cast|const_cast)$")
 )

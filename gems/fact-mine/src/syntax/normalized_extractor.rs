@@ -5,7 +5,7 @@ use super::{
     },
     BranchArm, BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, FunctionDef,
     OwnerDef, PathConditionSite, PredicateAlias, RawNode, SemanticEffectSite, StateDeclaration,
-    StateRead, StateWrite,
+    StateRead, StateWrite, HazardSite,
 };
 use crate::ast::{self, Child, Node, Span};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -20,6 +20,12 @@ pub(crate) struct NormalizedFacts {
     pub(crate) state_declarations: Vec<StateDeclaration>,
     pub(crate) state_reads: Vec<StateRead>,
     pub(crate) state_writes: Vec<StateWrite>,
+    /// Bare reads through a chained self-attribute receiver (`self.spec.namespace`).
+    /// Excluded from `state_reads` because the receiver's actual runtime type is
+    /// unproven, so attributing the read to `namespace`'s owning class would be
+    /// unsound; kept separately so a consumer with its own type evidence can
+    /// still use it as a lower-confidence signal.
+    pub(crate) chained_self_reads: Vec<StateRead>,
     pub(crate) decision_sites: Vec<DecisionSite>,
     pub(crate) branch_decisions: Vec<BranchDecision>,
     pub(crate) branch_arms: Vec<BranchArm>,
@@ -28,6 +34,7 @@ pub(crate) struct NormalizedFacts {
     pub(crate) predicate_aliases: Vec<PredicateAlias>,
     pub(crate) comparison_uses: Vec<ComparisonUse>,
     pub(crate) path_condition_sites: Vec<PathConditionSite>,
+    pub(crate) hazard_sites: Vec<HazardSite>,
 }
 
 pub(crate) fn extract(
@@ -135,6 +142,28 @@ impl<'a> Extractor<'a> {
             "ATTRASGN" => self.scan_attr_assignment(node),
             "OPCALL" => self.scan_operator_call(node),
             "OP_ASGN1" | "OP_ASGN2" => self.scan_operator_assignment(node),
+            "UPDATE_EXPRESSION" | "INC_STATEMENT" | "DEC_STATEMENT" => {
+                self.scan_update_expression(node)
+            }
+            // Unlike UPDATE_EXPRESSION/INC_STATEMENT/DEC_STATEMENT - each a
+            // grammar rule dedicated to increment/decrement alone - this
+            // pair is a generic catch-all also covering unrelated unary
+            // reads (`!flag`, `-x`, `+x`, `~x`); only the `++`/`--` spelling
+            // means a mutation, so that must be checked textually before
+            // treating the operand as a write, or a boolean negation would
+            // wrongly register as reassigning the field it reads.
+            "POSTFIX_UNARY_EXPRESSION" | "PREFIX_UNARY_EXPRESSION" => {
+                let trimmed = node.text.trim();
+                if trimmed.starts_with("++")
+                    || trimmed.starts_with("--")
+                    || trimmed.ends_with("++")
+                    || trimmed.ends_with("--")
+                {
+                    self.scan_update_expression(node);
+                } else {
+                    self.scan_children(node);
+                }
+            }
             _ => {
                 if let Some(owner) = self.behavior.declarative_owner(node, &self.current_owner()) {
                     self.scan_declarative_owner(node, owner);
@@ -616,6 +645,34 @@ impl<'a> Extractor<'a> {
         self.scan_children(node);
     }
 
+    // Real bug: `this.lastId++`/`--this.count` (JS/TS/C-family increment and
+    // decrement) normalize to a single UPDATE_EXPRESSION node wrapping its
+    // operand as an ordinary property-read CALL - with no dispatch arm for
+    // this node kind anywhere, it fell into the generic scan_children
+    // fallback, so the operand was only ever recorded as a read, never a
+    // write. This is exactly a mutation, same as `this.lastId += 1`;
+    // record the write first, using the same field/receiver call_parts
+    // already resolves them into for an ordinary property-read CALL, then
+    // still scan the child normally so the (real, correct) read tracking
+    // is untouched.
+    fn scan_update_expression(&mut self, node: &Node) {
+        if let Some(operand) = child_node(node, 0) {
+            if matches!(operand.r#type.as_str(), "CALL" | "QCALL") {
+                if let Some(parts) = self.call_parts(operand) {
+                    if parts.receiver == "self" {
+                        self.record_state_write_target_span(
+                            parts.receiver.clone(),
+                            parts.message.clone(),
+                            node,
+                            span(node),
+                        );
+                    }
+                }
+            }
+        }
+        self.scan_children(node);
+    }
+
     fn record_call_node(&mut self, node: &Node, block: bool) {
         let Some(parts) = self.call_parts(node) else {
             self.scan_children(node);
@@ -789,6 +846,17 @@ impl<'a> Extractor<'a> {
         let field =
             first_string_or_symbol(node).or_else(|| child_node(node, 0).map(|n| n.text.clone()));
         self.record_local_owned_value(field.as_deref(), child_node(node, 1));
+
+        if self.behavior.treats_object_literal_binding_as_owner()
+            && self.current_function() == "(top-level)"
+        {
+            if let (Some(owner), Some(value)) = (field.as_deref(), child_node(node, 1)) {
+                if value.r#type == "HASH" {
+                    self.register_object_literal_state_declarations(owner, value);
+                }
+            }
+        }
+
         let writes = self
             .behavior
             .local_assignment_writes(field.as_deref(), node, span(node));
@@ -818,6 +886,41 @@ impl<'a> Extractor<'a> {
         }
         if let Some(value) = child_node(node, 1) {
             self.scan(value);
+        }
+    }
+
+    // A module-level `const NAME = { key: value, ... }` binding: each pair
+    // normalizes as its own nested HASH node (key child then value child).
+    // Registered as a state declaration owned by NAME regardless of
+    // whether `key` is ever read or written again anywhere else - unlike
+    // every other path to a state declaration, which only reacts to a
+    // later read/write, an object literal's own keys ARE its declaration,
+    // in the same way a class field's initializer is.
+    fn register_object_literal_state_declarations(&mut self, owner: &str, hash_node: &Node) {
+        for pair in child_nodes(hash_node) {
+            if pair.r#type != "HASH" {
+                continue;
+            }
+            let Some(key_node) = child_node(pair, 0) else {
+                continue;
+            };
+            let Some(key) = first_string_or_symbol(key_node) else {
+                continue;
+            };
+            let key = self.behavior.clean_identifier(&key);
+            self.owner_fields
+                .entry(owner.to_string())
+                .or_default()
+                .push(key.clone());
+            self.facts.state_declarations.push(StateDeclaration {
+                field: key,
+                owner: owner.to_string(),
+                r#type: None,
+                immutable: false,
+                file: self.file.clone(),
+                line: pair.first_lineno,
+                span: span(pair),
+            });
         }
     }
 
@@ -1043,10 +1146,22 @@ impl<'a> Extractor<'a> {
         {
             return;
         }
+        if let Some(receiver_field) = call.receiver.strip_prefix('@') {
+            self.facts.chained_self_reads.push(StateRead {
+                field: call.message.clone(),
+                identity: String::new(),
+                receiver: receiver_field.to_string(),
+                file: self.file.clone(),
+                function: self.current_function(),
+                line: node.first_lineno,
+                span: call.span,
+                owner: self.current_owner(),
+            });
+            return;
+        }
         if call.receiver.is_empty()
             || constant_receiver(&call.receiver)
             || literal_receiver(&call.receiver)
-            || call.receiver.starts_with('@')
             || call.receiver.starts_with('$')
         {
             return;
@@ -2195,6 +2310,15 @@ fn state_receiver_field(receiver: &str) -> Option<String> {
         return (!field.is_empty()).then(|| field.to_string());
     }
     if let Some(field) = receiver.strip_prefix("self.") {
+        return simple_identifier(field).then(|| field.to_string());
+    }
+    // Several languages spell the instance receiver "this", not "self" -
+    // `this.items.push(x)` was falling through to None here even once a
+    // language's mutating_receiver_message recognized "push", silently
+    // dropping every mutating-call state write for every "this."-style
+    // language (confirmed broken for one such already-overriding language
+    // before this fix, and entirely missing the override in another).
+    if let Some(field) = receiver.strip_prefix("this.") {
         return simple_identifier(field).then(|| field.to_string());
     }
     None

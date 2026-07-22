@@ -77,6 +77,12 @@ fn parse_normalized_file(
     let mut facts =
         passes::StatelessSyntaxPass::normalized(&parsed.file, &lines, &normalized_root, behavior)
             .run();
+    facts.hazard_sites = crate::syntax::hazards::extract_hazards(
+        &parsed.file.to_string_lossy(),
+        parsed.tree.root_node(),
+        &parsed.source,
+        language,
+    );
     let metadata = passes::StatefulSyntaxPass::new(
         &parsed.file,
         &parsed.source,
@@ -90,7 +96,7 @@ fn parse_normalized_file(
     let mut path_condition_sites = facts.path_condition_sites;
     path_condition_sites.extend(metadata.path_condition_sites);
 
-    let document = Document {
+    let mut document = Document {
         file: parsed.file.to_string_lossy().to_string(),
         language,
         source_digest: format!("sha256:{:x}", Sha256::digest(parsed.source.as_bytes())),
@@ -114,6 +120,7 @@ fn parse_normalized_file(
         state_declarations: facts.state_declarations,
         state_reads: facts.state_reads,
         state_writes: facts.state_writes,
+        chained_self_reads: facts.chained_self_reads,
         decision_sites: facts.decision_sites,
         branch_decisions: facts.branch_decisions,
         branch_arms: facts.branch_arms,
@@ -146,7 +153,25 @@ fn parse_normalized_file(
         method_param_types: metadata.syntax.method_param_types,
         method_local_types: metadata.syntax.method_local_types,
         state_param_origins: Vec::new(),
+        hazard_sites: facts.hazard_sites,
+        imports: Vec::new(),
     };
+    let mut import_facts = crate::syntax::imports::symbol_imports(
+        &document
+            .symbol_scope
+            .explicit_imports
+            .iter()
+            .map(|(alias, target)| (alias.clone(), target.clone()))
+            .collect::<Vec<_>>(),
+        language,
+    );
+    import_facts.extend(crate::syntax::imports::extract_file_imports(
+        parsed.tree.root_node(),
+        &parsed.source,
+        language,
+    ));
+    document.imports = import_facts;
+    crate::syntax::hazards::detect_and_append_callback_hazards(&mut document);
     profile_parse_phase(
         profile,
         file_label,
@@ -234,7 +259,7 @@ impl ParsedDocument {
             .set_language(&grammar_for_language(language))
             .with_context(|| "failed to initialize tree-sitter parser")?;
         let tree = parser
-            .parse(&source, None)
+            .parse(crate::ast::parse_buffer(&source, language), None)
             .with_context(|| format!("tree-sitter produced no tree for {}", file.display()))?;
         Ok(Self { file, source, tree })
     }

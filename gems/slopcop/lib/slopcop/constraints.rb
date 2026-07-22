@@ -11,6 +11,15 @@ require_relative "constraints/go_provider"
 require_relative "constraints/rust_provider"
 require_relative "constraints/sarif"
 require_relative "constraints/zig_provider"
+require_relative "constraints/ruby_provider"
+require_relative "constraints/python_provider"
+require_relative "constraints/javascript_provider"
+require_relative "constraints/typescript_provider"
+require_relative "constraints/lua_provider"
+require_relative "constraints/java_provider"
+require_relative "constraints/kotlin_provider"
+require_relative "constraints/swift_provider"
+require_relative "constraints/php_provider"
 
 module SlopCop
   module Constraints
@@ -23,7 +32,16 @@ module SlopCop
         "csharp" => CsharpProvider,
         "go" => GoProvider,
         "rust" => RustProvider,
-        "zig" => ZigProvider
+        "zig" => ZigProvider,
+        "ruby" => RubyProvider,
+        "python" => PythonProvider,
+        "javascript" => JavascriptProvider,
+        "typescript" => TypescriptProvider,
+        "lua" => LuaProvider,
+        "java" => JavaProvider,
+        "kotlin" => KotlinProvider,
+        "swift" => SwiftProvider,
+        "php" => PhpProvider
       }
     end
   end

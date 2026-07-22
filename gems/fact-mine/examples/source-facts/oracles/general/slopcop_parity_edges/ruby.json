@@ -953,6 +953,151 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#guarded_emit:entry:0:19:2",
+        "kind": "entry",
+        "line": 19
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#guarded_emit:exit:4:24:5",
+        "kind": "exit",
+        "line": 24
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#guarded_emit:return:0.then.0:20:4",
+        "kind": "jump",
+        "line": 20
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#guarded_emit:return:1.then.0:21:4",
+        "kind": "jump",
+        "line": 21
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#guarded_emit:stmt:1:20:4",
+        "kind": "branch",
+        "line": 20
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#guarded_emit:stmt:2:21:4",
+        "kind": "branch",
+        "line": 21
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#guarded_emit:stmt:3:23:4",
+        "kind": "statement",
+        "line": 23
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#report:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#report:exit:5:9:5",
+        "kind": "exit",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#report:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#report:stmt:2.loop.0:7:31",
+        "kind": "statement",
+        "line": 7
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#report:stmt:2:6:4",
+        "kind": "statement",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#report:stmt:3:7:4",
+        "kind": "loop",
+        "line": 7
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#report:stmt:4:8:4",
+        "kind": "statement",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#scan:entry:0:11:2",
+        "kind": "entry",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#scan:exit:2:17:5",
+        "kind": "exit",
+        "line": 17
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#scan:stmt:1:12:4",
+        "kind": "statement",
+        "line": 12
+      }
+    ],
     "decisions": [
       {
         "enclosing_span": [
@@ -971,7 +1116,51 @@
         "predicate": "paths && !Array(paths).empty?"
       }
     ],
+    "def_use": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 11,
@@ -1001,6 +1190,25 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -1234,6 +1442,115 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactSlopcopParityEdges#guarded_emit:local:evidence",
+          "place:SourceFactSlopcopParityEdges#guarded_emit:local:source"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactSlopcopParityEdges#guarded_emit:local:source"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactSlopcopParityEdges#guarded_emit:local:evidence"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactSlopcopParityEdges#guarded_emit:local:source"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactSlopcopParityEdges#report:local:gaps"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactSlopcopParityEdges#report:local:gaps",
+          "place:SourceFactSlopcopParityEdges#report:local:x"
+        ],
+        "writes": [
+          "place:SourceFactSlopcopParityEdges#report:local:flagged",
+          "place:SourceFactSlopcopParityEdges#report:local:x"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactSlopcopParityEdges#report:local:flagged",
+          "place:SourceFactSlopcopParityEdges#report:local:x"
+        ],
+        "writes": [
+          "place:SourceFactSlopcopParityEdges#report:local:dup",
+          "place:SourceFactSlopcopParityEdges#report:local:x"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactSlopcopParityEdges#report:instance_field:@top",
+          "place:SourceFactSlopcopParityEdges#report:local:gaps"
+        ],
+        "writes": [
+          "place:SourceFactSlopcopParityEdges#report:local:x"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactSlopcopParityEdges#report:instance_field:@top",
+          "place:SourceFactSlopcopParityEdges#report:local:dup",
+          "place:SourceFactSlopcopParityEdges#report:local:gaps"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactSlopcopParityEdges#scan:local:paths"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactSlopcopParityEdges#scan:local:path",
+          "place:SourceFactSlopcopParityEdges#scan:local:paths"
+        ],
+        "writes": [
+          "place:SourceFactSlopcopParityEdges#scan:local:path"
+        ]
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -1277,6 +1594,53 @@
           "paths"
         ],
         "line": 13
+      }
+    ],
+    "places": [
+      {
+        "id": "place:SourceFactSlopcopParityEdges#scan:local:paths",
+        "kind": "local",
+        "name": "paths"
+      },
+      {
+        "id": "place:SourceFactSlopcopParityEdges#scan:local:path",
+        "kind": "local",
+        "name": "path"
+      },
+      {
+        "id": "place:SourceFactSlopcopParityEdges#guarded_emit:local:evidence",
+        "kind": "local",
+        "name": "evidence"
+      },
+      {
+        "id": "place:SourceFactSlopcopParityEdges#guarded_emit:local:source",
+        "kind": "local",
+        "name": "source"
+      },
+      {
+        "id": "place:SourceFactSlopcopParityEdges#report:instance_field:@top",
+        "kind": "instance_field",
+        "name": "@top"
+      },
+      {
+        "id": "place:SourceFactSlopcopParityEdges#report:local:gaps",
+        "kind": "local",
+        "name": "gaps"
+      },
+      {
+        "id": "place:SourceFactSlopcopParityEdges#report:local:flagged",
+        "kind": "local",
+        "name": "flagged"
+      },
+      {
+        "id": "place:SourceFactSlopcopParityEdges#report:local:x",
+        "kind": "local",
+        "name": "x"
+      },
+      {
+        "id": "place:SourceFactSlopcopParityEdges#report:local:dup",
+        "kind": "local",
+        "name": "dup"
       }
     ],
     "predicate_bodies": [
@@ -1413,6 +1777,41 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

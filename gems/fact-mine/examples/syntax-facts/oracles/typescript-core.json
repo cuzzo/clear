@@ -349,7 +349,7 @@
           "span": [
             54,
             2,
-            67,
+            69,
             3
           ],
           "visibility": "private"
@@ -368,35 +368,35 @@
           "visibility": "public"
         },
         {
-          "line": 69,
+          "line": 71,
           "name": "ready",
           "owner": "TypeScriptSyntaxFactsCore",
           "params": [],
           "span": [
-            69,
-            2,
             71,
+            2,
+            73,
             3
           ],
           "visibility": "public"
         },
         {
-          "line": 74,
+          "line": 76,
           "name": "normalizeValue",
           "owner": "core",
           "params": [
             "input"
           ],
           "span": [
-            74,
-            7,
             76,
+            7,
+            78,
             1
           ],
           "visibility": "public"
         },
         {
-          "line": 79,
+          "line": 81,
           "name": "send",
           "owner": "Sink",
           "params": [
@@ -404,14 +404,15 @@
             "value"
           ],
           "span": [
-            79,
+            81,
             2,
-            79,
+            81,
             41
           ],
           "visibility": "public"
         }
       ],
+      "imports": [],
       "language": "typescript",
       "owners": [
         {
@@ -432,7 +433,7 @@
           "span": [
             15,
             7,
-            72,
+            74,
             1
           ]
         },
@@ -449,12 +450,12 @@
         },
         {
           "kind": "class",
-          "line": 78,
+          "line": 80,
           "name": "Sink",
           "span": [
-            78,
-            0,
             80,
+            0,
+            82,
             1
           ]
         }
@@ -462,13 +463,13 @@
       "predicate_bodies": [
         {
           "body": "input ?? defaultValue",
-          "line": 74,
+          "line": 76,
           "name": "normalizeValue",
           "owner": "core",
           "span": [
-            74,
-            7,
             76,
+            7,
+            78,
             1
           ]
         }
@@ -538,42 +539,16 @@
           ]
         },
         {
-          "field": "audit",
-          "function": "process",
-          "line": 48,
-          "owner": "TypeScriptSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            48,
-            6,
-            48,
-            16
-          ]
-        },
-        {
           "field": "count",
           "function": "ready",
-          "line": 70,
+          "line": 72,
           "owner": "TypeScriptSyntaxFactsCore",
           "receiver": "self",
           "span": [
-            70,
+            72,
             11,
-            70,
+            72,
             21
-          ]
-        },
-        {
-          "field": "defaultCase",
-          "function": "process",
-          "line": 37,
-          "owner": "TypeScriptSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            37,
-            8,
-            37,
-            24
           ]
         },
         {
@@ -587,32 +562,6 @@
             6,
             62,
             19
-          ]
-        },
-        {
-          "field": "escalate",
-          "function": "process",
-          "line": 31,
-          "owner": "TypeScriptSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            31,
-            8,
-            31,
-            21
-          ]
-        },
-        {
-          "field": "fallback",
-          "function": "process",
-          "line": 34,
-          "owner": "TypeScriptSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            34,
-            8,
-            34,
-            21
           ]
         },
         {
@@ -665,19 +614,6 @@
             17,
             24,
             29
-          ]
-        },
-        {
-          "field": "publish",
-          "function": "process",
-          "line": 42,
-          "owner": "TypeScriptSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            42,
-            6,
-            42,
-            18
           ]
         },
         {
@@ -735,13 +671,13 @@
         {
           "field": "status",
           "function": "audit",
-          "line": 66,
+          "line": 68,
           "owner": "TypeScriptSyntaxFactsCore",
           "receiver": "self",
           "span": [
-            66,
+            68,
             11,
-            66,
+            68,
             22
           ]
         },

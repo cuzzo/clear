@@ -1849,8 +1849,175 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {},
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#assertion_argument_calls:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#assertion_argument_calls:exit:2:6:5",
+        "kind": "exit",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#assertion_argument_calls:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#assertion_single_call_argument:entry:0:8:2",
+        "kind": "entry",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#assertion_single_call_argument:exit:2:13:5",
+        "kind": "exit",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#assertion_single_call_argument:stmt:1:9:4",
+        "kind": "statement",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#chained_multiline:entry:0:22:2",
+        "kind": "entry",
+        "line": 22
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#chained_multiline:exit:3:39:5",
+        "kind": "exit",
+        "line": 39
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#chained_multiline:stmt:1:23:4",
+        "kind": "statement",
+        "line": 23
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#chained_multiline:stmt:2:38:4",
+        "kind": "statement",
+        "line": 38
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#symbol_proc_maps:entry:0:15:2",
+        "kind": "entry",
+        "line": 15
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#symbol_proc_maps:exit:4:20:5",
+        "kind": "exit",
+        "line": 20
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#symbol_proc_maps:stmt:1:16:4",
+        "kind": "statement",
+        "line": 16
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#symbol_proc_maps:stmt:2:17:4",
+        "kind": "statement",
+        "line": 17
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#symbol_proc_maps:stmt:3:18:4",
+        "kind": "statement",
+        "line": 18
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 15,
@@ -1898,6 +2065,23 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -2324,6 +2508,112 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactSequenceCallEdges#assertion_argument_calls:local:result"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactSequenceCallEdges#assertion_argument_calls:local:result"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:coverage",
+          "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:dir",
+          "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:file",
+          "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:path",
+          "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:v"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:coverage",
+          "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:dir",
+          "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:file",
+          "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:path",
+          "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:v"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:diagnostic_mids",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:ffi_boundary",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:files",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:repo",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:resultset"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:abs",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:arm",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:diagnostic_mids",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:ffi_boundary",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:file",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:files",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:rel",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:repo",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:resultset"
+        ],
+        "writes": [
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:abs",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:arm",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:arms",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:file",
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:rel"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactSequenceCallEdges#chained_multiline:local:arms"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactSequenceCallEdges#symbol_proc_maps:local:arms",
+          "place:SourceFactSequenceCallEdges#symbol_proc_maps:local:f",
+          "place:SourceFactSequenceCallEdges#symbol_proc_maps:local:rsf"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -2332,6 +2622,103 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactSequenceCallEdges#symbol_proc_maps:local:arms",
+        "kind": "local",
+        "name": "arms"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#symbol_proc_maps:local:f",
+        "kind": "local",
+        "name": "f"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#symbol_proc_maps:local:rsf",
+        "kind": "local",
+        "name": "rsf"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#chained_multiline:local:diagnostic_mids",
+        "kind": "local",
+        "name": "diagnostic_mids"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#chained_multiline:local:ffi_boundary",
+        "kind": "local",
+        "name": "ffi_boundary"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#chained_multiline:local:files",
+        "kind": "local",
+        "name": "files"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#chained_multiline:local:repo",
+        "kind": "local",
+        "name": "repo"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#chained_multiline:local:resultset",
+        "kind": "local",
+        "name": "resultset"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#chained_multiline:local:abs",
+        "kind": "local",
+        "name": "abs"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#chained_multiline:local:arm",
+        "kind": "local",
+        "name": "arm"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#chained_multiline:local:arms",
+        "kind": "local",
+        "name": "arms"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#chained_multiline:local:file",
+        "kind": "local",
+        "name": "file"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#chained_multiline:local:rel",
+        "kind": "local",
+        "name": "rel"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#assertion_argument_calls:local:result",
+        "kind": "local",
+        "name": "result"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:coverage",
+        "kind": "local",
+        "name": "coverage"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:dir",
+        "kind": "local",
+        "name": "dir"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:file",
+        "kind": "local",
+        "name": "file"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:path",
+        "kind": "local",
+        "name": "path"
+      },
+      {
+        "id": "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:v",
+        "kind": "local",
+        "name": "v"
+      }
+    ],
     "predicate_bodies": [
       {
         "body": "with_env(\"DECOMPLEX_PARSER\", \"tree_sitter\") do assert_empty C.classify_file(coverage, file, root: dir) assert_nil SlopCop::DecomplexVerdict.lookup(v, path, \"plain\", 2) end",
@@ -2522,6 +2909,41 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

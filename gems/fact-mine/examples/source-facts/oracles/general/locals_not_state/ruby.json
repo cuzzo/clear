@@ -337,8 +337,128 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactLocalsNotState#build:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactLocalsNotState#build:exit:8:14:5",
+        "kind": "exit",
+        "line": 14
+      },
+      {
+        "id": "cfg:SourceFactLocalsNotState#build:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactLocalsNotState#build:stmt:2:6:4",
+        "kind": "statement",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactLocalsNotState#build:stmt:3.loop.0:9:6",
+        "kind": "statement",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactLocalsNotState#build:stmt:3:7:4",
+        "kind": "statement",
+        "line": 7
+      },
+      {
+        "id": "cfg:SourceFactLocalsNotState#build:stmt:4:8:4",
+        "kind": "loop",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactLocalsNotState#build:stmt:5:11:4",
+        "kind": "statement",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactLocalsNotState#build:stmt:6:12:4",
+        "kind": "statement",
+        "line": 12
+      },
+      {
+        "id": "cfg:SourceFactLocalsNotState#build:stmt:7:13:4",
+        "kind": "statement",
+        "line": 13
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 4,
@@ -350,6 +470,18 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -538,6 +670,77 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactLocalsNotState#build:local:config",
+          "place:SourceFactLocalsNotState#build:local:values"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactLocalsNotState#build:local:key"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalsNotState#build:local:key"
+        ],
+        "writes": [
+          "place:SourceFactLocalsNotState#build:local:path"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalsNotState#build:local:total",
+          "place:SourceFactLocalsNotState#build:local:value"
+        ],
+        "writes": [
+          "place:SourceFactLocalsNotState#build:local:total"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactLocalsNotState#build:local:total"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalsNotState#build:local:values"
+        ],
+        "writes": [
+          "place:SourceFactLocalsNotState#build:local:value"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalsNotState#build:local:config",
+          "place:SourceFactLocalsNotState#build:local:path"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalsNotState#build:local:values"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactLocalsNotState#build:local:config",
+          "place:SourceFactLocalsNotState#build:local:path",
+          "place:SourceFactLocalsNotState#build:local:total"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -546,6 +749,38 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactLocalsNotState#build:local:config",
+        "kind": "local",
+        "name": "config"
+      },
+      {
+        "id": "place:SourceFactLocalsNotState#build:local:values",
+        "kind": "local",
+        "name": "values"
+      },
+      {
+        "id": "place:SourceFactLocalsNotState#build:local:key",
+        "kind": "local",
+        "name": "key"
+      },
+      {
+        "id": "place:SourceFactLocalsNotState#build:local:path",
+        "kind": "local",
+        "name": "path"
+      },
+      {
+        "id": "place:SourceFactLocalsNotState#build:local:total",
+        "kind": "local",
+        "name": "total"
+      },
+      {
+        "id": "place:SourceFactLocalsNotState#build:local:value",
+        "kind": "local",
+        "name": "value"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -577,6 +812,30 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

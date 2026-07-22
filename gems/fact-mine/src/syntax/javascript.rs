@@ -284,6 +284,10 @@ impl NormalizedLanguageBehavior for JavaScriptNormalizedBehavior {
         }
     }
 
+    fn function_dispatch_kind_from_node(&self, _name: &str, node: &Node, owner: &str) -> String {
+        function_dispatch_kind_from_node(node, owner)
+    }
+
     fn wrap_branch_predicate(&self, _branch: &Node) -> bool {
         true
     }
@@ -304,12 +308,48 @@ impl NormalizedLanguageBehavior for JavaScriptNormalizedBehavior {
         call.receiver == "self" && call.message == "callback"
     }
 
+    // call_parts defaults every receiver-less call's receiver to "self" (a
+    // Ruby-implicit-dispatch convention); JS/TS have no implicit self
+    // dispatch, so that default would otherwise read as a phantom field
+    // access on the called name.
+    fn suppress_method_call_state_read(&self, call: &NormalizedCallProjection) -> bool {
+        call.receiver == "self"
+    }
+
     fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
         property_read_call(node, parts)
     }
 
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
         (node.r#type == "CLASS").then_some(default_span)
+    }
+
+    // Real bug: `store.items.push(x)`/`.unshift(x)`/`.pop()` mutate `items`
+    // in place with no top-level `=`, so without this override
+    // record_state_write_for_mutating_call (normalized_extractor.rs) never
+    // fires and the receiver is only ever seen as read, never written -
+    // every JS array/collection field mutated via a method call instead of
+    // assignment was invisible as state. TypeScript already overrides this
+    // (typescript.rs); .js files use JavaScriptNormalizedBehavior, not
+    // TypeScriptNormalizedBehavior, so that override never applied to them.
+    fn mutating_receiver_message(&self, message: &str) -> bool {
+        matches!(
+            message,
+            "add"
+                | "delete"
+                | "pop"
+                | "push"
+                | "reverse"
+                | "set"
+                | "shift"
+                | "sort"
+                | "splice"
+                | "unshift"
+        )
+    }
+
+    fn treats_object_literal_binding_as_owner(&self) -> bool {
+        true
     }
 
     fn nil_guard_fact(&self, message: &str, subject: &str) -> Option<NormalizedNilGuardFact> {
@@ -414,6 +454,22 @@ pub(crate) fn property_read_call(node: &Node, parts: &NormalizedCallParts) -> bo
     }
     let text = node.text.as_str();
     !text.contains('(') || (text.starts_with('(') && text.ends_with(')'))
+}
+
+pub(crate) fn function_dispatch_kind_from_node(node: &Node, owner: &str) -> String {
+    if owner.is_empty() {
+        return "top".to_string();
+    }
+    let header = node.text.split('{').next().unwrap_or(node.text.as_str());
+    if header
+        .split(|character: char| !(character == '_' || character.is_ascii_alphanumeric()))
+        .any(|token| token == "static")
+    {
+        "class"
+    } else {
+        "instance"
+    }
+    .to_string()
 }
 
 #[cfg(test)]

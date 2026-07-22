@@ -1394,8 +1394,469 @@
         "source": "value == nil"
       }
     ],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#clone_left:entry:0:65:2",
+        "kind": "entry",
+        "line": 65
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#clone_left:exit:4:69:5",
+        "kind": "exit",
+        "line": 69
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#clone_left:stmt:1:66:4",
+        "kind": "statement",
+        "line": 66
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#clone_left:stmt:2:67:4",
+        "kind": "statement",
+        "line": 67
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#clone_left:stmt:3:68:4",
+        "kind": "statement",
+        "line": 68
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#clone_right:entry:0:71:2",
+        "kind": "entry",
+        "line": 71
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#clone_right:exit:4:75:5",
+        "kind": "exit",
+        "line": 75
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#clone_right:stmt:1:72:4",
+        "kind": "statement",
+        "line": 72
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#clone_right:stmt:2:73:4",
+        "kind": "statement",
+        "line": 73
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#clone_right:stmt:3:74:4",
+        "kind": "statement",
+        "line": 74
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#close:entry:0:8:2",
+        "kind": "entry",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#close:exit:2:10:5",
+        "kind": "exit",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#close:stmt:1:9:4",
+        "kind": "statement",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard:entry:0:17:2",
+        "kind": "entry",
+        "line": 17
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard:exit:3:21:5",
+        "kind": "exit",
+        "line": 21
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard:return:0.then.0:18:4",
+        "kind": "jump",
+        "line": 18
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard:stmt:1:18:4",
+        "kind": "branch",
+        "line": 18
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard:stmt:2:20:4",
+        "kind": "statement",
+        "line": 20
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_both_terminate:entry:0:43:2",
+        "kind": "entry",
+        "line": 43
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_both_terminate:exit:2:49:5",
+        "kind": "exit",
+        "line": 49
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_both_terminate:stmt:1:44:4",
+        "kind": "statement",
+        "line": 44
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_else_terminate:entry:0:51:2",
+        "kind": "entry",
+        "line": 51
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_else_terminate:exit:2:57:5",
+        "kind": "exit",
+        "line": 57
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_else_terminate:stmt:1:52:4",
+        "kind": "statement",
+        "line": 52
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_eq_nil:entry:0:23:2",
+        "kind": "entry",
+        "line": 23
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_eq_nil:exit:3:28:5",
+        "kind": "exit",
+        "line": 28
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_eq_nil:return:0.then.0:25:6",
+        "kind": "jump",
+        "line": 25
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_eq_nil:stmt:1:24:4",
+        "kind": "branch",
+        "line": 24
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_eq_nil:stmt:2:27:4",
+        "kind": "statement",
+        "line": 27
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_ne_nil:entry:0:30:2",
+        "kind": "entry",
+        "line": 30
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_ne_nil:exit:2:34:5",
+        "kind": "exit",
+        "line": 34
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_ne_nil:stmt:1:31:4",
+        "kind": "statement",
+        "line": 31
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_negated:entry:0:36:2",
+        "kind": "entry",
+        "line": 36
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_negated:exit:3:41:5",
+        "kind": "exit",
+        "line": 41
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_negated:return:0.then.0:38:6",
+        "kind": "jump",
+        "line": 38
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_negated:stmt:1:37:4",
+        "kind": "branch",
+        "line": 37
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_negated:stmt:2:40:4",
+        "kind": "statement",
+        "line": 40
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_safe_nav_cond:entry:0:59:2",
+        "kind": "entry",
+        "line": 59
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_safe_nav_cond:exit:2:63:5",
+        "kind": "exit",
+        "line": 63
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_safe_nav_cond:stmt:1:60:4",
+        "kind": "statement",
+        "line": 60
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#open:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#open:exit:2:6:5",
+        "kind": "exit",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#open:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#run:entry:0:12:2",
+        "kind": "entry",
+        "line": 12
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#run:exit:3:15:5",
+        "kind": "exit",
+        "line": 15
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#run:stmt:1.then.0:14:4",
+        "kind": "statement",
+        "line": 14
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#run:stmt:1:13:4",
+        "kind": "statement",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#run:stmt:2:14:4",
+        "kind": "branch",
+        "line": 14
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 12,
@@ -1501,6 +1962,56 @@
         "params": [],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -2094,6 +2605,262 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#clone_left:local:user"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#clone_left:local:user"
+        ],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#clone_left:local:data"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#clone_left:local:data"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#clone_left:local:data"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#clone_right:local:account"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#clone_right:local:account"
+        ],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#clone_right:local:data"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#clone_right:local:data"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#clone_right:local:data"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#close:instance_field:@opened"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#guard:local:value"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard:local:value"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard:local:value"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#guard_both_terminate:local:value"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard_both_terminate:local:value"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#guard_else_terminate:local:value"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard_else_terminate:local:value"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#guard_eq_nil:local:value"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard_eq_nil:local:value"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard_eq_nil:local:value"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#guard_ne_nil:local:value"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard_ne_nil:local:value"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#guard_negated:local:value"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard_negated:local:value"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard_negated:local:value"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#guard_safe_nav_cond:local:value"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard_safe_nav_cond:local:value"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#open:instance_field:@opened"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#run:local:item"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#run:local:item"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -2102,6 +2869,78 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactProtocolsNilClone#run:local:item",
+        "kind": "local",
+        "name": "item"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#guard:local:value",
+        "kind": "local",
+        "name": "value"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#guard_eq_nil:local:value",
+        "kind": "local",
+        "name": "value"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#guard_ne_nil:local:value",
+        "kind": "local",
+        "name": "value"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#guard_negated:local:value",
+        "kind": "local",
+        "name": "value"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#guard_both_terminate:local:value",
+        "kind": "local",
+        "name": "value"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#open:instance_field:@opened",
+        "kind": "instance_field",
+        "name": "@opened"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#guard_else_terminate:local:value",
+        "kind": "local",
+        "name": "value"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#guard_safe_nav_cond:local:value",
+        "kind": "local",
+        "name": "value"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#clone_left:local:user",
+        "kind": "local",
+        "name": "user"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#clone_left:local:data",
+        "kind": "local",
+        "name": "data"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#clone_right:local:account",
+        "kind": "local",
+        "name": "account"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#clone_right:local:data",
+        "kind": "local",
+        "name": "data"
+      },
+      {
+        "id": "place:SourceFactProtocolsNilClone#close:instance_field:@opened",
+        "kind": "instance_field",
+        "name": "@opened"
+      }
+    ],
     "predicate_bodies": [
       {
         "body": "if !value.nil? value.name else raise \"nil!\" end",
@@ -2455,6 +3294,75 @@
           "opened"
         ]
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [
       {

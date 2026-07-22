@@ -151,8 +151,67 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactMultilineHashLocalFlow#summary:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactMultilineHashLocalFlow#summary:exit:4:10:5",
+        "kind": "exit",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactMultilineHashLocalFlow#summary:stmt:1:6:6",
+        "kind": "statement",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactMultilineHashLocalFlow#summary:stmt:2:7:6",
+        "kind": "statement",
+        "line": 7
+      },
+      {
+        "id": "cfg:SourceFactMultilineHashLocalFlow#summary:stmt:3:8:6",
+        "kind": "statement",
+        "line": 8
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 4,
@@ -163,6 +222,13 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -236,6 +302,36 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactMultilineHashLocalFlow#summary:local:label"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactMultilineHashLocalFlow#summary:local:label"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactMultilineHashLocalFlow#summary:instance_field:@items"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactMultilineHashLocalFlow#summary:instance_field:@active"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -244,6 +340,23 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactMultilineHashLocalFlow#summary:instance_field:@active",
+        "kind": "instance_field",
+        "name": "@active"
+      },
+      {
+        "id": "place:SourceFactMultilineHashLocalFlow#summary:instance_field:@items",
+        "kind": "instance_field",
+        "name": "@items"
+      },
+      {
+        "id": "place:SourceFactMultilineHashLocalFlow#summary:local:label",
+        "kind": "local",
+        "name": "label"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -270,6 +383,18 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

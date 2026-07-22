@@ -11,99 +11,52 @@ module SlopCop
 
       def findings(provider, repo:, additions:, evidence:)
         repo = File.expand_path(repo)
-        additions.each_with_object([]) do |(path, lines), out|
-          next unless provider.source_path?(path)
+        changed_files = additions.keys.select { |path| provider.source_path?(path) }
+        return [] if changed_files.empty?
 
-          hazards = provider.scan_file(path, source_contents(repo, path))
+        hazards = provider.scan_hazards(repo: repo, paths: changed_files)
+
+        hazards.each_with_object([]) do |hazard, out|
+          path = hazard[:path] || hazard["path"]
+          lines = additions[path]
+          next unless lines
+
           changed = lines.to_set
-          hazards.each do |hazard|
-            next unless changed.include?(hazard[:line])
+          line = hazard[:line] || hazard["line"]
+          next unless changed.include?(line)
+          req_ev = hazard[:required_evidence] || hazard["required_evidence"]
+          report_required = hazard.key?(:report_required) ? hazard[:report_required] : hazard.fetch("report_required", true)
+          next unless report_required
+
+          coverage_required = hazard.key?(:coverage_required) ? hazard[:coverage_required] : hazard.fetch("coverage_required", true)
+          if coverage_required
             next if covered?(evidence, hazard)
-
-            out << Finding.new(
-              path: path,
-              line: hazard[:line],
-              rule_id: provider.rule_id_for(hazard[:required_evidence]),
-              message: "changed #{hazard[:label]} has no #{hazard[:required_evidence]} coverage evidence",
-              source: hazard[:source],
-              hazard_type: hazard[:hazard_type],
-              required_evidence: hazard[:required_evidence],
-              severity: "warning"
-            )
+            message = "changed #{hazard[:label] || hazard["label"]} has no #{req_ev} coverage evidence"
+          else
+            claim = hazard[:evidence_claim] || hazard["evidence_claim"] || "site_reached"
+            message = "changed #{hazard[:label] || hazard["label"]} requires review; #{claim} evidence cannot satisfy this hazard"
           end
-        end
-      end
 
-      def scan_hazards(provider, repo:, paths: nil)
-        repo = File.expand_path(repo)
-        files = if paths && !Array(paths).empty?
-                  Array(paths).select { |path| provider.source_path?(path) }
-                else
-                  Dir.chdir(repo) { Dir["**/*"] }.select { |path| File.file?(File.join(repo, path)) && provider.source_path?(path) }
-                end
-        files.flat_map do |path|
-          provider.scan_file(path, source_contents(repo, path))
-        end.sort_by { |site| [site[:path], site[:line], site[:hazard_type]] }
+          out << Finding.new(
+            path: path,
+            line: line,
+            rule_id: provider.rule_id_for(req_ev),
+            message: message,
+            source: hazard[:source] || hazard["source"],
+            hazard_type: hazard[:hazard_type] || hazard["hazard_type"],
+            required_evidence: req_ev,
+            severity: "warning"
+          )
+        end
       end
 
       def covered?(evidence, hazard)
-        evidence_type = hazard[:required_evidence]
+        evidence_type = hazard[:required_evidence] || hazard["required_evidence"]
         return false unless evidence.known_type?(evidence_type)
 
-        evidence.line_covered?(evidence_type, hazard[:path], hazard[:line])
-      end
-
-      def source_contents(repo, path)
-        file = File.join(repo, path)
-        File.file?(file) ? File.read(file) : ""
-      end
-
-      def hazard(path, line, source, hazard_type, required_evidence, label)
-        {
-          path: path,
-          line: line,
-          source: source.strip,
-          hazard_type: hazard_type,
-          required_evidence: required_evidence,
-          label: label
-        }
-      end
-
-      def c_style_code(line, in_block_comment)
-        out = +""
-        rest = line.to_s
-        loop do
-          if in_block_comment[:active]
-            after = rest.split("*/", 2)[1]
-            return strip_strings(out) unless after
-
-            in_block_comment[:active] = false
-            rest = after
-            next
-          end
-
-          block = rest.index("/*")
-          comment = rest.index("//")
-          case
-          when block && comment && comment < block
-            out << rest[0...comment]
-            return strip_strings(out)
-          when block
-            out << rest[0...block]
-            rest = rest[(block + 2)..].to_s
-            in_block_comment[:active] = true
-          when comment
-            out << rest[0...comment]
-            return strip_strings(out)
-          else
-            out << rest
-            return strip_strings(out)
-          end
-        end
-      end
-
-      def strip_strings(code)
-        code.to_s.gsub(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/, '""')
+        path = hazard[:path] || hazard["path"]
+        line = hazard[:line] || hazard["line"]
+        evidence.line_covered?(evidence_type, path, line)
       end
 
       def excluded_path?(path, dirs:, file_suffixes: [])
@@ -111,14 +64,6 @@ module SlopCop
         return true if parts.any? { |part| dirs.include?(part) || part.start_with?(".") }
 
         file_suffixes.any? { |suffix| path.end_with?(suffix) }
-      end
-
-      def token?(code, token)
-        code.match?(/(?<![A-Za-z0-9_])#{Regexp.escape(token)}(?![A-Za-z0-9_])/)
-      end
-
-      def any_include?(code, needles)
-        needles.any? { |needle| code.include?(needle) }
       end
     end
   end

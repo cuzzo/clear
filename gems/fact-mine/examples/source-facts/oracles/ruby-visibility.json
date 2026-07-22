@@ -188,8 +188,68 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {},
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactVisibility#prepare:entry:0:10:2",
+        "kind": "entry",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactVisibility#prepare:exit:2:12:5",
+        "kind": "exit",
+        "line": 12
+      },
+      {
+        "id": "cfg:SourceFactVisibility#prepare:stmt:1:11:4",
+        "kind": "statement",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactVisibility#public_step:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactVisibility#public_step:exit:2:6:5",
+        "kind": "exit",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactVisibility#public_step:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      }
+    ],
     "decisions": [],
+    "def_use": [],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [],
     "functions": [
       {
         "line": 10,
@@ -212,6 +272,14 @@
         "params": [],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -281,6 +349,34 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactVisibility#prepare:instance_field:@ready"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -289,6 +385,13 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactVisibility#prepare:instance_field:@ready",
+        "kind": "instance_field",
+        "name": "@ready"
+      }
+    ],
     "predicate_bodies": [
       {
         "body": "true",
@@ -355,6 +458,15 @@
         "writes": []
       }
     ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [],
     "redundant_nil_guards": [],
     "semantic_effects": [],
     "state_declarations": [],

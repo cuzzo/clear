@@ -500,8 +500,102 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactReceiverAttributeLocalFlow#apply:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactReceiverAttributeLocalFlow#apply:exit:7:11:5",
+        "kind": "exit",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactReceiverAttributeLocalFlow#apply:stmt:1:5:4",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactReceiverAttributeLocalFlow#apply:stmt:2:6:4",
+        "kind": "statement",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactReceiverAttributeLocalFlow#apply:stmt:3:7:4",
+        "kind": "statement",
+        "line": 7
+      },
+      {
+        "id": "cfg:SourceFactReceiverAttributeLocalFlow#apply:stmt:4:8:4",
+        "kind": "statement",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactReceiverAttributeLocalFlow#apply:stmt:5:9:4",
+        "kind": "statement",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactReceiverAttributeLocalFlow#apply:stmt:6:10:4",
+        "kind": "statement",
+        "line": 10
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 4,
@@ -513,6 +607,16 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -679,6 +783,62 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [
+          "place:SourceFactReceiverAttributeLocalFlow#apply:local:row"
+        ],
+        "writes": [
+          "place:SourceFactReceiverAttributeLocalFlow#apply:instance_field:@repo"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactReceiverAttributeLocalFlow#apply:local:facts",
+          "place:SourceFactReceiverAttributeLocalFlow#apply:local:row"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactReceiverAttributeLocalFlow#apply:local:facts",
+          "place:SourceFactReceiverAttributeLocalFlow#apply:local:row"
+        ],
+        "writes": [
+          "place:SourceFactReceiverAttributeLocalFlow#apply:local:fact"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactReceiverAttributeLocalFlow#apply:local:fact",
+          "place:SourceFactReceiverAttributeLocalFlow#apply:local:row"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactReceiverAttributeLocalFlow#apply:local:fact",
+          "place:SourceFactReceiverAttributeLocalFlow#apply:local:row"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactReceiverAttributeLocalFlow#apply:local:row"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactReceiverAttributeLocalFlow#apply:local:fact"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -687,6 +847,28 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactReceiverAttributeLocalFlow#apply:local:facts",
+        "kind": "local",
+        "name": "facts"
+      },
+      {
+        "id": "place:SourceFactReceiverAttributeLocalFlow#apply:local:row",
+        "kind": "local",
+        "name": "row"
+      },
+      {
+        "id": "place:SourceFactReceiverAttributeLocalFlow#apply:instance_field:@repo",
+        "kind": "instance_field",
+        "name": "@repo"
+      },
+      {
+        "id": "place:SourceFactReceiverAttributeLocalFlow#apply:local:fact",
+        "kind": "local",
+        "name": "fact"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -718,6 +900,27 @@
           "row.status"
         ]
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [

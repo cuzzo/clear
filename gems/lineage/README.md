@@ -423,6 +423,43 @@ Stack-trace ingestion is commit-scoped. Re-ingesting the same event is
 idempotent; use `--replace` to reload the commits present in an input
 file.
 
+### Runtime profiling (pprof) hotness
+
+Static Big-O says which functions can be expensive; a profile says which
+ones are. Lineage ingests `profile-hotness/v1` and uses it to rank the
+Expensive Operations view (Big-O first, then measured share), badge
+critical functions with a flame icon in the file view, and annotate lines
+in the info popup.
+
+```bash
+# capture with your language's profiler, e.g. Go:
+go tool pprof -top -lines cpu.pb.gz > pprof-top.txt
+# convert (also accepts stackprof JSON and perf script output):
+ruby gems/lineage/tools/pprof_to_hotness.rb --pprof-top pprof-top.txt > hotness.json
+# ingest:
+lineage ingest-hotness --db lineage.db --repo . --input hotness.json
+```
+
+For this repository, `ruby tools/profile_hotness.rb --target NAME --ingest
+--db lineage.db` packages the whole flow per sub-project. For perf-based
+languages the binary must carry DWARF or frames arrive without file:line -
+build Rust with `cargo build --profile profiling` and do not strip
+Zig/C/C++ binaries. Frames without paths are resolved against the
+logical-unit inventory at ingest time and never guessed.
+
+See [profiling-data-integration.md](docs/agents/profiling-data-integration.md)
+for per-language recipes, resolution tiers, and known gaps.
+
+### MCP server
+
+`lineage mcp --db lineage.db --repo .` exposes five read-only,
+workflow-shaped tools (file risk, unit context, verification gaps, change
+history, find-definition) over stdio MCP - not one tool per table. `--db`
+is optional: omitting it runs a DB-less mode serving live-disk structure
+and in-process hazard scans only. See
+[mcp.md](docs/agents/mcp.md) for the tool list, why 5 and not 17, the
+uncommitted-changes and DB-less designs, and known gaps.
+
 ## Supported Languages Roadmap
 
 Lineage uses Tree-sitter-backed logical-unit extraction for the core

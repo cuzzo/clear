@@ -12,12 +12,12 @@ module SlopCop
     class Audit
       attr_reader :repo, :base, :head, :coverage_specs, :languages
 
-      def initialize(repo:, base:, head: "HEAD", coverage_specs: [], languages: ["zig"])
+      def initialize(repo:, base:, head: "HEAD", coverage_specs: [], languages: nil)
         @repo = File.expand_path(repo)
         @base = base
         @head = head
         @coverage_specs = coverage_specs
-        @languages = languages
+        @languages = languages || Constraints.providers.keys
       end
 
       def findings

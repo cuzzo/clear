@@ -1,0 +1,301 @@
+//! The canonical hazard contract and its query resources.
+//!
+//! The contract is parsed once by this crate, and Rust consumers resolve
+//! hazard metadata through the same anchored glob matcher. Ruby consumers
+//! load the JSON resource and exercise the shared matcher vectors.
+
+use serde::Deserialize;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::sync::OnceLock;
+
+pub const CONTRACT_JSON: &str = include_str!("../contract.json");
+
+pub const C_HAZARDS: &str = include_str!("../queries/c_hazards.scm");
+pub const CPP_HAZARDS: &str = include_str!("../queries/cpp_hazards.scm");
+pub const CSHARP_HAZARDS: &str = include_str!("../queries/csharp_hazards.scm");
+pub const GO_HAZARDS: &str = include_str!("../queries/go_hazards.scm");
+pub const RUST_HAZARDS: &str = include_str!("../queries/rust_hazards.scm");
+pub const ZIG_HAZARDS: &str = include_str!("../queries/zig_hazards.scm");
+pub const RUBY_HAZARDS: &str = include_str!("../queries/ruby_hazards.scm");
+pub const PYTHON_HAZARDS: &str = include_str!("../queries/python_hazards.scm");
+pub const JAVASCRIPT_HAZARDS: &str = include_str!("../queries/javascript_hazards.scm");
+pub const TYPESCRIPT_HAZARDS: &str = include_str!("../queries/typescript_hazards.scm");
+pub const LUA_HAZARDS: &str = include_str!("../queries/lua_hazards.scm");
+pub const JAVA_HAZARDS: &str = include_str!("../queries/java_hazards.scm");
+pub const PHP_HAZARDS: &str = include_str!("../queries/php_hazards.scm");
+pub const KOTLIN_HAZARDS: &str = include_str!("../queries/kotlin_hazards.scm");
+pub const SWIFT_HAZARDS: &str = include_str!("../queries/swift_hazards.scm");
+
+/// The query resources exported by this crate. The manifest's `queries` map
+/// is validated against this list so adding a query cannot silently bypass
+/// the contract or leave a stale language name behind.
+pub const QUERY_RESOURCES: &[(&str, &str)] = &[
+    ("c", C_HAZARDS),
+    ("cpp", CPP_HAZARDS),
+    ("csharp", CSHARP_HAZARDS),
+    ("go", GO_HAZARDS),
+    ("rust", RUST_HAZARDS),
+    ("zig", ZIG_HAZARDS),
+    ("ruby", RUBY_HAZARDS),
+    ("python", PYTHON_HAZARDS),
+    ("javascript", JAVASCRIPT_HAZARDS),
+    ("typescript", TYPESCRIPT_HAZARDS),
+    ("lua", LUA_HAZARDS),
+    ("java", JAVA_HAZARDS),
+    ("php", PHP_HAZARDS),
+    ("kotlin", KOTLIN_HAZARDS),
+    ("swift", SWIFT_HAZARDS),
+];
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct EvidencePolicy {
+    pub claim: String,
+    #[serde(default)]
+    pub proves: Vec<String>,
+    #[serde(default)]
+    pub does_not_prove: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct HazardPolicy {
+    #[serde(rename = "match")]
+    pub pattern: String,
+    pub kind: String,
+    pub evidence_provider: String,
+    pub evidence_claim: String,
+    pub coverage_required: bool,
+    pub report_required: bool,
+    pub label: String,
+    pub mitigation: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct MatcherVector {
+    pub pattern: String,
+    pub value: String,
+    pub matches: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct ContractDocument {
+    version: u32,
+    evidence: BTreeMap<String, EvidencePolicy>,
+    policies: Vec<HazardPolicy>,
+    queries: BTreeMap<String, String>,
+    matcher_vectors: Vec<MatcherVector>,
+}
+
+fn contract() -> &'static ContractDocument {
+    static CONTRACT: OnceLock<ContractDocument> = OnceLock::new();
+    CONTRACT.get_or_init(|| {
+        serde_json::from_str(CONTRACT_JSON)
+            .unwrap_or_else(|error| panic!("bundled hazard contract must be valid JSON: {error}"))
+    })
+}
+
+fn ensure_contract_is_valid() {
+    static VALIDATED: OnceLock<()> = OnceLock::new();
+    VALIDATED.get_or_init(|| {
+        validate_contract()
+            .unwrap_or_else(|error| panic!("invalid bundled hazard contract: {error}"));
+    });
+}
+
+/// Resolve a hazard name using the canonical anchored glob semantics.
+pub fn resolve_hazard_policy(hazard_type: &str) -> Option<&'static HazardPolicy> {
+    ensure_contract_is_valid();
+    contract()
+        .policies
+        .iter()
+        .find(|policy| glob_matches(&policy.pattern, hazard_type))
+}
+
+/// Return whether `value` matches the complete `pattern`. The only wildcard
+/// is `*`, which matches zero or more Unicode scalar values; matching is
+/// anchored at both ends.
+pub fn glob_matches(pattern: &str, value: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let value: Vec<char> = value.chars().collect();
+    let mut current = vec![false; value.len() + 1];
+    current[0] = true;
+
+    for pattern_character in pattern {
+        let mut next = vec![false; value.len() + 1];
+        if pattern_character == '*' {
+            next[0] = current[0];
+            for index in 1..=value.len() {
+                next[index] = current[index] || next[index - 1];
+            }
+        } else {
+            for index in 1..=value.len() {
+                next[index] = current[index - 1] && pattern_character == value[index - 1];
+            }
+        }
+        current = next;
+    }
+
+    current[value.len()]
+}
+
+/// Return whether a numeric literal on a C/C++ arithmetic hazard is
+/// sanitizer-relevant. Dynamic operands remain relevant; harmless literals
+/// such as `/ 2` and `<< 3` do not. Zero divisors and shift counts at least
+/// 32 are retained conservatively for UBSan's target-type checks.
+pub fn c_arithmetic_literal_is_relevant(operator: &str, rhs: &str) -> bool {
+    let mut literal = rhs.trim();
+    let without_suffix = literal.trim_end_matches(['u', 'U', 'l', 'L']);
+    literal = without_suffix;
+    let value = if let Some(hex) = literal
+        .strip_prefix("0x")
+        .or_else(|| literal.strip_prefix("0X"))
+    {
+        u128::from_str_radix(hex, 16).ok()
+    } else if literal.chars().all(|character| character.is_ascii_digit()) {
+        literal.parse::<u128>().ok()
+    } else {
+        None
+    };
+    let Some(value) = value else {
+        return true;
+    };
+    match operator {
+        "/" | "%" => value == 0,
+        "<<" | ">>" => value >= 32,
+        _ => true,
+    }
+}
+
+fn query_hazard_names(query: &str) -> Vec<String> {
+    let bytes = query.as_bytes();
+    let mut names = Vec::new();
+    let mut index = 0;
+    while index + 8 < bytes.len() {
+        if bytes[index..].starts_with(b"@hazard.") {
+            let start = index + 8;
+            let mut end = start;
+            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+                end += 1;
+            }
+            if end > start {
+                names.push(query[start..end].to_string());
+            }
+            index = end;
+        } else {
+            index += 1;
+        }
+    }
+    names
+}
+
+/// Validate all policy/query invariants shared by FactMine, Lineage, and
+/// SlopCop. JSON parsing is delegated to serde_json so UTF-8 and escaped
+/// Unicode, including surrogate pairs, follow the JSON specification.
+pub fn validate_contract() -> Result<(), String> {
+    let contract = contract();
+    if contract.version != 1 {
+        return Err(format!(
+            "unsupported hazard contract version {}",
+            contract.version
+        ));
+    }
+
+    let resource_names: BTreeSet<_> = QUERY_RESOURCES.iter().map(|(name, _)| *name).collect();
+    let manifest_names: BTreeSet<_> = contract.queries.keys().map(String::as_str).collect();
+    if resource_names != manifest_names {
+        return Err(format!(
+            "query resources and contract.queries differ: resources={resource_names:?}, manifest={manifest_names:?}"
+        ));
+    }
+
+    let mut patterns = HashSet::new();
+    for policy in &contract.policies {
+        for (field, value) in [
+            ("match", policy.pattern.as_str()),
+            ("kind", policy.kind.as_str()),
+            ("evidence_provider", policy.evidence_provider.as_str()),
+            ("evidence_claim", policy.evidence_claim.as_str()),
+            ("label", policy.label.as_str()),
+            ("mitigation", policy.mitigation.as_str()),
+        ] {
+            if value.is_empty() {
+                return Err(format!("policy field {field:?} must not be empty"));
+            }
+        }
+        let Some(evidence) = contract.evidence.get(&policy.evidence_provider) else {
+            return Err(format!(
+                "policy {:?} uses unknown evidence provider {:?}",
+                policy.pattern, policy.evidence_provider
+            ));
+        };
+        if evidence.claim != policy.evidence_claim {
+            return Err(format!(
+                "policy {:?} claims {:?}, provider {:?} declares {:?}",
+                policy.pattern, policy.evidence_claim, policy.evidence_provider, evidence.claim
+            ));
+        }
+        if !patterns.insert(&policy.pattern) {
+            return Err(format!("duplicate hazard policy {:?}", policy.pattern));
+        }
+    }
+
+    if contract.matcher_vectors.is_empty() {
+        return Err("contract.matcher_vectors must not be empty".to_string());
+    }
+    for vector in &contract.matcher_vectors {
+        if glob_matches(&vector.pattern, &vector.value) != vector.matches {
+            return Err(format!(
+                "matcher vector disagrees with anchored glob semantics: {:?}",
+                vector
+            ));
+        }
+    }
+
+    for (name, query) in QUERY_RESOURCES {
+        let Some(query_path) = contract.queries.get(*name) else {
+            return Err(format!("missing query manifest entry {name:?}"));
+        };
+        let expected_path = format!("queries/{name}_hazards.scm");
+        if query_path != &expected_path {
+            return Err(format!(
+                "query manifest entry {name:?} points to {query_path:?}, expected {expected_path:?}"
+            ));
+        }
+        let captures = query_hazard_names(query);
+        if captures.is_empty() {
+            return Err(format!("query {name:?} exports no hazard captures"));
+        }
+        for hazard in captures {
+            let matches = contract
+                .policies
+                .iter()
+                .filter(|policy| glob_matches(&policy.pattern, &hazard))
+                .count();
+            if matches != 1 {
+                return Err(format!(
+                    "hazard capture {hazard:?} matches {matches} policies; policy overlap is ambiguous"
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{glob_matches, validate_contract};
+
+    #[test]
+    fn canonical_contract_is_valid_and_synchronized() {
+        validate_contract().expect("canonical hazard contract must validate");
+    }
+
+    #[test]
+    fn glob_matching_is_anchored() {
+        assert!(glob_matches("go_race_*", "go_race_lock"));
+        assert!(!glob_matches("go_race_*", "xgo_race_lock"));
+        assert!(!glob_matches("*_metaprogramming", "metaprogramming"));
+        assert!(glob_matches("*_vopr_*", "zig_vopr_time"));
+        assert!(!glob_matches("*_vopr_*", "zig_vopr"));
+    }
+}

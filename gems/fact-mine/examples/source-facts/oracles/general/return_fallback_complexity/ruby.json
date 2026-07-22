@@ -479,8 +479,98 @@
       }
     ],
     "comparisons": [],
+    "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "return"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      }
+    ],
+    "control_flow_metrics": [
+      {}
+    ],
+    "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactReturnFallbackComplexity#state_type_for:entry:0:4:2",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:SourceFactReturnFallbackComplexity#state_type_for:exit:3:13:5",
+        "kind": "exit",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactReturnFallbackComplexity#state_type_for:return:0.then.0:5:4",
+        "kind": "jump",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactReturnFallbackComplexity#state_type_for:return:1.then.1:9:6",
+        "kind": "jump",
+        "line": 9
+      },
+      {
+        "id": "cfg:SourceFactReturnFallbackComplexity#state_type_for:stmt:1.then.0:8:6",
+        "kind": "statement",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactReturnFallbackComplexity#state_type_for:stmt:1:5:4",
+        "kind": "branch",
+        "line": 5
+      },
+      {
+        "id": "cfg:SourceFactReturnFallbackComplexity#state_type_for:stmt:2:7:4",
+        "kind": "branch",
+        "line": 7
+      }
+    ],
     "decisions": [],
+    "def_use": [
+      {},
+      {},
+      {}
+    ],
     "dispatch_sites": [],
+    "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 4,
@@ -492,6 +582,15 @@
         ],
         "visibility": "public"
       }
+    ],
+    "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "local_complexity_scores": [
       {
@@ -587,6 +686,54 @@
         ]
       }
     ],
+    "node_effects": [
+      {
+        "reads": [],
+        "writes": [
+          "place:SourceFactReturnFallbackComplexity#state_type_for:local:receiver",
+          "place:SourceFactReturnFallbackComplexity#state_type_for:local:state_types"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactReturnFallbackComplexity#state_type_for:local:receiver",
+          "place:SourceFactReturnFallbackComplexity#state_type_for:local:state_types"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactReturnFallbackComplexity#state_type_for:local:field",
+          "place:SourceFactReturnFallbackComplexity#state_type_for:local:state_types"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactReturnFallbackComplexity#state_type_for:local:receiver"
+        ],
+        "writes": [
+          "place:SourceFactReturnFallbackComplexity#state_type_for:local:field"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactReturnFallbackComplexity#state_type_for:local:receiver",
+          "place:SourceFactReturnFallbackComplexity#state_type_for:local:state_types"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactReturnFallbackComplexity#state_type_for:local:receiver"
+        ],
+        "writes": []
+      }
+    ],
     "owners": [
       {
         "kind": "class",
@@ -595,6 +742,23 @@
       }
     ],
     "path_conditions": [],
+    "places": [
+      {
+        "id": "place:SourceFactReturnFallbackComplexity#state_type_for:local:receiver",
+        "kind": "local",
+        "name": "receiver"
+      },
+      {
+        "id": "place:SourceFactReturnFallbackComplexity#state_type_for:local:state_types",
+        "kind": "local",
+        "name": "state_types"
+      },
+      {
+        "id": "place:SourceFactReturnFallbackComplexity#state_type_for:local:field",
+        "kind": "local",
+        "name": "field"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -622,6 +786,25 @@
         ],
         "writes": []
       }
+    ],
+    "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
     ],
     "redundant_nil_guards": [],
     "semantic_effects": [],

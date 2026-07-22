@@ -2,10 +2,10 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use lineage::{
     coverage_records_to_test_exposure_json, ingest_coverage_json_with_options, ingest_hazards,
-    ingest_mutant_facts_json, ingest_sarif_paths, ingest_stack_traces,
+    ingest_hotness_json, ingest_mutant_facts_json, ingest_sarif_paths, ingest_stack_traces,
     ingest_test_exposure_json, parse_coverage_input, resolve_coverage_record_paths, serve_lsp,
-    serve_ui_with_overlays, CoverageIngestOptions, GitProvider, HeuristicExtractor, LineageEngine,
-    RepoPathNormalizer, SentryProvider, Storage, ingest_architecture_json,
+    serve_mcp, serve_ui_with_overlays, CoverageIngestOptions, GitProvider, HeuristicExtractor,
+    LineageEngine, RepoPathNormalizer, SentryProvider, Storage, ingest_architecture_json,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -79,6 +79,14 @@ enum Command {
         #[arg(long = "overlay")]
         overlays: Vec<PathBuf>,
     },
+    /// Serve lineage.db to LLM coding agents over the Model Context Protocol.
+    /// Omit --db to run DB-less (live disk facts only; see docs/agents/mcp.md).
+    Mcp {
+        #[arg(long)]
+        db: Option<PathBuf>,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+    },
     /// Ingest aggregate coverage or mutation quality data for one commit.
     IngestCoverage {
         #[arg(long, default_value = "lineage.db")]
@@ -131,6 +139,19 @@ enum Command {
         timestamp: Option<i64>,
         #[arg(long, default_value = "unit")]
         test_type: String,
+    },
+    /// Ingest profile-hotness/v1 runtime profiling shares.
+    IngestHotness {
+        #[arg(long, default_value = "lineage.db")]
+        db: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        commit: Option<String>,
     },
     /// Ingest current hazard sites for one provider and commit.
     IngestHazards {
@@ -271,6 +292,12 @@ fn main() -> Result<()> {
                 .enable_all()
                 .build()?;
             runtime.block_on(serve_lsp(db, repo, &overlays))?;
+        }
+        Command::Mcp { db, repo } => {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            runtime.block_on(serve_mcp(db, repo))?;
         }
         Command::IngestCoverage {
             db,
@@ -427,6 +454,33 @@ fn main() -> Result<()> {
                 stats.exposure_events,
                 stats.skipped_files,
                 stats.skipped_facts
+            );
+        }
+        Command::IngestHotness {
+            db,
+            repo,
+            input,
+            source,
+            commit,
+        } => {
+            let storage = Storage::open(&db)?;
+            let normalizer = RepoPathNormalizer::new(&repo);
+            let payload = fs::read_to_string(&input)?;
+            let stats = ingest_hotness_json(
+                &storage,
+                &normalizer,
+                &payload,
+                source.as_deref(),
+                commit.as_deref(),
+            )?;
+            println!(
+                "ingested hotness: entries={} critical={} skipped={} resolved_exact={} resolved_symbol={} unresolved={}",
+                stats.entries,
+                stats.critical,
+                stats.skipped,
+                stats.resolved_exact,
+                stats.resolved_symbol,
+                stats.unresolved
             );
         }
         Command::IngestHazards {

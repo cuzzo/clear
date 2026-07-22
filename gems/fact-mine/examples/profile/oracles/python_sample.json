@@ -1,15 +1,97 @@
 {
   "array_shapes": [],
+  "declaration_type_pressures": [
+    {
+      "collection_depth": 0,
+      "declaration_kind": "state_field",
+      "declaration_name": "@port",
+      "declared_type": {
+        "data": "int",
+        "kind": "Primitive"
+      },
+      "id": "python\u0000examples/profile/python_sample.py\u0000Database\u0000state_field\u0000@port\u00005\u0000python-typing\u0000declared",
+      "language": "python",
+      "line": 5,
+      "nested_union_width": 0,
+      "nilable": false,
+      "nilable_collection": false,
+      "owner": "Database",
+      "path": "examples/profile/python_sample.py",
+      "slot": "declared",
+      "union_width": 0,
+      "unknown_leaves": 0
+    },
+    {
+      "collection_depth": 0,
+      "declaration_kind": "method_signature",
+      "declaration_name": "__init__",
+      "declared_type": {
+        "data": "Database",
+        "kind": "Primitive"
+      },
+      "id": "python\u0000examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000__init__\u00008\u0000python-typing\u0000param:db",
+      "language": "python",
+      "line": 8,
+      "nested_union_width": 0,
+      "nilable": false,
+      "nilable_collection": false,
+      "owner": "Greeter",
+      "path": "examples/profile/python_sample.py",
+      "slot": "param:db",
+      "union_width": 0,
+      "unknown_leaves": 0
+    },
+    {
+      "collection_depth": 0,
+      "declaration_kind": "method_signature",
+      "declaration_name": "hello",
+      "declared_type": {
+        "data": "str",
+        "kind": "Primitive"
+      },
+      "id": "python\u0000examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000hello\u000011\u0000python-typing\u0000param:name",
+      "language": "python",
+      "line": 11,
+      "nested_union_width": 0,
+      "nilable": false,
+      "nilable_collection": false,
+      "owner": "Greeter",
+      "path": "examples/profile/python_sample.py",
+      "slot": "param:name",
+      "union_width": 0,
+      "unknown_leaves": 0
+    },
+    {
+      "collection_depth": 0,
+      "declaration_kind": "method_signature",
+      "declaration_name": "hello",
+      "declared_type": {
+        "data": "str",
+        "kind": "Primitive"
+      },
+      "id": "python\u0000examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000hello\u000011\u0000python-typing\u0000return",
+      "language": "python",
+      "line": 11,
+      "nested_union_width": 0,
+      "nilable": false,
+      "nilable_collection": false,
+      "owner": "Greeter",
+      "path": "examples/profile/python_sample.py",
+      "slot": "return",
+      "union_width": 0,
+      "unknown_leaves": 0
+    }
+  ],
   "fields": [
     {
       "declared_type": "int",
-      "id": "state:ac29136eabc706a4",
+      "id": "state:41638fe5d66c2aa3",
       "language": "python",
       "line": 5,
-      "name": "port",
+      "name": "@port",
       "owner": "Database",
-      "owner_id": "owner:b8064726d03619ce",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "owner_id": "owner:1a8faee6057d3971",
+      "path": "examples/profile/python_sample.py",
       "source": "syntax",
       "span": [
         5,
@@ -21,31 +103,13 @@
     },
     {
       "declared_type": null,
-      "id": "state:f001f40fc32da24e",
-      "language": "python",
-      "line": 5,
-      "name": "@port",
-      "owner": "Database",
-      "owner_id": "owner:b8064726d03619ce",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
-      "source": "syntax",
-      "span": [
-        5,
-        8,
-        5,
-        29
-      ],
-      "static_origin": "state_write"
-    },
-    {
-      "declared_type": null,
-      "id": "state:708fb7824917db17",
+      "id": "state:04ff731a0d59825a",
       "language": "python",
       "line": 9,
       "name": "@_db",
       "owner": "Greeter",
-      "owner_id": "owner:a8957e23a055d851",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "owner_id": "owner:d2af1adb22a6d402",
+      "path": "examples/profile/python_sample.py",
       "source": "syntax",
       "span": [
         9,
@@ -56,10 +120,69 @@
       "static_origin": "state_write"
     }
   ],
+  "flow_local_types": [
+    {
+      "complete": true,
+      "file": "examples/profile/python_sample.py",
+      "function": "__init__",
+      "line": 9,
+      "name": "db",
+      "node_id": "cfg:Greeter#__init__:stmt:1:9:8",
+      "owner": "Greeter",
+      "place_id": "place:Greeter#__init__:local:db",
+      "reaching_definitions": [
+        "cfg:Greeter#__init__:entry:0:8:4"
+      ],
+      "resolved_types": [
+        {
+          "data": "Database",
+          "kind": "Primitive"
+        }
+      ],
+      "span": [
+        9,
+        8,
+        9,
+        21
+      ],
+      "types": [
+        "declared:Database"
+      ]
+    },
+    {
+      "complete": true,
+      "file": "examples/profile/python_sample.py",
+      "function": "hello",
+      "line": 12,
+      "name": "name",
+      "node_id": "cfg:Greeter#hello:stmt:1:12:8",
+      "owner": "Greeter",
+      "place_id": "place:Greeter#hello:local:name",
+      "reaching_definitions": [
+        "cfg:Greeter#hello:entry:0:11:4"
+      ],
+      "resolved_types": [
+        {
+          "data": "str",
+          "kind": "Primitive"
+        }
+      ],
+      "span": [
+        12,
+        8,
+        12,
+        30
+      ],
+      "types": [
+        "declared:str"
+      ]
+    }
+  ],
   "hash_shapes": [],
   "methods": [
     {
-      "id": "fn:36d86df03e91b9f5",
+      "dispatch_name": "__init__",
+      "id": "fn:887fdfc886d5b516",
       "key": [
         "Database",
         "__init__",
@@ -72,11 +195,11 @@
       "name": "__init__",
       "normalized_source": "def __init__(self): self.port: int = 5432",
       "owner": "Database",
-      "owner_id": "owner:b8064726d03619ce",
+      "owner_id": "owner:1a8faee6057d3971",
       "params": [
         "self"
       ],
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "examples/profile/python_sample.py",
       "raw_source": "def __init__(self):\n        self.port: int = 5432",
       "signature": "def __init__(self):",
       "source": {
@@ -89,10 +212,12 @@
         5,
         29
       ],
+      "symbol_owner": "python_sample.Database",
       "visibility": "public"
     },
     {
-      "id": "fn:da9413a4cfff38ee",
+      "dispatch_name": "__init__",
+      "id": "fn:8254a2e8c05c9d0b",
       "key": [
         "Greeter",
         "__init__",
@@ -105,12 +230,12 @@
       "name": "__init__",
       "normalized_source": "def __init__(self, db: Database): self._db = db",
       "owner": "Greeter",
-      "owner_id": "owner:a8957e23a055d851",
+      "owner_id": "owner:d2af1adb22a6d402",
       "params": [
         "self",
         "db"
       ],
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "examples/profile/python_sample.py",
       "raw_source": "def __init__(self, db: Database):\n        self._db = db",
       "signature": "def __init__(self, db: Database):",
       "source": {
@@ -123,10 +248,12 @@
         9,
         21
       ],
+      "symbol_owner": "python_sample.Greeter",
       "visibility": "public"
     },
     {
-      "id": "fn:d8362c17d1674f24",
+      "dispatch_name": "hello",
+      "id": "fn:66deac84d584cdb7",
       "key": [
         "Greeter",
         "hello",
@@ -139,12 +266,12 @@
       "name": "hello",
       "normalized_source": "def hello(self, name: str) -> str: return f\"Hello {name}\"",
       "owner": "Greeter",
-      "owner_id": "owner:a8957e23a055d851",
+      "owner_id": "owner:d2af1adb22a6d402",
       "params": [
         "self",
         "name"
       ],
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "examples/profile/python_sample.py",
       "raw_source": "def hello(self, name: str) -> str:\n        return f\"Hello {name}\"",
       "signature": "def hello(self, name: str) -> str:",
       "source": {
@@ -157,39 +284,42 @@
         12,
         30
       ],
+      "symbol_owner": "python_sample.Greeter",
       "visibility": "public"
     }
   ],
   "owners": [
     {
       "confidence": "high",
-      "id": "owner:b8064726d03619ce",
+      "id": "owner:1a8faee6057d3971",
       "kind": "class",
       "language": "python",
       "line": 3,
       "name": "Database",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "examples/profile/python_sample.py",
       "span": [
         3,
         0,
         5,
         29
-      ]
+      ],
+      "symbol": "python_sample.Database"
     },
     {
       "confidence": "high",
-      "id": "owner:a8957e23a055d851",
+      "id": "owner:d2af1adb22a6d402",
       "kind": "class",
       "language": "python",
       "line": 7,
       "name": "Greeter",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "examples/profile/python_sample.py",
       "span": [
         7,
         0,
         12,
         30
-      ]
+      ],
+      "symbol": "python_sample.Greeter"
     }
   ],
   "signatures": {
@@ -203,12 +333,12 @@
       "confidence": "high",
       "field": "@port",
       "function": "__init__",
-      "function_id": "fn:36d86df03e91b9f5",
-      "id": "edge:a32086b5b46ec814",
+      "function_id": "fn:887fdfc886d5b516",
+      "id": "edge:dc2b379a57c32afa",
       "kind": "writes",
       "line": 5,
       "owner": "Database",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "examples/profile/python_sample.py",
       "receiver": "self",
       "span": [
         5,
@@ -216,19 +346,19 @@
         5,
         29
       ],
-      "state_id": "state:f001f40fc32da24e"
+      "state_id": "state:41638fe5d66c2aa3"
     },
     {
       "conditional": false,
       "confidence": "high",
       "field": "@_db",
       "function": "__init__",
-      "function_id": "fn:da9413a4cfff38ee",
-      "id": "edge:a487e75c5dac1bcc",
+      "function_id": "fn:8254a2e8c05c9d0b",
+      "id": "edge:833205b939f16c46",
       "kind": "writes",
       "line": 9,
       "owner": "Greeter",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "examples/profile/python_sample.py",
       "receiver": "self",
       "span": [
         9,
@@ -236,7 +366,7 @@
         9,
         21
       ],
-      "state_id": "state:708fb7824917db17"
+      "state_id": "state:04ff731a0d59825a"
     }
   ],
   "state_param_origin_records": [
@@ -248,7 +378,7 @@
       "line": 9,
       "owner": "Greeter",
       "param": "db",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "examples/profile/python_sample.py",
       "span": [
         9,
         8,
@@ -269,12 +399,12 @@
         "data": "int",
         "kind": "Primitive"
       },
-      "field": "port",
-      "key": "Database\u0000port",
+      "field": "@port",
+      "key": "Database\u0000@port",
       "language": "python",
       "line": 5,
       "owner": "Database",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "examples/profile/python_sample.py",
       "span": [
         5,
         8,
@@ -284,14 +414,14 @@
     }
   ],
   "state_types": {
-    "Database\u0000port": {
+    "Database\u0000@port": {
       "data": "int",
       "kind": "Primitive"
     }
   },
   "type_definitions": [
     {
-      "id": "python\u0000/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000__init__\u00008\u0000python-typing",
+      "id": "python\u0000examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000__init__\u00008\u0000python-typing",
       "kind": "method_signature",
       "language": "python",
       "line": 8,
@@ -306,12 +436,12 @@
           }
         }
       ],
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "examples/profile/python_sample.py",
       "signature": "def __init__(self, db: Database):",
       "type_system": "python-typing"
     },
     {
-      "id": "python\u0000/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000hello\u000011\u0000python-typing",
+      "id": "python\u0000examples/profile/python_sample.py\u0000Greeter\u0000method_signature\u0000hello\u000011\u0000python-typing",
       "kind": "method_signature",
       "language": "python",
       "line": 11,
@@ -326,7 +456,8 @@
           }
         }
       ],
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "examples/profile/python_sample.py",
+      "return_dispatch_owner": "str",
       "return_type": {
         "data": "str",
         "kind": "Primitive"
@@ -335,17 +466,14 @@
       "type_system": "python-typing"
     },
     {
-      "declared_type": {
-        "data": "int",
-        "kind": "Primitive"
-      },
-      "id": "python\u0000/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py\u0000Database\u0000state_field\u0000port\u00005\u0000python-typing",
+      "declared_type": "int",
+      "id": "python\u0000examples/profile/python_sample.py\u0000Database\u0000state_field\u0000@port\u00005\u0000python-typing",
       "kind": "state_field",
       "language": "python",
       "line": 5,
-      "name": "port",
+      "name": "@port",
       "owner": "Database",
-      "path": "/home/yahn/easy-vm/gems/fact-mine/examples/profile/python_sample.py",
+      "path": "examples/profile/python_sample.py",
       "source": "syntax",
       "type_system": "python-typing"
     }

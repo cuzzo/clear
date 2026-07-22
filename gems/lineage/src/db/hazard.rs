@@ -16,12 +16,12 @@ pub struct HazardIngestStats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct HazardSite {
-    path: String,
-    line: u32,
-    source: String,
-    hazard_type: String,
-    required_evidence: String,
+pub(crate) struct HazardSite {
+    pub(crate) path: String,
+    pub(crate) line: u32,
+    pub(crate) source: String,
+    pub(crate) hazard_type: String,
+    pub(crate) required_evidence: String,
 }
 
 pub fn ingest_hazards(
@@ -349,39 +349,150 @@ fn excluded_zig_file(path: &str) -> bool {
         || matches!(name, "all-tests.zig" | "all-fuzz.zig" | "size_check.zig" | "runtime-header.zig")
 }
 
-const GO_HAZARDS: &str = include_str!("queries/go/hazards.scm");
-const RUST_HAZARDS: &str = include_str!("queries/rust/hazards.scm");
-const ZIG_HAZARDS: &str = include_str!("queries/zig/hazards.scm");
-const C_HAZARDS: &str = include_str!("queries/c/hazards.scm");
-const CPP_HAZARDS: &str = include_str!("queries/cpp/hazards.scm");
-const CSHARP_HAZARDS: &str = include_str!("queries/csharp/hazards.scm");
+// Both scanners consume the same contract resolver. The old Lineage copy
+// classified hazard names independently and could turn `unsafe_block` into a
+// race because it contains the substring "lock".
+const GO_HAZARDS: &str = hazard_contract::GO_HAZARDS;
+const RUST_HAZARDS: &str = hazard_contract::RUST_HAZARDS;
+const ZIG_HAZARDS: &str = hazard_contract::ZIG_HAZARDS;
+const C_HAZARDS: &str = hazard_contract::C_HAZARDS;
+const CPP_HAZARDS: &str = hazard_contract::CPP_HAZARDS;
 
-fn evidence_for_hazard(hazard_type: &str) -> &'static str {
-    if hazard_type.contains("concurrency") || hazard_type.contains("channel") || hazard_type.contains("waitgroup") || hazard_type.contains("sync") {
-        "concurrency"
-    } else if hazard_type.contains("race") || hazard_type.contains("lock") {
-        "race"
-    } else if hazard_type.contains("loom") {
-        "loom"
-    } else if hazard_type.contains("unsafe_fn") || hazard_type.contains("unsafe_impl") || hazard_type.contains("unsafe_block") || hazard_type.contains("unsafe_operation") {
-        "miri"
-    } else if hazard_type.contains("tsan") {
-        "tsan"
-    } else if hazard_type.contains("asan") {
-        "asan"
-    } else if hazard_type.contains("lsan") || hazard_type.contains("lifetime") {
-        "lsan"
-    } else if hazard_type.contains("ubsan") || hazard_type.contains("arithmetic") || hazard_type.contains("cast") {
-        "ubsan"
-    } else if hazard_type.contains("unsafe") {
-        "unsafe"
-    } else if hazard_type.contains("allocator") {
-        "allocator"
-    } else if hazard_type.contains("vopr") {
-        "vopr"
-    } else {
-        "hazard"
+fn hazard_policy(hazard_type: &str) -> Option<&'static hazard_contract::HazardPolicy> {
+    hazard_contract::resolve_hazard_policy(hazard_type)
+}
+
+fn go_reflect_import_aliases(
+    root: tree_sitter::Node,
+    source: &[u8],
+) -> std::collections::HashSet<String> {
+    fn visit(node: tree_sitter::Node, source: &[u8], aliases: &mut std::collections::HashSet<String>) {
+        if node.kind() == "import_spec"
+            && node
+                .child_by_field_name("path")
+                .and_then(|path| path.utf8_text(source).ok())
+                .is_some_and(|path| path.trim_matches('"') == "reflect")
+        {
+            let alias = node
+                .child_by_field_name("name")
+                .and_then(|name| name.utf8_text(source).ok())
+                .unwrap_or("reflect");
+            if alias != "_" && alias != "." {
+                aliases.insert(alias.to_string());
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit(child, source, aliases);
+        }
     }
+
+    let mut aliases = std::collections::HashSet::new();
+    visit(root, source, &mut aliases);
+    aliases
+}
+
+fn go_identifier_is_binding(node: tree_sitter::Node, source: &[u8], name: &str) -> bool {
+    let text = node.utf8_text(source).unwrap_or("");
+    let left_side = match node.kind() {
+        "short_var_declaration" | "range_clause" => text.split(":=").next().unwrap_or(text),
+        "var_declaration" | "const_declaration" => text
+            .strip_prefix("var")
+            .or_else(|| text.strip_prefix("const"))
+            .unwrap_or(text)
+            .split('=').next().unwrap_or(text),
+        "type_declaration" => text.strip_prefix("type").unwrap_or(text),
+        _ => return false,
+    };
+    left_side
+        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+        .any(|word| word == name)
+}
+
+fn go_block_shadows_reflect(
+    block: tree_sitter::Node,
+    call: tree_sitter::Node,
+    source: &[u8],
+    alias: &str,
+) -> bool {
+    fn visit(
+        node: tree_sitter::Node,
+        call: tree_sitter::Node,
+        source: &[u8],
+        alias: &str,
+        block: tree_sitter::Node,
+    ) -> bool {
+        if node.id() != block.id() && node.kind() == "block" {
+            return false;
+        }
+        if node.id() != call.id()
+            && node.start_byte() <= call.start_byte()
+            && go_identifier_is_binding(node, source, alias)
+        {
+            return true;
+        }
+        let mut cursor = node.walk();
+        let found = node
+            .children(&mut cursor)
+            .any(|child| visit(child, call, source, alias, block));
+        found
+    }
+
+    visit(block, call, source, alias, block)
+}
+
+fn go_reflection_call_is_imported_and_unshadowed(
+    call: tree_sitter::Node,
+    source: &[u8],
+    aliases: &std::collections::HashSet<String>,
+) -> bool {
+    let Some(function) = call.child_by_field_name("function") else {
+        return false;
+    };
+    if function.kind() != "selector_expression" {
+        return false;
+    }
+    let Some(package) = function.child_by_field_name("operand") else {
+        return false;
+    };
+    let Ok(package_name) = package.utf8_text(source) else {
+        return false;
+    };
+    if !aliases.contains(package_name) {
+        return false;
+    }
+
+    let mut current = Some(call);
+    while let Some(node) = current {
+        if node.kind() == "block" && go_block_shadows_reflect(node, call, source, package_name) {
+            return false;
+        }
+        if matches!(node.kind(), "function_declaration" | "method_declaration")
+            && node
+                .child_by_field_name("parameters")
+                .and_then(|parameters| parameters.utf8_text(source).ok())
+                .is_some_and(|text| {
+                    text.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+                        .any(|word| word == package_name)
+                })
+        {
+            return false;
+        }
+        current = node.parent();
+    }
+    true
+}
+
+fn c_arithmetic_hazard_is_relevant(node: tree_sitter::Node, source: &[u8]) -> bool {
+    let operator = node
+        .child_by_field_name("operator")
+        .and_then(|operator| operator.utf8_text(source).ok())
+        .unwrap_or("");
+    let rhs = node
+        .child_by_field_name("right")
+        .and_then(|right| right.utf8_text(source).ok())
+        .unwrap_or("");
+    hazard_contract::c_arithmetic_literal_is_relevant(operator, rhs)
 }
 
 fn query_hazards(
@@ -389,7 +500,6 @@ fn query_hazards(
     contents: &str,
     language: tree_sitter::Language,
     query_str: &str,
-    default_evidence: &str,
 ) -> Vec<HazardSite> {
     let mut parser = tree_sitter::Parser::new();
     if parser.set_language(&language).is_err() {
@@ -422,15 +532,30 @@ fn query_hazards(
                     .trim()
                     .to_string();
                 
-                let evidence = evidence_for_hazard(hazard_type);
-                let final_evidence = if evidence == "hazard" { default_evidence } else { evidence };
+                let policy = hazard_policy(hazard_type).unwrap_or_else(|| {
+                    panic!("hazard query capture {hazard_type:?} has no contract policy")
+                });
 
+                if hazard_type == "go_reflection"
+                    && !go_reflection_call_is_imported_and_unshadowed(
+                        capture.node,
+                        contents.as_bytes(),
+                        &go_reflect_import_aliases(tree.root_node(), contents.as_bytes()),
+                    )
+                {
+                    continue;
+                }
+                if matches!(hazard_type, "c_ubsan_arithmetic" | "cpp_ubsan_arithmetic")
+                    && !c_arithmetic_hazard_is_relevant(capture.node, contents.as_bytes())
+                {
+                    continue;
+                }
                 sites.push(HazardSite {
                     path: path.to_string(),
                     line: start_line,
                     source: line_text,
                     hazard_type: hazard_type.to_string(),
-                    required_evidence: final_evidence.to_string(),
+                    required_evidence: policy.evidence_provider.clone(),
                 });
             }
         }
@@ -444,8 +569,8 @@ fn query_hazards(
     unique_sites
 }
 
-fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    let sites = query_hazards(path, contents, tree_sitter_zig::LANGUAGE.into(), ZIG_HAZARDS, "vopr");
+pub(crate) fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+    let sites = query_hazards(path, contents, tree_sitter_zig::LANGUAGE.into(), ZIG_HAZARDS);
 
     let mut final_sites = Vec::new();
     let mut in_loom_exclude = false;
@@ -501,17 +626,17 @@ fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     for (idx, &(_loom_ex, vopr_ex, retry, start_retry, _, retry_direct, line)) in line_states.iter().enumerate() {
         let line_no = (idx + 1) as u32;
         if line.contains("HAMMER-WAIT-LOOP-BEGIN") {
-            final_sites.push(site(path, line_no, line, "zig_wait_loop", "hammer"));
+            final_sites.push(site(path, line_no, line, "zig_wait_loop"));
         }
         if vopr_ex {
             continue;
         }
         if start_retry || retry_direct {
-            final_sites.push(site(path, line_no, line, "zig_vopr_retry", "vopr"));
+            final_sites.push(site(path, line_no, line, "zig_vopr_retry"));
         } else if retry && executable_zig_retry_line(line) && !line.contains("VOPR-") {
             let has_structural_vopr = final_sites.iter().any(|s| s.line == line_no && s.hazard_type.starts_with("zig_vopr_"));
             if !has_structural_vopr {
-                final_sites.push(site(path, line_no, line, "zig_vopr_retry_body", "vopr"));
+                final_sites.push(site(path, line_no, line, "zig_vopr_retry_body"));
             }
         }
     }
@@ -526,24 +651,40 @@ fn executable_zig_retry_line(line: &str) -> bool {
         && code != "} else {"
 }
 
-fn scan_go_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_go::LANGUAGE.into(), GO_HAZARDS, "race")
+pub(crate) fn scan_go_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+    query_hazards(path, contents, tree_sitter_go::LANGUAGE.into(), GO_HAZARDS)
 }
 
-fn scan_rust_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_rust::LANGUAGE.into(), RUST_HAZARDS, "miri")
+pub(crate) fn scan_rust_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+    query_hazards(path, contents, tree_sitter_rust::LANGUAGE.into(), RUST_HAZARDS)
 }
 
-fn scan_c_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_c::LANGUAGE.into(), C_HAZARDS, "tsan")
+pub(crate) fn scan_c_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+    query_hazards(path, contents, tree_sitter_c::LANGUAGE.into(), C_HAZARDS)
 }
 
-fn scan_cpp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_cpp::LANGUAGE.into(), CPP_HAZARDS, "tsan")
+pub(crate) fn scan_cpp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+    query_hazards(path, contents, tree_sitter_cpp::LANGUAGE.into(), CPP_HAZARDS)
 }
 
-fn scan_csharp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_c_sharp::LANGUAGE.into(), CSHARP_HAZARDS, "concurrency")
+// C# reflection flow is owned by FactMine. Lineage keeps the same narrow site
+// shape for storage/UI consumers, but does not replay a second type/alias
+// analysis here.
+pub(crate) fn scan_csharp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+    fact_mine_rust::syntax::hazards::extract_file_hazards(
+        path,
+        contents,
+        fact_mine_rust::syntax::Language::CSharp,
+    )
+    .into_iter()
+    .map(|fact| HazardSite {
+        path: fact.path,
+        line: fact.line,
+        source: fact.snippet,
+        hazard_type: fact.hazard_type,
+        required_evidence: fact.required_evidence,
+    })
+    .collect()
 }
 
 fn site(
@@ -551,20 +692,22 @@ fn site(
     line: u32,
     source: &str,
     hazard_type: &str,
-    required_evidence: &str,
 ) -> HazardSite {
+    let policy = hazard_policy(hazard_type).unwrap_or_else(|| {
+        panic!("synthetic hazard {hazard_type:?} has no contract policy")
+    });
     HazardSite {
         path: path.to_string(),
         line,
         source: source.trim().to_string(),
         hazard_type: hazard_type.to_string(),
-        required_evidence: required_evidence.to_string(),
+        required_evidence: policy.evidence_provider.clone(),
     }
 }
 
 
 
-fn unit_for_site(blob: &BlobFile, units: &[LogicalUnit], line: u32) -> LogicalUnit {
+pub fn unit_for_site(blob: &BlobFile, units: &[LogicalUnit], line: u32) -> LogicalUnit {
     units
         .iter()
         .find(|unit| unit.start_line <= line && line <= unit.end_line)
@@ -589,7 +732,7 @@ fn rel_path(repo: &Path, path: &Path) -> Result<String> {
     Ok(rel.to_string_lossy().replace('\\', "/"))
 }
 
-fn now_timestamp() -> i64 {
+pub fn now_timestamp() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs() as i64)
@@ -644,6 +787,21 @@ mod tests {
     }
 
     #[test]
+    fn go_reflection_requires_the_reflect_import_alias_and_not_a_local_shadow() {
+        let aliased = scan_go_sites(
+            "worker.go",
+            "package demo\nimport r \"reflect\"\nfunc run(value interface{}, name string) {\n  r.ValueOf(value).MethodByName(name).Call(nil)\n}",
+        );
+        assert!(aliased.iter().any(|site| site.hazard_type == "go_reflection"));
+
+        let shadowed = scan_go_sites(
+            "worker.go",
+            "package demo\nimport \"reflect\"\nfunc run(value interface{}, name string) {\n  reflect := fakeReflect{}\n  reflect.ValueOf(value).MethodByName(name).Call(nil)\n}",
+        );
+        assert!(!shadowed.iter().any(|site| site.hazard_type == "go_reflection"));
+    }
+
+    #[test]
     fn ingests_rust_loom_and_unsafe_hazards_for_current_snapshot() {
         let dir = tempdir().unwrap();
         fs::create_dir_all(dir.path().join("src")).unwrap();
@@ -689,6 +847,42 @@ mod tests {
         ));
         assert!(csharp_types.contains(&"csharp_concurrency".to_string()));
         assert!(csharp_types.contains(&"csharp_unsafe_memory".to_string()));
+    }
+
+    #[test]
+    fn lineage_csharp_reflection_scan_uses_canonical_factmine_facts() {
+        let source = r#"
+            class Demo {
+                void Run() {
+                    Type target = typeof(Demo);
+                    MethodInfo method = target.GetMethod("Run");
+                    method.Invoke(null, null);
+                    Assembly.Load("demo");
+                }
+            }
+        "#;
+        let lineage_sites = scan_csharp_sites("Demo.cs", source);
+        let reflection: Vec<_> = lineage_sites
+            .iter()
+            .filter(|site| site.hazard_type == "csharp_metaprogramming")
+            .collect();
+        assert_eq!(reflection.len(), 3, "{reflection:?}");
+        assert!(reflection.iter().any(|site| site.source.contains("target.GetMethod")));
+        assert!(reflection.iter().any(|site| site.source.contains("method.Invoke")));
+        assert!(reflection.iter().any(|site| site.source.contains("Assembly.Load")));
+
+        let shadowed = r#"
+            class Type { public object GetMethod(string name) { return null; } }
+            class Demo {
+                void Run() {
+                    Type target = new Type();
+                    target.GetMethod("Run");
+                }
+            }
+        "#;
+        assert!(!scan_csharp_sites("Shadow.cs", shadowed)
+            .iter()
+            .any(|site| site.hazard_type == "csharp_metaprogramming"));
     }
 
     #[test]
@@ -869,7 +1063,7 @@ mod tests {
             
             fn normal_fn() {
                 unsafe {
-                    let val = *raw_ptr; // unsafe operation inside unsafe block
+                    let val = raw_ptr.read(); // unsafe operation inside unsafe block
                     if val > 0 {
                         let nested = 42;
                     }
@@ -1035,15 +1229,23 @@ mod tests {
 
     #[test]
     fn test_query_hazards_invalid_query_error() {
-        let sites = query_hazards("test.rs", "pub fn foo() {}", tree_sitter_rust::LANGUAGE.into(), "(invalid_pattern", "miri");
+        let sites = query_hazards("test.rs", "pub fn foo() {}", tree_sitter_rust::LANGUAGE.into(), "(invalid_pattern");
         assert!(sites.is_empty());
     }
 
     #[test]
-    fn test_evidence_for_hazard_unmatched_keywords() {
-        assert_eq!(evidence_for_hazard("allocator_leak"), "allocator");
-        assert_eq!(evidence_for_hazard("vopr_io"), "vopr");
-        assert_eq!(evidence_for_hazard("unknown_hazard"), "hazard");
+    fn hazard_policy_comes_from_shared_contract() {
+        assert_eq!(hazard_policy("zig_allocator").unwrap().evidence_provider, "allocator");
+        assert_eq!(hazard_policy("zig_vopr_time").unwrap().evidence_provider, "vopr");
+        assert!(hazard_policy("unknown_hazard").is_none());
+    }
+
+    #[test]
+    fn unsafe_hazards_are_not_classified_by_substrings() {
+        assert_eq!(hazard_policy("rust_unsafe_block").unwrap().evidence_provider, "miri");
+        assert_eq!(hazard_policy("rust_unsafe_fn").unwrap().evidence_provider, "miri");
+        assert_eq!(hazard_policy("go_race_lock").unwrap().evidence_provider, "race");
+        assert_eq!(hazard_policy("go_race_atomic").unwrap().evidence_provider, "race");
     }
 
     #[test]
@@ -1054,5 +1256,42 @@ mod tests {
         let storage = Storage::open_memory().unwrap();
         let stats = ingest_hazards(&storage, &file_path, "zig", "abc", Some(10)).unwrap();
         assert_eq!(stats.scanned_files, 0);
+    }
+
+    // The runtime query text comes from hazard-contract. These copies remain
+    // as generated/package-local resources; this test checks both generated
+    // copies, so a local edit cannot quietly create a second policy owner.
+    #[test]
+    fn vendored_hazard_queries_match_fact_mines_originals() {
+        let originals_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fact-mine/src/syntax");
+        if !originals_dir.is_dir() {
+            eprintln!("skipping: fact-mine sibling tree not present (not a monorepo checkout)");
+            return;
+        }
+        let vendored = [
+            ("go_hazards.scm", GO_HAZARDS),
+            ("rust_hazards.scm", RUST_HAZARDS),
+            ("zig_hazards.scm", ZIG_HAZARDS),
+            ("c_hazards.scm", C_HAZARDS),
+            ("cpp_hazards.scm", CPP_HAZARDS),
+            ("csharp_hazards.scm", hazard_contract::CSHARP_HAZARDS),
+        ];
+        for (name, vendored_text) in vendored {
+            let generated_copy = fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("src/db/hazards")
+                    .join(name),
+            )
+            .unwrap_or_else(|_| panic!("lineage generated query {name} is missing"));
+            assert_eq!(vendored_text, generated_copy, "lineage generated {name} drifted from hazard-contract");
+            let original = fs::read_to_string(originals_dir.join(name))
+                .unwrap_or_else(|_| panic!("fact-mine original {name} is missing"));
+            assert_eq!(
+                vendored_text, original,
+                "{name} has drifted from fact-mine's original - re-copy it from \
+                 gems/fact-mine/src/syntax/{name} into gems/lineage/src/db/hazards/{name}"
+            );
+        }
     }
 }

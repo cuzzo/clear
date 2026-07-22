@@ -359,14 +359,18 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
     }
 
     fn function_visibility(&self, _name: &str, node: &Node, _lines: &[String]) -> String {
-        let text = node.text.trim_start();
-        if text.starts_with("private ") {
-            "private".to_string()
-        } else if text.starts_with("protected ") {
-            "protected".to_string()
-        } else {
-            "public".to_string()
+        // Modifiers may follow annotations and mix with static/final/etc.
+        // No access modifier means package-private in Java, not public.
+        let header = node.text.split('(').next().unwrap_or("");
+        for token in header.split_whitespace().take(8) {
+            match token {
+                "private" => return "private".to_string(),
+                "protected" => return "protected".to_string(),
+                "public" => return "public".to_string(),
+                _ => {}
+            }
         }
+        "package".to_string()
     }
 
     fn parameter_type_from_signature(&self, parameter: &str) -> Option<String> {
@@ -570,6 +574,15 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
         in_method: bool,
     ) -> Option<StateDeclaration> {
         if in_method {
+            return None;
+        }
+        // Unlike every other language's version of this heuristic, this
+        // one had no node-type guard at all: any node whose text loosely
+        // looked like "word word ... = ..." matched, including comments
+        // (`// TODO this seems wrong` parsed as a field named "wrong" of
+        // type "// TODO this seems"). Field declarations are the only
+        // legitimate source for this heuristic.
+        if node.r#type != "FIELD_DECLARATION" {
             return None;
         }
         let text = node
@@ -876,6 +889,18 @@ mod tests {
         );
         assert_eq!(
             b.function_visibility("foo", &node("FN", "public void foo()"), &[]),
+            "public"
+        );
+        assert_eq!(
+            b.function_visibility("foo", &node("FN", "void foo()"), &[]),
+            "package"
+        );
+        assert_eq!(
+            b.function_visibility("foo", &node("FN", "static final void foo()"), &[]),
+            "package"
+        );
+        assert_eq!(
+            b.function_visibility("foo", &node("FN", "@Override\npublic void foo()"), &[]),
             "public"
         );
 
