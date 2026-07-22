@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clear.tools/contracts/fact-mine/proof-boundary.v2.schema.json",
+  "title": "FactMine SARIF proof boundary v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "input_completeness", "claim_status", "coverage_discharge", "authority", "scope", "blockers"],
+  "properties": {
+    "schema": {"const": "fact-mine.proof-boundary.v2"},
+    "input_completeness": {"enum": ["complete", "partial", "unknown"]},
+    "claim_status": {"enum": ["proven", "observed", "review"]},
+    "coverage_discharge": {"enum": ["satisfiable", "unsatisfiable", "not_applicable", "unknown"]},
+    "authority": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
+    "scope": {"type": "string", "minLength": 1},
+    "blockers": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+  }
+}

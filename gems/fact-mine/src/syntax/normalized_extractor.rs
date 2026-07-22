@@ -5,7 +5,8 @@ use super::{
     },
     nullable::{NullableOperationSeed, PresenceCorrelationSeed}, BranchArm, BranchDecision, CallSite, ComparisonUse,
     DecisionSite, DispatchSite, FunctionDef,
-    OwnerDef, PathConditionSite, PredicateAlias, RawNode, SemanticEffectSite, StateDeclaration,
+    CallRawOriginProjection, OwnerDef, PathConditionSite, PredicateAlias, RawNode,
+    SemanticEffectSite, StateDeclaration,
     StateRead, StateWrite, HazardSite,
 };
 use crate::ast::{self, Child, Node, Span};
@@ -17,6 +18,7 @@ pub(crate) struct NormalizedFacts {
     pub(crate) function_defs: Vec<FunctionDef>,
     pub(crate) owner_defs: Vec<OwnerDef>,
     pub(crate) call_sites: Vec<CallSite>,
+    pub(crate) call_raw_origin_projections: Vec<CallRawOriginProjection>,
     pub(crate) call_receiver_projections: Vec<super::CallReceiverProjection>,
     pub(crate) state_declarations: Vec<StateDeclaration>,
     pub(crate) state_reads: Vec<StateRead>,
@@ -117,6 +119,10 @@ impl<'a> Extractor<'a> {
             .call_receiver_projections
             .sort_by_key(|projection| (projection.outer_span, projection.receiver_call_span));
         self.facts.call_receiver_projections.dedup();
+        self.facts
+            .call_raw_origin_projections
+            .sort_by_key(|projection| (projection.raw_call_span, projection.normalized_call_span));
+        self.facts.call_raw_origin_projections.dedup();
         self.facts.semantic_effect_sites.sort_by_key(effect_key);
         self.facts
     }
@@ -781,6 +787,7 @@ impl<'a> Extractor<'a> {
             call.span,
         );
         if self.seen_calls.insert(key) {
+            self.record_call_raw_origin(node, call.span);
             if let Some(receiver_call_span) = receiver_call_span {
                 self.facts
                     .call_receiver_projections
@@ -844,9 +851,24 @@ impl<'a> Extractor<'a> {
             call.span,
         );
         if self.seen_calls.insert(key) {
+            self.record_call_raw_origin(node, call.span);
             self.record_call_receiver_projection(node, call.span);
             self.facts.call_sites.push(call);
         }
+    }
+
+    fn record_call_raw_origin(&mut self, node: &Node, normalized_call_span: Span) {
+        self.facts
+            .call_raw_origin_projections
+            .push(CallRawOriginProjection {
+                raw_call_span: [
+                    node.first_lineno,
+                    node.first_column,
+                    node.last_lineno,
+                    node.last_column,
+                ],
+                normalized_call_span,
+            });
     }
 
     fn record_call_receiver_projection(&mut self, node: &Node, outer_span: Span) {

@@ -6,30 +6,74 @@ pub const PROOF_BOUNDARY_PROPERTY: &str = "fact_mine.proof_boundary";
 pub const PROOF_BOUNDARY_SUMMARY_PROPERTY: &str = "fact_mine.proof_boundary_summary";
 pub const PROOF_BOUNDARY_SCHEMA: &str = "fact-mine.proof-boundary.v2";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InputCompleteness {
+    Complete,
+    Partial,
+    Unknown,
+}
+
+impl InputCompleteness {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Partial => "partial",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClaimStatus {
+    Proven,
+    Observed,
+    Review,
+}
+
+impl ClaimStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Proven => "proven",
+            Self::Observed => "observed",
+            Self::Review => "review",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CoverageDischarge {
+    Satisfiable,
+    Unsatisfiable,
+    NotApplicable,
+    Unknown,
+}
+
+impl CoverageDischarge {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Satisfiable => "satisfiable",
+            Self::Unsatisfiable => "unsatisfiable",
+            Self::NotApplicable => "not_applicable",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// Separates fact completeness, claim strength, and coverage discharge.
 /// Missing completeness metadata is `unknown`, never implicitly `complete`.
 pub fn proof_boundary(
-    input_completeness: &str,
-    claim_status: &str,
-    coverage_discharge: &str,
+    input_completeness: InputCompleteness,
+    claim_status: ClaimStatus,
+    coverage_discharge: CoverageDischarge,
     authority: &[&str],
     scope: &str,
     blockers: Vec<String>,
 ) -> Value {
-    debug_assert!(matches!(
-        input_completeness,
-        "complete" | "partial" | "unknown"
-    ));
-    debug_assert!(matches!(claim_status, "proven" | "observed" | "review"));
-    debug_assert!(matches!(
-        coverage_discharge,
-        "satisfiable" | "unsatisfiable" | "not_applicable" | "unknown"
-    ));
     json!({
         "schema": PROOF_BOUNDARY_SCHEMA,
-        "input_completeness": input_completeness,
-        "claim_status": claim_status,
-        "coverage_discharge": coverage_discharge,
+        "input_completeness": input_completeness.as_str(),
+        "claim_status": claim_status.as_str(),
+        "coverage_discharge": coverage_discharge.as_str(),
         "authority": authority,
         "scope": scope,
         "blockers": blockers,
@@ -385,9 +429,9 @@ mod tests {
             json!({
                 "properties": {
                     PROOF_BOUNDARY_PROPERTY: proof_boundary(
-                        "complete",
-                        "proven",
-                        "not_applicable",
+                        InputCompleteness::Complete,
+                        ClaimStatus::Proven,
+                        CoverageDischarge::NotApplicable,
                         &["fact_mine_normalized_ast"],
                         "local",
                         vec![],
@@ -397,9 +441,9 @@ mod tests {
             json!({
                 "properties": {
                     PROOF_BOUNDARY_PROPERTY: proof_boundary(
-                        "partial",
-                        "review",
-                        "unsatisfiable",
+                        InputCompleteness::Partial,
+                        ClaimStatus::Review,
+                        CoverageDischarge::Unsatisfiable,
                         &["fact_mine_normalized_ast"],
                         "local",
                         vec!["unresolved_call".to_string()],
@@ -422,5 +466,24 @@ mod tests {
         );
         assert_eq!(summary.pointer("/claim_status/proven"), Some(&json!(1)));
         assert_eq!(summary.pointer("/claim_status/review"), Some(&json!(1)));
+    }
+
+    #[test]
+    fn proof_boundary_conforms_to_shared_fixture() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../hazard-contract/fixtures/proof-boundary.v2.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            proof_boundary(
+                InputCompleteness::Partial,
+                ClaimStatus::Review,
+                CoverageDischarge::Unsatisfiable,
+                &["fact_mine_normalized_ast", "nil_kill_static"],
+                "static_nil_pressure",
+                vec!["unresolved_call".to_string()],
+            ),
+            fixture["valid"]
+        );
     }
 }

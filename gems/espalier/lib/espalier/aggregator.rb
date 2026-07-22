@@ -181,6 +181,7 @@ module Espalier
           span: mod[:span],
           language: mod[:language],
           type: mod[:type],
+          proof_boundary: mod[:proof_boundary],
           state: aggregated_states.empty? ? nil : aggregated_states,
           functions: aggregated_methods
         }.compact

@@ -155,11 +155,12 @@ module Espalier
           },
           "source_format" => "espalier.manifest.v1",
           Decomplex::Sarif::PROOF_BOUNDARY_PROPERTY => Decomplex::Sarif.proof_boundary(
-            input_completeness: "unknown",
+            input_completeness: input_completeness_for(mod),
             claim_status: "observed",
             coverage_discharge: "not_applicable",
             authority: ["fact_mine_normalized_ast"],
-            scope: "function_effect_observation"
+            scope: "function_effect_observation",
+            blockers: input_blockers_for(mod)
           )
         }
       )
@@ -221,14 +222,14 @@ module Espalier
           },
           Decomplex::Sarif::PROOF_BOUNDARY_PROPERTY => Decomplex::Sarif.proof_boundary(
             # Big-O completeness describes Espalier's estimate, not the
-            # completeness of the FactMine input. FactMine does not yet emit
-            # the corresponding per-finding metadata, so do not infer it.
-            input_completeness: "unknown",
+            # completeness of the FactMine input. The extractor supplies the
+            # latter explicitly through the projected module boundary.
+            input_completeness: input_completeness_for(mod),
             claim_status: "observed",
             coverage_discharge: "not_applicable",
             authority: ["fact_mine_normalized_ast", "espalier_static"],
             scope: "function_complexity",
-            blockers: complexity_proof_blockers(unknowns, warnings, time_complete, space_complete)
+            blockers: input_blockers_for(mod) + complexity_proof_blockers(unknowns, warnings, time_complete, space_complete)
           )
         }
       )
@@ -241,6 +242,17 @@ module Espalier
       return [] if time_complete && space_complete
 
       (unknowns + warnings + ["incomplete_complexity_proof"]).map(&:to_s).uniq.sort
+    end
+
+    def input_completeness_for(mod)
+      boundary = mod[:proof_boundary] || mod["proof_boundary"] || {}
+      value = boundary[:input_completeness] || boundary["input_completeness"]
+      %w[complete partial unknown].include?(value.to_s) ? value.to_s : "unknown"
+    end
+
+    def input_blockers_for(mod)
+      boundary = mod[:proof_boundary] || mod["proof_boundary"] || {}
+      Array(boundary[:input_blockers] || boundary["input_blockers"]).map(&:to_s).reject(&:empty?).uniq.sort
     end
 
     def complexity_related_locations(variables)

@@ -45,7 +45,7 @@ impl FindingsRollup {
         let Some(detectors) = rv::get(facts, "detectors") else {
             bail!("report facts missing detectors");
         };
-        let sections = build_sections(detectors);
+        let sections = build_sections(detectors, corpus_input_boundary(facts));
         validate_spans(&sections)?;
         let convergence_sections = sections
             .iter()
@@ -375,44 +375,25 @@ impl SarifEmitter {
 }
 
 fn finding_proof_boundary(section: &str, finding: &Value) -> Value {
-    let complete = rv::get(finding, "complete").and_then(Value::as_bool);
-    let proof_tier = rv::field(finding, "proof_tier");
-    let blockers = ["unknown_reasons", "blockers", "missing_proofs"]
-        .iter()
-        .flat_map(|key| rv::field_array_strings(finding, key))
-        .collect::<Vec<_>>();
-    let input_completeness = if complete == Some(true) {
-        "complete"
-    } else if complete == Some(false) || !blockers.is_empty() {
-        "partial"
-    } else {
-        "unknown"
-    };
-    let claim_status = if proof_tier == "static_proven" {
-        "proven"
-    } else if section == "Redundant Nil Guards" {
-        "review"
-    } else {
-        "observed"
-    };
-    let authority = if section == "Redundant Nil Guards" {
-        vec!["fact_mine_normalized_ast", "fact_mine_cfg"]
-    } else {
-        vec!["fact_mine_normalized_ast"]
-    };
-    let scope = if section == "Redundant Nil Guards" {
-        "local_control_flow"
-    } else {
-        "detector_local"
-    };
-    sarif::proof_boundary(
-        input_completeness,
-        claim_status,
-        "not_applicable",
-        &authority,
-        scope,
-        blockers,
-    )
+    rv::get(finding, "proof_boundary")
+        .cloned()
+        .unwrap_or_else(|| {
+            // Only old, externally supplied detector payloads reach this path.
+            // Their generic fields are intentionally not reinterpreted at render
+            // time: absence of an explicit boundary is an unknown observation.
+            sarif::proof_boundary(
+                sarif::InputCompleteness::Unknown,
+                if section == "Redundant Nil Guards" {
+                    sarif::ClaimStatus::Review
+                } else {
+                    sarif::ClaimStatus::Observed
+                },
+                sarif::CoverageDischarge::NotApplicable,
+                &["fact_mine_normalized_ast"],
+                "legacy_detector_payload",
+                Vec::new(),
+            )
+        })
 }
 
 #[derive(Clone, Debug)]
@@ -471,7 +452,10 @@ struct SarifLocation {
     end_column: Option<i64>,
 }
 
-fn build_sections(detectors: &Value) -> Vec<ReportSection> {
+fn build_sections(
+    detectors: &Value,
+    (input_completeness, corpus_blockers): (sarif::InputCompleteness, Vec<String>),
+) -> Vec<ReportSection> {
     let miner = rv::get(detectors, "miner").unwrap_or(&Value::Null);
     let co_update = rv::get(detectors, "co_update").unwrap_or(&Value::Null);
     let semantic_alias = rv::get(detectors, "semantic_alias").unwrap_or(&Value::Null);
@@ -483,7 +467,7 @@ fn build_sections(detectors: &Value) -> Vec<ReportSection> {
         .into_iter()
         .partition(|finding| rv::field(finding, "confidence") == "high");
 
-    vec![
+    let mut sections = vec![
         section("Decision Pressure", 1, "ELIMINABLE guard-pressure per loose contract (nil/is_a?/respond_to?/safe-nav/rescue-nil) -> tighten the contract once / nil-kill: DELETE. essential dispatch + pure c-uses are split out, NEVER summed (Rapps-Weyuker p-use; McCabe)", direct_array(detectors, "decision_pressure")),
         section("Redundant Nil Guards", 1, "nil checks / safe-nav dominated by an earlier non-nil proof -- delete repeated control flow or tighten the type", direct_array(detectors, "redundant_nil_guard")),
         section("State Heatmap", 1, "state fields ranked by write/read/re-derivation scatter -- tangled mutable state should get one owner", direct_array(detectors, "state_heatmap")).excluded_from_convergence(),
@@ -512,7 +496,67 @@ fn build_sections(detectors: &Value) -> Vec<ReportSection> {
         section("Operational Discontinuity", 3, "blank/comment phase boundary where local variable lifetimes reset -- *POSSIBLE* implicit sub-function boundary", operational_rest),
         section("False Simplicity", 3, "looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/reflection/reopen -- *POSSIBLE* (noisy)", direct_array(detectors, "false_simplicity")),
         section("Fat Unions", 3, "case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*", nested_array(fat_union, "fat_unions")),
-    ]
+    ];
+    attach_detector_boundaries(&mut sections, input_completeness, &corpus_blockers);
+    sections
+}
+
+fn corpus_input_boundary(facts: &Value) -> (sarif::InputCompleteness, Vec<String>) {
+    let corpus = rv::get(facts, "corpus");
+    match corpus
+        .and_then(|value| rv::get(value, "complete"))
+        .and_then(Value::as_bool)
+    {
+        Some(true) => (sarif::InputCompleteness::Complete, Vec::new()),
+        Some(false) => {
+            let reason = corpus
+                .and_then(|value| rv::get(value, "reason"))
+                .and_then(Value::as_str)
+                .unwrap_or("incomplete_corpus")
+                .to_string();
+            (sarif::InputCompleteness::Partial, vec![reason])
+        }
+        None => (sarif::InputCompleteness::Unknown, Vec::new()),
+    }
+}
+
+fn attach_detector_boundaries(
+    sections: &mut [ReportSection],
+    input_completeness: sarif::InputCompleteness,
+    corpus_blockers: &[String],
+) {
+    for section in sections {
+        let redundant_nil_guard = section.title == "Redundant Nil Guards";
+        for finding in &mut section.findings {
+            let Some(object) = finding.as_object_mut() else {
+                continue;
+            };
+            object
+                .entry("proof_boundary".to_string())
+                .or_insert_with(|| {
+                    sarif::proof_boundary(
+                        input_completeness,
+                        if redundant_nil_guard {
+                            sarif::ClaimStatus::Review
+                        } else {
+                            sarif::ClaimStatus::Observed
+                        },
+                        sarif::CoverageDischarge::NotApplicable,
+                        if redundant_nil_guard {
+                            &["fact_mine_normalized_ast", "fact_mine_cfg"]
+                        } else {
+                            &["fact_mine_normalized_ast"]
+                        },
+                        if redundant_nil_guard {
+                            "redundant_nil_guard"
+                        } else {
+                            "decomplex_detector"
+                        },
+                        corpus_blockers.to_vec(),
+                    )
+                });
+        }
+    }
 }
 
 fn section(title: &str, tier: i64, desc: &str, findings: Vec<Value>) -> ReportSection {

@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 require "json"
+begin
+  require "fact_mine/proof_boundary"
+rescue LoadError
+  require_relative "../../../fact-mine/lib/fact_mine/proof_boundary"
+end
 
 module NilKill
   # Small SARIF 2.1.0 builder shared by the generalized gems. It keeps
@@ -10,47 +15,23 @@ module NilKill
     module_function
 
     SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
-    PROOF_BOUNDARY_PROPERTY = "fact_mine.proof_boundary"
-    PROOF_BOUNDARY_SUMMARY_PROPERTY = "fact_mine.proof_boundary_summary"
-    PROOF_BOUNDARY_SCHEMA = "fact-mine.proof-boundary.v2"
+    PROOF_BOUNDARY_PROPERTY = FactMine::ProofBoundary::PROOF_BOUNDARY_PROPERTY
+    PROOF_BOUNDARY_SUMMARY_PROPERTY = FactMine::ProofBoundary::PROOF_BOUNDARY_SUMMARY_PROPERTY
+    PROOF_BOUNDARY_SCHEMA = FactMine::ProofBoundary::SCHEMA
 
     def proof_boundary(input_completeness:, claim_status:, coverage_discharge:, authority:, scope:, blockers: [])
-      raise ArgumentError, "invalid input completeness: #{input_completeness}" unless %w[complete partial unknown].include?(input_completeness.to_s)
-      raise ArgumentError, "invalid claim status: #{claim_status}" unless %w[proven observed review].include?(claim_status.to_s)
-      raise ArgumentError, "invalid coverage discharge: #{coverage_discharge}" unless %w[satisfiable unsatisfiable not_applicable unknown].include?(coverage_discharge.to_s)
-
-      {
-        "schema" => PROOF_BOUNDARY_SCHEMA,
-        "input_completeness" => input_completeness.to_s,
-        "claim_status" => claim_status.to_s,
-        "coverage_discharge" => coverage_discharge.to_s,
-        "authority" => Array(authority).map(&:to_s),
-        "scope" => scope.to_s,
-        "blockers" => Array(blockers).map(&:to_s).uniq.sort
-      }
+      FactMine::ProofBoundary.build(
+        input_completeness: input_completeness,
+        claim_status: claim_status,
+        coverage_discharge: coverage_discharge,
+        authority: authority,
+        scope: scope,
+        blockers: blockers
+      )
     end
 
     def proof_boundary_summary(results)
-      input = { "complete" => 0, "partial" => 0, "unknown" => 0 }
-      claims = { "proven" => 0, "observed" => 0, "review" => 0 }
-      coverage = { "satisfiable" => 0, "unsatisfiable" => 0, "not_applicable" => 0, "unknown" => 0 }
-      Array(results).each do |result|
-        boundary = result.dig("properties", PROOF_BOUNDARY_PROPERTY)
-        next unless boundary.is_a?(Hash)
-
-        input[input.key?(boundary["input_completeness"]) ? boundary["input_completeness"] : "unknown"] += 1
-        claims[claims.key?(boundary["claim_status"]) ? boundary["claim_status"] : "review"] += 1
-        coverage[coverage.key?(boundary["coverage_discharge"]) ? boundary["coverage_discharge"] : "unknown"] += 1
-      end
-      with_boundary = input.values.sum
-      {
-        "schema" => PROOF_BOUNDARY_SCHEMA,
-        "result_count" => Array(results).size,
-        "results_with_boundary" => with_boundary,
-        "input_completeness" => input,
-        "claim_status" => claims,
-        "coverage_discharge" => coverage
-      }
+      FactMine::ProofBoundary.summary(results)
     end
 
     def document(tool_name:, rules:, results:, information_uri: nil, properties: {})

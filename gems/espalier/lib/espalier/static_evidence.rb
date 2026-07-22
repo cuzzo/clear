@@ -31,6 +31,7 @@ module Espalier
     def self.project_modules(evidence, source_roles: ["production"])
       return [] unless evidence && evidence["methods"]
 
+      input_boundary = proof_boundary_from_corpus(evidence["corpus"])
       allowed_roles = Array(source_roles).map(&:to_s).to_set
       roles_by_path = Array(evidence["files"]).each_with_object({}) do |file, roles|
         path = file["path"].to_s
@@ -289,8 +290,26 @@ module Espalier
           ivar_types: module_like ? {} : fields_by_owner[owner].to_h { |field| [field["name"], field["declared_type"]] }.compact,
           ivar_properties: {},
           declared_fields: declared_fields,
+          proof_boundary: input_boundary,
           methods: methods_by_owner[owner]
         }
+      end
+    end
+
+    # Corpus completeness belongs to the extractor, not to a later report
+    # formatter. Keep the narrow input dimension alongside every projected
+    # module so downstream analyses can preserve it without guessing from
+    # their own estimate-specific flags.
+    def self.proof_boundary_from_corpus(corpus)
+      corpus = Hash(corpus || {})
+      complete = corpus["complete"]
+      reason = corpus["reason"].to_s
+      if complete == true
+        { input_completeness: "complete", input_blockers: [] }
+      elsif complete == false
+        { input_completeness: "partial", input_blockers: [reason.empty? ? "incomplete_corpus" : reason] }
+      else
+        { input_completeness: "unknown", input_blockers: [] }
       end
     end
 

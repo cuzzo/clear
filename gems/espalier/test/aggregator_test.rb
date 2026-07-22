@@ -240,6 +240,28 @@ class AggregatorTest < Minitest::Test
     assert_equal 1, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "unknown")
   end
 
+  def test_formatter_sarif_preserves_extractor_input_boundary
+    manifest = [{
+      module: "Parser",
+      file: "lib/parser.rb",
+      proof_boundary: {
+        input_completeness: "partial",
+        input_blockers: ["selected target is not a closed corpus"]
+      },
+      functions: [{
+        name: "parse",
+        line: 3,
+        quality_metrics: { big_o: "O(N)", big_o_space: "O(1)", big_o_complete: true, big_o_space_complete: true }
+      }]
+    }]
+
+    run = JSON.parse(Espalier::Formatter.to_sarif(manifest)).fetch("runs").first
+    boundary = run.fetch("results").first.dig("properties", "fact_mine.proof_boundary")
+    assert_equal "partial", boundary.fetch("input_completeness")
+    assert_equal ["selected target is not a closed corpus"], boundary.fetch("blockers")
+    assert_equal 1, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "partial")
+  end
+
   def test_delegations_mapped_to_concrete_type_when_available
     modules = [
       {

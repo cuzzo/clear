@@ -968,13 +968,16 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     }
 
     let raw_call_spans = document
-        .raw_call_spans
+        .raw_call_sites
         .iter()
-        .copied()
+        .map(|site| site.span)
         .collect::<BTreeSet<_>>();
     let normalized_call_spans = calls.iter().map(|call| call.span).collect::<BTreeSet<_>>();
-    let (raw_calls_not_normalized, normalized_calls_without_raw_span) =
-        unmatched_call_spans(&raw_call_spans, &normalized_call_spans);
+    let (raw_calls_not_normalized, normalized_calls_without_raw_span) = unmatched_call_origins(
+        &raw_call_spans,
+        &normalized_call_spans,
+        &document.call_raw_origin_projections,
+    );
     let raw_call_kinds = document
         .raw_call_sites
         .iter()
@@ -2056,67 +2059,40 @@ fn span_contains(outer: [usize; 4], inner: [usize; 4]) -> bool {
         && (inner[2], inner[3]) <= (outer[2], outer[3])
 }
 
-/// Match parser and normalized calls structurally, not only by an identical
-/// range. Language adapters may deliberately retain a callable access span
-/// (`receiver.member`) instead of the enclosing invocation (`receiver.member()`)
-/// while preserving the same semantic call. Process smallest parser spans
-/// first and consume one normalized span per parser span so an inner call never
-/// masks a missing outer call.
-fn unmatched_call_spans(
+/// Match calls only through an origin recorded during normalization. A
+/// normalized call can deliberately retain a callable-access span
+/// (`receiver.member`) rather than its parser invocation (`receiver.member()`).
+/// Reconstructing that relation from span overlap can pair nested or adjacent
+/// calls incorrectly and hide a dropped call.
+fn unmatched_call_origins(
     raw: &BTreeSet<[usize; 4]>,
     normalized: &BTreeSet<[usize; 4]>,
+    origins: &[syntax::CallRawOriginProjection],
 ) -> (Vec<[usize; 4]>, Vec<[usize; 4]>) {
-    let mut raw_spans = raw.iter().copied().collect::<Vec<_>>();
-    raw_spans.sort_by_key(span_extent);
-    let mut unused_normalized = normalized.iter().copied().collect::<BTreeSet<_>>();
-    let mut unmatched_raw = Vec::new();
-
-    for raw_span in raw_spans {
-        let match_span = unused_normalized
-            .iter()
-            .copied()
-            .filter(|normalized_span| spans_overlap(raw_span, *normalized_span))
-            .min_by_key(|normalized_span| call_span_match_rank(raw_span, *normalized_span));
-        if let Some(normalized_span) = match_span {
-            unused_normalized.remove(&normalized_span);
-        } else {
-            unmatched_raw.push(raw_span);
+    let mut unmatched_raw = raw.clone();
+    let mut unmatched_normalized = normalized.clone();
+    let mut normalized_by_raw = BTreeMap::<syntax::Span, BTreeSet<syntax::Span>>::new();
+    let mut raw_by_normalized = BTreeMap::<syntax::Span, BTreeSet<syntax::Span>>::new();
+    for origin in origins {
+        if !raw.contains(&origin.raw_call_span) || !normalized.contains(&origin.normalized_call_span) {
+            continue;
+        }
+        normalized_by_raw.entry(origin.raw_call_span).or_default().insert(origin.normalized_call_span);
+        raw_by_normalized.entry(origin.normalized_call_span).or_default().insert(origin.raw_call_span);
+    }
+    for (raw_span, normalized_spans) in normalized_by_raw {
+        if normalized_spans.len() != 1 {
+            continue;
+        }
+        let normalized_span = *normalized_spans.first().expect("one normalized origin");
+        if raw_by_normalized.get(&normalized_span).is_some_and(|raw_spans| raw_spans.len() == 1) {
+            unmatched_raw.remove(&raw_span);
+            unmatched_normalized.remove(&normalized_span);
         }
     }
-
-    (unmatched_raw, unused_normalized.into_iter().collect())
-}
-
-fn span_extent(span: &[usize; 4]) -> (usize, usize, usize, usize) {
     (
-        span[2].saturating_sub(span[0]),
-        span[3].saturating_sub(span[1]),
-        span[0],
-        span[1],
-    )
-}
-
-fn spans_overlap(left: [usize; 4], right: [usize; 4]) -> bool {
-    (left[0], left[1]) < (right[2], right[3]) && (right[0], right[1]) < (left[2], left[3])
-}
-
-fn call_span_match_rank(raw: [usize; 4], normalized: [usize; 4]) -> (u8, usize, usize, usize, usize) {
-    let relation = if raw == normalized {
-        0
-    } else if span_contains(raw, normalized) {
-        1
-    } else if span_contains(normalized, raw) {
-        2
-    } else {
-        3
-    };
-    let normalized_extent = span_extent(&normalized);
-    (
-        relation,
-        normalized_extent.0,
-        normalized_extent.1,
-        normalized_extent.2,
-        normalized_extent.3,
+        unmatched_raw.into_iter().collect(),
+        unmatched_normalized.into_iter().collect(),
     )
 }
 
@@ -6146,7 +6122,6 @@ pub(crate) mod tests {
             file: "test.rb".to_string(),
             language: Language::Ruby,
             source_digest: String::new(),
-            raw_call_spans: Vec::new(),
             raw_call_sites: Vec::new(),
             symbol_scope: syntax::SymbolScope::default(),
             function_defs: vec![syntax::FunctionDef {
@@ -6178,6 +6153,7 @@ pub(crate) mod tests {
                 line: 1,
                 span: [1, 0, 1, 16],
             }],
+            call_raw_origin_projections: Vec::new(),
             state_declarations: vec![syntax::StateDeclaration {
                 field: "@name".to_string(),
                 owner: "Greeter".to_string(),
@@ -6263,7 +6239,6 @@ pub(crate) mod tests {
     fn raw_call_loss_is_grouped_by_parser_node_kind_and_survives_merge() {
         let mut document = test_document();
         let span = [4, 2, 4, 9];
-        document.raw_call_spans = vec![span];
         document.raw_call_sites = vec![crate::ast::RawCallSite {
             span,
             kind: "call_expression".to_string(),
@@ -6328,7 +6303,11 @@ pub(crate) mod tests {
         ]);
         let normalized = BTreeSet::from([[1, 11, 1, 16]]); // inner callable access
 
-        let (unmatched_raw, unmatched_normalized) = unmatched_call_spans(&raw, &normalized);
+        let origins = vec![syntax::CallRawOriginProjection {
+            raw_call_span: [1, 11, 1, 18],
+            normalized_call_span: [1, 11, 1, 16],
+        }];
+        let (unmatched_raw, unmatched_normalized) = unmatched_call_origins(&raw, &normalized, &origins);
 
         assert_eq!(unmatched_raw, vec![[1, 0, 1, 20]]);
         assert!(unmatched_normalized.is_empty());
@@ -6339,10 +6318,25 @@ pub(crate) mod tests {
         let raw = BTreeSet::from([[1, 0, 1, 16]]); // receiver.member()
         let normalized = BTreeSet::from([[1, 0, 1, 15]]); // receiver.member
 
-        let (unmatched_raw, unmatched_normalized) = unmatched_call_spans(&raw, &normalized);
+        let origins = vec![syntax::CallRawOriginProjection {
+            raw_call_span: [1, 0, 1, 16],
+            normalized_call_span: [1, 0, 1, 15],
+        }];
+        let (unmatched_raw, unmatched_normalized) = unmatched_call_origins(&raw, &normalized, &origins);
 
         assert!(unmatched_raw.is_empty());
         assert!(unmatched_normalized.is_empty());
+    }
+
+    #[test]
+    fn call_coverage_does_not_treat_partial_overlap_as_a_shared_origin() {
+        let raw = BTreeSet::from([[1, 0, 1, 12]]);
+        let normalized = BTreeSet::from([[1, 8, 1, 18]]);
+
+        let (unmatched_raw, unmatched_normalized) = unmatched_call_origins(&raw, &normalized, &[]);
+
+        assert_eq!(unmatched_raw, vec![[1, 0, 1, 12]]);
+        assert_eq!(unmatched_normalized, vec![[1, 8, 1, 18]]);
     }
 
     pub(crate) fn extracts_methods_impl() {

@@ -372,9 +372,58 @@ RSpec.describe NilKill do
       claims = sarif.dig("runs", 0, "results").map { |result| result.dig("properties", "fact_mine.proof_boundary", "claim_status") }.compact
       expect(claims).to include("proven", "review")
       expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "claim_status", "review")).to be_positive
-      partial_boundary = described_class.new.send(:static_proof_boundary, { "unknown_reasons" => ["dynamic dispatch"] }, "static_nil_finding")
+      partial_boundary = described_class.new.send(:static_review_boundary, "static_nil_finding", blockers: ["dynamic dispatch"])
       expect(partial_boundary.fetch("input_completeness")).to eq("partial")
       expect(partial_boundary.fetch("blockers")).to eq(["dynamic dispatch"])
+    end
+
+    it "does not treat complete inputs as a proven static claim" do
+      boundary = described_class.new.send(
+        :static_proof_boundary,
+        { "complete" => true, "proof_tier" => "review" },
+        "legacy_static_nil_finding",
+        { "corpus" => { "complete" => true } }
+      )
+
+      expect(boundary).to include(
+        "input_completeness" => "complete",
+        "claim_status" => "review"
+      )
+    end
+
+    it "conforms to the shared proof-boundary fixture" do
+      fixture_path = File.join(NilKill::ROOT, "gems/hazard-contract/fixtures/proof-boundary.v2.json")
+      fixture = JSON.parse(File.read(fixture_path))
+      valid = fixture.fetch("valid")
+
+      boundary = NilKill::Sarif.proof_boundary(
+        input_completeness: valid.fetch("input_completeness"),
+        claim_status: valid.fetch("claim_status"),
+        coverage_discharge: valid.fetch("coverage_discharge"),
+        authority: valid.fetch("authority"),
+        scope: valid.fetch("scope"),
+        blockers: valid.fetch("blockers")
+      )
+
+      expect(boundary).to eq(valid)
+      expect {
+        NilKill::Sarif.proof_boundary(
+          input_completeness: fixture.dig("invalid", "input_completeness"),
+          claim_status: "review",
+          coverage_discharge: "unsatisfiable",
+          authority: [],
+          scope: "test"
+        )
+      }.to raise_error(ArgumentError, /input completeness/)
+      expect {
+        NilKill::Sarif.proof_boundary(
+          input_completeness: "partial",
+          claim_status: "review",
+          coverage_discharge: "unsatisfiable",
+          authority: [],
+          scope: ""
+        )
+      }.to raise_error(ArgumentError, /authority must not be empty/)
     end
 
     it "joins relative method paths to absolute return-origin paths" do

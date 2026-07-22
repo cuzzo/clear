@@ -252,8 +252,8 @@ module NilKill
     def sarif_results(evidence)
       sarif_actions(evidence).map { |action| sarif_action_result(action, evidence) } +
         sarif_diagnostics(evidence).map { |diagnostic| sarif_diagnostic_result(diagnostic) } +
-        sarif_static_findings(evidence).map { |finding| sarif_static_result(finding) } +
-        sarif_pressure_findings(evidence).map { |finding| sarif_pressure_result(finding) }
+        sarif_static_findings(evidence).map { |finding| sarif_static_result(finding, evidence) } +
+        sarif_pressure_findings(evidence).map { |finding| sarif_pressure_result(finding, evidence) }
     end
 
     def sarif_actions(evidence)
@@ -313,6 +313,7 @@ module NilKill
           "owner" => method["owner"],
           "name" => method["name"],
           "signature" => signature,
+          "proof_boundary" => static_review_boundary("static_signature"),
         }
       end
       if static_nullable_signature?(signature)
@@ -339,6 +340,11 @@ module NilKill
           "return_evidence" => false_nullable ? return_origin : nil,
           "proof_tier" => false_nullable ? "static_proven" : nil,
           "blockers" => false_nullable ? Array(return_origin["blockers"]) : [],
+          "proof_boundary" => if false_nullable
+            static_proven_boundary(return_origin, "static_nullable_return")
+          else
+            static_review_boundary("static_signature")
+          end,
         }
       end
       findings
@@ -424,6 +430,7 @@ module NilKill
         "owner" => field["owner"],
         "name" => field["name"] || field["field"],
         "signature" => type,
+        "proof_boundary" => static_review_boundary("static_field"),
       }
     end
 
@@ -446,6 +453,7 @@ module NilKill
         "definition" => recommendation["definition"],
         "slot_count" => recommendation["slot_count"],
         "slots" => recommendation["slots"],
+        "proof_boundary" => static_review_boundary("static_alias_recommendation"),
       }
     end
 
@@ -493,6 +501,7 @@ module NilKill
           "path" => row["path"],
           "line" => row["line"],
           "pressure" => row,
+          "proof_boundary" => static_review_boundary("fallibility_pressure"),
         }
       end
     end
@@ -511,6 +520,7 @@ module NilKill
           "path" => location[:path],
           "line" => location[:line],
           "pressure" => row,
+          "proof_boundary" => static_review_boundary("primitive_record_pressure"),
         }
       end
     end
@@ -545,7 +555,7 @@ module NilKill
       )
     end
 
-    def sarif_static_result(finding)
+    def sarif_static_result(finding, evidence)
       kind = finding["kind"].to_s.empty? ? "static" : finding["kind"].to_s
       NilKill::Sarif.result(
         rule_id: "nil-kill.static.#{NilKill::Sarif.slug(kind)}",
@@ -555,12 +565,12 @@ module NilKill
         line: finding["line"],
         properties: NilKill::Sarif.json_safe_value(finding).merge(
           "source_format" => "nil-kill.static.evidence.v2",
-          NilKill::Sarif::PROOF_BOUNDARY_PROPERTY => static_proof_boundary(finding, "static_nil_finding")
+          NilKill::Sarif::PROOF_BOUNDARY_PROPERTY => static_proof_boundary(finding, "static_nil_finding", evidence)
         )
       )
     end
 
-    def sarif_pressure_result(finding)
+    def sarif_pressure_result(finding, evidence)
       kind = finding["kind"].to_s.empty? ? "pressure" : finding["kind"].to_s
       NilKill::Sarif.result(
         rule_id: "nil-kill.pressure.#{NilKill::Sarif.slug(kind)}",
@@ -570,30 +580,78 @@ module NilKill
         line: finding["line"],
         properties: NilKill::Sarif.json_safe_value(finding).merge(
           "source_format" => "nil-kill.pressure",
-          NilKill::Sarif::PROOF_BOUNDARY_PROPERTY => static_proof_boundary(finding, "static_nil_pressure")
+          NilKill::Sarif::PROOF_BOUNDARY_PROPERTY => static_proof_boundary(finding, "static_nil_pressure", evidence)
         )
       )
     end
 
-    def static_proof_boundary(finding, scope)
-      blockers = Array(finding["unknown_reasons"]) + Array(finding["blockers"])
-      proof_tier = finding["proof_tier"].to_s
-      complete = finding["complete"]
-      input_completeness = if proof_tier == "static_proven" || complete == true
-                             "complete"
-                           elsif blockers.empty?
-                             "unknown"
-                           else
-                             "partial"
-                           end
+    def static_proof_boundary(finding, scope, evidence = nil)
+      boundary = finding["proof_boundary"]
+      return apply_corpus_completeness(boundary, evidence) if boundary.is_a?(Hash)
+
+      # Legacy evidence had no typed boundary. Do not reinterpret arbitrary
+      # payload fields such as `complete` or `proof_tier` while rendering.
+      static_review_boundary(scope, **corpus_boundary_attributes(evidence))
+    end
+
+    def static_proven_boundary(evidence, scope)
+      blockers = Array(evidence["blockers"])
+      input_completeness = if evidence["complete"] == true
+        "complete"
+      elsif evidence["complete"] == false || !blockers.empty?
+        "partial"
+      else
+        "unknown"
+      end
       NilKill::Sarif.proof_boundary(
         input_completeness: input_completeness,
-        claim_status: proof_tier == "static_proven" || complete == true ? "proven" : "review",
+        claim_status: "proven",
         coverage_discharge: "unsatisfiable",
         authority: ["fact_mine_normalized_ast", "nil_kill_static"],
         scope: scope,
         blockers: blockers
       )
+    end
+
+    def static_review_boundary(scope, input_completeness: nil, blockers: [])
+      NilKill::Sarif.proof_boundary(
+        input_completeness: input_completeness || (blockers.empty? ? "unknown" : "partial"),
+        claim_status: "review",
+        coverage_discharge: "unsatisfiable",
+        authority: ["fact_mine_normalized_ast", "nil_kill_static"],
+        scope: scope,
+        blockers: blockers
+      )
+    end
+
+    def apply_corpus_completeness(boundary, evidence)
+      corpus = corpus_boundary_attributes(evidence)
+      return boundary unless boundary["input_completeness"] == "unknown"
+      return boundary if corpus.fetch(:input_completeness) == "unknown"
+
+      NilKill::Sarif.proof_boundary(
+        input_completeness: corpus.fetch(:input_completeness),
+        claim_status: boundary.fetch("claim_status"),
+        coverage_discharge: boundary.fetch("coverage_discharge"),
+        authority: boundary.fetch("authority"),
+        scope: boundary.fetch("scope"),
+        blockers: Array(boundary["blockers"]) + corpus.fetch(:blockers)
+      )
+    end
+
+    def corpus_boundary_attributes(evidence)
+      corpus = evidence.is_a?(Hash) ? (evidence.dig("static", "corpus") || evidence["corpus"]) : nil
+      return { input_completeness: "unknown", blockers: [] } unless corpus.is_a?(Hash)
+      return { input_completeness: "complete", blockers: [] } if corpus["complete"] == true
+
+      if corpus["complete"] == false
+        return {
+          input_completeness: "partial",
+          blockers: [corpus["reason"].to_s.empty? ? "incomplete_corpus" : corpus["reason"].to_s]
+        }
+      end
+
+      { input_completeness: "unknown", blockers: [] }
     end
 
     def unknown_observation_boundary(scope)

@@ -69,6 +69,8 @@ pub struct NullableOperation {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct PresenceCorrelation {
     pub group_id: String,
+    pub path: String,
+    pub span: Span,
     pub value_place_id: String,
     pub presence_place_id: String,
     pub semantics: String,
@@ -401,10 +403,10 @@ pub(crate) fn project_presence_correlations(seeds: &[PresenceCorrelationSeed], f
             let place_for = |subject: &str| effect.reads.iter().chain(effect.writes.iter())
                 .find(|place_id| places.get(place_id.as_str()) == Some(&subject)).cloned();
             let (Some(value_place_id), Some(presence_place_id)) = (place_for(&seed.value_subject), place_for(&seed.presence_subject)) else { continue; };
-            rows.insert((format!("presence:{}:{value_place_id}:{presence_place_id}", node.id), value_place_id, presence_place_id, seed.semantics.clone(), "presence_on_true".to_string(), effect.complete));
+            rows.insert((format!("presence:{}:{value_place_id}:{presence_place_id}", node.id), node.file.clone(), node.span, value_place_id, presence_place_id, seed.semantics.clone(), "presence_on_true".to_string(), effect.complete));
         }
     }
-    rows.into_iter().map(|(group_id, value_place_id, presence_place_id, semantics, branch_refinement, complete)| PresenceCorrelation { group_id, value_place_id, presence_place_id, semantics, branch_refinement, complete }).collect()
+    rows.into_iter().map(|(group_id, path, span, value_place_id, presence_place_id, semantics, branch_refinement, complete)| PresenceCorrelation { group_id, path, span, value_place_id, presence_place_id, semantics, branch_refinement, complete }).collect()
 }
 
 fn join_projected_states<'a>(states: impl Iterator<Item = &'a str>) -> DefinitionState {

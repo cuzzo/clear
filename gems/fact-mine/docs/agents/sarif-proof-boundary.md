@@ -51,3 +51,16 @@ dimension; consumers must never combine `review` with `partial`, or infer
 Current producers are Decomplex, Espalier, NilKill, and SlopCop. Consumers
 must preserve these properties when re-emitting SARIF rather than replacing
 them with a global scan-completeness flag.
+
+## Ownership and conformance
+
+The machine-readable contract is
+`gems/hazard-contract/proof-boundary.v2.schema.json`; matching valid and
+invalid vectors live in `gems/hazard-contract/fixtures/proof-boundary.v2.json`.
+Ruby producers use `FactMine::ProofBoundary` rather than copying validation or
+summary logic. Rust producers use typed enums, so invalid values cannot escape
+in release builds.
+
+A detector creates the boundary with the finding it emits. SARIF only
+serializes it. Complete inputs do not imply a proven claim: only an explicit
+detector proof may use `claim_status: proven`.

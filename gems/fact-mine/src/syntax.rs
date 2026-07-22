@@ -243,8 +243,6 @@ pub struct Document {
     pub language: Language,
     #[serde(default)]
     pub source_digest: String,
-    #[serde(default)]
-    pub raw_call_spans: Vec<Span>,
     /// Parser-classified calls retained with grammar-node kinds for
     /// normalization-loss accounting. This is diagnostic evidence, not a
     /// second call extractor.
@@ -258,6 +256,10 @@ pub struct Document {
     pub owner_defs: Vec<OwnerDef>,
     #[serde(default)]
     pub call_sites: Vec<CallSite>,
+    /// Exact parser-call origins retained by normalization. Coverage uses
+    /// these identities instead of re-matching source ranges heuristically.
+    #[serde(default)]
+    pub call_raw_origin_projections: Vec<CallRawOriginProjection>,
     #[serde(default)]
     pub call_receiver_projections: Vec<CallReceiverProjection>,
     #[serde(default)]
@@ -490,6 +492,15 @@ pub struct CallSite {
     pub control: Option<String>,
     pub safe_navigation: bool,
     pub block: bool,
+}
+
+/// The parser call that produced a normalized call. `normalized_call_span`
+/// can be a callable-access span rather than the enclosing invocation, so it
+/// must not be reconstructed later from generic span overlap.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CallRawOriginProjection {
+    pub raw_call_span: Span,
+    pub normalized_call_span: Span,
 }
 
 /// Structural identity for a direct call used as another call's receiver.
@@ -773,6 +784,20 @@ mod tests {
         assert_eq!(docs[1].file, second.path().to_string_lossy());
         assert_eq!(docs[0].function_defs[0].name, "first");
         assert_eq!(docs[1].function_defs[0].name, "second");
+    }
+
+    #[test]
+    fn normalized_calls_retain_parser_call_origins() {
+        let doc = document("def run\n  receiver.call\nend\n", Language::Ruby);
+
+        assert!(!doc.raw_call_sites.is_empty());
+        assert!(!doc.call_sites.is_empty());
+        assert!(doc.call_raw_origin_projections.iter().any(|origin| {
+            doc.raw_call_sites
+                .iter()
+                .any(|raw| raw.span == origin.raw_call_span)
+                && doc.call_sites.iter().any(|call| call.span == origin.normalized_call_span)
+        }));
     }
 
     #[test]
