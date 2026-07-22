@@ -189,6 +189,7 @@ fn nullable_operations_join_native_dereferences_to_proven_null_states() -> Resul
     ] {
         let document = syntax::parse_file(fixture(name), language)?;
         let output = profile::extract(&document, Profile::NilKill);
+        assert_eq!(output.nullable_operations.len(), 1, "{name}");
         assert!(output.nullable_operations.iter().any(|operation| {
             operation.operation_kind == "pointer_dereference"
                 && operation.nil_behavior == behavior

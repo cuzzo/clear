@@ -317,6 +317,7 @@ pub(crate) fn project_operations(
             .nodes
             .iter()
             .filter(|node| node.function == seed.function)
+            .filter(|node| node.role != "function_entry" && node.role != "function_exit")
             .filter(|node| span_contains(node.span, seed.span))
             .collect::<Vec<_>>();
         for node in nodes {
