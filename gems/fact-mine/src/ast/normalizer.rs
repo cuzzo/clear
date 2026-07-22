@@ -294,7 +294,12 @@ impl<'source> TreeSitterNormalizer<'source> {
             if self.assignment_right(node).is_none() {
                 return Some(self.wrap(&kind_type(node.kind()), Vec::new(), node));
             }
-            return self.normalize_assignment(node);
+            let assignment = self.normalize_assignment(node)?;
+            return Some(self.wrap(
+                &kind_type(node.kind()),
+                vec![Child::Node(Box::new(assignment))],
+                node,
+            ));
         }
         if self
             .normalization_adapter
@@ -5466,10 +5471,8 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
-        if matches!(node.kind(), "annotated_assignment" | "variable_declarator") {
-            return self
-                .named_field(node, "name")
-                .or_else(|| self.named_children(node).into_iter().next());
+        if node.kind() == "annotated_assignment" {
+            return self.named_field(node, "name");
         }
         self.named_field(node, "left")
             .or_else(|| self.named_children(node).into_iter().next())
@@ -5479,10 +5482,8 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
-        if matches!(node.kind(), "annotated_assignment" | "variable_declarator") {
-            return self
-                .named_field(node, "value")
-                .or_else(|| self.named_children(node).into_iter().nth(1));
+        if node.kind() == "annotated_assignment" {
+            return self.named_field(node, "value");
         }
         self.named_field(node, "right")
             .or_else(|| self.named_children(node).into_iter().nth(1))

@@ -20,6 +20,21 @@ const TYPESCRIPT_TERNARY_KINDS: &[&str] = &[
 pub(crate) struct TypeScriptAstAdapter;
 
 impl AstNormalizationAdapter for TypeScriptAstAdapter {
+    fn named_field<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        name: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() == "variable_declarator" {
+            match name {
+                "left" => return node.child_by_field_name("name"),
+                "right" => return node.child_by_field_name("value"),
+                _ => {}
+            }
+        }
+        node.child_by_field_name(name)
+    }
+
     fn absence_literal(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
         self.check_node_role(node, "nil")
             || (node_text(node, source).trim() == "undefined"
@@ -495,4 +510,33 @@ fn typescript_bound_callable_name(node: TreeSitterNode<'_>, source: &str) -> Opt
     let name = parent.child_by_field_name("name")?;
     let text = node_text(name, source).trim();
     (!text.is_empty()).then(|| text.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    #[test]
+    fn variable_declarators_map_assignment_fields_without_hiding_other_fields() {
+        let source = "const value: string | null = null;";
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let mut nodes = vec![tree.root_node()];
+        let declarator = loop {
+            let node = nodes.pop().unwrap();
+            if node.kind() == "variable_declarator" {
+                break node;
+            }
+            nodes.extend((0..node.child_count()).filter_map(|index| node.child(index)));
+        };
+
+        let adapter = TypeScriptAstAdapter;
+        assert_eq!(node_text(adapter.named_field(declarator, "left").unwrap(), source), "value");
+        assert_eq!(node_text(adapter.named_field(declarator, "right").unwrap(), source), "null");
+        assert!(adapter.named_field(declarator, "missing").is_none());
+    }
 }
