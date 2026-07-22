@@ -457,7 +457,7 @@ fn semantic_groups(
             include_semantic_group(&unit, base_unit, &added_lines).then(|| {
                 let verification = unavailable_verification(&added_lines);
                 let group_added = group_added_line_numbers(added, unit.start_line, unit.end_line);
-                let visibility = visibility_for(source, &unit);
+                let visibility = visibility_for(path, source, &unit);
                 let risk = risk_summary(Some(source), &group_added, &verification);
                 DiffGroup {
                     name: unit.name,
@@ -512,22 +512,36 @@ fn summarize_group_lines(
     summarize_added_lines(Some(source), &lines, path)
 }
 
-fn visibility_for(source: &str, unit: &crate::model::LogicalUnit) -> Visibility {
+fn visibility_for(path: &str, source: &str, unit: &crate::model::LogicalUnit) -> Visibility {
     if unit.kind != UnitKind::Function {
         return Visibility::Unknown;
     }
     let signature = unit.signature.as_str();
-    if ruby_private_context(source, unit.start_line) || signature.contains("private") {
-        Visibility::Private
-    } else if signature.contains("public")
-        || signature.contains("pub ")
-        || signature.starts_with("pub fn")
-        || signature.starts_with("def ")
-    {
-        Visibility::Public
-    } else {
-        Visibility::Unknown
+    match language_for_path(path).as_deref() {
+        Some("ruby") => {
+            if ruby_private_context(source, unit.start_line) || signature.contains("private") {
+                Visibility::Private
+            } else {
+                Visibility::Public
+            }
+        }
+        Some("go") => go_exported_name(&unit.name)
+            .then_some(Visibility::Public)
+            .unwrap_or(Visibility::Private),
+        Some("zig") | Some("rust") => signature
+            .contains("pub ")
+            .then_some(Visibility::Public)
+            .unwrap_or(Visibility::Private),
+        Some("typescript") | Some("javascript") => signature
+            .contains("export ")
+            .then_some(Visibility::Public)
+            .unwrap_or(Visibility::Private),
+        _ => Visibility::Unknown,
     }
+}
+
+fn go_exported_name(name: &str) -> bool {
+    name.chars().next().is_some_and(char::is_uppercase)
 }
 
 fn ruby_private_context(source: &str, start_line: u32) -> bool {
@@ -1240,6 +1254,66 @@ mod tests {
         assert_eq!(changed.residual_lines.code, 1);
         assert_eq!(changed.verification.unknown, 3);
         assert_eq!(changed.risk.not_covered, 0);
+    }
+
+    #[test]
+    fn classifies_supported_language_function_visibility_conservatively() {
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            Vec::new(),
+            vec![
+                file("main.go", "func Public() {}\nfunc private() {}\n"),
+                file(
+                    "main.zig",
+                    "pub fn visible() void {}\nfn hidden() void {}\n",
+                ),
+                file("lib.rs", "pub fn visible() {}\nfn hidden() {}\n"),
+                file(
+                    "app.ts",
+                    "export function visible() {}\nfunction hidden() {}\n",
+                ),
+            ],
+        );
+
+        let visibility = |path: &str| {
+            plan.files
+                .iter()
+                .find(|file| file.path == path)
+                .unwrap()
+                .groups
+                .iter()
+                .map(|group| (group.name.as_str(), group.visibility))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            visibility("main.go"),
+            vec![
+                ("Public", Visibility::Public),
+                ("private", Visibility::Private)
+            ]
+        );
+        assert_eq!(
+            visibility("main.zig"),
+            vec![
+                ("visible", Visibility::Public),
+                ("hidden", Visibility::Private)
+            ]
+        );
+        assert_eq!(
+            visibility("lib.rs"),
+            vec![
+                ("visible", Visibility::Public),
+                ("hidden", Visibility::Private)
+            ]
+        );
+        assert_eq!(
+            visibility("app.ts"),
+            vec![
+                ("visible", Visibility::Public),
+                ("hidden", Visibility::Private)
+            ]
+        );
     }
 
     #[test]
