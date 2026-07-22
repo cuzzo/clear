@@ -315,6 +315,23 @@ fn native_function_pointer_calls_are_nullable_operations() -> Result<()> {
 }
 
 #[test]
+fn native_pointer_slot_mutation_invalidates_the_original_null_proof() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_alias_mutation.cpp"), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("use_after_slot_update")
+            && state.place_id.ends_with(":value")
+            && state.state == "unknown"
+            && !state.complete
+    }));
+    assert!(output.nullable_operations.iter().all(|operation| {
+        operation.span[0] != 5 || operation.operation_kind != "pointer_dereference"
+    }));
+    Ok(())
+}
+
+#[test]
 fn c_allocator_contracts_seed_maybe_null_operation_states() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_allocators.c"), Language::C)?;
     let output = profile::extract(&document, Profile::NilKill);

@@ -92,7 +92,7 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
                 nil_behavior: "undefined_behavior",
             });
         }
-        let subject = (node.r#type == "POINTER_EXPRESSION")
+        let subject = (node.r#type == "POINTER_EXPRESSION" && node.text.trim_start().starts_with('*'))
             .then(|| node.children.first().and_then(crate::ast::node))
             .flatten()
             .filter(|subject| subject.r#type == "LVAR")?
@@ -526,6 +526,12 @@ mod tests {
         };
         assert_eq!(local_call_subject(&malformed), None);
         assert_eq!(CNormalizedBehavior.function_value_calls_are_local_reads(), true);
+
+        let address = Node {
+            children: vec![Child::Node(Box::new(node("LVAR", "value")))],
+            ..node("POINTER_EXPRESSION", "&value")
+        };
+        assert!(CNormalizedBehavior.nullable_operation(&address).is_none());
     }
 
     #[test]
