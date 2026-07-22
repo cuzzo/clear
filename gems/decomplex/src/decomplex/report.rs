@@ -298,6 +298,12 @@ impl SarifEmitter {
                 object.insert("decomplex.snapshot".to_string(), snapshot);
             }
         }
+        if let Some(object) = properties.as_object_mut() {
+            object.insert(
+                sarif::PROOF_BOUNDARY_SUMMARY_PROPERTY.to_string(),
+                sarif::proof_boundary_summary(&results),
+            );
+        }
         sarif::document(
             "Decomplex",
             Self::sarif_rules(rollup),
@@ -308,7 +314,8 @@ impl SarifEmitter {
     }
 
     fn sarif_rules(rollup: &FindingsRollup) -> Vec<Value> {
-        rollup.sections
+        rollup
+            .sections
             .iter()
             .map(|section| {
                 sarif::rule(
@@ -334,6 +341,12 @@ impl SarifEmitter {
                         "tier": section.tier,
                         "method": location.method,
                     });
+                    if let Some(object) = properties.as_object_mut() {
+                        object.insert(
+                            sarif::PROOF_BOUNDARY_PROPERTY.to_string(),
+                            finding_proof_boundary(&section.title, finding),
+                        );
+                    }
                     if include_finding_payload {
                         if let Some(object) = properties.as_object_mut() {
                             object.insert(
@@ -359,6 +372,36 @@ impl SarifEmitter {
         }
         out
     }
+}
+
+fn finding_proof_boundary(section: &str, finding: &Value) -> Value {
+    let complete = rv::get(finding, "complete").and_then(Value::as_bool);
+    let proof_tier = rv::field(finding, "proof_tier");
+    let blockers = ["unknown_reasons", "blockers", "missing_proofs"]
+        .iter()
+        .flat_map(|key| rv::field_array_strings(finding, key))
+        .collect::<Vec<_>>();
+    let is_review = complete == Some(false)
+        || !blockers.is_empty()
+        || (section == "Redundant Nil Guards" && proof_tier != "static_proven");
+    let mut blockers = blockers;
+    if is_review && blockers.is_empty() {
+        blockers.push("review_only_local_proof".to_string());
+    }
+    let (tier, authority, scope) = if is_review {
+        (
+            "review",
+            vec!["fact_mine_normalized_ast", "fact_mine_cfg"],
+            "local_control_flow",
+        )
+    } else {
+        (
+            "complete",
+            vec!["fact_mine_normalized_ast"],
+            "detector_local",
+        )
+    };
+    sarif::proof_boundary(tier, &authority, scope, blockers)
 }
 
 #[derive(Clone, Debug)]
@@ -390,7 +433,12 @@ impl Report {
         include_finding_payload: bool,
         max_results: Option<usize>,
     ) -> Value {
-        SarifEmitter::to_value(&self.rollup, include_snapshot, include_finding_payload, max_results)
+        SarifEmitter::to_value(
+            &self.rollup,
+            include_snapshot,
+            include_finding_payload,
+            max_results,
+        )
     }
 
     pub fn convergence_value(&self) -> Value {
@@ -1604,7 +1652,7 @@ mod tests {
         });
 
         let report = Report::from_facts(&facts).unwrap();
-        
+
         let md = report.to_markdown();
         assert!(!md.is_empty());
 
@@ -1619,6 +1667,24 @@ mod tests {
 
         let sarif_val = report.to_sarif_value(true, true, None);
         assert!(!sarif_val.is_null());
+        let run = sarif_val.pointer("/runs/0").unwrap();
+        assert!(run
+            .pointer("/properties/fact_mine.proof_boundary_summary")
+            .is_some());
+        let nil_guard = run
+            .get("results")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .find(|result| {
+                result.get("ruleId").and_then(Value::as_str)
+                    == Some("decomplex.redundant-nil-guards")
+            })
+            .unwrap();
+        assert_eq!(
+            nil_guard.pointer("/properties/fact_mine.proof_boundary/tier"),
+            Some(&json!("review"))
+        );
 
         // Error checking path: missing detectors
         let invalid_facts = json!({
@@ -1943,11 +2009,16 @@ mod tests {
         });
 
         let mut rep = Report::from_facts(&comprehensive_facts).unwrap();
-        rep.rollup.sections.push(ReportSection::new("Unknown Section Title", 3, "desc", vec![
-            json!({"at": "file.rb:m:10"}),
-            json!({"at": "file.rb:10", "name": "foo"}),
-            json!({"at": "file.rb:10"}),
-        ]));
+        rep.rollup.sections.push(ReportSection::new(
+            "Unknown Section Title",
+            3,
+            "desc",
+            vec![
+                json!({"at": "file.rb:m:10"}),
+                json!({"at": "file.rb:10", "name": "foo"}),
+                json!({"at": "file.rb:10"}),
+            ],
+        ));
         let markdown = rep.to_markdown();
         assert!(markdown.contains("more)"));
 
@@ -1991,7 +2062,10 @@ mod tests {
         });
         let detail = sarif_message_detail("Superfluous State", &low_confidence);
         assert!(detail.contains("confidence=low"), "got {detail:?}");
-        assert!(detail.contains("unresolved chained receiver"), "got {detail:?}");
+        assert!(
+            detail.contains("unresolved chained receiver"),
+            "got {detail:?}"
+        );
 
         let high_confidence = json!({
             "field": "unused",

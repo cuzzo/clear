@@ -338,6 +338,42 @@ RSpec.describe NilKill do
         "ruleId" => "nil-kill.static.untyped-field",
         "message" => a_hash_including("text" => include("CurrentUnitSpan#id")),
       ))
+      static_result = results.find { |result| result.fetch("ruleId") == "nil-kill.static.untyped-signature" }
+      expect(static_result.dig("properties", "fact_mine.proof_boundary", "tier")).to eq("review")
+      expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "results_with_boundary")).to be_positive
+    end
+
+    it "distinguishes complete static proofs from partial static evidence in SARIF" do
+      evidence = {
+        "schema_version" => 2,
+        "languages" => ["ruby"],
+        "static" => {
+          "files" => [],
+          "methods" => [
+            { "path" => "lib/x.rb", "line" => 3, "owner" => "Parser", "name" => "parse", "kind" => "method", "language" => "ruby", "signature" => "sig { returns(T.nilable(String)) }" },
+            { "path" => "lib/x.rb", "line" => 7, "owner" => "Parser", "name" => "optional", "kind" => "method", "language" => "ruby", "signature" => "sig { returns(T.nilable(String)) }" }
+          ],
+          "fields" => [],
+          "facts" => {
+            "return_origins" => [{
+              "path" => "lib/x.rb", "class" => "Parser", "method" => "parse", "confidence" => "strong", "blockers" => [],
+              "candidate_type" => { "kind" => "Primitive", "data" => "String" },
+              "sources" => [{ "line" => 4, "type" => { "kind" => "Primitive", "data" => "String" } }]
+            }]
+          }
+        },
+        "runtime" => {},
+        "actions" => [],
+        "diagnostics" => []
+      }
+
+      sarif = JSON.parse(described_class.new(["--format=sarif"], evidence: evidence).to_sarif(evidence))
+      boundaries = sarif.dig("runs", 0, "results").map { |result| result.dig("properties", "fact_mine.proof_boundary", "tier") }.compact
+      expect(boundaries).to include("complete", "review")
+      expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "tiers", "review")).to be_positive
+      partial_boundary = described_class.new.send(:static_proof_boundary, { "unknown_reasons" => ["dynamic dispatch"] }, "static_nil_finding")
+      expect(partial_boundary.fetch("tier")).to eq("partial")
+      expect(partial_boundary.fetch("blockers")).to eq(["dynamic dispatch"])
     end
 
     it "joins relative method paths to absolute return-origin paths" do

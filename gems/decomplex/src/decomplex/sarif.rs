@@ -2,6 +2,69 @@ use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
 
 const SCHEMA: &str = "https://json.schemastore.org/sarif-2.1.0.json";
+pub const PROOF_BOUNDARY_PROPERTY: &str = "fact_mine.proof_boundary";
+pub const PROOF_BOUNDARY_SUMMARY_PROPERTY: &str = "fact_mine.proof_boundary_summary";
+pub const PROOF_BOUNDARY_SCHEMA: &str = "fact-mine.proof-boundary.v1";
+
+/// Records the narrowest completeness claim that supports one SARIF result.
+///
+/// This deliberately describes the facts used by the result, rather than the
+/// completeness of the entire scan.  A local syntax finding can therefore be
+/// complete even when an unrelated project-wide analysis is partial.
+pub fn proof_boundary(tier: &str, authority: &[&str], scope: &str, blockers: Vec<String>) -> Value {
+    debug_assert!(matches!(tier, "complete" | "partial" | "review"));
+    json!({
+        "schema": PROOF_BOUNDARY_SCHEMA,
+        "tier": tier,
+        "authority": authority,
+        "scope": scope,
+        "blockers": blockers,
+    })
+}
+
+/// Summarizes only results that declare a proof boundary.  Consumers can use
+/// this to disclose the partial-data rate without treating every result in a
+/// scan as unknown.
+pub fn proof_boundary_summary(results: &[Value]) -> Value {
+    let mut complete = 0usize;
+    let mut partial = 0usize;
+    let mut review = 0usize;
+    for result in results {
+        let Some(tier) = result
+            .pointer(&format!("/properties/{PROOF_BOUNDARY_PROPERTY}"))
+            .and_then(Value::as_object)
+            .and_then(|boundary| boundary.get("tier"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        match tier {
+            "complete" => complete += 1,
+            "partial" => partial += 1,
+            "review" => review += 1,
+            _ => {}
+        }
+    }
+    let results_with_boundary = complete + partial + review;
+    let partial_or_review = partial + review;
+    let partial_or_review_percent = if results_with_boundary == 0 {
+        0.0
+    } else {
+        (partial_or_review as f64 * 100.0) / results_with_boundary as f64
+    };
+    json!({
+        "schema": PROOF_BOUNDARY_SCHEMA,
+        "result_count": results.len(),
+        "results_with_boundary": results_with_boundary,
+        "tiers": {
+            "complete": complete,
+            "partial": partial,
+            "review": review,
+        },
+        "partial_or_review_results": partial_or_review,
+        "partial_or_review_percent": partial_or_review_percent,
+    })
+}
 
 pub fn document(
     tool_name: &str,
@@ -168,32 +231,30 @@ fn compact_value(value: Value) -> Value {
 
     while let Some(state) = state_stack.pop() {
         match state {
-            State::Pending(val) => {
-                match val {
-                    Value::Object(obj) => {
-                        let mut keys = Vec::new();
-                        let mut vals = Vec::new();
-                        for (k, v) in obj {
-                            keys.push(k);
-                            vals.push(v);
-                        }
-                        state_stack.push(State::PostObject { keys });
-                        for v in vals.into_iter().rev() {
-                            state_stack.push(State::Pending(v));
-                        }
+            State::Pending(val) => match val {
+                Value::Object(obj) => {
+                    let mut keys = Vec::new();
+                    let mut vals = Vec::new();
+                    for (k, v) in obj {
+                        keys.push(k);
+                        vals.push(v);
                     }
-                    Value::Array(arr) => {
-                        let len = arr.len();
-                        state_stack.push(State::PostArray { len });
-                        for v in arr.into_iter().rev() {
-                            state_stack.push(State::Pending(v));
-                        }
-                    }
-                    other => {
-                        results.push(other);
+                    state_stack.push(State::PostObject { keys });
+                    for v in vals.into_iter().rev() {
+                        state_stack.push(State::Pending(v));
                     }
                 }
-            }
+                Value::Array(arr) => {
+                    let len = arr.len();
+                    state_stack.push(State::PostArray { len });
+                    for v in arr.into_iter().rev() {
+                        state_stack.push(State::Pending(v));
+                    }
+                }
+                other => {
+                    results.push(other);
+                }
+            },
             State::PostObject { keys } => {
                 let mut out = Map::new();
                 for key in keys.into_iter().rev() {
@@ -277,10 +338,7 @@ mod tests {
         let doc = document(
             "mytool",
             vec![json!({"id": "rule1"})],
-            vec![
-                json!({"ruleId": "rule2"}),
-                json!({}),
-            ],
+            vec![json!({"ruleId": "rule2"}), json!({})],
             None,
             json!({}),
         );
@@ -293,5 +351,41 @@ mod tests {
         let empty_locs2 = sarif_locations(Some(""), None, None, None, None);
         assert_eq!(empty_locs2, Value::Array(vec![]));
     }
-}
 
+    #[test]
+    fn proof_boundary_summary_counts_only_annotated_results() {
+        let results = vec![
+            json!({
+                "properties": {
+                    PROOF_BOUNDARY_PROPERTY: proof_boundary(
+                        "complete",
+                        &["fact_mine_normalized_ast"],
+                        "local",
+                        vec![],
+                    )
+                }
+            }),
+            json!({
+                "properties": {
+                    PROOF_BOUNDARY_PROPERTY: proof_boundary(
+                        "partial",
+                        &["fact_mine_normalized_ast"],
+                        "local",
+                        vec!["unresolved_call".to_string()],
+                    )
+                }
+            }),
+            json!({"ruleId": "unannotated"}),
+        ];
+
+        let summary = proof_boundary_summary(&results);
+        assert_eq!(summary.pointer("/result_count"), Some(&json!(3)));
+        assert_eq!(summary.pointer("/results_with_boundary"), Some(&json!(2)));
+        assert_eq!(summary.pointer("/tiers/complete"), Some(&json!(1)));
+        assert_eq!(summary.pointer("/tiers/partial"), Some(&json!(1)));
+        assert_eq!(
+            summary.pointer("/partial_or_review_percent"),
+            Some(&json!(50.0))
+        );
+    }
+}

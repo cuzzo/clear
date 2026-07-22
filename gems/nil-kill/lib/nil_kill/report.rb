@@ -78,14 +78,16 @@ module NilKill
     end
 
     def to_sarif_hash(evidence = @evidence)
+      results = sarif_results(evidence)
       NilKill::Sarif.document(
         tool_name: "Nil-Kill",
         information_uri: "https://github.com/codeforreno/litedb",
         rules: sarif_rules(evidence),
-        results: sarif_results(evidence),
+        results: results,
         properties: {
           "format" => "nil-kill.report.sarif.v1",
-          "summary" => sarif_summary(evidence)
+          "summary" => sarif_summary(evidence),
+          NilKill::Sarif::PROOF_BOUNDARY_SUMMARY_PROPERTY => NilKill::Sarif.proof_boundary_summary(results)
         }
       )
     end
@@ -335,6 +337,8 @@ module NilKill
           "name" => method["name"],
           "signature" => signature,
           "return_evidence" => false_nullable ? return_origin : nil,
+          "proof_tier" => false_nullable ? "static_proven" : nil,
+          "blockers" => false_nullable ? Array(return_origin["blockers"]) : [],
         }
       end
       findings
@@ -548,7 +552,8 @@ module NilKill
         path: finding["path"],
         line: finding["line"],
         properties: NilKill::Sarif.json_safe_value(finding).merge(
-          "source_format" => "nil-kill.static.evidence.v2"
+          "source_format" => "nil-kill.static.evidence.v2",
+          NilKill::Sarif::PROOF_BOUNDARY_PROPERTY => static_proof_boundary(finding, "static_nil_finding")
         )
       )
     end
@@ -562,8 +567,29 @@ module NilKill
         path: finding["path"],
         line: finding["line"],
         properties: NilKill::Sarif.json_safe_value(finding).merge(
-          "source_format" => "nil-kill.pressure"
+          "source_format" => "nil-kill.pressure",
+          NilKill::Sarif::PROOF_BOUNDARY_PROPERTY => static_proof_boundary(finding, "static_nil_pressure")
         )
+      )
+    end
+
+    def static_proof_boundary(finding, scope)
+      blockers = Array(finding["unknown_reasons"]) + Array(finding["blockers"])
+      proof_tier = finding["proof_tier"].to_s
+      complete = finding["complete"]
+      tier = if proof_tier == "static_proven" || complete == true
+               "complete"
+             elsif blockers.empty?
+               "review"
+             else
+               "partial"
+             end
+      blockers << "review_only_static_evidence" if tier == "review" && blockers.empty?
+      NilKill::Sarif.proof_boundary(
+        tier: tier,
+        authority: ["fact_mine_normalized_ast", "nil_kill_static"],
+        scope: scope,
+        blockers: blockers
       )
     end
 

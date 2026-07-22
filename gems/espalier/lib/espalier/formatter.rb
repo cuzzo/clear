@@ -89,14 +89,16 @@ module Espalier
     end
 
     def to_sarif_hash(manifest)
+      results = sarif_results(manifest)
       Decomplex::Sarif.document(
         tool_name: "Espalier",
         information_uri: "https://github.com/codeforreno/litedb",
         rules: sarif_rules,
-        results: sarif_results(manifest),
+        results: results,
         properties: {
           "format" => "espalier.manifest.sarif.v1",
-          "espalier.manifest" => Decomplex::Sarif.json_safe_value(manifest)
+          "espalier.manifest" => Decomplex::Sarif.json_safe_value(manifest),
+          Decomplex::Sarif::PROOF_BOUNDARY_SUMMARY_PROPERTY => Decomplex::Sarif.proof_boundary_summary(results)
         }
       )
     end
@@ -151,7 +153,12 @@ module Espalier
             "reads" => reads,
             "writes" => writes
           },
-          "source_format" => "espalier.manifest.v1"
+          "source_format" => "espalier.manifest.v1",
+          Decomplex::Sarif::PROOF_BOUNDARY_PROPERTY => Decomplex::Sarif.proof_boundary(
+            tier: "complete",
+            authority: ["fact_mine_normalized_ast"],
+            scope: "function_effect_observation"
+          )
         }
       )
     end
@@ -211,12 +218,24 @@ module Espalier
             "warnings" => warnings,
             "unknown_operations" => unknowns,
             "variables" => variables
-          }
+          },
+          Decomplex::Sarif::PROOF_BOUNDARY_PROPERTY => Decomplex::Sarif.proof_boundary(
+            tier: time_complete && space_complete ? "complete" : "partial",
+            authority: ["fact_mine_normalized_ast", "espalier_static"],
+            scope: "function_complexity",
+            blockers: complexity_proof_blockers(unknowns, warnings, time_complete, space_complete)
+          )
         }
       )
       related = complexity_related_locations(variables)
       result["relatedLocations"] = related unless related.empty?
       result
+    end
+
+    def complexity_proof_blockers(unknowns, warnings, time_complete, space_complete)
+      return [] if time_complete && space_complete
+
+      (unknowns + warnings + ["incomplete_complexity_proof"]).map(&:to_s).uniq.sort
     end
 
     def complexity_related_locations(variables)

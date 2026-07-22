@@ -522,6 +522,8 @@ class SlopcopReportCovTest < Minitest::Test
     
     sarif = JSON.parse(report.to_sarif)
     assert_equal "2.1.0", sarif["version"]
+    assert_equal 2, sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "results_with_boundary")
+    assert_equal "partial", sarif.dig("runs", 0, "results", 0, "properties", "fact_mine.proof_boundary", "tier")
   end
 
   # --- DarkArmOverlay Tests ---
@@ -581,6 +583,16 @@ class SlopcopReportCovTest < Minitest::Test
     assert_equal 5, SlopCop::Sarif.send(:positive_int, "5")
     assert_nil SlopCop::Sarif.send(:positive_int, -5)
     assert_equal 1, SlopCop::Sarif.send(:positive_int, -5, 1)
+  end
+
+  def test_sarif_proof_boundary_summary
+    results = [
+      { "properties" => { "fact_mine.proof_boundary" => SlopCop::Sarif.proof_boundary(tier: "complete", authority: ["fact_mine"], scope: "local") } },
+      { "properties" => { "fact_mine.proof_boundary" => SlopCop::Sarif.proof_boundary(tier: "review", authority: ["fact_mine"], scope: "local", blockers: ["dynamic"]) } }
+    ]
+    summary = SlopCop::Sarif.proof_boundary_summary(results)
+    assert_equal 2, summary["results_with_boundary"]
+    assert_equal 50.0, summary["partial_or_review_percent"]
   end
 
   # --- Lexicons Tests ---

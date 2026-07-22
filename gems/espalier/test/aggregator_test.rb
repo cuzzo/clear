@@ -207,6 +207,34 @@ class AggregatorTest < Minitest::Test
         result.dig("properties", "function", "name") == "sort_names"
     }
     assert_equal "espalier.manifest.sarif.v1", run.dig("properties", "format")
+    assert_equal "complete", complexity.dig("properties", "fact_mine.proof_boundary", "tier")
+    assert_equal 3, run.dig("properties", "fact_mine.proof_boundary_summary", "results_with_boundary")
+    assert_equal 0, run.dig("properties", "fact_mine.proof_boundary_summary", "partial_or_review_results")
+  end
+
+  def test_formatter_sarif_marks_incomplete_complexity_as_partial
+    manifest = [{
+      module: "Parser",
+      file: "lib/parser.rb",
+      functions: [{
+        name: "parse",
+        line: 3,
+        quality_metrics: {
+          big_o: "unknown",
+          big_o_space: "O(1)",
+          big_o_complete: false,
+          big_o_space_complete: true,
+          big_o_unknowns: ["dispatch target unresolved"]
+        }
+      }]
+    }]
+
+    run = JSON.parse(Espalier::Formatter.to_sarif(manifest)).fetch("runs").first
+    result = run.fetch("results").first
+    boundary = result.dig("properties", "fact_mine.proof_boundary")
+    assert_equal "partial", boundary.fetch("tier")
+    assert_includes boundary.fetch("blockers"), "dispatch target unresolved"
+    assert_equal 1, run.dig("properties", "fact_mine.proof_boundary_summary", "partial_or_review_results")
   end
 
   def test_delegations_mapped_to_concrete_type_when_available

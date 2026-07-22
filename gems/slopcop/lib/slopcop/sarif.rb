@@ -10,6 +10,39 @@ module SlopCop
     module_function
 
     SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
+    PROOF_BOUNDARY_PROPERTY = "fact_mine.proof_boundary"
+    PROOF_BOUNDARY_SUMMARY_PROPERTY = "fact_mine.proof_boundary_summary"
+    PROOF_BOUNDARY_SCHEMA = "fact-mine.proof-boundary.v1"
+
+    def proof_boundary(tier:, authority:, scope:, blockers: [])
+      raise ArgumentError, "invalid proof-boundary tier: #{tier}" unless %w[complete partial review].include?(tier.to_s)
+
+      {
+        "schema" => PROOF_BOUNDARY_SCHEMA,
+        "tier" => tier.to_s,
+        "authority" => Array(authority).map(&:to_s),
+        "scope" => scope.to_s,
+        "blockers" => Array(blockers).map(&:to_s).uniq.sort
+      }
+    end
+
+    def proof_boundary_summary(results)
+      tiers = { "complete" => 0, "partial" => 0, "review" => 0 }
+      Array(results).each do |result|
+        tier = result.dig("properties", PROOF_BOUNDARY_PROPERTY, "tier")
+        tiers[tier] += 1 if tiers.key?(tier)
+      end
+      with_boundary = tiers.values.sum
+      partial_or_review = tiers.fetch("partial") + tiers.fetch("review")
+      {
+        "schema" => PROOF_BOUNDARY_SCHEMA,
+        "result_count" => Array(results).size,
+        "results_with_boundary" => with_boundary,
+        "tiers" => tiers,
+        "partial_or_review_results" => partial_or_review,
+        "partial_or_review_percent" => with_boundary.zero? ? 0.0 : (partial_or_review * 100.0 / with_boundary)
+      }
+    end
 
     def document(tool_name:, rules:, results:, information_uri: nil, properties: {})
       normalized_rules = unique_rules(rules)
