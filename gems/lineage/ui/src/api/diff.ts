@@ -11,6 +11,8 @@ export interface DiffRequest {
   readonly selection?: string;
   readonly mutant_corpus?: string;
   readonly test_set?: string;
+  readonly page?: number;
+  readonly path?: string;
 }
 
 export function revisionsFromSearch(search: string): DiffRequest | null {
@@ -27,6 +29,8 @@ export function revisionsFromSearch(search: string): DiffRequest | null {
     selection: optional("selection"),
     mutant_corpus: optional("mutant_corpus"),
     test_set: optional("test_set"),
+    page: pageFromSearch(query),
+    path: optional("path"),
   };
 }
 
@@ -36,12 +40,17 @@ export async function fetchDiffPlan(
 ): Promise<DiffPlan> {
   const query = new URLSearchParams();
   for (const [name, value] of Object.entries(revisions)) {
-    if (value) query.set(name, value);
+    if (value !== undefined) query.set(name, String(value));
   }
   const response = await fetcher(`/api/diff/plan?${query}`);
   if (!response.ok) throw new DiffApiError(`Diff plan request failed (${response.status})`);
   const envelope: unknown = await response.json();
   return parseEnvelope(envelope);
+}
+
+function pageFromSearch(query: URLSearchParams): number | undefined {
+  const page = Number(query.get("page"));
+  return Number.isSafeInteger(page) && page > 1 ? page : undefined;
 }
 
 function parseEnvelope(value: unknown): DiffPlan {

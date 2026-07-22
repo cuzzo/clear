@@ -17,6 +17,8 @@ struct DiffQuery {
     selection: Option<String>,
     mutant_corpus: Option<String>,
     test_set: Option<String>,
+    page: Option<usize>,
+    path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,6 +29,7 @@ struct DiffPageQuery {
     layout: Option<String>,
     path: Option<String>,
     focus: Option<String>,
+    page: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,6 +85,11 @@ async fn api_diff_plan_handler(
             apply_known_coverage(&state, &mut plan, query.coverage_source.as_deref());
             apply_known_mutation_kills(&state, &mut plan);
             apply_known_sarif(&state, &mut plan, query.sarif_source.as_deref());
+            crate::diff::retain_plan_sources_for_page(
+                &mut plan,
+                query.page,
+                query.path.as_deref(),
+            );
             Json(ApiEnvelope {
                 api_version: crate::diff::DIFF_API_VERSION,
                 data: plan,
@@ -275,6 +283,9 @@ fn canonical_diff_location(query: &DiffPageQuery, base: &str, head: &str) -> Str
             output.push((name, value.to_string()));
         }
     }
+    if let Some(page) = query.page.filter(|page| *page > 1) {
+        output.push(("page", page.to_string()));
+    }
     let mut serializer = url::form_urlencoded::Serializer::new(String::new());
     for (name, value) in output {
         serializer.append_pair(name, &value);
@@ -305,11 +316,12 @@ mod tests {
             layout: Some("inline".into()),
             path: Some("lib/app.rb".into()),
             focus: Some("residual".into()),
+            page: Some(2),
         };
         assert!(requires_canonical_redirect(&query, "a", "b"));
         assert_eq!(
             canonical_diff_location(&query, "a", "b"),
-            "/diff?base=a&head=b&presentation=raw&layout=inline&path=lib%2Fapp.rb&focus=residual"
+            "/diff?base=a&head=b&presentation=raw&layout=inline&path=lib%2Fapp.rb&focus=residual&page=2"
         );
     }
 
@@ -354,6 +366,41 @@ mod tests {
         (dir, state, base, head)
     }
 
+    fn large_test_state() -> (tempfile::TempDir, UiServerState, String, String) {
+        let dir = tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+        let mut index = repo.index().unwrap();
+        for number in 0..=crate::diff::DIFF_FILE_PAGE_SIZE {
+            let path = format!("app-{number:03}.rb");
+            std::fs::write(dir.path().join(&path), "puts :base\n").unwrap();
+            index.add_path(std::path::Path::new(&path)).unwrap();
+        }
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let base = repo
+            .commit(Some("HEAD"), &signature, &signature, "base", &tree, &[])
+            .unwrap()
+            .to_string();
+        let mut index = repo.index().unwrap();
+        for number in 0..=crate::diff::DIFF_FILE_PAGE_SIZE {
+            let path = format!("app-{number:03}.rb");
+            std::fs::write(dir.path().join(&path), "puts :head\n").unwrap();
+            index.add_path(std::path::Path::new(&path)).unwrap();
+        }
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+        let head = repo
+            .commit(Some("HEAD"), &signature, &signature, "head", &tree, &[&parent])
+            .unwrap()
+            .to_string();
+        let state = UiServerState {
+            db: Arc::new(dir.path().join("lineage.db")),
+            repo: Arc::new(dir.path().to_path_buf()),
+            overlays: Arc::new(UiOverlays::default()),
+        };
+        (dir, state, base, head)
+    }
+
     #[tokio::test]
     async fn diff_page_redirects_default_pair_to_immutable_oids() {
         let (_dir, state, base, head) = test_state();
@@ -366,6 +413,7 @@ mod tests {
                 layout: None,
                 path: None,
                 focus: None,
+                page: None,
             }),
         )
         .await;
@@ -394,6 +442,8 @@ mod tests {
                 selection: None,
                 mutant_corpus: None,
                 test_set: None,
+                page: None,
+                path: None,
             }),
         )
         .await;
@@ -431,6 +481,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn plan_api_bounds_source_blobs_to_the_requested_file_page() {
+        let (_dir, state, base, head) = large_test_state();
+        let response = api_diff_plan_handler(
+            State(state),
+            Query(DiffQuery {
+                base: Some(base),
+                head: Some(head),
+                coverage_source: None,
+                sarif_source: None,
+                selection: None,
+                mutant_corpus: None,
+                test_set: None,
+                page: Some(2),
+                path: None,
+            }),
+        )
+        .await;
+        let json: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        let files = json.pointer("/data/files").and_then(serde_json::Value::as_array).unwrap();
+        assert_eq!(files.len(), crate::diff::DIFF_FILE_PAGE_SIZE + 1);
+        assert_eq!(
+            files
+                .iter()
+                .filter(|file| file.get("head_source").is_some_and(|source| !source.is_null()))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn plan_api_marks_commit_matching_coverage_as_partial_evidence() {
         let (_dir, state, base, head) = test_state();
         let storage = crate::storage::Storage::open(state.db.as_ref()).unwrap();
@@ -448,6 +530,8 @@ mod tests {
                 selection: None,
                 mutant_corpus: None,
                 test_set: None,
+                page: None,
+                path: None,
             }),
         )
         .await;
@@ -502,6 +586,8 @@ mod tests {
                 selection: Some("all-production".into()),
                 mutant_corpus: Some("mutants-1".into()),
                 test_set: Some("tests-1".into()),
+                page: None,
+                path: None,
             }),
         )
         .await;
@@ -582,6 +668,8 @@ mod tests {
                 selection: Some("production".into()),
                 mutant_corpus: Some("mutants-v1".into()),
                 test_set: Some("suite-v1".into()),
+                page: None,
+                path: None,
             }),
         )
         .await;
@@ -652,6 +740,8 @@ mod tests {
                 selection: None,
                 mutant_corpus: None,
                 test_set: None,
+                page: None,
+                path: None,
             }),
         )
         .await;
@@ -753,6 +843,8 @@ mod tests {
                 selection: Some("production".into()),
                 mutant_corpus: Some("mutants".into()),
                 test_set: Some("suite".into()),
+                page: None,
+                path: None,
             }),
         )
         .await;
@@ -804,6 +896,8 @@ mod tests {
                 selection: Some("production".into()),
                 mutant_corpus: Some("mutants".into()),
                 test_set: Some("suite".into()),
+                page: None,
+                path: None,
             }),
         )
         .await;

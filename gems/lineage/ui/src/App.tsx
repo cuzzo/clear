@@ -22,7 +22,7 @@ export function App(): React.JSX.Element {
     void fetchDiffPlan(revisions).then(setPlan).catch((reason: unknown) => {
       setError(reason instanceof DiffApiError ? reason.message : "Unable to load diff plan");
     });
-  }, [revisions?.base, revisions?.head, revisions?.coverage_source, revisions?.selection, revisions?.mutant_corpus, revisions?.test_set]);
+  }, [revisions?.base, revisions?.head, revisions?.coverage_source, revisions?.selection, revisions?.mutant_corpus, revisions?.test_set, revisions?.page, revisions?.path]);
 
   useEffect(() => {
     const updateLocation = () => setLocation(window.location.search);

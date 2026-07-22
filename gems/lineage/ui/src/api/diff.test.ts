@@ -14,8 +14,8 @@ const plan = {
 
 describe("diff API", () => {
   it("reads only complete revision pairs from the URL", () => {
-    expect(revisionsFromSearch("?base=abc&head=def")).toEqual({ base: "abc", head: "def", coverage_source: undefined, sarif_source: undefined, selection: undefined, mutant_corpus: undefined, test_set: undefined });
-    expect(revisionsFromSearch("?base=abc&head=def&coverage_source=coverage%3Aci&sarif_source=scanner&selection=production&mutant_corpus=mutants&test_set=suite")).toEqual({ base: "abc", head: "def", coverage_source: "coverage:ci", sarif_source: "scanner", selection: "production", mutant_corpus: "mutants", test_set: "suite" });
+    expect(revisionsFromSearch("?base=abc&head=def")).toEqual({ base: "abc", head: "def", coverage_source: undefined, sarif_source: undefined, selection: undefined, mutant_corpus: undefined, test_set: undefined, page: undefined, path: undefined });
+    expect(revisionsFromSearch("?base=abc&head=def&coverage_source=coverage%3Aci&sarif_source=scanner&selection=production&mutant_corpus=mutants&test_set=suite&page=2&path=lib%2Fapp.rb")).toEqual({ base: "abc", head: "def", coverage_source: "coverage:ci", sarif_source: "scanner", selection: "production", mutant_corpus: "mutants", test_set: "suite", page: 2, path: "lib/app.rb" });
     expect(revisionsFromSearch("?base=abc")).toBeNull();
     expect(revisionsFromSearch("?base=%20&head=def")).toBeNull();
   });
@@ -24,8 +24,8 @@ describe("diff API", () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ api_version: "v1", data: plan }) });
     await expect(fetchDiffPlan({ base: "abc", head: "def" }, fetcher)).resolves.toBe(plan);
     expect(fetcher).toHaveBeenCalledWith("/api/diff/plan?base=abc&head=def");
-    await fetchDiffPlan({ base: "abc", head: "def", coverage_source: "coverage:ci", sarif_source: "scanner", selection: "production", mutant_corpus: "mutants", test_set: "suite" }, fetcher);
-    expect(fetcher).toHaveBeenLastCalledWith("/api/diff/plan?base=abc&head=def&coverage_source=coverage%3Aci&sarif_source=scanner&selection=production&mutant_corpus=mutants&test_set=suite");
+    await fetchDiffPlan({ base: "abc", head: "def", coverage_source: "coverage:ci", sarif_source: "scanner", selection: "production", mutant_corpus: "mutants", test_set: "suite", page: 2, path: "lib/app.rb" }, fetcher);
+    expect(fetcher).toHaveBeenLastCalledWith("/api/diff/plan?base=abc&head=def&coverage_source=coverage%3Aci&sarif_source=scanner&selection=production&mutant_corpus=mutants&test_set=suite&page=2&path=lib%2Fapp.rb");
   });
 
   it("rejects failed, incompatible, and incomplete responses", async () => {

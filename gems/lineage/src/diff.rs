@@ -9,6 +9,7 @@ use ts_rs::TS;
 
 pub const DIFF_API_VERSION: &str = "v1";
 pub const DIFF_POLICY_VERSION: &str = "diff-risk/v1";
+pub const DIFF_FILE_PAGE_SIZE: usize = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RevisionFile {
@@ -406,6 +407,32 @@ pub fn build_diff_plan_with_renames_and_overrides(
 pub fn with_evidence_scope(mut plan: DiffPlan, scope: EvidenceScopeFingerprint) -> DiffPlan {
     plan.scope.evidence_scope = scope;
     plan
+}
+
+/// Keeps ranking and aggregate data for every file while bounding the source
+/// blobs carried by a plan response. Source is included for the selected
+/// deterministic page and for an explicitly requested raw file; `/api/diff/file`
+/// remains the single-file path for any other on-demand expansion.
+pub fn retain_plan_sources_for_page(
+    plan: &mut DiffPlan,
+    requested_page: Option<usize>,
+    requested_path: Option<&str>,
+) {
+    let page = requested_page.unwrap_or(1).max(1);
+    let start = page.saturating_sub(1).saturating_mul(DIFF_FILE_PAGE_SIZE);
+    let visible = plan
+        .files
+        .iter()
+        .skip(start)
+        .take(DIFF_FILE_PAGE_SIZE)
+        .map(|file| file.path.clone())
+        .collect::<BTreeSet<_>>();
+    for file in &mut plan.files {
+        if !visible.contains(&file.path) && Some(file.path.as_str()) != requested_path {
+            file.base_source = None;
+            file.head_source = None;
+        }
+    }
 }
 
 fn changed_paths(
@@ -2532,6 +2559,28 @@ mod tests {
 
         assert_eq!(plan.evidence, unavailable_evidence());
         assert_eq!(plan.files[0].risk.tier_one_hazards, 0);
+    }
+
+    #[test]
+    fn bounds_plan_source_blobs_to_the_requested_page_and_raw_path() {
+        let files = (0..(DIFF_FILE_PAGE_SIZE + 1))
+            .map(|index| file(&format!("lib/{index}.rb"), "puts :value\n"))
+            .collect();
+        let mut plan = build_diff_plan("base", "head", Vec::new(), files);
+        let paged_path = plan.files[DIFF_FILE_PAGE_SIZE].path.clone();
+        retain_plan_sources_for_page(&mut plan, Some(2), Some("lib/0.rb"));
+        assert!(plan.files.iter().any(|file| {
+            file.path == "lib/0.rb" && file.head_source.as_deref() == Some("puts :value\n")
+        }));
+        assert!(plan.files.iter().any(|file| {
+            file.path == paged_path
+                && file.head_source.as_deref() == Some("puts :value\n")
+        }));
+        assert!(plan.files.iter().all(|file| {
+            file.path == "lib/0.rb"
+                || file.path == paged_path
+                || file.head_source.is_none()
+        }));
     }
 
     #[test]
