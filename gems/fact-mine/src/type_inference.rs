@@ -3480,8 +3480,16 @@ impl<'a> TypeInferenceVisitor<'a> {
     /// that node.  Hidden-enum collection must not replay an entire method
     /// body after type inference has finished walking it.
     fn collect_hidden_enum_observation_at_node(&mut self, node: &crate::ast::Node) {
+        // The existing normalized hidden-enum visitor is Ruby-oriented.
+        // Native named constants and enums require language-owned semantic
+        // suppression before they can safely participate in this report.
+        if self.document.language != Language::Ruby {
+            return;
+        }
         match node.r#type.as_str() {
-            "IASGN" | "CVASGN" => self.collect_hidden_enum_state_write(node),
+            "LASGN" | "DASGN" | "IASGN" | "CVASGN" => {
+                self.collect_hidden_enum_stable_write(node)
+            }
             "CASE" | "CASE2" => {
                 if let Some(condition) = child_node(node, 0) {
                     if let Some(slot) = self.hidden_enum_slot_for_current(condition) {
@@ -3536,14 +3544,15 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     /// Records an exact literal producer or an explicit open-world blocker for
-    /// a stable state slot. This runs as part of the primary normalized walk:
-    /// hidden-domain evidence must not reconstruct assignments in NilKill or
-    /// replay a second source traversal after type inference.
-    fn collect_hidden_enum_state_write(&mut self, node: &crate::ast::Node) {
+    /// a stable state or local slot. This runs as part of the primary
+    /// normalized walk: hidden-domain evidence must not reconstruct
+    /// assignments in NilKill or replay a second source traversal after type
+    /// inference.
+    fn collect_hidden_enum_stable_write(&mut self, node: &crate::ast::Node) {
         let Some(name) = node_symbol(node) else {
             return;
         };
-        let Some(slot) = self.hidden_enum_state_slot(&name, node.first_lineno) else {
+        let Some(slot) = self.hidden_enum_assignment_slot(node, &name) else {
             return;
         };
         let Some(value) = child_node(node, 1) else {
@@ -3575,32 +3584,11 @@ impl<'a> TypeInferenceVisitor<'a> {
         match node.r#type.as_str() {
             "LVAR" | "DVAR" => {
                 let name = node_symbol(node).unwrap_or_else(|| node.text.trim().to_string());
-                if !self.current_params.contains(&name) {
-                    return None;
+                if self.current_params.contains(&name) {
+                    self.hidden_enum_param_slot(&name)
+                } else {
+                    self.hidden_enum_local_slot(&name)
                 }
-                let owner = self.current_owners.join("::");
-                let method = self.current_method.as_deref()?;
-                let key = [
-                    "param".to_string(),
-                    self.path.to_string(),
-                    owner.clone(),
-                    self.current_method_kind.clone(),
-                    method.to_string(),
-                    self.current_method_line.to_string(),
-                    name.clone(),
-                ]
-                .join("\0");
-                Some(json!({
-                    "key": key,
-                    "kind": "param",
-                    "path": self.path,
-                    "line": self.current_method_line,
-                    "owner": owner,
-                    "method": method,
-                    "method_kind": self.current_method_kind,
-                    "slot": name,
-                    "type": self.param_types.get(&name).map(ToString::to_string).unwrap_or_default(),
-                }))
             }
             "IVAR" | "CVAR" => self.hidden_enum_state_slot(
                 &node_symbol(node).unwrap_or_else(|| node.text.trim().to_string()),
@@ -3608,6 +3596,73 @@ impl<'a> TypeInferenceVisitor<'a> {
             ),
             _ => None,
         }
+    }
+
+    fn hidden_enum_assignment_slot(
+        &self,
+        node: &crate::ast::Node,
+        name: &str,
+    ) -> Option<Value> {
+        match node.r#type.as_str() {
+            "LASGN" | "DASGN" if self.current_params.iter().any(|param| param == name) => {
+                self.hidden_enum_param_slot(name)
+            }
+            "LASGN" | "DASGN" => self.hidden_enum_local_slot(name),
+            "IASGN" | "CVASGN" => self.hidden_enum_state_slot(name, node.first_lineno),
+            _ => None,
+        }
+    }
+
+    fn hidden_enum_param_slot(&self, name: &str) -> Option<Value> {
+        let owner = self.current_owners.join("::");
+        let method = self.current_method.as_deref()?;
+        let key = [
+            "param".to_string(),
+            self.path.to_string(),
+            owner.clone(),
+            self.current_method_kind.clone(),
+            method.to_string(),
+            self.current_method_line.to_string(),
+            name.to_string(),
+        ]
+        .join("\0");
+        Some(json!({
+            "key": key,
+            "kind": "param",
+            "path": self.path,
+            "line": self.current_method_line,
+            "owner": owner,
+            "method": method,
+            "method_kind": self.current_method_kind,
+            "slot": name,
+            "type": self.param_types.get(name).map(ToString::to_string).unwrap_or_default(),
+        }))
+    }
+
+    fn hidden_enum_local_slot(&self, name: &str) -> Option<Value> {
+        let owner = self.current_owners.join("::");
+        let method = self.current_method.as_deref()?;
+        let key = [
+            "local".to_string(),
+            self.path.to_string(),
+            owner.clone(),
+            self.current_method_kind.clone(),
+            method.to_string(),
+            self.current_method_line.to_string(),
+            name.to_string(),
+        ]
+        .join("\0");
+        Some(json!({
+            "key": key,
+            "kind": "local",
+            "path": self.path,
+            "line": self.current_method_line,
+            "owner": owner,
+            "method": method,
+            "method_kind": self.current_method_kind,
+            "slot": name,
+            "type": self.local_types.get(name).map(ToString::to_string).unwrap_or_default(),
+        }))
     }
 
     fn hidden_enum_state_slot(&self, name: &str, line: usize) -> Option<Value> {
@@ -3633,130 +3688,6 @@ impl<'a> TypeInferenceVisitor<'a> {
             "slot": name,
             "type": "",
         }))
-    }
-
-    #[cfg(test)]
-    fn collect_hidden_enum_observations_node(
-        &mut self,
-        node: &crate::ast::Node,
-        record: &Value,
-        params: &BTreeMap<String, Value>,
-    ) {
-        match node.r#type.as_str() {
-            "CASE" | "CASE2" => {
-                if let Some(condition) = child_node(node, 0) {
-                    if let Some(slot) = self.hidden_enum_slot_for(condition, record, params) {
-                        let values = case_literal_values(node);
-                        self.record_hidden_enum_observation(slot, values, node, "case");
-                    }
-                }
-            }
-            "CALL" | "QCALL" | "OPCALL" => {
-                let name = node_symbol(node).unwrap_or_default();
-                if matches!(name.as_str(), "==" | "!=" | "===") {
-                    if let Some((receiver, _, args_node)) = match_call(node) {
-                        let arg_nodes = call_arguments(args_node);
-                        if arg_nodes.len() == 1 {
-                            let arg = arg_nodes[0];
-                            if let Some(slot) = self.hidden_enum_slot_for(receiver, record, params)
-                            {
-                                self.record_hidden_enum_observation(
-                                    slot,
-                                    hidden_enum_literal_values(arg),
-                                    node,
-                                    &name,
-                                );
-                            }
-                            if let Some(slot) = self.hidden_enum_slot_for(arg, record, params) {
-                                self.record_hidden_enum_observation(
-                                    slot,
-                                    hidden_enum_literal_values(receiver),
-                                    node,
-                                    &name,
-                                );
-                            }
-                        }
-                    }
-                } else if matches!(name.as_str(), "include?" | "member?" | "key?") {
-                    if let Some((receiver, _, args_node)) = match_call(node) {
-                        let arg_nodes = call_arguments(args_node);
-                        if arg_nodes.len() == 1 {
-                            let arg = arg_nodes[0];
-                            if let Some(slot) = self.hidden_enum_slot_for(arg, record, params) {
-                                self.record_hidden_enum_observation(
-                                    slot,
-                                    hidden_enum_literal_values(receiver),
-                                    node,
-                                    &name,
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-        for child in child_nodes(node) {
-            self.collect_hidden_enum_observations_node(child, record, params);
-        }
-    }
-
-    #[cfg(test)]
-    fn hidden_enum_slot_for(
-        &self,
-        node: &crate::ast::Node,
-        record: &Value,
-        params: &BTreeMap<String, Value>,
-    ) -> Option<Value> {
-        match node.r#type.as_str() {
-            "LVAR" | "DVAR" => {
-                let name = node_symbol(node).unwrap_or_else(|| node.text.trim().to_string());
-                let param = params.get(&name)?;
-                let key = [
-                    "param".to_string(),
-                    record["path"].as_str().unwrap_or("").to_string(),
-                    record["class"].as_str().unwrap_or("").to_string(),
-                    record["kind"].as_str().unwrap_or("instance").to_string(),
-                    record["method"].as_str().unwrap_or("").to_string(),
-                    record["line"].as_i64().unwrap_or(0).to_string(),
-                    name.clone(),
-                ]
-                .join("\0");
-                Some(json!({
-                    "key": key,
-                    "kind": "param",
-                    "path": record["path"],
-                    "line": record["line"],
-                    "owner": record["class"],
-                    "method": record["method"],
-                    "method_kind": record["kind"],
-                    "slot": name,
-                    "type": param.get("type").and_then(get_type_str).unwrap_or_default(),
-                }))
-            }
-            "IVAR" | "CVAR" => {
-                let name = node_symbol(node).unwrap_or_else(|| node.text.trim().to_string());
-                let key = [
-                    "state".to_string(),
-                    record["path"].as_str().unwrap_or("").to_string(),
-                    record["class"].as_str().unwrap_or("").to_string(),
-                    name.clone(),
-                ]
-                .join("\0");
-                Some(json!({
-                    "key": key,
-                    "kind": "state",
-                    "path": record["path"],
-                    "line": node.first_lineno,
-                    "owner": record["class"],
-                    "method": Value::Null,
-                    "method_kind": Value::Null,
-                    "slot": name,
-                    "type": "",
-                }))
-            }
-            _ => None,
-        }
     }
 
     fn record_hidden_enum_observation(

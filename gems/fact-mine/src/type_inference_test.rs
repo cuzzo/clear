@@ -2561,33 +2561,8 @@ mod tests {
         let params_json = visitor.current_params_json(&defn_node);
         assert_eq!(params_json.len(), 2);
 
-        // 25. collect_hidden_enum_observations_node: include?/member?/key? method calls, and IVAR/CVAR receiver
-        let record = json!({
-            "path": "test.rb",
-            "class": "MyClass",
-            "kind": "instance",
-            "method": "foo",
-            "line": 1,
-            "params": []
-        });
-        let include_node: crate::ast::Node = serde_json::from_str(r#"{
-            "type": "CALL",
-            "children": [
-                {"Node": {"type": "IVAR", "children": [], "first_lineno":1, "first_column":1, "last_lineno":1, "last_column":5, "text":"@arr"}},
-                {"Symbol": "include?"},
-                {"Node": {
-                    "type": "LIST",
-                    "children": [
-                        {"Node": {"type": "LVAR", "children": [{"Symbol": "x"}], "first_lineno":1, "first_column":1, "last_lineno":1, "last_column":2, "text":"x"}}
-                    ],
-                    "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 5, "text": "x"
-                }}
-            ],
-            "first_lineno": 1, "first_column": 1, "last_lineno": 1, "last_column": 15, "text": "@arr.include?(x)"
-        }"#).unwrap();
-        let params_map = BTreeMap::new();
-        visitor.collect_hidden_enum_observations_node(&include_node, &record, &params_map);
-
+        // 25. Hidden-enum slots are resolved from the primary visitor's
+        // current callable context; no second whole-method test walker exists.
         visitor.current_owners = vec!["MyClass".to_string()];
         visitor.current_method_kind = "instance".to_string();
         visitor.current_method_line = 1;
@@ -2606,7 +2581,10 @@ mod tests {
         visitor.current_method = Some("foo".to_string());
         assert!(visitor.hidden_enum_slot_for_current(&tracked).is_some());
         let untracked = crate::ast::Node { text: "other".to_string(), ..tracked.clone() };
-        assert!(visitor.hidden_enum_slot_for_current(&untracked).is_none());
+        assert_eq!(
+            visitor.hidden_enum_slot_for_current(&untracked).unwrap()["kind"],
+            "local"
+        );
         let state = crate::ast::Node { r#type: "IVAR".to_string(), text: "@state".to_string(), ..tracked };
         assert!(visitor.hidden_enum_slot_for_current(&state).is_some());
         let ignored_case: crate::ast::Node = serde_json::from_str(r#"{
@@ -3307,17 +3285,10 @@ mod tests {
         let res5 = visitor.classify_origin(&node_call_fail, &param_names, &assigns, 0);
         assert_eq!(res5.0, "call");
 
-        // 8. hidden_enum_slot_for
-        let record = json!({
-            "path": "test.rb",
-            "class": "MyClass",
-            "kind": "instance",
-            "method": "my_method",
-            "line": 10
-        });
-        let params_map = std::collections::BTreeMap::new();
+        // 8. hidden_enum_slot_for_current
+        visitor.current_owners = vec!["MyClass".to_string()];
         let node_ivar = make_node("IVAR", vec![], "@x");
-        let slot = visitor.hidden_enum_slot_for(&node_ivar, &record, &params_map);
+        let slot = visitor.hidden_enum_slot_for_current(&node_ivar);
         assert!(slot.is_some());
 
         // 9. value_in_collection_append_or_index_write

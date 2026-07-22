@@ -2582,28 +2582,43 @@ pub fn build_actions(input: &InputState) -> Vec<Action> {
     actions
 }
 
+#[derive(Default)]
+struct PrimitiveDomain {
+    values: BTreeSet<String>,
+    decision_sites: BTreeSet<String>,
+    producer_sites: BTreeSet<String>,
+    path: String,
+    line: i64,
+    kind: String,
+    slot: String,
+    blocked: bool,
+    strong_decision: bool,
+}
+
+fn primitive_domain_is_closed(domain: &PrimitiveDomain) -> bool {
+    !domain.blocked && (2..=10).contains(&domain.values.len())
+}
+
+fn primitive_domain_has_sufficient_evidence(domain: &PrimitiveDomain) -> bool {
+    domain.decision_sites.len() >= 2
+        || (domain.strong_decision && !domain.producer_sites.is_empty())
+}
+
+fn reportable_primitive_domain(domain: &PrimitiveDomain) -> bool {
+    primitive_domain_is_closed(domain) && primitive_domain_has_sufficient_evidence(domain)
+}
+
 /// Reports closed-looking primitive state domains from FactMine's normalized
 /// hidden-enum observations. Parameters are deliberately excluded: without a
 /// proven caller contract they are open-world inputs rather than candidates.
 fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
-    #[derive(Default)]
-    struct Domain {
-        values: BTreeSet<String>,
-        decision_sites: BTreeSet<String>,
-        producer_sites: BTreeSet<String>,
-        path: String,
-        line: i64,
-        slot: String,
-        blocked: bool,
-        strong_decision: bool,
-    }
 
-    let mut domains = BTreeMap::<String, Domain>::new();
+    let mut domains = BTreeMap::<String, PrimitiveDomain>::new();
     for observation in fact_objects(input, "hidden_enum_observations") {
         // Parameters are open-world inputs without a caller contract.  Keep
         // each remaining stable FactMine identity separate rather than
         // grouping conditions by spelling or by their literal set.
-        if fact_string(observation, "kind") != Some("state") {
+        if !matches!(fact_string(observation, "kind"), Some("state" | "local")) {
             continue;
         }
         let Some(key) = fact_string(observation, "key") else {
@@ -2612,6 +2627,7 @@ fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
         let domain = domains.entry(key.to_string()).or_default();
         domain.path = fact_string(observation, "path").unwrap_or("").to_string();
         domain.line = fact_i64(observation, "line").unwrap_or(0);
+        domain.kind = fact_string(observation, "kind").unwrap_or("state").to_string();
         domain.slot = fact_string(observation, "slot").unwrap_or("").to_string();
         let site = observation
             .get("site")
@@ -2642,19 +2658,15 @@ fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
     }
     domains
         .into_values()
-        .filter(|domain| {
-            !domain.blocked
-                && (2..=10).contains(&domain.values.len())
-                && (domain.decision_sites.len() >= 2
-                    || (domain.strong_decision && !domain.producer_sites.is_empty()))
-        })
+        .filter(reportable_primitive_domain)
         .map(|domain| Action {
             kind: "report_static_primitive_domain".to_string(),
             confidence: "review".to_string(),
             path: domain.path,
             line: domain.line,
             message: format!(
-                "state {} has a closed-looking string domain across {} decision sites",
+                "{} {} has a closed-looking string domain across {} decision sites",
+                domain.kind,
                 domain.slot,
                 domain.decision_sites.len()
             ),
@@ -3091,6 +3103,44 @@ mod tests {
         assert_eq!(
             actions[0].data["decision_sites"],
             serde_json::json!(["workflow.rb:8"])
+        );
+    }
+
+    #[test]
+    fn local_domains_use_callable_qualified_factmine_identity() {
+        let input = input_from_json(serde_json::json!({
+            "methods": [],
+            "facts": {
+                "hidden_enum_observations": [
+                    {
+                        "event": "decision", "kind": "local", "key": "local:first:status",
+                        "path": "workflow.rb", "line": 2, "slot": "status",
+                        "site": {"path": "workflow.rb", "line": 4},
+                        "values": [{"kind": "String", "value": "\"draft\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "local", "key": "local:first:status",
+                        "path": "workflow.rb", "line": 2, "slot": "status",
+                        "site": {"path": "workflow.rb", "line": 5},
+                        "values": [{"kind": "String", "value": "\"sent\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "local", "key": "local:second:status",
+                        "path": "workflow.rb", "line": 10, "slot": "status",
+                        "site": {"path": "workflow.rb", "line": 12},
+                        "values": [{"kind": "String", "value": "\"queued\""}]
+                    }
+                ]
+            }
+        }));
+
+        let actions = report_static_primitive_domains(&input);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].line, 2);
+        assert!(actions[0].message.starts_with("local status"));
+        assert_eq!(
+            actions[0].data["values"],
+            serde_json::json!(["\"draft\"", "\"sent\""])
         );
     }
 

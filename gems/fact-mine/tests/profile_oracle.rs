@@ -441,6 +441,58 @@ fn hidden_enum_observations_mark_nonliteral_state_writes_open_world() -> Result<
 }
 
 #[test]
+fn hidden_enum_observations_keep_same_spelled_locals_in_distinct_callables() -> Result<()> {
+    let document = syntax::parse_file(
+        fixture("hidden_enum_unrelated_locals.rb"),
+        Language::Ruby,
+    )?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let locals = output
+        .hidden_enum_observations
+        .iter()
+        .filter(|observation| observation["kind"] == "local")
+        .collect::<Vec<_>>();
+
+    assert_eq!(locals.len(), 4);
+    assert_eq!(
+        locals
+            .iter()
+            .filter_map(|observation| observation["method"].as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["draft?", "sent?"])
+    );
+    assert!(locals.iter().all(|observation| {
+        observation["key"]
+            .as_str()
+            .is_some_and(|key| key.starts_with("local\0") && key.ends_with("\0state"))
+    }));
+    Ok(())
+}
+
+#[test]
+fn native_deliberate_domains_do_not_emit_hidden_enum_observations() -> Result<()> {
+    for (fixture_name, language) in [
+        ("go/core.go", Language::Go),
+        ("c/core.c", Language::C),
+        ("cpp/core.cpp", Language::Cpp),
+    ] {
+        let document = syntax::parse_file(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("syntax-facts")
+                .join(fixture_name),
+            language,
+        )?;
+        let output = profile::extract(&document, Profile::NilKill);
+        assert!(
+            output.hidden_enum_observations.is_empty(),
+            "{fixture_name} must not turn native named constants or enums into primitive-domain candidates"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn native_pointer_slot_mutation_invalidates_the_original_null_proof() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_alias_mutation.cpp"), Language::Cpp)?;
     let output = profile::extract(&document, Profile::NilKill);
