@@ -339,6 +339,7 @@ RSpec.describe NilKill do
         "message" => a_hash_including("text" => include("CurrentUnitSpan#id")),
       ))
       static_result = results.find { |result| result.fetch("ruleId") == "nil-kill.static.untyped-signature" }
+      expect(static_result.fetch("properties")).not_to have_key("proof_boundary")
       expect(static_result.dig("properties", "fact_mine.proof_boundary", "input_completeness")).to eq("unknown")
       expect(static_result.dig("properties", "fact_mine.proof_boundary", "claim_status")).to eq("review")
       expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "results_with_boundary")).to be_positive
@@ -389,6 +390,26 @@ RSpec.describe NilKill do
         "input_completeness" => "complete",
         "claim_status" => "review"
       )
+    end
+
+    it "serializes only the canonical proof boundary for pressure findings" do
+      reporter = described_class.new
+      finding = {
+        "kind" => "primitive_record",
+        "message" => "pressure",
+        "path" => "lib/x.rb",
+        "line" => 3,
+        "proof_boundary" => reporter.send(:static_review_boundary, "primitive_record_pressure")
+      }
+
+      result = reporter.send(
+        :sarif_pressure_result,
+        finding,
+        { "static" => { "input_coverage" => { "complete" => true } } }
+      )
+
+      expect(result.fetch("properties")).not_to have_key("proof_boundary")
+      expect(result.dig("properties", "fact_mine.proof_boundary", "input_completeness")).to eq("complete")
     end
 
     it "conforms to the shared proof-boundary fixture" do

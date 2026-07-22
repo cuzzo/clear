@@ -563,7 +563,7 @@ module NilKill
         message: finding["message"] || kind,
         path: finding["path"],
         line: finding["line"],
-        properties: NilKill::Sarif.json_safe_value(finding).merge(
+        properties: NilKill::Sarif.json_safe_value(finding.except("proof_boundary")).merge(
           "source_format" => "nil-kill.static.evidence.v2",
           NilKill::Sarif::PROOF_BOUNDARY_PROPERTY => static_proof_boundary(finding, "static_nil_finding", evidence)
         )
@@ -578,7 +578,7 @@ module NilKill
         message: finding["message"] || kind,
         path: finding["path"],
         line: finding["line"],
-        properties: NilKill::Sarif.json_safe_value(finding).merge(
+        properties: NilKill::Sarif.json_safe_value(finding.except("proof_boundary")).merge(
           "source_format" => "nil-kill.pressure",
           NilKill::Sarif::PROOF_BOUNDARY_PROPERTY => static_proof_boundary(finding, "static_nil_pressure", evidence)
         )
