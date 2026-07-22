@@ -63,9 +63,16 @@ describe("App", () => {
     expect(screen.getByText(/Evidence: coverage unknown/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Base revision"), { target: { value: "next-base" } });
     fireEvent.change(screen.getByLabelText("Head revision"), { target: { value: "next-head" } });
+    fireEvent.click(screen.getByText("Evidence selection"));
+    fireEvent.change(screen.getByLabelText("Coverage source"), { target: { value: "coverage:ci" } });
+    fireEvent.change(screen.getByLabelText("Evidence selection"), { target: { value: "production" } });
+    fireEvent.change(screen.getByLabelText("Mutant corpus"), { target: { value: "mutants" } });
+    fireEvent.change(screen.getByLabelText("Test set"), { target: { value: "suite" } });
     fireEvent.click(screen.getByRole("button", { name: "Compare revisions" }));
     expect(window.location.search).toContain("base=next-base");
     expect(window.location.search).toContain("head=next-head");
+    expect(window.location.search).toContain("coverage_source=coverage%3Aci");
+    expect(window.location.search).toContain("selection=production");
     fireEvent.click(screen.getByRole("button", { name: /lib\/app.rb/ }));
     expect(screen.getByText(/Removals/)).toBeInTheDocument();
     expect(screen.getAllByText(/SARIF findings \(partial\): Scanner\/rule line 1: unsafe value/)).toHaveLength(2);

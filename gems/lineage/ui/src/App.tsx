@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DiffApiError, type AddedLines, type DependencyChange, type DiffFile, type DiffGroup, type DiffPlan, type RiskSummary, type VerificationSlices, fetchDiffPlan, revisionsFromSearch } from "./api/diff";
+import { DiffApiError, type AddedLines, type DependencyChange, type DiffFile, type DiffGroup, type DiffPlan, type DiffRequest, type RiskSummary, type VerificationSlices, fetchDiffPlan, revisionsFromSearch } from "./api/diff";
 import { DiffPreview, type SourceHighlight } from "./monaco/DiffPreview";
 
 export function App(): React.JSX.Element {
@@ -87,19 +87,30 @@ function DiffReview({ initialLayout, plan, rawPath }: { readonly initialLayout: 
   </section>;
 }
 
-function RevisionControls({ revisions }: { readonly revisions: { readonly base: string; readonly head: string } | null }): React.JSX.Element {
+function RevisionControls({ revisions }: { readonly revisions: DiffRequest | null }): React.JSX.Element {
   const [base, setBase] = useState(revisions?.base ?? "");
   const [head, setHead] = useState(revisions?.head ?? "");
+  const [coverageSource, setCoverageSource] = useState(revisions?.coverage_source ?? "");
+  const [selection, setSelection] = useState(revisions?.selection ?? "");
+  const [mutantCorpus, setMutantCorpus] = useState(revisions?.mutant_corpus ?? "");
+  const [testSet, setTestSet] = useState(revisions?.test_set ?? "");
   useEffect(() => {
     setBase(revisions?.base ?? "");
     setHead(revisions?.head ?? "");
-  }, [revisions?.base, revisions?.head]);
+    setCoverageSource(revisions?.coverage_source ?? "");
+    setSelection(revisions?.selection ?? "");
+    setMutantCorpus(revisions?.mutant_corpus ?? "");
+    setTestSet(revisions?.test_set ?? "");
+  }, [revisions?.base, revisions?.head, revisions?.coverage_source, revisions?.selection, revisions?.mutant_corpus, revisions?.test_set]);
   const chooseRevisions = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!base.trim() || !head.trim()) return;
     const next = new URLSearchParams(window.location.search);
     next.set("base", base.trim());
     next.set("head", head.trim());
+    for (const [name, value] of [["coverage_source", coverageSource], ["selection", selection], ["mutant_corpus", mutantCorpus], ["test_set", testSet]] as const) {
+      if (value.trim()) next.set(name, value.trim()); else next.delete(name);
+    }
     next.delete("presentation");
     next.delete("path");
     window.history.pushState({}, "", `${window.location.pathname}?${next}`);
@@ -108,6 +119,12 @@ function RevisionControls({ revisions }: { readonly revisions: { readonly base: 
   return <form aria-label="Revision comparison" className="revision-controls" onSubmit={chooseRevisions}>
     <label>Base revision <input aria-label="Base revision" onChange={(event) => setBase(event.target.value)} required value={base} /></label>
     <label>Head revision <input aria-label="Head revision" onChange={(event) => setHead(event.target.value)} required value={head} /></label>
+    <details><summary>Evidence selection</summary>
+      <label>Coverage source <input aria-label="Coverage source" onChange={(event) => setCoverageSource(event.target.value)} value={coverageSource} /></label>
+      <label>Selection <input aria-label="Evidence selection" onChange={(event) => setSelection(event.target.value)} value={selection} /></label>
+      <label>Mutant corpus <input aria-label="Mutant corpus" onChange={(event) => setMutantCorpus(event.target.value)} value={mutantCorpus} /></label>
+      <label>Test set <input aria-label="Test set" onChange={(event) => setTestSet(event.target.value)} value={testSet} /></label>
+    </details>
     <button type="submit">Compare revisions</button>
   </form>;
 }
