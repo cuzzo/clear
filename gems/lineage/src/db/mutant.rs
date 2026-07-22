@@ -125,7 +125,10 @@ where
     let mut expected_lines = BTreeSet::new();
     let mut all_units_loaded = false;
 
-    storage.begin_transaction()?;
+    let owns_transaction = !storage.transaction_active();
+    if owns_transaction {
+        storage.begin_transaction()?;
+    }
     let result = (|| -> Result<MutantIngestStats> {
         for fact in facts {
             let normalized_path = normalizer.normalize_path(&fact.file);
@@ -226,11 +229,15 @@ where
 
     match result {
         Ok(stats) => {
-            storage.commit_transaction()?;
+            if owns_transaction {
+                storage.commit_transaction()?;
+            }
             Ok(stats)
         }
         Err(error) => {
-            let _ = storage.rollback_transaction();
+            if owns_transaction {
+                let _ = storage.rollback_transaction();
+            }
             Err(error)
         }
     }

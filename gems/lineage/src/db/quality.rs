@@ -102,7 +102,10 @@ pub fn ingest_coverage_json_with_options(
         ..CoverageIngestStats::default()
     };
 
-    storage.begin_transaction()?;
+    let owns_transaction = !storage.transaction_active();
+    if owns_transaction {
+        storage.begin_transaction()?;
+    }
     if replace {
         if options.line_source == DEFAULT_COVERAGE_SOURCE {
             storage.delete_coverage_for_commit(commit_hash)?;
@@ -113,11 +116,15 @@ pub fn ingest_coverage_json_with_options(
     let result = ingest_records(storage, records, commit_hash, timestamp, &mut stats, options);
     match result {
         Ok(()) => {
-            storage.commit_transaction()?;
+            if owns_transaction {
+                storage.commit_transaction()?;
+            }
             Ok(stats)
         }
         Err(error) => {
-            let _ = storage.rollback_transaction();
+            if owns_transaction {
+                let _ = storage.rollback_transaction();
+            }
             Err(error)
         }
     }

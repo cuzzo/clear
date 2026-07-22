@@ -8,11 +8,13 @@ use lineage::{
     load_run_manifest, parse_coverage_input, read_manifest_artifact, render_structured_diff_json,
     render_structured_diff_text, resolve_coverage_record_paths, serve_lsp, serve_mcp,
     serve_ui_with_overlays, ArtifactKind, CoverageIngestOptions, DiffRequest,
-    EvidenceScopeFingerprint, GitProvider, HeuristicExtractor, LineageEngine, MutantIngestOptions,
-    RepoPathNormalizer, SentryProvider, Storage,
+    EvidenceArtifactScope, EvidenceScopeFingerprint, GitProvider, HeuristicExtractor,
+    LineageEngine, MutantIngestOptions, RepoPathNormalizer, RunStatus, SentryProvider, Storage,
 };
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command as ProcessCommand;
 
 #[derive(Debug, Parser)]
 #[command(name = "lineage")]
@@ -279,7 +281,9 @@ fn main() -> Result<()> {
         Command::Ci { repo, db, profile } => {
             let config = load_config(&repo)?;
             let git = GitProvider::open(&repo)?;
+            ensure_clean_worktree(&repo, &config.artifacts.directory)?;
             let revision = git.resolve_commit("HEAD")?;
+            ensure_revision_snapshot(&db, &repo, &revision)?;
             let manifest = execute_profile(&repo, &config, &profile, &revision)?;
             let run = latest_run_directory(&repo, &config).join("manifest.json");
             ingest_run_manifest(&db, &repo, &run)?;
@@ -705,8 +709,52 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn execute_diff(request: DiffCommandRequest) -> Result<String> {
+fn ensure_clean_worktree(repo: &std::path::Path, artifact_directory: &std::path::Path) -> Result<()> {
+    let output = ProcessCommand::new("git")
+        .args(["status", "--porcelain=v1", "--untracked-files=all"])
+        .current_dir(repo)
+        .output()
+        .context("inspect Git worktree before lineage ci")?;
+    if !output.status.success() {
+        anyhow::bail!("could not inspect Git worktree before lineage ci");
+    }
+    let artifact_prefix = artifact_directory.to_string_lossy().replace('\\', "/");
+    let dirty = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.get(3..))
+        .map(|path| path.trim_start_matches("./").replace('\\', "/"))
+        .find(|path| path != &artifact_prefix && !path.starts_with(&format!("{artifact_prefix}/")));
+    if let Some(path) = dirty {
+        anyhow::bail!("lineage ci requires a clean worktree (found {path})");
+    }
+    Ok(())
+}
+
+fn ensure_revision_snapshot(
+    db: &std::path::Path,
+    repo: &std::path::Path,
+    revision: &str,
+) -> Result<()> {
+    if let Some(parent) = db.parent().filter(|path| !path.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create Lineage database directory {}", parent.display()))?;
+    }
+    if Storage::open(db)?.commit_exists(revision)? {
+        return Ok(());
+    }
+    let provider = GitProvider::open(repo)?;
+    let storage = Storage::open(db)?;
+    LineageEngine::new(provider, HeuristicExtractor::default(), storage).run(Some(1))?;
+    if !Storage::open(db)?.commit_exists(revision)? {
+        anyhow::bail!("could not index selected revision {revision}");
+    }
+    Storage::open(db)?.refresh_ui_summaries()?;
+    Ok(())
+}
+
+fn execute_diff(mut request: DiffCommandRequest) -> Result<String> {
     let provider = GitProvider::open(&request.repo)?;
+    resolve_diff_run_scope(&provider, &mut request)?;
     let storage = request
         .db
         .exists()
@@ -731,12 +779,66 @@ fn execute_diff(request: DiffCommandRequest) -> Result<String> {
     }
 }
 
+fn resolve_diff_run_scope(provider: &GitProvider, request: &mut DiffCommandRequest) -> Result<()> {
+    let supplied = [
+        request.selection.is_some(),
+        request.mutant_corpus.is_some(),
+        request.test_set.is_some(),
+    ];
+    if supplied.iter().any(|present| *present) && !supplied.iter().all(|present| *present) {
+        anyhow::bail!("--selection, --mutant-corpus, and --test-set must be supplied together");
+    }
+    if supplied.iter().all(|present| *present) {
+        return Ok(());
+    }
+    let config = load_config(&request.repo)?;
+    let manifest_path = latest_run_directory(&request.repo, &config).join("manifest.json");
+    if !manifest_path.exists() {
+        return Ok(());
+    }
+    let manifest = load_run_manifest(&manifest_path)?;
+    let head = provider.resolve_commit(request.head.as_deref().unwrap_or("HEAD"))?;
+    if manifest.status != RunStatus::Succeeded
+        || manifest.revision != head
+        || (!manifest.tree_fingerprint.is_empty() && manifest.tree_fingerprint != head)
+    {
+        return Ok(());
+    }
+    let scopes = manifest
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.complete)
+        .filter_map(|artifact| artifact.evidence_scope.as_ref())
+        .collect::<Vec<_>>();
+    let Some(scope) = scopes.first() else {
+        return Ok(());
+    };
+    if scopes.iter().any(|candidate| *candidate != *scope) {
+        anyhow::bail!("latest successful run contains incompatible complete evidence scopes");
+    }
+    request.selection = Some(scope.selection.clone());
+    request.mutant_corpus = Some(scope.mutant_corpus.clone());
+    request.test_set = Some(scope.test_set.clone());
+    request.coverage_source = manifest
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.kind == ArtifactKind::Coverage)
+        .map(|artifact| artifact.producer.clone());
+    request.sarif_source = manifest
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.kind == ArtifactKind::Sarif)
+        .map(|artifact| artifact.producer.clone());
+    Ok(())
+}
+
 fn ingest_run_manifest(
     db: &std::path::Path,
     repo: &std::path::Path,
     manifest_path: &std::path::Path,
 ) -> Result<()> {
     let manifest = load_run_manifest(manifest_path)?;
+    validate_manifest_artifact_batches(&manifest)?;
     let run_directory = manifest_path
         .parent()
         .context("run manifest has no parent directory")?;
@@ -744,50 +846,115 @@ fn ingest_run_manifest(
     let git = GitProvider::open(repo)?;
     let extractor = HeuristicExtractor::default();
     let normalizer = RepoPathNormalizer::new(repo);
-    for artifact in &manifest.artifacts {
-        let payload = read_manifest_artifact(run_directory, artifact)?;
-        match artifact.kind {
-            ArtifactKind::Coverage => {
-                ingest_coverage_json_with_options(
-                    &storage,
-                    std::str::from_utf8(&payload)?,
-                    &artifact.format,
-                    &manifest.revision,
-                    None,
-                    true,
-                    &CoverageIngestOptions::default(),
-                )?;
-            }
-            ArtifactKind::Mutants => {
-                ingest_mutant_facts_json_with_options(
-                    &storage,
-                    &normalizer,
-                    &git,
-                    &extractor,
-                    std::str::from_utf8(&payload)?,
-                    &manifest.revision,
-                    None,
-                    "unit",
-                    &MutantIngestOptions::default(),
-                )?;
+    let mut sarif_inputs = BTreeMap::<String, Vec<PathBuf>>::new();
+    let mut sarif_scopes = BTreeMap::<String, Vec<(EvidenceScopeFingerprint, bool)>>::new();
+    storage.begin_transaction()?;
+    let result = (|| -> Result<()> {
+        for (index, artifact) in manifest.artifacts.iter().enumerate() {
+            let payload = read_manifest_artifact(run_directory, artifact)?;
+            let evidence_scope = artifact_evidence_scope(artifact, &manifest.revision)?;
+            match artifact.kind {
+                ArtifactKind::Coverage => {
+                    ingest_coverage_json_with_options(
+                        &storage,
+                        std::str::from_utf8(&payload)?,
+                        &artifact.format,
+                        &manifest.revision,
+                        None,
+                        true,
+                        &CoverageIngestOptions {
+                            line_source: artifact.producer.clone(),
+                            evidence_scope: evidence_scope.clone(),
+                            complete: artifact.complete,
+                        },
+                    )?;
+                }
+                ArtifactKind::Mutants => {
+                    ingest_mutant_facts_json_with_options(
+                        &storage,
+                        &normalizer,
+                        &git,
+                        &extractor,
+                        std::str::from_utf8(&payload)?,
+                        &manifest.revision,
+                        None,
+                        evidence_scope
+                            .clone()
+                            .as_ref()
+                            .map(|scope| scope.test_set.as_str())
+                            .unwrap_or("unit"),
+                        &MutantIngestOptions {
+                            mutation_corpus: evidence_scope
+                                .as_ref()
+                                .map(|scope| scope.mutant_corpus.clone())
+                                .unwrap_or_default(),
+                            evidence_scope,
+                            complete: artifact.complete,
+                        },
+                    )?;
             }
             ArtifactKind::Sarif => {
+                let document: serde_json::Value = serde_json::from_slice(&payload).with_context(|| {
+                    format!("parse SARIF artifact from producer {:?}", artifact.producer)
+                })?;
+                if document.get("version").and_then(serde_json::Value::as_str).is_none()
+                    || document.get("runs").and_then(serde_json::Value::as_array).is_none()
+                {
+                    anyhow::bail!("producer {:?} emitted an invalid SARIF document", artifact.producer);
+                }
                 let unpacked = run_directory
-                    .join("unpacked")
-                    .join(&artifact.path)
-                    .with_extension("json");
-                fs::create_dir_all(unpacked.parent().expect("unpacked artifact parent exists"))?;
-                fs::write(&unpacked, payload)?;
-                ingest_sarif_paths(
-                    &storage,
-                    repo,
-                    &[unpacked],
-                    &artifact.producer,
-                    &manifest.revision,
-                    None,
-                    true,
-                )?;
+                        .join("unpacked")
+                        .join(format!("{index}-{}", artifact.producer))
+                        .with_extension("json");
+                    fs::create_dir_all(
+                        unpacked.parent().expect("unpacked artifact parent exists"),
+                    )?;
+                    fs::write(&unpacked, payload)?;
+                    sarif_inputs
+                        .entry(artifact.producer.clone())
+                        .or_default()
+                        .push(unpacked);
+                    if let Some(scope) = evidence_scope {
+                        sarif_scopes
+                            .entry(artifact.producer.clone())
+                            .or_default()
+                            .push((scope, artifact.complete));
+                    }
+                }
             }
+        }
+        for (source, inputs) in sarif_inputs {
+            ingest_sarif_paths(
+                &storage,
+                repo,
+                &inputs,
+                &source,
+                &manifest.revision,
+                None,
+                true,
+            )?;
+            if let Some((scope, complete)) = sarif_scopes
+                .remove(&source)
+                .unwrap_or_default()
+                .into_iter()
+                .next()
+            {
+                storage.record_evidence_artifact_scope(&EvidenceArtifactScope {
+                    family: "sarif".into(),
+                    source: source.clone(),
+                    scope,
+                    complete,
+                    expected_lines: Default::default(),
+                })?;
+            }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => storage.commit_transaction()?,
+        Err(error) => {
+            let _ = storage.rollback_transaction();
+            return Err(error);
         }
     }
     println!(
@@ -796,6 +963,53 @@ fn ingest_run_manifest(
         manifest.artifacts.len()
     );
     Ok(())
+}
+
+fn validate_manifest_artifact_batches(manifest: &lineage::pipeline::RunManifest) -> Result<()> {
+    let mut batches =
+        BTreeMap::<(String, ArtifactKind), Vec<&lineage::pipeline::ManifestArtifact>>::new();
+    for artifact in &manifest.artifacts {
+        batches
+            .entry((artifact.producer.clone(), artifact.kind))
+            .or_default()
+            .push(artifact);
+    }
+    for ((producer, kind), artifacts) in batches {
+        let first = artifacts[0];
+        if artifacts.iter().any(|artifact| {
+            artifact.complete != first.complete || artifact.evidence_scope != first.evidence_scope
+        }) {
+            anyhow::bail!(
+                "producer {producer:?} has incompatible scope or completeness declarations for {kind:?} artifacts"
+            );
+        }
+        if matches!(kind, ArtifactKind::Coverage | ArtifactKind::Mutants) && artifacts.len() != 1 {
+            anyhow::bail!(
+                "producer {producer:?} emits {} {kind:?} artifacts; shard merging is not yet supported, configure one merged artifact",
+                artifacts.len()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn artifact_evidence_scope(
+    artifact: &lineage::pipeline::ManifestArtifact,
+    revision: &str,
+) -> Result<Option<EvidenceScopeFingerprint>> {
+    let scope = artifact.evidence_scope.as_ref();
+    if artifact.complete && scope.is_none() {
+        anyhow::bail!(
+            "complete artifact from producer {:?} lacks evidence_scope",
+            artifact.producer
+        );
+    }
+    Ok(scope.map(|scope| EvidenceScopeFingerprint {
+        revision: revision.into(),
+        selection: scope.selection.clone(),
+        mutant_corpus: scope.mutant_corpus.clone(),
+        test_set: scope.test_set.clone(),
+    }))
 }
 
 fn print_json_summary(units: &[lineage::UnitSummary]) {
@@ -876,4 +1090,136 @@ fn json_escape(value: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lineage::pipeline::{DeclaredEvidenceScope, ManifestArtifact, RunManifest};
+    use tempfile::tempdir;
+
+    #[test]
+    fn latest_successful_run_supplies_complete_diff_scope() {
+        let directory = tempdir().unwrap();
+        let repository = git2::Repository::init(directory.path()).unwrap();
+        let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+        fs::write(directory.path().join("app.rb"), "puts :ok\n").unwrap();
+        let mut index = repository.index().unwrap();
+        index.add_path(std::path::Path::new("app.rb")).unwrap();
+        let tree = repository.find_tree(index.write_tree().unwrap()).unwrap();
+        let revision = repository
+            .commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap()
+            .to_string();
+        fs::write(directory.path().join("lineage.yml"), "version: 1\n").unwrap();
+        let config = load_config(directory.path()).unwrap();
+        let latest = latest_run_directory(directory.path(), &config);
+        fs::create_dir_all(&latest).unwrap();
+        fs::write(
+            latest.join("manifest.json"),
+            serde_json::to_vec(&RunManifest {
+                version: lineage::pipeline::RUN_MANIFEST_VERSION.into(),
+                revision: revision.clone(),
+                profile: "ci".into(),
+                repository_identity: "example".into(),
+                tree_fingerprint: revision.clone(),
+                started_at_unix_ms: 1,
+                duration_ms: 1,
+                status: RunStatus::Succeeded,
+                configuration_hash: "config".into(),
+                producers: Vec::new(),
+                artifacts: vec![ManifestArtifact {
+                    producer: "coverage-ci".into(),
+                    kind: ArtifactKind::Coverage,
+                    format: "generic".into(),
+                    path: "coverage.json".into(),
+                    content_hash: "unused".into(),
+                    compression: lineage::ArtifactCompression::None,
+                    scope: None,
+                    complete: true,
+                    evidence_scope: Some(DeclaredEvidenceScope {
+                        selection: "full".into(),
+                        mutant_corpus: "corpus-v1".into(),
+                        test_set: "unit".into(),
+                    }),
+                }],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let provider = GitProvider::open(directory.path()).unwrap();
+        let mut request = DiffCommandRequest {
+            repo: directory.path().to_path_buf(),
+            db: directory.path().join("lineage.db"),
+            base: None,
+            head: Some(revision),
+            format: DiffFormat::Text,
+            full: true,
+            coverage_source: None,
+            sarif_source: None,
+            selection: None,
+            mutant_corpus: None,
+            test_set: None,
+        };
+
+        resolve_diff_run_scope(&provider, &mut request).unwrap();
+
+        assert_eq!(request.coverage_source.as_deref(), Some("coverage-ci"));
+        assert_eq!(request.selection.as_deref(), Some("full"));
+        assert_eq!(request.mutant_corpus.as_deref(), Some("corpus-v1"));
+        assert_eq!(request.test_set.as_deref(), Some("unit"));
+    }
+
+    #[test]
+    fn partial_diff_scope_override_is_rejected() {
+        let directory = tempdir().unwrap();
+        let repository = git2::Repository::init(directory.path()).unwrap();
+        let provider = GitProvider::open(repository.path().parent().unwrap()).unwrap();
+        let mut request = DiffCommandRequest {
+            repo: directory.path().to_path_buf(),
+            db: directory.path().join("lineage.db"),
+            base: None,
+            head: None,
+            format: DiffFormat::Text,
+            full: true,
+            coverage_source: None,
+            sarif_source: None,
+            selection: Some("full".into()),
+            mutant_corpus: None,
+            test_set: None,
+        };
+        assert!(resolve_diff_run_scope(&provider, &mut request)
+            .unwrap_err()
+            .to_string()
+            .contains("must be supplied together"));
+    }
+
+    #[test]
+    fn clean_worktree_check_ignores_only_configured_artifacts() {
+        let directory = tempdir().unwrap();
+        let repository = git2::Repository::init(directory.path()).unwrap();
+        let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+        fs::write(directory.path().join("tracked.txt"), "tracked\n").unwrap();
+        let mut index = repository.index().unwrap();
+        index.add_path(std::path::Path::new("tracked.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repository.find_tree(index.write_tree().unwrap()).unwrap();
+        repository
+            .commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap();
+        fs::create_dir_all(directory.path().join(".lineage/artifacts/runs")).unwrap();
+        fs::write(
+            directory.path().join(".lineage/artifacts/runs/manifest.json"),
+            "{}",
+        )
+        .unwrap();
+
+        ensure_clean_worktree(directory.path(), std::path::Path::new(".lineage/artifacts"))
+            .unwrap();
+        fs::write(directory.path().join("unexpected.txt"), "dirty\n").unwrap();
+        assert!(ensure_clean_worktree(directory.path(), std::path::Path::new(".lineage/artifacts"))
+            .unwrap_err()
+            .to_string()
+            .contains("clean worktree"));
+    }
 }

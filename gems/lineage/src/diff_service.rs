@@ -38,26 +38,32 @@ pub fn build_structured_diff(
         request.head_revision.as_deref(),
     )?;
     let mut plan = provider.diff_plan(&base, &head)?;
-    bind_requested_evidence_scope(&mut plan, request);
+    bind_requested_evidence_scope(&mut plan, request)?;
     if let Some(storage) = storage {
-        apply_known_coverage(storage, &mut plan, request.coverage_source.as_deref());
-        apply_known_mutation_kills(storage, &mut plan);
-        apply_known_sarif(storage, &mut plan, request.sarif_source.as_deref());
+        apply_known_coverage(storage, &mut plan, request.coverage_source.as_deref())?;
+        apply_known_mutation_kills(storage, &mut plan)?;
+        apply_known_sarif(storage, &mut plan, request.sarif_source.as_deref())?;
     }
     Ok(plan)
 }
 
-fn bind_requested_evidence_scope(plan: &mut DiffPlan, request: &DiffRequest) {
-    let (Some(selection), Some(mutant_corpus), Some(test_set)) = (
+fn bind_requested_evidence_scope(plan: &mut DiffPlan, request: &DiffRequest) -> Result<()> {
+    let supplied = [
         request.selection.as_ref(),
         request.mutant_corpus.as_ref(),
         request.test_set.as_ref(),
-    ) else {
-        return;
+    ];
+    if supplied.iter().any(|item| item.is_some()) && !supplied.iter().all(|item| item.is_some()) {
+        anyhow::bail!("selection, mutant corpus, and test set must be supplied together");
+    }
+    let (Some(selection), Some(mutant_corpus), Some(test_set)) =
+        (supplied[0], supplied[1], supplied[2])
+    else {
+        return Ok(());
     };
     if selection.trim().is_empty() || mutant_corpus.trim().is_empty() || test_set.trim().is_empty()
     {
-        return;
+        anyhow::bail!("selection, mutant corpus, and test set cannot be empty");
     }
     plan.scope.evidence_scope = EvidenceScopeFingerprint {
         revision: plan.scope.head_oid.clone(),
@@ -65,44 +71,43 @@ fn bind_requested_evidence_scope(plan: &mut DiffPlan, request: &DiffRequest) {
         mutant_corpus: mutant_corpus.clone(),
         test_set: test_set.clone(),
     };
+    Ok(())
 }
 
-fn apply_known_coverage(storage: &Storage, plan: &mut DiffPlan, source: Option<&str>) {
+fn apply_known_coverage(
+    storage: &Storage,
+    plan: &mut DiffPlan,
+    source: Option<&str>,
+) -> Result<()> {
     let paths = changed_paths(plan);
     let source = source.unwrap_or("coverage");
-    if let Ok(Some(artifact)) =
-        storage.scoped_coverage_artifact(source, &plan.scope.evidence_scope, &paths)
+    if let Some(artifact) =
+        storage.scoped_coverage_artifact(source, &plan.scope.evidence_scope, &paths)?
     {
         apply_scoped_coverage(plan, &artifact);
-        return;
+        return Ok(());
     }
-    let Ok(rows) = storage.coverage_observations_for_commit_paths(&plan.scope.head_oid, &paths)
-    else {
-        return;
-    };
+    let rows = storage.coverage_observations_for_commit_paths(&plan.scope.head_oid, &paths)?;
     apply_partial_coverage(plan, &rows);
+    Ok(())
 }
 
-fn apply_known_mutation_kills(storage: &Storage, plan: &mut DiffPlan) {
+fn apply_known_mutation_kills(storage: &Storage, plan: &mut DiffPlan) -> Result<()> {
     let paths = changed_paths(plan);
-    if let Ok(Some(artifact)) = storage.scoped_mutation_artifact(&plan.scope.evidence_scope, &paths)
-    {
+    if let Some(artifact) = storage.scoped_mutation_artifact(&plan.scope.evidence_scope, &paths)? {
         apply_scoped_mutation_kills(plan, &artifact);
-        return;
+        return Ok(());
     }
-    let Ok(rows) =
-        storage.mutation_kill_observations_for_commit_paths(&plan.scope.head_oid, &paths)
-    else {
-        return;
-    };
+    let rows = storage.mutation_kill_observations_for_commit_paths(&plan.scope.head_oid, &paths)?;
     apply_partial_mutation_kills(plan, &rows);
+    Ok(())
 }
 
-fn apply_known_sarif(storage: &Storage, plan: &mut DiffPlan, source: Option<&str>) {
+fn apply_known_sarif(storage: &Storage, plan: &mut DiffPlan, source: Option<&str>) -> Result<()> {
     let paths = changed_paths(plan);
     if let Some(source) = source {
-        if let Ok(Some(rows)) =
-            storage.scoped_sarif_observations(source, &plan.scope.evidence_scope, &paths)
+        if let Some(rows) =
+            storage.scoped_sarif_observations(source, &plan.scope.evidence_scope, &paths)?
         {
             let base_scope = EvidenceScopeFingerprint {
                 revision: plan.scope.base_oid.clone(),
@@ -119,25 +124,24 @@ fn apply_known_sarif(storage: &Storage, plan: &mut DiffPlan, source: Option<&str
                         .unwrap_or_else(|| file.path.clone())
                 })
                 .collect::<Vec<_>>();
-            if let Ok(Some(base_rows)) =
-                storage.scoped_sarif_observations(source, &base_scope, &base_paths)
+            if let Some(base_rows) =
+                storage.scoped_sarif_observations(source, &base_scope, &base_paths)?
             {
                 apply_exact_sarif_findings(plan, &rows, &base_rows);
             } else {
                 apply_head_only_sarif_findings(plan, &rows);
             }
-            return;
+            return Ok(());
         }
-        if storage.has_scoped_sarif_source(source).unwrap_or(false) {
+        if storage.has_scoped_sarif_source(source)? {
             plan.evidence.sarif = crate::diff::EvidenceState::Stale;
             plan.evidence.hazards = crate::diff::EvidenceState::Stale;
-            return;
+            return Ok(());
         }
     }
-    let Ok(rows) = storage.sarif_observations_for_commit_paths(&plan.scope.head_oid, &paths) else {
-        return;
-    };
+    let rows = storage.sarif_observations_for_commit_paths(&plan.scope.head_oid, &paths)?;
     apply_partial_sarif_findings(plan, &rows);
+    Ok(())
 }
 
 fn changed_paths(plan: &DiffPlan) -> Vec<String> {

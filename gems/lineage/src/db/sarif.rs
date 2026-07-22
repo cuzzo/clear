@@ -33,7 +33,10 @@ pub fn ingest_sarif_paths(
     let unit_index = CurrentUnitIndex::load(storage)?;
     let mut stats = SarifIngestStats::default();
 
-    storage.begin_transaction()?;
+    let owns_transaction = !storage.transaction_active();
+    if owns_transaction {
+        storage.begin_transaction()?;
+    }
     let result = (|| {
         if replace {
             storage.delete_sarif_for_commit_source(commit, source)?;
@@ -71,11 +74,15 @@ pub fn ingest_sarif_paths(
     })();
     match result {
         Ok(()) => {
-            storage.commit_transaction()?;
+            if owns_transaction {
+                storage.commit_transaction()?;
+            }
             Ok(stats)
         }
         Err(error) => {
-            storage.rollback_transaction()?;
+            if owns_transaction {
+                storage.rollback_transaction()?;
+            }
             Err(error)
         }
     }

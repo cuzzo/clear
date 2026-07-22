@@ -11,16 +11,25 @@ use std::collections::{BTreeMap, HashMap};
 
 pub struct GitProvider {
     path: PathBuf,
+    scope_prefix: Option<String>,
     blob_cache: std::sync::Mutex<HashMap<String, (git2::Oid, String)>>,
 }
 
 impl GitProvider {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path_buf = path.as_ref().to_path_buf();
-        let _repo = Repository::open(&path_buf)
+        let repo = Repository::discover(&path_buf)
             .with_context(|| format!("open git repository {}", path_buf.display()))?;
+        let workdir = repo.workdir().unwrap_or(path_buf.as_path()).to_path_buf();
+        let requested = path_buf.canonicalize().unwrap_or(path_buf);
+        let scope_prefix = requested
+            .strip_prefix(&workdir)
+            .ok()
+            .filter(|path| !path.as_os_str().is_empty())
+            .map(|path| path.to_string_lossy().replace('\\', "/"));
         Ok(Self {
-            path: path_buf,
+            path: workdir,
+            scope_prefix,
             blob_cache: std::sync::Mutex::new(HashMap::new()),
         })
     }
@@ -87,6 +96,12 @@ impl GitProvider {
         ))
     }
 
+    fn in_scope(&self, path: &str) -> bool {
+        self.scope_prefix
+            .as_ref()
+            .is_none_or(|prefix| path == prefix || path.starts_with(&format!("{prefix}/")))
+    }
+
     /// Resolves a review pair to immutable object IDs. With no explicit base,
     /// the default is the merge base of the selected head and its first parent.
     /// For ordinary commits that is the first parent itself; using Git's merge
@@ -120,6 +135,7 @@ impl GitProvider {
         let commit = repo.find_commit(git2::Oid::from_str(commit_hash)?)?;
         let mut files = Vec::new();
         collect_revision_tree(&repo, &commit.tree()?, PathBuf::new(), &mut files)?;
+        files.retain(|file| self.in_scope(&file.path));
         Ok(files)
     }
 
@@ -136,10 +152,12 @@ impl GitProvider {
             .filter_map(|delta| {
                 (delta.status() == git2::Delta::Renamed)
                     .then(|| {
-                        Some((
-                            delta.old_file().path()?.to_str()?.to_string(),
-                            delta.new_file().path()?.to_str()?.to_string(),
-                        ))
+                        let old_path = delta.old_file().path()?.to_str()?;
+                        let new_path = delta.new_file().path()?.to_str()?;
+                        if !self.in_scope(old_path) && !self.in_scope(new_path) {
+                            return None;
+                        }
+                        Some((old_path.to_string(), new_path.to_string()))
                     })
                     .flatten()
             })
@@ -215,6 +233,7 @@ impl VcsProvider for GitProvider {
             &self.blob_cache,
             &mut files,
         )?;
+        files.retain(|file| self.in_scope(&file.path));
         Ok(files)
     }
 
@@ -256,7 +275,7 @@ impl VcsProvider for GitProvider {
                     | git2::Delta::Copied => {
                         if let Some(new_file) = delta.new_file().path() {
                             if let Some(path_str) = new_file.to_str() {
-                                if path_filter(path_str) {
+                                if path_filter(path_str) && self.in_scope(path_str) {
                                     let entry_id = delta.new_file().id();
                                     if entry_id.is_zero() {
                                         continue;
@@ -301,7 +320,7 @@ impl VcsProvider for GitProvider {
                         if delta.status() == git2::Delta::Renamed {
                             if let Some(old_file) = delta.old_file().path() {
                                 if let Some(path_str) = old_file.to_str() {
-                                    if path_filter(path_str) {
+                                    if path_filter(path_str) && self.in_scope(path_str) {
                                         deleted.push(path_str.to_string());
                                     }
                                 }
@@ -311,7 +330,7 @@ impl VcsProvider for GitProvider {
                     git2::Delta::Deleted => {
                         if let Some(old_file) = delta.old_file().path() {
                             if let Some(path_str) = old_file.to_str() {
-                                if path_filter(path_str) {
+                                if path_filter(path_str) && self.in_scope(path_str) {
                                     deleted.push(path_str.to_string());
                                 }
                             }
@@ -610,6 +629,39 @@ mod tests {
     }
 
     #[test]
+    fn subdirectory_provider_scopes_snapshots_diffs_and_engine_changes() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path())?;
+        let base = create_commit(
+            &repo,
+            "base",
+            &[
+                ("gems/demo/lib/value.rb", "def value\n  1\nend\n"),
+                ("other/lib/value.rb", "def value\n  1\nend\n"),
+            ],
+        )?;
+        let head = create_commit(
+            &repo,
+            "change demo only",
+            &[
+                ("gems/demo/lib/value.rb", "def value\n  2\nend\n"),
+                ("other/lib/value.rb", "def value\n  3\nend\n"),
+            ],
+        )?;
+
+        let provider = GitProvider::open(dir.path().join("gems/demo"))?;
+        let plan = provider.diff_plan(&base, &head)?;
+        assert_eq!(plan.files.len(), 1);
+        assert_eq!(plan.files[0].path, "gems/demo/lib/value.rb");
+
+        let all = |_path: &str| true;
+        let changes = provider.changes_at_commit(Some(&base), &head, &all)?;
+        assert_eq!(changes.added_or_modified.len(), 1);
+        assert_eq!(changes.added_or_modified[0].path, "gems/demo/lib/value.rb");
+        Ok(())
+    }
+
+    #[test]
     fn diff_plan_preserves_git_detected_renames_with_edits() -> Result<()> {
         let dir = tempdir()?;
         let repo = Repository::init(dir.path())?;
@@ -660,7 +712,11 @@ mod tests {
     fn diff_plan_uses_head_revision_classification_overrides() -> Result<()> {
         let dir = tempdir()?;
         let repo = Repository::init(dir.path())?;
-        let base = create_commit(&repo, "base", &[("spec/value_spec.rb", "describe :value do\nend\n")])?;
+        let base = create_commit(
+            &repo,
+            "base",
+            &[("spec/value_spec.rb", "describe :value do\nend\n")],
+        )?;
         let head = create_commit(
             &repo,
             "override source role",

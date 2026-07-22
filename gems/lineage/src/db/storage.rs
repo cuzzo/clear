@@ -254,6 +254,15 @@ impl Storage {
         Ok(())
     }
 
+    /// Returns whether a caller already owns the connection transaction.
+    ///
+    /// Importers use this to participate in a run-wide transaction without
+    /// committing evidence independently. Stand-alone importer calls retain
+    /// their existing transactional behavior.
+    pub fn transaction_active(&self) -> bool {
+        !self.conn.is_autocommit()
+    }
+
     pub fn commit_transaction(&self) -> Result<()> {
         self.conn.execute_batch("COMMIT;")?;
         Ok(())
