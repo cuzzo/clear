@@ -64,6 +64,7 @@ struct Extractor<'a> {
     decision_spans: Vec<Span>,
     receiver_aliases: Vec<BTreeMap<String, String>>,
     owner_fields: BTreeMap<String, Vec<String>>,
+    unevaluated_context_depth: usize,
     facts: NormalizedFacts,
     seen_calls: HashSet<(String, String, String, usize, Span)>,
     seen_reads: HashSet<(String, String, String, String, usize, Span)>,
@@ -92,6 +93,7 @@ impl<'a> Extractor<'a> {
             decision_spans: Vec::new(),
             receiver_aliases: Vec::new(),
             owner_fields: BTreeMap::new(),
+            unevaluated_context_depth: 0,
             facts: NormalizedFacts::default(),
             seen_calls: HashSet::new(),
             seen_reads: HashSet::new(),
@@ -120,11 +122,15 @@ impl<'a> Extractor<'a> {
     }
 
     fn scan(&mut self, node: &Node) {
-        self.record_nullable_operation(node);
+        if self.unevaluated_context_depth == 0 {
+            self.record_nullable_operation(node);
+        }
         self.record_presence_correlation(node);
         self.record_behavior_node_reads(node);
         self.record_behavior_node_calls(node);
         self.record_behavior_initializer_writes(node);
+        let enters_unevaluated_context = is_unevaluated_context(node);
+        self.unevaluated_context_depth += usize::from(enters_unevaluated_context);
         match node.r#type.as_str() {
             "CLASS" | "MODULE" | "INTERFACE_DECLARATION" => self.scan_owner(node),
             "DEFN" | "DEFS" | "METHOD_SIGNATURE" => self.scan_function(node),
@@ -177,6 +183,7 @@ impl<'a> Extractor<'a> {
                 }
             }
         }
+        self.unevaluated_context_depth -= usize::from(enters_unevaluated_context);
     }
 
     fn record_nullable_operation(&mut self, node: &Node) {
@@ -2510,6 +2517,16 @@ fn dispatch_member_calls<'a>(
 
 fn dispatch_member_name(call: &CallSite) -> String {
     call.message.trim_end_matches('=').to_string()
+}
+
+/// C and C++ retain expression-shaped operands in a few type-only contexts.
+/// Those operands are parsed as ordinary pointer expressions but are never
+/// evaluated, so they cannot be nullable-operation obligations.
+fn is_unevaluated_context(node: &Node) -> bool {
+    matches!(
+        node.r#type.as_str(),
+        "SIZEOF_EXPRESSION" | "ALIGNOF_EXPRESSION" | "DECLTYPE" | "NOEXCEPT"
+    ) || (node.r#type == "FCALL" && node.text.trim_start().starts_with("noexcept("))
 }
 
 fn collect_equality_dispatch_sites(

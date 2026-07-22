@@ -262,6 +262,26 @@ fn nullable_operations_join_native_dereferences_to_proven_null_states() -> Resul
 }
 
 #[test]
+fn native_unevaluated_pointer_operands_do_not_create_nullable_operations() -> Result<()> {
+    for (name, language) in [
+        ("nullable_unevaluated.c", Language::C),
+        ("nullable_unevaluated.cpp", Language::Cpp),
+    ] {
+        let document = syntax::parse_file(fixture(name), language)?;
+        let output = profile::extract(&document, Profile::NilKill);
+        assert_eq!(output.nullable_operations.len(), 1, "{name}");
+        assert!(output.nullable_operations.iter().all(|operation| {
+            operation.operation_kind == "pointer_dereference"
+                && operation
+                    .place_id
+                    .contains("evaluated_dereference_is_reported")
+                && operation.span[0] > 0
+        }));
+    }
+    Ok(())
+}
+
+#[test]
 fn go_map_lookup_exports_presence_without_proving_payload_non_null() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_presence.go"), Language::Go)?;
     let output = profile::extract(&document, Profile::NilKill);
