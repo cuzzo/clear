@@ -269,6 +269,14 @@ fn go_nullable_operations_cover_index_writes_and_channels() -> Result<()> {
 }
 
 #[test]
+fn go_safe_nil_collection_operations_do_not_create_nullable_operations() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_go_safe_collections.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    assert!(output.nullable_operations.is_empty());
+    Ok(())
+}
+
+#[test]
 fn native_function_pointer_calls_are_nullable_operations() -> Result<()> {
     for (fixture_name, language) in [
         ("nullable_function_pointer.c", Language::C),
