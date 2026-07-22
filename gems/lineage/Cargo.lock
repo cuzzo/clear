@@ -989,6 +989,7 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2",
  "streaming-iterator",
  "tempfile",

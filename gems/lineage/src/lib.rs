@@ -26,6 +26,7 @@ pub mod mcp;
 pub mod model;
 #[path = "db/mutant.rs"]
 pub mod mutant;
+pub mod pipeline;
 #[path = "db/quality.rs"]
 pub mod quality;
 #[path = "db/sarif.rs"]
@@ -48,11 +49,11 @@ pub use diff::{
     build_diff_plan, build_diff_plan_with_renames, with_evidence_scope, ChangeInventory,
     DependencyChange, DiffFile, DiffPlan, DiffScope, EvidenceScopeFingerprint, RevisionFile,
 };
-pub use diff_service::{build_structured_diff, DiffRequest};
 pub use diff_render::{
     render_structured_diff_json, render_structured_diff_text, structured_diff_document,
     StructuredDiffDocument, STRUCTURED_DIFF_FORMAT_VERSION,
 };
+pub use diff_service::{build_structured_diff, DiffRequest};
 pub use engine::{EngineStats, LineageEngine};
 pub use extract::{BoundaryExtractor, HeuristicExtractor, SourceFilter};
 pub use git::GitProvider;
@@ -70,6 +71,10 @@ pub use model::{
 pub use mutant::{
     ingest_mutant_facts_json, ingest_mutant_facts_json_with_options, parse_mutant_facts,
     MutantFact, MutantIngestOptions, MutantIngestStats,
+};
+pub use pipeline::{
+    latest_run_directory, load_config, ArtifactCompression, ArtifactKind, LineageConfig,
+    RunManifest,
 };
 pub use quality::{
     coverage_records_to_test_exposure_json, ingest_coverage_json,
