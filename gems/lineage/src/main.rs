@@ -1,11 +1,13 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use lineage::{
-    coverage_records_to_test_exposure_json, ingest_coverage_json_with_options, ingest_hazards,
-    ingest_hotness_json, ingest_mutant_facts_json, ingest_sarif_paths, ingest_stack_traces,
+    coverage_records_to_test_exposure_json, ingest_architecture_json,
+    ingest_coverage_json_with_options, ingest_hazards, ingest_hotness_json,
+    ingest_mutant_facts_json_with_options, ingest_sarif_paths, ingest_stack_traces,
     ingest_test_exposure_json, parse_coverage_input, resolve_coverage_record_paths, serve_lsp,
-    serve_mcp, serve_ui_with_overlays, CoverageIngestOptions, GitProvider, HeuristicExtractor,
-    LineageEngine, RepoPathNormalizer, SentryProvider, Storage, ingest_architecture_json,
+    serve_mcp, serve_ui_with_overlays, CoverageIngestOptions, EvidenceScopeFingerprint,
+    GitProvider, HeuristicExtractor, LineageEngine, MutantIngestOptions, RepoPathNormalizer,
+    SentryProvider, Storage,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -139,6 +141,16 @@ enum Command {
         timestamp: Option<i64>,
         #[arg(long, default_value = "unit")]
         test_type: String,
+        /// Stable mutation-corpus fingerprint. Supplying all scope fields lets
+        /// the diff view use this artifact as exact positive evidence.
+        #[arg(long)]
+        mutation_corpus: Option<String>,
+        #[arg(long)]
+        selection: Option<String>,
+        #[arg(long)]
+        test_set: Option<String>,
+        #[arg(long)]
+        complete: bool,
     },
     /// Ingest profile-hotness/v1 runtime profiling shares.
     IngestHotness {
@@ -315,13 +327,11 @@ fn main() -> Result<()> {
             let storage = Storage::open(&db)?;
             let payload = fs::read_to_string(&input)?;
             let normalized_test_type = test_type.as_deref().map(normalize_test_type);
-            let coverage_test_id = normalized_test_type
-                .as_ref()
-                .map(|test_type| {
-                    test_id
-                        .clone()
-                        .unwrap_or_else(|| default_coverage_test_id(test_type, &input))
-                });
+            let coverage_test_id = normalized_test_type.as_ref().map(|test_type| {
+                test_id
+                    .clone()
+                    .unwrap_or_else(|| default_coverage_test_id(test_type, &input))
+            });
             let line_source = normalized_test_type
                 .as_ref()
                 .zip(coverage_test_id.as_ref())
@@ -334,7 +344,11 @@ fn main() -> Result<()> {
                 &commit,
                 timestamp,
                 replace,
-                &CoverageIngestOptions { line_source, evidence_scope: None, complete: false },
+                &CoverageIngestOptions {
+                    line_source,
+                    evidence_scope: None,
+                    complete: false,
+                },
             )?;
             println!(
                 "ingested coverage: files={} units={} events={} line_events={} skipped_files={}",
@@ -355,12 +369,11 @@ fn main() -> Result<()> {
                     mutation_status.as_deref(),
                     mutation_kind.as_deref(),
                 );
-                let exposure_record_count = serde_json::from_str::<serde_json::Value>(
-                    &exposure_payload,
-                )?
-                .get("hits")
-                .and_then(serde_json::Value::as_array)
-                .map_or(0, Vec::len);
+                let exposure_record_count =
+                    serde_json::from_str::<serde_json::Value>(&exposure_payload)?
+                        .get("hits")
+                        .and_then(serde_json::Value::as_array)
+                        .map_or(0, Vec::len);
                 if exposure_record_count == 0 {
                     println!(
                         "skipped coverage exposure: test_id={} test_type={} records=0",
@@ -430,13 +443,31 @@ fn main() -> Result<()> {
             commit,
             timestamp,
             test_type,
+            mutation_corpus,
+            selection,
+            test_set,
+            complete,
         } => {
             let storage = Storage::open(&db)?;
             let git = GitProvider::open(&repo)?;
             let extractor = HeuristicExtractor::default();
             let normalizer = RepoPathNormalizer::new(&repo);
             let payload = fs::read_to_string(&input)?;
-            let stats = ingest_mutant_facts_json(
+            let mutation_corpus = mutation_corpus.unwrap_or_default();
+            let evidence_scope = match (selection, test_set) {
+                (Some(selection), Some(test_set)) => Some(EvidenceScopeFingerprint {
+                    revision: commit.clone(),
+                    selection,
+                    mutant_corpus: mutation_corpus.clone(),
+                    test_set,
+                }),
+                (None, None) => None,
+                _ => anyhow::bail!("--selection and --test-set must be supplied together"),
+            };
+            if complete && evidence_scope.is_none() {
+                anyhow::bail!("--complete requires --selection, --test-set, and --mutation-corpus");
+            }
+            let stats = ingest_mutant_facts_json_with_options(
                 &storage,
                 &normalizer,
                 &git,
@@ -445,6 +476,11 @@ fn main() -> Result<()> {
                 &commit,
                 timestamp,
                 &test_type,
+                &MutantIngestOptions {
+                    mutation_corpus,
+                    evidence_scope,
+                    complete,
+                },
             )?;
             println!(
                 "ingested mutant facts: facts={} units={} quality_events={} exposure_events={} skipped_files={} skipped_facts={}",
@@ -511,13 +547,7 @@ fn main() -> Result<()> {
             }
             let storage = Storage::open(&db)?;
             let stats = ingest_sarif_paths(
-                &storage,
-                &repo,
-                &inputs,
-                &source,
-                &commit,
-                timestamp,
-                replace,
+                &storage, &repo, &inputs, &source, &commit, timestamp, replace,
             )?;
             println!(
                 "ingested SARIF: artifacts={} findings={} skipped_files={} skipped_results={}",

@@ -109,6 +109,7 @@ where
                 test_type: normalized_test_type(&record.test_type),
                 mutation_status: record.mutation_status.clone(),
                 mutation_kind: record.mutation_kind.clone(),
+                mutation_corpus: String::new(),
                 is_mutation_verified,
                 is_mutation_killed,
                 is_verified,
@@ -168,8 +169,7 @@ fn collect_file_records(file_entry: &Value, records: &mut Vec<TestExposureRecord
         .into_iter()
         .flatten()
     {
-        let name = string_at(function, &["name", "function", "method", "defn"])
-            .map(str::to_string);
+        let name = string_at(function, &["name", "function", "method", "defn"]).map(str::to_string);
         let line = u32_at(function, &["line", "start_line"]);
         let context_line = string_at(function, &["context_line"]).map(str::to_string);
         for test in function
@@ -178,7 +178,9 @@ fn collect_file_records(file_entry: &Value, records: &mut Vec<TestExposureRecord
             .into_iter()
             .flatten()
         {
-            if let Some(record) = nested_record(path, name.clone(), line, None, context_line.clone(), test) {
+            if let Some(record) =
+                nested_record(path, name.clone(), line, None, context_line.clone(), test)
+            {
                 records.push(record);
             }
         }
@@ -197,7 +199,8 @@ fn collect_file_records(file_entry: &Value, records: &mut Vec<TestExposureRecord
             .into_iter()
             .flatten()
         {
-            if let Some(record) = nested_record(path, None, line, None, context_line.clone(), test) {
+            if let Some(record) = nested_record(path, None, line, None, context_line.clone(), test)
+            {
                 records.push(record);
             }
         }
@@ -217,9 +220,14 @@ fn collect_file_records(file_entry: &Value, records: &mut Vec<TestExposureRecord
             .into_iter()
             .flatten()
         {
-            if let Some(record) =
-                nested_record(path, None, line, branch_id.clone(), context_line.clone(), test)
-            {
+            if let Some(record) = nested_record(
+                path,
+                None,
+                line,
+                branch_id.clone(),
+                context_line.clone(),
+                test,
+            ) {
                 records.push(record);
             }
         }
@@ -235,11 +243,17 @@ fn flat_record(entry: &Value) -> Option<TestExposureRecord> {
     let test_type = string_at(entry, &["test_type", "type"])
         .unwrap_or("unknown")
         .to_string();
-    let mutation_status = optional_string_at(entry, &["mutation_status", "mutant_status", "mutation"]);
+    let mutation_status =
+        optional_string_at(entry, &["mutation_status", "mutant_status", "mutation"]);
     let mutation_kind = normalized_mutation_kind(
         optional_string_at(
             entry,
-            &["mutation_kind", "mutation_type", "mutant_kind", "mutant_type"],
+            &[
+                "mutation_kind",
+                "mutation_type",
+                "mutant_kind",
+                "mutant_type",
+            ],
         )
         .as_deref(),
         mutation_status.as_deref(),
@@ -272,14 +286,20 @@ fn nested_record(
     if test_id.is_empty() {
         return None;
     }
-    let mutation_status = optional_string_at(test, &["mutation_status", "mutant_status", "mutation"]);
+    let mutation_status =
+        optional_string_at(test, &["mutation_status", "mutant_status", "mutation"]);
     let test_type = string_at(test, &["test_type", "type"])
         .unwrap_or("unknown")
         .to_string();
     let mutation_kind = normalized_mutation_kind(
         optional_string_at(
             test,
-            &["mutation_kind", "mutation_type", "mutant_kind", "mutant_type"],
+            &[
+                "mutation_kind",
+                "mutation_type",
+                "mutant_kind",
+                "mutant_type",
+            ],
         )
         .as_deref(),
         mutation_status.as_deref(),
@@ -320,9 +340,11 @@ fn matching_unit<'a>(
         }
     }
     record.function.as_ref().and_then(|function| {
-        units
-            .iter()
-            .find(|unit| function_aliases(function).iter().any(|name| name == &unit.name))
+        units.iter().find(|unit| {
+            function_aliases(function)
+                .iter()
+                .any(|name| name == &unit.name)
+        })
     })
 }
 
@@ -372,7 +394,11 @@ fn is_mutation_verified_status(status: Option<&str>) -> bool {
 
 fn is_mutation_killed_status(status: Option<&str>) -> bool {
     matches!(
-        status.unwrap_or_default().trim().to_ascii_lowercase().as_str(),
+        status
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
         "killed" | "kill" | "pass" | "passed" | "hard" | "hard-gated"
     )
 }
@@ -426,7 +452,8 @@ fn normalized_test_type(test_type: &str) -> String {
 }
 
 fn string_at<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
-    keys.iter().find_map(|key| value.get(*key).and_then(Value::as_str))
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
 }
 
 fn optional_string_at(value: &Value, keys: &[&str]) -> Option<String> {
@@ -480,7 +507,9 @@ mod tests {
         assert_eq!(records.len(), 3);
         assert_eq!(records[0].function.as_deref(), Some("Worker#call"));
         assert_eq!(records[0].branch_id.as_deref(), Some("b1"));
-        assert!(is_mutation_killed_status(records[0].mutation_status.as_deref()));
+        assert!(is_mutation_killed_status(
+            records[0].mutation_status.as_deref()
+        ));
         assert_eq!(records[0].mutation_kind.as_deref(), Some("stochastic"));
         assert_eq!(records[1].test_type, "integration");
         assert_eq!(records[2].mutation_status.as_deref(), Some("survived"));
@@ -494,13 +523,13 @@ mod tests {
         assert!(function_aliases("mod.fn").contains(&"fn".to_string()));
     }
 
-    use tempfile::tempdir;
-    use crate::storage::Storage;
-    use crate::git::GitProvider;
     use crate::extract::HeuristicExtractor;
+    use crate::git::GitProvider;
     use crate::stack_trace::RepoPathNormalizer;
+    use crate::storage::Storage;
     use std::fs;
     use std::path::Path;
+    use tempfile::tempdir;
 
     fn create_commit(
         repo: &git2::Repository,
@@ -508,7 +537,9 @@ mod tests {
         files: &[(&str, &str)],
     ) -> Result<String, git2::Error> {
         let mut index = repo.index()?;
-        let workdir = repo.workdir().ok_or_else(|| git2::Error::from_str("no workdir"))?;
+        let workdir = repo
+            .workdir()
+            .ok_or_else(|| git2::Error::from_str("no workdir"))?;
         for (path, content) in files {
             let file_path = workdir.join(path);
             if let Some(parent_dir) = file_path.parent() {
@@ -520,9 +551,9 @@ mod tests {
         index.write()?;
         let tree_oid = index.write_tree()?;
         let tree = repo.find_tree(tree_oid)?;
-        
+
         let signature = git2::Signature::now("Test User", "test@example.com")?;
-        
+
         let parent = match repo.head() {
             Ok(head_ref) => {
                 let target = head_ref.target().unwrap();
@@ -530,12 +561,12 @@ mod tests {
             }
             Err(_) => None,
         };
-        
+
         let mut parents = Vec::new();
         if let Some(ref p) = parent {
             parents.push(p);
         }
-        
+
         let oid = repo.commit(
             Some("HEAD"),
             &signature,
@@ -551,17 +582,17 @@ mod tests {
     fn test_ingest_test_exposure_json_flow() {
         let dir = tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
-        
+
         // Write file and commit
         let content = "def foo\n  puts 'hello'\nend\n";
         let c1 = create_commit(&repo, "init", &[("src/foo.rb", content)]).unwrap();
-        
+
         let storage = Storage::open_memory().unwrap();
-        
+
         let provider = GitProvider::open(dir.path()).unwrap();
         let normalizer = RepoPathNormalizer::new(dir.path());
         let extractor = HeuristicExtractor::default();
-        
+
         let input_json = json!({
             "hits": [{
                 "file": "src/foo.rb",
@@ -570,7 +601,7 @@ mod tests {
                 "test_type": "unit",
             }]
         });
-        
+
         let err = ingest_test_exposure_json(
             &storage,
             &normalizer,
@@ -581,13 +612,15 @@ mod tests {
             None,
         );
         assert!(err.is_err());
-        
-        storage.insert_metadata(&crate::model::CommitMetadata {
-            hash: c1.clone(),
-            message: "init".to_string(),
-            timestamp: 123456,
-        }).unwrap();
-        
+
+        storage
+            .insert_metadata(&crate::model::CommitMetadata {
+                hash: c1.clone(),
+                message: "init".to_string(),
+                timestamp: 123456,
+            })
+            .unwrap();
+
         let units = extractor.extract_units(&crate::model::BlobFile {
             path: "src/foo.rb".to_string(),
             contents: content.to_string(),
@@ -595,7 +628,7 @@ mod tests {
         for unit in &units {
             storage.upsert_logical_unit(unit, 123456).unwrap();
         }
-        
+
         let stats = ingest_test_exposure_json(
             &storage,
             &normalizer,
@@ -604,11 +637,12 @@ mod tests {
             &input_json.to_string(),
             &c1,
             None,
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         assert_eq!(stats.records, 1);
         assert_eq!(stats.events, 1);
-        
+
         let err_json = ingest_test_exposure_json(
             &storage,
             &normalizer,
@@ -637,21 +671,23 @@ mod tests {
     fn test_ingest_test_exposure_nested_flow() {
         let dir = tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
-        
+
         let content = "def foo\n  puts 'hello'\nend\n";
         let c1 = create_commit(&repo, "init", &[("src/foo.rb", content)]).unwrap();
-        
+
         let storage = Storage::open_memory().unwrap();
-        storage.insert_metadata(&crate::model::CommitMetadata {
-            hash: c1.clone(),
-            message: "init".to_string(),
-            timestamp: 123456,
-        }).unwrap();
-        
+        storage
+            .insert_metadata(&crate::model::CommitMetadata {
+                hash: c1.clone(),
+                message: "init".to_string(),
+                timestamp: 123456,
+            })
+            .unwrap();
+
         let provider = GitProvider::open(dir.path()).unwrap();
         let normalizer = RepoPathNormalizer::new(dir.path());
         let extractor = HeuristicExtractor::default();
-        
+
         let units = extractor.extract_units(&crate::model::BlobFile {
             path: "src/foo.rb".to_string(),
             contents: content.to_string(),
@@ -714,7 +750,8 @@ mod tests {
             &nested_json.to_string(),
             &c1,
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(stats.records, 5);
         assert_eq!(stats.events, 5);

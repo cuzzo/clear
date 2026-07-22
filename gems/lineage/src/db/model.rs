@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 
@@ -170,6 +170,9 @@ pub struct TestExposureEvent {
     pub test_type: String,
     pub mutation_status: Option<String>,
     pub mutation_kind: Option<String>,
+    /// Immutable identifier for the mutation corpus that produced this row.
+    /// Empty identifies legacy, unscoped evidence and must never be treated as exact.
+    pub mutation_corpus: String,
     pub is_mutation_verified: bool,
     pub is_mutation_killed: bool,
     pub is_verified: bool,

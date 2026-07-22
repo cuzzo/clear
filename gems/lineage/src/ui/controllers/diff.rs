@@ -193,6 +193,11 @@ fn apply_known_mutation_kills(state: &UiServerState, plan: &mut crate::diff::Dif
         .iter()
         .map(|file| file.path.clone())
         .collect::<Vec<_>>();
+    if let Ok(Some(artifact)) = storage.scoped_mutation_artifact(&plan.scope.evidence_scope, &paths)
+    {
+        crate::diff::apply_scoped_mutation_kills(plan, &artifact);
+        return;
+    }
     let Ok(rows) =
         storage.mutation_kill_observations_for_commit_paths(&plan.scope.head_oid, &paths)
     else {
@@ -492,6 +497,87 @@ mod tests {
         );
         assert_eq!(
             json.pointer("/data/files/0/verification/not_covered")
+                .and_then(|value| value.as_u64()),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_api_uses_only_complete_scoped_mutation_corpora_as_exact_evidence() {
+        let (_dir, state, base, head) = test_state();
+        let storage = crate::storage::Storage::open(state.db.as_ref()).unwrap();
+        let unit = crate::model::LogicalUnit::new(
+            "app",
+            crate::model::UnitKind::Function,
+            "app.rb",
+            1,
+            1,
+            1,
+            "puts :head",
+            "puts :head\n",
+        );
+        storage.upsert_logical_unit(&unit, 1).unwrap();
+        storage
+            .insert_test_exposure_event(&crate::model::TestExposureEvent {
+                unit_id: unit.id,
+                commit_hash: head.clone(),
+                timestamp: 1,
+                path: "app.rb".into(),
+                function: Some("app".into()),
+                line: Some(1),
+                branch_id: None,
+                test_id: "mutant:app".into(),
+                test_type: "unit".into(),
+                mutation_status: Some("killed".into()),
+                mutation_kind: Some("stochastic".into()),
+                mutation_corpus: "mutants-v1".into(),
+                is_mutation_verified: true,
+                is_mutation_killed: true,
+                is_verified: true,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .record_evidence_artifact_scope(&crate::storage::EvidenceArtifactScope {
+                family: "mutation".into(),
+                source: "mutants-v1".into(),
+                scope: crate::diff::EvidenceScopeFingerprint {
+                    revision: head.clone(),
+                    selection: "production".into(),
+                    mutant_corpus: "mutants-v1".into(),
+                    test_set: "suite-v1".into(),
+                },
+                complete: true,
+                expected_lines: [("app.rb".into(), 1)].into_iter().collect(),
+            })
+            .unwrap();
+        storage
+            .record_coverage_line_with_source(&head, 1, "app.rb", 1, 1, false, "legacy")
+            .unwrap();
+
+        let response = api_diff_plan_handler(
+            State(state),
+            Query(DiffQuery {
+                base: Some(base),
+                head: Some(head),
+                coverage_source: None,
+                sarif_source: None,
+                selection: Some("production".into()),
+                mutant_corpus: Some("mutants-v1".into()),
+                test_set: Some("suite-v1".into()),
+            }),
+        )
+        .await;
+        let json: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            json.pointer("/data/evidence/mutation")
+                .and_then(|value| value.as_str()),
+            Some("exact")
+        );
+        assert_eq!(
+            json.pointer("/data/files/0/verification/covered_and_killed")
                 .and_then(|value| value.as_u64()),
             Some(1)
         );

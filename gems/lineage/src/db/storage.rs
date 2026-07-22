@@ -1,6 +1,6 @@
 use crate::diff::{
     CoverageObservation, EvidenceScopeFingerprint, MutationKillObservation, SarifFindingSummary,
-    SarifObservation, ScopedCoverageArtifact,
+    SarifObservation, ScopedCoverageArtifact, ScopedMutationArtifact,
 };
 use crate::model::{
     CommitMetadata, CrashEvent, Event, HazardEvent, LogicalUnit, QualityEvent, QualityMetric,
@@ -146,6 +146,11 @@ impl Storage {
             "TEXT NOT NULL DEFAULT ''",
         )?;
         self.ensure_column(
+            "test_exposure_events",
+            "mutation_corpus",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        self.ensure_column(
             "coverage_line_events",
             "is_partial",
             "INTEGER NOT NULL DEFAULT 0",
@@ -185,6 +190,10 @@ impl Storage {
         self.backfill_mutation_kind()?;
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_test_exposure_events_mutation_kind ON test_exposure_events(mutation_kind)",
+            [],
+        )?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_test_exposure_events_mutation_corpus ON test_exposure_events(commit_hash, mutation_corpus)",
             [],
         )?;
         self.ensure_natural_key_indexes()?;
@@ -1165,6 +1174,85 @@ impl Storage {
         Ok(observations)
     }
 
+    /// Returns a mutation artifact only when its immutable scope was recorded
+    /// as complete. Legacy and differently-scoped rows cannot make exact
+    /// claims in a diff.
+    pub fn scoped_mutation_artifact(
+        &self,
+        scope: &EvidenceScopeFingerprint,
+        paths: &[String],
+    ) -> Result<Option<ScopedMutationArtifact>> {
+        if scope.mutant_corpus.trim().is_empty() || scope.mutant_corpus == "unknown" {
+            return Ok(None);
+        }
+        let complete = self
+            .conn
+            .query_row(
+                "SELECT complete FROM evidence_artifact_scopes WHERE family = 'mutation' \
+                 AND source = ?1 AND revision = ?2 AND selection_scope = ?3 \
+                 AND mutant_corpus = ?4 AND test_set = ?5",
+                params![
+                    scope.mutant_corpus,
+                    scope.revision,
+                    scope.selection,
+                    scope.mutant_corpus,
+                    scope.test_set
+                ],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        let Some(complete) = complete else {
+            return Ok(None);
+        };
+        let observations = self.mutation_kill_observations_for_commit_paths_corpus(
+            &scope.revision,
+            paths,
+            &scope.mutant_corpus,
+        )?;
+        Ok(Some(ScopedMutationArtifact {
+            scope: scope.clone(),
+            complete: complete != 0,
+            observations,
+        }))
+    }
+
+    fn mutation_kill_observations_for_commit_paths_corpus(
+        &self,
+        commit_hash: &str,
+        paths: &[String],
+        mutation_corpus: &str,
+    ) -> Result<Vec<MutationKillObservation>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut observations = Vec::new();
+        for paths in paths.chunks(499) {
+            let placeholders = std::iter::repeat("?")
+                .take(paths.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT DISTINCT path, line FROM test_exposure_events WHERE commit_hash = ? \
+                 AND mutation_corpus = ? AND is_mutation_killed = 1 AND line IS NOT NULL \
+                 AND path IN ({placeholders})"
+            );
+            let mut values = vec![
+                rusqlite::types::Value::Text(commit_hash.to_string()),
+                rusqlite::types::Value::Text(mutation_corpus.to_string()),
+            ];
+            values.extend(paths.iter().cloned().map(rusqlite::types::Value::Text));
+            let mut statement = self.conn.prepare(&sql)?;
+            let rows = statement.query_map(rusqlite::params_from_iter(values), |row| {
+                Ok(MutationKillObservation {
+                    path: row.get(0)?,
+                    line: row.get::<_, i64>(1)?.max(1) as u32,
+                })
+            })?;
+            observations.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
+        }
+        Ok(observations)
+    }
+
     /// Reads only SARIF rows that declare the requested immutable revision.
     /// The diff layer treats these as partial, because a stored artifact does
     /// not itself establish analyzer/configuration completeness.
@@ -1491,6 +1579,7 @@ impl Storage {
                 event.test_type,
                 event.mutation_status,
                 event.mutation_kind,
+                event.mutation_corpus,
                 if event.is_mutation_verified { 1 } else { 0 },
                 if event.is_mutation_killed { 1 } else { 0 },
                 if event.is_verified { 1 } else { 0 },
@@ -2400,6 +2489,27 @@ mod tests {
                 test_type: "unit".into(),
                 mutation_status: Some("killed".into()),
                 mutation_kind: Some("stochastic".into()),
+                mutation_corpus: String::new(),
+                is_mutation_verified: true,
+                is_mutation_killed: true,
+                is_verified: true,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .insert_test_exposure_event(&TestExposureEvent {
+                unit_id: unit.id.clone(),
+                commit_hash: "abc".into(),
+                timestamp: 10,
+                path: "src/a.rb".into(),
+                function: Some("run".into()),
+                line: Some(2),
+                branch_id: None,
+                test_id: "spec/a_spec.rb:1".into(),
+                test_type: "unit".into(),
+                mutation_status: Some("killed".into()),
+                mutation_kind: Some("stochastic".into()),
+                mutation_corpus: "second-corpus".into(),
                 is_mutation_verified: true,
                 is_mutation_killed: true,
                 is_verified: true,
@@ -2419,6 +2529,7 @@ mod tests {
                 test_type: "integration".into(),
                 mutation_status: None,
                 mutation_kind: None,
+                mutation_corpus: String::new(),
                 is_mutation_verified: false,
                 is_mutation_killed: false,
                 is_verified: true,
@@ -2449,7 +2560,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(storage.count_rows("test_exposure_events").unwrap(), 2);
+        assert_eq!(storage.count_rows("test_exposure_events").unwrap(), 3);
         assert_eq!(summary, (2, "integration,unit".into(), 1, 1, 10));
     }
 
@@ -2495,6 +2606,7 @@ mod tests {
                 test_type: "unit".into(),
                 mutation_status: Some("killed".into()),
                 mutation_kind: Some("stochastic".into()),
+                mutation_corpus: String::new(),
                 is_mutation_verified: true,
                 is_mutation_killed: true,
                 is_verified: true,

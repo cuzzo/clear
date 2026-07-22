@@ -166,6 +166,13 @@ pub struct MutationKillObservation {
     pub line: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopedMutationArtifact {
+    pub scope: EvidenceScopeFingerprint,
+    pub complete: bool,
+    pub observations: Vec<MutationKillObservation>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 pub struct SarifFindingSummary {
     pub source: String,
@@ -561,6 +568,35 @@ pub fn apply_partial_mutation_kills(plan: &mut DiffPlan, observations: &[Mutatio
         }
         refresh_file_verification(file);
     }
+    plan.language_summaries = language_summaries(&plan.files);
+}
+
+/// Applies corpus-complete mutation evidence. Mutation facts are positive
+/// evidence only: an absent kill never changes a covered line into a negative
+/// finding, even when the corpus is complete.
+pub fn apply_scoped_mutation_kills(plan: &mut DiffPlan, artifact: &ScopedMutationArtifact) {
+    if artifact.scope != plan.scope.evidence_scope {
+        plan.evidence.mutation = EvidenceState::Stale;
+        return;
+    }
+    if !artifact.complete {
+        apply_partial_mutation_kills(plan, &artifact.observations);
+        return;
+    }
+    let kills = artifact
+        .observations
+        .iter()
+        .map(|observation| (observation.path.as_str(), observation.line))
+        .collect::<BTreeSet<_>>();
+    for file in &mut plan.files {
+        for (line, state) in &mut file.line_verification {
+            if kills.contains(&(file.path.as_str(), *line)) && *state == LineVerification::Covered {
+                *state = LineVerification::CoveredAndKilled;
+            }
+        }
+        refresh_file_verification(file);
+    }
+    plan.evidence.mutation = EvidenceState::Exact;
     plan.language_summaries = language_summaries(&plan.files);
 }
 
@@ -2357,6 +2393,95 @@ mod tests {
         assert_eq!(verification.covered_and_killed, 1);
         assert_eq!(verification.covered, 0);
         assert_eq!(verification.unknown, 1);
+    }
+
+    #[test]
+    fn applies_complete_scoped_mutation_kills_without_creating_negative_claims() {
+        let scope = EvidenceScopeFingerprint {
+            revision: "head".into(),
+            selection: "production".into(),
+            mutant_corpus: "mutants-v1".into(),
+            test_set: "suite-v1".into(),
+        };
+        let mut plan = with_evidence_scope(
+            build_diff_plan(
+                "base",
+                "head",
+                Vec::new(),
+                vec![file("lib/app.rb", "def run\n  value\nend\n")],
+            ),
+            scope.clone(),
+        );
+        let expected_lines = plan.files[0]
+            .line_verification
+            .keys()
+            .map(|line| ("lib/app.rb".to_string(), *line))
+            .collect();
+        apply_scoped_coverage(
+            &mut plan,
+            &ScopedCoverageArtifact {
+                scope: scope.clone(),
+                complete: true,
+                expected_lines,
+                observations: vec![CoverageObservation {
+                    path: "lib/app.rb".into(),
+                    line: 1,
+                    hits: 1,
+                    is_partial: false,
+                }],
+            },
+        );
+        apply_scoped_mutation_kills(
+            &mut plan,
+            &ScopedMutationArtifact {
+                scope,
+                complete: true,
+                observations: vec![MutationKillObservation {
+                    path: "lib/app.rb".into(),
+                    line: 1,
+                }],
+            },
+        );
+
+        assert_eq!(plan.evidence.mutation, EvidenceState::Exact);
+        assert_eq!(plan.files[0].verification.covered_and_killed, 1);
+        assert_eq!(plan.files[0].verification.not_covered, 0);
+    }
+
+    #[test]
+    fn rejects_mismatched_or_incomplete_scoped_mutation_evidence() {
+        let mut plan = build_diff_plan(
+            "base",
+            "head",
+            Vec::new(),
+            vec![file("lib/app.rb", "value\n")],
+        );
+        let stale_scope = EvidenceScopeFingerprint {
+            revision: "elsewhere".into(),
+            selection: "production".into(),
+            mutant_corpus: "mutants-v1".into(),
+            test_set: "suite-v1".into(),
+        };
+        apply_scoped_mutation_kills(
+            &mut plan,
+            &ScopedMutationArtifact {
+                scope: stale_scope,
+                complete: true,
+                observations: Vec::new(),
+            },
+        );
+        assert_eq!(plan.evidence.mutation, EvidenceState::Stale);
+
+        let scope = plan.scope.evidence_scope.clone();
+        apply_scoped_mutation_kills(
+            &mut plan,
+            &ScopedMutationArtifact {
+                scope,
+                complete: false,
+                observations: Vec::new(),
+            },
+        );
+        assert_eq!(plan.evidence.mutation, EvidenceState::Stale);
     }
 
     #[test]

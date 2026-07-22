@@ -43,8 +43,8 @@ pub use architecture::{
     state_access, ArchitectureIngestStats,
 };
 pub use diff::{
-    build_diff_plan, build_diff_plan_with_renames, with_evidence_scope, ChangeInventory, DependencyChange, DiffFile, DiffPlan,
-    DiffScope, EvidenceScopeFingerprint, RevisionFile,
+    build_diff_plan, build_diff_plan_with_renames, with_evidence_scope, ChangeInventory,
+    DependencyChange, DiffFile, DiffPlan, DiffScope, EvidenceScopeFingerprint, RevisionFile,
 };
 pub use engine::{EngineStats, LineageEngine};
 pub use extract::{BoundaryExtractor, HeuristicExtractor, SourceFilter};
@@ -60,7 +60,10 @@ pub use model::{
     BlobFile, CommitMetadata, CrashEvent, Event, EventType, HazardEvent, LogicalUnit, QualityEvent,
     QualityMetric, SarifArtifact, SarifFinding, TestExposureEvent, UnitKind,
 };
-pub use mutant::{ingest_mutant_facts_json, parse_mutant_facts, MutantFact, MutantIngestStats};
+pub use mutant::{
+    ingest_mutant_facts_json, ingest_mutant_facts_json_with_options, parse_mutant_facts,
+    MutantFact, MutantIngestOptions, MutantIngestStats,
+};
 pub use quality::{
     coverage_records_to_test_exposure_json, ingest_coverage_json,
     ingest_coverage_json_with_options, parse_coverage_input, resolve_coverage_record_paths,

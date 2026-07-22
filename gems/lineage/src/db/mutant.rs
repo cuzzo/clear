@@ -1,11 +1,12 @@
+use crate::diff::EvidenceScopeFingerprint;
 use crate::extract::BoundaryExtractor;
 use crate::model::{BlobFile, LogicalUnit, QualityEvent, QualityMetric, TestExposureEvent};
 use crate::stack_trace::LanguageNormalizer;
-use crate::storage::Storage;
+use crate::storage::{EvidenceArtifactScope, Storage};
 use crate::vcs::VcsProvider;
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MutantFact {
@@ -33,6 +34,24 @@ pub struct MutantIngestStats {
     pub skipped_facts: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MutantIngestOptions {
+    /// Stable corpus fingerprint. Empty identifies legacy, unscoped facts.
+    pub mutation_corpus: String,
+    pub evidence_scope: Option<EvidenceScopeFingerprint>,
+    pub complete: bool,
+}
+
+impl Default for MutantIngestOptions {
+    fn default() -> Self {
+        Self {
+            mutation_corpus: String::new(),
+            evidence_scope: None,
+            complete: false,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn ingest_mutant_facts_json<P, E>(
     storage: &Storage,
@@ -48,8 +67,48 @@ where
     P: VcsProvider,
     E: BoundaryExtractor,
 {
+    ingest_mutant_facts_json_with_options(
+        storage,
+        normalizer,
+        vcs,
+        extractor,
+        input,
+        commit_hash,
+        timestamp,
+        test_type,
+        &MutantIngestOptions::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_mutant_facts_json_with_options<P, E>(
+    storage: &Storage,
+    normalizer: &dyn LanguageNormalizer,
+    vcs: &P,
+    extractor: &E,
+    input: &str,
+    commit_hash: &str,
+    timestamp: Option<i64>,
+    test_type: &str,
+    options: &MutantIngestOptions,
+) -> Result<MutantIngestStats>
+where
+    P: VcsProvider,
+    E: BoundaryExtractor,
+{
     if !storage.commit_exists(commit_hash)? {
         anyhow::bail!("commit {commit_hash} is not present in lineage metadata");
+    }
+    if let Some(scope) = &options.evidence_scope {
+        if scope.revision != commit_hash {
+            anyhow::bail!("mutation evidence scope revision must match commit {commit_hash}");
+        }
+        if options.mutation_corpus.trim().is_empty() || options.mutation_corpus == "unknown" {
+            anyhow::bail!("scoped mutation evidence requires a stable mutation corpus fingerprint");
+        }
+        if scope.mutant_corpus != options.mutation_corpus {
+            anyhow::bail!("mutation corpus must match the evidence scope fingerprint");
+        }
     }
 
     let facts = parse_mutant_facts(input)?;
@@ -63,6 +122,7 @@ where
     };
     let mut files = HashMap::<String, Option<BlobFile>>::new();
     let mut units = HashMap::<String, Vec<LogicalUnit>>::new();
+    let mut expected_lines = BTreeSet::new();
     let mut all_units_loaded = false;
 
     storage.begin_transaction()?;
@@ -112,7 +172,8 @@ where
                     continue;
                 };
                 stats.units += 1;
-                if let Some(kill_rate) = fact.kill_rate.filter(|_| fact.mutations.unwrap_or(0) > 0) {
+                if let Some(kill_rate) = fact.kill_rate.filter(|_| fact.mutations.unwrap_or(0) > 0)
+                {
                     if storage.record_quality_metric(&QualityEvent {
                         unit_id: unit_id.clone(),
                         commit_hash: commit_hash.to_string(),
@@ -138,6 +199,7 @@ where
                             test_type: test_type.clone(),
                             mutation_status: Some(status.to_string()),
                             mutation_kind: Some(fact.mutation_kind.clone()),
+                            mutation_corpus: options.mutation_corpus.clone(),
                             is_mutation_verified: true,
                             is_mutation_killed: status == "killed",
                             is_verified: true,
@@ -145,9 +207,19 @@ where
                         })? {
                             stats.exposure_events += 1;
                         }
+                        expected_lines.insert((path.clone(), line));
                     }
                 }
             }
+        }
+        if let Some(scope) = &options.evidence_scope {
+            storage.record_evidence_artifact_scope(&EvidenceArtifactScope {
+                family: "mutation".into(),
+                source: options.mutation_corpus.clone(),
+                scope: scope.clone(),
+                complete: options.complete,
+                expected_lines,
+            })?;
         }
         Ok(stats)
     })();
@@ -174,7 +246,12 @@ pub fn parse_mutant_facts(input: &str) -> Result<Vec<MutantFact>> {
         .to_string();
     let mutation_kind = normalized_mutation_kind(string_at(
         &value,
-        &["mutation_kind", "mutation_type", "mutant_kind", "mutant_type"],
+        &[
+            "mutation_kind",
+            "mutation_type",
+            "mutant_kind",
+            "mutant_type",
+        ],
     ));
     let subjects = value
         .get("subjects")
@@ -206,11 +283,18 @@ fn mutant_fact(
         language: string_at(subject, &["language"])
             .unwrap_or(default_language)
             .to_string(),
-        mutation_kind: normalized_mutation_kind(string_at(
-            subject,
-            &["mutation_kind", "mutation_type", "mutant_kind", "mutant_type"],
-        )
-        .or(Some(default_mutation_kind))),
+        mutation_kind: normalized_mutation_kind(
+            string_at(
+                subject,
+                &[
+                    "mutation_kind",
+                    "mutation_type",
+                    "mutant_kind",
+                    "mutant_type",
+                ],
+            )
+            .or(Some(default_mutation_kind)),
+        ),
         kill_rate: number_at(subject, &["kill_rate", "coverage"]),
         gate_status: string_at(subject, &["gate_status", "gate"]).map(str::to_string),
         mutations: u32_at(subject, &["mutations"]),
@@ -415,7 +499,9 @@ fn owner_text_needles(owner: &str) -> Vec<String> {
 fn unit_matches_aliases(unit: &LogicalUnit, aliases: &[String]) -> bool {
     aliases.iter().any(|alias| {
         unit.name == *alias
-            || (!alias.contains('.') && !alias.contains('#') && unit.name.ends_with(&format!(".{alias}")))
+            || (!alias.contains('.')
+                && !alias.contains('#')
+                && unit.name.ends_with(&format!(".{alias}")))
     })
 }
 
@@ -475,7 +561,12 @@ fn normalize_test_type(test_type: &str) -> String {
 }
 
 fn normalized_mutation_kind(kind: Option<&str>) -> String {
-    match kind.unwrap_or_default().trim().to_ascii_lowercase().as_str() {
+    match kind
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "contract" | "contracts" | "invariant" | "invariants" | "property" | "properties"
         | "property-based" | "fuzz" | "fuzzer" | "fuzzing" => "invariant".to_string(),
         "stochastic" | "random" | "mutation" | "mutant" | "ruby-mutant" | "ruby_mutant"
@@ -532,15 +623,17 @@ where
 }
 
 fn string_at<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
-    keys.iter().find_map(|key| value.get(*key).and_then(Value::as_str))
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
 }
 
 fn number_at(value: &Value, keys: &[&str]) -> Option<f64> {
     keys.iter().find_map(|key| {
         value.get(*key).and_then(|raw| {
-            raw.as_f64().or_else(|| raw.as_str().and_then(|text| {
-                text.trim_end_matches('%').parse::<f64>().ok()
-            }))
+            raw.as_f64().or_else(|| {
+                raw.as_str()
+                    .and_then(|text| text.trim_end_matches('%').parse::<f64>().ok())
+            })
         })
     })
 }
@@ -612,7 +705,10 @@ mod tests {
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].file, "src/demo.rb");
         assert_eq!(facts[0].method, "Worker#run");
-        assert_eq!(facts[0].source, "gems/lineage/tools/mutant-converters/ruby_mutant.rb");
+        assert_eq!(
+            facts[0].source,
+            "gems/lineage/tools/mutant-converters/ruby_mutant.rb"
+        );
         assert_eq!(facts[0].language, "ruby");
         assert_eq!(facts[0].mutation_kind, "stochastic");
         assert_eq!(facts[0].kill_rate, Some(95.5));
@@ -642,7 +738,10 @@ mod tests {
         assert_eq!(facts[0].language, "zig");
         assert_eq!(facts[0].source, "gems/zig-mutants");
         assert_eq!(facts[0].mutation_kind, "invariant");
-        assert_eq!(mutant_test_id(&facts[0]), "mutant:zig:gems/zig-mutants:poll");
+        assert_eq!(
+            mutant_test_id(&facts[0]),
+            "mutant:zig:gems/zig-mutants:poll"
+        );
     }
 
     #[test]
@@ -698,7 +797,13 @@ mod tests {
             }]
         });
 
-        let stats = ingest_mutant_facts_json(
+        let scope = EvidenceScopeFingerprint {
+            revision: "abc".into(),
+            selection: "production".into(),
+            mutant_corpus: "mutants-v1".into(),
+            test_set: "suite-v1".into(),
+        };
+        let stats = ingest_mutant_facts_json_with_options(
             &storage,
             &RepoPathNormalizer::new("."),
             &provider,
@@ -707,6 +812,11 @@ mod tests {
             "abc",
             None,
             "unit",
+            &MutantIngestOptions {
+                mutation_corpus: "mutants-v1".into(),
+                evidence_scope: Some(scope.clone()),
+                complete: true,
+            },
         )
         .unwrap();
 
@@ -723,6 +833,52 @@ mod tests {
             )
             .unwrap();
         assert_eq!(killed, 3);
+        let artifact = storage
+            .scoped_mutation_artifact(&scope, &["src/demo.rb".into()])
+            .unwrap()
+            .unwrap();
+        assert!(artifact.complete);
+        assert_eq!(artifact.observations.len(), 3);
+    }
+
+    #[test]
+    fn rejects_scoped_mutants_without_a_matching_immutable_corpus_scope() {
+        let storage = Storage::open_memory().unwrap();
+        storage
+            .insert_metadata(&CommitMetadata {
+                hash: "abc".into(),
+                message: "coverage".into(),
+                timestamp: 10,
+            })
+            .unwrap();
+        let provider = MemoryProvider { files: Vec::new() };
+        let scope = EvidenceScopeFingerprint {
+            revision: "different".into(),
+            selection: "production".into(),
+            mutant_corpus: "mutants-v1".into(),
+            test_set: "suite-v1".into(),
+        };
+
+        let error = ingest_mutant_facts_json_with_options(
+            &storage,
+            &RepoPathNormalizer::new("."),
+            &provider,
+            &HeuristicExtractor::default(),
+            "{\"subjects\":[]}",
+            "abc",
+            None,
+            "unit",
+            &MutantIngestOptions {
+                mutation_corpus: "mutants-v1".into(),
+                evidence_scope: Some(scope),
+                complete: true,
+            },
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("scope revision must match commit"));
     }
 
     #[test]
@@ -1025,7 +1181,7 @@ mod tests {
         let storage = Storage::open_memory().unwrap();
         let extractor = HeuristicExtractor::default();
         let normalizer = RepoPathNormalizer::new(".");
-        
+
         let provider = MemoryProvider {
             files: vec![BlobFile {
                 path: "src/loader.rb".to_string(),
@@ -1045,11 +1201,13 @@ mod tests {
         );
         assert!(err.is_err());
 
-        storage.insert_metadata(&CommitMetadata {
-            hash: "abc".into(),
-            message: "coverage".into(),
-            timestamp: 10,
-        }).unwrap();
+        storage
+            .insert_metadata(&CommitMetadata {
+                hash: "abc".into(),
+                message: "coverage".into(),
+                timestamp: 10,
+            })
+            .unwrap();
         let loader_file = BlobFile {
             path: "src/loader.rb".to_string(),
             contents: "class Loader\n  def run\n  end\nend".to_string(),
@@ -1093,7 +1251,8 @@ mod tests {
             "abc",
             None,
             "unit",
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(stats.facts, 3);
         assert_eq!(stats.units, 3);

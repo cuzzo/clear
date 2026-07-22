@@ -82,6 +82,7 @@
               test_type TEXT NOT NULL,
               mutation_status TEXT,
               mutation_kind TEXT NOT NULL DEFAULT '',
+              mutation_corpus TEXT NOT NULL DEFAULT '',
               is_mutation_verified INTEGER NOT NULL CHECK (is_mutation_verified IN (0, 1)),
               is_mutation_killed INTEGER NOT NULL CHECK (is_mutation_killed IN (0, 1)),
               is_verified INTEGER NOT NULL CHECK (is_verified IN (0, 1)),

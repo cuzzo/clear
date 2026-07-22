@@ -1,4 +1,4 @@
--- query-id: storage.ensure_natural_key_indexes.v1
+-- query-id: storage.ensure_natural_key_indexes.v2
 DELETE FROM coverage_line_events
             WHERE id NOT IN (
               SELECT (
@@ -56,6 +56,7 @@ DELETE FROM coverage_line_events
             CREATE UNIQUE INDEX IF NOT EXISTS idx_crash_events_natural_key
               ON crash_events(unit_id, commit_hash, error_class, provider_id, path, line, function);
 
+            DROP INDEX IF EXISTS idx_test_exposure_events_natural_key;
             DELETE FROM test_exposure_events
             WHERE id NOT IN (
               SELECT (
@@ -68,6 +69,7 @@ DELETE FROM coverage_line_events
                   AND COALESCE(t2.branch_id, '') = COALESCE(t1.branch_id, '')
                   AND t2.test_id = t1.test_id
                   AND t2.test_type = t1.test_type
+                  AND COALESCE(t2.mutation_corpus, '') = COALESCE(t1.mutation_corpus, '')
                 ORDER BY t2.is_verified DESC,
                          t2.is_mutation_killed DESC,
                          t2.is_mutation_verified DESC,
@@ -82,7 +84,8 @@ DELETE FROM coverage_line_events
               )
               FROM test_exposure_events t1
               GROUP BY t1.unit_id, t1.commit_hash, t1.path, COALESCE(t1.line, -1),
-                       COALESCE(t1.branch_id, ''), t1.test_id, t1.test_type
+                       COALESCE(t1.branch_id, ''), t1.test_id, t1.test_type,
+                       COALESCE(t1.mutation_corpus, '')
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_test_exposure_events_natural_key
               ON test_exposure_events(
@@ -92,5 +95,6 @@ DELETE FROM coverage_line_events
                 COALESCE(line, -1),
                 COALESCE(branch_id, ''),
                 test_id,
-                test_type
+                test_type,
+                COALESCE(mutation_corpus, '')
               );
