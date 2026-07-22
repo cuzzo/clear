@@ -108,6 +108,9 @@ pub struct DiffFile {
     /// risk scoring until their artifact scope can prove completeness.
     pub sarif_findings: Vec<SarifFindingSummary>,
     pub risk: RiskSummary,
+    #[serde(skip)]
+    #[ts(skip)]
+    line_verification: BTreeMap<u32, LineVerification>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -169,6 +172,14 @@ pub struct VerificationSlices {
     pub unknown: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineVerification {
+    CoveredAndKilled,
+    Covered,
+    PartiallyCovered,
+    Unknown,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
 pub struct RiskSummary {
     pub score: f64,
@@ -190,6 +201,16 @@ pub struct LanguageSummary {
     pub language: String,
     pub production: AddedLines,
     pub test: AddedLines,
+    pub production_verification: VerificationSlices,
+    pub production_by_visibility: VisibilityVerificationSlices,
+    pub test_assertions: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, TS)]
+pub struct VisibilityVerificationSlices {
+    pub public: VerificationSlices,
+    pub private: VerificationSlices,
+    pub unknown: VerificationSlices,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -313,8 +334,9 @@ fn plan_file(
         &added_line_numbers,
     );
     let verification = unavailable_verification(&added_lines);
-
-    Some(DiffFile {
+    let line_verification =
+        unknown_line_verification(head_source.as_deref(), &added_line_numbers, path);
+    let mut file = DiffFile {
         path: path.to_string(),
         previous_path,
         change,
@@ -328,7 +350,10 @@ fn plan_file(
         base_source,
         head_source,
         added_lines,
-    })
+        line_verification,
+    };
+    refresh_file_verification(&mut file);
+    Some(file)
 }
 
 fn is_renamed_source(path: &str, renamed: &BTreeMap<String, String>) -> bool {
@@ -381,16 +406,18 @@ pub fn apply_partial_coverage(plan: &mut DiffPlan, observations: &[CoverageObser
     }
     plan.evidence.coverage = EvidenceState::Partial;
     for file in &mut plan.files {
-        let added = added_line_numbers(file.base_source.as_deref(), file.head_source.as_deref());
-        let code = code_line_numbers(file.head_source.as_deref(), &added, &file.path);
-        apply_partial_verification(&mut file.verification, &code, &rows, &file.path);
-        file.risk = risk_summary(file.head_source.as_deref(), &added, &file.verification);
-        for group in &mut file.groups {
-            let lines = group_added_line_numbers(&code, group.start_line, group.end_line);
-            apply_partial_verification(&mut group.verification, &lines, &rows, &file.path);
-            group.risk = risk_summary(file.head_source.as_deref(), &lines, &group.verification);
+        for (line, state) in &mut file.line_verification {
+            if let Some(is_partial) = rows.get(&(file.path.as_str(), *line)) {
+                *state = if *is_partial {
+                    LineVerification::PartiallyCovered
+                } else {
+                    LineVerification::Covered
+                };
+            }
         }
+        refresh_file_verification(file);
     }
+    plan.language_summaries = language_summaries(&plan.files);
 }
 
 /// Upgrades only already-observed covered lines. The mutation event ledger has
@@ -405,14 +432,14 @@ pub fn apply_partial_mutation_kills(plan: &mut DiffPlan, observations: &[Mutatio
         .collect::<BTreeSet<_>>();
     plan.evidence.mutation = EvidenceState::Partial;
     for file in &mut plan.files {
-        let added = added_line_numbers(file.base_source.as_deref(), file.head_source.as_deref());
-        let code = code_line_numbers(file.head_source.as_deref(), &added, &file.path);
-        apply_kill_verification(&mut file.verification, &code, &kills, &file.path);
-        for group in &mut file.groups {
-            let lines = group_added_line_numbers(&code, group.start_line, group.end_line);
-            apply_kill_verification(&mut group.verification, &lines, &kills, &file.path);
+        for (line, state) in &mut file.line_verification {
+            if kills.contains(&(file.path.as_str(), *line)) && *state == LineVerification::Covered {
+                *state = LineVerification::CoveredAndKilled;
+            }
         }
+        refresh_file_verification(file);
     }
+    plan.language_summaries = language_summaries(&plan.files);
 }
 
 /// Attaches SARIF rows only when they were produced for the immutable head
@@ -469,37 +496,47 @@ fn code_line_numbers(source: Option<&str>, added: &BTreeSet<u32>, path: &str) ->
         .collect()
 }
 
-fn apply_partial_verification(
-    verification: &mut VerificationSlices,
-    code_lines: &BTreeSet<u32>,
-    observations: &BTreeMap<(&str, u32), bool>,
+fn unknown_line_verification(
+    source: Option<&str>,
+    added: &BTreeSet<u32>,
     path: &str,
-) {
-    let (covered, partial) = code_lines.iter().fold((0, 0), |(covered, partial), line| {
-        match observations.get(&(path, *line)) {
-            Some(true) => (covered, partial + 1),
-            Some(false) => (covered + 1, partial),
-            None => (covered, partial),
-        }
-    });
-    verification.covered += covered;
-    verification.partially_covered += partial;
-    verification.unknown = verification.unknown.saturating_sub(covered + partial);
+) -> BTreeMap<u32, LineVerification> {
+    code_line_numbers(source, added, path)
+        .into_iter()
+        .map(|line| (line, LineVerification::Unknown))
+        .collect()
 }
 
-fn apply_kill_verification(
-    verification: &mut VerificationSlices,
-    code_lines: &BTreeSet<u32>,
-    kills: &BTreeSet<(&str, u32)>,
-    path: &str,
-) {
-    let kills = code_lines
-        .iter()
-        .filter(|line| kills.contains(&(path, **line)))
-        .count()
-        .min(verification.covered);
-    verification.covered -= kills;
-    verification.covered_and_killed += kills;
+fn refresh_file_verification(file: &mut DiffFile) {
+    file.verification = verification_slices(file.line_verification.values().copied());
+    let added = added_line_numbers(file.base_source.as_deref(), file.head_source.as_deref());
+    file.risk = risk_summary(file.head_source.as_deref(), &added, &file.verification);
+    for group in &mut file.groups {
+        let lines = file
+            .line_verification
+            .range(group.start_line..=group.end_line)
+            .map(|(_, state)| *state);
+        group.verification = verification_slices(lines);
+        let group_added = group_added_line_numbers(&added, group.start_line, group.end_line);
+        group.risk = risk_summary(
+            file.head_source.as_deref(),
+            &group_added,
+            &group.verification,
+        );
+    }
+}
+
+fn verification_slices(states: impl IntoIterator<Item = LineVerification>) -> VerificationSlices {
+    let mut slices = VerificationSlices::default();
+    for state in states {
+        match state {
+            LineVerification::CoveredAndKilled => slices.covered_and_killed += 1,
+            LineVerification::Covered => slices.covered += 1,
+            LineVerification::PartiallyCovered => slices.partially_covered += 1,
+            LineVerification::Unknown => slices.unknown += 1,
+        }
+    }
+    slices
 }
 
 fn risk_summary(
@@ -553,14 +590,51 @@ fn language_summaries(files: &[DiffFile]) -> Vec<LanguageSummary> {
                 language: language.clone(),
                 production: AddedLines::default(),
                 test: AddedLines::default(),
+                production_verification: VerificationSlices::default(),
+                production_by_visibility: VisibilityVerificationSlices::default(),
+                test_assertions: None,
             });
         match file.role {
-            SourceRole::Production => add_lines(&mut summary.production, &file.added_lines),
+            SourceRole::Production => {
+                add_lines(&mut summary.production, &file.added_lines);
+                add_file_language_verification(summary, file);
+            }
             SourceRole::Test => add_lines(&mut summary.test, &file.added_lines),
             _ => {}
         }
     }
     summaries.into_values().collect()
+}
+
+fn add_file_language_verification(summary: &mut LanguageSummary, file: &DiffFile) {
+    for (line, state) in &file.line_verification {
+        add_verification_slice(&mut summary.production_verification, *state);
+        let visibility = visibility_at_line(file, *line);
+        let target = match visibility {
+            Visibility::Public => &mut summary.production_by_visibility.public,
+            Visibility::Private => &mut summary.production_by_visibility.private,
+            Visibility::Unknown => &mut summary.production_by_visibility.unknown,
+        };
+        add_verification_slice(target, *state);
+    }
+}
+
+fn visibility_at_line(file: &DiffFile, line: u32) -> Visibility {
+    file.groups
+        .iter()
+        .filter(|group| group.start_line <= line && line <= group.end_line)
+        .min_by_key(|group| group.end_line - group.start_line)
+        .map(|group| group.visibility)
+        .unwrap_or(Visibility::Unknown)
+}
+
+fn add_verification_slice(target: &mut VerificationSlices, state: LineVerification) {
+    match state {
+        LineVerification::CoveredAndKilled => target.covered_and_killed += 1,
+        LineVerification::Covered => target.covered += 1,
+        LineVerification::PartiallyCovered => target.partially_covered += 1,
+        LineVerification::Unknown => target.unknown += 1,
+    }
 }
 
 fn add_lines(target: &mut AddedLines, source: &AddedLines) {
@@ -1582,6 +1656,59 @@ mod tests {
                 ("hidden", Visibility::Private)
             ]
         );
+    }
+
+    #[test]
+    fn summarizes_production_by_language_visibility_and_verification_state() {
+        let mut plan = build_diff_plan(
+            "base",
+            "head",
+            Vec::new(),
+            vec![file(
+                "lib/app.rb",
+                "def run\n  value\nend\n\nprivate\ndef hide\n  secret\nend\n",
+            )],
+        );
+        apply_partial_coverage(
+            &mut plan,
+            &[
+                CoverageObservation {
+                    path: "lib/app.rb".into(),
+                    line: 1,
+                    hits: 1,
+                    is_partial: false,
+                },
+                CoverageObservation {
+                    path: "lib/app.rb".into(),
+                    line: 6,
+                    hits: 1,
+                    is_partial: true,
+                },
+            ],
+        );
+        apply_partial_mutation_kills(
+            &mut plan,
+            &[MutationKillObservation {
+                path: "lib/app.rb".into(),
+                line: 1,
+            }],
+        );
+
+        let summary = &plan.language_summaries[0];
+        assert_eq!(summary.production_verification.covered_and_killed, 1);
+        assert_eq!(summary.production_verification.partially_covered, 1);
+        assert_eq!(summary.production_verification.unknown, 3);
+        assert_eq!(
+            summary.production_by_visibility.public.covered_and_killed,
+            1
+        );
+        assert_eq!(
+            summary.production_by_visibility.private.partially_covered,
+            1
+        );
+        assert_eq!(summary.production_by_visibility.private.unknown, 1);
+        assert_eq!(summary.production_by_visibility.unknown.unknown, 1);
+        assert_eq!(summary.test_assertions, None);
     }
 
     #[test]

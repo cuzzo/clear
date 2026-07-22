@@ -25,7 +25,9 @@ export type VerificationSlices = { covered_and_killed: number, covered: number, 
 
 export type RiskSummary = { score: number, not_covered: number, partially_covered: number, added_complexity: number, tier_one_hazards: number, };
 
-export type LanguageSummary = { language: string, production: AddedLines, test: AddedLines, };
+export type LanguageSummary = { language: string, production: AddedLines, test: AddedLines, production_verification: VerificationSlices, production_by_visibility: VisibilityVerificationSlices, test_assertions: number | null, };
+
+export type VisibilityVerificationSlices = { public: VerificationSlices, private: VerificationSlices, unknown: VerificationSlices, };
 
 export type EvidenceAvailability = { coverage: EvidenceState, mutation: EvidenceState, hazards: EvidenceState, sarif: EvidenceState, };
 

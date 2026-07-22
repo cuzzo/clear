@@ -2,6 +2,7 @@ use lineage::diff::{
     AddedLines, ChangeInventory, ConfigFile, DependencyChange, DependencyEntry, DependencyStatus,
     DiffFile, DiffGroup, DiffPlan, DiffScope, EvidenceAvailability, EvidenceState, FileChangeKind,
     LanguageSummary, RiskSummary, SarifFindingSummary, SourceRole, VerificationSlices, Visibility,
+    VisibilityVerificationSlices,
 };
 use std::path::Path;
 use ts_rs::TS;
@@ -20,6 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         VerificationSlices::decl(),
         RiskSummary::decl(),
         LanguageSummary::decl(),
+        VisibilityVerificationSlices::decl(),
         EvidenceAvailability::decl(),
         DependencyChange::decl(),
         DependencyEntry::decl(),
