@@ -2664,7 +2664,13 @@ fn attach_operation_obligations(
             {
                 let node = fact_string(operation, "node_id").unwrap_or("");
                 let kind = fact_string(operation, "operation_kind").unwrap_or("");
-                evidence.operations.insert(format!("{kind}:{node}"));
+                evidence.operations.insert(
+                    format!("{kind}:{node}"),
+                    OperationLocation {
+                        path: fact_string(operation, "path").unwrap_or("").to_string(),
+                        line: fact_span_line(operation),
+                    },
+                );
             }
         }
     }
@@ -2676,6 +2682,12 @@ fn pressure_actions(roots: BTreeMap<String, PressureEvidence>) -> Vec<Action> {
         .filter_map(|(root, evidence)| {
             let pressure = evidence.guards.len() + evidence.returns.len() + evidence.operations.len();
             (pressure > 0).then(|| {
+                let location = evidence
+                    .operations
+                    .values()
+                    .find(|location| !location.path.is_empty())
+                    .cloned()
+                    .unwrap_or_default();
                 let mut data = HashMap::new();
                 data.insert("root_definition_id".to_string(), serde_json::Value::String(root.clone()));
                 data.insert(
@@ -2684,12 +2696,15 @@ fn pressure_actions(roots: BTreeMap<String, PressureEvidence>) -> Vec<Action> {
                 );
                 data.insert("guard_clusters".to_string(), json_strings(evidence.guards));
                 data.insert("nullable_returns".to_string(), json_strings(evidence.returns));
-                data.insert("unsafe_operations".to_string(), json_strings(evidence.operations));
+                data.insert(
+                    "unsafe_operations".to_string(),
+                    json_strings(evidence.operations.into_keys().collect()),
+                );
                 Action {
                     kind: "report_static_nil_pressure".to_string(),
                     confidence: "review".to_string(),
-                    path: String::new(),
-                    line: 0,
+                    path: location.path,
+                    line: location.line,
                     message: format!(
                         "nullable root {root} creates {pressure} independently necessary obligations"
                     ),
@@ -2705,7 +2720,13 @@ struct PressureEvidence {
     places: BTreeSet<String>,
     guards: BTreeSet<String>,
     returns: BTreeSet<String>,
-    operations: BTreeSet<String>,
+    operations: BTreeMap<String, OperationLocation>,
+}
+
+#[derive(Clone, Default)]
+struct OperationLocation {
+    path: String,
+    line: i64,
 }
 
 fn fact_objects<'a>(input: &'a InputState, key: &str) -> Vec<&'a serde_json::Map<String, serde_json::Value>> {
@@ -2734,6 +2755,15 @@ fn fact_strings<'a>(fact: &'a serde_json::Map<String, serde_json::Value>, key: &
 
 fn fact_bool(fact: &serde_json::Map<String, serde_json::Value>, key: &str) -> bool {
     fact.get(key).and_then(serde_json::Value::as_bool).unwrap_or(false)
+}
+
+fn fact_span_line(fact: &serde_json::Map<String, serde_json::Value>) -> i64 {
+    fact.get("span")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|span| span.first())
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|line| i64::try_from(line).ok())
+        .unwrap_or(0)
 }
 
 fn json_strings(values: BTreeSet<String>) -> serde_json::Value {
@@ -2898,6 +2928,8 @@ mod tests {
                     {
                         "place_id": "place:cache:value",
                         "node_id": "deref:1",
+                        "path": "cache.c",
+                        "span": [14, 2, 14, 8],
                         "operation_kind": "pointer_dereference",
                         "nil_behavior": "undefined_behavior",
                         "complete": true
@@ -2924,6 +2956,8 @@ mod tests {
         assert_eq!(actions.len(), 1);
         let action = &actions[0];
         assert_eq!(action.kind, "report_static_nil_pressure");
+        assert_eq!(action.path, "cache.c");
+        assert_eq!(action.line, 14);
         assert_eq!(action.data["pressure"], 3);
         assert_eq!(action.data["guard_clusters"], serde_json::json!(["place:cache:value:guard:1"]));
         assert_eq!(action.data["nullable_returns"], serde_json::json!(["Cache#lookup"]));

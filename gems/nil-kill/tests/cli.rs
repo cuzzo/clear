@@ -76,6 +76,15 @@ fn binary_reports_causal_nullable_pressure_from_public_facts() {
                     "return_state": "definitely_null",
                     "complete": true,
                     "source_definition_ids": ["definition:cache_lookup"]
+                }],
+                "nullable_operations": [{
+                    "place_id": "place:cache:value",
+                    "node_id": "deref:1",
+                    "path": "src/cache.c",
+                    "span": [22, 4, 22, 10],
+                    "operation_kind": "pointer_dereference",
+                    "nil_behavior": "undefined_behavior",
+                    "complete": true
                 }]
             }
         }))
@@ -99,5 +108,7 @@ fn binary_reports_causal_nullable_pressure_from_public_facts() {
         .find(|action| action["kind"] == "report_static_nil_pressure")
         .unwrap();
     assert_eq!(action["data"]["root_definition_id"], "definition:cache_lookup");
-    assert_eq!(action["data"]["pressure"], 2);
+    assert_eq!(action["data"]["pressure"], 3);
+    assert_eq!(action["path"], "src/cache.c");
+    assert_eq!(action["line"], 22);
 }
