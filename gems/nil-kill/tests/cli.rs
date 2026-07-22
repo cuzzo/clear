@@ -61,7 +61,7 @@ fn binary_reports_causal_nullable_pressure_from_public_facts() {
         serde_json::to_vec_pretty(&json!({
             "facts": {
                 "nullable_states": [{
-                    "state": "definitely_null",
+                    "state": "maybe_null",
                     "complete": true,
                     "place_id": "place:cache:value",
                     "source_definition_ids": ["definition:cache_lookup"]
@@ -73,7 +73,7 @@ fn binary_reports_causal_nullable_pressure_from_public_facts() {
                 "nullable_summaries": [{
                     "owner": "Cache",
                     "function": "lookup",
-                    "return_state": "definitely_null",
+                    "return_state": "maybe_null",
                     "complete": true,
                     "source_definition_ids": ["definition:cache_lookup"]
                 }],

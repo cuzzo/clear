@@ -2597,7 +2597,7 @@ fn nullable_roots(
 ) -> BTreeMap<String, PressureEvidence> {
     let mut roots = BTreeMap::<String, PressureEvidence>::new();
     for state in states {
-        if fact_string(state, "state") != Some("definitely_null") || !fact_bool(state, "complete") {
+        if !is_pressure_nullable_state(fact_string(state, "state")) || !fact_bool(state, "complete") {
             continue;
         }
         let Some(place_id) = fact_string(state, "place_id") else {
@@ -2635,7 +2635,7 @@ fn attach_return_obligations(
 ) {
     for (root, evidence) in roots {
         for summary in summaries {
-            if fact_string(summary, "return_state") == Some("definitely_null")
+            if is_pressure_nullable_state(fact_string(summary, "return_state"))
                 && fact_bool(summary, "complete")
                 && fact_strings(summary, "source_definition_ids").contains(&root.as_str())
             {
@@ -2645,6 +2645,10 @@ fn attach_return_obligations(
             }
         }
     }
+}
+
+fn is_pressure_nullable_state(state: Option<&str>) -> bool {
+    matches!(state, Some("definitely_null" | "maybe_null"))
 }
 
 fn attach_operation_obligations(
