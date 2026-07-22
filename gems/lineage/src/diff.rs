@@ -16,6 +16,16 @@ pub struct RevisionFile {
     pub contents: Option<String>,
 }
 
+/// Repository-local source-role overrides, parsed from the immutable head
+/// revision's `.lineage/diff.toml`. They are intentionally limited to exact
+/// paths and directory prefixes so classification remains auditable and does
+/// not need a second glob language.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClassificationOverrides {
+    exact: BTreeMap<String, SourceRole>,
+    prefixes: Vec<(String, SourceRole)>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 pub struct DiffScope {
     pub base_oid: String,
@@ -327,6 +337,24 @@ pub fn build_diff_plan_with_renames(
     head_files: Vec<RevisionFile>,
     git_renames: BTreeMap<String, String>,
 ) -> DiffPlan {
+    build_diff_plan_with_renames_and_overrides(
+        base_oid,
+        head_oid,
+        base_files,
+        head_files,
+        git_renames,
+        ClassificationOverrides::default(),
+    )
+}
+
+pub fn build_diff_plan_with_renames_and_overrides(
+    base_oid: impl Into<String>,
+    head_oid: impl Into<String>,
+    base_files: Vec<RevisionFile>,
+    head_files: Vec<RevisionFile>,
+    git_renames: BTreeMap<String, String>,
+    overrides: ClassificationOverrides,
+) -> DiffPlan {
     let base_oid = base_oid.into();
     let head_oid = head_oid.into();
     let base = file_map(base_files);
@@ -335,7 +363,7 @@ pub fn build_diff_plan_with_renames(
     renamed.extend(git_renames);
     let mut files = changed_paths(&base, &head)
         .into_iter()
-        .filter_map(|path| plan_file(&path, &base, &head, &renamed))
+        .filter_map(|path| plan_file(&path, &base, &head, &renamed, &overrides))
         .collect::<Vec<_>>();
     files.sort_by(|left, right| {
         right
@@ -392,6 +420,7 @@ fn plan_file(
     base: &BTreeMap<String, RevisionFile>,
     head: &BTreeMap<String, RevisionFile>,
     renamed: &BTreeMap<String, String>,
+    overrides: &ClassificationOverrides,
 ) -> Option<DiffFile> {
     let previous_path = previous_path(path, renamed);
     let base_file = base.get(path).or_else(|| {
@@ -435,7 +464,7 @@ fn plan_file(
         path: path.to_string(),
         previous_path,
         change,
-        role: source_role(path),
+        role: source_role_with_overrides(path, overrides),
         language: language_for_path(path),
         semantic_classification_available,
         residual_lines: residual_lines(&line_kinds, &added_lines_set, &groups),
@@ -1752,7 +1781,10 @@ fn parse_go_mod(contents: &str) -> Result<BTreeMap<(String, String), String>, ()
     (!in_require_block).then_some(dependencies).ok_or(())
 }
 
-fn source_role(path: &str) -> SourceRole {
+fn source_role_with_overrides(path: &str, overrides: &ClassificationOverrides) -> SourceRole {
+    if let Some(role) = overrides.role_for(path) {
+        return role;
+    }
     if is_lockfile(path) {
         SourceRole::Lockfile
     } else if is_generated(path) {
@@ -1767,6 +1799,85 @@ fn source_role(path: &str) -> SourceRole {
         SourceRole::Production
     } else {
         SourceRole::Other
+    }
+}
+
+impl ClassificationOverrides {
+    fn role_for(&self, path: &str) -> Option<SourceRole> {
+        self.exact.get(path).copied().or_else(|| {
+            self.prefixes
+                .iter()
+                .filter(|(prefix, _)| path.starts_with(prefix))
+                .max_by_key(|(prefix, _)| prefix.len())
+                .map(|(_, role)| *role)
+        })
+    }
+}
+
+/// Parses `.lineage/diff.toml` from the selected head revision. Invalid,
+/// absolute, and traversal paths are ignored rather than applying a broad
+/// classification to an unintended file.
+pub fn classification_overrides(contents: Option<&str>) -> ClassificationOverrides {
+    let Some(contents) = contents else {
+        return ClassificationOverrides::default();
+    };
+    let Ok(document) = contents.parse::<toml::Value>() else {
+        return ClassificationOverrides::default();
+    };
+    let Some(rules) = document.get("overrides").and_then(toml::Value::as_array) else {
+        return ClassificationOverrides::default();
+    };
+    let mut output = ClassificationOverrides::default();
+    for rule in rules {
+        let Some(table) = rule.as_table() else {
+            continue;
+        };
+        let Some(role) = table
+            .get("role")
+            .and_then(toml::Value::as_str)
+            .and_then(source_role_from_name)
+        else {
+            continue;
+        };
+        if let Some(path) = table.get("path").and_then(toml::Value::as_str) {
+            if let Some(path) = normalized_override_path(path, false) {
+                output.exact.insert(path, role);
+            }
+        }
+        if let Some(prefix) = table.get("prefix").and_then(toml::Value::as_str) {
+            if let Some(prefix) = normalized_override_path(prefix, true) {
+                output.prefixes.push((prefix, role));
+            }
+        }
+    }
+    output
+}
+
+fn normalized_override_path(value: &str, is_prefix: bool) -> Option<String> {
+    let normalized = value.trim().trim_matches('/');
+    if normalized.is_empty()
+        || value.starts_with('/')
+        || normalized.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return None;
+    }
+    Some(if is_prefix {
+        format!("{normalized}/")
+    } else {
+        normalized.to_string()
+    })
+}
+
+fn source_role_from_name(value: &str) -> Option<SourceRole> {
+    match value {
+        "production" => Some(SourceRole::Production),
+        "test" => Some(SourceRole::Test),
+        "documentation" => Some(SourceRole::Documentation),
+        "configuration" => Some(SourceRole::Configuration),
+        "generated" => Some(SourceRole::Generated),
+        "lockfile" => Some(SourceRole::Lockfile),
+        "other" => Some(SourceRole::Other),
+        _ => None,
     }
 }
 
@@ -1807,6 +1918,9 @@ fn is_lockfile(path: &str) -> bool {
 
 fn config_kind(path: &str) -> Option<&'static str> {
     let file = path.rsplit('/').next().unwrap_or(path);
+    if path == ".lineage/diff.toml" {
+        return Some("lineage");
+    }
     if path.starts_with(".github/workflows/") && (file.ends_with(".yml") || file.ends_with(".yaml"))
     {
         return Some("github_workflow");
@@ -3024,13 +3138,14 @@ mod tests {
 
     #[test]
     fn recognizes_catalog_entries_and_raw_file_fallbacks() {
-        assert_eq!(source_role("src/main.zig"), SourceRole::Production);
-        assert_eq!(source_role("spec/model_spec.rb"), SourceRole::Test);
-        assert_eq!(source_role("generated/api.ts"), SourceRole::Generated);
-        assert_eq!(source_role("README.md"), SourceRole::Documentation);
-        assert_eq!(source_role(".gitignore"), SourceRole::Configuration);
-        assert_eq!(source_role("go.sum"), SourceRole::Lockfile);
-        assert_eq!(source_role("image.avif"), SourceRole::Other);
+        let overrides = ClassificationOverrides::default();
+        assert_eq!(source_role_with_overrides("src/main.zig", &overrides), SourceRole::Production);
+        assert_eq!(source_role_with_overrides("spec/model_spec.rb", &overrides), SourceRole::Test);
+        assert_eq!(source_role_with_overrides("generated/api.ts", &overrides), SourceRole::Generated);
+        assert_eq!(source_role_with_overrides("README.md", &overrides), SourceRole::Documentation);
+        assert_eq!(source_role_with_overrides(".gitignore", &overrides), SourceRole::Configuration);
+        assert_eq!(source_role_with_overrides("go.sum", &overrides), SourceRole::Lockfile);
+        assert_eq!(source_role_with_overrides("image.avif", &overrides), SourceRole::Other);
         assert_eq!(config_kind("Library.gemspec"), Some("ruby_manifest"));
         assert_eq!(
             config_kind(".github/actions/setup/action.yml"),
@@ -3053,5 +3168,32 @@ mod tests {
         assert!(is_lockfile("src/gradle.lockfile"));
         assert!(is_generated("vendor/dependency.rb"));
         assert_eq!(config_kind("src/app.rs"), None);
+    }
+
+    #[test]
+    fn repository_overrides_win_over_conventional_source_roles() {
+        let overrides = classification_overrides(Some(
+            r#"
+                [[overrides]]
+                prefix = "spec/"
+                role = "production"
+
+                [[overrides]]
+                path = "lib/generated.rb"
+                role = "test"
+
+                [[overrides]]
+                prefix = "../outside"
+                role = "generated"
+            "#,
+        ));
+        assert_eq!(source_role_with_overrides("spec/model_spec.rb", &overrides), SourceRole::Production);
+        assert_eq!(source_role_with_overrides("lib/generated.rb", &overrides), SourceRole::Test);
+        assert_eq!(source_role_with_overrides("lib/ordinary.rb", &overrides), SourceRole::Production);
+        assert_eq!(source_role_with_overrides("outside/file.rb", &overrides), SourceRole::Production);
+        assert_eq!(
+            source_role_with_overrides(".lineage/diff.toml", &overrides),
+            SourceRole::Configuration
+        );
     }
 }

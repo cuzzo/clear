@@ -1,4 +1,6 @@
-use crate::diff::{build_diff_plan_with_renames, DiffPlan, RevisionFile};
+use crate::diff::{
+    build_diff_plan_with_renames_and_overrides, classification_overrides, DiffPlan, RevisionFile,
+};
 use crate::model::{BlobFile, CommitMetadata};
 use crate::vcs::{CommitChanges, VcsProvider};
 use anyhow::{Context, Result};
@@ -75,8 +77,13 @@ impl GitProvider {
         let base = self.revision_snapshot(&base_oid)?;
         let head = self.revision_snapshot(&head_oid)?;
         let renames = self.diff_renames(&base_oid, &head_oid)?;
-        Ok(build_diff_plan_with_renames(
-            base_oid, head_oid, base, head, renames,
+        let overrides = classification_overrides(
+            head.iter()
+                .find(|file| file.path == ".lineage/diff.toml")
+                .and_then(|file| file.contents.as_deref()),
+        );
+        Ok(build_diff_plan_with_renames_and_overrides(
+            base_oid, head_oid, base, head, renames, overrides,
         ))
     }
 
@@ -646,6 +653,32 @@ mod tests {
         );
         assert_eq!(plan.inventory.renamed_files, 1);
         assert_eq!(plan.inventory.deleted_files, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn diff_plan_uses_head_revision_classification_overrides() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path())?;
+        let base = create_commit(&repo, "base", &[("spec/value_spec.rb", "describe :value do\nend\n")])?;
+        let head = create_commit(
+            &repo,
+            "override source role",
+            &[
+                ("spec/value_spec.rb", "describe :value do\n  value\nend\n"),
+                (
+                    ".lineage/diff.toml",
+                    "[[overrides]]\nprefix = \"spec/\"\nrole = \"production\"\n",
+                ),
+            ],
+        )?;
+        let plan = GitProvider::open(dir.path())?.diff_plan(&base, &head)?;
+        let file = plan
+            .files
+            .iter()
+            .find(|file| file.path == "spec/value_spec.rb")
+            .unwrap();
+        assert_eq!(file.role, crate::diff::SourceRole::Production);
         Ok(())
     }
 
