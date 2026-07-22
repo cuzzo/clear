@@ -160,3 +160,48 @@ fn trace_plan_cli_is_deterministic_across_worker_counts() {
     assert!(parallel.status.success());
     assert_eq!(sequential.stdout, parallel.stdout);
 }
+
+#[test]
+fn nil_kill_profile_cli_is_deterministic_across_worker_counts() {
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    let bin_path = env!("CARGO_BIN_EXE_fact-mine-rust");
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures");
+    let native = fixtures.join("nullable_operations.c");
+    let go = fixtures.join("nullable_operations.go");
+    let mut ruby = tempfile::Builder::new().suffix(".rb").tempfile().unwrap();
+    ruby
+        .write_all(
+            b"class Workflow\n  def transition\n    state = \"draft\"\n    state == \"draft\"\n  end\nend\n",
+        )
+        .unwrap();
+
+    let run = |jobs: &str| {
+        Command::new(bin_path)
+            .env("FACT_MINE_JOBS", jobs)
+            .args([
+                "profile",
+                "nil-kill",
+                native.to_str().unwrap(),
+                go.to_str().unwrap(),
+                ruby.path().to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+    };
+    let sequential = run("1");
+    let parallel = run("4");
+
+    assert!(sequential.status.success());
+    assert!(parallel.status.success());
+    assert_eq!(sequential.stdout, parallel.stdout);
+
+    let output: serde_json::Value = serde_json::from_slice(&sequential.stdout).unwrap();
+    assert!(output["nullable_states"].as_array().unwrap().len() >= 2);
+    assert!(output["nullable_operations"].as_array().unwrap().len() >= 2);
+    assert!(!output["hidden_enum_observations"].as_array().unwrap().is_empty());
+}
