@@ -119,16 +119,8 @@ pub(crate) fn project_refinements(
     }
 
     rows.into_iter()
-        .map(|(
-            place_id,
-            condition_node_id,
-            edge,
-            state_on_edge,
-            proof_kind,
-            source_span,
-            complete,
-        )| {
-            NullableRefinement {
+        .map(
+            |(
                 place_id,
                 condition_node_id,
                 edge,
@@ -136,8 +128,18 @@ pub(crate) fn project_refinements(
                 proof_kind,
                 source_span,
                 complete,
-            }
-        })
+            )| {
+                NullableRefinement {
+                    place_id,
+                    condition_node_id,
+                    edge,
+                    state_on_edge,
+                    proof_kind,
+                    source_span,
+                    complete,
+                }
+            },
+        )
         .collect()
 }
 
@@ -157,7 +159,12 @@ pub(crate) fn project_states(facts: &ControlFlowFacts) -> Vec<NullableState> {
     let reaching = facts
         .reaching_definitions
         .iter()
-        .map(|fact| ((fact.node_id.as_str(), fact.place_id.as_str()), &fact.definitions))
+        .map(|fact| {
+            (
+                (fact.node_id.as_str(), fact.place_id.as_str()),
+                &fact.definitions,
+            )
+        })
         .collect::<BTreeMap<_, _>>();
     let reachable = facts
         .reachability
@@ -168,8 +175,8 @@ pub(crate) fn project_states(facts: &ControlFlowFacts) -> Vec<NullableState> {
     let mut states = BTreeMap::new();
 
     for ((node_id, place_id), definitions) in &reaching {
-        let state = if reachable.get(node_id) == Some(&false) {
-            DefinitionState::Unreachable
+        let result = if reachable.get(node_id) == Some(&false) {
+            DefinitionResult::unreachable()
         } else {
             join_definitions(
                 definitions,
@@ -180,15 +187,17 @@ pub(crate) fn project_states(facts: &ControlFlowFacts) -> Vec<NullableState> {
                 &mut BTreeSet::new(),
             )
         };
+        let complete = result.complete();
+        let unknown_reasons = result.unknown_reasons();
         states.insert(
             (node_id.to_string(), place_id.to_string()),
             NullableState {
                 node_id: node_id.to_string(),
                 place_id: place_id.to_string(),
-                state: state.name().to_string(),
-                source_definition_ids: (*definitions).clone(),
-                complete: state.complete(),
-                unknown_reasons: state.unknown_reasons(),
+                state: result.state.name().to_string(),
+                source_definition_ids: result.roots.into_iter().collect(),
+                complete,
+                unknown_reasons,
             },
         );
     }
@@ -325,16 +334,18 @@ pub(crate) fn project_operations(
     }
 
     rows.into_iter()
-        .map(|(node_id, place_id, operation_kind, nil_behavior, state_at_operation, complete)| {
-            NullableOperation {
-                node_id,
-                place_id,
-                operation_kind,
-                nil_behavior,
-                state_at_operation,
-                complete,
-            }
-        })
+        .map(
+            |(node_id, place_id, operation_kind, nil_behavior, state_at_operation, complete)| {
+                NullableOperation {
+                    node_id,
+                    place_id,
+                    operation_kind,
+                    nil_behavior,
+                    state_at_operation,
+                    complete,
+                }
+            },
+        )
         .collect()
 }
 
@@ -393,28 +404,70 @@ impl DefinitionState {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DefinitionResult {
+    state: DefinitionState,
+    roots: BTreeSet<String>,
+}
+
+impl DefinitionResult {
+    fn new(state: DefinitionState, roots: BTreeSet<String>) -> Self {
+        Self { state, roots }
+    }
+
+    fn unknown() -> Self {
+        Self::new(DefinitionState::Unknown, BTreeSet::new())
+    }
+
+    fn unreachable() -> Self {
+        Self::new(DefinitionState::Unreachable, BTreeSet::new())
+    }
+
+    fn complete(&self) -> bool {
+        self.state.complete()
+    }
+
+    fn unknown_reasons(&self) -> Vec<String> {
+        self.state.unknown_reasons()
+    }
+}
+
 fn join_definitions(
     definitions: &[String],
     place_id: &str,
     effects: &BTreeMap<&str, &NodeEffect>,
     reaching: &BTreeMap<(&str, &str), &Vec<String>>,
-    cache: &mut BTreeMap<(String, String), DefinitionState>,
+    cache: &mut BTreeMap<(String, String), DefinitionResult>,
     visiting: &mut BTreeSet<(String, String)>,
-) -> DefinitionState {
+) -> DefinitionResult {
     if definitions.is_empty() {
-        return DefinitionState::Unknown;
+        return DefinitionResult::unknown();
     }
 
-    let states = definitions
+    let results = definitions
         .iter()
         .map(|node_id| definition_state(node_id, place_id, effects, reaching, cache, visiting))
+        .collect::<Vec<_>>();
+    let states = results
+        .iter()
+        .map(|result| result.state)
         .collect::<BTreeSet<_>>();
+    let roots = results
+        .iter()
+        .flat_map(|result| result.roots.iter().cloned())
+        .collect();
     if states.contains(&DefinitionState::Unknown) {
-        DefinitionState::Unknown
+        DefinitionResult::new(DefinitionState::Unknown, roots)
     } else if states.len() == 1 {
-        *states.iter().next().expect("non-empty definition state set")
+        DefinitionResult::new(
+            *states
+                .iter()
+                .next()
+                .expect("non-empty definition state set"),
+            roots,
+        )
     } else {
-        DefinitionState::MaybeNull
+        DefinitionResult::new(DefinitionState::MaybeNull, roots)
     }
 }
 
@@ -423,36 +476,39 @@ fn definition_state(
     place_id: &str,
     effects: &BTreeMap<&str, &NodeEffect>,
     reaching: &BTreeMap<(&str, &str), &Vec<String>>,
-    cache: &mut BTreeMap<(String, String), DefinitionState>,
+    cache: &mut BTreeMap<(String, String), DefinitionResult>,
     visiting: &mut BTreeSet<(String, String)>,
-) -> DefinitionState {
+) -> DefinitionResult {
     let Some(effect) = effects.get(node_id) else {
-        return DefinitionState::Unknown;
+        return DefinitionResult::unknown();
     };
     if !effect.writes.iter().any(|written| written == place_id) {
-        return DefinitionState::Unknown;
+        return DefinitionResult::unknown();
     }
     let key = (node_id.to_string(), place_id.to_string());
     if let Some(state) = cache.get(&key) {
-        return *state;
+        return state.clone();
     }
     if !visiting.insert(key.clone()) {
-        return DefinitionState::Unknown;
+        return DefinitionResult::unknown();
     }
     let state = if !effect.complete || effect.unknown_call {
-        DefinitionState::Unknown
+        DefinitionResult::unknown()
     } else if effect
         .write_value_hints
         .get(place_id)
         .is_some_and(|value| value == "nil" || value == "null")
     {
-        DefinitionState::DefinitelyNull
+        DefinitionResult::new(
+            DefinitionState::DefinitelyNull,
+            BTreeSet::from([node_id.to_string()]),
+        )
     } else if effect
         .write_value_hints
         .get(place_id)
         .is_some_and(|value| definitely_non_null_literal(value))
     {
-        DefinitionState::DefinitelyNonNull
+        DefinitionResult::new(DefinitionState::DefinitelyNonNull, BTreeSet::new())
     } else if let Some(source_id) = effect.write_sources.get(place_id) {
         let definitions = reaching
             .get(&(node_id, source_id.as_str()))
@@ -460,10 +516,10 @@ fn definition_state(
             .unwrap_or_default();
         join_definitions(definitions, source_id, effects, reaching, cache, visiting)
     } else {
-        DefinitionState::Unknown
+        DefinitionResult::unknown()
     };
     visiting.remove(&key);
-    cache.insert(key, state);
+    cache.insert(key, state.clone());
     state
 }
 
@@ -598,6 +654,10 @@ mod tests {
             "definitely_non_null"
         );
         assert_eq!(states[&key("read-alias", "q")].state, "definitely_null");
+        assert_eq!(
+            states[&key("read-alias", "q")].source_definition_ids,
+            ["null-write"]
+        );
         assert_eq!(states[&key("read-unknown", "p")].state, "unknown");
         assert!(!states[&key("read-unknown", "p")].complete);
         assert_eq!(states[&key("read-dead", "p")].state, "unreachable");
@@ -631,7 +691,10 @@ mod tests {
             function: String::new(),
             owner: String::new(),
             place_id: place_id.to_string(),
-            definitions: definitions.iter().map(|value| (*value).to_string()).collect(),
+            definitions: definitions
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
         }
     }
 
@@ -698,7 +761,11 @@ mod tests {
             nodes: vec![return_node("missing-effect"), return_node("return")],
             effects: vec![NodeEffect {
                 node_id: "return".to_string(),
-                reads: vec!["null".to_string(), "present".to_string(), "unmapped".to_string()],
+                reads: vec![
+                    "null".to_string(),
+                    "present".to_string(),
+                    "unmapped".to_string(),
+                ],
                 ..NodeEffect::default()
             }],
             ..ControlFlowFacts::default()
@@ -726,34 +793,40 @@ mod tests {
         );
 
         assert_eq!(rows[0].return_state, "maybe_null");
-        assert_eq!(rows[0].source_definition_ids, ["null-write", "present-write"]);
+        assert_eq!(
+            rows[0].source_definition_ids,
+            ["null-write", "present-write"]
+        );
         assert_eq!(definition_state_from_name("not-a-state"), None);
     }
 
     #[test]
     fn operation_projection_joins_exact_places_and_preserves_unknown_boundaries() {
         let facts = ControlFlowFacts {
-            nodes: vec![ControlFlowNode {
-                id: "return".to_string(),
-                file: "demo.c".to_string(),
-                function: "load".to_string(),
-                owner: "Cache".to_string(),
-                kind: "jump".to_string(),
-                role: "return".to_string(),
-                line: 1,
-                span: [1, 0, 1, 14],
-                source: "return *value;".to_string(),
-            }, ControlFlowNode {
-                id: "orphan".to_string(),
-                file: "demo.c".to_string(),
-                function: "orphan".to_string(),
-                owner: "Cache".to_string(),
-                kind: "jump".to_string(),
-                role: "return".to_string(),
-                line: 2,
-                span: [2, 0, 2, 14],
-                source: "return *value;".to_string(),
-            }],
+            nodes: vec![
+                ControlFlowNode {
+                    id: "return".to_string(),
+                    file: "demo.c".to_string(),
+                    function: "load".to_string(),
+                    owner: "Cache".to_string(),
+                    kind: "jump".to_string(),
+                    role: "return".to_string(),
+                    line: 1,
+                    span: [1, 0, 1, 14],
+                    source: "return *value;".to_string(),
+                },
+                ControlFlowNode {
+                    id: "orphan".to_string(),
+                    file: "demo.c".to_string(),
+                    function: "orphan".to_string(),
+                    owner: "Cache".to_string(),
+                    kind: "jump".to_string(),
+                    role: "return".to_string(),
+                    line: 2,
+                    span: [2, 0, 2, 14],
+                    source: "return *value;".to_string(),
+                },
+            ],
             places: vec![Place {
                 id: "place:value".to_string(),
                 file: "demo.c".to_string(),
