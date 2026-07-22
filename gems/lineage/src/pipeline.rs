@@ -8,6 +8,8 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Write};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -519,11 +521,13 @@ fn finalize_run(repo: &Path, config: &LineageConfig, staged: &Path) -> Result<Pa
         .file_name()
         .and_then(|name| name.to_str())
         .context("staged run directory has no valid file name")?;
-    let published_name = run_name.trim_start_matches(".staging-");
-    let published = runs.join(published_name);
-    fs::rename(staged, &published)
+    let pending = runs.join(format!(
+        "pending-{}",
+        run_name.trim_start_matches(".staging-")
+    ));
+    fs::rename(staged, &pending)
         .with_context(|| format!("finalize staged Lineage run {}", staged.display()))?;
-    Ok(published)
+    Ok(pending)
 }
 
 /// Atomically updates the `latest` pointer after the completed run has been
@@ -531,7 +535,7 @@ fn finalize_run(repo: &Path, config: &LineageConfig, staged: &Path) -> Result<Pa
 pub fn publish_run(repo: &Path, config: &LineageConfig, completed: &Path) -> Result<()> {
     let root = repo.join(&config.artifacts.directory);
     let runs = root.join("runs");
-    let published_name = completed
+    let pending_name = completed
         .file_name()
         .and_then(|name| name.to_str())
         .context("completed run directory has no valid file name")?;
@@ -542,11 +546,20 @@ pub fn publish_run(repo: &Path, config: &LineageConfig, completed: &Path) -> Res
         );
     }
 
+    let published_name = pending_name
+        .strip_prefix("pending-")
+        .context("only pending runs can be published")?;
+    let published = runs.join(format!("published-{published_name}"));
+    fs::rename(completed, &published)
+        .with_context(|| format!("publish completed Lineage run {}", completed.display()))?;
     let latest = latest_run_directory(repo, config);
     let temporary_link = root.join(format!(".latest-{published_name}"));
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(Path::new("runs").join(published_name), &temporary_link)?;
+        std::os::unix::fs::symlink(
+            Path::new("runs").join(format!("published-{published_name}")),
+            &temporary_link,
+        )?;
     }
     #[cfg(not(unix))]
     {
@@ -565,21 +578,27 @@ pub fn publish_run(repo: &Path, config: &LineageConfig, completed: &Path) -> Res
     }
     fs::rename(&temporary_link, &latest)
         .with_context(|| format!("atomically publish latest Lineage run {}", latest.display()))?;
-    prune_retained_runs(&runs, config.artifacts.retain_runs)?;
+    prune_retained_runs(&runs, config.artifacts.retain_runs, &published)?;
     Ok(())
 }
 
-fn prune_retained_runs(runs: &Path, retain_runs: usize) -> Result<()> {
+fn prune_retained_runs(runs: &Path, retain_runs: usize, latest: &Path) -> Result<()> {
     let mut completed = fs::read_dir(runs)?
         .filter_map(std::result::Result::ok)
         .filter_map(|entry| {
             let metadata = fs::symlink_metadata(entry.path()).ok()?;
-            (!metadata.file_type().is_symlink() && metadata.is_dir())
+            (entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("published-")
+                && !metadata.file_type().is_symlink()
+                && metadata.is_dir()
+                && entry.path() != latest)
                 .then_some((metadata.modified().ok()?, entry.path()))
         })
         .collect::<Vec<_>>();
     completed.sort_by(|left, right| right.0.cmp(&left.0));
-    for (_, path) in completed.into_iter().skip(retain_runs) {
+    for (_, path) in completed.into_iter().skip(retain_runs.saturating_sub(1)) {
         fs::remove_dir_all(&path)
             .with_context(|| format!("prune retained Lineage run {}", path.display()))?;
     }
@@ -616,6 +635,16 @@ fn execute_producer(
         }
     }
     command.envs(&producer.environment);
+    #[cfg(unix)]
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setpgid(0, 0) == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -639,7 +668,7 @@ fn execute_producer(
             break status;
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
+            terminate_process_tree(&mut child);
             timed_out = true;
             break child.wait()?;
         }
@@ -690,6 +719,26 @@ fn execute_producer(
     })
 }
 
+fn terminate_process_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let process_group = -(child.id() as i32);
+        unsafe {
+            libc::kill(process_group, libc::SIGTERM);
+        }
+        thread::sleep(Duration::from_millis(100));
+        if child.try_wait().ok().flatten().is_none() {
+            unsafe {
+                libc::kill(process_group, libc::SIGKILL);
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
+    }
+}
+
 fn stage_artifact(
     repo: &Path,
     run_directory: &Path,
@@ -709,6 +758,16 @@ fn stage_artifact(
         bail!(
             "artifact {} escapes repository through a symlink",
             artifact.path.display()
+        );
+    }
+    let size = fs::metadata(&source)
+        .with_context(|| format!("stat artifact {}", source.display()))?
+        .len();
+    if size > MAX_DECOMPRESSED_ARTIFACT_BYTES {
+        bail!(
+            "artifact {} exceeds {} byte staging limit",
+            artifact.path.display(),
+            MAX_DECOMPRESSED_ARTIFACT_BYTES
         );
     }
     let bytes = fs::read(&source).with_context(|| format!("read artifact {}", source.display()))?;

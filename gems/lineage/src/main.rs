@@ -31,7 +31,7 @@ enum Command {
     Ci {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long, default_value = "ci")]
         profile: String,
@@ -40,7 +40,7 @@ enum Command {
     Diff {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(value_name = "BASE")]
         base: Option<String>,
@@ -64,12 +64,12 @@ enum Command {
     },
     /// Initialize an empty lineage SQLite database.
     Init {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
     },
     /// Ingest a versioned Espalier architecture graph artifact.
     IngestArchitecture {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long)]
         input: PathBuf,
@@ -78,14 +78,14 @@ enum Command {
     Build {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long)]
         max_commits: Option<usize>,
     },
     /// Print the highest-risk logical units from a lineage database.
     Summary {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long, default_value_t = 20)]
         top: usize,
@@ -96,12 +96,12 @@ enum Command {
     },
     /// Refresh materialized UI summaries for fast dashboard and file index reads.
     RefreshUi {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
     },
     /// Serve the local Lineage source and verification UI.
     Ui {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -114,7 +114,7 @@ enum Command {
     },
     /// Run the Lineage language server over stdio.
     Lsp {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -131,7 +131,7 @@ enum Command {
     },
     /// Ingest aggregate coverage or mutation quality data for one commit.
     IngestCoverage {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -156,7 +156,7 @@ enum Command {
     },
     /// Ingest named test exposure facts for one commit.
     IngestTestExposure {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -169,7 +169,7 @@ enum Command {
     },
     /// Ingest Ruby mutant-facts/v1 and convert them to mutation exposure.
     IngestMutants {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -194,7 +194,7 @@ enum Command {
     },
     /// Ingest profile-hotness/v1 runtime profiling shares.
     IngestHotness {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -207,7 +207,7 @@ enum Command {
     },
     /// Ingest current hazard sites for one provider and commit.
     IngestHazards {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -220,7 +220,7 @@ enum Command {
     },
     /// Ingest SARIF artifacts into the persistent finding index.
     IngestSarif {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -237,7 +237,7 @@ enum Command {
     },
     /// Ingest provider stack traces and anchor frames to logical units.
     Ingest {
-        #[arg(long, default_value = "lineage.db")]
+        #[arg(long, default_value = ".lineage/lineage.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -280,13 +280,14 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Ci { repo, db, profile } => {
+            let db = repository_path(&repo, &db);
             let config = load_config(&repo)?;
             let git = GitProvider::open(&repo)?;
-            ensure_clean_worktree(&repo, &config.artifacts.directory)?;
+            ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
             let revision = git.resolve_commit("HEAD")?;
             ensure_revision_snapshot(&db, &repo, &revision)?;
             let completed = execute_profile(&repo, &config, &profile, &revision)?;
-            ensure_clean_worktree(&repo, &config.artifacts.directory)?;
+            ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
             let run = completed.directory.join("manifest.json");
             ingest_run_manifest(&db, &repo, &run)?;
             Storage::open(&db)?.refresh_ui_summaries()?;
@@ -311,6 +312,7 @@ fn main() -> Result<()> {
             mutant_corpus,
             test_set,
         } => {
+            let db = repository_path(&repo, &db);
             print!(
                 "{}",
                 execute_diff(DiffCommandRequest {
@@ -713,7 +715,19 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn ensure_clean_worktree(repo: &std::path::Path, artifact_directory: &std::path::Path) -> Result<()> {
+fn repository_path(repo: &std::path::Path, path: &std::path::Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        repo.join(path)
+    }
+}
+
+fn ensure_clean_worktree(
+    repo: &std::path::Path,
+    artifact_directory: &std::path::Path,
+    database: Option<&std::path::Path>,
+) -> Result<()> {
     let output = ProcessCommand::new("git")
         .args(["status", "--porcelain=v1", "--untracked-files=all"])
         .current_dir(repo)
@@ -723,11 +737,21 @@ fn ensure_clean_worktree(repo: &std::path::Path, artifact_directory: &std::path:
         anyhow::bail!("could not inspect Git worktree before lineage ci");
     }
     let artifact_prefix = artifact_directory.to_string_lossy().replace('\\', "/");
+    let database_path = database
+        .and_then(|path| path.strip_prefix(repo).ok())
+        .map(|path| path.to_string_lossy().replace('\\', "/"));
     let dirty = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| line.get(3..))
         .map(|path| path.trim_start_matches("./").replace('\\', "/"))
-        .find(|path| path != &artifact_prefix && !path.starts_with(&format!("{artifact_prefix}/")));
+        .find(|path| {
+            path != &artifact_prefix
+                && !path.starts_with(&format!("{artifact_prefix}/"))
+                && database_path.as_deref() != Some(path)
+                && !database_path
+                    .as_deref()
+                    .is_some_and(|database| path.starts_with(&format!("{database}-")))
+        });
     if let Some(path) = dirty {
         anyhow::bail!("lineage ci requires a clean worktree (found {path})");
     }
@@ -792,9 +816,7 @@ fn resolve_diff_run_scope(provider: &GitProvider, request: &mut DiffCommandReque
     if supplied.iter().any(|present| *present) && !supplied.iter().all(|present| *present) {
         anyhow::bail!("--selection, --mutant-corpus, and --test-set must be supplied together");
     }
-    if supplied.iter().all(|present| *present) {
-        return Ok(());
-    }
+    let explicit_scope = supplied.iter().all(|present| *present);
     let config_path = request.repo.join(lineage::pipeline::CONFIG_FILE_NAME);
     let json_config_path = request.repo.join(lineage::pipeline::CONFIG_JSON_FILE_NAME);
     if !config_path.exists() && !json_config_path.exists() {
@@ -825,29 +847,35 @@ fn resolve_diff_run_scope(provider: &GitProvider, request: &mut DiffCommandReque
     if scopes.iter().any(|candidate| *candidate != *scope) {
         anyhow::bail!("latest successful run contains incompatible complete evidence scopes");
     }
-    request.selection = Some(scope.selection.clone());
-    request.mutant_corpus = Some(scope.mutant_corpus.clone());
-    request.test_set = Some(scope.test_set.clone());
+    if !explicit_scope {
+        request.selection = Some(scope.selection.clone());
+        request.mutant_corpus = Some(scope.mutant_corpus.clone());
+        request.test_set = Some(scope.test_set.clone());
+    }
     let coverage_sources = manifest
         .artifacts
         .iter()
         .filter(|artifact| artifact.kind == ArtifactKind::Coverage)
         .map(|artifact| artifact.producer.as_str())
         .collect::<std::collections::BTreeSet<_>>();
-    if coverage_sources.len() > 1 {
+    if request.coverage_source.is_none() && coverage_sources.len() > 1 {
         anyhow::bail!("latest successful run has multiple coverage producers; specify --coverage-source");
     }
-    request.coverage_source = coverage_sources.into_iter().next().map(str::to_string);
+    if request.coverage_source.is_none() {
+        request.coverage_source = coverage_sources.into_iter().next().map(str::to_string);
+    }
     let sarif_sources = manifest
         .artifacts
         .iter()
         .filter(|artifact| artifact.kind == ArtifactKind::Sarif)
         .map(|artifact| artifact.producer.as_str())
         .collect::<std::collections::BTreeSet<_>>();
-    if sarif_sources.len() > 1 {
+    if request.sarif_source.is_none() && sarif_sources.len() > 1 {
         anyhow::bail!("latest successful run has multiple SARIF producers; specify --sarif-source");
     }
-    request.sarif_source = sarif_sources.into_iter().next().map(str::to_string);
+    if request.sarif_source.is_none() {
+        request.sarif_source = sarif_sources.into_iter().next().map(str::to_string);
+    }
     Ok(())
 }
 
@@ -1287,11 +1315,17 @@ mod tests {
             "{}",
         )
         .unwrap();
+        let database = directory.path().join(".lineage/lineage.db");
+        fs::write(&database, "sqlite").unwrap();
 
-        ensure_clean_worktree(directory.path(), std::path::Path::new(".lineage/artifacts"))
-            .unwrap();
+        ensure_clean_worktree(
+            directory.path(),
+            std::path::Path::new(".lineage/artifacts"),
+            Some(&database),
+        )
+        .unwrap();
         fs::write(directory.path().join("unexpected.txt"), "dirty\n").unwrap();
-        assert!(ensure_clean_worktree(directory.path(), std::path::Path::new(".lineage/artifacts"))
+        assert!(ensure_clean_worktree(directory.path(), std::path::Path::new(".lineage/artifacts"), None)
             .unwrap_err()
             .to_string()
             .contains("clean worktree"));
