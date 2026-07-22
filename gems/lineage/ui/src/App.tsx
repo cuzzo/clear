@@ -95,7 +95,7 @@ function DiffReview({ initialLayout, page, plan, rawPath }: { readonly initialLa
     {plan.dependency_changes.map((change) => <DependencySummary change={change} key={change.manifest_path} />)}
     {plan.language_summaries.map((summary) => <LanguageSummaryCard key={summary.language} summary={summary} />)}
     <fieldset><legend>Diff layout</legend><label><input checked={sideBySide} name="layout" onChange={() => setLayout(true)} type="radio" />Side by side</label><label><input checked={!sideBySide} name="layout" onChange={() => setLayout(false)} type="radio" />Inline</label></fieldset>
-    {rawFile ? <RawReview file={rawFile} onBack={closeRaw} sideBySide={sideBySide} /> : <><PageControls onPage={selectPage} page={selectedPage} pageCount={pageCount} totalFiles={plan.files.length} />{visibleFiles.map((file) => <FileReview file={file} key={file.path} onRaw={openRaw} sideBySide={sideBySide} />)}</>}
+    {rawFile ? <RawReview file={rawFile} headOid={plan.scope.head_oid} onBack={closeRaw} sideBySide={sideBySide} /> : <><PageControls onPage={selectPage} page={selectedPage} pageCount={pageCount} totalFiles={plan.files.length} />{visibleFiles.map((file) => <FileReview file={file} headOid={plan.scope.head_oid} key={file.path} onRaw={openRaw} sideBySide={sideBySide} />)}</>}
   </section>;
 }
 
@@ -171,11 +171,11 @@ function InventoryPaths({ label, paths }: { readonly label: string; readonly pat
   return paths.length > 0 ? <p>{label}: {paths.join(", ")}</p> : null;
 }
 
-function FileReview({ file, onRaw, sideBySide }: { readonly file: DiffFile; readonly onRaw: (path: string) => void; readonly sideBySide: boolean }): React.JSX.Element {
+function FileReview({ file, headOid, onRaw, sideBySide }: { readonly file: DiffFile; readonly headOid: string; readonly onRaw: (path: string) => void; readonly sideBySide: boolean }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const publicGroups = file.groups.filter((group) => group.visibility !== "private" && (group.kind === "function" || group.kind === "class" || group.kind === "module"));
   const privateGroups = file.groups.filter((group) => group.visibility === "private");
-  return <article className="file-review"><button aria-expanded={expanded} className="disclosure" onClick={() => setExpanded(!expanded)}>{file.path} · risk {file.risk.score} · {file.role} · {file.change} · {file.added_lines.code} code lines</button>
+  return <article className="file-review"><button aria-expanded={expanded} className="disclosure" onClick={() => setExpanded(!expanded)}>{file.path} · risk {file.risk.score} · {file.role} · {file.change} · {file.added_lines.code} code lines</button> <a href={sourceUrl(file.path, headOid)}>Open source</a>
     {expanded && <div className="file-body">
       {!file.semantic_classification_available && <p className="metrics">Semantic classification unavailable; use the raw source-ordered diff.</p>}
       <RiskMetrics risk={file.risk} verification={file.verification} />
@@ -208,8 +208,8 @@ function GroupReview({ file, group, sideBySide }: { readonly file: DiffFile; rea
   </section>;
 }
 
-function RawReview({ file, onBack, sideBySide }: { readonly file: DiffFile; readonly onBack: () => void; readonly sideBySide: boolean }): React.JSX.Element {
-  return <article className="file-review"><button onClick={onBack}>Back to semantic review</button><h2>Raw diff: {file.path}</h2>{file.base_source !== null && file.head_source !== null ? <DiffPreview annotations={file.line_annotations} highlights={file.sarif_findings.map(findingHighlight)} language={file.language ?? "plaintext"} modified={file.head_source} original={file.base_source} sideBySide={sideBySide} /> : <p>Binary or one-sided change.</p>}</article>;
+function RawReview({ file, headOid, onBack, sideBySide }: { readonly file: DiffFile; readonly headOid: string; readonly onBack: () => void; readonly sideBySide: boolean }): React.JSX.Element {
+  return <article className="file-review"><button onClick={onBack}>Back to semantic review</button><h2>Raw diff: {file.path}</h2><a href={sourceUrl(file.path, headOid)}>Open source</a>{file.base_source !== null && file.head_source !== null ? <DiffPreview annotations={file.line_annotations} highlights={file.sarif_findings.map(findingHighlight)} language={file.language ?? "plaintext"} modified={file.head_source} original={file.base_source} sideBySide={sideBySide} /> : <p>Binary or one-sided change.</p>}</article>;
 }
 
 function RiskMetrics({ risk, verification }: { readonly risk: RiskSummary; readonly verification: VerificationSlices }): React.JSX.Element {
@@ -273,4 +273,9 @@ function findingHighlight(finding: DiffFile["sarif_findings"][number]): SourceHi
     endLine: finding.end_line,
     title: `${finding.tool}/${finding.rule_id}: ${finding.message}`,
   };
+}
+
+function sourceUrl(path: string, commit: string): string {
+  const query = new URLSearchParams({ path, commit });
+  return `/?${query}#L1`;
 }

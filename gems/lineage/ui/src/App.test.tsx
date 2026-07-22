@@ -62,6 +62,7 @@ describe("App", () => {
     expect(screen.getByText(/package.json: no declared dependency changes/)).toBeInTheDocument();
     expect(screen.getByText(/ruby: 1 production code lines.*public 1.*assertions unavailable/)).toBeInTheDocument();
     expect(screen.getByText(/Evidence: coverage unknown/)).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Open source" })[0]).toHaveAttribute("href", `/?path=lib%2Fapp.rb&commit=${"b".repeat(40)}#L1`);
     expect(screen.getByText(/Resolved SARIF findings: lib\/app.rb Scanner\/rule line 1: unsafe value/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Base revision"), { target: { value: "next-base" } });
     fireEvent.change(screen.getByLabelText("Head revision"), { target: { value: "next-head" } });
