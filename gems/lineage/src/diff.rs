@@ -173,6 +173,9 @@ pub struct SarifFindingSummary {
     pub rule_id: String,
     pub level: String,
     pub message: String,
+    pub fingerprint: String,
+    pub tier_one: bool,
+    pub status: String,
     pub start_line: u32,
     pub end_line: u32,
 }
@@ -596,6 +599,80 @@ pub fn apply_partial_sarif_findings(plan: &mut DiffPlan, observations: &[SarifOb
                 .collect();
         }
     }
+}
+
+/// Applies a complete SARIF comparison. Only newly introduced tier-one
+/// findings may contribute to the policy's H1 term; persisted findings remain
+/// visible but are not re-counted as review risk.
+pub fn apply_exact_sarif_findings(
+    plan: &mut DiffPlan,
+    observations: &[SarifObservation],
+    base_identities: &BTreeSet<String>,
+) {
+    if observations.is_empty() {
+        plan.evidence.sarif = EvidenceState::Exact;
+        plan.evidence.hazards = EvidenceState::Exact;
+        return;
+    }
+    plan.evidence.sarif = EvidenceState::Exact;
+    plan.evidence.hazards = EvidenceState::Exact;
+    for file in &mut plan.files {
+        let findings = observations
+            .iter()
+            .filter(|observation| observation.path == file.path)
+            .map(|observation| {
+                let mut finding = observation.finding.clone();
+                finding.status = if base_identities.contains(&sarif_identity(&finding)) {
+                    "persisted"
+                } else {
+                    "new"
+                }
+                .into();
+                finding
+            })
+            .collect::<Vec<_>>();
+        file.sarif_findings = findings.clone();
+        let h1 = findings
+            .iter()
+            .filter(|finding| finding.status == "new" && finding.tier_one)
+            .count();
+        apply_tier_one_hazards(&mut file.risk, h1);
+        for group in &mut file.groups {
+            group.sarif_findings = findings
+                .iter()
+                .filter(|finding| {
+                    spans_overlap(
+                        finding.start_line,
+                        finding.end_line,
+                        group.start_line,
+                        group.end_line,
+                    )
+                })
+                .cloned()
+                .collect();
+            let group_h1 = group
+                .sarif_findings
+                .iter()
+                .filter(|finding| finding.status == "new" && finding.tier_one)
+                .count();
+            apply_tier_one_hazards(&mut group.risk, group_h1);
+        }
+    }
+}
+
+pub fn sarif_identity(finding: &SarifFindingSummary) -> String {
+    format!(
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+        finding.source, finding.tool, finding.rule_id, finding.fingerprint
+    )
+}
+
+fn apply_tier_one_hazards(risk: &mut RiskSummary, tier_one_hazards: usize) {
+    risk.tier_one_hazards = tier_one_hazards;
+    risk.score = risk.not_covered as f64
+        + risk.partially_covered as f64 * 0.5
+        + risk.added_complexity as f64 * 2.0
+        + tier_one_hazards as f64 * 8.0;
 }
 
 fn spans_overlap(left_start: u32, left_end: u32, right_start: u32, right_end: u32) -> bool {
@@ -2381,6 +2458,42 @@ mod tests {
         assert_eq!(file.risk.tier_one_hazards, 0);
     }
 
+    #[test]
+    fn exact_sarif_counts_only_new_tier_one_findings_in_risk() {
+        let mut plan = build_diff_plan(
+            "base",
+            "head",
+            Vec::new(),
+            vec![file("lib/app.rb", "def run\n  value\nend\n")],
+        );
+        let mut persisted = sarif_finding(2, 2, "persisted");
+        persisted.tier_one = true;
+        let mut introduced = sarif_finding(2, 2, "introduced");
+        introduced.tier_one = true;
+        let base = [sarif_identity(&persisted)].into_iter().collect();
+        apply_exact_sarif_findings(
+            &mut plan,
+            &[
+                SarifObservation {
+                    path: "lib/app.rb".into(),
+                    finding: persisted,
+                },
+                SarifObservation {
+                    path: "lib/app.rb".into(),
+                    finding: introduced,
+                },
+            ],
+            &base,
+        );
+        let file = &plan.files[0];
+        assert_eq!(plan.evidence.sarif, EvidenceState::Exact);
+        assert_eq!(file.risk.tier_one_hazards, 1);
+        assert_eq!(file.risk.score, 8.0);
+        assert_eq!(file.sarif_findings[0].status, "persisted");
+        assert_eq!(file.sarif_findings[1].status, "new");
+        assert_eq!(file.groups[0].risk.tier_one_hazards, 1);
+    }
+
     fn sarif_finding(start_line: u32, end_line: u32, message: &str) -> SarifFindingSummary {
         SarifFindingSummary {
             source: "scanner".into(),
@@ -2388,6 +2501,9 @@ mod tests {
             rule_id: "scanner.rule".into(),
             level: "warning".into(),
             message: message.into(),
+            fingerprint: message.into(),
+            tier_one: false,
+            status: "partial".into(),
             start_line,
             end_line,
         }

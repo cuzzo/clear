@@ -1183,7 +1183,7 @@ impl Storage {
                 .collect::<Vec<_>>()
                 .join(", ");
             let sql = format!(
-                "SELECT path, source, tool_name, rule_id, level, message, start_line, \
+                "SELECT path, source, tool_name, rule_id, level, message, fingerprint, properties_json, start_line, \
                  COALESCE(end_line, start_line) FROM sarif_findings \
                  WHERE commit_hash = ? AND path IN ({placeholders}) \
                  ORDER BY path, start_line, rule_id, finding_key"
@@ -1201,14 +1201,29 @@ impl Storage {
                         rule_id: row.get(3)?,
                         level: row.get(4)?,
                         message: row.get(5)?,
-                        start_line: row.get::<_, i64>(6)?.max(1) as u32,
-                        end_line: row.get::<_, i64>(7)?.max(1) as u32,
+                        fingerprint: row.get(6)?,
+                        tier_one: Self::sarif_tier_one(&row.get::<_, String>(7)?),
+                        status: "partial".into(),
+                        start_line: row.get::<_, i64>(8)?.max(1) as u32,
+                        end_line: row.get::<_, i64>(9)?.max(1) as u32,
                     },
                 })
             })?;
             observations.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
         }
         Ok(observations)
+    }
+
+    fn sarif_tier_one(properties_json: &str) -> bool {
+        serde_json::from_str::<serde_json::Value>(properties_json)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("tier")
+                    .and_then(serde_json::Value::as_i64)
+                    .or_else(|| value.get("risk_tier").and_then(serde_json::Value::as_i64))
+            })
+            == Some(1)
     }
 
     #[allow(clippy::too_many_arguments)]
