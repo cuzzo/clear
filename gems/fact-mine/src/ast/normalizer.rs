@@ -5701,7 +5701,9 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     pub(in crate::ast) fn target_name(&self, node: TreeSitterNode<'_>) -> String {
         let text = node_text(node, self.source);
-        if let Some(name) = self.identifier_text(node) {
+        if let Some(name) = self.normalization_adapter.assignment_target_name(node, self.source) {
+            name
+        } else if let Some(name) = self.identifier_text(node) {
             name
         } else if self
             .normalization_adapter

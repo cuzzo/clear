@@ -1373,6 +1373,12 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         false
     }
 
+    /// Returns a language-owned canonical assignment target when concrete
+    /// declaration syntax adds punctuation that is not part of the binding.
+    fn assignment_target_name(&self, _node: TreeSitterNode<'_>, _source: &str) -> Option<String> {
+        None
+    }
+
     fn instance_variable(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
         false
     }

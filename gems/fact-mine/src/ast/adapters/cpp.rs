@@ -1,4 +1,4 @@
-use super::super::named_children;
+use super::super::{named_children, node_text};
 use super::base::AstNormalizationAdapter;
 use tree_sitter::Node as TreeSitterNode;
 
@@ -49,6 +49,16 @@ impl AstNormalizationAdapter for CppAstAdapter {
             return false;
         };
         cpp_function_declarator(declarator)
+    }
+
+    fn assignment_target_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+        if node.kind() != "pointer_declarator" {
+            return None;
+        }
+        named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "identifier")
+            .map(|child| node_text(child, source).to_string())
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
@@ -251,5 +261,36 @@ mod tests {
         }
         kinds.sort();
         assert_eq!(kinds, ["qualified_identifier", "qualified_identifier"]);
+    }
+
+    #[test]
+    fn strips_pointer_declarator_punctuation_from_assignment_bindings() {
+        let source = "void run() { int *value = 0; }";
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_cpp::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let mut nodes = vec![tree.root_node()];
+        let pointer = loop {
+            let node = nodes.pop().expect("pointer declarator");
+            if node.kind() == "pointer_declarator" {
+                break node;
+            }
+            nodes.extend(named_children(node));
+        };
+        assert_eq!(CppAstAdapter.assignment_target_name(pointer, source), Some("value".to_string()));
+        assert_eq!(CppAstAdapter.assignment_target_name(tree.root_node(), source), None);
+
+        let normalized = crate::ast::normalize_tree(tree.root_node(), source, crate::syntax::Language::Cpp);
+        let mut normalized_nodes = vec![&normalized];
+        let assignment = loop {
+            let node = normalized_nodes.pop().expect("normalized assignment");
+            if node.r#type == "LASGN" {
+                break node;
+            }
+            normalized_nodes.extend(node.children.iter().filter_map(crate::ast::node));
+        };
+        assert_eq!(assignment.children.first(), Some(&crate::ast::Child::String("value".to_string())));
     }
 }
