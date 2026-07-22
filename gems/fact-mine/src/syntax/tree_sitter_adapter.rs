@@ -2,7 +2,7 @@ use super::{
     normalized_behavior, parser_grammar::grammar_for_language, passes, Document, Language,
     SymbolScope,
 };
-use crate::ast::normalize_tree;
+use crate::ast::normalize_tree_with_call_origins;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -45,7 +45,8 @@ fn parse_normalized_file(
         crate::ast::raw_call_sites(parsed.tree.root_node(), &parsed.source, language);
     let parse_recovery_spans = parse_recovery_spans(parsed.tree.root_node());
     let parse_recovered = !parse_recovery_spans.is_empty();
-    let normalized_root = normalize_tree(parsed.tree.root_node(), &parsed.source, language);
+    let (normalized_root, parser_call_origins) =
+        normalize_tree_with_call_origins(parsed.tree.root_node(), &parsed.source, language);
     let (mut namespace, mut explicit_imports) =
         crate::ast::symbol_scope(parsed.tree.root_node(), &parsed.source, language);
     let declaration_namespaces =
@@ -79,6 +80,31 @@ fn parse_normalized_file(
     let mut facts =
         passes::StatelessSyntaxPass::normalized(&parsed.file, &lines, &normalized_root, behavior)
             .run();
+    let normalization_call_origins = parser_call_origins
+        .into_iter()
+        .map(
+            |(raw_call_span, normalized_call_span)| super::CallRawOriginProjection {
+                raw_call_span,
+                normalized_call_span,
+            },
+        )
+        .collect::<Vec<_>>();
+    let parser_origins_by_normalized = normalization_call_origins
+        .iter()
+        .map(|origin| (origin.normalized_call_span, origin.raw_call_span))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let call_raw_origin_projections = facts
+        .call_node_projections
+        .iter()
+        .filter_map(|projection| {
+            parser_origins_by_normalized
+                .get(&projection.normalized_node_span)
+                .map(|raw| super::CallRawOriginProjection {
+                    raw_call_span: *raw,
+                    normalized_call_span: projection.emitted_call_span,
+                })
+        })
+        .collect();
     facts.hazard_sites = crate::syntax::hazards::extract_hazards(
         &parsed.file.to_string_lossy(),
         parsed.tree.root_node(),
@@ -120,7 +146,8 @@ fn parse_normalized_file(
         function_defs: facts.function_defs,
         owner_defs: facts.owner_defs,
         call_sites: facts.call_sites,
-        call_raw_origin_projections: facts.call_raw_origin_projections,
+        normalization_call_origins,
+        call_raw_origin_projections,
         call_receiver_projections: facts.call_receiver_projections,
         state_declarations: facts.state_declarations,
         state_reads: facts.state_reads,
@@ -152,8 +179,8 @@ fn parse_normalized_file(
         clone_candidates: metadata.clone_candidates,
         redundant_nil_guards: metadata.redundant_nil_guards,
         nullable_refinements: metadata.nullable_refinements,
-            nullable_states: metadata.nullable_states,
-            nullable_summaries: metadata.nullable_summaries,
+        nullable_states: metadata.nullable_states,
+        nullable_summaries: metadata.nullable_summaries,
         nullable_operations: metadata.nullable_operations,
         presence_correlations: metadata.presence_correlations,
         immutable_struct_readers: metadata.syntax.immutable_struct_readers,

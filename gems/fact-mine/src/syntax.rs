@@ -268,6 +268,11 @@ pub struct Document {
     /// Exact parser-call origins retained by normalization. Coverage uses
     /// these identities instead of re-matching source ranges heuristically.
     #[serde(default)]
+    pub normalization_call_origins: Vec<CallRawOriginProjection>,
+    /// Exact parser origins for semantic calls emitted by the normalized
+    /// extractor. Calls deliberately suppressed as non-semantic remain in
+    /// `normalization_call_origins` but not here.
+    #[serde(default)]
     pub call_raw_origin_projections: Vec<CallRawOriginProjection>,
     #[serde(default)]
     pub call_receiver_projections: Vec<CallReceiverProjection>,
@@ -805,7 +810,10 @@ mod tests {
             doc.raw_call_sites
                 .iter()
                 .any(|raw| raw.span == origin.raw_call_span)
-                && doc.call_sites.iter().any(|call| call.span == origin.normalized_call_span)
+                && doc
+                    .call_sites
+                    .iter()
+                    .any(|call| call.span == origin.normalized_call_span)
         }));
     }
 
@@ -819,7 +827,10 @@ mod tests {
 
     #[test]
     fn parses_rust_raw_identifier_without_recovery() {
-        let doc = document("fn sample() { let raw = 1; let _ = raw; }\n", Language::Rust);
+        let doc = document(
+            "fn sample() { let raw = 1; let _ = raw; }\n",
+            Language::Rust,
+        );
 
         assert!(!doc.parse_recovered);
         assert!(doc.parse_recovery_spans.is_empty());

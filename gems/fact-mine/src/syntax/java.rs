@@ -14,7 +14,6 @@ use super::normalized_behavior::{
 };
 use super::StateDeclaration;
 use super::{CallSite, ExternalCallComplexity, FunctionDef};
-use crate::ast::Child;
 use crate::ast::{Node, Span};
 use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
 use crate::type_inference::TypeExpr;

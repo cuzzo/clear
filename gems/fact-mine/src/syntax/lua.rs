@@ -5,11 +5,11 @@ use super::cfg::ControlFlowProfile;
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     configured_external_latency_bound, configured_intrinsic_call_complexity,
-    configured_semantic_symbol_call_complexity,
-    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
-    eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
-    scip_global_parts, NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
-    NormalizedNilGuardFact, NormalizedSemanticEffect, NormalizedStateRead, NormalizedStateWrite,
+    configured_semantic_symbol_call_complexity, configured_semantic_symbol_kind,
+    configured_semantic_symbol_parametric_cost, eliminable_guard_from_call,
+    nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    NormalizedSemanticEffect, NormalizedStateRead, NormalizedStateWrite,
 };
 use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata, StateDeclaration};
 use crate::ast::{Child, Node, Span};
@@ -89,11 +89,8 @@ pub(crate) fn external_symbol_call_complexity(
             assumption: None,
         });
     }
-    let complexity = configured_external_latency_bound(
-        "lua",
-        owner.as_deref().unwrap_or("_G"),
-        message,
-    )?;
+    let complexity =
+        configured_external_latency_bound("lua", owner.as_deref().unwrap_or("_G"), message)?;
     Some(ExternalCallComplexity {
         time: complexity.time,
         space: complexity.space,
@@ -871,17 +868,11 @@ mod tests {
         assert_eq!(external_symbol_owner(insert).as_deref(), Some("table"));
         assert!(external_symbol_call_complexity(dependency, "call").is_none());
 
-        let print = external_symbol_call_complexity(
-            "scip-lua luarocks lua . print().",
-            "print",
-        )
-        .unwrap();
+        let print =
+            external_symbol_call_complexity("scip-lua luarocks lua . print().", "print").unwrap();
         assert_eq!(print.time, "O(N)");
         assert_eq!(print.provenance, "lua_external_effect_registry");
-        assert_eq!(
-            print.bound_quality,
-            "upper_bound_external_latency_excluded"
-        );
+        assert_eq!(print.bound_quality, "upper_bound_external_latency_excluded");
         assert!(print.assumption.is_some());
     }
 

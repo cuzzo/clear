@@ -22,12 +22,14 @@ macro_rules! eprintln {
 
 use crate::syntax::{Document, Language};
 
-use crate::ast::{Child, Node, Span};
+#[cfg(test)]
+use crate::ast::Child;
+use crate::ast::Span;
+#[cfg(test)]
+use crate::profile::split_top_level_params;
 use crate::profile::{
-    call_arguments, child_nodes, child_symbol, owner_name, receiver_state_field,
-    split_top_level_params, state_key, ArrayShape, CallGraphEdge, FieldRecord, HashShape,
-    MethodRecord, StateParamOriginRecord, StateProtocolRecord, StateTypeEdge, StateTypeRecord,
-    StructDeclaration, TypeDefinition,
+    call_arguments, child_nodes, child_symbol, owner_name, state_key, HashShape, StateTypeRecord,
+    StructDeclaration,
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -601,6 +603,7 @@ pub(crate) struct TypeInferenceVisitor<'a> {
     pub(crate) behavior:
         &'static dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
     pub(crate) document: &'a Document,
+    #[allow(dead_code)] // Retained source lines are part of the visitor's test fixture API.
     pub(crate) lines: &'a [String],
     pub(crate) path: &'a str,
     pub(crate) current_owners: Vec<String>,
@@ -682,11 +685,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         let parsed = TypeExpr::parse(s, self.document.language.as_str());
         self.expand_type_aliases(parsed, &mut BTreeSet::new())
     }
-    fn expand_type_aliases(
-        &self,
-        parsed: TypeExpr,
-        seen: &mut BTreeSet<String>,
-    ) -> TypeExpr {
+    fn expand_type_aliases(&self, parsed: TypeExpr, seen: &mut BTreeSet<String>) -> TypeExpr {
         match parsed {
             TypeExpr::Primitive(name) => {
                 let Some(target) = self.type_alias_target(&name) else {
@@ -702,15 +701,13 @@ impl<'a> TypeInferenceVisitor<'a> {
                 seen.remove(&name);
                 expanded
             }
-            TypeExpr::Nilable(inner) => TypeExpr::Nilable(Box::new(
-                self.expand_type_aliases(*inner, seen),
-            )),
-            TypeExpr::Array(inner) => TypeExpr::Array(Box::new(
-                self.expand_type_aliases(*inner, seen),
-            )),
-            TypeExpr::Set(inner) => TypeExpr::Set(Box::new(
-                self.expand_type_aliases(*inner, seen),
-            )),
+            TypeExpr::Nilable(inner) => {
+                TypeExpr::Nilable(Box::new(self.expand_type_aliases(*inner, seen)))
+            }
+            TypeExpr::Array(inner) => {
+                TypeExpr::Array(Box::new(self.expand_type_aliases(*inner, seen)))
+            }
+            TypeExpr::Set(inner) => TypeExpr::Set(Box::new(self.expand_type_aliases(*inner, seen))),
             TypeExpr::Hash { key, value } => TypeExpr::Hash {
                 key: Box::new(self.expand_type_aliases(*key, seen)),
                 value: Box::new(self.expand_type_aliases(*value, seen)),
@@ -912,7 +909,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                         "line": node.first_lineno,
                         "declared_type": self.param_types.get(param_name),
                     });
-                    self.local_container_origins.insert(param_name.clone(), origin);
+                    self.local_container_origins
+                        .insert(param_name.clone(), origin);
 
                     if let Some(shape) = self
                         .get_method_param_hash_shape(&owner, &func_name, param_name)
@@ -1548,7 +1546,9 @@ impl<'a> TypeInferenceVisitor<'a> {
                     }));
                 } else if method == "must" && receiver.text == "T" {
                     let arg_nodes = call_arguments(args_node);
-                    if let Some(subject) = arg_nodes.first().filter(|arg| self.provably_non_nil(arg)) {
+                    if let Some(subject) =
+                        arg_nodes.first().filter(|arg| self.provably_non_nil(arg))
+                    {
                         self.facts.dead_nil_checks.push(json!({
                             "path": self.path,
                             "line": node.first_lineno,
@@ -2119,8 +2119,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(value) {
                     if value.r#type != "FCALL" && value.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(value) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes.first().and_then(|arg| {
@@ -2192,8 +2192,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(value) {
                     if value.r#type != "FCALL" && value.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(value) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes.first().and_then(|arg| {
@@ -2321,8 +2321,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(receiver) {
                     if receiver.r#type != "FCALL" && receiver.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(receiver) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes.first().and_then(|arg| {
@@ -2371,6 +2371,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         None
     }
 
+    #[cfg(test)]
     fn hash_shape_index_type_readonly(
         &self,
         receiver: &crate::ast::Node,
@@ -3487,13 +3488,16 @@ impl<'a> TypeInferenceVisitor<'a> {
             return;
         }
         match node.r#type.as_str() {
-            "LASGN" | "DASGN" | "IASGN" | "CVASGN" => {
-                self.collect_hidden_enum_stable_write(node)
-            }
+            "LASGN" | "DASGN" | "IASGN" | "CVASGN" => self.collect_hidden_enum_stable_write(node),
             "CASE" | "CASE2" => {
                 if let Some(condition) = child_node(node, 0) {
                     if let Some(slot) = self.hidden_enum_slot_for_current(condition) {
-                        self.record_hidden_enum_observation(slot, case_literal_values(node), node, "case");
+                        self.record_hidden_enum_observation(
+                            slot,
+                            case_literal_values(node),
+                            node,
+                            "case",
+                        );
                     }
                 }
             }
@@ -3569,14 +3573,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 Some("nonliteral_assignment"),
             );
         } else {
-            self.record_hidden_enum_event(
-                slot,
-                values,
-                node,
-                "assignment",
-                "producer",
-                None,
-            );
+            self.record_hidden_enum_event(slot, values, node, "assignment", "producer", None);
         }
     }
 
@@ -3598,11 +3595,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    fn hidden_enum_assignment_slot(
-        &self,
-        node: &crate::ast::Node,
-        name: &str,
-    ) -> Option<Value> {
+    fn hidden_enum_assignment_slot(&self, node: &crate::ast::Node, name: &str) -> Option<Value> {
         match node.r#type.as_str() {
             "LASGN" | "DASGN" if self.current_params.iter().any(|param| param == name) => {
                 self.hidden_enum_param_slot(name)
@@ -4908,8 +4901,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(receiver) {
                     if receiver.r#type != "FCALL" && receiver.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(receiver) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes
@@ -4971,8 +4964,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(receiver) {
                     if receiver.r#type != "FCALL" && receiver.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(receiver) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes.first().and_then(|arg| {
@@ -5599,7 +5592,7 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     fn check_local_escapes_and_mutations(&mut self, node: &crate::ast::Node) {
-        if let Some((rec, method, args_node)) = match_call(node) {
+        if let Some((rec, method, _args_node)) = match_call(node) {
             if rec.r#type == "LVAR" || rec.r#type == "DVAR" {
                 if let Some(name) = node_symbol(rec) {
                     if matches!(
@@ -5785,8 +5778,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(value) {
                     if value.r#type != "FCALL" && value.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(value) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes
@@ -5856,8 +5849,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(value) {
                     if value.r#type != "FCALL" && value.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(value) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes
@@ -6223,6 +6216,7 @@ fn flow_hint_type(hint: &str, language: &str) -> Option<TypeExpr> {
     languages::flow_hint(hint, language)
 }
 
+#[cfg(test)]
 fn nilable_type(type_text: &str) -> String {
     if type_text == "NilClass" || type_text.starts_with("T.nilable(") {
         type_text.to_string()
@@ -6336,6 +6330,7 @@ fn collect_block_param_names(args_node: &crate::ast::Node) -> Vec<String> {
     names
 }
 
+#[cfg(test)]
 fn extract_param_entries(sig: &str) -> Vec<(String, String)> {
     let Some(params) = extract_call_args(sig, "params") else {
         return Vec::new();

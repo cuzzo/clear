@@ -577,8 +577,7 @@ fn fact_for_method(
     collect_deferred_regions(node, &mut deferred_regions, behavior);
     let state_replays = collect_state_replays(node, &mut domain_registry, behavior);
     let state_progress = collect_state_progress(node, &mut domain_registry, behavior);
-    let state_cursor_domains =
-        collect_state_cursor_domains(node, &mut domain_registry, behavior);
+    let state_cursor_domains = collect_state_cursor_domains(node, &mut domain_registry, behavior);
     let mut collection_growth = BTreeMap::new();
     visit_loops(
         node,
@@ -2576,7 +2575,11 @@ mod tests {
         facts(&document)
     }
 
-    fn language_facts(source: &str, language: Language, suffix: &str) -> Vec<MethodComplexityFacts> {
+    fn language_facts(
+        source: &str,
+        language: Language,
+        suffix: &str,
+    ) -> Vec<MethodComplexityFacts> {
         let mut file = tempfile::Builder::new().suffix(suffix).tempfile().unwrap();
         file.write_all(source.as_bytes()).unwrap();
         let document = syntax::parse_file(file.path().to_path_buf(), language).unwrap();
@@ -2623,10 +2626,19 @@ class ReplayCursor:
             let replay = rows.iter().find(|row| row.function == "speculate").unwrap();
             assert_eq!(replay.state_replays.len(), 1);
             assert_eq!(replay.state_replays[0].checkpoint_local, "checkpoint");
-            assert_eq!(replay.state_replays[0].replayed_calls[0].message, "parse_value");
-            let value = rows.iter().find(|row| row.function == "parse_value").unwrap();
+            assert_eq!(
+                replay.state_replays[0].replayed_calls[0].message,
+                "parse_value"
+            );
+            let value = rows
+                .iter()
+                .find(|row| row.function == "parse_value")
+                .unwrap();
             assert_eq!(value.state_cursor_domains.len(), 1);
-            assert_eq!(value.state_cursor_domains[0].cursor_domain, "state:ReplayCursor:@cursor");
+            assert_eq!(
+                value.state_cursor_domains[0].cursor_domain,
+                "state:ReplayCursor:@cursor"
+            );
             assert_eq!(value.state_progress.len(), 1, "{value:#?}");
         }
 
@@ -2680,10 +2692,13 @@ class Cursor:
 
         for rows in [&ruby, &python] {
             let scan = rows.iter().find(|row| row.function == "scan").unwrap();
-            assert!(scan.state_cursor_domains.iter().any(|cursor| {
-                cursor.cursor_domain == "state:Cursor:@position"
-                    && cursor.collection_domain == "state:Cursor:@items"
-            }), "{scan:#?}");
+            assert!(
+                scan.state_cursor_domains.iter().any(|cursor| {
+                    cursor.cursor_domain == "state:Cursor:@position"
+                        && cursor.collection_domain == "state:Cursor:@items"
+                }),
+                "{scan:#?}"
+            );
         }
     }
 
@@ -2828,7 +2843,10 @@ func search(left, right int) int {
         assert_eq!(iteration.execution_multiplicity, "O(N)");
         assert_eq!(iteration.evidence_gap, None);
         assert!(iteration.symbolic_time.as_ref().unwrap().complete);
-        assert_eq!(symbolic_factors(&rows, "search"), [("left + right".to_string(), 1)]);
+        assert_eq!(
+            symbolic_factors(&rows, "search"),
+            [("left + right".to_string(), 1)]
+        );
     }
 
     #[test]

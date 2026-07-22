@@ -5,11 +5,10 @@ use super::cfg::ControlFlowProfile;
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     configured_intrinsic_call_complexity, eliminable_guard_from_call, exact_direct_call_name,
-    native_pointer_nullability_contract, nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
-    type_before_parameter_name, NormalizedCallComplexity,
-    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
-    NormalizedNullableOperation, NormalizedOwner,
-    NormalizedSemanticEffect,
+    native_pointer_nullability_contract, nil_guard_from_predicates, scip_descriptor_owner,
+    scip_global_parts, type_before_parameter_name, NormalizedCallComplexity, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    NormalizedNullableOperation, NormalizedOwner, NormalizedSemanticEffect,
 };
 use super::{CallSite, ExternalSymbolMetadata};
 use crate::ast::{Child, Node, Span};
@@ -64,7 +63,11 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
     // global came from libc rather than a project header. Preserve that
     // uncertainty instead of turning a familiar spelling into fake proof.
     ExternalSymbolMetadata {
-        scope: if package == "." { "external" } else { "dependency" },
+        scope: if package == "." {
+            "external"
+        } else {
+            "dependency"
+        },
         missing_cost_kind: "dependency_cost_model_missing".to_string(),
         parametric_cost: None,
     }
@@ -93,13 +96,14 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
                 nil_behavior: "undefined_behavior",
             });
         }
-        let subject = (node.r#type == "POINTER_EXPRESSION" && node.text.trim_start().starts_with('*'))
-            .then(|| node.children.first().and_then(crate::ast::node))
-            .flatten()
-            .filter(|subject| subject.r#type == "LVAR")?
-            .text
-            .trim()
-            .to_string();
+        let subject = (node.r#type == "POINTER_EXPRESSION"
+            && node.text.trim_start().starts_with('*'))
+        .then(|| node.children.first().and_then(crate::ast::node))
+        .flatten()
+        .filter(|subject| subject.r#type == "LVAR")?
+        .text
+        .trim()
+        .to_string();
         (!subject.is_empty()).then_some(NormalizedNullableOperation {
             subject,
             operation_kind: "pointer_dereference",
@@ -295,7 +299,11 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
             if let Some(end) = param[start..].find(')') {
                 let inner = &param[start + 2..start + end];
                 let name = inner.trim_start_matches('*').trim();
-                if !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                if !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                {
                     return Some(name.to_string());
                 }
             }
@@ -412,7 +420,9 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
 
 fn local_call_subject(node: &Node) -> Option<String> {
     match node.children.first()? {
-        Child::Symbol(subject) | Child::String(subject) => (!subject.trim().is_empty()).then(|| subject.trim().to_string()),
+        Child::Symbol(subject) | Child::String(subject) => {
+            (!subject.trim().is_empty()).then(|| subject.trim().to_string())
+        }
         _ => None,
     }
 }
@@ -423,6 +433,7 @@ pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
 }
 
+#[cfg(test)]
 fn span(node: &Node) -> Span {
     [
         node.first_lineno,
@@ -497,6 +508,7 @@ fn simple_identifier(name: &str) -> bool {
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
+#[cfg(test)]
 fn is_simple_name(name: &str) -> bool {
     !name.is_empty()
         && !name.contains(' ')
@@ -507,7 +519,7 @@ fn is_simple_name(name: &str) -> bool {
         && name
             .chars()
             .next()
-            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
         && name
             .chars()
             .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
@@ -541,7 +553,10 @@ mod tests {
             ..node("VCALL", "callback()")
         };
         assert_eq!(local_call_subject(&malformed), None);
-        assert_eq!(CNormalizedBehavior.function_value_calls_are_local_reads(), true);
+        assert_eq!(
+            CNormalizedBehavior.function_value_calls_are_local_reads(),
+            true
+        );
 
         let address = Node {
             children: vec![Child::Node(Box::new(node("LVAR", "value")))],
@@ -573,10 +588,7 @@ mod tests {
             behavior.nullable_declared_type_contract("Widget * _Nullable"),
             Some("nullable_declared_type")
         );
-        assert_eq!(
-            behavior.nullable_declared_type_contract("Widget *"),
-            None
-        );
+        assert_eq!(behavior.nullable_declared_type_contract("Widget *"), None);
         assert_eq!(
             behavior.declared_local_type("Widget * _Nullable value = load_widget()", "value"),
             Some("Widget * _Nullable".to_string())

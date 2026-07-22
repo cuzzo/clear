@@ -150,6 +150,16 @@ pub fn normalize_tree(root: TreeSitterNode<'_>, source: &str, language: Language
     TreeSitterNormalizer::new(source, language).normalize(root)
 }
 
+/// Returns the normalized tree plus exact parser-call identities captured by
+/// the normalizer before adapters transform source nodes.
+pub(crate) fn normalize_tree_with_call_origins(
+    root: TreeSitterNode<'_>,
+    source: &str,
+    language: Language,
+) -> (Node, Vec<(Span, Span)>) {
+    TreeSitterNormalizer::new(source, language).normalize_with_call_origins(root)
+}
+
 pub(crate) fn raw_call_sites(
     root: TreeSitterNode<'_>,
     source: &str,

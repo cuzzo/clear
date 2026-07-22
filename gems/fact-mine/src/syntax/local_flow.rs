@@ -1472,14 +1472,22 @@ mod tests {
               }\n",
         )
         .unwrap();
-        let summaries = scan_files(&[file.path().to_path_buf()], crate::syntax::Language::C).unwrap();
+        let summaries =
+            scan_files(&[file.path().to_path_buf()], crate::syntax::Language::C).unwrap();
         let declaration = summaries[0]
             .statements
             .iter()
             .find(|statement| statement.source.contains("numevents = 0"))
             .expect("declaration statement");
-        assert!(declaration.reads.is_empty(), "reads should be empty, got {:?}", declaration.reads);
-        assert_eq!(declaration.writes, BTreeSet::from(["numevents".to_string()]));
+        assert!(
+            declaration.reads.is_empty(),
+            "reads should be empty, got {:?}",
+            declaration.reads
+        );
+        assert_eq!(
+            declaration.writes,
+            BTreeSet::from(["numevents".to_string()])
+        );
         assert!(declaration.dependencies.is_empty());
     }
 
@@ -1505,7 +1513,11 @@ mod tests {
               \x20       )\n",
         )
         .unwrap();
-        let summaries = scan_files(&[file.path().to_path_buf()], crate::syntax::Language::Python).unwrap();
+        let summaries = scan_files(
+            &[file.path().to_path_buf()],
+            crate::syntax::Language::Python,
+        )
+        .unwrap();
         let call_statement = summaries[0]
             .statements
             .iter()
@@ -1549,14 +1561,24 @@ mod tests {
               \x20       self._thread_local.last_nonce = nonce\n",
         )
         .unwrap();
-        let summaries = scan_files(&[file.path().to_path_buf()], crate::syntax::Language::Python).unwrap();
-        let all_statements = summaries.iter().flat_map(|summary| &summary.statements).collect::<Vec<_>>();
+        let summaries = scan_files(
+            &[file.path().to_path_buf()],
+            crate::syntax::Language::Python,
+        )
+        .unwrap();
+        let all_statements = summaries
+            .iter()
+            .flat_map(|summary| &summary.statements)
+            .collect::<Vec<_>>();
 
         let init_statement = all_statements
             .iter()
             .find(|statement| statement.source.contains("threading.local()"))
             .expect("declaration statement");
-        assert_eq!(init_statement.writes, BTreeSet::from(["@_thread_local".to_string()]));
+        assert_eq!(
+            init_statement.writes,
+            BTreeSet::from(["@_thread_local".to_string()])
+        );
 
         let mutation_statement = all_statements
             .iter()
@@ -1585,7 +1607,10 @@ mod tests {
     fn indexed_self_attribute_write_still_returns_its_writes() {
         let behavior = crate::syntax::python::behavior();
         let writes = textual_local_writes("self.cache[index].status = 1", behavior);
-        assert!(!writes.is_empty(), "expected the indexed write's targets to survive, got none");
+        assert!(
+            !writes.is_empty(),
+            "expected the indexed write's targets to survive, got none"
+        );
     }
 
     // Real bug, found auditing wrk/src/http_parser.c's http_parser_execute:
@@ -1610,7 +1635,8 @@ mod tests {
               }\n",
         )
         .unwrap();
-        let summaries = scan_files(&[file.path().to_path_buf()], crate::syntax::Language::C).unwrap();
+        let summaries =
+            scan_files(&[file.path().to_path_buf()], crate::syntax::Language::C).unwrap();
         let loop_statement = summaries[0]
             .statements
             .iter()

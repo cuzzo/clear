@@ -7,11 +7,11 @@ use super::normalized_behavior::{
     balanced_selector_name, configured_collection_operation, configured_intrinsic_call_complexity,
     configured_non_call_construct, configured_semantic_symbol_call_complexity,
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
-    eliminable_guard_from_call, exact_direct_call_name, native_pointer_nullability_contract, nil_guard_from_predicates, scip_descriptor_owner,
-    scip_global_parts, type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
+    eliminable_guard_from_call, exact_direct_call_name, native_pointer_nullability_contract,
+    nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
+    type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
     NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedNullableOperation,
-    NormalizedSemanticEffect,
-    NormalizedStateRead,
+    NormalizedSemanticEffect, NormalizedStateRead,
 };
 use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata};
 use crate::ast::{Child, Node, Span};
@@ -236,18 +236,19 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
                 .map(|receiver| receiver.text.trim().to_string())
                 .filter(|subject| !subject.is_empty())
                 .map(|subject| NormalizedNullableOperation {
-                subject,
-                operation_kind: "pointer_selector",
-                nil_behavior: "undefined_behavior",
-            });
+                    subject,
+                    operation_kind: "pointer_selector",
+                    nil_behavior: "undefined_behavior",
+                });
         }
-        let subject = (node.r#type == "POINTER_EXPRESSION" && node.text.trim_start().starts_with('*'))
-            .then(|| node.children.first().and_then(crate::ast::node))
-            .flatten()
-            .filter(|subject| subject.r#type == "LVAR")?
-            .text
-            .trim()
-            .to_string();
+        let subject = (node.r#type == "POINTER_EXPRESSION"
+            && node.text.trim_start().starts_with('*'))
+        .then(|| node.children.first().and_then(crate::ast::node))
+        .flatten()
+        .filter(|subject| subject.r#type == "LVAR")?
+        .text
+        .trim()
+        .to_string();
         (!subject.is_empty()).then_some(NormalizedNullableOperation {
             subject,
             operation_kind: "pointer_dereference",
@@ -446,7 +447,11 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
             if let Some(end) = param[start..].find(')') {
                 let inner = &param[start + 2..start + end];
                 let name = inner.trim_start_matches('*').trim();
-                if !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                if !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                {
                     return Some(name.to_string());
                 }
             }
@@ -558,7 +563,9 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
 
 fn local_call_subject(node: &Node) -> Option<String> {
     match node.children.first()? {
-        Child::Symbol(subject) | Child::String(subject) => (!subject.trim().is_empty()).then(|| subject.trim().to_string()),
+        Child::Symbol(subject) | Child::String(subject) => {
+            (!subject.trim().is_empty()).then(|| subject.trim().to_string())
+        }
         _ => None,
     }
 }
@@ -608,13 +615,16 @@ fn cpp_member_selector_is_invoked(source: &str, message: &str) -> Option<bool> {
         })
         .max();
     let offset = explicit_offset.or_else(|| {
-        source.match_indices(selector).filter_map(|(offset, _)| {
-            let before = source[..offset].chars().next_back();
-            let end = offset + selector.len();
-            let after = source[end..].chars().next();
-            let identifier = |character: char| character == '_' || character.is_alphanumeric();
-            (!before.is_some_and(identifier) && !after.is_some_and(identifier)).then_some(end)
-        }).last()
+        source
+            .match_indices(selector)
+            .filter_map(|(offset, _)| {
+                let before = source[..offset].chars().next_back();
+                let end = offset + selector.len();
+                let after = source[end..].chars().next();
+                let identifier = |character: char| character == '_' || character.is_alphanumeric();
+                (!before.is_some_and(identifier) && !after.is_some_and(identifier)).then_some(end)
+            })
+            .last()
     })?;
     let suffix = source[offset..].trim_start();
     if !suffix.starts_with('<') {
@@ -687,7 +697,10 @@ mod tests {
             ..node("VCALL", "callback()")
         };
         assert_eq!(local_call_subject(&malformed), None);
-        assert_eq!(CppNormalizedBehavior.function_value_calls_are_local_reads(), true);
+        assert_eq!(
+            CppNormalizedBehavior.function_value_calls_are_local_reads(),
+            true
+        );
 
         let address = Node {
             children: vec![Child::Node(Box::new(node("LVAR", "value")))],
@@ -753,7 +766,10 @@ mod tests {
             ],
             ..node("FCALL", "static_cast<int *>(value)")
         };
-        assert_eq!(behavior.nullable_call_result_contract(&malformed_cast), None);
+        assert_eq!(
+            behavior.nullable_call_result_contract(&malformed_cast),
+            None
+        );
         assert_eq!(
             behavior.nullable_declared_type_contract("gsl::not_null<Widget *>"),
             Some("non_null_declared_type")

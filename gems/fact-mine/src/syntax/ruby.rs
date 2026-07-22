@@ -921,7 +921,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 
     fn clean_receiver(&self, receiver: &str) -> String {
-        let mut t = receiver.replace('@', "");
+        let t = receiver.replace('@', "");
         t.replace('$', "")
     }
 
@@ -985,7 +985,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
 
     fn static_return_type(&self, message: &str, receiver_type: Option<&str>) -> Option<String> {
         let r = receiver_type.unwrap_or("T.untyped");
-        let (receiver_bare, _) = if r.starts_with("T.nilable(") && r.ends_with(')') {
+        let (_receiver_bare, _) = if r.starts_with("T.nilable(") && r.ends_with(')') {
             let bare = r["T.nilable(".len()..r.len() - 1].to_string();
             (bare, true)
         } else {
@@ -1334,10 +1334,11 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         eliminable_guard_from_call(call, RUBY_GUARD_MIDS)
             .or_else(|| effect_from_call_with_lexicon(call, &RUBY_EFFECT_LEXICON))
             .or_else(|| {
-                self.mutating_receiver_message(&call.message).then(|| NormalizedSemanticEffect {
-                    kind: "hidden_mutation".to_string(),
-                    detail: call.message.clone(),
-                })
+                self.mutating_receiver_message(&call.message)
+                    .then(|| NormalizedSemanticEffect {
+                        kind: "hidden_mutation".to_string(),
+                        detail: call.message.clone(),
+                    })
             })
     }
 
@@ -2322,7 +2323,7 @@ mod tests {
         );
 
         // static_call_return_type for Arrays, Hashes, and Iters
-        let mut index_arg = Node {
+        let index_arg = Node {
             r#type: "RANGE".to_string(),
             children: Vec::new(),
             first_lineno: 10,
@@ -2331,7 +2332,7 @@ mod tests {
             last_column: 4,
             text: "1..3".to_string(),
         };
-        let mut args_node_array = Node {
+        let args_node_array = Node {
             r#type: "ARGS".to_string(),
             children: vec![Child::Node(Box::new(index_arg))],
             first_lineno: 10,
@@ -2340,7 +2341,7 @@ mod tests {
             last_column: 4,
             text: "(1..3)".to_string(),
         };
-        let mut lookup_node = Node {
+        let lookup_node = Node {
             r#type: "CALL".to_string(),
             children: vec![
                 Child::Node(Box::new(node("IDENT", "arr"))),
@@ -2396,7 +2397,7 @@ mod tests {
         assert_eq!(behavior.parameter_list_source("def foo(a"), "");
 
         // declarative_owner fallback paths
-        let mut invalid_lasgn = Node {
+        let invalid_lasgn = Node {
             r#type: "LASGN".to_string(),
             children: vec![Child::Integer(123)],
             first_lineno: 10,
@@ -2407,7 +2408,7 @@ mod tests {
         };
         assert!(behavior.declarative_owner(&invalid_lasgn, "").is_none());
 
-        let mut invalid_call = Node {
+        let invalid_call = Node {
             r#type: "CALL".to_string(),
             children: vec![
                 Child::Node(Box::new(node("IDENT", "Struct"))),
@@ -2419,7 +2420,7 @@ mod tests {
             last_column: 4,
             text: "Struct.new".to_string(),
         };
-        let mut lasgn_with_invalid_call = Node {
+        let lasgn_with_invalid_call = Node {
             r#type: "LASGN".to_string(),
             children: vec![
                 Child::Symbol("MyAlias".to_string()),
@@ -2436,7 +2437,7 @@ mod tests {
             .is_none());
 
         // struct_declaration_fields non-node children
-        let mut invalid_args = Node {
+        let invalid_args = Node {
             r#type: "ARGS".to_string(),
             children: vec![
                 Child::Integer(123),
@@ -2448,7 +2449,7 @@ mod tests {
             last_column: 4,
             text: "(123)".to_string(),
         };
-        let mut invalid_call_for_struct = Node {
+        let invalid_call_for_struct = Node {
             r#type: "CALL".to_string(),
             children: vec![
                 Child::Node(Box::new(node("IDENT", "new"))),
@@ -2461,7 +2462,7 @@ mod tests {
             last_column: 4,
             text: "new(123)".to_string(),
         };
-        let mut invalid_struct_node = Node {
+        let invalid_struct_node = Node {
             r#type: "LASGN".to_string(),
             children: vec![
                 Child::Node(Box::new(node("IDENT", "Struct"))),
@@ -2489,7 +2490,7 @@ mod tests {
         );
 
         // index lookup empty args
-        let mut empty_args_node = Node {
+        let empty_args_node = Node {
             r#type: "ARGS".to_string(),
             children: Vec::new(),
             first_lineno: 10,
@@ -2498,7 +2499,7 @@ mod tests {
             last_column: 4,
             text: "()".to_string(),
         };
-        let mut lookup_empty_args = Node {
+        let lookup_empty_args = Node {
             r#type: "CALL".to_string(),
             children: vec![
                 Child::Node(Box::new(node("IDENT", "arr"))),

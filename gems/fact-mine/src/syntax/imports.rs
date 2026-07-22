@@ -15,7 +15,11 @@ pub struct ImportFact {
     pub line: u32,
 }
 
-pub(crate) fn extract_file_imports(root: Node, source: &str, language: Language) -> Vec<ImportFact> {
+pub(crate) fn extract_file_imports(
+    root: Node,
+    source: &str,
+    language: Language,
+) -> Vec<ImportFact> {
     let mut imports = Vec::new();
     match language {
         Language::JavaScript | Language::TypeScript => {
@@ -97,7 +101,10 @@ pub(crate) fn extract_file_imports(root: Node, source: &str, language: Language)
     imports
 }
 
-pub(crate) fn symbol_imports(explicit_imports: &[(String, String)], _language: Language) -> Vec<ImportFact> {
+pub(crate) fn symbol_imports(
+    explicit_imports: &[(String, String)],
+    _language: Language,
+) -> Vec<ImportFact> {
     explicit_imports
         .iter()
         .map(|(alias, target)| ImportFact {

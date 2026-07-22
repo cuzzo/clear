@@ -835,8 +835,10 @@ mod tests {
         use crate::syntax::{self, Language};
         use std::io::Write;
         let mut file = tempfile::Builder::new().suffix(".py").tempfile().unwrap();
-        file.write_all(b"class Foo:\n    def __init__(self):\n        self.tokens: int = 1\n").unwrap();
-        let documents = syntax::parse_files(&[file.path().to_path_buf()], Language::Python).unwrap();
+        file.write_all(b"class Foo:\n    def __init__(self):\n        self.tokens: int = 1\n")
+            .unwrap();
+        let documents =
+            syntax::parse_files(&[file.path().to_path_buf()], Language::Python).unwrap();
         let document = &documents[0];
 
         assert_eq!(document.state_declarations.len(), 1);

@@ -162,7 +162,8 @@ impl<'a> StatefulSyntaxPass<'a> {
             &nullable_states,
         );
         let presence_correlations = nullable::project_presence_correlations(
-            &facts.presence_correlation_seeds, &control_flow,
+            &facts.presence_correlation_seeds,
+            &control_flow,
         );
 
         StatefulSyntaxMetadata {

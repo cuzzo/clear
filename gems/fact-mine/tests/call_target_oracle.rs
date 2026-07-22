@@ -292,14 +292,14 @@ fn call_resolution_coverage_has_an_honest_executable_denominator() -> Result<()>
         .clone();
     candidate.candidate_targets = vec![merged.methods[0].id.clone()];
     candidate.candidate_reason = Some("compiler_closed_implementation_set".to_string());
-    let candidate_coverage = profile::summarize_call_resolution(
-        &merged.owners,
-        &merged.methods,
-        &[candidate],
-    );
+    let candidate_coverage =
+        profile::summarize_call_resolution(&merged.owners, &merged.methods, &[candidate]);
     assert_eq!(candidate_coverage.accounted_call_percent, 0.0);
     assert_eq!(candidate_coverage.semantically_accounted_call_sites, 1);
-    assert_eq!(candidate_coverage.semantically_accounted_call_percent, 100.0);
+    assert_eq!(
+        candidate_coverage.semantically_accounted_call_percent,
+        100.0
+    );
     assert_eq!(
         coverage
             .unresolved_by_reason

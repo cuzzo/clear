@@ -87,7 +87,9 @@ pub(super) fn strip_linkage_macros_before_type_name(source: &str) -> String {
         .expect("static regex is valid");
     let mut result = source.as_bytes().to_vec();
     for caps in pattern.captures_iter(&masked) {
-        let macro_token = caps.get(1).expect("group 1 always matches with the outer match");
+        let macro_token = caps
+            .get(1)
+            .expect("group 1 always matches with the outer match");
         for pos in macro_token.range() {
             result[pos] = b' ';
         }
@@ -219,11 +221,19 @@ mod tests {
 
     #[test]
     fn strips_linkage_macro_and_preserves_byte_length_and_positions() {
-        let source = "class PLOG_LINKAGE Logger : public IAppender {\npublic:\n    void write() {}\n};\n";
+        let source =
+            "class PLOG_LINKAGE Logger : public IAppender {\npublic:\n    void write() {}\n};\n";
         let stripped = strip_linkage_macros_before_type_name(source);
-        assert_eq!(stripped.len(), source.len(), "must preserve total byte length");
+        assert_eq!(
+            stripped.len(),
+            source.len(),
+            "must preserve total byte length"
+        );
         assert!(
-            stripped.contains(&format!("class {} Logger : public IAppender {{", " ".repeat("PLOG_LINKAGE".len()))),
+            stripped.contains(&format!(
+                "class {} Logger : public IAppender {{",
+                " ".repeat("PLOG_LINKAGE".len())
+            )),
             "expected the macro token blanked with equal-length spaces, got {stripped:?}"
         );
         // Everything after the macro token keeps its original byte offset.
@@ -292,9 +302,9 @@ mod tests {
         let buffer = strip_native_nullability_annotations(source);
         let tree = parser.parse(&buffer, None).unwrap();
         fn find_pointer(node: TreeSitterNode<'_>) -> Option<TreeSitterNode<'_>> {
-            (node.kind() == "pointer_declarator").then_some(node).or_else(|| {
-                named_children(node).into_iter().find_map(find_pointer)
-            })
+            (node.kind() == "pointer_declarator")
+                .then_some(node)
+                .or_else(|| named_children(node).into_iter().find_map(find_pointer))
         }
         let pointer = find_pointer(tree.root_node()).expect("pointer declarator");
         assert_eq!(

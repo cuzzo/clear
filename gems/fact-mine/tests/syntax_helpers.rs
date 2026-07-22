@@ -203,5 +203,8 @@ fn nil_kill_profile_cli_is_deterministic_across_worker_counts() {
     let output: serde_json::Value = serde_json::from_slice(&sequential.stdout).unwrap();
     assert!(output["nullable_states"].as_array().unwrap().len() >= 2);
     assert!(output["nullable_operations"].as_array().unwrap().len() >= 2);
-    assert!(!output["hidden_enum_observations"].as_array().unwrap().is_empty());
+    assert!(!output["hidden_enum_observations"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }

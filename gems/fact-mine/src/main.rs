@@ -36,17 +36,17 @@ fn run() -> Result<()> {
                     let mut batches: std::collections::BTreeMap<&'static str, Vec<PathBuf>> =
                         std::collections::BTreeMap::new();
                     for file in &files {
-                        let extension = file
-                            .extension()
-                            .and_then(|ext| ext.to_str())
-                            .unwrap_or("");
+                        let extension = file.extension().and_then(|ext| ext.to_str()).unwrap_or("");
                         let language = Language::for_extension(extension).with_context(|| {
                             format!(
                                 "cannot infer language for {} (pass --language to override)",
                                 file.display()
                             )
                         })?;
-                        batches.entry(language.as_str()).or_default().push(file.clone());
+                        batches
+                            .entry(language.as_str())
+                            .or_default()
+                            .push(file.clone());
                     }
                     let mut merged: Option<serde_json::Value> = None;
                     for (language_name, batch) in batches {
@@ -56,7 +56,8 @@ fn run() -> Result<()> {
                         match merged.as_mut() {
                             None => merged = Some(chunk),
                             Some(out) => {
-                                let docs = chunk["documents"].as_array().cloned().unwrap_or_default();
+                                let docs =
+                                    chunk["documents"].as_array().cloned().unwrap_or_default();
                                 out["documents"]
                                     .as_array_mut()
                                     .expect("documents array")
@@ -135,8 +136,14 @@ fn run() -> Result<()> {
                 // Corpus-resolved call edges plus the method index needed to
                 // join them: the architecture layer consumes this directly.
                 "edges" => {
-                    let method_index: std::collections::BTreeMap<&str, &fact_mine_rust::profile::MethodRecord> =
-                        merged.methods.iter().map(|method| (method.id.as_str(), method)).collect();
+                    let method_index: std::collections::BTreeMap<
+                        &str,
+                        &fact_mine_rust::profile::MethodRecord,
+                    > = merged
+                        .methods
+                        .iter()
+                        .map(|method| (method.id.as_str(), method))
+                        .collect();
                     let edges = merged
                         .calls
                         .iter()
@@ -184,7 +191,9 @@ fn run() -> Result<()> {
                         "coverage": merged.call_resolution_coverage,
                     }))?
                 }
-                other => bail!("unsupported call-resolution format: {other}; use text, json, or edges"),
+                other => {
+                    bail!("unsupported call-resolution format: {other}; use text, json, or edges")
+                }
             };
             if let Some(ref output_path) = output {
                 fs::write(output_path, rendered)?;

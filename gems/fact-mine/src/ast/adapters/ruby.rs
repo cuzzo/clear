@@ -1089,7 +1089,7 @@ mod tests {
         assert!(!adapter.dynamic_constant_pattern_text(""));
 
         // normalizer scope / boundary / definition / assignment
-        let mut normalizer = TreeSitterNormalizer::new("x = 1", Language::Ruby);
+        let normalizer = TreeSitterNormalizer::new("x = 1", Language::Ruby);
         let tree_var = raw_tree("def foo(x); y = 1; end");
         let mut nodes_var = Vec::new();
         collect_all_nodes(tree_var.root_node(), &mut nodes_var);

@@ -47,8 +47,10 @@ fn declarator_before_initializer(text: &str) -> &str {
         }
         let previous = index.checked_sub(1).and_then(|i| bytes.get(i)).copied();
         let next = bytes.get(index + 1).copied();
-        if matches!(previous, Some(b'=' | b'!' | b'<' | b'>' | b'+' | b'-' | b'*' | b'/'))
-            || matches!(next, Some(b'=' | b'>'))
+        if matches!(
+            previous,
+            Some(b'=' | b'!' | b'<' | b'>' | b'+' | b'-' | b'*' | b'/')
+        ) || matches!(next, Some(b'=' | b'>'))
         {
             continue;
         }
@@ -582,10 +584,12 @@ fn interlocked_ref_argument_field(node: &Node) -> Option<String> {
         return None;
     }
     let argument = node.children.iter().find_map(|c| match c {
-        crate::ast::Child::Node(n) if n.r#type == "LIST" => n.children.iter().find_map(|a| match a {
-            crate::ast::Child::Node(a) if a.r#type == "ARGUMENT" => Some(a.text.trim()),
-            _ => None,
-        }),
+        crate::ast::Child::Node(n) if n.r#type == "LIST" => {
+            n.children.iter().find_map(|a| match a {
+                crate::ast::Child::Node(a) if a.r#type == "ARGUMENT" => Some(a.text.trim()),
+                _ => None,
+            })
+        }
         _ => None,
     })?;
     let reference = argument

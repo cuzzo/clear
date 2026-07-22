@@ -412,6 +412,15 @@ pub struct CallResolutionCoverage {
     pub inherited_target_opportunities_by_language: BTreeMap<String, usize>,
 }
 
+/// Compact, FactMine-owned evidence for consumers that need to know whether a
+/// call-sensitive finding depends on an unresolved call target.  This avoids
+/// running a full Espalier profile merely to reconstruct that single boundary.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct CallResolutionEvidence {
+    pub call_resolution_coverage: CallResolutionCoverage,
+    pub unresolved_function_spans_by_file: BTreeMap<String, Vec<[usize; 4]>>,
+}
+
 impl CallResolutionCoverage {
     pub fn is_empty(&self) -> bool {
         self.total_call_sites == 0 && self.raw_parser_call_sites == 0
@@ -650,6 +659,68 @@ pub struct StructDeclaration {
 // ---------------------------------------------------------------------------
 // Extraction
 // ---------------------------------------------------------------------------
+
+/// Resolve only the call facts needed to establish consumer proof boundaries.
+///
+/// This intentionally avoids AST re-parsing, flow inference, shape analysis,
+/// and every other Espalier profile output.  It operates on the normalized
+/// `Document` artifact already produced by FactMine and retains resolution
+/// ownership here rather than asking each consumer to replay it.
+pub fn call_resolution_evidence(documents: &[Document]) -> CallResolutionEvidence {
+    let mut owners = Vec::new();
+    let mut methods = Vec::new();
+    let mut type_definitions = Vec::new();
+    let mut calls = Vec::new();
+
+    for document in documents {
+        let language = document.language.as_str().to_string();
+        let path = document.file.clone();
+        let lines = std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .lines()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        owners.extend(extract_owners(document, &language, &path));
+        methods.extend(extract_methods(&lines, document, &language, &path));
+        type_definitions.extend(extract_type_definitions(&lines, document, &language, &path));
+        calls.extend(extract_calls(document, &language, &path));
+    }
+
+    owners.sort_by(|left, right| left.id.cmp(&right.id));
+    owners.dedup_by(|left, right| left.id == right.id);
+    methods.sort_by(|left, right| left.id.cmp(&right.id));
+    methods.dedup_by(|left, right| left.id == right.id);
+    type_definitions.sort_by(|left, right| left.id.cmp(&right.id));
+    type_definitions.dedup_by(|left, right| left.id == right.id);
+    resolve_project_calls(&owners, &methods, &type_definitions, &mut calls);
+    calls.sort_by(|left, right| left.id.cmp(&right.id));
+    calls.dedup_by(|left, right| left.id == right.id);
+    annotate_call_resolution_proofs(&owners, &methods, &mut calls);
+
+    let unresolved_sources = calls
+        .iter()
+        .filter(|call| call.resolution_missing_proof.is_some())
+        .map(|call| call.source.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut unresolved_function_spans_by_file = BTreeMap::new();
+    for document in documents {
+        let mut spans = methods
+            .iter()
+            .filter(|method| {
+                method.path == document.file && unresolved_sources.contains(method.id.as_str())
+            })
+            .filter_map(|method| method.span)
+            .collect::<Vec<_>>();
+        spans.sort_unstable();
+        spans.dedup();
+        unresolved_function_spans_by_file.insert(document.file.clone(), spans);
+    }
+
+    CallResolutionEvidence {
+        call_resolution_coverage: summarize_call_resolution(&owners, &methods, &calls),
+        unresolved_function_spans_by_file,
+    }
+}
 
 /// Extract enriched facts from a set of documents.
 pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
@@ -1005,6 +1076,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     let (raw_calls_not_normalized, normalized_calls_without_raw_span) = unmatched_call_origins(
         &raw_call_spans,
         &normalized_call_spans,
+        &document.normalization_call_origins,
         &document.call_raw_origin_projections,
     );
     let raw_call_kinds = document
@@ -1122,7 +1194,11 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         } else {
             Vec::new()
         },
-        presence_correlations: if nil_kill { document.presence_correlations.clone() } else { Vec::new() },
+        presence_correlations: if nil_kill {
+            document.presence_correlations.clone()
+        } else {
+            Vec::new()
+        },
         dispatcher_inferences,
         hash_record_member_calls,
         param_origins,
@@ -2086,8 +2162,7 @@ fn percentage(numerator: usize, denominator: usize) -> f64 {
 }
 
 fn span_contains(outer: [usize; 4], inner: [usize; 4]) -> bool {
-    (outer[0], outer[1]) <= (inner[0], inner[1])
-        && (inner[2], inner[3]) <= (outer[2], outer[3])
+    (outer[0], outer[1]) <= (inner[0], inner[1]) && (inner[2], inner[3]) <= (outer[2], outer[3])
 }
 
 /// Match calls only through an origin recorded during normalization. A
@@ -2098,25 +2173,52 @@ fn span_contains(outer: [usize; 4], inner: [usize; 4]) -> bool {
 fn unmatched_call_origins(
     raw: &BTreeSet<[usize; 4]>,
     normalized: &BTreeSet<[usize; 4]>,
-    origins: &[syntax::CallRawOriginProjection],
+    normalization_origins: &[syntax::CallRawOriginProjection],
+    emitted_call_origins: &[syntax::CallRawOriginProjection],
 ) -> (Vec<[usize; 4]>, Vec<[usize; 4]>) {
     let mut unmatched_raw = raw.clone();
     let mut unmatched_normalized = normalized.clone();
+    let mut normalized_nodes_by_raw = BTreeMap::<syntax::Span, BTreeSet<syntax::Span>>::new();
+    for origin in normalization_origins {
+        if raw.contains(&origin.raw_call_span) {
+            normalized_nodes_by_raw
+                .entry(origin.raw_call_span)
+                .or_default()
+                .insert(origin.normalized_call_span);
+        }
+    }
+    for (raw_span, normalized_nodes) in normalized_nodes_by_raw {
+        if normalized_nodes.len() == 1 {
+            unmatched_raw.remove(&raw_span);
+        }
+    }
+
     let mut normalized_by_raw = BTreeMap::<syntax::Span, BTreeSet<syntax::Span>>::new();
     let mut raw_by_normalized = BTreeMap::<syntax::Span, BTreeSet<syntax::Span>>::new();
-    for origin in origins {
-        if !raw.contains(&origin.raw_call_span) || !normalized.contains(&origin.normalized_call_span) {
+    for origin in emitted_call_origins {
+        if !raw.contains(&origin.raw_call_span)
+            || !normalized.contains(&origin.normalized_call_span)
+        {
             continue;
         }
-        normalized_by_raw.entry(origin.raw_call_span).or_default().insert(origin.normalized_call_span);
-        raw_by_normalized.entry(origin.normalized_call_span).or_default().insert(origin.raw_call_span);
+        normalized_by_raw
+            .entry(origin.raw_call_span)
+            .or_default()
+            .insert(origin.normalized_call_span);
+        raw_by_normalized
+            .entry(origin.normalized_call_span)
+            .or_default()
+            .insert(origin.raw_call_span);
     }
     for (raw_span, normalized_spans) in normalized_by_raw {
         if normalized_spans.len() != 1 {
             continue;
         }
         let normalized_span = *normalized_spans.first().expect("one normalized origin");
-        if raw_by_normalized.get(&normalized_span).is_some_and(|raw_spans| raw_spans.len() == 1) {
+        if raw_by_normalized
+            .get(&normalized_span)
+            .is_some_and(|raw_spans| raw_spans.len() == 1)
+        {
             unmatched_raw.remove(&raw_span);
             unmatched_normalized.remove(&normalized_span);
         }
@@ -3319,7 +3421,12 @@ fn extract_methods(
             MethodRecord {
                 id: function_id(language, path, fn_def),
                 semantic_symbol: None,
-                owner_id: owner_id(language, path, structural_owner, owner_span(document, structural_owner)),
+                owner_id: owner_id(
+                    language,
+                    path,
+                    structural_owner,
+                    owner_span(document, structural_owner),
+                ),
                 key: vec![owner.clone(), name.clone(), kind.clone()],
                 symbol_owner: canonical_symbol_owner(document, structural_owner, Some(fn_def.span)),
                 lexical_symbol: (kind == "top"
@@ -4161,11 +4268,17 @@ pub fn extract_declaration_type_pressures(document: &Document) -> Vec<Declaratio
     declaration_type_pressures_from_definitions(&definitions)
 }
 
-fn declaration_type_pressures_from_definitions(definitions: &[TypeDefinition]) -> Vec<DeclarationTypePressure> {
+fn declaration_type_pressures_from_definitions(
+    definitions: &[TypeDefinition],
+) -> Vec<DeclarationTypePressure> {
     let mut out = Vec::new();
     for definition in definitions {
         if let Some(declared_type) = &definition.return_type {
-            out.push(type_pressure_row(definition, "return", declared_type.clone()));
+            out.push(type_pressure_row(
+                definition,
+                "return",
+                declared_type.clone(),
+            ));
         }
         if let Some(declared_type) = &definition.declared_type {
             out.push(type_pressure_row(
@@ -4182,10 +4295,18 @@ fn declaration_type_pressures_from_definitions(definitions: &[TypeDefinition]) -
             ));
         }
         for param in &definition.params {
-            let Some(name) = param.get("name").and_then(Value::as_str) else { continue };
-            let Some(value) = param.get("type") else { continue };
+            let Some(name) = param.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(value) = param.get("type") else {
+                continue;
+            };
             if let Ok(declared_type) = serde_json::from_value::<TypeExpr>(value.clone()) {
-                out.push(type_pressure_row(definition, &format!("param:{name}"), declared_type));
+                out.push(type_pressure_row(
+                    definition,
+                    &format!("param:{name}"),
+                    declared_type,
+                ));
             }
         }
     }
@@ -4204,7 +4325,11 @@ struct TypePressureMetrics {
     nilable_collection: bool,
 }
 
-fn type_pressure_row(definition: &TypeDefinition, slot: &str, declared_type: TypeExpr) -> DeclarationTypePressure {
+fn type_pressure_row(
+    definition: &TypeDefinition,
+    slot: &str,
+    declared_type: TypeExpr,
+) -> DeclarationTypePressure {
     let mut metrics = TypePressureMetrics::default();
     measure_type_pressure(&declared_type, 0, false, &mut metrics);
     DeclarationTypePressure {
@@ -4226,13 +4351,21 @@ fn type_pressure_row(definition: &TypeDefinition, slot: &str, declared_type: Typ
     }
 }
 
-fn measure_type_pressure(value: &TypeExpr, collection_depth: usize, inside_union: bool, metrics: &mut TypePressureMetrics) {
+fn measure_type_pressure(
+    value: &TypeExpr,
+    collection_depth: usize,
+    inside_union: bool,
+    metrics: &mut TypePressureMetrics,
+) {
     match value {
         TypeExpr::Untyped => metrics.unknown_leaves += 1,
         TypeExpr::NilClass | TypeExpr::Primitive(_) => {}
         TypeExpr::Nilable(inner) => {
             metrics.nilable = true;
-            if matches!(inner.as_ref(), TypeExpr::Array(_) | TypeExpr::Hash { .. } | TypeExpr::Set(_)) {
+            if matches!(
+                inner.as_ref(),
+                TypeExpr::Array(_) | TypeExpr::Hash { .. } | TypeExpr::Set(_)
+            ) {
                 metrics.nilable_collection = true;
             }
             measure_type_pressure(inner, collection_depth, inside_union, metrics);
@@ -4773,7 +4906,6 @@ fn collect_braced_block(lines: &[String], start: usize) -> Option<(String, usize
     let mut depth = 0u32;
     let mut started = false;
     let mut buf = String::new();
-    let mut end_line = start;
     for (offset, line) in lines.iter().enumerate().skip(start) {
         for ch in line.chars() {
             match ch {
@@ -4785,8 +4917,7 @@ fn collect_braced_block(lines: &[String], start: usize) -> Option<(String, usize
                     depth = depth.saturating_sub(1);
                     buf.push(ch);
                     if depth == 0 && started {
-                        end_line = offset;
-                        return Some((buf, end_line));
+                        return Some((buf, offset));
                     }
                     continue;
                 }
@@ -4797,7 +4928,6 @@ fn collect_braced_block(lines: &[String], start: usize) -> Option<(String, usize
         if started {
             buf.push(' ');
         }
-        end_line = offset;
     }
     None
 }
@@ -5767,8 +5897,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                             .intrinsic_call_complexity(None, &call.message)
                             .or_else(|| {
                                 behavior.intrinsic_call_complexity(
-                                    (!call.receiver.is_empty())
-                                        .then_some(call.receiver.as_str()),
+                                    (!call.receiver.is_empty()).then_some(call.receiver.as_str()),
                                     &call.message,
                                 )
                             })
@@ -5906,12 +6035,13 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             } else {
                 "unbound"
             };
-            let callback_receiver = parametric_cost.is_some() || source_definition.is_some_and(|definition| {
-                definition
-                    .callback_params
-                    .iter()
-                    .any(|parameter| parameter == &call.receiver)
-            });
+            let callback_receiver = parametric_cost.is_some()
+                || source_definition.is_some_and(|definition| {
+                    definition
+                        .callback_params
+                        .iter()
+                        .any(|parameter| parameter == &call.receiver)
+                });
             let dispatch_boundary = document
                 .semantic_effect_sites
                 .iter()
@@ -6022,10 +6152,17 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .or_else(|| parametric_complexity.map(|cost| cost.1.to_string())),
                 complexity_provenance: known_complexity
                     .map(|_| "language_stdlib_registry".to_string())
-                    .or_else(|| parametric_complexity.map(|_| "parametric_declared_receiver_contract".to_string())),
+                    .or_else(|| {
+                        parametric_complexity
+                            .map(|_| "parametric_declared_receiver_contract".to_string())
+                    }),
                 complexity_bound_quality: known_complexity
                     .map(|_| "upper_bound_declared_receiver".to_string())
-                    .or_else(|| parametric_cost.as_ref().map(|kind| format!("upper_bound_parametric_{kind}"))),
+                    .or_else(|| {
+                        parametric_cost
+                            .as_ref()
+                            .map(|kind| format!("upper_bound_parametric_{kind}"))
+                    }),
                 complexity_candidates: Vec::new(),
                 complexity_assumptions: Vec::new(),
                 message: call.message.clone(),
@@ -6147,6 +6284,8 @@ pub(crate) mod tests {
     use super::*;
 
     use crate::syntax::Language;
+    #[cfg(test)]
+    use std::io::Write;
 
     pub(crate) fn test_document() -> Document {
         Document {
@@ -6186,6 +6325,7 @@ pub(crate) mod tests {
                 line: 1,
                 span: [1, 0, 1, 16],
             }],
+            normalization_call_origins: Vec::new(),
             call_raw_origin_projections: Vec::new(),
             state_declarations: vec![syntax::StateDeclaration {
                 field: "@name".to_string(),
@@ -6331,7 +6471,7 @@ pub(crate) mod tests {
     #[test]
     fn call_coverage_matches_access_spans_without_hiding_missing_outer_calls() {
         let raw = BTreeSet::from([
-            [1, 0, 1, 20], // outer_call(inner())
+            [1, 0, 1, 20],  // outer_call(inner())
             [1, 11, 1, 18], // inner()
         ]);
         let normalized = BTreeSet::from([[1, 11, 1, 16]]); // inner callable access
@@ -6340,7 +6480,8 @@ pub(crate) mod tests {
             raw_call_span: [1, 11, 1, 18],
             normalized_call_span: [1, 11, 1, 16],
         }];
-        let (unmatched_raw, unmatched_normalized) = unmatched_call_origins(&raw, &normalized, &origins);
+        let (unmatched_raw, unmatched_normalized) =
+            unmatched_call_origins(&raw, &normalized, &origins, &origins);
 
         assert_eq!(unmatched_raw, vec![[1, 0, 1, 20]]);
         assert!(unmatched_normalized.is_empty());
@@ -6355,7 +6496,8 @@ pub(crate) mod tests {
             raw_call_span: [1, 0, 1, 16],
             normalized_call_span: [1, 0, 1, 15],
         }];
-        let (unmatched_raw, unmatched_normalized) = unmatched_call_origins(&raw, &normalized, &origins);
+        let (unmatched_raw, unmatched_normalized) =
+            unmatched_call_origins(&raw, &normalized, &origins, &origins);
 
         assert!(unmatched_raw.is_empty());
         assert!(unmatched_normalized.is_empty());
@@ -6366,10 +6508,84 @@ pub(crate) mod tests {
         let raw = BTreeSet::from([[1, 0, 1, 12]]);
         let normalized = BTreeSet::from([[1, 8, 1, 18]]);
 
-        let (unmatched_raw, unmatched_normalized) = unmatched_call_origins(&raw, &normalized, &[]);
+        let (unmatched_raw, unmatched_normalized) =
+            unmatched_call_origins(&raw, &normalized, &[], &[]);
 
         assert_eq!(unmatched_raw, vec![[1, 0, 1, 12]]);
         assert_eq!(unmatched_normalized, vec![[1, 8, 1, 18]]);
+    }
+
+    #[test]
+    fn call_coverage_keeps_synthetic_receiver_calls_unmatched() {
+        let raw = BTreeSet::from([[1, 0, 1, 16]]); // lookup[key]
+        let normalized = BTreeSet::from([
+            [1, 0, 1, 6],  // synthetic receiver VCALL: lookup
+            [1, 0, 1, 16], // emitted index call
+        ]);
+        let origins = vec![syntax::CallRawOriginProjection {
+            raw_call_span: [1, 0, 1, 16],
+            normalized_call_span: [1, 0, 1, 16],
+        }];
+
+        let (unmatched_raw, unmatched_normalized) =
+            unmatched_call_origins(&raw, &normalized, &origins, &origins);
+
+        assert!(unmatched_raw.is_empty());
+        assert_eq!(unmatched_normalized, vec![[1, 0, 1, 6]]);
+    }
+
+    #[test]
+    fn compact_call_resolution_evidence_matches_full_espalier_resolution() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"class ResolverFixture
+  def known
+  end
+
+  def caller
+    known
+    external_boundary
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let documents = syntax::parse_files(&[file.path().to_path_buf()], Language::Ruby)
+            .expect("parse Ruby source");
+
+        let full = merge(
+            documents
+                .iter()
+                .map(|document| extract(document, Profile::Espalier))
+                .collect(),
+            Profile::Espalier,
+        );
+        let compact = call_resolution_evidence(&documents);
+
+        assert_eq!(
+            compact.call_resolution_coverage.exact_project_targets,
+            full.call_resolution_coverage.exact_project_targets
+        );
+        assert_eq!(
+            compact
+                .call_resolution_coverage
+                .modeled_without_project_target,
+            full.call_resolution_coverage.modeled_without_project_target
+        );
+        assert_eq!(
+            compact.call_resolution_coverage.unresolved_call_sites,
+            full.call_resolution_coverage.unresolved_call_sites
+        );
+        assert_eq!(
+            compact
+                .unresolved_function_spans_by_file
+                .get(&documents[0].file)
+                .map(Vec::len),
+            Some(1)
+        );
     }
 
     pub(crate) fn extracts_methods_impl() {
@@ -6384,7 +6600,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn top_level_function_whose_fallback_owner_name_collides_with_a_real_owner_is_not_linked_to_it() {
+    fn top_level_function_whose_fallback_owner_name_collides_with_a_real_owner_is_not_linked_to_it()
+    {
         let mut doc = test_document();
         doc.function_defs.push(syntax::FunctionDef {
             file: "test.rb".to_string(),
@@ -6408,10 +6625,21 @@ pub(crate) mod tests {
         });
         let output = extract(&doc, Profile::Espalier);
 
-        let real_member = output.methods.iter().find(|m| m.name == "hello").expect("real method");
-        let free_function = output.methods.iter().find(|m| m.name == "helper").expect("free function");
+        let real_member = output
+            .methods
+            .iter()
+            .find(|m| m.name == "hello")
+            .expect("real method");
+        let free_function = output
+            .methods
+            .iter()
+            .find(|m| m.name == "helper")
+            .expect("free function");
 
-        assert_eq!(free_function.owner, "Greeter", "the display owner (file-stem fallback) is unchanged");
+        assert_eq!(
+            free_function.owner, "Greeter",
+            "the display owner (file-stem fallback) is unchanged"
+        );
         assert_ne!(
             free_function.owner_id, real_member.owner_id,
             "a free function must never share owner_id with an unrelated real owner of the same name"
@@ -6461,10 +6689,10 @@ pub(crate) mod tests {
         assert!(r.is_none());
         assert!(p.is_empty());
 
-        let (r, p) = parse_python_signature("def my_func(a: int");
+        let (r, _p) = parse_python_signature("def my_func(a: int");
         assert!(r.is_none());
 
-        let (r, p) = parse_python_signature("def my_func(self, cls, , a, b: ) -> str:");
+        let (_r, p) = parse_python_signature("def my_func(self, cls, , a, b: ) -> str:");
         assert_eq!(p.len(), 0);
     }
 
@@ -6484,10 +6712,10 @@ pub(crate) mod tests {
         assert!(r.is_none());
         assert!(p.is_empty());
 
-        let (r, p) = parse_typescript_signature("(a: number");
+        let (r, _p) = parse_typescript_signature("(a: number");
         assert!(r.is_none());
 
-        let (r, p) = parse_typescript_signature("( , a, b: ): void");
+        let (_r, p) = parse_typescript_signature("( , a, b: ): void");
         assert_eq!(p.len(), 0);
     }
 
@@ -6986,7 +7214,7 @@ def py_fn(a: int) -> str:
     }
 
     pub(crate) fn test_sorbet_signature_parsing_impl() {
-        let (r, p) = parse_sorbet_signature("def foo");
+        let (r, _p) = parse_sorbet_signature("def foo");
         assert!(r.is_none());
 
         let (r, p) = parse_sorbet_signature("sig { .params(x: Integer).returns(String) }");
@@ -7001,7 +7229,7 @@ def py_fn(a: int) -> str:
         assert_eq!(r, Some("String".to_string()));
         assert_eq!(p.len(), 2);
 
-        let (r, p) = parse_sorbet_signature("sig { .params(x: Integer");
+        let (r, _p) = parse_sorbet_signature("sig { .params(x: Integer");
         assert!(r.is_none());
     }
 
@@ -7859,18 +8087,24 @@ impl<'a> StateParamVisitor<'a> {
 
 fn normalize_string(s: &str, root: &std::path::Path) -> String {
     if s.contains('\x00') {
-        let parts: Vec<String> = s.split('\x00').map(|part| normalize_string(part, root)).collect();
+        let parts: Vec<String> = s
+            .split('\x00')
+            .map(|part| normalize_string(part, root))
+            .collect();
         parts.join("\x00")
     } else if s.contains(':') {
-        let parts: Vec<String> = s.split(':').map(|part| {
-            let path = std::path::Path::new(part);
-            if path.is_absolute() {
-                if let Ok(rel) = path.strip_prefix(root) {
-                    return rel.to_string_lossy().to_string();
+        let parts: Vec<String> = s
+            .split(':')
+            .map(|part| {
+                let path = std::path::Path::new(part);
+                if path.is_absolute() {
+                    if let Ok(rel) = path.strip_prefix(root) {
+                        return rel.to_string_lossy().to_string();
+                    }
                 }
-            }
-            part.to_string()
-        }).collect();
+                part.to_string()
+            })
+            .collect();
         parts.join(":")
     } else {
         let path = std::path::Path::new(s);

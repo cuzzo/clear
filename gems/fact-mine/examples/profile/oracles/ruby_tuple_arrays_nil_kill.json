@@ -81,7 +81,7 @@
     "exact_project_targets": 0,
     "functions_with_unresolved_calls": 0,
     "modeled_without_project_target": 0,
-    "normalized_calls_without_raw_span": 1,
+    "normalized_calls_without_raw_span": 2,
     "outside_executable_function": 0,
     "owners_with_supertypes": 0,
     "raw_calls_not_normalized": 0,

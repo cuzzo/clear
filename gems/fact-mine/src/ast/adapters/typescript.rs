@@ -51,7 +51,11 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
     fn class_node(&self, node: TreeSitterNode<'_>) -> bool {
         matches!(
             node.kind(),
-            "class" | "class_definition" | "class_declaration" | "class_specifier" | "abstract_class_declaration"
+            "class"
+                | "class_definition"
+                | "class_declaration"
+                | "class_specifier"
+                | "abstract_class_declaration"
         )
     }
 
@@ -409,9 +413,10 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
         };
         let Some(constructor) = named_children(body).into_iter().find(|member| {
             member.kind() == "method_definition"
-                && member
-                    .child_by_field_name("name")
-                    .is_some_and(|name| name.kind() == "property_identifier" && node_text(name, _source) == "constructor")
+                && member.child_by_field_name("name").is_some_and(|name| {
+                    name.kind() == "property_identifier"
+                        && node_text(name, _source) == "constructor"
+                })
         }) else {
             return Vec::new();
         };
@@ -422,9 +427,10 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
             .into_iter()
             .filter(|param| matches!(param.kind(), "required_parameter" | "optional_parameter"))
             .filter(|param| {
-                named_children(*param)
-                    .iter()
-                    .any(|child| child.kind() == "accessibility_modifier" || node_text(*child, _source) == "readonly")
+                named_children(*param).iter().any(|child| {
+                    child.kind() == "accessibility_modifier"
+                        || node_text(*child, _source) == "readonly"
+                })
             })
             .collect()
     }
@@ -535,8 +541,14 @@ mod tests {
         };
 
         let adapter = TypeScriptAstAdapter;
-        assert_eq!(node_text(adapter.named_field(declarator, "left").unwrap(), source), "value");
-        assert_eq!(node_text(adapter.named_field(declarator, "right").unwrap(), source), "null");
+        assert_eq!(
+            node_text(adapter.named_field(declarator, "left").unwrap(), source),
+            "value"
+        );
+        assert_eq!(
+            node_text(adapter.named_field(declarator, "right").unwrap(), source),
+            "null"
+        );
         assert!(adapter.named_field(declarator, "missing").is_none());
     }
 }

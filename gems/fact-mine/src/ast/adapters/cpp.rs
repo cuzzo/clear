@@ -279,10 +279,17 @@ mod tests {
             }
             nodes.extend(named_children(node));
         };
-        assert_eq!(CppAstAdapter.assignment_target_name(pointer, source), Some("value".to_string()));
-        assert_eq!(CppAstAdapter.assignment_target_name(tree.root_node(), source), None);
+        assert_eq!(
+            CppAstAdapter.assignment_target_name(pointer, source),
+            Some("value".to_string())
+        );
+        assert_eq!(
+            CppAstAdapter.assignment_target_name(tree.root_node(), source),
+            None
+        );
 
-        let normalized = crate::ast::normalize_tree(tree.root_node(), source, crate::syntax::Language::Cpp);
+        let normalized =
+            crate::ast::normalize_tree(tree.root_node(), source, crate::syntax::Language::Cpp);
         let mut normalized_nodes = vec![&normalized];
         let assignment = loop {
             let node = normalized_nodes.pop().expect("normalized assignment");
@@ -291,6 +298,9 @@ mod tests {
             }
             normalized_nodes.extend(node.children.iter().filter_map(crate::ast::node));
         };
-        assert_eq!(assignment.children.first(), Some(&crate::ast::Child::String("value".to_string())));
+        assert_eq!(
+            assignment.children.first(),
+            Some(&crate::ast::Child::String("value".to_string()))
+        );
     }
 }

@@ -104,7 +104,11 @@ pub(crate) fn extract(
             match find_syntax_node(&method.node, node.span, &node.role) {
                 Some(syntax_node) => {
                     let target = effect_target(syntax_node, &node.role, profile);
-                    collect(target, &mut raw, behavior.function_value_calls_are_local_reads());
+                    collect(
+                        target,
+                        &mut raw,
+                        behavior.function_value_calls_are_local_reads(),
+                    );
                     for (name, producer_span) in raw.write_call_sources.clone() {
                         let contract = [
                             find_by_span_and_kind(target, producer_span, "FCALL")
@@ -115,7 +119,8 @@ pub(crate) fn extract(
                         .flatten()
                         .find_map(|producer| behavior.nullable_call_result_contract(producer));
                         if let Some(contract) = contract {
-                            raw.write_nullable_contracts.insert(name, contract.to_string());
+                            raw.write_nullable_contracts
+                                .insert(name, contract.to_string());
                         }
                     }
                     apply_normalized_local_contract(method, node, &mut raw);
@@ -135,8 +140,11 @@ pub(crate) fn extract(
                                 raw.record_place(name.clone(), "local");
                                 raw.write_type_hints
                                     .insert(name.clone(), format!("declared:{type_name}"));
-                                if let Some(contract) = behavior.nullable_declared_type_contract(&type_name) {
-                                    raw.write_nullable_contracts.insert(name, contract.to_string());
+                                if let Some(contract) =
+                                    behavior.nullable_declared_type_contract(&type_name)
+                                {
+                                    raw.write_nullable_contracts
+                                        .insert(name, contract.to_string());
                                 }
                             }
                         }
@@ -409,7 +417,9 @@ fn collect(node: &Node, effect: &mut RawEffect, function_value_calls_are_local_r
             }
             if let Some(rhs) = node.children.iter().skip(1).find_map(ast::node) {
                 if let Some(hint) = value_type_hint(rhs) {
-                    effect.write_type_hints.insert(name.clone(), hint.to_string());
+                    effect
+                        .write_type_hints
+                        .insert(name.clone(), hint.to_string());
                     if let Some(value) = literal_value_hint(rhs) {
                         effect.write_value_hints.insert(name, value);
                     }
@@ -497,16 +507,28 @@ fn direct_call_result_span(node: &Node) -> Option<Span> {
 }
 
 fn direct_call_result_node(node: &Node) -> Option<&Node> {
-    if matches!(node.r#type.as_str(), "CALL" | "QCALL" | "FCALL" | "VCALL" | "NEW_EXPRESSION") {
+    if matches!(
+        node.r#type.as_str(),
+        "CALL" | "QCALL" | "FCALL" | "VCALL" | "NEW_EXPRESSION"
+    ) {
         return Some(node);
     }
     if matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
-        return node.children.iter().skip(1).find_map(ast::node).and_then(direct_call_result_node);
+        return node
+            .children
+            .iter()
+            .skip(1)
+            .find_map(ast::node)
+            .and_then(direct_call_result_node);
     }
     if matches!(node.r#type.as_str(), "PAREN" | "BEGIN" | "EXPRESSION_LIST") {
         let mut children = node.children.iter().filter_map(ast::node);
         let only = children.next()?;
-        return children.next().is_none().then(|| direct_call_result_node(only)).flatten();
+        return children
+            .next()
+            .is_none()
+            .then(|| direct_call_result_node(only))
+            .flatten();
     }
     None
 }
@@ -657,7 +679,10 @@ mod tests {
         let call = node("FCALL", vec![Child::Symbol("malloc".to_string())]);
         let assignment = node(
             "LASGN",
-            vec![Child::Symbol("value".to_string()), Child::Node(Box::new(call.clone()))],
+            vec![
+                Child::Symbol("value".to_string()),
+                Child::Node(Box::new(call.clone())),
+            ],
         );
         assert_eq!(direct_call_result_node(&call), Some(&call));
         assert_eq!(
@@ -672,7 +697,10 @@ mod tests {
         );
         let multi_expression = node(
             "EXPRESSION_LIST",
-            vec![Child::Node(Box::new(call.clone())), Child::Node(Box::new(call))],
+            vec![
+                Child::Node(Box::new(call.clone())),
+                Child::Node(Box::new(call)),
+            ],
         );
         assert_eq!(direct_call_result_node(&multi_expression), None);
         assert_eq!(direct_call_result_node(&node("OPCALL", Vec::new())), None);
@@ -681,7 +709,10 @@ mod tests {
     #[test]
     fn indexed_base_reads_require_a_simple_local_receiver() {
         assert_eq!(indexed_base_name("values[key]"), Some("values".to_string()));
-        assert_eq!(indexed_base_name("items [ index ]"), Some("items".to_string()));
+        assert_eq!(
+            indexed_base_name("items [ index ]"),
+            Some("items".to_string())
+        );
         assert_eq!(indexed_base_name("object.values[key]"), None);
         assert_eq!(indexed_base_name("values"), None);
         assert_eq!(indexed_base_name("[key]"), None);

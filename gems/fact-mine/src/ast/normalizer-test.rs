@@ -952,7 +952,7 @@ pub(crate) mod tests {
             let (tree, lang) = parse_code("yield; nil; true; false; :foo; 123; x", "ruby");
             let root = tree.root_node();
             let mut normalizer = TreeSitterNormalizer::new("yield; nil; true; false; :foo; 123; x", lang);
-            
+
             // Iterate over all children
             for child in root.children(&mut root.walk()) {
                 normalizer.scalar_argument_list_value(child);
@@ -1125,6 +1125,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
 
             // Toggle dynamic syntax on
@@ -1163,6 +1165,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             normalizer_infix.normalize_return_value(body_infix);
             normalizer_infix.normalize_leading_function_statement(method_infix);
@@ -1181,6 +1185,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             normalizer_ref.normalize_return_value(arg_list_ref);
 
@@ -1198,6 +1204,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
 
             normalizer_blk.normalize_return_value(arg_list_blk);
@@ -1219,6 +1227,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
 
             let (tree_js_dotted, _) = parse_code("a.b", "javascript");
@@ -1518,7 +1528,7 @@ pub(crate) mod tests {
 
         // 19. Extra coverage block for normalizer.rs (uncovered paths)
         {
-            use crate::ast::adapters::AstNormalizationAdapter;
+
             use std::sync::atomic::Ordering;
 
             let (tree_arg, lang_arg) = parse_code("foo(x)", "ruby");
@@ -1534,6 +1544,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
 
             // Call next_sibling, prev_sibling, next_named_sibling
@@ -1550,7 +1562,7 @@ pub(crate) mod tests {
             let (tree_if, lang_if) = parse_code("if x\n  1\nelse\n  foo.bar\nend", "ruby");
             let root_if = tree_if.root_node();
             let if_node = root_if.child(0).unwrap();
-            let mut normalizer_if = TreeSitterNormalizer::new("if x\n  1\nelse\n  foo.bar\nend", lang_if);
+            let normalizer_if = TreeSitterNormalizer::new("if x\n  1\nelse\n  foo.bar\nend", lang_if);
             let _ = normalizer_if.single_dotted_else_body(if_node);
             let _ = normalizer_if.single_dotted_body_node(if_node);
             let _ = normalizer_if.singleton_receiver(if_node);
@@ -1560,7 +1572,7 @@ pub(crate) mod tests {
             let (tree_splat, lang_splat) = parse_code("def foo(*args); end", "ruby");
             let root_splat = tree_splat.root_node();
             let def_node = root_splat.child(0).unwrap();
-            let mut normalizer_splat = TreeSitterNormalizer::new("def foo(*args); end", lang_splat);
+            let normalizer_splat = TreeSitterNormalizer::new("def foo(*args); end", lang_splat);
             let params = def_node.child(2).unwrap();
             let splat = params.child(1).unwrap();
             let _ = normalizer_splat.target_name(splat);
@@ -1675,6 +1687,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             mock.mock_statement_wrapper.store(true, Ordering::Relaxed);
             let _ = normalizer_match.normalize_node(binary_match);
@@ -1708,6 +1722,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             mock.mock_block_wrapper.store(true, Ordering::Relaxed);
             mock.is_modifier.store(true, Ordering::Relaxed);
@@ -1749,6 +1765,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             mock.is_unary_not.store(true, Ordering::Relaxed);
             mock.mock_statement_wrapper.store(true, Ordering::Relaxed);
@@ -1768,6 +1786,8 @@ pub(crate) mod tests {
                     local_stack: Vec::new(),
                     root_span: None,
                     current_heredoc_body_span: None,
+                    parser_call_spans: BTreeSet::new(),
+                    call_raw_origins: RefCell::new(Vec::new()),
                 };
                 mock.is_unary_not.store(true, Ordering::Relaxed);
                 let _ = normalizer_not2.normalize_node(body_stmt_node);
@@ -1785,6 +1805,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             mock.is_dotted.store(true, Ordering::Relaxed);
             let _ = normalizer_dot.normalize_node(dot_node);
@@ -1801,6 +1823,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             mock.mock_self_or_this.store(true, Ordering::Relaxed);
             let res_self = normalizer_self.normalize_node(self_node);
@@ -1818,6 +1842,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             mock.mock_array.store(true, Ordering::Relaxed);
             let res_arr = normalizer_arr.normalize_node(arr_node);
@@ -1835,6 +1861,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             mock.mock_concatenated.store(true, Ordering::Relaxed);
             let res_str = normalizer_str.normalize_node(str_node);
@@ -1857,6 +1885,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             mock.mock_call_node.store(true, Ordering::Relaxed);
             let _ = normalizer_super.normalize_super_statement(super_node);
@@ -1904,6 +1934,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             let _ = normalizer_minus.normalize_body(minus_node);
 
@@ -1918,6 +1950,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             mock.is_unary_not.store(true, Ordering::Relaxed);
             let _ = normalizer_arg_not.normalize_body(arg_not_list);
@@ -2020,6 +2054,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             let _ = normalizer_while.normalize_node(while_stmt);
 
@@ -2032,6 +2068,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             let _ = normalizer_def.normalize_node(def_stmt);
 
@@ -2044,6 +2082,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             let _ = normalizer_op.normalize_node(op_stmt);
 
@@ -2058,6 +2098,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             mock.mock_leading_function_non_fn.store(true, Ordering::Relaxed);
             let res_fn = normalizer_fn.normalize_leading_function_statement(method_node);
@@ -2067,37 +2109,37 @@ pub(crate) mod tests {
             // 21. Additional testing for uncovered normalizer paths
             // Test 21a: match3 / match2 in dynamic syntax
             let (tree_match3, lang_match3) = parse_code("a =~ b", "ruby");
-            let mut normalizer_match3 = TreeSitterNormalizer::new("a =~ b", lang_match3);
+            let normalizer_match3 = TreeSitterNormalizer::new("a =~ b", lang_match3);
             let _ = normalizer_match3.normalize(tree_match3.root_node());
 
             // Test 21b: operator assignment patterns (OP_ASGN1 and OP_ASGN2)
             let (tree_op1, lang_op1) = parse_code("a[i] += 1", "ruby");
-            let mut normalizer_op1 = TreeSitterNormalizer::new("a[i] += 1", lang_op1);
+            let normalizer_op1 = TreeSitterNormalizer::new("a[i] += 1", lang_op1);
             let _ = normalizer_op1.normalize(tree_op1.root_node());
 
             let (tree_op2, lang_op2) = parse_code("a.b += 1", "ruby");
-            let mut normalizer_op2 = TreeSitterNormalizer::new("a.b += 1", lang_op2);
+            let normalizer_op2 = TreeSitterNormalizer::new("a.b += 1", lang_op2);
             let _ = normalizer_op2.normalize(tree_op2.root_node());
 
             // Test 21c: element reference RHS and self RHS
             let (tree_el, lang_el) = parse_code("x = a[i]", "ruby");
-            let mut normalizer_el = TreeSitterNormalizer::new("x = a[i]", lang_el);
+            let normalizer_el = TreeSitterNormalizer::new("x = a[i]", lang_el);
             let _ = normalizer_el.normalize(tree_el.root_node());
 
             let (tree_el_self, lang_el_self) = parse_code("x = self[i]", "ruby");
-            let mut normalizer_el_self = TreeSitterNormalizer::new("x = self[i]", lang_el_self);
+            let normalizer_el_self = TreeSitterNormalizer::new("x = self[i]", lang_el_self);
             let _ = normalizer_el_self.normalize(tree_el_self.root_node());
 
             // Test 21d: concatenated strings and chained strings (normal / interpolated)
             let (tree_concat, lang_concat) = parse_code("\"a\" \"b\"", "ruby");
-            let mut normalizer_concat = TreeSitterNormalizer::new("\"a\" \"b\"", lang_concat);
+            let normalizer_concat = TreeSitterNormalizer::new("\"a\" \"b\"", lang_concat);
             let _ = normalizer_concat.normalize(tree_concat.root_node());
             let chained_node = tree_concat.root_node().named_child(0).unwrap();
             let mut normalizer_concat2 = TreeSitterNormalizer::new("\"a\" \"b\"", lang_concat);
             let _ = normalizer_concat2.normalize_chained_string(chained_node);
 
             let (tree_concat_interp, lang_concat_interp) = parse_code("\"a\" \"#{b}\"", "ruby");
-            let mut normalizer_concat_interp = TreeSitterNormalizer::new("\"a\" \"#{b}\"", lang_concat_interp);
+            let normalizer_concat_interp = TreeSitterNormalizer::new("\"a\" \"#{b}\"", lang_concat_interp);
             let _ = normalizer_concat_interp.normalize(tree_concat_interp.root_node());
             let chained_node_interp = tree_concat_interp.root_node().named_child(0).unwrap();
             let mut normalizer_concat_interp2 = TreeSitterNormalizer::new("\"a\" \"#{b}\"", lang_concat_interp);
@@ -2105,11 +2147,11 @@ pub(crate) mod tests {
 
             // Test 21e: heredoc syntax and heredoc with interpolation
             let (tree_heredoc, lang_heredoc) = parse_code("<<-EOF\nhello\nEOF", "ruby");
-            let mut normalizer_heredoc = TreeSitterNormalizer::new("<<-EOF\nhello\nEOF", lang_heredoc);
+            let normalizer_heredoc = TreeSitterNormalizer::new("<<-EOF\nhello\nEOF", lang_heredoc);
             let _ = normalizer_heredoc.normalize(tree_heredoc.root_node());
 
             let (tree_heredoc_interp, lang_heredoc_interp) = parse_code("<<-EOF\nhello #{x}\nEOF", "ruby");
-            let mut normalizer_heredoc_interp = TreeSitterNormalizer::new("<<-EOF\nhello #{x}\nEOF", lang_heredoc_interp);
+            let normalizer_heredoc_interp = TreeSitterNormalizer::new("<<-EOF\nhello #{x}\nEOF", lang_heredoc_interp);
             let _ = normalizer_heredoc_interp.normalize(tree_heredoc_interp.root_node());
 
             // Test 21f: normalize_flat_dotted_nodes
@@ -2129,7 +2171,7 @@ pub(crate) mod tests {
 
             // Test 21g: Python nested else-if syntax
             let (tree_py, lang_py) = parse_code("if a:\n    1\nelse:\n    if b:\n        2\n", "python");
-            let mut normalizer_py = TreeSitterNormalizer::new("if a:\n    1\nelse:\n    if b:\n        2\n", lang_py);
+            let normalizer_py = TreeSitterNormalizer::new("if a:\n    1\nelse:\n    if b:\n        2\n", lang_py);
             let _ = normalizer_py.normalize(tree_py.root_node());
 
             // Test 21h: normalize_return_value with mock flags and dynamic syntax enabled
@@ -2141,6 +2183,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
 
             // test is_dotted in return value
@@ -2186,6 +2230,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             mock.tracks_scope.store(true, Ordering::Relaxed); // Enable dynamic syntax
             mock.mock_inline_def_receiver_text.store(true, Ordering::Relaxed);
@@ -2220,6 +2266,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
             mock.is_unary_not.store(true, Ordering::Relaxed);
             mock.mock_unary.store(true, Ordering::Relaxed);
@@ -2251,6 +2299,8 @@ pub(crate) mod tests {
                 local_stack: Vec::new(),
                 root_span: None,
                 current_heredoc_body_span: None,
+                parser_call_spans: BTreeSet::new(),
+                call_raw_origins: RefCell::new(Vec::new()),
             };
 
             mock.mock_block_or_do_block.store(true, Ordering::Relaxed);
@@ -2371,4 +2421,3 @@ pub(crate) mod tests {
 pub fn run_normalizer_uncovered_paths_tests() {
     tests::test_normalizer_uncovered_paths_impl();
 }
-

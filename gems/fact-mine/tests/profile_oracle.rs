@@ -172,11 +172,14 @@ fn nullable_states_preserve_go_and_cpp_null_literals() -> Result<()> {
         let document = syntax::parse_file(fixture(name), language)?;
         let output = profile::extract(&document, Profile::NilKill);
         assert!(output.nullable_states.iter().any(|state| {
-            state.state == "definitely_null" && state.complete && !state.source_definition_ids.is_empty()
+            state.state == "definitely_null"
+                && state.complete
+                && !state.source_definition_ids.is_empty()
         }));
-        assert!(output.nullable_summaries.iter().any(|summary| {
-            summary.return_state == "definitely_null" && summary.complete
-        }));
+        assert!(output
+            .nullable_summaries
+            .iter()
+            .any(|summary| { summary.return_state == "definitely_null" && summary.complete }));
     }
     Ok(())
 }
@@ -231,7 +234,9 @@ fn c_native_nullability_annotations_survive_parser_preprocessing() -> Result<()>
             && operation.complete
     }));
     assert!(output.nullable_operations.iter().all(|operation| {
-        operation.path.ends_with("nullable_annotations.c")
+        operation
+            .path
+            .ends_with("nullable_annotations.c")
             .then_some(operation.operation_kind.as_str())
             != Some("function_pointer_call")
     }));
@@ -242,7 +247,11 @@ fn c_native_nullability_annotations_survive_parser_preprocessing() -> Result<()>
 fn nullable_operations_join_native_dereferences_to_proven_null_states() -> Result<()> {
     for (name, language, behavior) in [
         ("nullable_operations.c", Language::C, "undefined_behavior"),
-        ("nullable_operations.cpp", Language::Cpp, "undefined_behavior"),
+        (
+            "nullable_operations.cpp",
+            Language::Cpp,
+            "undefined_behavior",
+        ),
         ("nullable_operations.go", Language::Go, "panic"),
     ] {
         let document = syntax::parse_file(fixture(name), language)?;
@@ -296,10 +305,14 @@ fn java_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
             && operation.nil_behavior == "null_pointer_exception"
             && operation.state_at_operation == "definitely_null"
             && operation.complete
-            && operation.place_id.contains("NullableJava#unsafe:local:value")
+            && operation
+                .place_id
+                .contains("NullableJava#unsafe:local:value")
     }));
     assert!(output.nullable_refinements.iter().any(|refinement| {
-        refinement.place_id.contains("NullableJava#guarded:local:value")
+        refinement
+            .place_id
+            .contains("NullableJava#guarded:local:value")
             && refinement.edge == "else"
             && refinement.state_on_edge == "definitely_non_null"
             && refinement.proof_kind == "nil_comparison"
@@ -323,10 +336,14 @@ fn csharp_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
             && operation.nil_behavior == "null_reference_exception"
             && operation.state_at_operation == "definitely_null"
             && operation.complete
-            && operation.place_id.contains("NullableCSharp#Unsafe:local:value")
+            && operation
+                .place_id
+                .contains("NullableCSharp#Unsafe:local:value")
     }));
     assert!(output.nullable_refinements.iter().any(|refinement| {
-        refinement.place_id.contains("NullableCSharp#Guarded:local:value")
+        refinement
+            .place_id
+            .contains("NullableCSharp#Guarded:local:value")
             && refinement.edge == "else"
             && refinement.state_on_edge == "definitely_non_null"
             && refinement.proof_kind == "nil_comparison"
@@ -380,11 +397,16 @@ fn go_map_lookup_exports_presence_without_proving_payload_non_null() -> Result<(
     let document = syntax::parse_file(fixture("nullable_presence.go"), Language::Go)?;
     let output = profile::extract(&document, Profile::NilKill);
     assert!(output.presence_correlations.iter().any(|correlation| {
-        correlation.semantics == "map_lookup" && correlation.branch_refinement == "presence_on_true"
-            && correlation.complete && correlation.value_place_id.ends_with(":value")
+        correlation.semantics == "map_lookup"
+            && correlation.branch_refinement == "presence_on_true"
+            && correlation.complete
+            && correlation.value_place_id.ends_with(":value")
             && correlation.presence_place_id.ends_with(":ok")
     }));
-    assert!(output.nullable_states.iter().all(|state| !state.place_id.ends_with(":value") || state.state != "definitely_non_null"));
+    assert!(output
+        .nullable_states
+        .iter()
+        .all(|state| !state.place_id.ends_with(":value") || state.state != "definitely_non_null"));
     Ok(())
 }
 
@@ -413,9 +435,20 @@ fn go_nullable_operations_distinguish_pointer_selectors_and_function_values() ->
         .nullable_operations
         .iter()
         .filter(|operation| operation.state_at_operation == "definitely_null" && operation.complete)
-        .map(|operation| (operation.operation_kind.as_str(), operation.nil_behavior.as_str()))
+        .map(|operation| {
+            (
+                operation.operation_kind.as_str(),
+                operation.nil_behavior.as_str(),
+            )
+        })
         .collect::<Vec<_>>();
-    assert_eq!(operations, vec![("function_value_call", "panic"), ("pointer_selector", "panic")]);
+    assert_eq!(
+        operations,
+        vec![
+            ("function_value_call", "panic"),
+            ("pointer_selector", "panic")
+        ]
+    );
     Ok(())
 }
 
@@ -427,7 +460,12 @@ fn go_nullable_operations_cover_index_writes_and_channels() -> Result<()> {
         .nullable_operations
         .iter()
         .filter(|operation| operation.state_at_operation == "definitely_null" && operation.complete)
-        .map(|operation| (operation.operation_kind.as_str(), operation.nil_behavior.as_str()))
+        .map(|operation| {
+            (
+                operation.operation_kind.as_str(),
+                operation.nil_behavior.as_str(),
+            )
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         operations,
@@ -556,10 +594,7 @@ fn hidden_enum_observations_mark_nonliteral_state_writes_open_world() -> Result<
 
 #[test]
 fn hidden_enum_observations_keep_same_spelled_locals_in_distinct_callables() -> Result<()> {
-    let document = syntax::parse_file(
-        fixture("hidden_enum_unrelated_locals.rb"),
-        Language::Ruby,
-    )?;
+    let document = syntax::parse_file(fixture("hidden_enum_unrelated_locals.rb"), Language::Ruby)?;
     let output = profile::extract(&document, Profile::NilKill);
     let locals = output
         .hidden_enum_observations
@@ -748,13 +783,16 @@ fn cpp_macro_alias_template_and_overload_boundaries_stay_unknown() -> Result<()>
     let output = profile::extract(&document, Profile::NilKill);
 
     for function in ["macro_and_alias_boundary", "overload_boundary"] {
-        assert!(output.nullable_operations.iter().any(|operation| {
-            operation.path.ends_with("nullable_cpp_boundaries.cpp")
-                && operation.state_at_operation == "unknown"
-                && !operation.complete
-                && operation.operation_kind == "pointer_dereference"
-                && operation.node_id.contains(function)
-        }), "{function}");
+        assert!(
+            output.nullable_operations.iter().any(|operation| {
+                operation.path.ends_with("nullable_cpp_boundaries.cpp")
+                    && operation.state_at_operation == "unknown"
+                    && !operation.complete
+                    && operation.operation_kind == "pointer_dereference"
+                    && operation.node_id.contains(function)
+            }),
+            "{function}"
+        );
     }
     Ok(())
 }
@@ -1083,14 +1121,10 @@ func (p *pool) ready() bool {
 
     assert_eq!(calls.len(), 2, "{calls:#?}");
     assert!(calls.iter().any(|call| {
-        call.receiver == "self"
-            && call.message == "IsClosed"
-            && call.argument_count == 0
+        call.receiver == "self" && call.message == "IsClosed" && call.argument_count == 0
     }));
     assert!(calls.iter().any(|call| {
-        call.receiver == "self"
-            && call.message == "Running"
-            && call.argument_count == 0
+        call.receiver == "self" && call.message == "Running" && call.argument_count == 0
     }));
     Ok(())
 }

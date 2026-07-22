@@ -3,11 +3,10 @@ use super::{
         NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedOwner,
         NormalizedStateRead,
     },
-    nullable::{NullableOperationSeed, PresenceCorrelationSeed}, BranchArm, BranchDecision, CallSite, ComparisonUse,
-    DecisionSite, DispatchSite, FunctionDef,
-    CallRawOriginProjection, OwnerDef, PathConditionSite, PredicateAlias, RawNode,
-    SemanticEffectSite, StateDeclaration,
-    StateRead, StateWrite, HazardSite,
+    nullable::{NullableOperationSeed, PresenceCorrelationSeed},
+    BranchArm, BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, FunctionDef,
+    HazardSite, OwnerDef, PathConditionSite, PredicateAlias, RawNode, SemanticEffectSite,
+    StateDeclaration, StateRead, StateWrite,
 };
 use crate::ast::{self, Child, Node, Span};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -18,7 +17,10 @@ pub(crate) struct NormalizedFacts {
     pub(crate) function_defs: Vec<FunctionDef>,
     pub(crate) owner_defs: Vec<OwnerDef>,
     pub(crate) call_sites: Vec<CallSite>,
-    pub(crate) call_raw_origin_projections: Vec<CallRawOriginProjection>,
+    /// Connects an emitted semantic call to its normalized AST node. The
+    /// parser origin is joined later by the tree-sitter adapter; this pass
+    /// never guesses a raw parser identity from a normalized span.
+    pub(crate) call_node_projections: Vec<CallNodeProjection>,
     pub(crate) call_receiver_projections: Vec<super::CallReceiverProjection>,
     pub(crate) state_declarations: Vec<StateDeclaration>,
     pub(crate) state_reads: Vec<StateRead>,
@@ -40,6 +42,12 @@ pub(crate) struct NormalizedFacts {
     pub(crate) hazard_sites: Vec<HazardSite>,
     pub(crate) nullable_operation_seeds: Vec<NullableOperationSeed>,
     pub(crate) presence_correlation_seeds: Vec<PresenceCorrelationSeed>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CallNodeProjection {
+    pub(crate) normalized_node_span: Span,
+    pub(crate) emitted_call_span: Span,
 }
 
 pub(crate) fn extract(
@@ -119,10 +127,13 @@ impl<'a> Extractor<'a> {
             .call_receiver_projections
             .sort_by_key(|projection| (projection.outer_span, projection.receiver_call_span));
         self.facts.call_receiver_projections.dedup();
-        self.facts
-            .call_raw_origin_projections
-            .sort_by_key(|projection| (projection.raw_call_span, projection.normalized_call_span));
-        self.facts.call_raw_origin_projections.dedup();
+        self.facts.call_node_projections.sort_by_key(|projection| {
+            (
+                projection.normalized_node_span,
+                projection.emitted_call_span,
+            )
+        });
+        self.facts.call_node_projections.dedup();
         self.facts.semantic_effect_sites.sort_by_key(effect_key);
         self.facts
     }
@@ -208,12 +219,18 @@ impl<'a> Extractor<'a> {
     }
 
     fn record_presence_correlation(&mut self, node: &Node) {
-        let Some(correlation) = self.behavior.presence_correlation(node) else { return; };
-        self.facts.presence_correlation_seeds.push(PresenceCorrelationSeed {
-            function: self.current_function(), span: span(node),
-            value_subject: correlation.value_subject, presence_subject: correlation.presence_subject,
-            semantics: correlation.semantics.to_string(),
-        });
+        let Some(correlation) = self.behavior.presence_correlation(node) else {
+            return;
+        };
+        self.facts
+            .presence_correlation_seeds
+            .push(PresenceCorrelationSeed {
+                function: self.current_function(),
+                span: span(node),
+                value_subject: correlation.value_subject,
+                presence_subject: correlation.presence_subject,
+                semantics: correlation.semantics.to_string(),
+            });
     }
 
     fn scan_children(&mut self, node: &Node) {
@@ -787,7 +804,7 @@ impl<'a> Extractor<'a> {
             call.span,
         );
         if self.seen_calls.insert(key) {
-            self.record_call_raw_origin(node, call.span);
+            self.record_call_node_projection(node, call.span);
             if let Some(receiver_call_span) = receiver_call_span {
                 self.facts
                     .call_receiver_projections
@@ -851,24 +868,22 @@ impl<'a> Extractor<'a> {
             call.span,
         );
         if self.seen_calls.insert(key) {
-            self.record_call_raw_origin(node, call.span);
+            self.record_call_node_projection(node, call.span);
             self.record_call_receiver_projection(node, call.span);
             self.facts.call_sites.push(call);
         }
     }
 
-    fn record_call_raw_origin(&mut self, node: &Node, normalized_call_span: Span) {
-        self.facts
-            .call_raw_origin_projections
-            .push(CallRawOriginProjection {
-                raw_call_span: [
-                    node.first_lineno,
-                    node.first_column,
-                    node.last_lineno,
-                    node.last_column,
-                ],
-                normalized_call_span,
-            });
+    fn record_call_node_projection(&mut self, node: &Node, emitted_call_span: Span) {
+        self.facts.call_node_projections.push(CallNodeProjection {
+            normalized_node_span: [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ],
+            emitted_call_span,
+        });
     }
 
     fn record_call_receiver_projection(&mut self, node: &Node, outer_span: Span) {
@@ -1311,13 +1326,7 @@ impl<'a> Extractor<'a> {
         detail: &str,
         receiver_scope: &str,
     ) {
-        self.record_semantic_effect_at(
-            node.first_lineno,
-            span(node),
-            kind,
-            detail,
-            receiver_scope,
-        );
+        self.record_semantic_effect_at(node.first_lineno, span(node), kind, detail, receiver_scope);
     }
 
     fn record_semantic_effect_at(

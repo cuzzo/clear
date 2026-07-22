@@ -639,7 +639,7 @@ fn parse_file_routes_all_languages_through_normalized_passes() {
     ];
     let missing = [
         "parse_normalized_file(",
-        "normalize_tree(",
+        "normalize_tree_with_call_origins(",
         "StatelessSyntaxPass::normalized",
         "StatefulSyntaxPass::new",
     ];

@@ -7,10 +7,10 @@ use super::normalized_behavior::{
     configured_collection_operation, configured_external_latency_bound,
     configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
-    NormalizedNullableOperation, NormalizedOwner, NormalizedPresenceCorrelation,
-    method_param_types_from_signatures, NormalizedSemanticEffect, NormalizedStateRead,
+    eliminable_guard_from_call, method_param_types_from_signatures, nil_guard_from_predicates,
+    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
+    NormalizedNilGuardFact, NormalizedNullableOperation, NormalizedOwner,
+    NormalizedPresenceCorrelation, NormalizedSemanticEffect, NormalizedStateRead,
     NormalizedStateWrite, SyntaxMetadata,
 };
 use super::{CallSite, ExternalCallComplexity, FunctionDef};
@@ -215,34 +215,40 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
                 "function_value_call",
                 "panic",
             ),
-            "LASGN" => (
-                indexed_assignment_subject(node)?,
-                "indexed_write",
-                "panic",
-            ),
+            "LASGN" => (indexed_assignment_subject(node)?, "indexed_write", "panic"),
             "SEND_STATEMENT" => (
                 local_subject(node.children.first().and_then(crate::ast::node))?,
                 "channel_send",
                 "blocks",
             ),
-            "FCALL" if local_symbol(node.children.first())? == "close" => (
-                single_local_argument(node)?,
-                "channel_close",
-                "panic",
-            ),
+            "FCALL" if local_symbol(node.children.first())? == "close" => {
+                (single_local_argument(node)?, "channel_close", "panic")
+            }
             _ => return None,
         };
-        Some(NormalizedNullableOperation { subject, operation_kind, nil_behavior })
+        Some(NormalizedNullableOperation {
+            subject,
+            operation_kind,
+            nil_behavior,
+        })
     }
 
     fn presence_correlation(&self, node: &Node) -> Option<NormalizedPresenceCorrelation> {
-        if node.r#type != "SHORT_VAR_DECLARATION" { return None; }
+        if node.r#type != "SHORT_VAR_DECLARATION" {
+            return None;
+        }
         let targets = node.children.first().and_then(crate::ast::node)?;
         let source = node.children.get(1).and_then(crate::ast::node)?;
-        if targets.r#type != "EXPRESSION_LIST" || source.r#type != "EXPRESSION_LIST" { return None; }
-        let subjects = targets.children.iter().filter_map(crate::ast::node)
+        if targets.r#type != "EXPRESSION_LIST" || source.r#type != "EXPRESSION_LIST" {
+            return None;
+        }
+        let subjects = targets
+            .children
+            .iter()
+            .filter_map(crate::ast::node)
             .filter(|target| target.r#type == "LVAR")
-            .map(|target| target.text.trim().to_string()).collect::<Vec<_>>();
+            .map(|target| target.text.trim().to_string())
+            .collect::<Vec<_>>();
         let producer = source.children.first().and_then(crate::ast::node)?;
         let semantics = match producer.r#type.as_str() {
             "INDEX_EXPRESSION" => "map_lookup",
@@ -251,7 +257,9 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             _ => return None,
         };
         (subjects.len() == 2).then(|| NormalizedPresenceCorrelation {
-            value_subject: subjects[0].clone(), presence_subject: subjects[1].clone(), semantics,
+            value_subject: subjects[0].clone(),
+            presence_subject: subjects[1].clone(),
+            semantics,
         })
     }
 
@@ -345,9 +353,7 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
 
     fn suppress_call_site(&self, node: &Node, call: &NormalizedCallProjection) -> bool {
         let receiver = call.receiver.trim_start();
-        if call.message == "call"
-            && (receiver.starts_with("func(") || receiver.starts_with('*'))
-        {
+        if call.message == "call" && (receiver.starts_with("func(") || receiver.starts_with('*')) {
             // Immediately-invoked function bodies and conversion arguments are
             // visited independently. The synthetic wrapper is not another
             // dynamically dispatched call.
@@ -401,7 +407,11 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         }
         if let Some(name) = first_lvar_child_name(node) {
             let ty = strip_struct_tag(
-                node.text.trim_start().strip_prefix(&name).unwrap_or("").trim(),
+                node.text
+                    .trim_start()
+                    .strip_prefix(&name)
+                    .unwrap_or("")
+                    .trim(),
             )
             .to_string();
             return (!ty.is_empty()).then(|| super::StateDeclaration {
@@ -422,7 +432,11 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         // function nor field_name_from_declaration (unset for Go) had
         // anything to find.
         let embedded_type = strip_struct_tag(node.text.trim());
-        let name = embedded_type.trim_start_matches('*').rsplit('.').next()?.to_string();
+        let name = embedded_type
+            .trim_start_matches('*')
+            .rsplit('.')
+            .next()?
+            .to_string();
         (simple_identifier(&name)).then(|| super::StateDeclaration {
             field: name,
             owner: String::new(),
@@ -807,7 +821,11 @@ fn single_local_argument(node: &Node) -> Option<String> {
     let arguments = node.children.get(1).and_then(crate::ast::node)?;
     let mut values = arguments.children.iter().filter_map(crate::ast::node);
     let value = values.next()?;
-    values.next().is_none().then(|| local_subject(Some(value))).flatten()
+    values
+        .next()
+        .is_none()
+        .then(|| local_subject(Some(value)))
+        .flatten()
 }
 
 fn is_simple_name(value: &str) -> bool {
@@ -825,7 +843,9 @@ fn local_subject(node: Option<&Node>) -> Option<String> {
 
 fn local_symbol(child: Option<&Child>) -> Option<String> {
     match child? {
-        Child::Symbol(symbol) | Child::String(symbol) => (!symbol.trim().is_empty()).then(|| symbol.trim().to_string()),
+        Child::Symbol(symbol) | Child::String(symbol) => {
+            (!symbol.trim().is_empty()).then(|| symbol.trim().to_string())
+        }
         _ => None,
     }
 }
@@ -911,12 +931,14 @@ fn go_method_local_types(
             .expect("valid Go struct regex")
     });
     let field = FIELD.get_or_init(|| {
-        Regex::new(r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s+([^\s`]+)")
-            .expect("valid Go field regex")
+        Regex::new(r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s+([^\s`]+)").expect("valid Go field regex")
     });
 
     let mut field_types = BTreeMap::<String, BTreeSet<String>>::new();
-    for body in struct_body.captures_iter(source).filter_map(|row| row.get(1)) {
+    for body in struct_body
+        .captures_iter(source)
+        .filter_map(|row| row.get(1))
+    {
         for capture in field.captures_iter(body.as_str()) {
             field_types
                 .entry(capture[1].to_string())
@@ -965,7 +987,11 @@ fn go_method_local_types(
                 let element = channel_elements
                     .get(&capture[2])
                     .map(String::as_str)
-                    .or_else(|| known.get(&capture[2]).and_then(|value| value.strip_prefix("chan ")));
+                    .or_else(|| {
+                        known
+                            .get(&capture[2])
+                            .and_then(|value| value.strip_prefix("chan "))
+                    });
                 if let Some(element) = element {
                     candidates
                         .entry(capture[1].to_string())
@@ -1087,7 +1113,7 @@ fn receiver_owner_from_go_function(source: &str) -> Option<String> {
             .unwrap_or(value)
             .to_string(),
     )
-        .filter(|value| !value.is_empty())
+    .filter(|value| !value.is_empty())
 }
 
 fn receiver_name_from_go_function(source: &str) -> Option<String> {
@@ -1448,8 +1474,7 @@ mod tests {
             "scip-go gomod github.com/golang/go/src go1.22 `crypto/rsa`/VerifyPSS().",
         ] {
             assert_eq!(
-                external_symbol_call_complexity(symbol, "verify")
-                    .map(|complexity| complexity.time),
+                external_symbol_call_complexity(symbol, "verify").map(|complexity| complexity.time),
                 Some("O(N^3)"),
                 "{symbol}"
             );
@@ -1475,18 +1500,14 @@ mod tests {
             &node("CALL", "(*uint32)(value)"),
             &projection("*uint32", "call")
         ));
-        assert!(!behavior.suppress_call_site(
-            &node("CALL", "fn()"),
-            &projection("fn", "call")
-        ));
+        assert!(!behavior.suppress_call_site(&node("CALL", "fn()"), &projection("fn", "call")));
         assert!(behavior.suppress_call_site(
             &node("CALL", "ecdsaKey.Curve.Params().BitSize"),
             &projection("ecdsaKey.Curve.Params()", "BitSize")
         ));
-        assert!(!behavior.suppress_call_site(
-            &node("CALL", "err.Error()"),
-            &projection("err", "Error")
-        ));
+        assert!(
+            !behavior.suppress_call_site(&node("CALL", "err.Error()"), &projection("err", "Error"))
+        );
     }
 
     #[test]
@@ -1513,18 +1534,22 @@ mod tests {
         );
         assert_eq!(lines.get("EvictCallback"), Some(&1));
         assert_eq!(
-            GoNormalizedBehavior.declared_callable_cost(
-                aliases.get("EvictCallback").unwrap()
-            ),
+            GoNormalizedBehavior.declared_callable_cost(aliases.get("EvictCallback").unwrap()),
             Some("callback_once".to_string())
         );
     }
 
     #[test]
     fn function_value_operation_subjects_require_locals_and_symbols() {
-        assert_eq!(local_symbol(Some(&Child::Symbol("callback".to_string()))), Some("callback".to_string()));
+        assert_eq!(
+            local_symbol(Some(&Child::Symbol("callback".to_string()))),
+            Some("callback".to_string())
+        );
         assert_eq!(local_symbol(Some(&Child::Nil)), None);
-        assert_eq!(local_subject(Some(&node("LVAR", "callback"))), Some("callback".to_string()));
+        assert_eq!(
+            local_subject(Some(&node("LVAR", "callback"))),
+            Some("callback".to_string())
+        );
         assert_eq!(local_subject(Some(&node("CONST", "Callback"))), None);
     }
 
@@ -1536,9 +1561,13 @@ mod tests {
     #[test]
     fn struct_with_interface_typed_field_is_not_classified_as_interface() {
         let text = "type DecoderConfig struct {\n\tResult interface{}\n\tName string\n}\n";
-        assert!(!is_interface_declaration(text), "a struct field's own type must not leak into the declaration kind");
+        assert!(
+            !is_interface_declaration(text),
+            "a struct field's own type must not leak into the declaration kind"
+        );
 
-        let real_interface = "type DecodeHookFunc interface {\n\tDecode(from, to reflect.Value) error\n}\n";
+        let real_interface =
+            "type DecodeHookFunc interface {\n\tDecode(from, to reflect.Value) error\n}\n";
         assert!(is_interface_declaration(real_interface));
     }
 }

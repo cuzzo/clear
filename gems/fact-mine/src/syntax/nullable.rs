@@ -377,7 +377,16 @@ pub(crate) fn project_operations(
 
     rows.into_iter()
         .map(
-            |(node_id, path, span, place_id, operation_kind, nil_behavior, state_at_operation, complete)| {
+            |(
+                node_id,
+                path,
+                span,
+                place_id,
+                operation_kind,
+                nil_behavior,
+                state_at_operation,
+                complete,
+            )| {
                 NullableOperation {
                     node_id,
                     path,
@@ -393,20 +402,79 @@ pub(crate) fn project_operations(
         .collect()
 }
 
-pub(crate) fn project_presence_correlations(seeds: &[PresenceCorrelationSeed], facts: &ControlFlowFacts) -> Vec<PresenceCorrelation> {
-    let places = facts.places.iter().map(|place| (place.id.as_str(), place.name.as_str())).collect::<BTreeMap<_, _>>();
-    let effects = facts.effects.iter().map(|effect| (effect.node_id.as_str(), effect)).collect::<BTreeMap<_, _>>();
+pub(crate) fn project_presence_correlations(
+    seeds: &[PresenceCorrelationSeed],
+    facts: &ControlFlowFacts,
+) -> Vec<PresenceCorrelation> {
+    let places = facts
+        .places
+        .iter()
+        .map(|place| (place.id.as_str(), place.name.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let effects = facts
+        .effects
+        .iter()
+        .map(|effect| (effect.node_id.as_str(), effect))
+        .collect::<BTreeMap<_, _>>();
     let mut rows = BTreeSet::new();
     for seed in seeds {
-        for node in facts.nodes.iter().filter(|node| node.function == seed.function && span_contains(node.span, seed.span)) {
-            let Some(effect) = effects.get(node.id.as_str()) else { continue; };
-            let place_for = |subject: &str| effect.reads.iter().chain(effect.writes.iter())
-                .find(|place_id| places.get(place_id.as_str()) == Some(&subject)).cloned();
-            let (Some(value_place_id), Some(presence_place_id)) = (place_for(&seed.value_subject), place_for(&seed.presence_subject)) else { continue; };
-            rows.insert((format!("presence:{}:{value_place_id}:{presence_place_id}", node.id), node.file.clone(), node.span, value_place_id, presence_place_id, seed.semantics.clone(), "presence_on_true".to_string(), effect.complete));
+        for node in facts
+            .nodes
+            .iter()
+            .filter(|node| node.function == seed.function && span_contains(node.span, seed.span))
+        {
+            let Some(effect) = effects.get(node.id.as_str()) else {
+                continue;
+            };
+            let place_for = |subject: &str| {
+                effect
+                    .reads
+                    .iter()
+                    .chain(effect.writes.iter())
+                    .find(|place_id| places.get(place_id.as_str()) == Some(&subject))
+                    .cloned()
+            };
+            let (Some(value_place_id), Some(presence_place_id)) = (
+                place_for(&seed.value_subject),
+                place_for(&seed.presence_subject),
+            ) else {
+                continue;
+            };
+            rows.insert((
+                format!("presence:{}:{value_place_id}:{presence_place_id}", node.id),
+                node.file.clone(),
+                node.span,
+                value_place_id,
+                presence_place_id,
+                seed.semantics.clone(),
+                "presence_on_true".to_string(),
+                effect.complete,
+            ));
         }
     }
-    rows.into_iter().map(|(group_id, path, span, value_place_id, presence_place_id, semantics, branch_refinement, complete)| PresenceCorrelation { group_id, path, span, value_place_id, presence_place_id, semantics, branch_refinement, complete }).collect()
+    rows.into_iter()
+        .map(
+            |(
+                group_id,
+                path,
+                span,
+                value_place_id,
+                presence_place_id,
+                semantics,
+                branch_refinement,
+                complete,
+            )| PresenceCorrelation {
+                group_id,
+                path,
+                span,
+                value_place_id,
+                presence_place_id,
+                semantics,
+                branch_refinement,
+                complete,
+            },
+        )
+        .collect()
 }
 
 fn join_projected_states<'a>(states: impl Iterator<Item = &'a str>) -> DefinitionState {
@@ -675,15 +743,13 @@ mod tests {
             .write_sources
             .insert("cycle".to_string(), "cycle".to_string());
         let mut nullable_annotation = effect("nullable-annotation", "nullable");
-        nullable_annotation.write_nullable_contracts.insert(
-            "nullable".to_string(),
-            "nullable_declared_type".to_string(),
-        );
+        nullable_annotation
+            .write_nullable_contracts
+            .insert("nullable".to_string(), "nullable_declared_type".to_string());
         let mut non_null_annotation = effect("non-null-annotation", "non-null");
-        non_null_annotation.write_nullable_contracts.insert(
-            "non-null".to_string(),
-            "non_null_declared_type".to_string(),
-        );
+        non_null_annotation
+            .write_nullable_contracts
+            .insert("non-null".to_string(), "non_null_declared_type".to_string());
         let facts = ControlFlowFacts {
             effects: vec![
                 null_write,

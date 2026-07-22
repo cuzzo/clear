@@ -1450,6 +1450,7 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 
     /// Extract explicit 'this.' or 'self.' bindings
+    #[allow(dead_code)] // Extension hook retained for language adapters.
     fn literal_state_writes(&self, _node: &Node, _normalized_text: &str) -> Vec<String> {
         Vec::new()
     }
@@ -1579,14 +1580,17 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         format!("T::Array[{}]", elem)
     }
 
+    #[allow(dead_code)] // Formatting is exercised by language-adapter conformance tests.
     fn format_hash_type(&self, key: &str, val: &str) -> String {
         format!("T::Hash[{}, {}]", key, val)
     }
 
+    #[allow(dead_code)] // Formatting is exercised by language-adapter conformance tests.
     fn format_set_type(&self, elem: &str) -> String {
         format!("T::Set[{}]", elem)
     }
 
+    #[allow(dead_code)] // Formatting is exercised by language-adapter conformance tests.
     fn format_nilable_type(&self, type_text: &str) -> String {
         if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None"
         {
@@ -1956,7 +1960,9 @@ mod tests {
         assert!(b.literal_receiver_type(&node).is_none());
         assert_eq!(b.parameter_list_source("("), "");
         assert!(b.parameter_name_from_signature("").is_none());
-        assert!(b.nullable_declared_type_contract("Widget * _Nullable").is_none());
+        assert!(b
+            .nullable_declared_type_contract("Widget * _Nullable")
+            .is_none());
         assert!(b.literal_state_refs(&node, "text").is_empty());
         assert!(b.nil_guard_fact("msg", "sub").is_none());
         assert!(!b.local_flow_declaration_keyword("key"));
