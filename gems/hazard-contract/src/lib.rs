@@ -284,6 +284,8 @@ pub fn validate_contract() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{glob_matches, validate_contract};
+    use jsonschema::JSONSchema;
+    use serde_json::Value;
 
     #[test]
     fn canonical_contract_is_valid_and_synchronized() {
@@ -297,5 +299,33 @@ mod tests {
         assert!(!glob_matches("*_metaprogramming", "metaprogramming"));
         assert!(glob_matches("*_vopr_*", "zig_vopr_time"));
         assert!(!glob_matches("*_vopr_*", "zig_vopr"));
+    }
+
+    #[test]
+    fn proof_boundary_producer_vectors_conform_to_the_versioned_schema() {
+        let schema: Value = serde_json::from_str(include_str!("../proof-boundary.v3.schema.json"))
+            .expect("proof-boundary schema must be valid JSON");
+        let validator = JSONSchema::compile(&schema).expect("proof-boundary schema must compile");
+        let fixture: Value =
+            serde_json::from_str(include_str!("../fixtures/proof-boundary.v3.json"))
+                .expect("proof-boundary fixture must be valid JSON");
+
+        let valid = fixture.get("valid").into_iter().chain(
+            fixture
+                .get("representative")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flat_map(|producers| producers.values()),
+        );
+        for boundary in valid {
+            assert!(
+                validator.is_valid(boundary),
+                "representative boundary must satisfy v3 schema: {boundary}"
+            );
+        }
+        assert!(
+            !validator.is_valid(&fixture["invalid"]),
+            "invalid vector must fail the v3 schema"
+        );
     }
 }

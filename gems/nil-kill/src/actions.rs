@@ -1820,11 +1820,17 @@ fn rewriteable_field_type(current_type: &str, candidate: &str) -> bool {
 }
 
 fn propose_false_nilable_return_actions(input: &InputState) -> Vec<Action> {
-    let Some(existing_sigs) = input.facts.get("existing_sigs").and_then(|value| value.as_array())
+    let Some(existing_sigs) = input
+        .facts
+        .get("existing_sigs")
+        .and_then(|value| value.as_array())
     else {
         return Vec::new();
     };
-    let Some(return_origins) = input.facts.get("return_origins").and_then(|value| value.as_array())
+    let Some(return_origins) = input
+        .facts
+        .get("return_origins")
+        .and_then(|value| value.as_array())
     else {
         return Vec::new();
     };
@@ -1906,7 +1912,12 @@ fn propose_false_nilable_return_actions(input: &InputState) -> Vec<Action> {
 }
 
 fn fact_location(value: &serde_json::Value) -> String {
-    let text = |key| value.get(key).and_then(|item| item.as_str()).unwrap_or_default();
+    let text = |key| {
+        value
+            .get(key)
+            .and_then(|item| item.as_str())
+            .unwrap_or_default()
+    };
     let line = value
         .get("line")
         .and_then(|item| item.as_i64())
@@ -2613,7 +2624,6 @@ fn reportable_primitive_domain(domain: &PrimitiveDomain) -> bool {
 /// hidden-enum observations. Parameters are deliberately excluded: without a
 /// proven caller contract they are open-world inputs rather than candidates.
 fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
-
     let mut domains = BTreeMap::<String, PrimitiveDomain>::new();
     for observation in fact_objects(input, "hidden_enum_observations") {
         // Parameters are open-world inputs without a caller contract.  Keep
@@ -2628,7 +2638,9 @@ fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
         let domain = domains.entry(key.to_string()).or_default();
         domain.path = fact_string(observation, "path").unwrap_or("").to_string();
         domain.line = fact_i64(observation, "line").unwrap_or(0);
-        domain.kind = fact_string(observation, "kind").unwrap_or("state").to_string();
+        domain.kind = fact_string(observation, "kind")
+            .unwrap_or("state")
+            .to_string();
         domain.slot = fact_string(observation, "slot").unwrap_or("").to_string();
         let site = observation
             .get("site")
@@ -2667,7 +2679,8 @@ fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
             line: domain.line,
             message: format!(
                 "{} {} has a closed-looking {} domain across {} decision sites",
-                domain.kind, domain.literal_kind,
+                domain.kind,
+                domain.literal_kind,
                 domain.slot,
                 domain.decision_sites.len()
             ),
@@ -2728,7 +2741,8 @@ fn nullable_roots(
 ) -> BTreeMap<String, PressureEvidence> {
     let mut roots = BTreeMap::<String, PressureEvidence>::new();
     for state in states {
-        if !is_pressure_nullable_state(fact_string(state, "state")) || !fact_bool(state, "complete") {
+        if !is_pressure_nullable_state(fact_string(state, "state")) || !fact_bool(state, "complete")
+        {
             continue;
         }
         let Some(place_id) = fact_string(state, "place_id") else {
@@ -2804,7 +2818,9 @@ fn attach_operation_obligations(
                     line: fact_span_line(operation),
                 };
                 if location.is_real_source_location() {
-                    evidence.operations.insert(format!("{kind}:{node}"), location);
+                    evidence
+                        .operations
+                        .insert(format!("{kind}:{node}"), location);
                 }
             }
         }
@@ -2865,7 +2881,10 @@ impl OperationLocation {
     }
 }
 
-fn fact_objects<'a>(input: &'a InputState, key: &str) -> Vec<&'a serde_json::Map<String, serde_json::Value>> {
+fn fact_objects<'a>(
+    input: &'a InputState,
+    key: &str,
+) -> Vec<&'a serde_json::Map<String, serde_json::Value>> {
     input
         .facts
         .get(key)
@@ -2876,7 +2895,10 @@ fn fact_objects<'a>(input: &'a InputState, key: &str) -> Vec<&'a serde_json::Map
         .collect()
 }
 
-fn fact_string<'a>(fact: &'a serde_json::Map<String, serde_json::Value>, key: &str) -> Option<&'a str> {
+fn fact_string<'a>(
+    fact: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<&'a str> {
     fact.get(key).and_then(serde_json::Value::as_str)
 }
 
@@ -2884,7 +2906,10 @@ fn fact_i64(fact: &serde_json::Map<String, serde_json::Value>, key: &str) -> Opt
     fact.get(key).and_then(serde_json::Value::as_i64)
 }
 
-fn fact_strings<'a>(fact: &'a serde_json::Map<String, serde_json::Value>, key: &str) -> Vec<&'a str> {
+fn fact_strings<'a>(
+    fact: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Vec<&'a str> {
     fact.get(key)
         .and_then(serde_json::Value::as_array)
         .into_iter()
@@ -2894,7 +2919,9 @@ fn fact_strings<'a>(fact: &'a serde_json::Map<String, serde_json::Value>, key: &
 }
 
 fn fact_bool(fact: &serde_json::Map<String, serde_json::Value>, key: &str) -> bool {
-    fact.get(key).and_then(serde_json::Value::as_bool).unwrap_or(false)
+    fact.get(key)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn fact_span_line(fact: &serde_json::Map<String, serde_json::Value>) -> i64 {
@@ -2997,12 +3024,37 @@ mod tests {
         let actions = report_static_primitive_domains(&input);
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].kind, "report_static_primitive_domain");
-        assert_eq!(actions[0].data["values"], serde_json::json!(["\"draft\"", "\"published\""]));
-        assert_eq!(actions[0].data["decision_sites"], serde_json::json!(["post.rb:4", "post.rb:8"]));
+        assert_eq!(
+            actions[0].data["values"],
+            serde_json::json!(["\"draft\"", "\"published\""])
+        );
+        assert_eq!(
+            actions[0].data["decision_sites"],
+            serde_json::json!(["post.rb:4", "post.rb:8"])
+        );
     }
 
     #[test]
-    fn excludes_open_world_unrelated_and_non_string_domain_observations() {
+    fn reports_closed_symbol_and_integer_domains_without_opening_params() {
+        let input = input_from_json(serde_json::json!({
+            "methods": [], "facts": { "hidden_enum_observations": [
+                {"event":"decision","kind":"state","key":"state:phase","path":"job.rb","line":2,"slot":"@phase","site":{"path":"job.rb","line":3},"values":[{"kind":"Symbol","value":":queued"}]},
+                {"event":"decision","kind":"state","key":"state:phase","path":"job.rb","line":2,"slot":"@phase","site":{"path":"job.rb","line":4},"values":[{"kind":"Symbol","value":":done"}]},
+                {"event":"decision","kind":"local","key":"local:attempt","path":"job.rb","line":8,"slot":"attempt","site":{"path":"job.rb","line":9},"values":[{"kind":"Integer","value":"1"}]},
+                {"event":"decision","kind":"local","key":"local:attempt","path":"job.rb","line":8,"slot":"attempt","site":{"path":"job.rb","line":10},"values":[{"kind":"Integer","value":"2"}]},
+                {"event":"decision","kind":"param","key":"param:phase","path":"job.rb","line":12,"slot":"phase","site":{"path":"job.rb","line":13},"values":[{"kind":"Symbol","value":":queued"}]}
+            ]}
+        }));
+        let actions = report_static_primitive_domains(&input);
+        assert_eq!(actions.len(), 2);
+        assert!(actions.iter().any(|action| action.data["slot"] == "@phase"));
+        assert!(actions
+            .iter()
+            .any(|action| action.data["slot"] == "attempt"));
+    }
+
+    #[test]
+    fn excludes_open_world_unrelated_and_unsupported_domain_observations() {
         let input = input_from_json(serde_json::json!({
             "methods": [],
             "facts": {
@@ -3079,7 +3131,10 @@ mod tests {
             }
         }));
 
-        assert!(report_static_primitive_domains(&input).is_empty());
+        let actions = report_static_primitive_domains(&input);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].data["slot"], "@flags");
+        assert_eq!(actions[0].data["values"], serde_json::json!(["1", "2"]));
     }
 
     #[test]
@@ -3150,7 +3205,9 @@ mod tests {
         let actions = report_static_primitive_domains(&input);
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].line, 2);
-        assert!(actions[0].message.starts_with("local status"));
+        assert!(actions[0]
+            .message
+            .starts_with("local String has a closed-looking status domain"));
         assert_eq!(
             actions[0].data["values"],
             serde_json::json!(["\"draft\"", "\"sent\""])
@@ -3345,8 +3402,14 @@ mod tests {
         assert_eq!(action.path, "cache.c");
         assert_eq!(action.line, 14);
         assert_eq!(action.data["pressure"], 3);
-        assert_eq!(action.data["guard_clusters"], serde_json::json!(["place:cache:value:guard:1"]));
-        assert_eq!(action.data["nullable_returns"], serde_json::json!(["Cache#lookup"]));
+        assert_eq!(
+            action.data["guard_clusters"],
+            serde_json::json!(["place:cache:value:guard:1"])
+        );
+        assert_eq!(
+            action.data["nullable_returns"],
+            serde_json::json!(["Cache#lookup"])
+        );
         assert_eq!(
             action.data["unsafe_operations"],
             serde_json::json!(["pointer_dereference:deref:1"])

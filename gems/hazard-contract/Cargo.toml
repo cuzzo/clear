@@ -11,3 +11,8 @@ path = "src/lib.rs"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+[dev-dependencies]
+# Conformance tests validate bundled JSON only; remote/file reference support
+# is unnecessary and would pull an HTTP stack into this small contract crate.
+jsonschema = { version = "0.18", default-features = false }

@@ -59,6 +59,93 @@ pub enum ProofScopeKind {
     Local,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub enum ProofBlockerKind {
+    ParserRecovery,
+    CallResolution,
+    MissingEvidence,
+    OpenCorpus,
+    UnsupportedLanguage,
+    Unknown,
+}
+
+impl ProofBlockerKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::ParserRecovery => "parser_recovery",
+            Self::CallResolution => "call_resolution",
+            Self::MissingEvidence => "missing_evidence",
+            Self::OpenCorpus => "open_corpus",
+            Self::UnsupportedLanguage => "unsupported_language",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// A canonical reason why a detector cannot make a stronger boundary claim.
+///
+/// Constructors keep serialized blocker kinds within the v3 contract rather
+/// than relying on presentation-layer string parsing.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ProofBlocker {
+    kind: ProofBlockerKind,
+    path: Option<String>,
+    span: Option<[i64; 4]>,
+}
+
+impl ProofBlocker {
+    pub fn parser_recovery(path: impl Into<String>, span: Option<[i64; 4]>) -> Self {
+        Self {
+            kind: ProofBlockerKind::ParserRecovery,
+            path: Some(path.into()),
+            span,
+        }
+    }
+
+    pub fn call_resolution(path: impl Into<String>, span: Option<[i64; 4]>) -> Self {
+        Self {
+            kind: ProofBlockerKind::CallResolution,
+            path: Some(path.into()),
+            span,
+        }
+    }
+
+    pub fn missing_evidence(path: Option<String>) -> Self {
+        Self {
+            kind: ProofBlockerKind::MissingEvidence,
+            path,
+            span: None,
+        }
+    }
+
+    pub const fn open_corpus() -> Self {
+        Self {
+            kind: ProofBlockerKind::OpenCorpus,
+            path: None,
+            span: None,
+        }
+    }
+
+    pub const fn unknown() -> Self {
+        Self {
+            kind: ProofBlockerKind::Unknown,
+            path: None,
+            span: None,
+        }
+    }
+
+    fn value(self) -> Value {
+        let mut value = json!({ "kind": self.kind.as_str() });
+        if let Some(path) = self.path {
+            value["path"] = json!(path);
+        }
+        if let Some(span) = self.span {
+            value["span"] = json!(span);
+        }
+        value
+    }
+}
+
 impl ProofScopeKind {
     const fn as_str(self) -> &'static str {
         match self {
@@ -94,35 +181,11 @@ pub fn proof_boundary(
     claim_kind: &str,
     scope: ProofScopeKind,
     closed: bool,
-    blockers: Vec<String>,
+    blockers: Vec<ProofBlocker>,
 ) -> Value {
     let blockers = blockers
         .into_iter()
-        .map(|blocker| {
-            let value = if blocker.starts_with("parser_recovery") {
-                "parser_recovery"
-            } else if blocker.starts_with("unresolved_call_resolution") {
-                "call_resolution"
-            } else if blocker.starts_with("missing_") {
-                "missing_evidence"
-            } else if blocker == "open_corpus" {
-                "open_corpus"
-            } else {
-                "unknown"
-            };
-            let mut result = json!({ "kind": value });
-            if let Some(path) = blocker.strip_prefix("parser_recovery_dependency:") {
-                result["path"] = json!(path);
-            } else if let Some(location) = blocker.strip_prefix("unresolved_call_resolution:") {
-                if let Some((path, line)) = location.rsplit_once(':') {
-                    if let Ok(line) = line.parse::<i64>() {
-                        result["path"] = json!(path);
-                        result["span"] = json!([line, 0, line, 0]);
-                    }
-                }
-            }
-            result
-        })
+        .map(ProofBlocker::value)
         .collect::<Vec<_>>();
     json!({
         "schema": PROOF_BOUNDARY_SCHEMA,
@@ -506,7 +569,7 @@ mod tests {
                         "test_claim",
                         ProofScopeKind::Local,
                         false,
-                        vec!["unresolved_call".to_string()],
+                        vec![ProofBlocker::unknown()],
                     )
                 }
             }),
@@ -543,7 +606,7 @@ mod tests {
                 "static_nil_pressure",
                 ProofScopeKind::Local,
                 false,
-                vec!["unresolved_call".to_string()],
+                vec![ProofBlocker::unknown()],
             ),
             fixture["valid"]
         );
@@ -554,12 +617,15 @@ mod tests {
         let boundary = proof_boundary(
             InputCompleteness::Partial,
             ClaimStatus::Review,
-            CoverageDischarge::Unsatisfiable,
+            CoverageDischarge::NotApplicable,
             &["fact_mine_normalized_ast"],
-            "test_claim",
+            "false_simplicity",
             ProofScopeKind::Function,
             false,
-            vec!["unresolved_call_resolution:lib/example.rb:12".to_string()],
+            vec![ProofBlocker::call_resolution(
+                "lib/example.rb",
+                Some([12, 0, 12, 0]),
+            )],
         );
         assert_eq!(
             boundary.pointer("/blockers/0/kind"),
@@ -573,5 +639,10 @@ mod tests {
             boundary.pointer("/blockers/0/span"),
             Some(&json!([12, 0, 12, 0]))
         );
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../hazard-contract/fixtures/proof-boundary.v3.json"
+        ))
+        .unwrap();
+        assert_eq!(boundary, fixture["representative"]["decomplex"]);
     }
 }

@@ -62,7 +62,11 @@ them with a global scan-completeness flag.
 
 The machine-readable contract is
 `gems/hazard-contract/proof-boundary.v3.schema.json`; matching valid and
-invalid vectors live in `gems/hazard-contract/fixtures/proof-boundary.v3.json`.
+invalid vectors, including representative Decomplex, Espalier, NilKill, and
+SlopCop producer values, live in
+`gems/hazard-contract/fixtures/proof-boundary.v3.json`. The hazard-contract
+test compiles the versioned JSON Schema and validates those vectors, so the
+fixture is a conformance check rather than documentation alone.
 Ruby producers use `FactMine::ProofBoundary` rather than copying validation or
 summary logic. Rust producers use typed enums, so invalid values cannot escape
 in release builds.

@@ -623,8 +623,8 @@ module NilKill
 
     def apply_corpus_completeness(boundary, evidence)
       coverage = corpus_boundary_attributes(evidence)
-      return boundary unless boundary["input_completeness"] == "unknown"
       return boundary if coverage.fetch(:input_completeness) == "unknown"
+      return boundary if coverage.fetch(:input_completeness) == "complete" && boundary["input_completeness"] != "unknown"
 
       NilKill::Sarif.proof_boundary(
         input_completeness: coverage.fetch(:input_completeness),

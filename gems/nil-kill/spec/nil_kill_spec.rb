@@ -392,6 +392,29 @@ RSpec.describe NilKill do
       )
     end
 
+    it "does not let fact-local completeness override partial corpus input" do
+      reporter = described_class.new
+      fact_boundary = NilKill::Sarif.proof_boundary(
+        input_completeness: "complete",
+        claim_status: "proven",
+        coverage_discharge: "unsatisfiable",
+        authority: ["fact_mine_normalized_ast", "nil_kill_static"],
+        claim_kind: "static_nullable_return",
+        scope: { kind: "local", closed: false }
+      )
+
+      boundary = reporter.send(
+        :static_proof_boundary,
+        { "proof_boundary" => fact_boundary },
+        "static_nullable_return",
+        { "static" => { "input_coverage" => { "complete" => false, "reason" => "parser_recovery" } } }
+      )
+
+      expect(boundary.fetch("input_completeness")).to eq("partial")
+      expect(boundary.fetch("claim_status")).to eq("proven")
+      expect(boundary.fetch("blockers")).to include({ "kind" => "parser_recovery" })
+    end
+
     it "serializes only the canonical proof boundary for pressure findings" do
       reporter = described_class.new
       finding = {
@@ -428,6 +451,7 @@ RSpec.describe NilKill do
       )
 
       expect(boundary).to eq(valid)
+      expect(boundary).to eq(fixture.dig("representative", "nil_kill"))
       expect {
         NilKill::Sarif.proof_boundary(
           input_completeness: fixture.dig("invalid", "input_completeness"),

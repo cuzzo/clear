@@ -554,6 +554,18 @@ impl SarifLocation {
             self.source_end_column.unwrap_or(i64::MAX),
         ]
     }
+
+    /// A source span suitable for serialization. Unlike `source_span`, this
+    /// never leaks internal unbounded-coordinate sentinels into SARIF.
+    fn source_location_span(&self) -> Option<[i64; 4]> {
+        let start_column = self.source_start_column?;
+        Some([
+            self.line,
+            start_column,
+            self.end_line.unwrap_or(self.line),
+            self.source_end_column.unwrap_or(start_column),
+        ])
+    }
 }
 
 fn build_sections(detectors: &Value, facts: &Value) -> Vec<ReportSection> {
@@ -642,7 +654,7 @@ fn finding_input_boundary(
     evidence_requirement: EvidenceRequirement,
     finding: &Value,
     facts: &Value,
-) -> (sarif::InputCompleteness, Vec<String>) {
+) -> (sarif::InputCompleteness, Vec<sarif::ProofBlocker>) {
     let by_file = facts
         .pointer("/semantic_evidence/by_file")
         .and_then(Value::as_object);
@@ -650,19 +662,19 @@ fn finding_input_boundary(
     if locations.is_empty() {
         return (
             sarif::InputCompleteness::Unknown,
-            vec!["missing_finding_location".to_string()],
+            vec![sarif::ProofBlocker::missing_evidence(None)],
         );
     }
     let mut partial = Vec::new();
     let mut unknown = Vec::new();
     if evidence_requirement.scope == EvidenceScope::ClosedCorpus {
         if facts.pointer("/corpus/complete").and_then(Value::as_bool) != Some(true) {
-            unknown.push("open_corpus".to_string());
+            unknown.push(sarif::ProofBlocker::open_corpus());
         }
         if let Some(files) = by_file {
             for (path, file) in files {
                 if file.get("normalized_ast_complete").and_then(Value::as_bool) != Some(true) {
-                    unknown.push(format!("parser_recovery_dependency:{path}"));
+                    unknown.push(sarif::ProofBlocker::parser_recovery(path, None));
                 }
             }
         }
@@ -671,25 +683,26 @@ fn finding_input_boundary(
         let Some(path) = location.path.as_deref() else {
             return (
                 sarif::InputCompleteness::Unknown,
-                vec!["missing_finding_path".to_string()],
+                vec![sarif::ProofBlocker::missing_evidence(None)],
             );
         };
         let Some(file) = by_file.and_then(|files| files.get(path)) else {
             return (
                 sarif::InputCompleteness::Unknown,
-                vec![format!("missing_extractor_evidence:{path}")],
+                vec![sarif::ProofBlocker::missing_evidence(Some(
+                    path.to_string(),
+                ))],
             );
         };
         if evidence_requirement.scope != EvidenceScope::ClosedCorpus {
             match dependency_span(evidence_requirement.scope, file, &location) {
                 Some(span) if recovery_affects_span(file, span) => {
-                    unknown.push(format!("parser_recovery_dependency:{path}"));
+                    unknown.push(sarif::ProofBlocker::parser_recovery(path, Some(span)));
                 }
                 Some(_) => {}
-                None => unknown.push(format!(
-                    "missing_dependency_region:{:?}",
-                    evidence_requirement.scope
-                )),
+                None => unknown.push(sarif::ProofBlocker::missing_evidence(Some(
+                    path.to_string(),
+                ))),
             }
         }
         if evidence_requirement.call_resolution
@@ -702,9 +715,9 @@ fn finding_input_boundary(
                         .any(|span| span_contains_location(span, &location))
                 })
         {
-            partial.push(format!(
-                "unresolved_call_resolution:{path}:{}",
-                location.line
+            partial.push(sarif::ProofBlocker::call_resolution(
+                path,
+                location.source_location_span(),
             ));
         }
     }
@@ -2024,7 +2037,10 @@ mod tests {
             &facts,
         );
         assert_eq!(completeness, sarif::InputCompleteness::Partial);
-        assert_eq!(blockers, vec!["unresolved_call_resolution:clean.rb:12"]);
+        assert_eq!(
+            blockers,
+            vec![sarif::ProofBlocker::call_resolution("clean.rb", None)]
+        );
         let recovered = json!({ "at": "recovered.rb:work:3" });
         assert_eq!(
             finding_input_boundary(EvidenceRequirement::REPORTED_SPANS, &recovered, &facts).0,

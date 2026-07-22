@@ -563,6 +563,35 @@ fn hidden_enum_observations_use_the_primary_normalized_walk() -> Result<()> {
 }
 
 #[test]
+fn hidden_enum_observations_preserve_closed_symbol_and_integer_domains() -> Result<()> {
+    let document = syntax::parse_file(fixture("hidden_enum_symbol_integer.rb"), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let values = output
+        .hidden_enum_observations
+        .iter()
+        .filter(|observation| observation["kind"] == "state")
+        .flat_map(|observation| observation["values"].as_array().into_iter().flatten())
+        .filter_map(|value| {
+            Some((
+                value["kind"].as_str()?.to_string(),
+                value["value"].as_str()?.to_string(),
+            ))
+        })
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        values,
+        BTreeSet::from([
+            ("Integer".to_string(), "1".to_string()),
+            ("Integer".to_string(), "2".to_string()),
+            ("Symbol".to_string(), ":done".to_string()),
+            ("Symbol".to_string(), ":queued".to_string()),
+        ])
+    );
+    Ok(())
+}
+
+#[test]
 fn hidden_enum_observations_mark_nonliteral_state_writes_open_world() -> Result<()> {
     let document = syntax::parse_file(fixture("hidden_enum_open_world.rb"), Language::Ruby)?;
     let output = profile::extract(&document, Profile::NilKill);

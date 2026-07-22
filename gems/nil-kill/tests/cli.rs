@@ -107,7 +107,10 @@ fn binary_reports_causal_nullable_pressure_from_public_facts() {
         .iter()
         .find(|action| action["kind"] == "report_static_nil_pressure")
         .unwrap();
-    assert_eq!(action["data"]["root_definition_id"], "definition:cache_lookup");
+    assert_eq!(
+        action["data"]["root_definition_id"],
+        "definition:cache_lookup"
+    );
     assert_eq!(action["data"]["pressure"], 3);
     assert_eq!(action["path"], "src/cache.c");
     assert_eq!(action["line"], 22);
