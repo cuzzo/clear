@@ -31,6 +31,24 @@ struct NilFact {
     non_nil_when_true: bool,
 }
 
+/// Guard semantics before they are joined to CFG places. Keeping this small
+/// record independent of CFG construction lets redundant-guard detection and
+/// nullable flow share one normalized interpretation of a condition.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct NullableRefinementSeed {
+    pub(crate) function: String,
+    pub(crate) subject: String,
+    pub(crate) condition_span: Span,
+    pub(crate) edge: String,
+    pub(crate) state_on_edge: String,
+    pub(crate) proof_kind: String,
+}
+
+pub(crate) struct NormalizedNilGuardFacts {
+    pub(crate) redundant_guards: Vec<RedundantNilGuardRow>,
+    pub(crate) refinements: Vec<NullableRefinementSeed>,
+}
+
 struct CallParts<'a> {
     receiver: Option<&'a Node>,
     message: String,
@@ -80,12 +98,12 @@ pub fn scan_documents(documents: &[Document]) -> Vec<RedundantNilGuardRow> {
     out
 }
 
-pub(crate) fn scan_normalized(
+pub(crate) fn normalized_facts_from_normalized(
     file: &str,
     lines: &[String],
     root: &Node,
     behavior: &dyn NormalizedLanguageBehavior,
-) -> Vec<RedundantNilGuardRow> {
+) -> NormalizedNilGuardFacts {
     let mut scanner = RedundantNilGuard::new(file.to_string(), lines.to_vec(), behavior);
     scanner.walk(root, &Vec::new());
     let mut out = scanner
@@ -94,7 +112,18 @@ pub(crate) fn scan_normalized(
         .map(|finding| finding.to_h())
         .collect::<Vec<_>>();
     sort_rows(&mut out);
-    out
+    scanner.refinements.sort_by(|left, right| {
+        left.function
+            .cmp(&right.function)
+            .then_with(|| left.condition_span.cmp(&right.condition_span))
+            .then_with(|| left.subject.cmp(&right.subject))
+            .then_with(|| left.edge.cmp(&right.edge))
+    });
+    scanner.refinements.dedup();
+    NormalizedNilGuardFacts {
+        redundant_guards: out,
+        refinements: scanner.refinements,
+    }
 }
 
 fn sort_rows(rows: &mut [RedundantNilGuardRow]) {
@@ -112,6 +141,7 @@ struct RedundantNilGuard<'a> {
     lines: Vec<String>,
     behavior: &'a dyn NormalizedLanguageBehavior,
     findings: Vec<Finding>,
+    refinements: Vec<NullableRefinementSeed>,
 }
 
 impl<'a> RedundantNilGuard<'a> {
@@ -121,6 +151,7 @@ impl<'a> RedundantNilGuard<'a> {
             lines,
             behavior,
             findings: Vec::new(),
+            refinements: Vec::new(),
         }
     }
 
@@ -211,6 +242,7 @@ impl<'a> RedundantNilGuard<'a> {
 
         if let Some(cond) = cond {
             self.inspect_node(cond, defstack, &scoped_known);
+            self.record_refinements(node.r#type.as_str(), cond, defstack);
         }
 
         let then_known = self.known_for_branch(node.r#type.as_str(), true, cond, &scoped_known);
@@ -254,6 +286,92 @@ impl<'a> RedundantNilGuard<'a> {
             }
         }
         flow
+    }
+
+    fn record_refinements(&mut self, node_type: &str, condition: &Node, defstack: &[String]) {
+        let function = defstack
+            .last()
+            .cloned()
+            .unwrap_or_else(|| "(top-level)".to_string());
+        let condition_span = self.span(condition);
+        let proof_kind = self.refinement_proof_kind(condition);
+
+        if let Some(fact) = self.nil_fact(condition) {
+            self.push_refinement(
+                &function,
+                condition_span,
+                node_type,
+                true,
+                &fact.local,
+                fact.non_nil_when_true,
+                &proof_kind,
+            );
+            self.push_refinement(
+                &function,
+                condition_span,
+                node_type,
+                false,
+                &fact.local,
+                !fact.non_nil_when_true,
+                &proof_kind,
+            );
+            return;
+        }
+
+        for fact in self.branch_nil_facts(condition, true) {
+            self.push_refinement(
+                &function,
+                condition_span,
+                node_type,
+                true,
+                &fact.local,
+                true,
+                &proof_kind,
+            );
+        }
+    }
+
+    fn push_refinement(
+        &mut self,
+        function: &str,
+        condition_span: Span,
+        node_type: &str,
+        condition_truth: bool,
+        subject: &str,
+        non_null: bool,
+        proof_kind: &str,
+    ) {
+        let then_branch = if node_type == "IF" {
+            condition_truth
+        } else {
+            !condition_truth
+        };
+        self.refinements.push(NullableRefinementSeed {
+            function: function.to_string(),
+            subject: subject.to_string(),
+            condition_span,
+            edge: if then_branch { "then" } else { "else" }.to_string(),
+            state_on_edge: if non_null {
+                "definitely_non_null"
+            } else {
+                "definitely_null"
+            }
+            .to_string(),
+            proof_kind: proof_kind.to_string(),
+        });
+    }
+
+    fn refinement_proof_kind(&self, node: &Node) -> String {
+        if node.r#type == "QCALL" {
+            return "safe_navigation".to_string();
+        }
+        if node.r#type == "OPCALL" {
+            return "nil_comparison".to_string();
+        }
+        if self.call_parts(node).is_some() {
+            return "predicate".to_string();
+        }
+        "truthy".to_string()
     }
 
     fn known_for_branch(
@@ -609,6 +727,7 @@ mod tests {
             lines: Vec::new(),
             behavior: &TestBehavior,
             findings: Vec::new(),
+            refinements: Vec::new(),
         }
     }
 
@@ -635,8 +754,22 @@ int queue(struct entry* previous) {
         let tree = parser.parse(source, None).expect("C source parses");
         let root = crate::ast::normalize_tree(tree.root_node(), source, Language::C);
         let lines = source.lines().map(str::to_string).collect::<Vec<_>>();
-        let findings = scan_normalized("queue.c", &lines, &root, crate::syntax::c::behavior());
-        assert!(findings.is_empty(), "unexpected findings: {findings:?}");
+        let facts = normalized_facts_from_normalized(
+            "queue.c",
+            &lines,
+            &root,
+            crate::syntax::c::behavior(),
+        );
+        assert!(
+            facts.redundant_guards.is_empty(),
+            "unexpected findings: {:?}",
+            facts.redundant_guards
+        );
+        assert_eq!(facts.refinements.len(), 4);
+        assert!(facts
+            .refinements
+            .iter()
+            .all(|row| row.proof_kind == "nil_comparison"));
     }
 
     #[test]
@@ -646,6 +779,7 @@ int queue(struct entry* previous) {
             lines: Vec::new(),
             behavior: &ShadowBehavior,
             findings: Vec::new(),
+            refinements: Vec::new(),
         };
         let branch = Node {
             r#type: "IF".to_string(),

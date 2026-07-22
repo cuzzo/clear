@@ -117,6 +117,10 @@ pub struct ProfileOutput {
     pub hash_record_escape_sites: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden_enum_observations: Vec<serde_json::Value>,
+    /// Stable branch-local proofs emitted by FactMine's normalized CFG pass.
+    /// NilKill consumes these directly and never reparses conditions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nullable_refinements: Vec<syntax::nullable::NullableRefinement>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dispatcher_inferences: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -982,6 +986,11 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         return_direct_usage_sites,
         hash_record_escape_sites,
         hidden_enum_observations,
+        nullable_refinements: if nil_kill {
+            document.nullable_refinements.clone()
+        } else {
+            Vec::new()
+        },
         dispatcher_inferences,
         hash_record_member_calls,
         param_origins,
@@ -1045,6 +1054,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut return_direct_usage_sites = Vec::new();
     let mut hash_record_escape_sites = Vec::new();
     let mut hidden_enum_observations = Vec::new();
+    let mut nullable_refinements = Vec::new();
     let mut dispatcher_inferences = Vec::new();
     let mut hash_record_member_calls = Vec::new();
     let mut param_origins = Vec::new();
@@ -1112,6 +1122,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
             return_direct_usage_sites.extend(output.return_direct_usage_sites);
             hash_record_escape_sites.extend(output.hash_record_escape_sites);
             hidden_enum_observations.extend(output.hidden_enum_observations);
+            nullable_refinements.extend(output.nullable_refinements);
             dispatcher_inferences.extend(output.dispatcher_inferences);
             hash_record_member_calls.extend(output.hash_record_member_calls);
             param_origins.extend(output.param_origins);
@@ -1191,6 +1202,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         return_direct_usage_sites,
         hash_record_escape_sites,
         hidden_enum_observations,
+        nullable_refinements,
         dispatcher_inferences,
         hash_record_member_calls,
         param_origins,
@@ -5998,6 +6010,7 @@ pub(crate) mod tests {
             protocol_call_paths: vec![],
             clone_candidates: vec![],
             redundant_nil_guards: vec![],
+            nullable_refinements: vec![],
             immutable_struct_readers: Default::default(),
             immutable_struct_reader_types: Default::default(),
             type_aliases: Default::default(),

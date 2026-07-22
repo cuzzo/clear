@@ -92,6 +92,33 @@ fn declared_method_types_are_normalized_from_language_owned_syntax() -> Result<(
 }
 
 #[test]
+fn nullable_refinements_are_a_stable_nil_kill_public_fact() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_refinements.c"), Language::C)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let actual = output
+        .nullable_refinements
+        .iter()
+        .map(|row| {
+            json!({
+                "edge": row.edge,
+                "proof_kind": row.proof_kind,
+                "state_on_edge": row.state_on_edge,
+            })
+        })
+        .collect::<Vec<_>>();
+    let expected: Vec<Value> =
+        serde_json::from_str(&fs::read_to_string(fixture("nullable_refinements.json"))?)?;
+
+    assert_eq!(actual, expected);
+    assert!(output.nullable_refinements.iter().all(|row| {
+        row.place_id.starts_with("place:")
+            && row.condition_node_id.starts_with("cfg:")
+            && row.complete
+    }));
+    Ok(())
+}
+
+#[test]
 fn typescript_variable_bound_callables_are_emitted_as_project_methods() -> Result<()> {
     let document = syntax::parse_file(fixture("typescript_callable.ts"), Language::TypeScript)?;
     let output = profile::extract(&document, Profile::Espalier);

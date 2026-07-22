@@ -310,6 +310,7 @@ fn syntax_directory_does_not_gain_unreviewed_helper_files() {
         "cfg/worklist.rs",
         "effects.rs",
         "local_flow.rs",
+        "nullable.rs",
         "normalized_behavior.rs",
         "c.rs",
         "cpp.rs",

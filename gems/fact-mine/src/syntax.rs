@@ -16,6 +16,7 @@ pub mod local_flow;
 pub(crate) mod lua;
 pub(crate) mod normalized_behavior;
 pub(crate) mod normalized_extractor;
+pub mod nullable;
 pub(crate) mod parser_grammar;
 pub(crate) mod passes;
 pub mod path_condition;
@@ -315,6 +316,8 @@ pub struct Document {
     pub(crate) clone_candidates: Vec<CloneCandidate>,
     #[serde(default)]
     pub redundant_nil_guards: Vec<redundant_nil_guard::RedundantNilGuardRow>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nullable_refinements: Vec<nullable::NullableRefinement>,
     #[serde(default)]
     pub immutable_struct_readers: BTreeMap<String, Vec<String>>,
     #[serde(default)]

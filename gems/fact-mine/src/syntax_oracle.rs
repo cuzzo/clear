@@ -513,6 +513,7 @@ mod tests {
             protocol_call_paths: Vec::new(),
             clone_candidates: Vec::new(),
             redundant_nil_guards: Vec::new(),
+            nullable_refinements: Vec::new(),
             immutable_struct_readers: BTreeMap::new(),
             immutable_struct_reader_types: BTreeMap::new(),
             type_aliases: BTreeMap::new(),
@@ -568,6 +569,7 @@ mod tests {
             protocol_call_paths: Vec::new(),
             clone_candidates: Vec::new(),
             redundant_nil_guards: Vec::new(),
+            nullable_refinements: Vec::new(),
             immutable_struct_readers: vec![("OtherType".to_string(), vec!["b".to_string()])]
                 .into_iter()
                 .collect(),
