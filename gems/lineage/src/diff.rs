@@ -1239,6 +1239,16 @@ fn dependency_change(file: &DiffFile) -> Option<DependencyChange> {
         Some(pyproject_toml_dependencies(file))
     } else if path == "go.mod" || path.ends_with("/go.mod") {
         Some(go_mod_dependencies(file))
+    } else if path == "composer.json" || path.ends_with("/composer.json") {
+        Some(composer_dependencies(file))
+    } else if path == "Package.resolved" || path.ends_with("/Package.resolved") {
+        Some(package_resolved_dependencies(file))
+    } else if path.ends_with(".csproj") || path.ends_with(".fsproj") {
+        Some(dotnet_project_dependencies(file))
+    } else if path == "pom.xml" || path.ends_with("/pom.xml") {
+        Some(maven_dependencies(file))
+    } else if is_requirements_path(path) {
+        Some(requirements_dependencies(file))
     } else if is_manifest_path(path) {
         Some(DependencyChange {
             manifest_path: file.path.clone(),
@@ -1310,6 +1320,38 @@ fn go_mod_dependencies(file: &DiffFile) -> DependencyChange {
     exact_dependency_change(file, before.unwrap_or_default(), after.unwrap_or_default())
 }
 
+fn composer_dependencies(file: &DiffFile) -> DependencyChange {
+    dependency_change_from_sources(file, parse_composer_json)
+}
+
+fn package_resolved_dependencies(file: &DiffFile) -> DependencyChange {
+    dependency_change_from_sources(file, parse_package_resolved)
+}
+
+fn dotnet_project_dependencies(file: &DiffFile) -> DependencyChange {
+    dependency_change_from_sources(file, parse_dotnet_project)
+}
+
+fn maven_dependencies(file: &DiffFile) -> DependencyChange {
+    dependency_change_from_sources(file, parse_maven_pom)
+}
+
+fn requirements_dependencies(file: &DiffFile) -> DependencyChange {
+    dependency_change_from_sources(file, parse_requirements)
+}
+
+fn dependency_change_from_sources(
+    file: &DiffFile,
+    parser: fn(&str) -> Result<BTreeMap<(String, String), String>, ()>,
+) -> DependencyChange {
+    let before = file.base_source.as_deref().map(parser).transpose();
+    let after = file.head_source.as_deref().map(parser).transpose();
+    let (Ok(before), Ok(after)) = (before, after) else {
+        return unknown_dependency_change(file);
+    };
+    exact_dependency_change(file, before.unwrap_or_default(), after.unwrap_or_default())
+}
+
 fn unknown_dependency_change(file: &DiffFile) -> DependencyChange {
     DependencyChange {
         manifest_path: file.path.clone(),
@@ -1364,6 +1406,153 @@ fn parse_package_json(contents: &str) -> Result<BTreeMap<(String, String), Strin
                 dependencies.insert((scope.to_string(), name.clone()), version.to_string());
             }
         }
+    }
+    Ok(dependencies)
+}
+
+fn parse_composer_json(contents: &str) -> Result<BTreeMap<(String, String), String>, ()> {
+    let value: serde_json::Value = serde_json::from_str(contents).map_err(|_| ())?;
+    let object = value.as_object().ok_or(())?;
+    let mut dependencies = BTreeMap::new();
+    for scope in ["require", "require-dev"] {
+        let Some(values) = object.get(scope) else {
+            continue;
+        };
+        for (name, version) in values.as_object().ok_or(())? {
+            let version = version.as_str().ok_or(())?;
+            dependencies.insert((scope.to_string(), name.clone()), version.to_string());
+        }
+    }
+    Ok(dependencies)
+}
+
+fn parse_package_resolved(contents: &str) -> Result<BTreeMap<(String, String), String>, ()> {
+    let value: serde_json::Value = serde_json::from_str(contents).map_err(|_| ())?;
+    let packages = value
+        .get("pins")
+        .or_else(|| value.get("object").and_then(|object| object.get("pins")))
+        .or_else(|| value.get("pins"))
+        .or_else(|| value.get("packages"))
+        .and_then(serde_json::Value::as_array)
+        .ok_or(())?;
+    let mut dependencies = BTreeMap::new();
+    for package in packages {
+        let object = package.as_object().ok_or(())?;
+        let name = object
+            .get("identity")
+            .or_else(|| object.get("package"))
+            .or_else(|| object.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|name| !name.trim().is_empty())
+            .ok_or(())?;
+        let state = object
+            .get("state")
+            .and_then(serde_json::Value::as_object)
+            .ok_or(())?;
+        let version = state
+            .get("version")
+            .or_else(|| state.get("revision"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|version| !version.trim().is_empty())
+            .ok_or(())?;
+        dependencies.insert(("resolved".into(), name.to_string()), version.to_string());
+    }
+    Ok(dependencies)
+}
+
+fn parse_dotnet_project(contents: &str) -> Result<BTreeMap<(String, String), String>, ()> {
+    let document = roxmltree::Document::parse(contents).map_err(|_| ())?;
+    let mut dependencies = BTreeMap::new();
+    for node in document
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().name() == "PackageReference")
+    {
+        let name = node
+            .attribute("Include")
+            .or_else(|| node.attribute("Update"))
+            .filter(|name| !name.trim().is_empty())
+            .ok_or(())?;
+        let version = node
+            .attribute("Version")
+            .or_else(|| xml_child_text(node, "Version"))
+            .filter(|version| !version.trim().is_empty())
+            .ok_or(())?;
+        if version.contains('$') || version.contains('{') {
+            return Err(());
+        }
+        dependencies.insert(("package".into(), name.to_string()), version.to_string());
+    }
+    Ok(dependencies)
+}
+
+fn parse_maven_pom(contents: &str) -> Result<BTreeMap<(String, String), String>, ()> {
+    let document = roxmltree::Document::parse(contents).map_err(|_| ())?;
+    let mut dependencies = BTreeMap::new();
+    for node in document
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().name() == "dependency")
+    {
+        let group = xml_child_text(node, "groupId").ok_or(())?;
+        let artifact = xml_child_text(node, "artifactId").ok_or(())?;
+        let version = xml_child_text(node, "version").ok_or(())?;
+        if [group, artifact, version]
+            .iter()
+            .any(|value| value.contains("${") || value.trim().is_empty())
+        {
+            return Err(());
+        }
+        let scope = xml_child_text(node, "scope").unwrap_or("compile");
+        let scope = if has_dependency_management_ancestor(node) {
+            format!("managed:{scope}")
+        } else {
+            scope.to_string()
+        };
+        dependencies.insert((scope, format!("{group}:{artifact}")), version.to_string());
+    }
+    Ok(dependencies)
+}
+
+fn xml_child_text<'a>(node: roxmltree::Node<'a, 'a>, name: &str) -> Option<&'a str> {
+    node.children()
+        .find(|child| child.is_element() && child.tag_name().name() == name)
+        .and_then(|child| child.text())
+        .map(str::trim)
+}
+
+fn has_dependency_management_ancestor(node: roxmltree::Node<'_, '_>) -> bool {
+    node.ancestors().any(|ancestor| {
+        ancestor.is_element() && ancestor.tag_name().name() == "dependencyManagement"
+    })
+}
+
+fn parse_requirements(contents: &str) -> Result<BTreeMap<(String, String), String>, ()> {
+    let mut dependencies = BTreeMap::new();
+    for original in contents.lines() {
+        let requirement = original.split('#').next().unwrap_or_default().trim();
+        if requirement.is_empty() {
+            continue;
+        }
+        if requirement.starts_with('-') || requirement.contains("://") || requirement.contains('@')
+        {
+            return Err(());
+        }
+        let name_end = requirement
+            .find(|character: char| {
+                matches!(character, ' ' | '<' | '>' | '=' | '!' | '~' | ';' | '[')
+            })
+            .unwrap_or(requirement.len());
+        let name = &requirement[..name_end];
+        if name.is_empty()
+            || !name.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+            })
+        {
+            return Err(());
+        }
+        dependencies.insert(
+            ("requirements".into(), name.to_string()),
+            requirement.to_string(),
+        );
     }
     Ok(dependencies)
 }
@@ -1642,6 +1831,11 @@ fn is_python_config(file: &str) -> bool {
         file,
         "pyproject.toml" | "setup.cfg" | "setup.py" | "Pipfile" | "tox.ini" | "noxfile.py"
     ) || file.starts_with("requirements") && file.ends_with(".txt")
+}
+
+fn is_requirements_path(path: &str) -> bool {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    file.starts_with("requirements") && file.ends_with(".txt")
 }
 
 fn is_go_config(file: &str) -> bool {
@@ -1931,6 +2125,67 @@ mod tests {
             .entries
             .iter()
             .any(|entry| entry.name == "example.test/new" && entry.before.is_none()));
+    }
+
+    #[test]
+    fn reports_structured_composer_swift_dotnet_maven_and_requirements_dependencies() {
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            vec![
+                file("composer.json", "{\"require\":{\"vendor/old\":\"^1\"}}"),
+                file("Package.resolved", "{\"pins\":[{\"package\":\"Old\",\"state\":{\"version\":\"1.0.0\"}}]}"),
+                file("app.csproj", "<Project><ItemGroup><PackageReference Include=\"Old\" Version=\"1.0\" /></ItemGroup></Project>"),
+                file("pom.xml", "<project><dependencies><dependency><groupId>org.old</groupId><artifactId>old</artifactId><version>1.0</version></dependency></dependencies></project>"),
+                file("requirements.txt", "old==1\n"),
+            ],
+            vec![
+                file("composer.json", "{\"require\":{\"vendor/new\":\"^2\"},\"require-dev\":{\"vendor/test\":\"^1\"}}"),
+                file("Package.resolved", "{\"pins\":[{\"identity\":\"new\",\"state\":{\"version\":\"2.0.0\"}}]}"),
+                file("app.csproj", "<Project><ItemGroup><PackageReference Include=\"New\"><Version>2.0</Version></PackageReference></ItemGroup></Project>"),
+                file("pom.xml", "<project><dependencies><dependency><groupId>org.new</groupId><artifactId>new</artifactId><version>2.0</version><scope>test</scope></dependency></dependencies></project>"),
+                file("requirements.txt", "new>=2\n"),
+            ],
+        );
+
+        assert_eq!(plan.dependency_changes.len(), 5);
+        assert!(plan
+            .dependency_changes
+            .iter()
+            .all(|change| change.status == DependencyStatus::Exact));
+        let names = plan
+            .dependency_changes
+            .iter()
+            .flat_map(|change| change.entries.iter().map(|entry| entry.name.as_str()))
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"vendor/new"));
+        assert!(names.contains(&"new"));
+        assert!(names.contains(&"New"));
+        assert!(names.contains(&"org.new:new"));
+    }
+
+    #[test]
+    fn keeps_dynamic_structured_manifest_versions_and_requirements_unknown() {
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            vec![
+                file("app.csproj", "<Project><ItemGroup><PackageReference Include=\"Example\" Version=\"$(Version)\" /></ItemGroup></Project>"),
+                file("pom.xml", "<project><dependencies><dependency><groupId>org.example</groupId><artifactId>example</artifactId><version>${version}</version></dependency></dependencies></project>"),
+                file("requirements.txt", "-r common.txt\n"),
+            ],
+            vec![
+                file("app.csproj", "<Project><ItemGroup><PackageReference Include=\"Example\" Version=\"2\" /></ItemGroup></Project>"),
+                file("pom.xml", "<project><dependencies><dependency><groupId>org.example</groupId><artifactId>example</artifactId><version>2</version></dependency></dependencies></project>"),
+                file("requirements.txt", "example==2\n"),
+            ],
+        );
+
+        assert_eq!(plan.dependency_changes.len(), 3);
+        assert!(plan
+            .dependency_changes
+            .iter()
+            .all(|change| change.status == DependencyStatus::UnknownPackageFile));
     }
 
     #[test]
