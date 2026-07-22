@@ -324,4 +324,3 @@ mod tests {
         assert!(!cls[0].fat_union);
     }
 }
-

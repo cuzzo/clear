@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 const SCHEMA: &str = "https://json.schemastore.org/sarif-2.1.0.json";
 pub const PROOF_BOUNDARY_PROPERTY: &str = "fact_mine.proof_boundary";
 pub const PROOF_BOUNDARY_SUMMARY_PROPERTY: &str = "fact_mine.proof_boundary_summary";
-pub const PROOF_BOUNDARY_SCHEMA: &str = "fact-mine.proof-boundary.v2";
+pub const PROOF_BOUNDARY_SCHEMA: &str = "fact-mine.proof-boundary.v3";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InputCompleteness {
@@ -48,6 +48,31 @@ pub enum CoverageDischarge {
     Unknown,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProofScopeKind {
+    ReportedSpan,
+    Function,
+    Owner,
+    File,
+    Project,
+    ClosedBuildTarget,
+    Local,
+}
+
+impl ProofScopeKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReportedSpan => "reported_span",
+            Self::Function => "function",
+            Self::Owner => "owner",
+            Self::File => "file",
+            Self::Project => "project",
+            Self::ClosedBuildTarget => "closed_build_target",
+            Self::Local => "local",
+        }
+    }
+}
+
 impl CoverageDischarge {
     const fn as_str(self) -> &'static str {
         match self {
@@ -66,16 +91,36 @@ pub fn proof_boundary(
     claim_status: ClaimStatus,
     coverage_discharge: CoverageDischarge,
     authority: &[&str],
-    scope: &str,
+    claim_kind: &str,
+    scope: ProofScopeKind,
+    closed: bool,
     blockers: Vec<String>,
 ) -> Value {
+    let blockers = blockers
+        .into_iter()
+        .map(|blocker| {
+            let kind = if blocker.starts_with("parser_recovery") {
+                "parser_recovery"
+            } else if blocker.starts_with("unresolved_call_resolution") {
+                "call_resolution"
+            } else if blocker.starts_with("missing_") {
+                "missing_evidence"
+            } else if blocker == "open_corpus" {
+                "open_corpus"
+            } else {
+                "unknown"
+            };
+            json!({ "kind": kind })
+        })
+        .collect::<Vec<_>>();
     json!({
         "schema": PROOF_BOUNDARY_SCHEMA,
         "input_completeness": input_completeness.as_str(),
         "claim_status": claim_status.as_str(),
         "coverage_discharge": coverage_discharge.as_str(),
         "authority": authority,
-        "scope": scope,
+        "claim_kind": claim_kind,
+        "scope": { "kind": scope.as_str(), "closed": closed },
         "blockers": blockers,
     })
 }
@@ -433,7 +478,9 @@ mod tests {
                         ClaimStatus::Proven,
                         CoverageDischarge::NotApplicable,
                         &["fact_mine_normalized_ast"],
-                        "local",
+                        "test_claim",
+                        ProofScopeKind::Local,
+                        false,
                         vec![],
                     )
                 }
@@ -445,7 +492,9 @@ mod tests {
                         ClaimStatus::Review,
                         CoverageDischarge::Unsatisfiable,
                         &["fact_mine_normalized_ast"],
-                        "local",
+                        "test_claim",
+                        ProofScopeKind::Local,
+                        false,
                         vec!["unresolved_call".to_string()],
                     )
                 }
@@ -471,7 +520,7 @@ mod tests {
     #[test]
     fn proof_boundary_conforms_to_shared_fixture() {
         let fixture: Value = serde_json::from_str(include_str!(
-            "../../../hazard-contract/fixtures/proof-boundary.v2.json"
+            "../../../hazard-contract/fixtures/proof-boundary.v3.json"
         ))
         .unwrap();
         assert_eq!(
@@ -481,6 +530,8 @@ mod tests {
                 CoverageDischarge::Unsatisfiable,
                 &["fact_mine_normalized_ast", "nil_kill_static"],
                 "static_nil_pressure",
+                ProofScopeKind::Local,
+                false,
                 vec!["unresolved_call".to_string()],
             ),
             fixture["valid"]

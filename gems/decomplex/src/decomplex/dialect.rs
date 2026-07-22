@@ -1,6 +1,6 @@
 use crate::decomplex::syntax::Language;
-use std::sync::OnceLock;
 use regex::Regex;
+use std::sync::OnceLock;
 
 pub trait Dialect: Send + Sync {
     /// Normalize/clean an identifier token (e.g. trimming `@` ivar sigils or `=` setter suffixes).
@@ -156,7 +156,9 @@ pub fn dialect_for_document(doc: &crate::decomplex::syntax::Document) -> Box<dyn
     dialect_for(doc.language)
 }
 
-pub fn dialect_for_method(method: &crate::decomplex::syntax::local_flow::MethodSummary) -> Box<dyn Dialect> {
+pub fn dialect_for_method(
+    method: &crate::decomplex::syntax::local_flow::MethodSummary,
+) -> Box<dyn Dialect> {
     let language = std::path::Path::new(&method.file)
         .extension()
         .and_then(|ext| ext.to_str())
@@ -183,4 +185,3 @@ mod tests {
         assert!(!dialect.is_identifier(""));
     }
 }
-

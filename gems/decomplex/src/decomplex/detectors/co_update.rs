@@ -39,7 +39,11 @@ struct Write {
     owner: String,
 }
 
-pub fn scan_files(files: &[PathBuf], language: Language, min_support: usize) -> Result<CoUpdateReport> {
+pub fn scan_files(
+    files: &[PathBuf],
+    language: Language,
+    min_support: usize,
+) -> Result<CoUpdateReport> {
     let documents = syntax::parse_files(files, language)?;
     Ok(scan_documents(&documents, min_support))
 }
@@ -90,7 +94,10 @@ fn file_stem(file: &str) -> Option<String> {
 }
 
 fn is_dynamic_language(file: &str) -> bool {
-    if let Some(ext) = std::path::Path::new(file).extension().and_then(|e| e.to_str()) {
+    if let Some(ext) = std::path::Path::new(file)
+        .extension()
+        .and_then(|e| e.to_str())
+    {
         matches!(ext, "rb" | "py" | "js" | "php" | "lua")
     } else {
         false
@@ -159,7 +166,11 @@ impl Report {
                     let w1 = &ws[i];
                     let w2 = &ws[j];
                     if w1.attr != w2.attr && can_pair(w1, w2) {
-                        let pair = if w1.attr < w2.attr { (w1.attr.as_str(), w2.attr.as_str()) } else { (w2.attr.as_str(), w1.attr.as_str()) };
+                        let pair = if w1.attr < w2.attr {
+                            (w1.attr.as_str(), w2.attr.as_str())
+                        } else {
+                            (w2.attr.as_str(), w1.attr.as_str())
+                        };
                         let owner_ctx = if is_unknown(w1) || is_unknown(w2) {
                             ""
                         } else {
@@ -181,7 +192,11 @@ impl Report {
                     let w1 = &ws[i];
                     let w2 = &ws[j];
                     if w1.attr != w2.attr && can_pair(w1, w2) {
-                        let pair = if w1.attr < w2.attr { (w1.attr.as_str(), w2.attr.as_str()) } else { (w2.attr.as_str(), w1.attr.as_str()) };
+                        let pair = if w1.attr < w2.attr {
+                            (w1.attr.as_str(), w2.attr.as_str())
+                        } else {
+                            (w2.attr.as_str(), w1.attr.as_str())
+                        };
                         let entry = pair_recvs.entry(pair).or_default();
                         if !w1.recv.is_empty() {
                             entry.insert(w1.recv.as_str());
@@ -204,8 +219,15 @@ impl Report {
                     let w1 = &ws[i];
                     let w2 = &ws[j];
                     if w1.attr != w2.attr && can_pair(w1, w2) {
-                        let pair = if w1.attr < w2.attr { (w1.attr.as_str(), w2.attr.as_str()) } else { (w2.attr.as_str(), w1.attr.as_str()) };
-                        counts.entry(pair).or_default().insert((unit.0.as_str(), unit.1.as_str()));
+                        let pair = if w1.attr < w2.attr {
+                            (w1.attr.as_str(), w2.attr.as_str())
+                        } else {
+                            (w2.attr.as_str(), w1.attr.as_str())
+                        };
+                        counts
+                            .entry(pair)
+                            .or_default()
+                            .insert((unit.0.as_str(), unit.1.as_str()));
                     }
                 }
             }
@@ -235,7 +257,6 @@ impl Report {
         let pair_recvs = self.pair_recvs();
         let mut out = Vec::new();
 
-
         for ((file, defn), ws) in &self.by_unit {
             let mut writes_by_attr = HashMap::<&str, &Write>::new();
             for w in ws {
@@ -246,9 +267,13 @@ impl Report {
                 let a = &p.pair[0];
                 let b = &p.pair[1];
 
-                let (has, miss) = if writes_by_attr.contains_key(a.as_str()) && !writes_by_attr.contains_key(b.as_str()) {
+                let (has, miss) = if writes_by_attr.contains_key(a.as_str())
+                    && !writes_by_attr.contains_key(b.as_str())
+                {
                     (Some(a), Some(b))
-                } else if writes_by_attr.contains_key(b.as_str()) && !writes_by_attr.contains_key(a.as_str()) {
+                } else if writes_by_attr.contains_key(b.as_str())
+                    && !writes_by_attr.contains_key(a.as_str())
+                {
                     (Some(b), Some(a))
                 } else {
                     (None, None)
@@ -256,7 +281,11 @@ impl Report {
 
                 if let (Some(has), Some(miss)) = (has, miss) {
                     if let Some(&w) = writes_by_attr.get(has.as_str()) {
-                        let pair_tuple = if a < b { (a.as_str(), b.as_str()) } else { (b.as_str(), a.as_str()) };
+                        let pair_tuple = if a < b {
+                            (a.as_str(), b.as_str())
+                        } else {
+                            (b.as_str(), a.as_str())
+                        };
                         let matches_owner = if is_unknown(w) {
                             true
                         } else if let Some(owners) = pair_owners.get(&pair_tuple) {
@@ -271,7 +300,11 @@ impl Report {
                             if recvs.contains(&w.recv.as_str()) {
                                 true
                             } else {
-                                w.recv.is_empty() || w.recv == "self" || w.recv == "this" || recvs.contains("self") || recvs.contains("this")
+                                w.recv.is_empty()
+                                    || w.recv == "self"
+                                    || w.recv == "this"
+                                    || recvs.contains("self")
+                                    || recvs.contains("this")
                             }
                         } else {
                             true
@@ -330,7 +363,8 @@ mod tests {
                     "owner": "MyType"
                 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
 
         let writes = state_writes_for_documents(&[doc]);
         assert_eq!(writes.len(), 2);
@@ -420,9 +454,14 @@ mod tests {
                     "owner": "known_to_unknown"
                 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
 
-        let writes1 = doc1.state_writes.iter().map(super::write_from_state_write).collect();
+        let writes1 = doc1
+            .state_writes
+            .iter()
+            .map(super::write_from_state_write)
+            .collect();
         let rep1 = super::Report::new(writes1);
         let report1 = super::CoUpdateReport {
             co_written_pairs: rep1.co_written_pairs(3),
@@ -431,7 +470,7 @@ mod tests {
         assert_eq!(report1.co_written_pairs.len(), 1);
         assert_eq!(report1.co_written_pairs[0].pair, vec!["a", "b"]);
         assert_eq!(report1.co_written_pairs[0].support, 3);
-        
+
         assert_eq!(report1.neglected_updates.len(), 1);
         assert_eq!(report1.neglected_updates[0].has, "a");
         assert_eq!(report1.neglected_updates[0].missing, "b");
@@ -510,9 +549,14 @@ mod tests {
                     "owner": "KnownClass2"
                 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
 
-        let writes2 = doc2.state_writes.iter().map(super::write_from_state_write).collect();
+        let writes2 = doc2
+            .state_writes
+            .iter()
+            .map(super::write_from_state_write)
+            .collect();
         let rep2 = super::Report::new(writes2);
         let report2 = super::CoUpdateReport {
             co_written_pairs: rep2.co_written_pairs(3),
@@ -528,4 +572,3 @@ mod tests {
         assert_eq!(report2.neglected_updates[0].recv, "self");
     }
 }
-

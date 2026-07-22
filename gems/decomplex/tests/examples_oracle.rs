@@ -131,7 +131,8 @@ fn shared_local_flow_consumer_fact_examples_match_exact_oracles() -> Result<()> 
             .with_context(|| format!("{} input", fixture.display()))?;
 
         let mut actuals = std::collections::BTreeMap::new();
-        if let Some(expected_by_detector) = fixture_value.get("expected").and_then(Value::as_object) {
+        if let Some(expected_by_detector) = fixture_value.get("expected").and_then(Value::as_object)
+        {
             for detector in expected_by_detector.keys() {
                 let actual = run_detector_on_fact_input(detector, &input, &fixture_value)
                     .with_context(|| format!("{} {}", detector, fixture.display()))?;
@@ -140,14 +141,19 @@ fn shared_local_flow_consumer_fact_examples_match_exact_oracles() -> Result<()> 
         }
 
         if std::env::var("UPDATE_ORACLES").is_ok() {
-            if let Some(expected_by_detector) = fixture_value.get_mut("expected").and_then(Value::as_object_mut) {
+            if let Some(expected_by_detector) = fixture_value
+                .get_mut("expected")
+                .and_then(Value::as_object_mut)
+            {
                 for (detector, actual) in actuals {
                     expected_by_detector.insert(detector, actual);
                 }
             }
             fs::write(&fixture, serde_json::to_string_pretty(&fixture_value)?)?;
         } else {
-            if let Some(expected_by_detector) = fixture_value.get("expected").and_then(Value::as_object) {
+            if let Some(expected_by_detector) =
+                fixture_value.get("expected").and_then(Value::as_object)
+            {
                 for (detector, expected) in expected_by_detector {
                     let actual = actuals.get(detector).unwrap();
                     if *actual != *expected {
@@ -362,7 +368,11 @@ fn run_detector(
     options: &Value,
 ) -> Result<Value> {
     match detector {
-        "co-update" => value(co_update::scan_files(files, language, option_usize(options, "min_support", 3)?)?),
+        "co-update" => value(co_update::scan_files(
+            files,
+            language,
+            option_usize(options, "min_support", 3)?,
+        )?),
         "decision-pressure" => value(decision_pressure::scan_files(files, language)?),
         "predicate-alias" | "predicate-aliases" => {
             value(predicate_alias::scan_files(files, language)?)
@@ -399,7 +409,11 @@ fn run_detector(
         }
         "oversized-predicate" => value(oversized_predicate::scan_files(files, language)?),
         "path-condition" => value(path_condition::scan_files(files, language)?),
-        "sequence-mine" | "broken-protocol" => value(sequence_mine::scan_files(files, language, option_usize(options, "min_support", 3)?)?),
+        "sequence-mine" | "broken-protocol" => value(sequence_mine::scan_files(
+            files,
+            language,
+            option_usize(options, "min_support", 3)?,
+        )?),
         "function-lcom" => value(function_lcom::scan_files(files, language)?),
         "false-simplicity" => value(false_simplicity::scan_files(files, language)?),
         "fat-union" => value(fat_union::scan_files(files, language)?),
@@ -417,7 +431,10 @@ fn run_detector_on_fact_input(
     let documents = input.documents.as_slice();
     let options = fixture.get("options").cloned().unwrap_or_else(|| json!({}));
     match detector {
-        "co-update" => value(co_update::scan_documents(documents, option_usize(&options, "min_support", 3)?)),
+        "co-update" => value(co_update::scan_documents(
+            documents,
+            option_usize(&options, "min_support", 3)?,
+        )),
         "decision-pressure" => {
             if input.local_methods.is_empty() {
                 value(decision_pressure::scan_documents(documents))
@@ -495,7 +512,10 @@ fn run_detector_on_fact_input(
             let report = path_condition::scan_documents(documents);
             value(json!({ "neglected": report.neglected }))
         }
-        "sequence-mine" | "broken-protocol" => value(sequence_mine::scan_documents(documents, option_usize(&options, "min_support", 3)?)),
+        "sequence-mine" | "broken-protocol" => value(sequence_mine::scan_documents(
+            documents,
+            option_usize(&options, "min_support", 3)?,
+        )),
         "function-lcom" => {
             if input.local_methods.is_empty() {
                 value(function_lcom::scan_documents(documents))
@@ -670,7 +690,17 @@ fn project_detector_output(detector: &str, output: Value) -> Value {
                 .collect(),
         ),
         "derived-state" => canonicalize_derived_state_refs(&rows(&output, &["derived", "source"])),
-        "superfluous-state" => rows(&output, &["field", "score", "classification", "writer_method_count", "reader_method_count", "ctorset"]),
+        "superfluous-state" => rows(
+            &output,
+            &[
+                "field",
+                "score",
+                "classification",
+                "writer_method_count",
+                "reader_method_count",
+                "ctorset",
+            ],
+        ),
         "implicit-control-flow" => json!({
             "ordered_protocols": project_protocols(field(&output, "ordered_protocols")),
             "order_drift": project_protocols(field(&output, "order_drift")),
@@ -886,9 +916,7 @@ fn normalize_paths(value: &Value) -> Value {
             }
             Value::Object(out)
         }
-        Value::Array(arr) => {
-            Value::Array(arr.iter().map(normalize_paths).collect())
-        }
+        Value::Array(arr) => Value::Array(arr.iter().map(normalize_paths).collect()),
         _ => value.clone(),
     }
 }
@@ -1093,22 +1121,25 @@ fn value_text(value: &Value) -> String {
 
 fn canonicalize_derived_state_refs(val: &Value) -> Value {
     match val {
-        Value::Array(arr) => {
-            Value::Array(arr.iter().map(|item| {
-                match item {
+        Value::Array(arr) => Value::Array(
+            arr.iter()
+                .map(|item| match item {
                     Value::Object(obj) => {
                         let mut new_obj = Map::new();
                         for (k, v) in obj {
                             if k == "derived" || k == "source" {
                                 if let Value::String(s) = v {
                                     let mut text = s.clone();
-                                    for prefix in &["$this->", "this->", "self->", "this.", "self.", "@"] {
+                                    for prefix in
+                                        &["$this->", "this->", "self->", "this.", "self.", "@"]
+                                    {
                                         if let Some(stripped) = text.strip_prefix(prefix) {
                                             text = stripped.to_string();
                                             break;
                                         }
                                     }
-                                    new_obj.insert(k.clone(), Value::String(format!("self.{}", text)));
+                                    new_obj
+                                        .insert(k.clone(), Value::String(format!("self.{}", text)));
                                 } else {
                                     new_obj.insert(k.clone(), v.clone());
                                 }
@@ -1119,9 +1150,9 @@ fn canonicalize_derived_state_refs(val: &Value) -> Value {
                         Value::Object(new_obj)
                     }
                     _ => item.clone(),
-                }
-            }).collect())
-        }
+                })
+                .collect(),
+        ),
         _ => val.clone(),
     }
 }

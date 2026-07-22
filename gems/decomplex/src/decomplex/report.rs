@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 
 #[derive(Clone, Debug)]
 pub struct ReportSection {
+    detector_policy: DetectorPolicy,
+    evidence_requirement: EvidenceRequirement,
     pub title: String,
     pub tier: i64,
     pub desc: String,
@@ -14,15 +16,104 @@ pub struct ReportSection {
     convergence_excluded: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EvidenceScope {
+    /// Only the source span rendered for this finding is an input.
+    ReportedSpans,
+    /// The complete enclosing executable function is an input.
+    EnclosingFunction,
+    /// The complete enclosing type/module/owner is an input.
+    Owner,
+    /// Every declaration and expression in the source file is an input.
+    File,
+    /// The detector reasons over absence/aggregation across the selected
+    /// project, so an open or recovered corpus cannot support completeness.
+    ClosedCorpus,
+}
+
+impl EvidenceScope {
+    const fn proof_scope(self) -> sarif::ProofScopeKind {
+        match self {
+            Self::ReportedSpans => sarif::ProofScopeKind::ReportedSpan,
+            Self::EnclosingFunction => sarif::ProofScopeKind::Function,
+            Self::Owner => sarif::ProofScopeKind::Owner,
+            Self::File => sarif::ProofScopeKind::File,
+            Self::ClosedCorpus => sarif::ProofScopeKind::Project,
+        }
+    }
+
+    const fn closed(self) -> bool {
+        matches!(self, Self::ClosedCorpus)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct EvidenceRequirement {
+    scope: EvidenceScope,
+    call_resolution: bool,
+}
+
+impl EvidenceRequirement {
+    const REPORTED_SPANS: Self = Self {
+        scope: EvidenceScope::ReportedSpans,
+        call_resolution: false,
+    };
+
+    const fn with_call_resolution(mut self) -> Self {
+        self.call_resolution = true;
+        self
+    }
+}
+
+/// Stable detector semantics. Display labels are deliberately not part of this
+/// contract: reports may rename a heading without changing proof boundaries.
+#[derive(Clone, Copy, Debug)]
+struct DetectorPolicy {
+    id: &'static str,
+    claim_status: sarif::ClaimStatus,
+    authority: &'static [&'static str],
+}
+
+impl DetectorPolicy {
+    const STRUCTURAL: Self = Self {
+        id: "decomplex_detector",
+        claim_status: sarif::ClaimStatus::Observed,
+        authority: &["fact_mine_normalized_ast"],
+    };
+
+    const REDUNDANT_NIL_GUARD: Self = Self {
+        id: "redundant_nil_guard",
+        claim_status: sarif::ClaimStatus::Review,
+        authority: &["fact_mine_normalized_ast", "fact_mine_cfg"],
+    };
+}
+
 impl ReportSection {
     pub fn new(title: &str, tier: i64, desc: &str, findings: Vec<Value>) -> Self {
         Self {
+            detector_policy: DetectorPolicy::STRUCTURAL,
             title: title.to_string(),
             tier,
             desc: desc.to_string(),
             findings,
+            evidence_requirement: EvidenceRequirement::REPORTED_SPANS,
             convergence_excluded: false,
         }
+    }
+
+    fn with_call_resolution(mut self) -> Self {
+        self.evidence_requirement = self.evidence_requirement.with_call_resolution();
+        self
+    }
+
+    fn with_evidence_scope(mut self, scope: EvidenceScope) -> Self {
+        self.evidence_requirement.scope = scope;
+        self
+    }
+
+    fn with_policy(mut self, detector_policy: DetectorPolicy) -> Self {
+        self.detector_policy = detector_policy;
+        self
     }
 
     fn excluded_from_convergence(mut self) -> Self {
@@ -344,7 +435,7 @@ impl SarifEmitter {
                     if let Some(object) = properties.as_object_mut() {
                         object.insert(
                             sarif::PROOF_BOUNDARY_PROPERTY.to_string(),
-                            finding_proof_boundary(&section.title, finding),
+                            finding_proof_boundary(section, finding),
                         );
                     }
                     if include_finding_payload {
@@ -374,7 +465,7 @@ impl SarifEmitter {
     }
 }
 
-fn finding_proof_boundary(section: &str, finding: &Value) -> Value {
+fn finding_proof_boundary(section: &ReportSection, finding: &Value) -> Value {
     rv::get(finding, "proof_boundary")
         .cloned()
         .unwrap_or_else(|| {
@@ -383,14 +474,12 @@ fn finding_proof_boundary(section: &str, finding: &Value) -> Value {
             // time: absence of an explicit boundary is an unknown observation.
             sarif::proof_boundary(
                 sarif::InputCompleteness::Unknown,
-                if section == "Redundant Nil Guards" {
-                    sarif::ClaimStatus::Review
-                } else {
-                    sarif::ClaimStatus::Observed
-                },
+                section.detector_policy.claim_status,
                 sarif::CoverageDischarge::NotApplicable,
-                &["fact_mine_normalized_ast"],
-                "legacy_detector_payload",
+                section.detector_policy.authority,
+                section.detector_policy.id,
+                section.evidence_requirement.scope.proof_scope(),
+                section.evidence_requirement.scope.closed(),
                 Vec::new(),
             )
         })
@@ -450,6 +539,21 @@ struct SarifLocation {
     start_column: Option<i64>,
     end_line: Option<i64>,
     end_column: Option<i64>,
+    /// Tree-sitter coordinates retained for evidence matching. SARIF columns
+    /// are one-based; parser recovery spans are zero-based.
+    source_start_column: Option<i64>,
+    source_end_column: Option<i64>,
+}
+
+impl SarifLocation {
+    fn source_span(&self) -> [i64; 4] {
+        [
+            self.line,
+            self.source_start_column.unwrap_or(i64::MIN),
+            self.end_line.unwrap_or(self.line),
+            self.source_end_column.unwrap_or(i64::MAX),
+        ]
+    }
 }
 
 fn build_sections(detectors: &Value, facts: &Value) -> Vec<ReportSection> {
@@ -466,11 +570,11 @@ fn build_sections(detectors: &Value, facts: &Value) -> Vec<ReportSection> {
 
     let mut sections = vec![
         section("Decision Pressure", 1, "ELIMINABLE guard-pressure per loose contract (nil/is_a?/respond_to?/safe-nav/rescue-nil) -> tighten the contract once / nil-kill: DELETE. essential dispatch + pure c-uses are split out, NEVER summed (Rapps-Weyuker p-use; McCabe)", direct_array(detectors, "decision_pressure")),
-        section("Redundant Nil Guards", 1, "nil checks / safe-nav dominated by an earlier non-nil proof -- delete repeated control flow or tighten the type", direct_array(detectors, "redundant_nil_guard")),
-        section("State Heatmap", 1, "state fields ranked by write/read/re-derivation scatter -- tangled mutable state should get one owner", direct_array(detectors, "state_heatmap")).excluded_from_convergence(),
-        section("Superfluous State", 1, "state fields that could be eliminated entirely (dead state / intra-method pass-through / adjacent-call pass-through / derived cache)", direct_array(detectors, "superfluous_state")),
+        section("Redundant Nil Guards", 1, "nil checks / safe-nav dominated by an earlier non-nil proof -- delete repeated control flow or tighten the type", direct_array(detectors, "redundant_nil_guard")).with_policy(DetectorPolicy::REDUNDANT_NIL_GUARD),
+        section("State Heatmap", 1, "state fields ranked by write/read/re-derivation scatter -- tangled mutable state should get one owner", direct_array(detectors, "state_heatmap")).with_evidence_scope(EvidenceScope::Owner).excluded_from_convergence(),
+        section("Superfluous State", 1, "state fields that could be eliminated entirely (dead state / intra-method pass-through / adjacent-call pass-through / derived cache)", direct_array(detectors, "superfluous_state")).with_evidence_scope(EvidenceScope::ClosedCorpus),
         section("Declared Type Pressure", 2, "normalized declared-type shapes where multiple pressures converge (wide/nested unions, unknown leaves, collection depth, and nilability)", direct_array(detectors, "declared_type_pressure")),
-        section("State-Based Branch Density", 1, "branch decisions over mutable/object state -- state + control-flow pressure", direct_array(detectors, "state_branch_density")),
+        section("State-Based Branch Density", 1, "branch decisions over mutable/object state -- state + control-flow pressure", direct_array(detectors, "state_branch_density")).with_evidence_scope(EvidenceScope::File),
         section("Temporal Ordering Pressure", 1, "public mutable lifecycle surfaces that create implicit state-machine ordering", direct_array(detectors, "temporal_ordering_pressure")),
         section("Scoped State Restoration", 1, "temporary mutable-state scopes with a proven restoration bypass, or a lower-confidence unprotected call before restoration", direct_array(detectors, "scoped_state_restoration")),
         section("Missing Abstractions", 1, "guard tuple recomputed across >=2 decision units", nested_array(miner, "missing_abstractions")),
@@ -484,14 +588,14 @@ fn build_sections(detectors: &Value, facts: &Value) -> Vec<ReportSection> {
         section("Neglected Conditions", 2, "dispatch/conjunction minus one element -- *POSSIBLE* bug", nested_array(miner, "neglected_conditions")),
         section("Neglected Path Conditions", 3, "nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)", nested_array(path_condition, "neglected")),
         section("Oversized Predicates", 3, "predicate with >3 condition atoms -- use an existing helper or extract a named predicate", direct_array(detectors, "oversized_predicate")),
-        section("Broken Protocols", 3, "co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)", nested_array(sequence_mine, "broken_protocol")),
-        section("Implicit Control Flow", 2, "state-dependent internal call order exists -- hidden lifecycle/control-flow pressure", nested_array(rv::get(detectors, "implicit_control_flow").unwrap_or(&Value::Null), "ordered_protocols")),
-        section("Weighted Inlined Cognitive Complexity", 2, "same-owner helper chain hides cognitive load behind a low-looking orchestration method", direct_array(detectors, "weighted_inlined_complexity")),
+        section("Broken Protocols", 3, "co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)", nested_array(sequence_mine, "broken_protocol")).with_evidence_scope(EvidenceScope::ClosedCorpus),
+        section("Implicit Control Flow", 2, "state-dependent internal call order exists -- hidden lifecycle/control-flow pressure", nested_array(rv::get(detectors, "implicit_control_flow").unwrap_or(&Value::Null), "ordered_protocols")).with_evidence_scope(EvidenceScope::ClosedCorpus).with_call_resolution(),
+        section("Weighted Inlined Cognitive Complexity", 2, "same-owner helper chain hides cognitive load behind a low-looking orchestration method", direct_array(detectors, "weighted_inlined_complexity")).with_evidence_scope(EvidenceScope::EnclosingFunction).with_call_resolution(),
         section("Locality Drag", 2, "local initialized far before first use while unrelated work runs -- move setup closer or extract a private phase", direct_array(detectors, "locality_drag")),
         section("Operational Discontinuity (High Confidence)", 2, "strong blank/comment phase boundary where local variable lifetimes reset -- likely implicit sub-function boundary", operational_high),
-        section("Function LCOM", 3, "independent local data-flow components inside one method -- *POSSIBLE* mixed concerns", direct_array(detectors, "function_lcom")),
+        section("Function LCOM", 3, "independent local data-flow components inside one method -- *POSSIBLE* mixed concerns", direct_array(detectors, "function_lcom")).with_evidence_scope(EvidenceScope::EnclosingFunction),
         section("Operational Discontinuity", 3, "blank/comment phase boundary where local variable lifetimes reset -- *POSSIBLE* implicit sub-function boundary", operational_rest),
-        section("False Simplicity", 3, "looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/reflection/reopen -- *POSSIBLE* (noisy)", direct_array(detectors, "false_simplicity")),
+        section("False Simplicity", 3, "looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/reflection/reopen -- *POSSIBLE* (noisy)", direct_array(detectors, "false_simplicity")).with_evidence_scope(EvidenceScope::EnclosingFunction).with_call_resolution(),
         section("Fat Unions", 3, "case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*", nested_array(fat_union, "fat_unions")),
     ];
     attach_detector_boundaries(&mut sections, facts);
@@ -500,7 +604,6 @@ fn build_sections(detectors: &Value, facts: &Value) -> Vec<ReportSection> {
 
 fn attach_detector_boundaries(sections: &mut [ReportSection], facts: &Value) {
     for section in sections {
-        let redundant_nil_guard = section.title == "Redundant Nil Guards";
         for finding in &mut section.findings {
             if !finding.is_object() {
                 continue;
@@ -509,7 +612,7 @@ fn attach_detector_boundaries(sections: &mut [ReportSection], facts: &Value) {
                 continue;
             }
             let (input_completeness, blockers) =
-                finding_input_boundary(&section.title, finding, facts);
+                finding_input_boundary(section.evidence_requirement, finding, facts);
             finding
                 .as_object_mut()
                 .expect("object checked above")
@@ -517,22 +620,12 @@ fn attach_detector_boundaries(sections: &mut [ReportSection], facts: &Value) {
                     "proof_boundary".to_string(),
                     sarif::proof_boundary(
                         input_completeness,
-                        if redundant_nil_guard {
-                            sarif::ClaimStatus::Review
-                        } else {
-                            sarif::ClaimStatus::Observed
-                        },
+                        section.detector_policy.claim_status,
                         sarif::CoverageDischarge::NotApplicable,
-                        if redundant_nil_guard {
-                            &["fact_mine_normalized_ast", "fact_mine_cfg"]
-                        } else {
-                            &["fact_mine_normalized_ast"]
-                        },
-                        if redundant_nil_guard {
-                            "redundant_nil_guard"
-                        } else {
-                            "decomplex_detector"
-                        },
+                        section.detector_policy.authority,
+                        section.detector_policy.id,
+                        section.evidence_requirement.scope.proof_scope(),
+                        section.evidence_requirement.scope.closed(),
                         blockers,
                     ),
                 );
@@ -546,7 +639,7 @@ fn attach_detector_boundaries(sections: &mut [ReportSection], facts: &Value) {
 /// enclosing function that supplied call facts to be free of unresolved
 /// eligible calls.
 fn finding_input_boundary(
-    section: &str,
+    evidence_requirement: EvidenceRequirement,
     finding: &Value,
     facts: &Value,
 ) -> (sarif::InputCompleteness, Vec<String>) {
@@ -560,35 +653,53 @@ fn finding_input_boundary(
             vec!["missing_finding_location".to_string()],
         );
     }
-    let call_sensitive = matches!(
-        section,
-        "False Simplicity" | "Implicit Control Flow" | "Weighted Inlined Cognitive Complexity"
-    );
     let mut partial = Vec::new();
+    let mut unknown = Vec::new();
+    if evidence_requirement.scope == EvidenceScope::ClosedCorpus {
+        if facts.pointer("/corpus/complete").and_then(Value::as_bool) != Some(true) {
+            unknown.push("open_corpus".to_string());
+        }
+        if let Some(files) = by_file {
+            for (path, file) in files {
+                if file.get("normalized_ast_complete").and_then(Value::as_bool) != Some(true) {
+                    unknown.push(format!("parser_recovery_dependency:{path}"));
+                }
+            }
+        }
+    }
     for location in locations {
-        let Some(path) = location.path else {
+        let Some(path) = location.path.as_deref() else {
             return (
                 sarif::InputCompleteness::Unknown,
                 vec!["missing_finding_path".to_string()],
             );
         };
-        let Some(file) = by_file.and_then(|files| files.get(&path)) else {
+        let Some(file) = by_file.and_then(|files| files.get(path)) else {
             return (
                 sarif::InputCompleteness::Unknown,
                 vec![format!("missing_extractor_evidence:{path}")],
             );
         };
-        if file.get("normalized_ast_complete").and_then(Value::as_bool) != Some(true) {
-            partial.push(format!("parser_recovery:{path}"));
+        if evidence_requirement.scope != EvidenceScope::ClosedCorpus {
+            match dependency_span(evidence_requirement.scope, file, &location) {
+                Some(span) if recovery_affects_span(file, span) => {
+                    unknown.push(format!("parser_recovery_dependency:{path}"));
+                }
+                Some(_) => {}
+                None => unknown.push(format!(
+                    "missing_dependency_region:{:?}",
+                    evidence_requirement.scope
+                )),
+            }
         }
-        if call_sensitive
+        if evidence_requirement.call_resolution
             && file
                 .get("unresolved_call_function_spans")
                 .and_then(Value::as_array)
                 .is_some_and(|spans| {
                     spans
                         .iter()
-                        .any(|span| span_contains_line(span, location.line))
+                        .any(|span| span_contains_location(span, &location))
                 })
         {
             partial.push(format!(
@@ -596,6 +707,11 @@ fn finding_input_boundary(
                 location.line
             ));
         }
+    }
+    unknown.sort();
+    unknown.dedup();
+    if !unknown.is_empty() {
+        return (sarif::InputCompleteness::Unknown, unknown);
     }
     partial.sort();
     partial.dedup();
@@ -606,11 +722,65 @@ fn finding_input_boundary(
     }
 }
 
-fn span_contains_line(span: &Value, line: i64) -> bool {
+fn dependency_span(
+    scope: EvidenceScope,
+    file: &Value,
+    location: &SarifLocation,
+) -> Option<[i64; 4]> {
+    match scope {
+        EvidenceScope::ReportedSpans => Some(location.source_span()),
+        EvidenceScope::File => Some([1, i64::MIN, i64::MAX, i64::MAX]),
+        EvidenceScope::EnclosingFunction => containing_span(file, "function_spans", location),
+        EvidenceScope::Owner => containing_span(file, "owner_spans", location),
+        EvidenceScope::ClosedCorpus => Some([1, i64::MIN, i64::MAX, i64::MAX]),
+    }
+}
+
+fn containing_span(file: &Value, key: &str, location: &SarifLocation) -> Option<[i64; 4]> {
+    file.get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(value_span)
+        .filter(|span| span_contains_location_values(*span, location))
+        .min_by_key(|span| (span[2] - span[0], span[3] - span[1]))
+}
+
+fn value_span(span: &Value) -> Option<[i64; 4]> {
     let values = rv::array_from(Some(span));
-    let start = values.first().and_then(Value::as_i64).unwrap_or(i64::MAX);
-    let end = values.get(2).and_then(Value::as_i64).unwrap_or(start);
-    start <= line && line <= end
+    Some([
+        values.first()?.as_i64()?,
+        values.get(1)?.as_i64()?,
+        values.get(2)?.as_i64()?,
+        values.get(3)?.as_i64()?,
+    ])
+}
+
+fn recovery_affects_span(file: &Value, dependency: [i64; 4]) -> bool {
+    let recoveries = rv::array_from(file.get("parse_recovery_spans"));
+    if recoveries.is_empty() {
+        return file.get("normalized_ast_complete").and_then(Value::as_bool) != Some(true);
+    }
+    recoveries
+        .iter()
+        .filter_map(value_span)
+        .any(|recovery| spans_overlap(recovery, dependency))
+}
+
+fn spans_overlap(left: [i64; 4], right: [i64; 4]) -> bool {
+    (left[0], left[1]) <= (right[2], right[3]) && (right[0], right[1]) <= (left[2], left[3])
+}
+
+fn span_contains_location(span: &Value, location: &SarifLocation) -> bool {
+    value_span(span).is_some_and(|span| span_contains_location_values(span, location))
+}
+
+fn span_contains_location_values(span: [i64; 4], location: &SarifLocation) -> bool {
+    let point = (
+        location.line,
+        location.source_start_column.unwrap_or(i64::MIN),
+    );
+    (span[0], span[1]) <= point && point <= (span[2], span[3])
 }
 
 fn section(title: &str, tier: i64, desc: &str, findings: Vec<Value>) -> ReportSection {
@@ -1425,11 +1595,13 @@ fn sarif_locations_for_finding(finding: &Value) -> Vec<SarifLocation> {
                         .get(1)
                         .and_then(Value::as_i64)
                         .map(zero_based_column_to_sarif);
+                    parsed.source_start_column = span.get(1).and_then(Value::as_i64);
                     parsed.end_line = span.get(2).and_then(Value::as_i64).filter(|line| *line > 0);
                     parsed.end_column = span
                         .get(3)
                         .and_then(Value::as_i64)
                         .map(zero_based_column_to_sarif);
+                    parsed.source_end_column = span.get(3).and_then(Value::as_i64);
                     Some(parsed)
                 })
                 .collect();
@@ -1471,6 +1643,8 @@ fn parse_sarif_loc(loc: &str) -> SarifLocation {
         start_column: None,
         end_line: None,
         end_column: None,
+        source_start_column: None,
+        source_end_column: None,
     }
 }
 
@@ -1795,23 +1969,23 @@ mod tests {
             Some(&json!("review"))
         );
 
-        let mut partial_input_facts = facts.clone();
-        partial_input_facts["input_coverage"] = json!({
+        let mut legacy_input_facts = facts.clone();
+        legacy_input_facts["input_coverage"] = json!({
             "complete": false,
             "reason": "tree-sitter recovered from a syntax error"
         });
-        let partial_input_report = Report::from_facts(&partial_input_facts).unwrap();
-        let partial_input_sarif = partial_input_report.to_sarif_value(false, false, None);
-        let partial_count = partial_input_sarif
+        let legacy_input_report = Report::from_facts(&legacy_input_facts).unwrap();
+        let legacy_input_sarif = legacy_input_report.to_sarif_value(false, false, None);
+        let legacy_count = legacy_input_sarif
             .pointer("/runs/0/results")
             .and_then(Value::as_array)
             .unwrap()
             .len();
         assert_eq!(
-            partial_input_sarif.pointer(
-                "/runs/0/properties/fact_mine.proof_boundary_summary/input_completeness/partial"
+            legacy_input_sarif.pointer(
+                "/runs/0/properties/fact_mine.proof_boundary_summary/input_completeness/unknown"
             ),
-            Some(&json!(partial_count))
+            Some(&json!(legacy_count))
         );
 
         // Error checking path: missing detectors
@@ -1840,23 +2014,140 @@ mod tests {
         });
         let clean = json!({ "at": "clean.rb:work:5" });
         assert_eq!(
-            finding_input_boundary("Decision Pressure", &clean, &facts).0,
+            finding_input_boundary(EvidenceRequirement::REPORTED_SPANS, &clean, &facts).0,
             sarif::InputCompleteness::Complete
         );
         let call_dependent = json!({ "at": "clean.rb:work:12" });
-        let (completeness, blockers) =
-            finding_input_boundary("False Simplicity", &call_dependent, &facts);
+        let (completeness, blockers) = finding_input_boundary(
+            EvidenceRequirement::REPORTED_SPANS.with_call_resolution(),
+            &call_dependent,
+            &facts,
+        );
         assert_eq!(completeness, sarif::InputCompleteness::Partial);
         assert_eq!(blockers, vec!["unresolved_call_resolution:clean.rb:12"]);
         let recovered = json!({ "at": "recovered.rb:work:3" });
         assert_eq!(
-            finding_input_boundary("Decision Pressure", &recovered, &facts).0,
-            sarif::InputCompleteness::Partial
+            finding_input_boundary(EvidenceRequirement::REPORTED_SPANS, &recovered, &facts).0,
+            sarif::InputCompleteness::Unknown
         );
         let missing = json!({ "at": "missing.rb:work:3" });
         assert_eq!(
-            finding_input_boundary("Decision Pressure", &missing, &facts).0,
+            finding_input_boundary(EvidenceRequirement::REPORTED_SPANS, &missing, &facts).0,
             sarif::InputCompleteness::Unknown
+        );
+    }
+
+    #[test]
+    fn parser_recovery_only_downgrades_overlapping_finding_regions() {
+        let file = json!({
+            "parse_recovery_spans": [[10, 4, 10, 12]]
+        });
+        let unaffected = SarifLocation {
+            path: Some("recovered.rb".to_string()),
+            method: None,
+            line: 10,
+            start_column: Some(20),
+            end_line: Some(10),
+            end_column: Some(25),
+            source_start_column: Some(19),
+            source_end_column: Some(24),
+        };
+        let overlapping = SarifLocation {
+            path: Some("recovered.rb".to_string()),
+            method: None,
+            line: 10,
+            start_column: Some(8),
+            end_line: Some(10),
+            end_column: Some(14),
+            source_start_column: Some(7),
+            source_end_column: Some(13),
+        };
+
+        assert!(!recovery_affects_span(&file, unaffected.source_span()));
+        assert!(recovery_affects_span(&file, overlapping.source_span()));
+    }
+
+    #[test]
+    fn parser_recovery_uses_raw_columns_for_zero_width_missing_nodes() {
+        let file = json!({
+            "parse_recovery_spans": [[10, 0, 10, 0]]
+        });
+        let location = SarifLocation {
+            path: Some("recovered.rb".to_string()),
+            method: None,
+            line: 10,
+            // SARIF's one-based rendering is deliberately different from
+            // the parser coordinate retained below.
+            start_column: Some(1),
+            end_line: Some(10),
+            end_column: Some(1),
+            source_start_column: Some(0),
+            source_end_column: Some(0),
+        };
+        assert!(recovery_affects_span(&file, location.source_span()));
+    }
+
+    #[test]
+    fn recovery_dependencies_follow_detector_scope() {
+        let facts = json!({
+            "corpus": { "complete": true },
+            "semantic_evidence": {
+                "by_file": {
+                    "recovered.rb": {
+                        "normalized_ast_complete": false,
+                        "parse_recovery_spans": [[20, 0, 20, 0]],
+                        "function_spans": [[1, 0, 30, 0]],
+                        "owner_spans": [[1, 0, 40, 0]],
+                        "unresolved_call_function_spans": []
+                    }
+                }
+            }
+        });
+        let finding = json!({ "at": "recovered.rb:work:5" });
+        assert_eq!(
+            finding_input_boundary(EvidenceRequirement::REPORTED_SPANS, &finding, &facts).0,
+            sarif::InputCompleteness::Complete
+        );
+        for scope in [
+            EvidenceScope::EnclosingFunction,
+            EvidenceScope::Owner,
+            EvidenceScope::ClosedCorpus,
+        ] {
+            let requirement = EvidenceRequirement {
+                scope,
+                call_resolution: false,
+            };
+            assert_eq!(
+                finding_input_boundary(requirement, &finding, &facts).0,
+                sarif::InputCompleteness::Unknown,
+                "scope={scope:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn detector_policy_is_independent_of_display_title() {
+        let section = ReportSection::new(
+            "Renamed nil-check heading",
+            1,
+            "display text is not detector semantics",
+            Vec::new(),
+        )
+        .with_policy(DetectorPolicy::REDUNDANT_NIL_GUARD);
+
+        let boundary = finding_proof_boundary(&section, &json!({}));
+        assert_eq!(
+            boundary.get("claim_kind"),
+            Some(&json!("redundant_nil_guard"))
+        );
+        assert_eq!(
+            boundary.pointer("/scope/kind"),
+            Some(&json!("reported_span"))
+        );
+        assert_eq!(boundary.get("claim_status"), Some(&json!("review")));
+        assert_eq!(
+            boundary.get("authority"),
+            Some(&json!(["fact_mine_normalized_ast", "fact_mine_cfg"]))
         );
     }
 

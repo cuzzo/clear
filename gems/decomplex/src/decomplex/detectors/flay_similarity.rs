@@ -186,8 +186,7 @@ impl Scanner {
             if !matches!(
                 candidate.node_name.as_str(),
                 "defn" | "defs" | "body_statement" | "match"
-            )
-                || candidate.child_fingerprints.len() < 3
+            ) || candidate.child_fingerprints.len() < 3
             {
                 continue;
             }
@@ -241,7 +240,10 @@ impl Scanner {
             key.sort();
             let key = key.join("\0");
             let finding = self.finding_for(&cluster, "type3", matched_mass);
-            if findings.get(&key).is_none_or(|existing| existing.mass < finding.mass) {
+            if findings
+                .get(&key)
+                .is_none_or(|existing| existing.mass < finding.mass)
+            {
                 findings.insert(key, finding);
             }
         }
@@ -341,23 +343,19 @@ impl Scanner {
     }
 }
 
-fn common_subsequence_mass(
-    left: &CloneCandidate,
-    right: &CloneCandidate,
-) -> (usize, usize) {
+fn common_subsequence_mass(left: &CloneCandidate, right: &CloneCandidate) -> (usize, usize) {
     let rows = left.child_fingerprints.len();
     let cols = right.child_fingerprints.len();
     let mut table = vec![vec![(0usize, 0usize); cols + 1]; rows + 1];
     for row in 0..rows {
         for col in 0..cols {
-            table[row + 1][col + 1] = if left.child_fingerprints[row]
-                == right.child_fingerprints[col]
-            {
-                let mass = left.child_masses[row].min(right.child_masses[col]);
-                (table[row][col].0 + mass, table[row][col].1 + 1)
-            } else {
-                table[row][col + 1].max(table[row + 1][col])
-            };
+            table[row + 1][col + 1] =
+                if left.child_fingerprints[row] == right.child_fingerprints[col] {
+                    let mass = left.child_masses[row].min(right.child_masses[col]);
+                    (table[row][col].0 + mass, table[row][col].1 + 1)
+                } else {
+                    table[row][col + 1].max(table[row + 1][col])
+                };
         }
     }
     table[rows][cols]
@@ -588,11 +586,21 @@ end
             6,
             1,
         );
-        assert!(out.iter().any(|finding| {
-            finding.clone_type == "type3" && finding.node == "body_statement" &&
-                finding.sites.iter().any(|site| site.contains("branch_prefix")) &&
-                finding.sites.iter().any(|site| site.contains("background_prefix"))
-        }), "{out:#?}");
+        assert!(
+            out.iter().any(|finding| {
+                finding.clone_type == "type3"
+                    && finding.node == "body_statement"
+                    && finding
+                        .sites
+                        .iter()
+                        .any(|site| site.contains("branch_prefix"))
+                    && finding
+                        .sites
+                        .iter()
+                        .any(|site| site.contains("background_prefix"))
+            }),
+            "{out:#?}"
+        );
     }
 
     #[test]
@@ -627,7 +635,8 @@ end
             "raw": "def m\n  body\nend",
             "child_fingerprints": [],
             "child_masses": []
-        })).unwrap();
+        }))
+        .unwrap();
 
         let c2: CloneCandidate = serde_json::from_value(serde_json::json!({
             "file": "bar.rb",
@@ -640,12 +649,12 @@ end
             "raw": "def m\n  body\nend",
             "child_fingerprints": [],
             "child_masses": []
-        })).unwrap();
+        }))
+        .unwrap();
 
         let scanner = Scanner::new(5, 0);
         let type2 = scanner.type2_findings(&[c1, c2]);
         assert!(type2.is_empty());
-
 
         let inner = SimilarityFinding {
             clone_type: "type2".to_string(),
@@ -655,8 +664,10 @@ end
             at: "file:a:1".to_string(),
             spans: vec![
                 ("file:a:1".to_string(), [1, 0, 1, 10]),
-                ("file:b:1".to_string(), [1, 0, 1, 10])
-            ].into_iter().collect(),
+                ("file:b:1".to_string(), [1, 0, 1, 10]),
+            ]
+            .into_iter()
+            .collect(),
             locations: Vec::new(),
         };
         let outer = SimilarityFinding {
@@ -667,8 +678,10 @@ end
             at: "file:a:1".to_string(),
             spans: vec![
                 ("file:a:1".to_string(), [1, 0, 1, 10]),
-                ("file:b:1".to_string(), [1, 0, 1, 10])
-            ].into_iter().collect(),
+                ("file:b:1".to_string(), [1, 0, 1, 10]),
+            ]
+            .into_iter()
+            .collect(),
             locations: Vec::new(),
         };
         assert!(!nested_finding(&inner, &outer));
@@ -679,7 +692,9 @@ end
             mass: 10,
             sites: vec!["foo".to_string()],
             at: "foo".to_string(),
-            spans: vec![("foo".to_string(), [1,0,1,10])].into_iter().collect(),
+            spans: vec![("foo".to_string(), [1, 0, 1, 10])]
+                .into_iter()
+                .collect(),
             locations: Vec::new(),
         };
         let idents = site_identities(&short_finding);
@@ -693,8 +708,10 @@ end
             at: "file:a:2".to_string(),
             spans: vec![
                 ("file:a:2".to_string(), [2, 1, 2, 5]),
-                ("file:b:2".to_string(), [2, 1, 2, 5])
-            ].into_iter().collect(),
+                ("file:b:2".to_string(), [2, 1, 2, 5]),
+            ]
+            .into_iter()
+            .collect(),
             locations: Vec::new(),
         };
         let f_outer = SimilarityFinding {
@@ -705,8 +722,10 @@ end
             at: "file:a:2".to_string(),
             spans: vec![
                 ("file:a:2".to_string(), [1, 0, 3, 10]),
-                ("file:b:2".to_string(), [1, 0, 3, 10])
-            ].into_iter().collect(),
+                ("file:b:2".to_string(), [1, 0, 3, 10]),
+            ]
+            .into_iter()
+            .collect(),
             locations: Vec::new(),
         };
         let scanner = Scanner::new(1, 1);

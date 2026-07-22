@@ -133,15 +133,32 @@ pub fn diff(baseline: &Value, head: &Value) -> Value {
 }
 
 pub fn to_markdown(delta: &Value) -> String {
-    let introduced = delta.pointer("/introduced/total").and_then(Value::as_i64).unwrap_or(0);
-    let resolved = delta.pointer("/resolved/total").and_then(Value::as_i64).unwrap_or(0);
-    let persisted = delta.pointer("/persisted/total").and_then(Value::as_i64).unwrap_or(0);
+    let introduced = delta
+        .pointer("/introduced/total")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let resolved = delta
+        .pointer("/resolved/total")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let persisted = delta
+        .pointer("/persisted/total")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     let net = delta.get("net").and_then(Value::as_i64).unwrap_or(0);
     let mut out = format!(
         "# Decomplex Delta\n\n- Introduced: **{introduced}**\n- Resolved: **{resolved}**\n- Persisted: **{persisted}**\n- Net: **{net:+}**\n\n"
     );
-    render_delta_section(&mut out, "Resolved structural findings", delta.pointer("/resolved/findings"));
-    render_delta_section(&mut out, "Introduced structural findings", delta.pointer("/introduced/findings"));
+    render_delta_section(
+        &mut out,
+        "Resolved structural findings",
+        delta.pointer("/resolved/findings"),
+    );
+    render_delta_section(
+        &mut out,
+        "Introduced structural findings",
+        delta.pointer("/introduced/findings"),
+    );
     out
 }
 
@@ -177,19 +194,28 @@ fn delta_entry(snapshot: &Value, fingerprint: &str, count: i64) -> Value {
 }
 
 fn delta_total(entries: &[Value]) -> i64 {
-    entries.iter().filter_map(|entry| entry.get("count").and_then(Value::as_i64)).sum()
+    entries
+        .iter()
+        .filter_map(|entry| entry.get("count").and_then(Value::as_i64))
+        .sum()
 }
 
 fn render_delta_section(out: &mut String, title: &str, findings: Option<&Value>) {
     out.push_str(&format!("## {title}\n\n"));
-    let findings = findings.and_then(Value::as_array).cloned().unwrap_or_default();
+    let findings = findings
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     if findings.is_empty() {
         out.push_str("None.\n\n");
         return;
     }
     for finding in findings {
         let count = finding.get("count").and_then(Value::as_i64).unwrap_or(0);
-        let fingerprint = finding.get("fingerprint").and_then(Value::as_str).unwrap_or("");
+        let fingerprint = finding
+            .get("fingerprint")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         let detail = finding
             .get("details")
             .and_then(Value::as_array)
@@ -225,9 +251,18 @@ mod tests {
         });
 
         let result = diff(&baseline, &head);
-        assert_eq!(result.pointer("/resolved/total").and_then(Value::as_i64), Some(2));
-        assert_eq!(result.pointer("/introduced/total").and_then(Value::as_i64), Some(1));
-        assert_eq!(result.pointer("/persisted/total").and_then(Value::as_i64), Some(1));
+        assert_eq!(
+            result.pointer("/resolved/total").and_then(Value::as_i64),
+            Some(2)
+        );
+        assert_eq!(
+            result.pointer("/introduced/total").and_then(Value::as_i64),
+            Some(1)
+        );
+        assert_eq!(
+            result.pointer("/persisted/total").and_then(Value::as_i64),
+            Some(1)
+        );
         assert_eq!(result.get("net").and_then(Value::as_i64), Some(-1));
         let markdown = to_markdown(&result);
         assert!(markdown.contains("semantic tuple pressure"));
@@ -240,6 +275,9 @@ mod tests {
             "site_findings": { "old": 1 }
         } } }] });
         let result = diff(&sarif, &json!({ "site_findings": {} }));
-        assert_eq!(result.pointer("/resolved/total").and_then(Value::as_i64), Some(1));
+        assert_eq!(
+            result.pointer("/resolved/total").and_then(Value::as_i64),
+            Some(1)
+        );
     }
 }

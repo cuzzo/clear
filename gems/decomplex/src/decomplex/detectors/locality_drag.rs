@@ -500,7 +500,6 @@ fn truncate_example_source(source: &str) -> String {
     format!("{prefix}...")
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -572,7 +571,8 @@ mod tests {
             "language": "ruby",
             "local_complexity_scores": scores_map,
             "local_methods": methods
-        })).unwrap()
+        }))
+        .unwrap()
     }
 
     #[test]
@@ -658,7 +658,14 @@ mod tests {
             "a_file.rb",
             1,
             vec![
-                make_stmt_json(0, 10, "x = 1; x_no_boundary = 1", &[], &["x", "x_no_boundary"], &[]),
+                make_stmt_json(
+                    0,
+                    10,
+                    "x = 1; x_no_boundary = 1",
+                    &[],
+                    &["x", "x_no_boundary"],
+                    &[],
+                ),
                 make_stmt_json(1, 11, "a1 = 2", &[], &["a1"], &[]),
                 make_stmt_json(2, 12, "a2 = 3", &[], &["a2"], &[]),
                 make_stmt_json(3, 12, "a3 = 4", &[], &["a3"], &[]),
@@ -669,15 +676,13 @@ mod tests {
                 make_stmt_json(8, 14, "a7 = 8", &[], &["a7"], &[]),
                 make_stmt_json(9, 20, "use(x)", &["x"], &[], &[]),
             ],
-            vec![
-                json!({
-                    "before_index": 6,
-                    "after_index": 7,
-                    "line": 14,
-                    "kind": "BLOCK",
-                    "text": "do"
-                })
-            ],
+            vec![json!({
+                "before_index": 6,
+                "after_index": 7,
+                "line": 14,
+                "kind": "BLOCK",
+                "text": "do"
+            })],
         );
 
         let method_2b = make_method_json(
@@ -716,7 +721,14 @@ mod tests {
                 make_stmt_json(7, 17, "f = nil", &[], &["f"], &[]),
                 make_stmt_json(8, 18, "g = 0", &[], &["g"], &[]),
                 make_stmt_json(9, 19, "h = T.let(nil)", &[], &["h"], &[]),
-                make_stmt_json(10, 20, "trivial_but_reads = x", &["x"], &["trivial_but_reads"], &[]),
+                make_stmt_json(
+                    10,
+                    20,
+                    "trivial_but_reads = x",
+                    &["x"],
+                    &["trivial_but_reads"],
+                    &[],
+                ),
                 make_stmt_json(11, 30, "use(y)", &["y"], &[], &[]),
             ],
             vec![],
@@ -728,7 +740,14 @@ mod tests {
             "a_file.rb",
             1,
             vec![
-                make_stmt_json(0, 10, "z_tie_a = 1; z_tie_b = 1", &[], &["z_tie_a", "z_tie_b"], &[]),
+                make_stmt_json(
+                    0,
+                    10,
+                    "z_tie_a = 1; z_tie_b = 1",
+                    &[],
+                    &["z_tie_a", "z_tie_b"],
+                    &[],
+                ),
                 make_stmt_json(1, 11, "z_later = 1", &[], &["z_later"], &[]),
                 make_stmt_json(2, 12, "unrelated_1 = 1", &[], &["unrelated_1"], &[]),
                 make_stmt_json(3, 13, "unrelated_2 = 1", &[], &["unrelated_2"], &[]),
@@ -737,7 +756,14 @@ mod tests {
                 make_stmt_json(6, 16, "unrelated_5 = 1", &[], &["unrelated_5"], &[]),
                 make_stmt_json(7, 17, "unrelated_6 = 1", &[], &["unrelated_6"], &[]),
                 make_stmt_json(8, 18, "unrelated_7 = 1", &[], &["unrelated_7"], &[]),
-                make_stmt_json(9, 42, "use(z_tie_a, z_tie_b, z_later)", &["z_tie_a", "z_tie_b", "z_later"], &[], &[]),
+                make_stmt_json(
+                    9,
+                    42,
+                    "use(z_tie_a, z_tie_b, z_later)",
+                    &["z_tie_a", "z_tie_b", "z_later"],
+                    &[],
+                    &[],
+                ),
             ],
             vec![],
         );
@@ -748,16 +774,44 @@ mod tests {
             "a_file.rb",
             1,
             vec![
-                make_stmt_json(0, 10, "z_related = 1; my_token = 1", &[], &["z_related", "my_token"], &[]),
-                make_stmt_json(1, 11, "derived_val = z_related + 1", &[], &["derived_val"], &[("derived_val", "z_related")]),
-                make_stmt_json(2, 12, "derived_val2 = derived_val + 1", &[], &["derived_val2"], &[("derived_val2", "derived_val")]),
+                make_stmt_json(
+                    0,
+                    10,
+                    "z_related = 1; my_token = 1",
+                    &[],
+                    &["z_related", "my_token"],
+                    &[],
+                ),
+                make_stmt_json(
+                    1,
+                    11,
+                    "derived_val = z_related + 1",
+                    &[],
+                    &["derived_val"],
+                    &[("derived_val", "z_related")],
+                ),
+                make_stmt_json(
+                    2,
+                    12,
+                    "derived_val2 = derived_val + 1",
+                    &[],
+                    &["derived_val2"],
+                    &[("derived_val2", "derived_val")],
+                ),
                 make_stmt_json(3, 13, "unrelated_1 = 1", &[], &["unrelated_1"], &[]),
                 make_stmt_json(4, 14, "unrelated_2 = 1", &[], &["unrelated_2"], &[]),
                 make_stmt_json(5, 15, "unrelated_3 = 1", &[], &["unrelated_3"], &[]),
                 make_stmt_json(6, 16, "unrelated_4 = 1", &[], &["unrelated_4"], &[]),
                 make_stmt_json(7, 17, "unrelated_5 = 1", &[], &["unrelated_5"], &[]),
                 make_stmt_json(8, 18, "unrelated_6 = 1", &[], &["unrelated_6"], &[]),
-                make_stmt_json(9, 42, "use(z_related, my_token)", &["z_related", "my_token"], &[], &[]),
+                make_stmt_json(
+                    9,
+                    42,
+                    "use(z_related, my_token)",
+                    &["z_related", "my_token"],
+                    &[],
+                    &[],
+                ),
             ],
             vec![],
         );
@@ -914,11 +968,7 @@ mod tests {
             ],
         );
 
-        let doc2 = make_doc(
-            "b_file.rb",
-            &[("method_10", 15.0)],
-            vec![method_10],
-        );
+        let doc2 = make_doc("b_file.rb", &[("method_10", 15.0)], vec![method_10]);
 
         let findings = scan_documents(&[doc1, doc2]);
 

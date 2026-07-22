@@ -230,7 +230,8 @@ mod tests {
                     "span": [1, 2, 3, 4]
                 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
 
         let report = scan_documents(&[doc1]);
         assert_eq!(report.fat_unions.len(), 2);
@@ -238,4 +239,3 @@ mod tests {
         assert!(!report.fat_unions[1].degenerate);
     }
 }
-

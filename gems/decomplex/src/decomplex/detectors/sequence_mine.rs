@@ -29,7 +29,11 @@ struct Call {
     span: Span,
 }
 
-pub fn scan_files(files: &[PathBuf], language: Language, min_support: usize) -> Result<BrokenProtocolReport> {
+pub fn scan_files(
+    files: &[PathBuf],
+    language: Language,
+    min_support: usize,
+) -> Result<BrokenProtocolReport> {
     let documents = syntax::parse_files(files, language)?;
     Ok(scan_documents(&documents, min_support))
 }
@@ -97,14 +101,17 @@ impl Report {
         for ((file, defn), calls) in &self.by_unit {
             let mids = unique_mids(calls);
             for pair in &pairs {
-                let (has, missing) =
-                    if mids.contains(&pair.pair[0].as_str()) && !mids.contains(&pair.pair[1].as_str()) {
-                        (pair.pair[0].clone(), pair.pair[1].clone())
-                    } else if mids.contains(&pair.pair[1].as_str()) && !mids.contains(&pair.pair[0].as_str()) {
-                        (pair.pair[1].clone(), pair.pair[0].clone())
-                    } else {
-                        continue;
-                    };
+                let (has, missing) = if mids.contains(&pair.pair[0].as_str())
+                    && !mids.contains(&pair.pair[1].as_str())
+                {
+                    (pair.pair[0].clone(), pair.pair[1].clone())
+                } else if mids.contains(&pair.pair[1].as_str())
+                    && !mids.contains(&pair.pair[0].as_str())
+                {
+                    (pair.pair[1].clone(), pair.pair[0].clone())
+                } else {
+                    continue;
+                };
                 let denominator = *self.support.get(&has).unwrap_or(&0);
                 let confidence = pair.support as f64 / denominator as f64;
                 if confidence < min_confidence {

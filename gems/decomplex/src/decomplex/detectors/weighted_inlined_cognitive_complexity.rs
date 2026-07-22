@@ -420,7 +420,7 @@ mod tests {
         let scores = BTreeMap::new();
         let analyzer = Analyzer::new(topology, scores, 12.0, 15.0, 3);
         assert_eq!(analyzer.edge_weight("other_weight"), 1.0);
-        
+
         let edge = structural_topology::Edge {
             r#type: "always".to_string(),
             caller: "a".to_string(),

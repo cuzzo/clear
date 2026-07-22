@@ -215,9 +215,10 @@ fn analyze(method: &MethodSummary, asgns: &[Asgn]) -> Vec<DerivedStateRow> {
             // `snapshot = state; state = temporary; state = snapshot` is a
             // scoped restoration protocol. The snapshot is intentionally read
             // after mutation and is not a stale cache of the temporary state.
-            let restored_from_snapshot = asgns.iter().skip(i + 1).any(|x| {
-                &x.name == a && x.deps.iter().any(|dependency| dependency == &b.name)
-            });
+            let restored_from_snapshot = asgns
+                .iter()
+                .skip(i + 1)
+                .any(|x| &x.name == a && x.deps.iter().any(|dependency| dependency == &b.name));
             if restored_from_snapshot {
                 continue;
             }

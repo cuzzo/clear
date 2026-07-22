@@ -155,7 +155,9 @@ fn local_contract_assignments(method: &MethodSummary) -> BTreeMap<String, String
 
     local_flow::local_contract_assignments(method)
         .into_iter()
-        .filter_map(|(name, source)| contract_of(&source, &BTreeMap::new(), 0, &*dialect).map(|c| (name, c)))
+        .filter_map(|(name, source)| {
+            contract_of(&source, &BTreeMap::new(), 0, &*dialect).map(|c| (name, c))
+        })
         .collect()
 }
 
@@ -292,18 +294,33 @@ mod tests {
         assert_eq!(contract_of("", &empty_map, 0, &dialect), None);
         assert_eq!(contract_of("self", &empty_map, 8, &dialect), None);
 
-        assert_eq!(contract_of("@my_ivar", &empty_map, 0, &dialect), Some("@my_ivar".to_string()));
+        assert_eq!(
+            contract_of("@my_ivar", &empty_map, 0, &dialect),
+            Some("@my_ivar".to_string())
+        );
 
-        assert_eq!(contract_of("self[foo]", &empty_map, 0, &dialect), Some("[foo]".to_string()));
+        assert_eq!(
+            contract_of("self[foo]", &empty_map, 0, &dialect),
+            Some("[foo]".to_string())
+        );
 
-        assert_eq!(contract_of("my_local", &empty_map, 0, &dialect), Some("~local".to_string()));
+        assert_eq!(
+            contract_of("my_local", &empty_map, 0, &dialect),
+            Some("~local".to_string())
+        );
 
-        assert_eq!(contract_of("obj.foo()", &empty_map, 0, &dialect), Some(".foo".to_string()));
+        assert_eq!(
+            contract_of("obj.foo()", &empty_map, 0, &dialect),
+            Some(".foo".to_string())
+        );
 
         assert_eq!(contract_of("obj.pop", &empty_map, 0, &dialect), None);
         assert_eq!(contract_of("obj.", &empty_map, 0, &dialect), None);
 
-        assert_eq!(contract_of("obj.bar", &empty_map, 0, &dialect), Some(".bar".to_string()));
+        assert_eq!(
+            contract_of("obj.bar", &empty_map, 0, &dialect),
+            Some(".bar".to_string())
+        );
 
         assert_eq!(contract_of("obj + 2", &empty_map, 0, &dialect), None);
     }
@@ -439,7 +456,8 @@ mod tests {
                     "span": [1, 2, 3, 4]
                 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
 
         let res = scan_documents(&[doc]);
         assert_eq!(res.len(), 2);
@@ -448,4 +466,3 @@ mod tests {
         assert_eq!(res[1].decisions, 7);
     }
 }
-

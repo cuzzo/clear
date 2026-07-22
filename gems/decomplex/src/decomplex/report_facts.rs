@@ -179,8 +179,8 @@ pub fn facts_for_source_files(
         options,
         include_documents,
         CorpusMetadata {
-        complete: false,
-        reason: "source files were supplied without a closed-corpus target".to_string(),
+            complete: false,
+            reason: "source files were supplied without a closed-corpus target".to_string(),
             targets: files
                 .iter()
                 .map(|file| file.path.to_string_lossy().to_string())
@@ -282,43 +282,28 @@ fn facts_for_source_files_with_corpus(
 /// detectors intentionally do not consume call identity and must not inherit
 /// this boundary merely because an unrelated call was unresolved.
 fn semantic_evidence(documents: &[Document]) -> Value {
-    use fact_mine_rust::profile::{self, Profile};
-
-    let output = profile::merge(
-        documents
-            .iter()
-            .map(|document| profile::extract(document, Profile::Espalier))
-            .collect(),
-        Profile::Espalier,
-    );
-    let unresolved_sources = output
-        .calls
-        .iter()
-        .filter(|call| call.resolution_missing_proof.is_some())
-        .map(|call| call.source.as_str())
-        .collect::<HashSet<_>>();
+    let evidence = fact_mine_rust::profile::call_resolution_evidence(documents);
     let mut by_file = BTreeMap::new();
     for document in documents {
-        let unresolved_function_spans = output
-            .methods
-            .iter()
-            .filter(|method| {
-                method.path == document.file && unresolved_sources.contains(method.id.as_str())
-            })
-            .filter_map(|method| method.span)
-            .collect::<Vec<_>>();
+        let unresolved_function_spans = evidence
+            .unresolved_function_spans_by_file
+            .get(&document.file)
+            .cloned()
+            .unwrap_or_default();
         by_file.insert(
             document.file.clone(),
             json!({
                 "normalized_ast_complete": !document.parse_recovered,
                 "parse_recovery_spans": document.parse_recovery_spans,
+                "function_spans": document.function_defs.iter().map(|definition| definition.span).collect::<Vec<_>>(),
+                "owner_spans": document.owner_defs.iter().map(|definition| definition.span).collect::<Vec<_>>(),
                 "unresolved_call_function_spans": unresolved_function_spans,
             }),
         );
     }
     json!({
         "schema": "decomplex.semantic-evidence.v1",
-        "call_resolution": output.call_resolution_coverage,
+        "call_resolution": evidence.call_resolution_coverage,
         "by_file": by_file,
     })
 }
@@ -981,39 +966,74 @@ fn source_role(path: &Path) -> SourceRole {
     let parts = text
         .split('/')
         .filter(|part| !part.is_empty())
+        .map(str::to_ascii_lowercase)
         .collect::<Vec<_>>();
-    let basename = parts.last().copied().unwrap_or_default();
+    let basename = parts.last().map(String::as_str).unwrap_or_default();
     if parts
         .iter()
-        .any(|part| matches!(*part, ".git" | ".hg" | ".svn"))
+        .any(|part| matches!(part.as_str(), ".git" | ".hg" | ".svn"))
     {
         SourceRole::VcsMetadata
-    } else if parts
-        .iter()
-        .any(|part| matches!(*part, "vendor" | "vendors" | "third_party" | "third-party"))
-    {
+    } else if parts.iter().any(|part| {
+        matches!(
+            part.as_str(),
+            "vendor" | "vendors" | "third_party" | "third-party"
+        )
+    }) {
         SourceRole::Vendored
     } else if parts
         .iter()
-        .any(|part| matches!(*part, "generated" | "gen" | "dist"))
+        .any(|part| matches!(part.as_str(), "generated" | "gen" | "dist"))
     {
         SourceRole::Generated
-    } else if parts
-        .iter()
-        .any(|part| matches!(*part, "benchmark" | "benchmarks" | "bench" | "benches"))
-    {
+    } else if parts.iter().any(|part| {
+        matches!(
+            part.as_str(),
+            "benchmark" | "benchmarks" | "bench" | "benches"
+        )
+    }) {
         SourceRole::Benchmark
     } else if parts
         .iter()
-        .any(|part| matches!(*part, "example" | "examples" | "sample" | "samples"))
+        .any(|part| matches!(part.as_str(), "example" | "examples" | "sample" | "samples"))
     {
         SourceRole::Example
-    } else if parts
-        .iter()
-        .any(|part| matches!(*part, "test" | "tests" | "spec" | "specs" | "__tests__"))
-        || basename
-            .split(['_', '.'])
-            .any(|part| matches!(part, "test" | "spec"))
+    } else if parts.iter().any(|part| {
+        matches!(
+            part.as_str(),
+            "test"
+                | "tests"
+                | "spec"
+                | "specs"
+                | "__tests__"
+                | "jvmtest"
+                | "androidtest"
+                | "commontest"
+                | "nativetest"
+                | "testfixtures"
+                | "testfixture"
+                | "integrationtest"
+                | "unittest"
+                | "uitest"
+                | "functionaltest"
+        ) || (part.ends_with("test")
+            && [
+                "android",
+                "common",
+                "functional",
+                "integration",
+                "jvm",
+                "native",
+                "nonwasm",
+                "unit",
+                "ui",
+                "wasm",
+            ]
+            .iter()
+            .any(|prefix| part.starts_with(prefix)))
+    }) || basename
+        .split(['_', '.'])
+        .any(|part| matches!(part, "test" | "spec"))
     {
         SourceRole::Test
     } else {
@@ -1046,6 +1066,23 @@ fn excluded_path(path: &Path, options: &Options) -> bool {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn source_role_recognizes_case_insensitive_and_platform_test_roots() {
+        for path in [
+            "Sources/Package/Tests/ParserTests.swift",
+            "okio/src/jvmTest/kotlin/okio/Example.kt",
+            "okio/src/androidTest/kotlin/okio/Example.kt",
+            "okio/src/nonWasmTest/kotlin/okio/Example.kt",
+            "module/src/testFixtures/kotlin/Fixture.kt",
+        ] {
+            assert_eq!(source_role(Path::new(path)), SourceRole::Test, "{path}");
+        }
+        assert_eq!(
+            source_role(Path::new("src/contest/Parser.kt")),
+            SourceRole::Production
+        );
+    }
 
     #[test]
     fn git_vcs_filter_keeps_only_tracked_source_files() {
@@ -1494,7 +1531,7 @@ mod tests {
         assert!(result.is_object());
         let obj = result.as_object().unwrap();
         assert_eq!(obj.get("format").unwrap(), FORMAT);
-        
+
         let files_val = obj.get("files").unwrap().as_array().unwrap();
         assert_eq!(files_val.len(), 2);
 
@@ -1592,7 +1629,7 @@ mod tests {
         .unwrap();
 
         let summaries = vec![summary1, summary2];
-        
+
         let res_owned = local_summaries_for_documents(&summaries, &[doc_a.clone()]);
         assert_eq!(res_owned.len(), 1);
         assert_eq!(res_owned[0].file, "a.rb");

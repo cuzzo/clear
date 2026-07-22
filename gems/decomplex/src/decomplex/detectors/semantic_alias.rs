@@ -223,7 +223,8 @@ mod tests {
                 }
             ],
             "comparison_uses": []
-        })).unwrap();
+        }))
+        .unwrap();
 
         let report = scan_documents(&[doc_ignore]);
         assert!(report.alias_clusters.is_empty());
@@ -319,7 +320,8 @@ mod tests {
                     "enclosing_span": [12, 11, 13, 13]
                 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
 
         let report = scan_documents(&[doc_operators]);
         let cluster = report.alias_clusters.iter().find(|c| c.canon == "x == 0");

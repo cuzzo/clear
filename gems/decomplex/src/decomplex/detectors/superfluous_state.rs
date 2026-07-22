@@ -31,7 +31,10 @@ pub fn scan_documents(documents: &[Document]) -> Vec<SuperfluousStateFinding> {
     scan_documents_with_corpus(documents, true)
 }
 
-pub fn scan_documents_with_corpus(documents: &[Document], corpus_complete: bool) -> Vec<SuperfluousStateFinding> {
+pub fn scan_documents_with_corpus(
+    documents: &[Document],
+    corpus_complete: bool,
+) -> Vec<SuperfluousStateFinding> {
     // Public accessor reads are call facts rather than owner-local state reads.
     // Without points-to proof, a same-named external message or a self message
     // from a different method is enough to make a `dead_state` verdict unsound.
@@ -75,13 +78,14 @@ pub fn scan_documents_with_corpus(documents: &[Document], corpus_complete: bool)
             })
         })
         .collect();
-    let chained_reads_by_field: BTreeMap<&str, Vec<&crate::decomplex::syntax::StateRead>> = documents
-        .iter()
-        .flat_map(|document| document.chained_self_reads.iter())
-        .fold(BTreeMap::new(), |mut acc, read| {
-            acc.entry(read.field.as_str()).or_default().push(read);
-            acc
-        });
+    let chained_reads_by_field: BTreeMap<&str, Vec<&crate::decomplex::syntax::StateRead>> =
+        documents
+            .iter()
+            .flat_map(|document| document.chained_self_reads.iter())
+            .fold(BTreeMap::new(), |mut acc, read| {
+                acc.entry(read.field.as_str()).or_default().push(read);
+                acc
+            });
     let mut adjacent_pairs: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
     for proto in &icf_report.ordered_protocols {
         if proto.dependency.contains(&"write_read".to_string()) && proto.protocol.len() >= 2 {
@@ -563,7 +567,10 @@ mod tests {
         })).unwrap();
 
         let findings = scan_documents(&[doc]);
-        let cache = findings.iter().find(|finding| finding.field == "cache").unwrap();
+        let cache = findings
+            .iter()
+            .find(|finding| finding.field == "cache")
+            .unwrap();
         assert_eq!(cache.classification, "derived_cache");
     }
 
@@ -603,7 +610,10 @@ mod tests {
         assert_eq!(namespace.classification, "dead_state");
         assert_eq!(namespace.confidence, "low");
         assert!(
-            namespace.confidence_reason.as_deref().is_some_and(|reason| reason.contains("spec")),
+            namespace
+                .confidence_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("spec")),
             "reason should cite the unresolved receiver, got {:?}",
             namespace.confidence_reason
         );
@@ -631,7 +641,9 @@ mod tests {
 
         let findings = scan_documents(&[doc]);
         assert!(
-            !findings.iter().any(|finding| finding.field.ends_with("namespace")),
+            !findings
+                .iter()
+                .any(|finding| finding.field.ends_with("namespace")),
             "spec is proven to be a HookSpec, so namespace has a real reader, got {:?}",
             findings
         );

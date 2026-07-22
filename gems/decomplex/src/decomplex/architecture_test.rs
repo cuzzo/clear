@@ -241,7 +241,6 @@ fn post_syntax_consumers_do_not_branch_on_concrete_languages() {
     );
 }
 
-
 #[test]
 fn report_facts_uses_document_detector_apis() {
     let path = crate_src().join("report_facts.rs");
@@ -382,4 +381,3 @@ fn test_architecture_rules_uncovered_paths() {
     assert!(!check_parser_or_adapter_internals(mock_path, "syntax::adapters").is_empty());
     assert!(!check_concrete_languages(mock_path, "Language::Python").is_empty());
 }
-

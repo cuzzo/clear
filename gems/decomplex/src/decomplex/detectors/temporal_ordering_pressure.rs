@@ -102,7 +102,8 @@ fn pressure_row_for_owner(document: &Document, owner: &str) -> Option<TemporalOr
                     .state_writes
                     .iter()
                     .filter(|write| {
-                        write.owner == function.owner && write.function == function.name
+                        write.owner == function.owner
+                            && write.function == function.name
                             && syntax::receiver_targets_owner(&write.receiver, &write.owner)
                     })
                     .map(|write| write.field.clone()),
