@@ -6,7 +6,8 @@ use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     configured_intrinsic_call_complexity, eliminable_guard_from_call, nil_guard_from_predicates,
     scip_descriptor_owner, scip_global_parts, NormalizedCallComplexity, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    NormalizedNullableOperation, NormalizedOwner,
     NormalizedSemanticEffect,
 };
 use super::{CallSite, ExternalSymbolMetadata};
@@ -83,6 +84,21 @@ const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
+    fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
+        let subject = (node.r#type == "POINTER_EXPRESSION")
+            .then(|| node.children.first().and_then(crate::ast::node))
+            .flatten()
+            .filter(|subject| subject.r#type == "LVAR")?
+            .text
+            .trim()
+            .to_string();
+        (!subject.is_empty()).then_some(NormalizedNullableOperation {
+            subject,
+            operation_kind: "pointer_dereference",
+            nil_behavior: "undefined_behavior",
+        })
+    }
+
     fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
         external_symbol_metadata(symbol)
     }

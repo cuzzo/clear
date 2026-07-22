@@ -3,7 +3,8 @@ use super::{
         NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedOwner,
         NormalizedStateRead,
     },
-    BranchArm, BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, FunctionDef,
+    nullable::NullableOperationSeed, BranchArm, BranchDecision, CallSite, ComparisonUse,
+    DecisionSite, DispatchSite, FunctionDef,
     OwnerDef, PathConditionSite, PredicateAlias, RawNode, SemanticEffectSite, StateDeclaration,
     StateRead, StateWrite, HazardSite,
 };
@@ -35,6 +36,7 @@ pub(crate) struct NormalizedFacts {
     pub(crate) comparison_uses: Vec<ComparisonUse>,
     pub(crate) path_condition_sites: Vec<PathConditionSite>,
     pub(crate) hazard_sites: Vec<HazardSite>,
+    pub(crate) nullable_operation_seeds: Vec<NullableOperationSeed>,
 }
 
 pub(crate) fn extract(
@@ -117,6 +119,7 @@ impl<'a> Extractor<'a> {
     }
 
     fn scan(&mut self, node: &Node) {
+        self.record_nullable_operation(node);
         self.record_behavior_node_reads(node);
         self.record_behavior_node_calls(node);
         self.record_behavior_initializer_writes(node);
@@ -172,6 +175,21 @@ impl<'a> Extractor<'a> {
                 }
             }
         }
+    }
+
+    fn record_nullable_operation(&mut self, node: &Node) {
+        let Some(operation) = self.behavior.nullable_operation(node) else {
+            return;
+        };
+        self.facts
+            .nullable_operation_seeds
+            .push(NullableOperationSeed {
+                function: self.current_function(),
+                span: span(node),
+                subject: operation.subject,
+                operation_kind: operation.operation_kind.to_string(),
+                nil_behavior: operation.nil_behavior.to_string(),
+            });
     }
 
     fn scan_children(&mut self, node: &Node) {

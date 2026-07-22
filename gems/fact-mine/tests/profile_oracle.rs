@@ -181,6 +181,26 @@ fn nullable_states_preserve_go_and_cpp_null_literals() -> Result<()> {
 }
 
 #[test]
+fn nullable_operations_join_native_dereferences_to_proven_null_states() -> Result<()> {
+    for (name, language, behavior) in [
+        ("nullable_operations.c", Language::C, "undefined_behavior"),
+        ("nullable_operations.cpp", Language::Cpp, "undefined_behavior"),
+        ("nullable_operations.go", Language::Go, "panic"),
+    ] {
+        let document = syntax::parse_file(fixture(name), language)?;
+        let output = profile::extract(&document, Profile::NilKill);
+        assert!(output.nullable_operations.iter().any(|operation| {
+            operation.operation_kind == "pointer_dereference"
+                && operation.nil_behavior == behavior
+                && operation.state_at_operation == "definitely_null"
+                && operation.complete
+                && !operation.place_id.is_empty()
+        }));
+    }
+    Ok(())
+}
+
+#[test]
 fn typescript_variable_bound_callables_are_emitted_as_project_methods() -> Result<()> {
     let document = syntax::parse_file(fixture("typescript_callable.ts"), Language::TypeScript)?;
     let output = profile::extract(&document, Profile::Espalier);

@@ -8,7 +8,8 @@ use super::normalized_behavior::{
     configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    NormalizedNullableOperation, NormalizedOwner,
     method_param_types_from_signatures, NormalizedSemanticEffect, NormalizedStateRead,
     NormalizedStateWrite, SyntaxMetadata,
 };
@@ -190,6 +191,21 @@ const GO_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct GoNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for GoNormalizedBehavior {
+    fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
+        let subject = (node.r#type == "UNARY_EXPRESSION" && node.text.trim_start().starts_with('*'))
+            .then(|| node.children.first().and_then(crate::ast::node))
+            .flatten()
+            .filter(|subject| subject.r#type == "LVAR")?
+            .text
+            .trim()
+            .to_string();
+        (!subject.is_empty()).then_some(NormalizedNullableOperation {
+            subject,
+            operation_kind: "pointer_dereference",
+            nil_behavior: "panic",
+        })
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,

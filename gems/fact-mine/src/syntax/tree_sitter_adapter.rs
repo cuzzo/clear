@@ -149,6 +149,7 @@ fn parse_normalized_file(
         nullable_refinements: metadata.nullable_refinements,
             nullable_states: metadata.nullable_states,
             nullable_summaries: metadata.nullable_summaries,
+            nullable_operations: metadata.nullable_operations,
         immutable_struct_readers: metadata.syntax.immutable_struct_readers,
         immutable_struct_reader_types: metadata.syntax.immutable_struct_reader_types,
         type_aliases: metadata.syntax.type_aliases,

@@ -124,6 +124,7 @@ pub struct ProfileOutput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nullable_states: Vec<syntax::nullable::NullableState>,
     pub nullable_summaries: Vec<syntax::nullable::NullableSummary>,
+    pub nullable_operations: Vec<syntax::nullable::NullableOperation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dispatcher_inferences: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1004,6 +1005,11 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         } else {
             Vec::new()
         },
+        nullable_operations: if nil_kill {
+            document.nullable_operations.clone()
+        } else {
+            Vec::new()
+        },
         dispatcher_inferences,
         hash_record_member_calls,
         param_origins,
@@ -1070,6 +1076,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut nullable_refinements = Vec::new();
     let mut nullable_states = Vec::new();
     let mut nullable_summaries = Vec::new();
+    let mut nullable_operations = Vec::new();
     let mut dispatcher_inferences = Vec::new();
     let mut hash_record_member_calls = Vec::new();
     let mut param_origins = Vec::new();
@@ -1140,6 +1147,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
             nullable_refinements.extend(output.nullable_refinements);
             nullable_states.extend(output.nullable_states);
             nullable_summaries.extend(output.nullable_summaries);
+            nullable_operations.extend(output.nullable_operations);
             dispatcher_inferences.extend(output.dispatcher_inferences);
             hash_record_member_calls.extend(output.hash_record_member_calls);
             param_origins.extend(output.param_origins);
@@ -1222,6 +1230,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         nullable_refinements,
         nullable_states,
         nullable_summaries,
+        nullable_operations,
         dispatcher_inferences,
         hash_record_member_calls,
         param_origins,
@@ -6032,6 +6041,7 @@ pub(crate) mod tests {
             nullable_refinements: vec![],
             nullable_states: vec![],
             nullable_summaries: vec![],
+            nullable_operations: vec![],
             immutable_struct_readers: Default::default(),
             immutable_struct_reader_types: Default::default(),
             type_aliases: Default::default(),

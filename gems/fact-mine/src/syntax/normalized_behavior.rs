@@ -75,6 +75,16 @@ pub(crate) struct NormalizedNilGuardFact {
     pub(crate) non_nil_when_true: bool,
 }
 
+/// A language-owned interpretation of one already-normalized nullable
+/// operation. The shared extractor owns traversal and CFG joining; adapters
+/// only classify syntax whose nil behavior differs by language.
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedNullableOperation {
+    pub(crate) subject: String,
+    pub(crate) operation_kind: &'static str,
+    pub(crate) nil_behavior: &'static str,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BlockCallSemantics {
     Iteration,
@@ -719,6 +729,9 @@ pub(crate) fn configured_collection_operation(
 }
 
 pub(crate) trait NormalizedLanguageBehavior: Sync {
+    fn nullable_operation(&self, _node: &Node) -> Option<NormalizedNullableOperation> {
+        None
+    }
     /// The configuration key for this source language. Keeping this at the
     /// adapter boundary ensures Fact-Mine owns native spellings while every
     /// downstream consumer sees only normalized complexity facts.

@@ -42,6 +42,28 @@ pub struct NullableSummary {
     pub unknown_reasons: Vec<String>,
 }
 
+/// A normalized nullable-sensitive operation before it is joined to CFG place
+/// identities and the current nullable state.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct NullableOperationSeed {
+    pub(crate) function: String,
+    pub(crate) span: Span,
+    pub(crate) subject: String,
+    pub(crate) operation_kind: String,
+    pub(crate) nil_behavior: String,
+}
+
+/// A nil-sensitive operation joined to its stable CFG place and state.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct NullableOperation {
+    pub node_id: String,
+    pub place_id: String,
+    pub operation_kind: String,
+    pub nil_behavior: String,
+    pub state_at_operation: String,
+    pub complete: bool,
+}
+
 /// Projects normalized guard semantics onto stable CFG places. The guard
 /// extractor owns predicate interpretation; this module only joins its seeds
 /// to already-built CFG identities.
@@ -231,6 +253,86 @@ pub(crate) fn project_summaries(
                 source_definition_ids,
                 complete,
                 unknown_reasons,
+            }
+        })
+        .collect()
+}
+
+/// Joins language-owned normalized operation descriptors to existing CFG reads
+/// and state facts. A descriptor whose subject cannot be resolved to the
+/// exact CFG place is retained as an incomplete unknown boundary.
+pub(crate) fn project_operations(
+    seeds: &[NullableOperationSeed],
+    facts: &ControlFlowFacts,
+    states: &[NullableState],
+) -> Vec<NullableOperation> {
+    let effects = facts
+        .effects
+        .iter()
+        .map(|effect| (effect.node_id.as_str(), effect))
+        .collect::<BTreeMap<_, _>>();
+    let places = facts
+        .places
+        .iter()
+        .map(|place| (place.id.as_str(), place.name.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let state_by_place = states
+        .iter()
+        .map(|state| ((state.node_id.as_str(), state.place_id.as_str()), state))
+        .collect::<BTreeMap<_, _>>();
+    let mut rows = BTreeSet::new();
+
+    for seed in seeds {
+        let nodes = facts
+            .nodes
+            .iter()
+            .filter(|node| node.function == seed.function)
+            .filter(|node| span_contains(node.span, seed.span))
+            .collect::<Vec<_>>();
+        for node in nodes {
+            let Some(effect) = effects.get(node.id.as_str()) else {
+                continue;
+            };
+            let place_id = effect
+                .reads
+                .iter()
+                .find(|place_id| places.get(place_id.as_str()) == Some(&seed.subject.as_str()));
+            let Some(place_id) = place_id else {
+                rows.insert((
+                    node.id.clone(),
+                    String::new(),
+                    seed.operation_kind.clone(),
+                    "unknown".to_string(),
+                    "unknown".to_string(),
+                    false,
+                ));
+                continue;
+            };
+            let state = state_by_place
+                .get(&(node.id.as_str(), place_id.as_str()))
+                .copied();
+            rows.insert((
+                node.id.clone(),
+                place_id.clone(),
+                seed.operation_kind.clone(),
+                seed.nil_behavior.clone(),
+                state
+                    .map(|state| state.state.clone())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                state.is_some_and(|state| state.complete) && effect.complete,
+            ));
+        }
+    }
+
+    rows.into_iter()
+        .map(|(node_id, place_id, operation_kind, nil_behavior, state_at_operation, complete)| {
+            NullableOperation {
+                node_id,
+                place_id,
+                operation_kind,
+                nil_behavior,
+                state_at_operation,
+                complete,
             }
         })
         .collect()
@@ -626,5 +728,102 @@ mod tests {
         assert_eq!(rows[0].return_state, "maybe_null");
         assert_eq!(rows[0].source_definition_ids, ["null-write", "present-write"]);
         assert_eq!(definition_state_from_name("not-a-state"), None);
+    }
+
+    #[test]
+    fn operation_projection_joins_exact_places_and_preserves_unknown_boundaries() {
+        let facts = ControlFlowFacts {
+            nodes: vec![ControlFlowNode {
+                id: "return".to_string(),
+                file: "demo.c".to_string(),
+                function: "load".to_string(),
+                owner: "Cache".to_string(),
+                kind: "jump".to_string(),
+                role: "return".to_string(),
+                line: 1,
+                span: [1, 0, 1, 14],
+                source: "return *value;".to_string(),
+            }, ControlFlowNode {
+                id: "orphan".to_string(),
+                file: "demo.c".to_string(),
+                function: "orphan".to_string(),
+                owner: "Cache".to_string(),
+                kind: "jump".to_string(),
+                role: "return".to_string(),
+                line: 2,
+                span: [2, 0, 2, 14],
+                source: "return *value;".to_string(),
+            }],
+            places: vec![Place {
+                id: "place:value".to_string(),
+                file: "demo.c".to_string(),
+                function: "load".to_string(),
+                owner: "Cache".to_string(),
+                kind: "local".to_string(),
+                name: "value".to_string(),
+                declaration_span: [1, 0, 1, 1],
+            }],
+            effects: vec![NodeEffect {
+                node_id: "return".to_string(),
+                reads: vec!["place:value".to_string()],
+                complete: true,
+                ..NodeEffect::default()
+            }],
+            ..ControlFlowFacts::default()
+        };
+        let rows = project_operations(
+            &[
+                NullableOperationSeed {
+                    function: "load".to_string(),
+                    span: [1, 7, 1, 13],
+                    subject: "value".to_string(),
+                    operation_kind: "pointer_dereference".to_string(),
+                    nil_behavior: "undefined_behavior".to_string(),
+                },
+                NullableOperationSeed {
+                    function: "load".to_string(),
+                    span: [1, 7, 1, 13],
+                    subject: "missing".to_string(),
+                    operation_kind: "pointer_dereference".to_string(),
+                    nil_behavior: "undefined_behavior".to_string(),
+                },
+                NullableOperationSeed {
+                    function: "other".to_string(),
+                    span: [1, 0, 1, 1],
+                    subject: "value".to_string(),
+                    operation_kind: "pointer_dereference".to_string(),
+                    nil_behavior: "undefined_behavior".to_string(),
+                },
+                NullableOperationSeed {
+                    function: "orphan".to_string(),
+                    span: [2, 7, 2, 13],
+                    subject: "value".to_string(),
+                    operation_kind: "pointer_dereference".to_string(),
+                    nil_behavior: "undefined_behavior".to_string(),
+                },
+            ],
+            &facts,
+            &[NullableState {
+                node_id: "return".to_string(),
+                place_id: "place:value".to_string(),
+                state: "definitely_null".to_string(),
+                source_definition_ids: vec!["null-write".to_string()],
+                complete: true,
+                unknown_reasons: Vec::new(),
+            }],
+        );
+
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|row| {
+            row.place_id == "place:value"
+                && row.state_at_operation == "definitely_null"
+                && row.complete
+        }));
+        assert!(rows.iter().any(|row| {
+            row.place_id.is_empty()
+                && row.nil_behavior == "unknown"
+                && row.state_at_operation == "unknown"
+                && !row.complete
+        }));
     }
 }

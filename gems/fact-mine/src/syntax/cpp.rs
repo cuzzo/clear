@@ -9,7 +9,8 @@ use super::normalized_behavior::{
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
     eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
     scip_global_parts, type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
-    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
+    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedNullableOperation,
+    NormalizedSemanticEffect,
     NormalizedStateRead,
 };
 use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata};
@@ -183,6 +184,21 @@ const CPP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct CppNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
+    fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
+        let subject = (node.r#type == "POINTER_EXPRESSION")
+            .then(|| node.children.first().and_then(crate::ast::node))
+            .flatten()
+            .filter(|subject| subject.r#type == "LVAR")?
+            .text
+            .trim()
+            .to_string();
+        (!subject.is_empty()).then_some(NormalizedNullableOperation {
+            subject,
+            operation_kind: "pointer_dereference",
+            nil_behavior: "undefined_behavior",
+        })
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,
