@@ -6,6 +6,7 @@
 #[path = "db/architecture.rs"]
 pub mod architecture;
 pub mod diff;
+pub mod diff_service;
 #[path = "db/engine.rs"]
 pub mod engine;
 #[path = "db/extract.rs"]
@@ -46,6 +47,7 @@ pub use diff::{
     build_diff_plan, build_diff_plan_with_renames, with_evidence_scope, ChangeInventory,
     DependencyChange, DiffFile, DiffPlan, DiffScope, EvidenceScopeFingerprint, RevisionFile,
 };
+pub use diff_service::{build_structured_diff, DiffRequest};
 pub use engine::{EngineStats, LineageEngine};
 pub use extract::{BoundaryExtractor, HeuristicExtractor, SourceFilter};
 pub use git::GitProvider;

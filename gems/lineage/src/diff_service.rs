@@ -1,0 +1,208 @@
+//! Read-only structured-diff assembly shared by the UI and command line.
+//!
+//! `DiffPlan` deliberately stays render-independent. This module owns the
+//! repository and evidence-ledger joins required to turn a revision request
+//! into the same structured plan for every presentation surface.
+
+use crate::diff::{
+    apply_exact_sarif_findings, apply_head_only_sarif_findings, apply_partial_coverage,
+    apply_partial_mutation_kills, apply_partial_sarif_findings, apply_scoped_coverage,
+    apply_scoped_mutation_kills, DiffPlan, EvidenceScopeFingerprint,
+};
+use crate::{GitProvider, Storage};
+use anyhow::Result;
+
+/// Read-only revision and evidence selection for one structured diff.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiffRequest {
+    pub base_revision: Option<String>,
+    pub head_revision: Option<String>,
+    pub coverage_source: Option<String>,
+    pub sarif_source: Option<String>,
+    pub selection: Option<String>,
+    pub mutant_corpus: Option<String>,
+    pub test_set: Option<String>,
+}
+
+/// Builds the revision-pinned plan consumed by both the React UI and CLI.
+///
+/// Passing no storage is intentional: Git-derived structure remains useful
+/// when a repository has not yet ingested dynamic evidence.
+pub fn build_structured_diff(
+    provider: &GitProvider,
+    storage: Option<&Storage>,
+    request: &DiffRequest,
+) -> Result<DiffPlan> {
+    let (base, head) = provider.diff_revisions(
+        request.base_revision.as_deref(),
+        request.head_revision.as_deref(),
+    )?;
+    let mut plan = provider.diff_plan(&base, &head)?;
+    bind_requested_evidence_scope(&mut plan, request);
+    if let Some(storage) = storage {
+        apply_known_coverage(storage, &mut plan, request.coverage_source.as_deref());
+        apply_known_mutation_kills(storage, &mut plan);
+        apply_known_sarif(storage, &mut plan, request.sarif_source.as_deref());
+    }
+    Ok(plan)
+}
+
+fn bind_requested_evidence_scope(plan: &mut DiffPlan, request: &DiffRequest) {
+    let (Some(selection), Some(mutant_corpus), Some(test_set)) = (
+        request.selection.as_ref(),
+        request.mutant_corpus.as_ref(),
+        request.test_set.as_ref(),
+    ) else {
+        return;
+    };
+    if selection.trim().is_empty() || mutant_corpus.trim().is_empty() || test_set.trim().is_empty()
+    {
+        return;
+    }
+    plan.scope.evidence_scope = EvidenceScopeFingerprint {
+        revision: plan.scope.head_oid.clone(),
+        selection: selection.clone(),
+        mutant_corpus: mutant_corpus.clone(),
+        test_set: test_set.clone(),
+    };
+}
+
+fn apply_known_coverage(storage: &Storage, plan: &mut DiffPlan, source: Option<&str>) {
+    let paths = changed_paths(plan);
+    let source = source.unwrap_or("coverage");
+    if let Ok(Some(artifact)) =
+        storage.scoped_coverage_artifact(source, &plan.scope.evidence_scope, &paths)
+    {
+        apply_scoped_coverage(plan, &artifact);
+        return;
+    }
+    let Ok(rows) = storage.coverage_observations_for_commit_paths(&plan.scope.head_oid, &paths)
+    else {
+        return;
+    };
+    apply_partial_coverage(plan, &rows);
+}
+
+fn apply_known_mutation_kills(storage: &Storage, plan: &mut DiffPlan) {
+    let paths = changed_paths(plan);
+    if let Ok(Some(artifact)) = storage.scoped_mutation_artifact(&plan.scope.evidence_scope, &paths)
+    {
+        apply_scoped_mutation_kills(plan, &artifact);
+        return;
+    }
+    let Ok(rows) =
+        storage.mutation_kill_observations_for_commit_paths(&plan.scope.head_oid, &paths)
+    else {
+        return;
+    };
+    apply_partial_mutation_kills(plan, &rows);
+}
+
+fn apply_known_sarif(storage: &Storage, plan: &mut DiffPlan, source: Option<&str>) {
+    let paths = changed_paths(plan);
+    if let Some(source) = source {
+        if let Ok(Some(rows)) =
+            storage.scoped_sarif_observations(source, &plan.scope.evidence_scope, &paths)
+        {
+            let base_scope = EvidenceScopeFingerprint {
+                revision: plan.scope.base_oid.clone(),
+                selection: plan.scope.evidence_scope.selection.clone(),
+                mutant_corpus: plan.scope.evidence_scope.mutant_corpus.clone(),
+                test_set: plan.scope.evidence_scope.test_set.clone(),
+            };
+            let base_paths = plan
+                .files
+                .iter()
+                .map(|file| {
+                    file.previous_path
+                        .clone()
+                        .unwrap_or_else(|| file.path.clone())
+                })
+                .collect::<Vec<_>>();
+            if let Ok(Some(base_rows)) =
+                storage.scoped_sarif_observations(source, &base_scope, &base_paths)
+            {
+                apply_exact_sarif_findings(plan, &rows, &base_rows);
+            } else {
+                apply_head_only_sarif_findings(plan, &rows);
+            }
+            return;
+        }
+        if storage.has_scoped_sarif_source(source).unwrap_or(false) {
+            plan.evidence.sarif = crate::diff::EvidenceState::Stale;
+            plan.evidence.hazards = crate::diff::EvidenceState::Stale;
+            return;
+        }
+    }
+    let Ok(rows) = storage.sarif_observations_for_commit_paths(&plan.scope.head_oid, &paths) else {
+        return;
+    };
+    apply_partial_sarif_findings(plan, &rows);
+}
+
+fn changed_paths(plan: &DiffPlan) -> Vec<String> {
+    plan.files.iter().map(|file| file.path.clone()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn builds_a_revision_pinned_plan_without_a_database() {
+        let directory = tempdir().unwrap();
+        let repository = git2::Repository::init(directory.path()).unwrap();
+        let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+        let path = directory.path().join("app.rb");
+        std::fs::write(&path, "puts :base\n").unwrap();
+        let base = commit_file(&repository, &signature, None);
+        std::fs::write(&path, "puts :head\n").unwrap();
+        let head = commit_file(&repository, &signature, Some(base));
+        let provider = GitProvider::open(directory.path()).unwrap();
+
+        let plan = build_structured_diff(
+            &provider,
+            None,
+            &DiffRequest {
+                base_revision: Some(base.to_string()),
+                head_revision: Some(head.to_string()),
+                selection: Some("production".into()),
+                mutant_corpus: Some("mutants".into()),
+                test_set: Some("suite".into()),
+                ..DiffRequest::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(plan.scope.base_oid, base.to_string());
+        assert_eq!(plan.scope.head_oid, head.to_string());
+        assert_eq!(plan.scope.evidence_scope.revision, head.to_string());
+        assert_eq!(plan.scope.evidence_scope.selection, "production");
+        assert_eq!(plan.files.len(), 1);
+        assert_eq!(plan.files[0].path, "app.rb");
+        assert_eq!(plan.evidence.coverage, crate::diff::EvidenceState::Missing);
+    }
+
+    fn commit_file(
+        repository: &git2::Repository,
+        signature: &git2::Signature<'_>,
+        parent: Option<git2::Oid>,
+    ) -> git2::Oid {
+        let mut index = repository.index().unwrap();
+        index.add_path(std::path::Path::new("app.rb")).unwrap();
+        let tree = repository.find_tree(index.write_tree().unwrap()).unwrap();
+        let parent_commit = parent.map(|oid| repository.find_commit(oid).unwrap());
+        let parents = parent_commit.iter().collect::<Vec<_>>();
+        repository
+            .commit(
+                Some("HEAD"),
+                signature,
+                signature,
+                "change app",
+                &tree,
+                &parents,
+            )
+            .unwrap()
+    }
+}

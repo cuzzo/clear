@@ -1,5 +1,6 @@
 use super::super::*;
 use axum::response::Redirect;
+use crate::{build_structured_diff, DiffRequest};
 
 pub(super) fn routes() -> Router<UiServerState> {
     Router::new()
@@ -75,22 +76,18 @@ async fn api_diff_plan_handler(
     State(state): State<UiServerState>,
     Query(query): Query<DiffQuery>,
 ) -> Response<Body> {
-    let result = GitProvider::open(state.repo.as_ref()).and_then(|repo| {
-        let (base, head) = repo.diff_revisions(query.base.as_deref(), query.head.as_deref())?;
-        repo.diff_plan(&base, &head)
-    });
+    let request = diff_request(
+        query.base.clone(),
+        query.head.clone(),
+        query.coverage_source.clone(),
+        query.sarif_source.clone(),
+        query.selection.clone(),
+        query.mutant_corpus.clone(),
+        query.test_set.clone(),
+    );
+    let result = build_ui_diff(&state, &request);
     match result {
         Ok(mut plan) => {
-            bind_requested_evidence_scope(
-                &mut plan,
-                &query.head,
-                &query.selection,
-                &query.mutant_corpus,
-                &query.test_set,
-            );
-            apply_known_coverage(&state, &mut plan, query.coverage_source.as_deref());
-            apply_known_mutation_kills(&state, &mut plan);
-            apply_known_sarif(&state, &mut plan, query.sarif_source.as_deref());
             crate::diff::retain_plan_sources_for_page(
                 &mut plan,
                 query.page,
@@ -106,135 +103,34 @@ async fn api_diff_plan_handler(
     }
 }
 
-fn apply_known_sarif(
-    state: &UiServerState,
-    plan: &mut crate::diff::DiffPlan,
-    source: Option<&str>,
-) {
-    if !state.db.exists() {
-        return;
+fn diff_request(
+    base_revision: Option<String>,
+    head_revision: Option<String>,
+    coverage_source: Option<String>,
+    sarif_source: Option<String>,
+    selection: Option<String>,
+    mutant_corpus: Option<String>,
+    test_set: Option<String>,
+) -> DiffRequest {
+    DiffRequest {
+        base_revision,
+        head_revision,
+        coverage_source,
+        sarif_source,
+        selection,
+        mutant_corpus,
+        test_set,
     }
-    let Ok(storage) = crate::storage::Storage::open_existing(state.db.as_ref()) else {
-        return;
-    };
-    let paths = plan
-        .files
-        .iter()
-        .map(|file| file.path.clone())
-        .collect::<Vec<_>>();
-    if let Some(source) = source {
-        if let Ok(Some(rows)) =
-            storage.scoped_sarif_observations(source, &plan.scope.evidence_scope, &paths)
-        {
-            let base_scope = crate::diff::EvidenceScopeFingerprint {
-                revision: plan.scope.base_oid.clone(),
-                selection: plan.scope.evidence_scope.selection.clone(),
-                mutant_corpus: plan.scope.evidence_scope.mutant_corpus.clone(),
-                test_set: plan.scope.evidence_scope.test_set.clone(),
-            };
-            let base_paths = plan
-                .files
-                .iter()
-                .map(|file| file.previous_path.clone().unwrap_or_else(|| file.path.clone()))
-                .collect::<Vec<_>>();
-            if let Ok(Some(base_rows)) =
-                storage.scoped_sarif_observations(source, &base_scope, &base_paths)
-            {
-                crate::diff::apply_exact_sarif_findings(plan, &rows, &base_rows);
-            } else {
-                crate::diff::apply_head_only_sarif_findings(plan, &rows);
-            }
-            return;
-        }
-        if storage.has_scoped_sarif_source(source).unwrap_or(false) {
-            plan.evidence.sarif = crate::diff::EvidenceState::Stale;
-            plan.evidence.hazards = crate::diff::EvidenceState::Stale;
-            return;
-        }
-    }
-    let Ok(rows) = storage.sarif_observations_for_commit_paths(&plan.scope.head_oid, &paths) else {
-        return;
-    };
-    crate::diff::apply_partial_sarif_findings(plan, &rows);
 }
 
-fn bind_requested_evidence_scope(
-    plan: &mut crate::diff::DiffPlan,
-    _head: &Option<String>,
-    selection: &Option<String>,
-    mutant_corpus: &Option<String>,
-    test_set: &Option<String>,
-) {
-    let (Some(selection), Some(mutant_corpus), Some(test_set)) =
-        (selection, mutant_corpus, test_set)
-    else {
-        return;
-    };
-    if selection.trim().is_empty() || mutant_corpus.trim().is_empty() || test_set.trim().is_empty()
-    {
-        return;
-    }
-    plan.scope.evidence_scope = crate::diff::EvidenceScopeFingerprint {
-        revision: plan.scope.head_oid.clone(),
-        selection: selection.clone(),
-        mutant_corpus: mutant_corpus.clone(),
-        test_set: test_set.clone(),
-    };
-}
-
-fn apply_known_coverage(
-    state: &UiServerState,
-    plan: &mut crate::diff::DiffPlan,
-    source: Option<&str>,
-) {
-    if !state.db.exists() {
-        return;
-    }
-    let Ok(storage) = crate::storage::Storage::open_existing(state.db.as_ref()) else {
-        return;
-    };
-    let paths = plan
-        .files
-        .iter()
-        .map(|file| file.path.clone())
-        .collect::<Vec<_>>();
-    let source = source.unwrap_or("coverage");
-    if let Ok(Some(artifact)) =
-        storage.scoped_coverage_artifact(source, &plan.scope.evidence_scope, &paths)
-    {
-        crate::diff::apply_scoped_coverage(plan, &artifact);
-        return;
-    }
-    let Ok(rows) = storage.coverage_observations_for_commit_paths(&plan.scope.head_oid, &paths)
-    else {
-        return;
-    };
-    crate::diff::apply_partial_coverage(plan, &rows);
-}
-
-fn apply_known_mutation_kills(state: &UiServerState, plan: &mut crate::diff::DiffPlan) {
-    if !state.db.exists() {
-        return;
-    }
-    let Ok(storage) = crate::storage::Storage::open_existing(state.db.as_ref()) else {
-        return;
-    };
-    let paths = plan
-        .files
-        .iter()
-        .map(|file| file.path.clone())
-        .collect::<Vec<_>>();
-    if let Ok(Some(artifact)) = storage.scoped_mutation_artifact(&plan.scope.evidence_scope, &paths)
-    {
-        crate::diff::apply_scoped_mutation_kills(plan, &artifact);
-        return;
-    }
-    let Ok(rows) =
-        storage.mutation_kill_observations_for_commit_paths(&plan.scope.head_oid, &paths)
-    else {
-        return;
-    };
-    crate::diff::apply_partial_mutation_kills(plan, &rows);
+fn build_ui_diff(state: &UiServerState, request: &DiffRequest) -> anyhow::Result<crate::diff::DiffPlan> {
+    let provider = GitProvider::open(state.repo.as_ref())?;
+    let storage = state
+        .db
+        .exists()
+        .then(|| crate::storage::Storage::open_existing(state.db.as_ref()))
+        .transpose()?;
+    build_structured_diff(&provider, storage.as_ref(), request)
 }
 
 async fn api_diff_file_handler(
@@ -244,22 +140,18 @@ async fn api_diff_file_handler(
     let Some(path) = query.path.filter(|path| !path.is_empty()) else {
         return invalid_request("path is required");
     };
-    let result = GitProvider::open(state.repo.as_ref()).and_then(|repo| {
-        let (base, head) = repo.diff_revisions(query.base.as_deref(), query.head.as_deref())?;
-        repo.diff_plan(&base, &head)
-    });
+    let request = diff_request(
+        query.base,
+        query.head,
+        query.coverage_source,
+        query.sarif_source,
+        query.selection,
+        query.mutant_corpus,
+        query.test_set,
+    );
+    let result = build_ui_diff(&state, &request);
     match result {
-        Ok(mut plan) => {
-            bind_requested_evidence_scope(
-                &mut plan,
-                &query.head,
-                &query.selection,
-                &query.mutant_corpus,
-                &query.test_set,
-            );
-            apply_known_coverage(&state, &mut plan, query.coverage_source.as_deref());
-            apply_known_mutation_kills(&state, &mut plan);
-            apply_known_sarif(&state, &mut plan, query.sarif_source.as_deref());
+        Ok(plan) => {
             match plan.files.into_iter().find(|file| file.path == path) {
                 Some(file) => Json(ApiEnvelope {
                     api_version: crate::diff::DIFF_API_VERSION,
