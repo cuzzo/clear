@@ -29,6 +29,19 @@ pub struct NullableState {
     pub unknown_reasons: Vec<String>,
 }
 
+/// A callable-level result proven from return-node reads and nullable CFG
+/// state. A summary is emitted only for an explicit return of a tracked
+/// place; unknown return expressions stay outside this contract.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct NullableSummary {
+    pub function: String,
+    pub owner: String,
+    pub return_state: String,
+    pub source_definition_ids: Vec<String>,
+    pub complete: bool,
+    pub unknown_reasons: Vec<String>,
+}
+
 /// Projects normalized guard semantics onto stable CFG places. The guard
 /// extractor owns predicate interpretation; this module only joins its seeds
 /// to already-built CFG identities.
@@ -159,6 +172,92 @@ pub(crate) fn project_states(facts: &ControlFlowFacts) -> Vec<NullableState> {
     }
 
     states.into_values().collect()
+}
+
+/// Collapses the already-projected return-node states into one conservative
+/// summary per callable. This is a pure public-fact projection: no source,
+/// AST, or call-graph traversal is replayed here.
+pub(crate) fn project_summaries(
+    facts: &ControlFlowFacts,
+    states: &[NullableState],
+) -> Vec<NullableSummary> {
+    let states_by_node = states
+        .iter()
+        .map(|state| ((state.node_id.as_str(), state.place_id.as_str()), state))
+        .collect::<BTreeMap<_, _>>();
+    let effects = facts
+        .effects
+        .iter()
+        .map(|effect| (effect.node_id.as_str(), effect))
+        .collect::<BTreeMap<_, _>>();
+    let mut returns = BTreeMap::<(String, String), Vec<&NullableState>>::new();
+
+    for node in facts.nodes.iter().filter(|node| node.role == "return") {
+        let Some(effect) = effects.get(node.id.as_str()) else {
+            continue;
+        };
+        for place_id in &effect.reads {
+            if let Some(state) = states_by_node.get(&(node.id.as_str(), place_id.as_str())) {
+                returns
+                    .entry((node.owner.clone(), node.function.clone()))
+                    .or_default()
+                    .push(state);
+            }
+        }
+    }
+
+    returns
+        .into_iter()
+        .map(|((owner, function), states)| {
+            let state = join_projected_states(states.iter().map(|state| state.state.as_str()));
+            let complete = states.iter().all(|state| state.complete)
+                && !matches!(state, DefinitionState::Unknown);
+            let source_definition_ids = states
+                .iter()
+                .flat_map(|state| state.source_definition_ids.iter().cloned())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            let unknown_reasons = states
+                .iter()
+                .flat_map(|state| state.unknown_reasons.iter().cloned())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            NullableSummary {
+                function,
+                owner,
+                return_state: state.name().to_string(),
+                source_definition_ids,
+                complete,
+                unknown_reasons,
+            }
+        })
+        .collect()
+}
+
+fn join_projected_states<'a>(states: impl Iterator<Item = &'a str>) -> DefinitionState {
+    let states = states
+        .filter_map(definition_state_from_name)
+        .collect::<BTreeSet<_>>();
+    if states.contains(&DefinitionState::Unknown) || states.is_empty() {
+        DefinitionState::Unknown
+    } else if states.len() == 1 {
+        *states.iter().next().expect("non-empty projected state set")
+    } else {
+        DefinitionState::MaybeNull
+    }
+}
+
+fn definition_state_from_name(name: &str) -> Option<DefinitionState> {
+    match name {
+        "unreachable" => Some(DefinitionState::Unreachable),
+        "definitely_null" => Some(DefinitionState::DefinitelyNull),
+        "definitely_non_null" => Some(DefinitionState::DefinitelyNonNull),
+        "maybe_null" => Some(DefinitionState::MaybeNull),
+        "unknown" => Some(DefinitionState::Unknown),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -432,5 +531,100 @@ mod tests {
             place_id: place_id.to_string(),
             definitions: definitions.iter().map(|value| (*value).to_string()).collect(),
         }
+    }
+
+    #[test]
+    fn summarizes_return_states_without_replaying_local_flow() {
+        let facts = ControlFlowFacts {
+            nodes: vec![ControlFlowNode {
+                id: "return".to_string(),
+                file: "demo.c".to_string(),
+                function: "load".to_string(),
+                owner: "Cache".to_string(),
+                kind: "jump".to_string(),
+                role: "return".to_string(),
+                line: 1,
+                span: [1, 0, 1, 1],
+                source: "return value;".to_string(),
+            }],
+            effects: vec![NodeEffect {
+                node_id: "return".to_string(),
+                reads: vec!["value".to_string()],
+                ..NodeEffect::default()
+            }],
+            ..ControlFlowFacts::default()
+        };
+        let rows = project_summaries(
+            &facts,
+            &[NullableState {
+                node_id: "return".to_string(),
+                place_id: "value".to_string(),
+                state: "definitely_null".to_string(),
+                source_definition_ids: vec!["null-write".to_string()],
+                complete: true,
+                unknown_reasons: Vec::new(),
+            }],
+        );
+
+        assert_eq!(
+            rows,
+            vec![NullableSummary {
+                function: "load".to_string(),
+                owner: "Cache".to_string(),
+                return_state: "definitely_null".to_string(),
+                source_definition_ids: vec!["null-write".to_string()],
+                complete: true,
+                unknown_reasons: Vec::new(),
+            }]
+        );
+    }
+
+    #[test]
+    fn summary_projection_discards_incomplete_rows_and_joins_known_states() {
+        let return_node = |id: &str| ControlFlowNode {
+            id: id.to_string(),
+            file: "demo.c".to_string(),
+            function: "load".to_string(),
+            owner: "Cache".to_string(),
+            kind: "jump".to_string(),
+            role: "return".to_string(),
+            line: 1,
+            span: [1, 0, 1, 1],
+            source: "return value;".to_string(),
+        };
+        let facts = ControlFlowFacts {
+            nodes: vec![return_node("missing-effect"), return_node("return")],
+            effects: vec![NodeEffect {
+                node_id: "return".to_string(),
+                reads: vec!["null".to_string(), "present".to_string(), "unmapped".to_string()],
+                ..NodeEffect::default()
+            }],
+            ..ControlFlowFacts::default()
+        };
+        let rows = project_summaries(
+            &facts,
+            &[
+                NullableState {
+                    node_id: "return".to_string(),
+                    place_id: "null".to_string(),
+                    state: "definitely_null".to_string(),
+                    source_definition_ids: vec!["null-write".to_string()],
+                    complete: true,
+                    unknown_reasons: Vec::new(),
+                },
+                NullableState {
+                    node_id: "return".to_string(),
+                    place_id: "present".to_string(),
+                    state: "definitely_non_null".to_string(),
+                    source_definition_ids: vec!["present-write".to_string()],
+                    complete: true,
+                    unknown_reasons: Vec::new(),
+                },
+            ],
+        );
+
+        assert_eq!(rows[0].return_state, "maybe_null");
+        assert_eq!(rows[0].source_definition_ids, ["null-write", "present-write"]);
+        assert_eq!(definition_state_from_name("not-a-state"), None);
     }
 }

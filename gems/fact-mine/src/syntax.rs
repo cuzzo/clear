@@ -320,6 +320,8 @@ pub struct Document {
     pub nullable_refinements: Vec<nullable::NullableRefinement>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nullable_states: Vec<nullable::NullableState>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nullable_summaries: Vec<nullable::NullableSummary>,
     #[serde(default)]
     pub immutable_struct_readers: BTreeMap<String, Vec<String>>,
     #[serde(default)]

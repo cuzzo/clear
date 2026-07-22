@@ -1,0 +1,12 @@
+[
+  {
+    "complete": true,
+    "function": "alias_null",
+    "return_state": "definitely_null"
+  },
+  {
+    "complete": true,
+    "function": "direct_null",
+    "return_state": "definitely_null"
+  }
+]

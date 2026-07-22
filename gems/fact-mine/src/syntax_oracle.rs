@@ -515,6 +515,7 @@ mod tests {
             redundant_nil_guards: Vec::new(),
             nullable_refinements: Vec::new(),
             nullable_states: Vec::new(),
+            nullable_summaries: Vec::new(),
             immutable_struct_readers: BTreeMap::new(),
             immutable_struct_reader_types: BTreeMap::new(),
             type_aliases: BTreeMap::new(),
@@ -572,6 +573,7 @@ mod tests {
             redundant_nil_guards: Vec::new(),
             nullable_refinements: Vec::new(),
             nullable_states: Vec::new(),
+            nullable_summaries: Vec::new(),
             immutable_struct_readers: vec![("OtherType".to_string(), vec!["b".to_string()])]
                 .into_iter()
                 .collect(),

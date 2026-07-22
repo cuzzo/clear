@@ -141,6 +141,46 @@ fn nullable_states_follow_exact_nil_writes_and_direct_aliases() -> Result<()> {
 }
 
 #[test]
+fn nullable_return_summaries_follow_cfg_state_facts() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_states.c"), Language::C)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let mut actual = output
+        .nullable_summaries
+        .iter()
+        .map(|summary| {
+            serde_json::json!({
+                "complete": summary.complete,
+                "function": summary.function,
+                "return_state": summary.return_state,
+            })
+        })
+        .collect::<Vec<_>>();
+    actual.sort_by_key(|row| row["function"].as_str().unwrap().to_string());
+    let expected: Vec<serde_json::Value> =
+        serde_json::from_str(&fs::read_to_string(fixture("nullable_summaries.json"))?)?;
+    assert_eq!(actual, expected);
+    Ok(())
+}
+
+#[test]
+fn nullable_states_preserve_go_and_cpp_null_literals() -> Result<()> {
+    for (name, language) in [
+        ("nullable_states.go", Language::Go),
+        ("nullable_states.cpp", Language::Cpp),
+    ] {
+        let document = syntax::parse_file(fixture(name), language)?;
+        let output = profile::extract(&document, Profile::NilKill);
+        assert!(output.nullable_states.iter().any(|state| {
+            state.state == "definitely_null" && state.complete && !state.source_definition_ids.is_empty()
+        }));
+        assert!(output.nullable_summaries.iter().any(|summary| {
+            summary.return_state == "definitely_null" && summary.complete
+        }));
+    }
+    Ok(())
+}
+
+#[test]
 fn typescript_variable_bound_callables_are_emitted_as_project_methods() -> Result<()> {
     let document = syntax::parse_file(fixture("typescript_callable.ts"), Language::TypeScript)?;
     let output = profile::extract(&document, Profile::Espalier);

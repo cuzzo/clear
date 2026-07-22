@@ -100,6 +100,7 @@ pub(crate) fn extract(
                 Some(syntax_node) => {
                     let target = effect_target(syntax_node, &node.role, profile);
                     collect(target, &mut raw);
+                    apply_normalized_local_contract(method, node, &mut raw);
                     let declared_candidates = raw
                         .writes
                         .iter()
@@ -223,6 +224,38 @@ pub(crate) fn extract(
     facts
         .effects
         .sort_by(|left, right| left.node_id.cmp(&right.node_id));
+}
+
+/// Some adapters expose a direct assignment through the normalized local-flow
+/// statement contract before it becomes a `LASGN` in the CFG effect tree. Use
+/// that existing normalized fact only at its exact statement span; this fills
+/// the value hint without introducing a second source scanner.
+fn apply_normalized_local_contract(
+    method: &MethodSummary,
+    node: &ControlFlowNode,
+    effect: &mut RawEffect,
+) {
+    let contracts = crate::syntax::local_flow::local_contract_assignments(method);
+    let Some(statement) = method
+        .statements
+        .iter()
+        .find(|statement| statement.span == node.span && statement.writes.len() == 1)
+    else {
+        return;
+    };
+    let name = statement.writes.iter().next().expect("single local write");
+    if contracts.get(name).is_some_and(|value| value == "nil")
+        && !effect.write_value_hints.contains_key(name)
+    {
+        effect.writes.insert(name.clone());
+        effect.record_place(name.clone(), "local");
+        effect
+            .write_type_hints
+            .insert(name.clone(), "nil".to_string());
+        effect
+            .write_value_hints
+            .insert(name.clone(), "nil".to_string());
+    }
 }
 
 fn method_for_node<'a>(
