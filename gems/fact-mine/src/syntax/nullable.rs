@@ -57,6 +57,8 @@ pub(crate) struct NullableOperationSeed {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct NullableOperation {
     pub node_id: String,
+    pub path: String,
+    pub span: Span,
     pub place_id: String,
     pub operation_kind: String,
     pub nil_behavior: String,
@@ -328,6 +330,8 @@ pub(crate) fn project_operations(
             let Some(place_id) = place_id else {
                 rows.insert((
                     node.id.clone(),
+                    node.file.clone(),
+                    node.span,
                     String::new(),
                     seed.operation_kind.clone(),
                     "unknown".to_string(),
@@ -341,6 +345,8 @@ pub(crate) fn project_operations(
                 .copied();
             rows.insert((
                 node.id.clone(),
+                node.file.clone(),
+                node.span,
                 place_id.clone(),
                 seed.operation_kind.clone(),
                 seed.nil_behavior.clone(),
@@ -354,9 +360,11 @@ pub(crate) fn project_operations(
 
     rows.into_iter()
         .map(
-            |(node_id, place_id, operation_kind, nil_behavior, state_at_operation, complete)| {
+            |(node_id, path, span, place_id, operation_kind, nil_behavior, state_at_operation, complete)| {
                 NullableOperation {
                     node_id,
+                    path,
+                    span,
                     place_id,
                     operation_kind,
                     nil_behavior,

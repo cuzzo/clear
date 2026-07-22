@@ -195,6 +195,8 @@ fn nullable_operations_join_native_dereferences_to_proven_null_states() -> Resul
                 && operation.state_at_operation == "definitely_null"
                 && operation.complete
                 && !operation.place_id.is_empty()
+                && operation.path.ends_with(name)
+                && operation.span[0] > 0
         }));
     }
     Ok(())
