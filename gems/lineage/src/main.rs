@@ -9,7 +9,8 @@ use lineage::{
     render_structured_diff_text, resolve_coverage_record_paths, serve_lsp, serve_mcp,
     serve_ui_with_overlays, ArtifactKind, CoverageIngestOptions, DiffRequest,
     EvidenceArtifactScope, EvidenceScopeFingerprint, GitProvider, HeuristicExtractor,
-    LineageEngine, MutantIngestOptions, RepoPathNormalizer, RunStatus, SentryProvider, Storage,
+    LineageEngine, MutantIngestOptions, publish_run, repository_identity, RepoPathNormalizer, RunStatus,
+    SentryProvider, Storage,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -284,14 +285,17 @@ fn main() -> Result<()> {
             ensure_clean_worktree(&repo, &config.artifacts.directory)?;
             let revision = git.resolve_commit("HEAD")?;
             ensure_revision_snapshot(&db, &repo, &revision)?;
-            let manifest = execute_profile(&repo, &config, &profile, &revision)?;
-            let run = latest_run_directory(&repo, &config).join("manifest.json");
+            let completed = execute_profile(&repo, &config, &profile, &revision)?;
+            ensure_clean_worktree(&repo, &config.artifacts.directory)?;
+            let run = completed.directory.join("manifest.json");
             ingest_run_manifest(&db, &repo, &run)?;
+            Storage::open(&db)?.refresh_ui_summaries()?;
+            publish_run(&repo, &config, &completed.directory)?;
             println!(
                 "lineage ci: profile={} revision={} artifacts={}",
                 profile,
-                manifest.revision,
-                manifest.artifacts.len()
+                completed.manifest.revision,
+                completed.manifest.artifacts.len()
             );
         }
         Command::Diff {
@@ -791,6 +795,11 @@ fn resolve_diff_run_scope(provider: &GitProvider, request: &mut DiffCommandReque
     if supplied.iter().all(|present| *present) {
         return Ok(());
     }
+    let config_path = request.repo.join(lineage::pipeline::CONFIG_FILE_NAME);
+    let json_config_path = request.repo.join(lineage::pipeline::CONFIG_JSON_FILE_NAME);
+    if !config_path.exists() && !json_config_path.exists() {
+        return Ok(());
+    }
     let config = load_config(&request.repo)?;
     let manifest_path = latest_run_directory(&request.repo, &config).join("manifest.json");
     if !manifest_path.exists() {
@@ -819,16 +828,26 @@ fn resolve_diff_run_scope(provider: &GitProvider, request: &mut DiffCommandReque
     request.selection = Some(scope.selection.clone());
     request.mutant_corpus = Some(scope.mutant_corpus.clone());
     request.test_set = Some(scope.test_set.clone());
-    request.coverage_source = manifest
+    let coverage_sources = manifest
         .artifacts
         .iter()
-        .find(|artifact| artifact.kind == ArtifactKind::Coverage)
-        .map(|artifact| artifact.producer.clone());
-    request.sarif_source = manifest
+        .filter(|artifact| artifact.kind == ArtifactKind::Coverage)
+        .map(|artifact| artifact.producer.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    if coverage_sources.len() > 1 {
+        anyhow::bail!("latest successful run has multiple coverage producers; specify --coverage-source");
+    }
+    request.coverage_source = coverage_sources.into_iter().next().map(str::to_string);
+    let sarif_sources = manifest
         .artifacts
         .iter()
-        .find(|artifact| artifact.kind == ArtifactKind::Sarif)
-        .map(|artifact| artifact.producer.clone());
+        .filter(|artifact| artifact.kind == ArtifactKind::Sarif)
+        .map(|artifact| artifact.producer.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    if sarif_sources.len() > 1 {
+        anyhow::bail!("latest successful run has multiple SARIF producers; specify --sarif-source");
+    }
+    request.sarif_source = sarif_sources.into_iter().next().map(str::to_string);
     Ok(())
 }
 
@@ -838,14 +857,24 @@ fn ingest_run_manifest(
     manifest_path: &std::path::Path,
 ) -> Result<()> {
     let manifest = load_run_manifest(manifest_path)?;
+    let git = GitProvider::open(repo)?;
+    validate_manifest_provenance(repo, &git, &manifest)?;
     validate_manifest_artifact_batches(&manifest)?;
     let run_directory = manifest_path
         .parent()
         .context("run manifest has no parent directory")?;
     let storage = Storage::open(db)?;
-    let git = GitProvider::open(repo)?;
     let extractor = HeuristicExtractor::default();
     let normalizer = RepoPathNormalizer::new(repo);
+    let sarif_directory = std::env::temp_dir().join(format!(
+        "lineage-sarif-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .context("system time precedes Unix epoch")?
+            .as_nanos()
+    ));
+    fs::create_dir_all(&sarif_directory)?;
     let mut sarif_inputs = BTreeMap::<String, Vec<PathBuf>>::new();
     let mut sarif_scopes = BTreeMap::<String, Vec<(EvidenceScopeFingerprint, bool)>>::new();
     storage.begin_transaction()?;
@@ -902,8 +931,7 @@ fn ingest_run_manifest(
                 {
                     anyhow::bail!("producer {:?} emitted an invalid SARIF document", artifact.producer);
                 }
-                let unpacked = run_directory
-                        .join("unpacked")
+                let unpacked = sarif_directory
                         .join(format!("{index}-{}", artifact.producer))
                         .with_extension("json");
                     fs::create_dir_all(
@@ -950,6 +978,7 @@ fn ingest_run_manifest(
         }
         Ok(())
     })();
+    let cleanup_result = fs::remove_dir_all(&sarif_directory);
     match result {
         Ok(()) => storage.commit_transaction()?,
         Err(error) => {
@@ -957,11 +986,33 @@ fn ingest_run_manifest(
             return Err(error);
         }
     }
+    cleanup_result.with_context(|| format!("remove temporary SARIF directory {}", sarif_directory.display()))?;
     println!(
         "ingested run {} with {} artifacts",
         manifest.revision,
         manifest.artifacts.len()
     );
+    Ok(())
+}
+
+fn validate_manifest_provenance(
+    repo: &std::path::Path,
+    git: &GitProvider,
+    manifest: &lineage::pipeline::RunManifest,
+) -> Result<()> {
+    if manifest.status != RunStatus::Succeeded {
+        anyhow::bail!("only successful run manifests can be ingested");
+    }
+    if manifest.repository_identity.is_empty() || manifest.repository_identity != repository_identity(repo) {
+        anyhow::bail!("run manifest was produced for a different repository");
+    }
+    let resolved = git.resolve_commit(&manifest.revision)?;
+    if resolved != manifest.revision {
+        anyhow::bail!("run manifest revision must be an immutable resolved commit hash");
+    }
+    if manifest.tree_fingerprint.is_empty() || manifest.tree_fingerprint != resolved {
+        anyhow::bail!("run manifest tree fingerprint does not match its revision");
+    }
     Ok(())
 }
 
@@ -1192,6 +1243,29 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("must be supplied together"));
+    }
+
+    #[test]
+    fn diff_scope_resolution_does_not_require_configuration() {
+        let directory = tempdir().unwrap();
+        let repository = git2::Repository::init(directory.path()).unwrap();
+        let provider = GitProvider::open(repository.path().parent().unwrap()).unwrap();
+        let mut request = DiffCommandRequest {
+            repo: directory.path().to_path_buf(),
+            db: directory.path().join("lineage.db"),
+            base: None,
+            head: None,
+            format: DiffFormat::Text,
+            full: true,
+            coverage_source: None,
+            sarif_source: None,
+            selection: None,
+            mutant_corpus: None,
+            test_set: None,
+        };
+
+        resolve_diff_run_scope(&provider, &mut request).unwrap();
+        assert!(request.selection.is_none());
     }
 
     #[test]

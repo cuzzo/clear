@@ -37,6 +37,8 @@ pub struct ArtifactStoreConfig {
     pub directory: PathBuf,
     #[serde(default = "default_compression")]
     pub compression: ArtifactCompression,
+    #[serde(default = "default_retained_runs")]
+    pub retain_runs: usize,
 }
 
 impl Default for ArtifactStoreConfig {
@@ -44,6 +46,7 @@ impl Default for ArtifactStoreConfig {
         Self {
             directory: default_artifact_directory(),
             compression: default_compression(),
+            retain_runs: default_retained_runs(),
         }
     }
 }
@@ -150,8 +153,8 @@ pub struct RunManifest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
-    #[default]
     Succeeded,
+    #[default]
     Failed,
     Cancelled,
 }
@@ -168,6 +171,13 @@ pub struct ProducerRun {
     pub exit_status: Option<i32>,
     pub stdout_log: PathBuf,
     pub stderr_log: PathBuf,
+}
+
+/// A validated, immutable run that has not yet been published as `latest`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletedRun {
+    pub manifest: RunManifest,
+    pub directory: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +231,9 @@ pub fn validate_config(config: LineageConfig) -> Result<LineageConfig> {
         );
     }
     validate_artifact_directory(&config.artifacts.directory)?;
+    if config.artifacts.retain_runs == 0 {
+        bail!("artifacts.retain_runs must be positive");
+    }
     for (name, producer) in &config.producers {
         if !is_safe_identifier(name) {
             bail!(
@@ -310,6 +323,16 @@ pub fn read_manifest_artifact(
             artifact.path.display()
         );
     }
+    let encoded_size = fs::metadata(&path)
+        .with_context(|| format!("stat artifact {}", path.display()))?
+        .len();
+    if encoded_size > MAX_DECOMPRESSED_ARTIFACT_BYTES {
+        bail!(
+            "artifact {} exceeds {} byte encoded limit",
+            artifact.path.display(),
+            MAX_DECOMPRESSED_ARTIFACT_BYTES
+        );
+    }
     let encoded = fs::read(&path).with_context(|| format!("read artifact {}", path.display()))?;
     let bytes = if artifact.compression == ArtifactCompression::Gzip {
         let decoder = GzDecoder::new(encoded.as_slice());
@@ -327,6 +350,13 @@ pub fn read_manifest_artifact(
         }
         bytes
     } else {
+        if encoded.len() as u64 > MAX_DECOMPRESSED_ARTIFACT_BYTES {
+            bail!(
+                "artifact {} exceeds {} byte limit",
+                artifact.path.display(),
+                MAX_DECOMPRESSED_ARTIFACT_BYTES
+            );
+        }
         encoded
     };
     if hex::encode(Sha256::digest(&bytes)) != artifact.content_hash {
@@ -343,7 +373,7 @@ pub fn execute_profile(
     config: &LineageConfig,
     profile_name: &str,
     revision: &str,
-) -> Result<RunManifest> {
+) -> Result<CompletedRun> {
     let profile = config
         .profiles
         .get(profile_name)
@@ -354,7 +384,7 @@ pub fn execute_profile(
     let started = Instant::now();
     let mut artifacts = Vec::new();
     let mut producer_runs = Vec::new();
-    let result = (|| -> Result<RunManifest> {
+    let result = (|| -> Result<CompletedRun> {
         for producer_name in &profile.producers {
             let producer = &config.producers[producer_name];
             producer_runs.push(execute_producer(
@@ -392,8 +422,11 @@ pub fn execute_profile(
         for artifact in &verified.artifacts {
             read_manifest_artifact(&run_directory, artifact)?;
         }
-        publish_run(repo, config, &run_directory)?;
-        Ok(manifest)
+        let directory = finalize_run(repo, config, &run_directory)?;
+        Ok(CompletedRun {
+            manifest,
+            directory,
+        })
     })();
     if let Err(error) = result {
         let failed = build_manifest(
@@ -449,8 +482,7 @@ fn write_manifest(run_directory: &Path, manifest: &RunManifest) -> Result<()> {
 }
 
 fn retain_failed_run(repo: &Path, config: &LineageConfig, staged: &Path) -> Result<()> {
-    let root = repo.join(&config.artifacts.directory);
-    let runs = root.join("runs");
+    let runs = repo.join(&config.artifacts.directory).join("runs");
     let name = staged
         .file_name()
         .and_then(|name| name.to_str())
@@ -480,7 +512,7 @@ fn staged_run_directory(repo: &Path, config: &LineageConfig, revision: &str) -> 
     )))
 }
 
-fn publish_run(repo: &Path, config: &LineageConfig, staged: &Path) -> Result<()> {
+fn finalize_run(repo: &Path, config: &LineageConfig, staged: &Path) -> Result<PathBuf> {
     let root = repo.join(&config.artifacts.directory);
     let runs = root.join("runs");
     let run_name = staged
@@ -490,7 +522,25 @@ fn publish_run(repo: &Path, config: &LineageConfig, staged: &Path) -> Result<()>
     let published_name = run_name.trim_start_matches(".staging-");
     let published = runs.join(published_name);
     fs::rename(staged, &published)
-        .with_context(|| format!("publish staged Lineage run {}", staged.display()))?;
+        .with_context(|| format!("finalize staged Lineage run {}", staged.display()))?;
+    Ok(published)
+}
+
+/// Atomically updates the `latest` pointer after the completed run has been
+/// ingested successfully. The run directory is immutable before this step.
+pub fn publish_run(repo: &Path, config: &LineageConfig, completed: &Path) -> Result<()> {
+    let root = repo.join(&config.artifacts.directory);
+    let runs = root.join("runs");
+    let published_name = completed
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("completed run directory has no valid file name")?;
+    if completed.parent() != Some(runs.as_path()) {
+        bail!(
+            "completed run {} is not in the configured run store",
+            completed.display()
+        );
+    }
 
     let latest = latest_run_directory(repo, config);
     let temporary_link = root.join(format!(".latest-{published_name}"));
@@ -515,6 +565,24 @@ fn publish_run(repo: &Path, config: &LineageConfig, staged: &Path) -> Result<()>
     }
     fs::rename(&temporary_link, &latest)
         .with_context(|| format!("atomically publish latest Lineage run {}", latest.display()))?;
+    prune_retained_runs(&runs, config.artifacts.retain_runs)?;
+    Ok(())
+}
+
+fn prune_retained_runs(runs: &Path, retain_runs: usize) -> Result<()> {
+    let mut completed = fs::read_dir(runs)?
+        .filter_map(std::result::Result::ok)
+        .filter_map(|entry| {
+            let metadata = fs::symlink_metadata(entry.path()).ok()?;
+            (!metadata.file_type().is_symlink() && metadata.is_dir())
+                .then_some((metadata.modified().ok()?, entry.path()))
+        })
+        .collect::<Vec<_>>();
+    completed.sort_by(|left, right| right.0.cmp(&left.0));
+    for (_, path) in completed.into_iter().skip(retain_runs) {
+        fs::remove_dir_all(&path)
+            .with_context(|| format!("prune retained Lineage run {}", path.display()))?;
+    }
     Ok(())
 }
 
@@ -748,6 +816,10 @@ fn default_command_output_bytes() -> usize {
     4 * 1024 * 1024
 }
 
+fn default_retained_runs() -> usize {
+    20
+}
+
 fn unix_time_ms() -> Result<u128> {
     Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -755,7 +827,7 @@ fn unix_time_ms() -> Result<u128> {
         .as_millis())
 }
 
-fn repository_identity(repo: &Path) -> String {
+pub fn repository_identity(repo: &Path) -> String {
     let remote = Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -877,7 +949,10 @@ mod tests {
         fs::create_dir_all(&latest).unwrap();
         fs::write(latest.join("old.txt"), "old").unwrap();
 
-        let manifest = execute_profile(directory.path(), &config, "ci", "abc").unwrap();
+        let completed = execute_profile(directory.path(), &config, "ci", "abc").unwrap();
+        let manifest = completed.manifest;
+        assert!(latest.join("old.txt").exists());
+        publish_run(directory.path(), &config, &completed.directory).unwrap();
 
         assert_eq!(manifest.version, RUN_MANIFEST_VERSION);
         assert_eq!(
@@ -935,7 +1010,8 @@ mod tests {
             )]),
         })
         .unwrap();
-        execute_profile(directory.path(), &config, "ci", "first").unwrap();
+        let first_run = execute_profile(directory.path(), &config, "ci", "first").unwrap();
+        publish_run(directory.path(), &config, &first_run.directory).unwrap();
         let latest = latest_run_directory(directory.path(), &config);
         let first = fs::read(latest.join("manifest.json")).unwrap();
         config.producers.get_mut("coverage").unwrap().argv = vec!["false".into()];
