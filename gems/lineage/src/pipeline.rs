@@ -171,8 +171,23 @@ pub struct ProducerRun {
     pub started_at_unix_ms: u128,
     pub duration_ms: u128,
     pub exit_status: Option<i32>,
+    #[serde(default)]
+    pub outcome: ProducerOutcome,
+    #[serde(default)]
+    pub failure: Option<String>,
     pub stdout_log: PathBuf,
     pub stderr_log: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProducerOutcome {
+    Succeeded,
+    Failed,
+    TimedOut,
+    OutputLimited,
+    #[default]
+    Unknown,
 }
 
 /// A validated, immutable run that has not yet been published as `latest`.
@@ -389,22 +404,44 @@ pub fn execute_profile(
     let result = (|| -> Result<CompletedRun> {
         for producer_name in &profile.producers {
             let producer = &config.producers[producer_name];
-            producer_runs.push(execute_producer(
-                repo,
-                producer_name,
-                producer,
-                &run_directory,
-            )?);
+            let quarantined =
+                quarantine_declared_outputs(repo, &run_directory, producer_name, producer)?;
+            let producer_run = match execute_producer(repo, producer_name, producer, &run_directory)
+            {
+                Ok(run) => run,
+                Err(error) => {
+                    restore_quarantined_outputs(&quarantined)?;
+                    return Err(error);
+                }
+            };
+            let failed = producer_run.outcome != ProducerOutcome::Succeeded;
+            let failure = producer_run.failure.clone();
+            producer_runs.push(producer_run);
+            if failed {
+                restore_quarantined_outputs(&quarantined)?;
+                bail!(
+                    "producer {producer_name:?} failed: {}",
+                    failure.unwrap_or_else(|| "unknown failure".into())
+                );
+            }
             for (index, artifact) in producer.produces.iter().enumerate() {
-                artifacts.push(stage_artifact(
+                let staged = stage_artifact(
                     repo,
                     &run_directory,
                     producer_name,
                     index,
                     artifact,
                     config.artifacts.compression,
-                )?);
+                );
+                match staged {
+                    Ok(artifact) => artifacts.push(artifact),
+                    Err(error) => {
+                        restore_quarantined_outputs(&quarantined)?;
+                        return Err(error);
+                    }
+                }
             }
+            discard_quarantined_outputs(quarantined)?;
         }
         let manifest = build_manifest(
             repo,
@@ -447,6 +484,60 @@ pub fn execute_profile(
         return Err(error);
     }
     result
+}
+
+struct QuarantinedOutput {
+    source: PathBuf,
+    backup: PathBuf,
+}
+
+fn quarantine_declared_outputs(
+    repo: &Path,
+    run_directory: &Path,
+    producer_name: &str,
+    producer: &EvidenceProducer,
+) -> Result<Vec<QuarantinedOutput>> {
+    let mut quarantined = Vec::new();
+    for (index, artifact) in producer.produces.iter().enumerate() {
+        let source = repo.join(&artifact.path);
+        if !source.exists() {
+            continue;
+        }
+        let backup = run_directory
+            .join("preexisting")
+            .join(producer_name)
+            .join(format!(
+                "{index}-{}",
+                artifact
+                    .path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+            ));
+        fs::create_dir_all(backup.parent().expect("backup parent exists"))?;
+        fs::rename(&source, &backup)
+            .with_context(|| format!("quarantine stale declared artifact {}", source.display()))?;
+        quarantined.push(QuarantinedOutput { source, backup });
+    }
+    Ok(quarantined)
+}
+
+fn restore_quarantined_outputs(quarantined: &[QuarantinedOutput]) -> Result<()> {
+    for output in quarantined.iter().rev() {
+        if output.backup.exists() {
+            fs::rename(&output.backup, &output.source)?;
+        }
+    }
+    Ok(())
+}
+
+fn discard_quarantined_outputs(quarantined: Vec<QuarantinedOutput>) -> Result<()> {
+    for output in quarantined {
+        if output.backup.exists() {
+            fs::remove_file(output.backup)?;
+        }
+    }
+    Ok(())
 }
 
 fn build_manifest(
@@ -674,6 +765,10 @@ fn execute_producer(
         }
         thread::sleep(Duration::from_millis(10));
     };
+    // A shell can exit before background descendants. Those descendants keep
+    // our output pipes open, so treat the producer process group—not merely
+    // its leader—as the lifecycle boundary.
+    terminate_process_group(child.id());
     let stdout = stdout_reader
         .join()
         .map_err(|_| anyhow::anyhow!("producer {name:?} stdout reader panicked"))?;
@@ -691,18 +786,27 @@ fn execute_producer(
         logs.join(format!("{name}.stderr")),
         stderr.unwrap_or_else(|error| error.to_string().into_bytes()),
     )?;
-    if timed_out {
-        bail!(
-            "producer {name:?} exceeded configured {} second timeout",
-            producer.timeout_seconds
-        );
-    }
-    if output_exceeded {
-        bail!("producer {name:?} exceeded configured output limit");
-    }
-    if !status.success() {
-        bail!("producer {name:?} exited with {status}");
-    }
+    let (outcome, failure) = if timed_out {
+        (
+            ProducerOutcome::TimedOut,
+            Some(format!(
+                "exceeded configured {} second timeout",
+                producer.timeout_seconds
+            )),
+        )
+    } else if output_exceeded {
+        (
+            ProducerOutcome::OutputLimited,
+            Some("exceeded configured output limit".into()),
+        )
+    } else if !status.success() {
+        (
+            ProducerOutcome::Failed,
+            Some(format!("exited with {status}")),
+        )
+    } else {
+        (ProducerOutcome::Succeeded, None)
+    };
     Ok(ProducerRun {
         name: name.into(),
         argv: producer.argv.clone(),
@@ -714,6 +818,8 @@ fn execute_producer(
         started_at_unix_ms,
         duration_ms: started.elapsed().as_millis(),
         exit_status: status.code(),
+        outcome,
+        failure,
         stdout_log: PathBuf::from("logs").join(format!("{name}.stdout")),
         stderr_log: PathBuf::from("logs").join(format!("{name}.stderr")),
     })
@@ -722,20 +828,21 @@ fn execute_producer(
 fn terminate_process_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     {
-        let process_group = -(child.id() as i32);
-        unsafe {
-            libc::kill(process_group, libc::SIGTERM);
-        }
-        thread::sleep(Duration::from_millis(100));
-        if child.try_wait().ok().flatten().is_none() {
-            unsafe {
-                libc::kill(process_group, libc::SIGKILL);
-            }
-        }
+        terminate_process_group(child.id());
     }
     #[cfg(not(unix))]
     {
         let _ = child.kill();
+    }
+}
+
+fn terminate_process_group(pid: u32) {
+    #[cfg(unix)]
+    unsafe {
+        let process_group = -(pid as i32);
+        libc::kill(process_group, libc::SIGTERM);
+        thread::sleep(Duration::from_millis(100));
+        libc::kill(process_group, libc::SIGKILL);
     }
 }
 
@@ -983,7 +1090,11 @@ mod tests {
                 "coverage".into(),
                 EvidenceProducer {
                     executor: ProducerExecutor::Command,
-                    argv: vec!["true".into()],
+                    argv: vec![
+                        "sh".into(),
+                        "-c".into(),
+                        "printf '{}' > coverage/report.json".into(),
+                    ],
                     working_directory: None,
                     timeout_seconds: default_command_timeout_seconds(),
                     max_output_bytes: default_command_output_bytes(),
@@ -1052,7 +1163,11 @@ mod tests {
                 "coverage".into(),
                 EvidenceProducer {
                     executor: ProducerExecutor::Command,
-                    argv: vec!["true".into()],
+                    argv: vec![
+                        "sh".into(),
+                        "-c".into(),
+                        "printf '{}' > coverage/report.json".into(),
+                    ],
                     working_directory: None,
                     timeout_seconds: 5,
                     max_output_bytes: 1024,
