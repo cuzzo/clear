@@ -9,7 +9,7 @@ options = {
   format: command == "infer" ? "sarif" : command == "evidence" ? "json" : "markdown", output: nil,
   root: Dir.pwd, language: "java", selected_components: [], new_test_ids: [], baseline_test_ids: [],
   runtimes: {}, high_cost_ms: 1_000.0, stability_trials: nil, stability_threshold: 3,
-  oracle_facts: nil, oracle_input: nil, counterfactual_config: nil, counterfactual_test_ids: []
+  oracle_facts: nil, oracle_input: nil, oracle_execute: nil, counterfactual_config: nil, counterfactual_test_ids: []
 }
 parser = OptionParser.new do |opts|
   opts.banner = "Usage: test-miser [infer|adapt|evidence] [options] INPUT [...]"
@@ -48,6 +48,7 @@ parser = OptionParser.new do |opts|
   opts.on("--stability-threshold COUNT", Integer, "Minimum repeated trials (default 3)") { |count| options[:stability_threshold] = count }
   opts.on("--oracle-facts FILE", "Normalized test-quality-oracle-facts/v1 artifact") { |path| options[:oracle_facts] = path }
   opts.on("--oracle-input FILE", "JSON envelope with facts, original_kills, disabled_trials, and rewrites") { |path| options[:oracle_input] = path }
+  opts.on("--oracle-execute FILE", "Run framework oracle discovery, controls, and disabled-oracle trials from FILE") { |path| options[:oracle_execute] = path }
   opts.on("--counterfactual-config FILE", "JSON CounterfactualRequest configuration") { |path| options[:counterfactual_config] = path }
   opts.on("--counterfactual-test TEST_ID", "Test ID covered by the counterfactual command") { |test_id| options[:counterfactual_test_ids] << test_id }
   opts.on("-h", "--help", "Show this help") do
@@ -126,12 +127,14 @@ begin
     report = TestMiser::MutationReport.load_files(ARGV)
     corpus = TestMiser::Evidence::Corpus.from_report(report)
     counterfactual_config = options[:counterfactual_config] ? JSON.parse(File.read(options[:counterfactual_config])) : nil
-    report_scope = corpus.evidence_scope(revision: counterfactual_config&.fetch("revision", "HEAD") || "unknown")
-    contributions = TestMiser::Evidence::ContributionAnalyzer.new(corpus).analyze(
+    oracle_execute_config = options[:oracle_execute] ? JSON.parse(File.read(options[:oracle_execute])) : nil
+    scope_revision = counterfactual_config&.fetch("revision", nil) || oracle_execute_config&.fetch("revision", nil) || "unknown"
+    report_scope = corpus.evidence_scope(revision: scope_revision)
+    contributions = TestMiser::Evidence::ContributionAnalyzer.new(corpus, scope: report_scope).analyze(
       new_test_ids: options[:new_test_ids],
       baseline_test_ids: options[:baseline_test_ids],
     )
-    subsumption = TestMiser::Evidence::SubsumptionAnalyzer.new(corpus).analyze(contributions: contributions)
+    subsumption = TestMiser::Evidence::SubsumptionAnalyzer.new(corpus, scope: report_scope).analyze(contributions: contributions)
     stability = nil
     if options[:stability_trials]
       payload = JSON.parse(File.read(options[:stability_trials]))
@@ -144,7 +147,65 @@ begin
       stability = TestMiser::Evidence::StabilityAnalyzer.new(corpus, threshold: options[:stability_threshold], scope: report_scope).analyze(trials)
     end
     oracle_sensitivity = nil
-    if options[:oracle_input] || options[:oracle_facts]
+    if oracle_execute_config
+      config = oracle_execute_config
+      repository = config.fetch("repository")
+      source_path = config.fetch("source_path")
+      test_id = config.fetch("test_id")
+      language = config.fetch("language")
+      provider = case config.fetch("provider", "factmine")
+                 when "factmine"
+                   TestMiser::Evidence::FactMineOracleFactProvider.new(
+                     binary: config.fetch("binary", ENV.fetch("FACT_MINE_RUST_BINARY", "gems/fact-mine/target/release/fact-mine-rust")),
+                     framework: config["framework"],
+                   )
+                 when "tree-sitter"
+                   TestMiser::Evidence::TreeSitterOracleFactProvider.new(
+                     grammar_paths: config.fetch("grammar_paths", {}), framework: config["framework"],
+                   )
+                 else
+                   raise TestMiser::Evidence::InvalidOracleFacts, "unknown oracle provider: #{config.fetch("provider")}"
+                 end
+      facts = TestMiser::Evidence::OracleFacts.new(
+        facts: provider.facts(test_id: test_id, source_path: source_path, language: language),
+        metadata: {"provider" => config.fetch("provider", "factmine")},
+      )
+      facts.validate_unique_ids!
+      limits = TestMiser::Evidence::CommandLimits.new(**config.fetch("limits", {}).transform_keys(&:to_sym))
+      execution_results = facts.facts.map do |fact|
+        disable_plan = TestMiser::Evidence::OracleMutationPlanner.plan(fact).fetch(0)
+        control_plan = TestMiser::Evidence::OracleMutationPlanner.control_plan(fact)
+        TestMiser::Evidence::OracleExecutionRunner.new.run(
+          TestMiser::Evidence::OracleExecutionRequest.new(
+            repository: repository,
+            revision: config.fetch("revision", "HEAD"),
+            source_path: source_path,
+            test_command: config.fetch("test_command"),
+            baseline_test_command: config["baseline_test_command"],
+            mutant_commands: config.fetch("mutant_commands", {}),
+            test_id: test_id,
+            fact: fact,
+            plan: disable_plan,
+            control_plan: control_plan,
+            language: language,
+            trial_count: Integer(config.fetch("trial_count", 3)),
+            limits: limits,
+            scope: report_scope,
+            allow_dirty: config.fetch("allow_dirty", false),
+          ),
+        )
+      end
+      oracle_sensitivity = TestMiser::Evidence::OracleSensitivityAnalyzer.analyze(
+        facts: facts,
+        original_kills: config.fetch("original_kills"),
+        disabled_trials: execution_results.flat_map(&:disabled_trials),
+        rewrites: execution_results.map(&:disabled_rewrite),
+        scope: report_scope,
+        trial_ids: config["trial_ids"],
+        min_trials: Integer(config.fetch("min_trials", config.fetch("trial_count", 3))),
+        execution_results: execution_results.map(&:to_h),
+      )
+    elsif options[:oracle_input] || options[:oracle_facts]
       payload = options[:oracle_input] ? JSON.parse(File.read(options[:oracle_input])) : {}
       facts = if options[:oracle_facts]
         TestMiser::Evidence::OracleFacts.load(options[:oracle_facts])
@@ -223,7 +284,7 @@ begin
   else
     puts output
   end
-rescue TestMiser::InvalidReport, TestMiser::Evidence::InvalidCohort, TestMiser::Evidence::InvalidOracleFacts, Errno::ENOENT, JSON::ParserError => error
+rescue TestMiser::InvalidReport, TestMiser::Evidence::InvalidCohort, TestMiser::Evidence::InvalidOracleFacts, TestMiser::Evidence::EvidenceScopeMismatch, Errno::ENOENT, JSON::ParserError => error
   warn "test-miser: #{error.message}"
   exit 1
 end

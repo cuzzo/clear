@@ -84,6 +84,27 @@ class EvidenceReportTest < Minitest::Test
     refute inconclusive.vectors.find { |vector| vector.test_id == "t2" }&.detects_reverted_change
   end
 
+  def test_sarif_uses_note_for_positive_findings_and_real_test_locations
+    corpus = Evidence::Corpus.new(
+      tests: [
+        Evidence::TestObservation.new(
+          id: "t1", name: "ExampleTest#test_value", covered_mutants: ["m1"], killed_mutants: ["m1"],
+          source_file: "test/example_test.rb", source_line: 12,
+        ),
+      ],
+      mutants: [mutant("m1", ["t1"], ["t1"])],
+      complete: true,
+    )
+    contributions = Evidence::ContributionAnalyzer.new(corpus).analyze(new_test_ids: ["t1"])
+    subsumption = Evidence::SubsumptionAnalyzer.new(corpus).analyze(contributions: contributions)
+    report = Evidence::ReportBuilder.new(corpus).build(contributions: contributions, subsumption: subsumption)
+    result = JSON.parse(report.sarif).dig("runs", 0, "results").find { |row| row["ruleId"].end_with?("adds_unique_kills") }
+
+    assert_equal "note", result.fetch("level")
+    assert_equal "test/example_test.rb", result.dig("locations", 0, "physicalLocation", "artifactLocation", "uri")
+    assert_equal 12, result.dig("locations", 0, "physicalLocation", "region", "startLine")
+  end
+
   def test_cohort_frontier_detection_does_not_contaminate_unrelated_cost_findings
     corpus = Evidence::Corpus.new(
       tests: [

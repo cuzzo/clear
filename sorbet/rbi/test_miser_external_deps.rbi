@@ -5,7 +5,7 @@ module Minitest
   end
   class SummaryReporter
     extend T::Sig
-    sig { params(io: T.untyped).returns(T.untyped) }
+    sig { params(io: T.untyped).void }
     def initialize(io); end
     sig { void }
     def start; end
@@ -21,7 +21,7 @@ module SQLite3
   end
   class Database
     extend T::Sig
-    sig { params(path: String, options: T.untyped).returns(T.untyped) }
+    sig { params(path: String, options: T.untyped).void }
     def initialize(path, **options); end
     sig { params(sql: String).returns(T.untyped) }
     def execute(sql); end
@@ -84,9 +84,9 @@ module Mutant
   end
   module Bootstrap
     extend T::Sig
-    sig { returns(T.untyped) }
+    sig { params(args: T.untyped).returns(T.untyped) }
     def self.call(*args); end
-    sig { returns(T.untyped) }
+    sig { params(args: T.untyped).returns(T.untyped) }
     def self.call_test(*args); end
   end
   class Env

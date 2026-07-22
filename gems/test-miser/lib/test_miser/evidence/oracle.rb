@@ -5,6 +5,7 @@ require "json"
 require "digest"
 require "fileutils"
 require "open3"
+require "securerandom"
 require "sorbet-runtime"
 require "tmpdir"
 require_relative "scope"
@@ -255,6 +256,112 @@ module TestMiser
       end
     end
 
+    module OracleFramework
+      extend T::Sig
+
+      MINITEST = T.let({
+        "assert" => OracleKind::Truthiness,
+        "assert_equal" => OracleKind::Equality,
+        "assert_same" => OracleKind::Identity,
+        "assert_nil" => OracleKind::NullCheck,
+        "refute_nil" => OracleKind::NullCheck,
+        "refute" => OracleKind::Truthiness,
+        "assert_raises" => OracleKind::ExceptionExpectation,
+        "assert_output" => OracleKind::SubprocessOutput,
+      }.freeze, T::Hash[String, OracleKind])
+      RSPEC = T.let({
+        "expect" => OracleKind::Equality,
+        "eq" => OracleKind::Equality,
+        "eql" => OracleKind::Equality,
+        "be_nil" => OracleKind::NullCheck,
+        "raise_error" => OracleKind::ExceptionExpectation,
+        "have_received" => OracleKind::MockVerification,
+      }.freeze, T::Hash[String, OracleKind])
+      PYTEST = T.let({
+        "assert" => OracleKind::Truthiness,
+        "assert_equal" => OracleKind::Equality,
+        "assert_raises" => OracleKind::ExceptionExpectation,
+      }.freeze, T::Hash[String, OracleKind])
+      UNITTEST = T.let({
+        "assertEqual" => OracleKind::Equality,
+        "assertIs" => OracleKind::Identity,
+        "assertTrue" => OracleKind::Truthiness,
+        "assertFalse" => OracleKind::Truthiness,
+        "assertIsNone" => OracleKind::NullCheck,
+        "assertRaises" => OracleKind::ExceptionExpectation,
+      }.freeze, T::Hash[String, OracleKind])
+      JUNIT = T.let({
+        "assertEquals" => OracleKind::Equality,
+        "assertSame" => OracleKind::Identity,
+        "assertTrue" => OracleKind::Truthiness,
+        "assertFalse" => OracleKind::Truthiness,
+        "assertNull" => OracleKind::NullCheck,
+        "assertThrows" => OracleKind::ExceptionExpectation,
+      }.freeze, T::Hash[String, OracleKind])
+      JEST = T.let({
+        "expect" => OracleKind::Equality,
+        "toEqual" => OracleKind::Equality,
+        "toStrictEqual" => OracleKind::Equality,
+        "toBe" => OracleKind::Identity,
+        "toBeTruthy" => OracleKind::Truthiness,
+        "toBeFalsy" => OracleKind::Truthiness,
+        "toBeNull" => OracleKind::NullCheck,
+        "toThrow" => OracleKind::ExceptionExpectation,
+      }.freeze, T::Hash[String, OracleKind])
+
+      sig { params(source: String, language: String, override: T.nilable(String)).returns(T.nilable(String)) }
+      def self.detect(source, language, override: nil)
+        return override unless override.nil? || override.empty?
+
+        text = source
+        case language.downcase
+        when "ruby"
+          return "minitest" if text.match?(/Minitest::Test|require\s*[\(\s][\"']minitest/)
+          return "rspec" if text.match?(/RSpec\.describe|require\s*[\(\s][\"']rspec/)
+        when "python"
+          return "unittest" if text.match?(/(?:import\s+unittest|from\s+unittest\b|unittest\.TestCase)/)
+          return "pytest" if text.match?(/(?:import\s+pytest|from\s+pytest\b)/)
+        when "java", "kotlin"
+          return "junit" if text.match?(/org\.junit|@(?:Test|ParameterizedTest)\b/)
+        when "javascript", "typescript"
+          return "jest" if text.match?(/(?:from\s*[\"'](?:@jest\/globals|vitest)|require\s*[\(\s][\"'](?:@jest|vitest))/)
+        end
+        nil
+      end
+
+      sig { params(framework: String, call: T.untyped).returns(T.nilable(OracleKind)) }
+      def self.kind(framework, call)
+        table = case framework
+                when "minitest" then MINITEST
+                when "rspec" then RSPEC
+                when "pytest" then PYTEST
+                when "unittest" then UNITTEST
+                when "junit" then JUNIT
+                when "jest" then JEST
+                else {}
+                end
+        return nil unless framework_receiver_allowed?(framework, call)
+
+        message = call.is_a?(Hash) ? call["message"] : call
+        table[message.to_s]
+      end
+
+      sig { params(framework: String, call: T.untyped).returns(T::Boolean) }
+      def self.framework_receiver_allowed?(framework, call)
+        return true unless call.is_a?(Hash)
+
+        receiver = call["receiver"].to_s
+        owner = call["owner"].to_s
+        return false unless receiver.empty? || %w[self this].include?(receiver)
+
+        return owner.empty? || owner.end_with?("Test") if framework == "minitest"
+        return owner.empty? || owner.end_with?("TestCase") if framework == "unittest"
+        return owner.empty? || owner.match?(/(?:Spec|_spec)\z/i) if framework == "rspec"
+
+        true
+      end
+    end
+
     # FactMine's normalized syntax-facts output is deliberately provider-neutral.
     # This adapter turns assertion-shaped call facts into the TestMiser oracle
     # schema without claiming recognition for calls it cannot classify.
@@ -262,10 +369,11 @@ module TestMiser
       extend T::Sig
       include OracleFactProvider
 
-      sig { params(binary: String, runner: T.untyped).void }
-      def initialize(binary: ENV.fetch("FACT_MINE_RUST_BINARY", "gems/fact-mine/target/release/fact-mine-rust"), runner: Open3)
+      sig { params(binary: String, runner: T.untyped, framework: T.nilable(String)).void }
+      def initialize(binary: ENV.fetch("FACT_MINE_RUST_BINARY", "gems/fact-mine/target/release/fact-mine-rust"), runner: Open3, framework: nil)
         @binary = binary
         @runner = runner
+        @framework = framework
       end
 
       sig do
@@ -276,9 +384,11 @@ module TestMiser
         raise InvalidOracleFacts, "FactMine failed for #{source_path}: #{stderr}" unless status.success?
 
         payload = JSON.parse(stdout)
+        framework = OracleFramework.detect(File.read(source_path), language, override: @framework)
+        return [] if framework.nil?
         calls = Array(payload["documents"]).flat_map { |document| Array(document["calls"]) }
         calls.filter_map.with_index do |call, index|
-          kind = classify(call["message"])
+          kind = OracleFramework.kind(framework, call)
           next if kind.nil?
 
           span = factmine_span(call["span"])
@@ -287,7 +397,7 @@ module TestMiser
             test_id: test_id,
             oracle_kind: kind,
             oracle_span: span,
-            framework: "fact-mine",
+            framework: framework,
             confidence: 0.90,
             source_file: source_path,
           )
@@ -297,20 +407,6 @@ module TestMiser
       end
 
       private
-
-      sig { params(message: T.untyped).returns(T.nilable(OracleKind)) }
-      def classify(message)
-        name = message.to_s.downcase
-        return OracleKind::Equality if name.match?(%r{\A(assert_?equal|assert_equal|expect|eq|eql|assert_predicate)\z}) || name.include?("equal")
-        return OracleKind::Identity if name.match?(%r{\A(assert_same|be_same|same)\z}) || name.include?("ident")
-        return OracleKind::NullCheck if name.match?(%r{\A(assert_?(nil|null)|refute_nil|be_nil|be_null)\z}) || name.include?("null")
-        return OracleKind::ExceptionExpectation if name.match?(%r{\A(assert_raises|raises|raise_error|assert_throws)\z}) || name.include?("exception")
-        return OracleKind::MockVerification if name.match?(%r{\A(verify|have_received|assert_received|expects?)\z})
-        return OracleKind::SubprocessOutput if name.match?(%r{\A(assert_output|assert_includes_output|output)\z})
-        return OracleKind::Truthiness if name.match?(%r{\A(assert|refute|be_truthy|be_falsey|be_true|be_false)\z})
-
-        nil
-      end
 
       sig { params(raw: T.untyped).returns(SourceSpan) }
       def factmine_span(raw)
@@ -335,9 +431,10 @@ module TestMiser
       extend T::Sig
       include OracleFactProvider
 
-      sig { params(grammar_paths: T::Hash[String, String]).void }
-      def initialize(grammar_paths: {})
+      sig { params(grammar_paths: T::Hash[String, String], framework: T.nilable(String)).void }
+      def initialize(grammar_paths: {}, framework: nil)
         @grammar_paths = grammar_paths
+        @framework = framework
       end
 
       sig do
@@ -353,6 +450,8 @@ module TestMiser
         parser = tree_sitter.const_get(:Parser).new
         parser.language = language
         source = File.read(source_path)
+        framework = OracleFramework.detect(source, language, override: @framework)
+        return [] if framework.nil?
         tree = parser.parse(source)
         raise InvalidOracleFacts, "Tree-sitter could not parse #{source_path}" if tree.nil?
 
@@ -363,7 +462,7 @@ module TestMiser
         end
         calls.filter_map.with_index do |node, index|
           method_node = node.child_by_field_name("method") || node.child_by_field_name("function") || node.children.find { |child| child.kind == "identifier" }
-          kind = classify(method_node&.text)
+          kind = OracleFramework.kind(framework, method_node&.text)
           next if kind.nil?
 
           span = tree_span(node)
@@ -372,7 +471,7 @@ module TestMiser
             test_id: test_id,
             oracle_kind: kind,
             oracle_span: span,
-            framework: "tree-sitter:#{language}",
+            framework: framework,
             confidence: 0.85,
             source_file: source_path,
           )
@@ -401,17 +500,6 @@ module TestMiser
         )
       end
 
-      sig { params(message: T.nilable(String)).returns(T.nilable(OracleKind)) }
-      def classify(message)
-        name = message.to_s.downcase
-        return OracleKind::Equality if name.match?(%r{\A(assert_equal|assert_same|eq|eql|equal_to|to_equal)\z})
-        return OracleKind::NullCheck if name.match?(%r{\A(assert_nil|refute_nil|be_nil|be_null)\z})
-        return OracleKind::ExceptionExpectation if name.match?(%r{\A(assert_raises|raise_error|to_raise)\z})
-        return OracleKind::MockVerification if name.match?(%r{\A(verify|have_received|assert_received|expects?)\z})
-        return OracleKind::Truthiness if name.match?(%r{\A(assert|refute|be_truthy|be_falsey|be_true|be_false)\z})
-
-        nil
-      end
     end
 
     class OracleMutationKind < T::Enum
@@ -503,7 +591,7 @@ module TestMiser
 
         start_offset, end_offset = offsets
         original = source.byteslice(start_offset...end_offset).to_s
-        replacement = replacement_for(plan.mutation, original, language)
+        replacement = replacement_for(plan.mutation, original, language, fact.framework)
         rewritten = source.dup
         rewritten[start_offset...end_offset] = replacement
         [rewritten, OracleRewrite.new(oracle_id: fact.oracle_id, mutation: plan.mutation, recognized: true, applied: true, reason: "conservative source rewrite applied")]
@@ -533,19 +621,52 @@ module TestMiser
         line.byteslice(0, [column - 1, 0].max).to_s.bytesize
       end
 
-      sig { params(mutation: OracleMutationKind, original: String, language: String).returns(String) }
-      def replacement_for(mutation, original, language)
+      sig { params(mutation: OracleMutationKind, original: String, language: String, framework: String).returns(String) }
+      def replacement_for(mutation, original, language, framework)
         case mutation
+        when OracleMutationKind::DisableOracle
+          return "nil" if language.downcase == "ruby" && %w[minitest rspec].include?(framework)
+          return "pass" if language.downcase == "python" && %w[pytest unittest].include?(framework)
+          return "void 0" if %w[javascript typescript].include?(language.downcase) && framework == "jest"
+          return ";" if %w[java kotlin].include?(language.downcase) && framework == "junit"
+
+          raise ArgumentError, "no safe oracle-disabling adapter for #{framework}/#{language}"
         when OracleMutationKind::NegateBoolean
-          if language.downcase == "ruby"
+          if language.downcase == "ruby" && framework == "minitest"
             return original.sub(/\bassert_equal\b/, "refute_equal") if original.match?(/\bassert_equal\b/)
             return original.sub(/\bassert_same\b/, "refute_same") if original.match?(/\bassert_same\b/)
             return original.sub(/\bassert\b/, "refute") if original.match?(/\bassert\b/)
             return original.sub(/\brefute\b/, "assert") if original.match?(/\brefute\b/)
           end
-          language.downcase == "python" ? "not (#{original})" : "!(#{original})"
-        when OracleMutationKind::PerturbExpected
-          {"python" => "None", "javascript" => "null", "typescript" => "null"}.fetch(language.downcase, "nil")
+
+          if language.downcase == "ruby" && framework == "rspec"
+            return original.sub(/\bto\s+eq\b/, "to_not eq") if original.match?(/\bto\s+eq\b/)
+            return original.sub(/\bto\s+eql\b/, "to_not eql") if original.match?(/\bto\s+eql\b/)
+          end
+
+          if language.downcase == "python" && framework == "unittest"
+            return original.sub(/\bassertEqual\b/, "assertNotEqual") if original.match?(/\bassertEqual\b/)
+            return original.sub(/\bassertTrue\b/, "assertFalse") if original.match?(/\bassertTrue\b/)
+            return original.sub(/\bassertFalse\b/, "assertTrue") if original.match?(/\bassertFalse\b/)
+          end
+
+          if language.downcase == "python" && framework == "pytest" && original.lstrip.start_with?("assert ")
+            indent = original[/\A\s*/].to_s
+            expression = original.lstrip.delete_prefix("assert ").strip
+            return "#{indent}assert not (#{expression})"
+          end
+
+          if %w[javascript typescript].include?(language.downcase) && framework == "jest"
+            return original.sub(/\.(toEqual|toStrictEqual|toBe|toBeTruthy|toBeFalsy|toBeNull|toThrow)\b/, ".not.\\1") if original.match?(/\.(?:toEqual|toStrictEqual|toBe|toBeTruthy|toBeFalsy|toBeNull|toThrow)\b/)
+          end
+
+          if %w[java kotlin].include?(language.downcase) && framework == "junit"
+            return original.sub(/\bassertEquals\b/, "assertNotEquals") if original.match?(/\bassertEquals\b/)
+            return original.sub(/\bassertTrue\b/, "assertFalse") if original.match?(/\bassertTrue\b/)
+            return original.sub(/\bassertFalse\b/, "assertTrue") if original.match?(/\bassertFalse\b/)
+          end
+
+          raise ArgumentError, "no safe oracle-negation adapter for #{framework}/#{language}"
         else
           raise ArgumentError, "no conservative adapter for #{mutation.serialize}"
         end
@@ -556,36 +677,45 @@ module TestMiser
       extend T::Sig
 
       PLANS = T.let({
-        OracleKind::Equality => [OracleMutationKind::NegateBoolean, OracleMutationKind::PerturbExpected],
+        OracleKind::Equality => [OracleMutationKind::NegateBoolean],
         OracleKind::Identity => [OracleMutationKind::NegateBoolean],
         OracleKind::Truthiness => [OracleMutationKind::NegateBoolean],
         OracleKind::NullCheck => [OracleMutationKind::NegateBoolean],
-        OracleKind::ExceptionExpectation => [OracleMutationKind::RemoveInvocation, OracleMutationKind::BroadenException],
-        OracleKind::Snapshot => [OracleMutationKind::PerturbSnapshot],
-        OracleKind::MockVerification => [OracleMutationKind::RemoveVerification],
+        OracleKind::ExceptionExpectation => [],
+        OracleKind::Snapshot => [],
+        OracleKind::MockVerification => [],
         OracleKind::Property => [OracleMutationKind::NegateBoolean],
-        OracleKind::CompileFailure => [OracleMutationKind::PerturbExpected],
-        OracleKind::SubprocessOutput => [OracleMutationKind::PerturbExpected],
+        OracleKind::CompileFailure => [],
+        OracleKind::SubprocessOutput => [],
       }.freeze, T::Hash[OracleKind, T::Array[OracleMutationKind]])
 
       sig { params(fact: OracleFact).returns(T::Array[OracleMutationPlan]) }
       def self.plan(fact)
         mutations = PLANS.fetch(fact.oracle_kind, [])
-        return [OracleMutationPlan.new(
+        supported = PLANS.key?(fact.oracle_kind)
+        disable = OracleMutationPlan.new(
           oracle_id: fact.oracle_id,
           mutation: OracleMutationKind::DisableOracle,
-          recognized: false,
-          reason: "oracle kind is unsupported by the conservative planner",
-        )] if mutations.empty?
+          recognized: supported,
+          reason: supported ? "disable the one recognized oracle while preserving the rest of the test" : "unsupported oracle kind",
+        )
+        return [disable] if mutations.empty?
 
-        mutations.map do |mutation|
-          OracleMutationPlan.new(
+        plans = T.let([disable], T::Array[OracleMutationPlan])
+        mutations.each do |mutation|
+          plans << OracleMutationPlan.new(
             oracle_id: fact.oracle_id,
             mutation: mutation,
             recognized: true,
-            reason: "safe transformation requires the framework adapter",
+            reason: "framework-specific safe transformation",
           )
         end.freeze
+        plans
+      end
+
+      sig { params(fact: OracleFact).returns(T.nilable(OracleMutationPlan)) }
+      def self.control_plan(fact)
+        plan(fact).find { |candidate| candidate.mutation != OracleMutationKind::DisableOracle }
       end
     end
 
@@ -652,6 +782,7 @@ module TestMiser
 
       const :results, T::Array[OracleSensitivity]
       const :scope, T.nilable(EvidenceScope), default: nil
+      const :execution_results, T::Array[T::Hash[String, T.untyped]], default: []
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
@@ -665,6 +796,7 @@ module TestMiser
           },
           "scope" => scope&.to_h,
           "oracles" => results.map(&:to_h),
+          "execution_results" => execution_results,
         }
       end
     end
@@ -681,9 +813,10 @@ module TestMiser
           scope: T.nilable(EvidenceScope),
           trial_ids: T.nilable(T::Array[String]),
           min_trials: Integer,
+          execution_results: T::Array[T::Hash[String, T.untyped]],
         ).returns(OracleSensitivityAnalysis)
       end
-      def self.analyze(facts:, original_kills:, disabled_trials:, rewrites:, scope: nil, trial_ids: nil, min_trials: 1)
+      def self.analyze(facts:, original_kills:, disabled_trials:, rewrites:, scope: nil, trial_ids: nil, min_trials: 1, execution_results: [])
         raise ArgumentError, "min_trials must be positive" unless min_trials.positive?
 
         facts.validate_unique_ids!
@@ -708,7 +841,7 @@ module TestMiser
             min_trials: min_trials,
           )
         end.freeze
-        OracleSensitivityAnalysis.new(results: results, scope: scope)
+        OracleSensitivityAnalysis.new(results: results, scope: scope, execution_results: execution_results)
       end
 
       class << self
@@ -810,6 +943,7 @@ module TestMiser
       const :test_id, String
       const :fact, OracleFact
       const :plan, OracleMutationPlan
+      const :control_plan, T.nilable(OracleMutationPlan), default: nil
       const :language, String
       const :trial_count, Integer, default: 3
       const :limits, CommandLimits, factory: -> { CommandLimits.new }
@@ -820,22 +954,32 @@ module TestMiser
     class OracleExecutionResult < T::Struct
       extend T::Sig
 
-      const :rewrite, OracleRewrite
-      const :control_outcome, TestOutcome
+      const :disabled_rewrite, OracleRewrite
+      const :control_rewrite, T.nilable(OracleRewrite)
+      const :disabled_control_outcome, TestOutcome
+      const :control_outcome, T.nilable(TestOutcome)
       const :baseline_outcome, TestOutcome
-      const :trials, T::Array[OracleTrial]
+      const :disabled_trials, T::Array[OracleTrial]
       const :run_id, String
       const :environment_fingerprint, String
+
+      sig { returns(T::Boolean) }
+      def control_verified?
+        control_outcome == TestOutcome::AssertionFailure
+      end
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
         {
           "run_id" => run_id,
           "environment_fingerprint" => environment_fingerprint,
-          "rewrite" => rewrite.to_h,
+          "disabled_rewrite" => disabled_rewrite.to_h,
+          "control_rewrite" => control_rewrite&.to_h,
           "baseline_outcome" => baseline_outcome.serialize,
-          "control_outcome" => control_outcome.serialize,
-          "trials" => trials.map(&:to_h),
+          "disabled_control_outcome" => disabled_control_outcome.serialize,
+          "control_outcome" => control_outcome&.serialize,
+          "control_verified" => control_verified?,
+          "disabled_trials" => disabled_trials.map(&:to_h),
         }
       end
     end
@@ -855,9 +999,20 @@ module TestMiser
         raise ArgumentError, "trial_count must be positive" unless request.trial_count.positive?
         ensure_clean_repository!(request)
         original_source = File.read(File.join(request.repository, request.source_path))
-        rewritten_source, rewrite = @adapter.rewrite(fact: request.fact, plan: request.plan, source: original_source, language: request.language)
+        disable_plan = request.plan.mutation == OracleMutationKind::DisableOracle ? request.plan : OracleMutationPlanner.plan(request.fact).first
+        control_plan = request.control_plan
+        control_plan ||= request.plan unless request.plan.mutation == OracleMutationKind::DisableOracle
+        control_plan ||= OracleMutationPlanner.control_plan(request.fact)
+        disabled_source, disabled_rewrite = @adapter.rewrite(
+          fact: request.fact, plan: T.must(disable_plan), source: original_source, language: request.language,
+        )
+        control_source, control_rewrite = if control_plan
+          @adapter.rewrite(fact: request.fact, plan: control_plan, source: original_source, language: request.language)
+        else
+          [original_source, nil]
+        end
         environment = Digest::SHA256.hexdigest("#{request.repository}:#{request.revision}:#{request.language}")
-        run_id = "oracle-#{Digest::SHA256.hexdigest("#{request.fact.oracle_id}:#{request.plan.mutation.serialize}:#{Time.now.to_f}")[0, 16]}"
+        run_id = "oracle-#{SecureRandom.uuid}"
 
         Dir.mktmpdir("test-miser-oracle-") do |directory|
           archive_revision(request, directory)
@@ -866,18 +1021,19 @@ module TestMiser
           File.write(target, original_source)
           baseline = @command_runner.run(request.baseline_test_command || request.test_command, chdir: directory, limits: request.limits)
           baseline_outcome = @parser.parse(baseline)
-          control_outcome = TestOutcome::InfrastructureFailure
-          trials = []
-          if rewrite.applied && baseline_outcome == TestOutcome::Passed
-            File.write(target, rewritten_source)
-            control_result = @command_runner.run(request.test_command, chdir: directory, limits: request.limits)
-            control_outcome = @parser.parse(control_result)
-            if control_outcome == TestOutcome::AssertionFailure
+          disabled_control_outcome = TestOutcome::InfrastructureFailure
+          control_outcome = nil
+          disabled_trials = []
+          if disabled_rewrite.applied && baseline_outcome == TestOutcome::Passed
+            File.write(target, disabled_source)
+            disabled_result = @command_runner.run(request.test_command, chdir: directory, limits: request.limits)
+            disabled_control_outcome = @parser.parse(disabled_result)
+            if disabled_control_outcome == TestOutcome::Passed
               request.trial_count.times do |index|
                 request.mutant_commands.each do |mutant_id, command|
                   result = @command_runner.run(command, chdir: directory, limits: request.limits)
                   outcome = @parser.parse(result)
-                  trials << OracleTrial.new(
+                  disabled_trials << OracleTrial.new(
                     test_id: request.test_id,
                     oracle_id: request.fact.oracle_id,
                     mutant_id: mutant_id,
@@ -891,11 +1047,18 @@ module TestMiser
               end
             end
           end
+          if control_rewrite&.applied && baseline_outcome == TestOutcome::Passed
+            File.write(target, control_source)
+            control_result = @command_runner.run(request.test_command, chdir: directory, limits: request.limits)
+            control_outcome = @parser.parse(control_result)
+          end
           OracleExecutionResult.new(
-            rewrite: rewrite,
+            disabled_rewrite: disabled_rewrite,
+            control_rewrite: control_rewrite,
+            disabled_control_outcome: disabled_control_outcome,
             baseline_outcome: baseline_outcome,
             control_outcome: control_outcome,
-            trials: trials.freeze,
+            disabled_trials: disabled_trials.freeze,
             run_id: run_id,
             environment_fingerprint: environment,
           )

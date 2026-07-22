@@ -29,6 +29,8 @@ module TestMiser
       const :name, String
       const :covered_mutants, T::Array[String]
       const :killed_mutants, T::Array[String]
+      const :source_file, T.nilable(String), default: nil
+      const :source_line, T.nilable(Integer), default: nil
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
@@ -37,7 +39,9 @@ module TestMiser
           "test_name" => name,
           "covered_mutants" => covered_mutants,
           "killed_mutants" => killed_mutants,
-        }
+          "source_file" => source_file,
+          "source_line" => source_line,
+        }.compact
       end
     end
 
@@ -69,11 +73,16 @@ module TestMiser
       sig { params(report: T.untyped).returns(Corpus) }
       def self.from_report(report)
         tests = report.tests.map do |test|
+          source_file = test.respond_to?(:file) ? test.file : nil
+          source_file = nil if source_file.to_s.empty? || source_file.to_s == "(unknown)"
+          source_line = test.respond_to?(:line) ? test.line : nil
           TestObservation.new(
             id: test.id.to_s,
             name: test.name.to_s,
             covered_mutants: [],
             killed_mutants: [],
+            source_file: source_file&.to_s,
+            source_line: source_line,
           )
         end
         observations = tests.to_h { |test| [test.id, test] }
@@ -97,6 +106,8 @@ module TestMiser
             name: test.name,
             covered_mutants: test.covered_mutants.uniq.sort.freeze,
             killed_mutants: test.killed_mutants.uniq.sort.freeze,
+            source_file: test.source_file,
+            source_line: test.source_line,
           )
         end.sort_by(&:id).freeze
         Corpus.new(

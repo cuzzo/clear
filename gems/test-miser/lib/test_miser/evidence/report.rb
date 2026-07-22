@@ -174,6 +174,7 @@ module TestMiser
       const :scope, EvidenceScope
       const :vectors, T::Array[EvidenceVector]
       const :findings, T::Array[ReviewFinding]
+      const :test_locations, T::Hash[String, T::Hash[String, T.untyped]], default: {}
 
       sig { returns(T::Hash[String, T.untyped]) }
       def to_h
@@ -188,6 +189,7 @@ module TestMiser
           "scope" => scope.to_h,
           "vectors" => vectors.map(&:to_h),
           "findings" => findings.map(&:to_h),
+          "test_locations" => test_locations,
         }.compact
       end
 
@@ -222,15 +224,17 @@ module TestMiser
         results = findings.map do |finding|
           result = {
             "ruleId" => "test-miser.evidence.#{finding.kind.serialize.downcase}",
-            "level" => "warning",
+            "level" => sarif_level(finding.kind),
             "message" => {"text" => finding.reason},
             "properties" => {"testId" => finding.test_id, "evidence" => finding.evidence}.compact,
           }
-          if finding.test_id
+          test_id = finding.test_id
+          location = test_id.nil? ? nil : test_locations[test_id]
+          if location && location["uri"]
             result["locations"] = [{
               "physicalLocation" => {
-                "artifactLocation" => {"uri" => finding.test_id},
-                "region" => {"startLine" => 1},
+                "artifactLocation" => {"uri" => location["uri"]},
+                "region" => {"startLine" => location.fetch("line", 1)},
               },
             }]
           end
@@ -245,6 +249,23 @@ module TestMiser
             "results" => results,
           }],
         )
+      end
+
+      sig { params(kind: ReviewFindingKind).returns(String) }
+      def sarif_level(kind)
+        case kind
+        when ReviewFindingKind::AddsUniqueKills,
+             ReviewFindingKind::AddsStableUniqueKills,
+             ReviewFindingKind::AddsGroupDetection,
+             ReviewFindingKind::AddsSubsumingMutantDetection,
+             ReviewFindingKind::ProvesRevertedChange,
+             ReviewFindingKind::StrengthensExistingOracle
+          "note"
+        when ReviewFindingKind::Unknown, ReviewFindingKind::UnknownIncompleteAttribution
+          "note"
+        else
+          "warning"
+        end
       end
     end
 
@@ -320,6 +341,11 @@ module TestMiser
           vectors: vectors,
           findings: findings,
           scope: @scope,
+          test_locations: @corpus.tests.filter_map do |test|
+            next if test.source_file.nil?
+
+            [test.id, {"uri" => test.source_file, "line" => test.source_line || 1}]
+          end.to_h,
         )
       end
 
