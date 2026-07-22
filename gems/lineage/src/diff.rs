@@ -412,7 +412,12 @@ fn plan_file(
         language: language_for_path(path),
         semantic_classification_available,
         residual_lines: residual_lines(&line_kinds, &added_lines_set, &groups),
-        risk: risk_summary(head_source.as_deref(), &added_lines_set, &verification),
+        risk: risk_summary(
+            head_source.as_deref(),
+            path,
+            &added_lines_set,
+            &verification,
+        ),
         verification,
         groups,
         sarif_findings: Vec::new(),
@@ -621,7 +626,12 @@ fn unknown_line_verification(
 fn refresh_file_verification(file: &mut DiffFile) {
     file.verification = verification_slices(file.line_verification.values().copied());
     let added = added_line_numbers(file.base_source.as_deref(), file.head_source.as_deref());
-    file.risk = risk_summary(file.head_source.as_deref(), &added, &file.verification);
+    file.risk = risk_summary(
+        file.head_source.as_deref(),
+        &file.path,
+        &added,
+        &file.verification,
+    );
     for group in &mut file.groups {
         let lines = file
             .line_verification
@@ -631,6 +641,7 @@ fn refresh_file_verification(file: &mut DiffFile) {
         let group_added = group_added_line_numbers(&added, group.start_line, group.end_line);
         group.risk = risk_summary(
             file.head_source.as_deref(),
+            &file.path,
             &group_added,
             &group.verification,
         );
@@ -653,15 +664,11 @@ fn verification_slices(states: impl IntoIterator<Item = LineVerification>) -> Ve
 
 fn risk_summary(
     source: Option<&str>,
+    path: &str,
     added: &BTreeSet<u32>,
     verification: &VerificationSlices,
 ) -> RiskSummary {
-    let added_complexity = source
-        .unwrap_or_default()
-        .lines()
-        .enumerate()
-        .filter(|(index, line)| added.contains(&(*index as u32 + 1)) && is_decision_line(line))
-        .count();
+    let added_complexity = decision_complexity(source, path, added);
     let tier_one_hazards = 0;
     RiskSummary {
         score: verification.not_covered as f64
@@ -681,13 +688,54 @@ fn unavailable_verification(lines: &AddedLines) -> VerificationSlices {
     }
 }
 
-fn is_decision_line(line: &str) -> bool {
-    let line = line.trim();
-    [
-        "if ", "unless ", "while ", "for ", "case ", "match ", " rescue ", "&&", "||",
-    ]
-    .iter()
-    .any(|token| line.starts_with(token) || line.contains(token))
+fn decision_complexity(source: Option<&str>, path: &str, added: &BTreeSet<u32>) -> usize {
+    let Some(source) = source else {
+        return 0;
+    };
+    let Some(language) = parser_language(path) else {
+        return 0;
+    };
+    let mut parser = Parser::new();
+    if parser.set_language(&language).is_err() {
+        return 0;
+    }
+    let Some(tree) = parser.parse(source, None) else {
+        return 0;
+    };
+    if tree.root_node().has_error() {
+        return 0;
+    }
+    decision_nodes(tree.root_node(), added)
+}
+
+fn decision_nodes(node: Node<'_>, added: &BTreeSet<u32>) -> usize {
+    let line = node.start_position().row as u32 + 1;
+    let own = (node.is_named() && added.contains(&line) && is_decision_node(node.kind())) as usize;
+    own + (0..node.child_count())
+        .filter_map(|index| node.child(index))
+        .map(|child| decision_nodes(child, added))
+        .sum::<usize>()
+}
+
+fn is_decision_node(kind: &str) -> bool {
+    matches!(
+        kind,
+        "if" | "if_statement"
+            | "unless"
+            | "unless_statement"
+            | "while"
+            | "while_statement"
+            | "for"
+            | "for_statement"
+            | "case"
+            | "case_statement"
+            | "when"
+            | "match"
+            | "match_expression"
+            | "switch_statement"
+            | "catch_clause"
+            | "rescue"
+    )
 }
 
 fn language_summaries(files: &[DiffFile]) -> Vec<LanguageSummary> {
@@ -823,7 +871,7 @@ fn semantic_groups(
                 let verification = unavailable_verification(&added_lines);
                 let group_added = group_added_line_numbers(added, unit.start_line, unit.end_line);
                 let visibility = visibility_for(path, source, &unit);
-                let risk = risk_summary(Some(source), &group_added, &verification);
+                let risk = risk_summary(Some(source), path, &group_added, &verification);
                 DiffGroup {
                     name: unit.name,
                     kind: unit.kind.as_str().to_string(),
@@ -1898,6 +1946,34 @@ mod tests {
         assert_eq!(plan.files[0].risk.score, 2.0);
         assert_eq!(plan.files[1].path, "lib/safe.rb");
         assert_eq!(plan.files[1].risk.score, 0.0);
+    }
+
+    #[test]
+    fn counts_only_tree_sitter_decisions_on_added_code() {
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            vec![],
+            vec![
+                file("lib/comment.rb", "# if condition\ndef value\n  1\nend\n"),
+                file(
+                    "web/value.js",
+                    "export function value(input) {\n  if (input) return 1;\n  return 0;\n}\n",
+                ),
+            ],
+        );
+        let ruby = plan
+            .files
+            .iter()
+            .find(|file| file.path == "lib/comment.rb")
+            .unwrap();
+        let javascript = plan
+            .files
+            .iter()
+            .find(|file| file.path == "web/value.js")
+            .unwrap();
+        assert_eq!(ruby.risk.added_complexity, 0);
+        assert_eq!(javascript.risk.added_complexity, 1);
     }
 
     #[test]
