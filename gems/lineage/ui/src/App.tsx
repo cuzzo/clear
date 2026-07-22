@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { DiffApiError, type AddedLines, type DependencyChange, type DiffFile, type DiffGroup, type DiffPlan, type DiffRequest, type RiskSummary, type VerificationSlices, fetchDiffPlan, revisionsFromSearch } from "./api/diff";
 import { DiffPreview, type SourceHighlight } from "./monaco/DiffPreview";
 
+export const FILES_PER_PAGE = 50;
+
 export function App(): React.JSX.Element {
   const [location, setLocation] = useState(window.location.search);
   const revisions = revisionsFromSearch(location);
@@ -38,14 +40,17 @@ export function App(): React.JSX.Element {
       <RevisionControls revisions={revisions} />
       {!revisions && <p role="status">Add immutable base and head revisions to the URL to begin review.</p>}
       {error && <p role="alert">{error}</p>}
-      {plan && <DiffReview initialLayout={initialLayout} plan={plan} rawPath={query.get("presentation") === "raw" ? query.get("path") : null} />}
+      {plan && <DiffReview initialLayout={initialLayout} page={pageFromSearch(location)} plan={plan} rawPath={query.get("presentation") === "raw" ? query.get("path") : null} />}
     </main>
   );
 }
 
-function DiffReview({ initialLayout, plan, rawPath }: { readonly initialLayout: "inline" | "split"; readonly plan: DiffPlan; readonly rawPath: string | null }): React.JSX.Element {
+function DiffReview({ initialLayout, page, plan, rawPath }: { readonly initialLayout: "inline" | "split"; readonly page: number; readonly plan: DiffPlan; readonly rawPath: string | null }): React.JSX.Element {
   const [sideBySide, setSideBySide] = useState(() => initialLayout === "split");
   const rawFile = rawPath ? plan.files.find((file) => file.path === rawPath) : undefined;
+  const pageCount = Math.max(1, Math.ceil(plan.files.length / FILES_PER_PAGE));
+  const selectedPage = Math.min(page, pageCount);
+  const visibleFiles = plan.files.slice((selectedPage - 1) * FILES_PER_PAGE, selectedPage * FILES_PER_PAGE);
   useEffect(() => setSideBySide(initialLayout === "split"), [initialLayout]);
   const setLayout = (next: boolean) => {
     const nextQuery = new URLSearchParams(window.location.search);
@@ -70,6 +75,12 @@ function DiffReview({ initialLayout, plan, rawPath }: { readonly initialLayout: 
     window.history.replaceState({}, "", `${window.location.pathname}?${nextQuery}`);
     window.dispatchEvent(new PopStateEvent("popstate"));
   };
+  const selectPage = (nextPage: number) => {
+    const nextQuery = new URLSearchParams(window.location.search);
+    if (nextPage === 1) nextQuery.delete("page"); else nextQuery.set("page", String(nextPage));
+    window.history.pushState({}, "", `${window.location.pathname}?${nextQuery}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
   return <section aria-label="Diff inventory" className="preview-card">
     <p>{plan.inventory.changed_files} files in {plan.inventory.changed_directories} directories</p>
     <p>{plan.inventory.added_files} added · {plan.inventory.modified_files} modified · {plan.inventory.deleted_files} deleted · {plan.inventory.renamed_files} renamed</p>
@@ -84,8 +95,20 @@ function DiffReview({ initialLayout, plan, rawPath }: { readonly initialLayout: 
     {plan.dependency_changes.map((change) => <DependencySummary change={change} key={change.manifest_path} />)}
     {plan.language_summaries.map((summary) => <LanguageSummaryCard key={summary.language} summary={summary} />)}
     <fieldset><legend>Diff layout</legend><label><input checked={sideBySide} name="layout" onChange={() => setLayout(true)} type="radio" />Side by side</label><label><input checked={!sideBySide} name="layout" onChange={() => setLayout(false)} type="radio" />Inline</label></fieldset>
-    {rawFile ? <RawReview file={rawFile} onBack={closeRaw} sideBySide={sideBySide} /> : plan.files.map((file) => <FileReview file={file} key={file.path} onRaw={openRaw} sideBySide={sideBySide} />)}
+    {rawFile ? <RawReview file={rawFile} onBack={closeRaw} sideBySide={sideBySide} /> : <><PageControls onPage={selectPage} page={selectedPage} pageCount={pageCount} totalFiles={plan.files.length} />{visibleFiles.map((file) => <FileReview file={file} key={file.path} onRaw={openRaw} sideBySide={sideBySide} />)}</>}
   </section>;
+}
+
+export function pageFromSearch(search: string): number {
+  const value = Number(new URLSearchParams(search).get("page"));
+  return Number.isSafeInteger(value) && value > 1 ? value : 1;
+}
+
+export function PageControls({ onPage, page, pageCount, totalFiles }: { readonly onPage: (page: number) => void; readonly page: number; readonly pageCount: number; readonly totalFiles: number }): React.JSX.Element | null {
+  if (pageCount <= 1) return null;
+  const first = (page - 1) * FILES_PER_PAGE + 1;
+  const last = Math.min(totalFiles, page * FILES_PER_PAGE);
+  return <nav aria-label="Diff file pages"><p>Showing files {first}–{last} of {totalFiles}</p><button disabled={page === 1} onClick={() => onPage(page - 1)}>Previous files</button><button disabled={page === pageCount} onClick={() => onPage(page + 1)}>Next files</button></nav>;
 }
 
 function RevisionControls({ revisions }: { readonly revisions: DiffRequest | null }): React.JSX.Element {

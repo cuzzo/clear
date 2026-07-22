@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "./App";
+import { App, FILES_PER_PAGE, PageControls, pageFromSearch } from "./App";
 
 const { diffPreview } = vi.hoisted(() => ({ diffPreview: vi.fn() }));
 const lines = { code: 1, comments: 0, other: 0 };
@@ -103,5 +103,37 @@ describe("App", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
     render(<App />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Diff plan request failed (500)");
+  });
+
+  it("uses deterministic URL-friendly file pages", () => {
+    const onPage = vi.fn();
+    expect(pageFromSearch("?page=2")).toBe(2);
+    expect(pageFromSearch("?page=0")).toBe(1);
+    expect(pageFromSearch("?page=not-a-number")).toBe(1);
+    const { rerender } = render(<PageControls onPage={onPage} page={1} pageCount={2} totalFiles={FILES_PER_PAGE + 1} />);
+    expect(screen.getByText(`Showing files 1–${FILES_PER_PAGE} of ${FILES_PER_PAGE + 1}`)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous files" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Next files" }));
+    expect(onPage).toHaveBeenCalledWith(2);
+    rerender(<PageControls onPage={onPage} page={2} pageCount={2} totalFiles={FILES_PER_PAGE + 1} />);
+    expect(screen.getByText(`Showing files ${FILES_PER_PAGE + 1}–${FILES_PER_PAGE + 1} of ${FILES_PER_PAGE + 1}`)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Previous files" }));
+    expect(onPage).toHaveBeenLastCalledWith(1);
+  });
+
+  it("persists a selected file page in the revision URL", async () => {
+    window.history.replaceState({}, "", "/diff?base=abc&head=def");
+    const emptyPlan = {
+      scope: { base_oid: "a".repeat(40), head_oid: "b".repeat(40), evidence_scope: { revision: "b".repeat(40), selection: "production", mutant_corpus: "mutants", test_set: "suite" }, policy_version: "diff-risk/v1" },
+      inventory: { changed_files: FILES_PER_PAGE + 1, changed_directories: 1, added_files: FILES_PER_PAGE + 1, modified_files: 0, deleted_files: 0, renamed_files: 0, by_role: {}, configuration_paths: [], documentation_paths: [], generated_paths: [], lockfile_paths: [] },
+      dependency_changes: [], language_summaries: [], evidence: { coverage: "missing", mutation: "missing", hazards: "missing", sarif: "missing" }, resolved_sarif_findings: [],
+      files: Array.from({ length: FILES_PER_PAGE + 1 }, (_, index) => ({ path: `lib/${index}.rb`, previous_path: null, change: "added", role: "production", language: "ruby", semantic_classification_available: true, base_source: "", head_source: "value", added_lines: lines, removed_lines: { code: 0, comments: 0, other: 0 }, verification, line_annotations: [], residual_lines: lines, groups: [], sarif_findings: [], risk: { ...risk, score: 0 } })),
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ api_version: "v1", data: emptyPlan }) }));
+    render(<App />);
+    expect(await screen.findByText(`Showing files 1–${FILES_PER_PAGE} of ${FILES_PER_PAGE + 1}`)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next files" }));
+    expect(window.location.search).toContain("page=2");
+    expect(await screen.findByText(`Showing files ${FILES_PER_PAGE + 1}–${FILES_PER_PAGE + 1} of ${FILES_PER_PAGE + 1}`)).toBeInTheDocument();
   });
 });
