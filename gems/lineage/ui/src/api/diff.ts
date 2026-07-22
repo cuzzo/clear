@@ -3,18 +3,39 @@ import type { DiffPlan } from "../generated/diff";
 
 export class DiffApiError extends Error {}
 
-export function revisionsFromSearch(search: string): { base: string; head: string } | null {
+export interface DiffRequest {
+  readonly base: string;
+  readonly head: string;
+  readonly coverage_source?: string;
+  readonly selection?: string;
+  readonly mutant_corpus?: string;
+  readonly test_set?: string;
+}
+
+export function revisionsFromSearch(search: string): DiffRequest | null {
   const query = new URLSearchParams(search);
   const base = query.get("base")?.trim();
   const head = query.get("head")?.trim();
-  return base && head ? { base, head } : null;
+  if (!base || !head) return null;
+  const optional = (name: string): string | undefined => query.get(name)?.trim() || undefined;
+  return {
+    base,
+    head,
+    coverage_source: optional("coverage_source"),
+    selection: optional("selection"),
+    mutant_corpus: optional("mutant_corpus"),
+    test_set: optional("test_set"),
+  };
 }
 
 export async function fetchDiffPlan(
-  revisions: { readonly base: string; readonly head: string },
+  revisions: DiffRequest,
   fetcher: typeof fetch = fetch,
 ): Promise<DiffPlan> {
-  const query = new URLSearchParams(revisions);
+  const query = new URLSearchParams();
+  for (const [name, value] of Object.entries(revisions)) {
+    if (value) query.set(name, value);
+  }
   const response = await fetcher(`/api/diff/plan?${query}`);
   if (!response.ok) throw new DiffApiError(`Diff plan request failed (${response.status})`);
   const envelope: unknown = await response.json();
