@@ -1,4 +1,4 @@
-use crate::diff::CoverageObservation;
+use crate::diff::{CoverageObservation, MutationKillObservation};
 use crate::model::{
     CommitMetadata, CrashEvent, Event, HazardEvent, LogicalUnit, QualityEvent, QualityMetric,
     SarifArtifact, SarifFinding, TestExposureEvent,
@@ -1014,6 +1014,38 @@ impl Storage {
                     line: row.get::<_, i64>(1)?.max(1) as u32,
                     hits: row.get::<_, i64>(2)?.max(0) as u32,
                     is_partial: row.get::<_, i64>(3)? != 0,
+                })
+            })?;
+            observations.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);
+        }
+        Ok(observations)
+    }
+
+    pub fn mutation_kill_observations_for_commit_paths(
+        &self,
+        commit_hash: &str,
+        paths: &[String],
+    ) -> Result<Vec<MutationKillObservation>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut observations = Vec::new();
+        for paths in paths.chunks(500) {
+            let placeholders = std::iter::repeat("?")
+                .take(paths.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT DISTINCT path, line FROM test_exposure_events WHERE commit_hash = ? AND is_mutation_killed = 1 AND line IS NOT NULL AND path IN ({placeholders})"
+            );
+            let mut values = Vec::<rusqlite::types::Value>::with_capacity(paths.len() + 1);
+            values.push(rusqlite::types::Value::Text(commit_hash.to_string()));
+            values.extend(paths.iter().cloned().map(rusqlite::types::Value::Text));
+            let mut statement = self.conn.prepare(&sql)?;
+            let rows = statement.query_map(rusqlite::params_from_iter(values), |row| {
+                Ok(MutationKillObservation {
+                    path: row.get(0)?,
+                    line: row.get::<_, i64>(1)?.max(1) as u32,
                 })
             })?;
             observations.extend(rows.collect::<std::result::Result<Vec<_>, _>>()?);

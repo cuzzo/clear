@@ -134,6 +134,12 @@ pub struct CoverageObservation {
     pub is_partial: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MutationKillObservation {
+    pub path: String,
+    pub line: u32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, TS)]
 pub struct VerificationSlices {
     pub covered_and_killed: usize,
@@ -365,6 +371,28 @@ pub fn apply_partial_coverage(plan: &mut DiffPlan, observations: &[CoverageObser
     }
 }
 
+/// Upgrades only already-observed covered lines. The mutation event ledger has
+/// no corpus-completeness fingerprint, so this remains partial attribution.
+pub fn apply_partial_mutation_kills(plan: &mut DiffPlan, observations: &[MutationKillObservation]) {
+    if observations.is_empty() {
+        return;
+    }
+    let kills = observations
+        .iter()
+        .map(|observation| (observation.path.as_str(), observation.line))
+        .collect::<BTreeSet<_>>();
+    plan.evidence.mutation = EvidenceState::Partial;
+    for file in &mut plan.files {
+        let added = added_line_numbers(file.base_source.as_deref(), file.head_source.as_deref());
+        let code = code_line_numbers(file.head_source.as_deref(), &added, &file.path);
+        apply_kill_verification(&mut file.verification, &code, &kills, &file.path);
+        for group in &mut file.groups {
+            let lines = group_added_line_numbers(&code, group.start_line, group.end_line);
+            apply_kill_verification(&mut group.verification, &lines, &kills, &file.path);
+        }
+    }
+}
+
 fn code_line_numbers(source: Option<&str>, added: &BTreeSet<u32>, path: &str) -> BTreeSet<u32> {
     source
         .unwrap_or_default()
@@ -394,6 +422,21 @@ fn apply_partial_verification(
     verification.covered += covered;
     verification.partially_covered += partial;
     verification.unknown = verification.unknown.saturating_sub(covered + partial);
+}
+
+fn apply_kill_verification(
+    verification: &mut VerificationSlices,
+    code_lines: &BTreeSet<u32>,
+    kills: &BTreeSet<(&str, u32)>,
+    path: &str,
+) {
+    let kills = code_lines
+        .iter()
+        .filter(|line| kills.contains(&(path, **line)))
+        .count()
+        .min(verification.covered);
+    verification.covered -= kills;
+    verification.covered_and_killed += kills;
 }
 
 fn risk_summary(
@@ -1420,6 +1463,44 @@ mod tests {
         assert_eq!(file.verification.unknown, 0);
         assert_eq!(file.verification.not_covered, 0);
         assert_eq!(file.risk.not_covered, 0);
+    }
+
+    #[test]
+    fn upgrades_only_known_covered_lines_with_partial_mutation_kills() {
+        let mut plan = build_diff_plan(
+            "base",
+            "head",
+            Vec::new(),
+            vec![file("lib/app.rb", "def run\n  value\nend\n")],
+        );
+        apply_partial_coverage(
+            &mut plan,
+            &[CoverageObservation {
+                path: "lib/app.rb".into(),
+                line: 1,
+                hits: 1,
+                is_partial: false,
+            }],
+        );
+        apply_partial_mutation_kills(
+            &mut plan,
+            &[
+                MutationKillObservation {
+                    path: "lib/app.rb".into(),
+                    line: 1,
+                },
+                MutationKillObservation {
+                    path: "lib/app.rb".into(),
+                    line: 2,
+                },
+            ],
+        );
+
+        let verification = &plan.files[0].verification;
+        assert_eq!(plan.evidence.mutation, EvidenceState::Partial);
+        assert_eq!(verification.covered_and_killed, 1);
+        assert_eq!(verification.covered, 0);
+        assert_eq!(verification.unknown, 1);
     }
 
     #[test]

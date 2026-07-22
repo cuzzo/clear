@@ -40,6 +40,7 @@ async fn api_diff_plan_handler(
     match GitProvider::open(state.repo.as_ref()).and_then(|repo| repo.diff_plan(&base, &head)) {
         Ok(mut plan) => {
             apply_known_coverage(&state, &mut plan);
+            apply_known_mutation_kills(&state, &mut plan);
             Json(ApiEnvelope {
                 api_version: crate::diff::DIFF_API_VERSION,
                 data: plan,
@@ -69,6 +70,26 @@ fn apply_known_coverage(state: &UiServerState, plan: &mut crate::diff::DiffPlan)
     crate::diff::apply_partial_coverage(plan, &rows);
 }
 
+fn apply_known_mutation_kills(state: &UiServerState, plan: &mut crate::diff::DiffPlan) {
+    if !state.db.exists() {
+        return;
+    }
+    let Ok(storage) = crate::storage::Storage::open_existing(state.db.as_ref()) else {
+        return;
+    };
+    let paths = plan
+        .files
+        .iter()
+        .map(|file| file.path.clone())
+        .collect::<Vec<_>>();
+    let Ok(rows) =
+        storage.mutation_kill_observations_for_commit_paths(&plan.scope.head_oid, &paths)
+    else {
+        return;
+    };
+    crate::diff::apply_partial_mutation_kills(plan, &rows);
+}
+
 async fn api_diff_file_handler(
     State(state): State<UiServerState>,
     Query(query): Query<DiffFileQuery>,
@@ -82,6 +103,7 @@ async fn api_diff_file_handler(
     match GitProvider::open(state.repo.as_ref()).and_then(|repo| repo.diff_plan(&base, &head)) {
         Ok(mut plan) => {
             apply_known_coverage(&state, &mut plan);
+            apply_known_mutation_kills(&state, &mut plan);
             match plan.files.into_iter().find(|file| file.path == path) {
                 Some(file) => Json(ApiEnvelope {
                     api_version: crate::diff::DIFF_API_VERSION,
