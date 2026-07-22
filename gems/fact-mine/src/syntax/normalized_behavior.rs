@@ -2,7 +2,7 @@ use super::{
     c, cpp, csharp, go, java, javascript, kotlin, lua, php, python, ruby, rust, swift, typescript,
     zig, CallSite, FunctionDef, Language, StateDeclaration,
 };
-use crate::ast::{Node, Span};
+use crate::ast::{Child, Node, Span};
 use crate::syntax::cfg::ControlFlowProfile;
 use crate::type_inference::TypeExpr;
 use std::collections::BTreeMap;
@@ -749,6 +749,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// for both, so its CFG needs a local read when a matching place exists.
     fn function_value_calls_are_local_reads(&self) -> bool {
         false
+    }
+
+    /// A reviewed exact call-result contract. This is deliberately exposed at
+    /// the language boundary while the normalized call identity is still
+    /// available; CFG consumers receive only the contract fact.
+    fn nullable_call_result_contract(&self, _node: &Node) -> Option<&'static str> {
+        None
     }
     /// The configuration key for this source language. Keeping this at the
     /// adapter boundary ensures Fact-Mine owns native spellings while every
@@ -1582,6 +1589,23 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 }
 
+/// Returns an exact normalized bare-call identifier, when one is preserved.
+/// This intentionally does not derive a contract from a receiver, type, or
+/// partial spelling: language descriptors may only match reviewed API names.
+pub(crate) fn exact_direct_call_name(node: &Node) -> Option<&str> {
+    if matches!(node.r#type.as_str(), "VCALL" | "FCALL") {
+        if let Some(Child::Symbol(name) | Child::String(name)) = node.children.first() {
+            return Some(name);
+        }
+    }
+    let name = node.text.trim().split_once('(')?.0.trim();
+    (name
+        .bytes()
+        .all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+        && !name.is_empty())
+    .then_some(name)
+}
+
 pub(crate) fn nil_guard_from_predicates(
     message: &str,
     subject: &str,
@@ -1930,6 +1954,28 @@ mod tests {
             })
             .is_none());
         assert!(b.core_owner_names().is_empty());
+    }
+
+    #[test]
+    fn exact_direct_call_names_require_a_normalized_bare_identifier() {
+        let symbol_callee = Node {
+            r#type: "FCALL".to_string(),
+            children: vec![Child::Symbol("malloc".to_string())],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 8,
+            text: "malloc()".to_string(),
+        };
+        assert_eq!(exact_direct_call_name(&symbol_callee), Some("malloc"));
+
+        let non_identifier = Node {
+            r#type: "CALL".to_string(),
+            children: Vec::new(),
+            text: "object.malloc()".to_string(),
+            ..symbol_callee
+        };
+        assert_eq!(exact_direct_call_name(&non_identifier), None);
     }
 
     #[test]

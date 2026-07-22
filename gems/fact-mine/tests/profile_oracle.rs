@@ -249,6 +249,50 @@ fn native_function_pointer_calls_are_nullable_operations() -> Result<()> {
 }
 
 #[test]
+fn c_allocator_contracts_seed_maybe_null_operation_states() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_allocators.c"), Language::C)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let operations = output
+        .nullable_operations
+        .iter()
+        .filter(|operation| operation.operation_kind == "pointer_dereference")
+        .collect::<Vec<_>>();
+    assert_eq!(operations.len(), 2);
+    assert!(operations.iter().all(|operation| {
+        operation.nil_behavior == "undefined_behavior"
+            && operation.state_at_operation == "maybe_null"
+            && operation.complete
+    }));
+    assert_eq!(
+        output
+            .nullable_states
+            .iter()
+            .filter(|state| state.state == "maybe_null" && state.complete)
+            .count(),
+        2
+    );
+    Ok(())
+}
+
+#[test]
+fn cpp_allocator_contracts_seed_maybe_null_operation_states() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_allocators.cpp"), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let operations = output
+        .nullable_operations
+        .iter()
+        .filter(|operation| operation.operation_kind == "pointer_dereference")
+        .collect::<Vec<_>>();
+    assert_eq!(operations.len(), 2);
+    assert!(operations.iter().all(|operation| {
+        operation.nil_behavior == "undefined_behavior"
+            && operation.state_at_operation == "maybe_null"
+            && operation.complete
+    }));
+    Ok(())
+}
+
+#[test]
 fn typescript_variable_bound_callables_are_emitted_as_project_methods() -> Result<()> {
     let document = syntax::parse_file(fixture("typescript_callable.ts"), Language::TypeScript)?;
     let output = profile::extract(&document, Profile::Espalier);

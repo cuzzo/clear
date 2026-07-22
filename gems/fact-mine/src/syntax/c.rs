@@ -4,9 +4,9 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    configured_intrinsic_call_complexity, eliminable_guard_from_call, nil_guard_from_predicates,
-    scip_descriptor_owner, scip_global_parts, NormalizedCallComplexity, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    configured_intrinsic_call_complexity, eliminable_guard_from_call, exact_direct_call_name,
+    nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts, NormalizedCallComplexity,
+    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
     NormalizedNullableOperation, NormalizedOwner,
     NormalizedSemanticEffect,
 };
@@ -108,6 +108,14 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
 
     fn function_value_calls_are_local_reads(&self) -> bool {
         true
+    }
+
+    fn nullable_call_result_contract(&self, node: &Node) -> Option<&'static str> {
+        exact_direct_call_name(node).and_then(|name| match name {
+            "malloc" | "calloc" => Some("nullable_allocation"),
+            "realloc" => Some("nullable_reallocation_preserves_input"),
+            _ => None,
+        })
     }
 
     fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
@@ -510,6 +518,27 @@ mod tests {
         };
         assert_eq!(local_call_subject(&malformed), None);
         assert_eq!(CNormalizedBehavior.function_value_calls_are_local_reads(), true);
+    }
+
+    #[test]
+    fn allocator_contracts_require_exact_bare_call_identity() {
+        let behavior = CNormalizedBehavior;
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "malloc(sizeof(int))")),
+            Some("nullable_allocation")
+        );
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "realloc(value, 8)")),
+            Some("nullable_reallocation_preserves_input")
+        );
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "custom_malloc(value)")),
+            None
+        );
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "object.malloc()")),
+            None
+        );
     }
 
     #[test]

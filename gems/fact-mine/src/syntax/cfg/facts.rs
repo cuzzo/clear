@@ -80,6 +80,10 @@ pub struct NodeEffect {
     /// receiver text or guessing its return type in the CFG layer.
     #[serde(default)]
     pub write_call_sources: BTreeMap<String, Span>,
+    /// Reviewed exact call-result contracts keyed by their target place.
+    /// This is not inferred from identifiers downstream of the adapter.
+    #[serde(default)]
+    pub write_nullable_contracts: BTreeMap<String, String>,
     pub unknown_call: bool,
     pub complete: bool,
     pub unknown_reasons: Vec<String>,

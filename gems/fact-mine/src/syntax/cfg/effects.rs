@@ -27,6 +27,7 @@ struct RawEffect {
     write_value_hints: BTreeMap<String, String>,
     write_sources: BTreeMap<String, String>,
     write_call_sources: BTreeMap<String, Span>,
+    write_nullable_contracts: BTreeMap<String, String>,
     unknown_call: bool,
     complete: bool,
     unknown_reasons: Vec<String>,
@@ -100,6 +101,18 @@ pub(crate) fn extract(
                 Some(syntax_node) => {
                     let target = effect_target(syntax_node, &node.role, profile);
                     collect(target, &mut raw, behavior.function_value_calls_are_local_reads());
+                    for (name, producer_span) in raw.write_call_sources.clone() {
+                        let contract = [
+                            find_by_span(target, producer_span, true),
+                            direct_call_result_node(target),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .find_map(|producer| behavior.nullable_call_result_contract(producer));
+                        if let Some(contract) = contract {
+                            raw.write_nullable_contracts.insert(name, contract.to_string());
+                        }
+                    }
                     apply_normalized_local_contract(method, node, &mut raw);
                     let declared_candidates = raw
                         .writes
@@ -213,6 +226,11 @@ pub(crate) fn extract(
                 .write_call_sources
                 .into_iter()
                 .map(|(target, producer_span)| (id_for(&target), producer_span))
+                .collect(),
+            write_nullable_contracts: raw
+                .write_nullable_contracts
+                .into_iter()
+                .map(|(target, contract)| (id_for(&target), contract))
                 .collect(),
             unknown_call: raw.unknown_call,
             complete: raw.complete,
@@ -457,6 +475,21 @@ fn direct_call_result_span(node: &Node) -> Option<Span> {
     }
 }
 
+fn direct_call_result_node(node: &Node) -> Option<&Node> {
+    if matches!(node.r#type.as_str(), "CALL" | "QCALL" | "FCALL" | "VCALL") {
+        return Some(node);
+    }
+    if matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
+        return node.children.iter().skip(1).find_map(ast::node).and_then(direct_call_result_node);
+    }
+    if matches!(node.r#type.as_str(), "PAREN" | "BEGIN" | "EXPRESSION_LIST") {
+        let mut children = node.children.iter().filter_map(ast::node);
+        let only = children.next()?;
+        return children.next().is_none().then(|| direct_call_result_node(only)).flatten();
+    }
+    None
+}
+
 fn value_type_hint(node: &Node) -> Option<&'static str> {
     match node.r#type.as_str() {
         "NIL" => Some("nil"),
@@ -564,6 +597,18 @@ fn find_syntax_node<'a>(node: &'a Node, span: Span, role: &str) -> Option<&'a No
 mod tests {
     use super::*;
 
+    fn node(kind: &str, children: Vec<Child>) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children,
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 1,
+            text: kind.to_string(),
+        }
+    }
+
     #[test]
     fn go_style_function_value_calls_are_local_reads_only_with_the_descriptor() {
         let call = Node {
@@ -584,6 +629,32 @@ mod tests {
         collect(&call, &mut disabled, false);
         assert!(disabled.reads.is_empty());
         assert!(disabled.unknown_call);
+    }
+
+    #[test]
+    fn direct_call_results_only_unwrap_assignments_and_transparent_grouping() {
+        let call = node("FCALL", vec![Child::Symbol("malloc".to_string())]);
+        let assignment = node(
+            "LASGN",
+            vec![Child::Symbol("value".to_string()), Child::Node(Box::new(call.clone()))],
+        );
+        assert_eq!(direct_call_result_node(&call), Some(&call));
+        assert_eq!(
+            direct_call_result_node(&assignment).map(|node| node.r#type.as_str()),
+            Some("FCALL")
+        );
+
+        let grouped = node("PAREN", vec![Child::Node(Box::new(call.clone()))]);
+        assert_eq!(
+            direct_call_result_node(&grouped).map(|node| node.r#type.as_str()),
+            Some("FCALL")
+        );
+        let multi_expression = node(
+            "EXPRESSION_LIST",
+            vec![Child::Node(Box::new(call.clone())), Child::Node(Box::new(call))],
+        );
+        assert_eq!(direct_call_result_node(&multi_expression), None);
+        assert_eq!(direct_call_result_node(&node("OPCALL", Vec::new())), None);
     }
 }
 

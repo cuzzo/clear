@@ -7,7 +7,7 @@ use super::normalized_behavior::{
     balanced_selector_name, configured_collection_operation, configured_intrinsic_call_complexity,
     configured_non_call_construct, configured_semantic_symbol_call_complexity,
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
-    eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
+    eliminable_guard_from_call, exact_direct_call_name, nil_guard_from_predicates, scip_descriptor_owner,
     scip_global_parts, type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
     NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedNullableOperation,
     NormalizedSemanticEffect,
@@ -183,6 +183,41 @@ const CPP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 
 pub(crate) struct CppNormalizedBehavior;
 
+/// C++ normalizes `static_cast<T>(call())` as an FCALL. The cast only changes
+/// the static view of the result, so a reviewed nullable result contract still
+/// belongs to the exact inner call.
+fn transparent_static_cast_argument(node: &Node) -> Option<&Node> {
+    let Child::Symbol(name) = node.children.first()? else {
+        return None;
+    };
+    if node.r#type != "FCALL" || !name.starts_with("static_cast<") {
+        return None;
+    }
+    let arguments = node.children.get(1).and_then(crate::ast::node)?;
+    if arguments.r#type != "LIST" {
+        return None;
+    }
+    let mut children = arguments.children.iter().filter_map(crate::ast::node);
+    let only = children.next()?;
+    children.next().is_none().then_some(only)
+}
+
+fn nullable_contract_call(node: &Node) -> &Node {
+    if let Some(argument) = transparent_static_cast_argument(node) {
+        return nullable_contract_call(argument);
+    }
+    if node.r#type == "LIST" {
+        let mut children = node.children.iter().filter_map(crate::ast::node);
+        let only = children.next();
+        if children.next().is_none() {
+            if let Some(only) = only {
+                return nullable_contract_call(only);
+            }
+        }
+    }
+    node
+}
+
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
         if node.r#type == "VCALL" {
@@ -208,6 +243,15 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
 
     fn function_value_calls_are_local_reads(&self) -> bool {
         true
+    }
+
+    fn nullable_call_result_contract(&self, node: &Node) -> Option<&'static str> {
+        let call = nullable_contract_call(node);
+        exact_direct_call_name(call).and_then(|name| match name {
+            "malloc" | "calloc" => Some("nullable_allocation"),
+            "realloc" => Some("nullable_reallocation_preserves_input"),
+            _ => None,
+        })
     }
 
     fn external_symbol_call_complexity(
@@ -620,6 +664,66 @@ mod tests {
         };
         assert_eq!(local_call_subject(&malformed), None);
         assert_eq!(CppNormalizedBehavior.function_value_calls_are_local_reads(), true);
+    }
+
+    #[test]
+    fn allocator_contracts_require_exact_bare_call_identity() {
+        let behavior = CppNormalizedBehavior;
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "malloc(sizeof(int))")),
+            Some("nullable_allocation")
+        );
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "realloc(value, 8)")),
+            Some("nullable_reallocation_preserves_input")
+        );
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "custom_malloc(value)")),
+            None
+        );
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "object.malloc()")),
+            None
+        );
+
+        let allocation = Node {
+            children: vec![
+                Child::Symbol("static_cast<int *>".to_string()),
+                Child::Node(Box::new(Node {
+                    children: vec![Child::Node(Box::new(Node {
+                        children: vec![Child::Symbol("malloc".to_string())],
+                        ..node("FCALL", "malloc(sizeof(int))")
+                    }))],
+                    ..node("LIST", "malloc(sizeof(int))")
+                })),
+            ],
+            ..node("FCALL", "static_cast<int *>(malloc(sizeof(int)))")
+        };
+        assert_eq!(
+            behavior.nullable_call_result_contract(&allocation),
+            Some("nullable_allocation")
+        );
+
+        let nested_allocation = Node {
+            children: vec![Child::Node(Box::new(Node {
+                children: vec![Child::Symbol("malloc".to_string())],
+                ..node("FCALL", "malloc(sizeof(int))")
+            }))],
+            ..node("LIST", "malloc(sizeof(int))")
+        };
+        assert_eq!(
+            behavior.nullable_call_result_contract(&nested_allocation),
+            Some("nullable_allocation")
+        );
+
+        let malformed_cast = Node {
+            children: vec![
+                Child::Symbol("static_cast<int *>".to_string()),
+                Child::Node(Box::new(node("PAREN", ""))),
+            ],
+            ..node("FCALL", "static_cast<int *>(value)")
+        };
+        assert_eq!(behavior.nullable_call_result_contract(&malformed_cast), None);
     }
 
     #[test]

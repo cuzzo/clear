@@ -536,9 +536,7 @@ fn definition_state(
     if !visiting.insert(key.clone()) {
         return DefinitionResult::unknown();
     }
-    let state = if !effect.complete || effect.unknown_call {
-        DefinitionResult::unknown()
-    } else if effect
+    let state = if effect
         .write_value_hints
         .get(place_id)
         .is_some_and(|value| value == "nil" || value == "null")
@@ -547,6 +545,13 @@ fn definition_state(
             DefinitionState::DefinitelyNull,
             BTreeSet::from([node_id.to_string()]),
         )
+    } else if effect.write_nullable_contracts.contains_key(place_id) {
+        DefinitionResult::new(
+            DefinitionState::MaybeNull,
+            BTreeSet::from([node_id.to_string()]),
+        )
+    } else if !effect.complete || effect.unknown_call {
+        DefinitionResult::unknown()
     } else if effect
         .write_value_hints
         .get(place_id)
