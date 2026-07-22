@@ -29,6 +29,12 @@ struct DiffPageQuery {
     layout: Option<String>,
     path: Option<String>,
     focus: Option<String>,
+    group: Option<String>,
+    coverage_source: Option<String>,
+    sarif_source: Option<String>,
+    selection: Option<String>,
+    mutant_corpus: Option<String>,
+    test_set: Option<String>,
     page: Option<usize>,
 }
 
@@ -278,6 +284,12 @@ fn canonical_diff_location(query: &DiffPageQuery, base: &str, head: &str) -> Str
         ("layout", query.layout.as_deref()),
         ("path", query.path.as_deref()),
         ("focus", query.focus.as_deref()),
+        ("group", query.group.as_deref()),
+        ("coverage_source", query.coverage_source.as_deref()),
+        ("sarif_source", query.sarif_source.as_deref()),
+        ("selection", query.selection.as_deref()),
+        ("mutant_corpus", query.mutant_corpus.as_deref()),
+        ("test_set", query.test_set.as_deref()),
     ] {
         if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
             output.push((name, value.to_string()));
@@ -316,12 +328,18 @@ mod tests {
             layout: Some("inline".into()),
             path: Some("lib/app.rb".into()),
             focus: Some("residual".into()),
+            group: Some("lib/app.rb:function:run:1".into()),
+            coverage_source: Some("coverage:ci".into()),
+            sarif_source: Some("scanner".into()),
+            selection: Some("production".into()),
+            mutant_corpus: Some("mutants".into()),
+            test_set: Some("suite".into()),
             page: Some(2),
         };
         assert!(requires_canonical_redirect(&query, "a", "b"));
         assert_eq!(
             canonical_diff_location(&query, "a", "b"),
-            "/diff?base=a&head=b&presentation=raw&layout=inline&path=lib%2Fapp.rb&focus=residual&page=2"
+            "/diff?base=a&head=b&presentation=raw&layout=inline&path=lib%2Fapp.rb&focus=residual&group=lib%2Fapp.rb%3Afunction%3Arun%3A1&coverage_source=coverage%3Aci&sarif_source=scanner&selection=production&mutant_corpus=mutants&test_set=suite&page=2"
         );
     }
 
@@ -413,6 +431,12 @@ mod tests {
                 layout: None,
                 path: None,
                 focus: None,
+                group: None,
+                coverage_source: None,
+                sarif_source: None,
+                selection: None,
+                mutant_corpus: None,
+                test_set: None,
                 page: None,
             }),
         )

@@ -22,7 +22,7 @@ export function App(): React.JSX.Element {
     void fetchDiffPlan(revisions).then(setPlan).catch((reason: unknown) => {
       setError(reason instanceof DiffApiError ? reason.message : "Unable to load diff plan");
     });
-  }, [revisions?.base, revisions?.head, revisions?.coverage_source, revisions?.selection, revisions?.mutant_corpus, revisions?.test_set, revisions?.page, revisions?.path]);
+  }, [revisions?.base, revisions?.head, revisions?.coverage_source, revisions?.sarif_source, revisions?.selection, revisions?.mutant_corpus, revisions?.test_set, revisions?.page, revisions?.path]);
 
   useEffect(() => {
     const updateLocation = () => setLocation(window.location.search);
@@ -103,7 +103,7 @@ function DiffReview({ initialLayout, page, plan, rawPath, selectedGroup }: { rea
     <p>Base {plan.scope.base_oid} · Head {plan.scope.head_oid}</p>
     <p>Evidence scope: {plan.scope.evidence_scope.selection} · {plan.scope.evidence_scope.mutant_corpus} · {plan.scope.evidence_scope.test_set}</p>
     <p>Evidence: coverage {plan.evidence.coverage} · mutation {plan.evidence.mutation} · hazards {plan.evidence.hazards} · SARIF {plan.evidence.sarif}</p>
-    {plan.resolved_sarif_findings.length > 0 && <p>Resolved SARIF findings: {plan.resolved_sarif_findings.map((entry) => `${entry.path} ${entry.finding.tool}/${entry.finding.rule_id} line ${entry.finding.start_line}: ${entry.finding.message}`).join(" · ")}</p>}
+    {plan.resolved_sarif_findings.length > 0 && <p>Resolved SARIF findings: {plan.resolved_sarif_findings.map((entry) => `${entry.path} ${findingDescription(entry.finding)}`).join(" · ")}</p>}
     <InventoryPaths label="Configuration" paths={plan.inventory.configuration_paths.map((file) => `${file.path} (${file.kind})`)} />
     <InventoryPaths label="Documentation" paths={plan.inventory.documentation_paths} />
     <InventoryPaths label="Generated" paths={plan.inventory.generated_paths} />
@@ -190,7 +190,7 @@ function InventoryPaths({ label, paths }: { readonly label: string; readonly pat
 
 function FileReview({ file, headOid, onGroupChange, onRaw, selectedGroup, sideBySide }: { readonly file: DiffFile; readonly headOid: string; readonly onGroupChange: (file: DiffFile, group: DiffGroup | null) => void; readonly onRaw: (path: string) => void; readonly selectedGroup: string | null; readonly sideBySide: boolean }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const publicGroups = file.groups.filter((group) => group.visibility !== "private" && (group.kind === "function" || group.kind === "class" || group.kind === "module"));
+  const publicGroups = file.groups.filter((group) => group.visibility !== "private");
   const privateGroups = file.groups.filter((group) => group.visibility === "private");
   useEffect(() => {
     if (selectedGroup !== null && file.groups.some((group) => groupIdentity(file, group) === selectedGroup)) setExpanded(true);
@@ -245,7 +245,11 @@ function RiskMetrics({ risk, verification }: { readonly risk: RiskSummary; reado
 
 function FindingSummary({ findings }: { readonly findings: DiffFile["sarif_findings"] }): React.JSX.Element | null {
   if (findings.length === 0) return null;
-  return <p className="metrics">SARIF findings: {findings.map((finding) => `${finding.status} ${finding.level}/${finding.category} ${finding.tier === null ? "unclassified tier" : `tier-${finding.tier}`} ${finding.tool}/${finding.rule_id} line ${finding.start_line}: ${finding.message}`).join(" · ")}</p>;
+  return <p className="metrics">SARIF findings: {findings.map(findingDescription).join(" · ")}</p>;
+}
+
+function findingDescription(finding: DiffFile["sarif_findings"][number]): string {
+  return `${finding.status} ${finding.level}/${finding.category} ${finding.tier === null ? "unclassified tier" : `tier-${finding.tier}`} ${finding.source}:${finding.tool}/${finding.rule_id} line ${finding.start_line}: ${finding.message}`;
 }
 
 function sourceRange(source: string | null, start: number | null, end: number | null): string {

@@ -30,7 +30,7 @@ describe("App", () => {
 
   it("renders the revision-pinned inventory and only mounts Monaco for two-sided text", async () => {
     window.history.replaceState({}, "", "/diff?base=abc&head=def");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+    const fetcher = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
         api_version: "v1",
@@ -42,12 +42,13 @@ describe("App", () => {
           evidence: { coverage: "unknown", mutation: "unknown", hazards: "unknown", sarif: "unknown" },
           resolved_sarif_findings: [{ path: "lib/app.rb", finding: { ...findings[0], status: "resolved" } }],
           files: [
-            { path: "lib/app.rb", role: "production", change: "modified", language: "ruby", semantic_classification_available: true, previous_path: null, base_source: "old\nold private", head_source: "new\nnew private", added_lines: lines, removed_lines: { code: 1, comments: 0, other: 0 }, verification, line_annotations: [{ line: 1, verification: "covered" }, { line: 2, verification: "partially_covered" }], residual_lines: { code: 0, comments: 0, other: 0 }, sarif_findings: findings, risk, groups: [{ name: "run", kind: "function", start_line: 1, end_line: 1, base_start_line: 1, base_end_line: 1, visibility: "public", added_lines: lines, verification, sarif_findings: findings, risk }, { name: "fresh", kind: "function", start_line: 1, end_line: 1, base_start_line: null, base_end_line: null, visibility: "public", added_lines: lines, verification, sarif_findings: [], risk: { ...risk, score: 1 } }, { name: "hide", kind: "function", start_line: 2, end_line: 2, base_start_line: 2, base_end_line: 2, visibility: "private", added_lines: { code: 2, comments: 1, other: 0 }, verification: { ...verification, unknown: 2 }, sarif_findings: [], risk: { ...risk, score: 0, added_complexity: 0 } }, { name: "secret", kind: "function", start_line: 2, end_line: 2, base_start_line: 2, base_end_line: 2, visibility: "private", added_lines: lines, verification, sarif_findings: [], risk: { ...risk, score: 0, added_complexity: 0 } }] },
+            { path: "lib/app.rb", role: "production", change: "modified", language: "ruby", semantic_classification_available: true, previous_path: null, base_source: "old\nold private", head_source: "new\nnew private", added_lines: lines, removed_lines: { code: 1, comments: 0, other: 0 }, verification, line_annotations: [{ line: 1, verification: "covered" }, { line: 2, verification: "partially_covered" }], residual_lines: { code: 0, comments: 0, other: 0 }, sarif_findings: findings, risk, groups: [{ name: "run", kind: "function", start_line: 1, end_line: 1, base_start_line: 1, base_end_line: 1, visibility: "public", added_lines: lines, verification, sarif_findings: findings, risk }, { name: "fresh", kind: "function", start_line: 1, end_line: 1, base_start_line: null, base_end_line: null, visibility: "public", added_lines: lines, verification, sarif_findings: [], risk: { ...risk, score: 1 } }, { name: "Widget", kind: "struct", start_line: 1, end_line: 1, base_start_line: null, base_end_line: null, visibility: "unknown", added_lines: lines, verification, sarif_findings: [], risk: { ...risk, score: 1 } }, { name: "hide", kind: "function", start_line: 2, end_line: 2, base_start_line: 2, base_end_line: 2, visibility: "private", added_lines: { code: 2, comments: 1, other: 0 }, verification: { ...verification, unknown: 2 }, sarif_findings: [], risk: { ...risk, score: 0, added_complexity: 0 } }, { name: "secret", kind: "function", start_line: 2, end_line: 2, base_start_line: 2, base_end_line: 2, visibility: "private", added_lines: lines, verification, sarif_findings: [], risk: { ...risk, score: 0, added_complexity: 0 } }] },
             { path: "logo.png", role: "other", change: "added", language: null, semantic_classification_available: false, previous_path: null, base_source: null, head_source: null, added_lines: { code: 0, comments: 0, other: 0 }, removed_lines: { code: 0, comments: 0, other: 0 }, verification: { ...verification, unknown: 0 }, line_annotations: [], residual_lines: { code: 0, comments: 0, other: 0 }, sarif_findings: [], risk: { ...risk, score: 0, added_complexity: 0 }, groups: [] },
           ],
         },
       }),
-    }));
+    });
+    vi.stubGlobal("fetch", fetcher);
 
     render(<App />);
 
@@ -62,8 +63,11 @@ describe("App", () => {
     expect(screen.getByText(/package.json: no declared dependency changes/)).toBeInTheDocument();
     expect(screen.getByText(/ruby: 1 production code lines · 2 production comments.*public 1.*0 test code lines · 3 test comments · assertions unavailable/)).toBeInTheDocument();
     expect(screen.getByText(/Evidence: coverage unknown/)).toBeInTheDocument();
+    window.history.replaceState({}, "", "/diff?base=abc&head=def&sarif_source=scanner");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await vi.waitFor(() => expect(fetcher).toHaveBeenLastCalledWith("/api/diff/plan?base=abc&head=def&sarif_source=scanner"));
     expect(screen.getAllByRole("link", { name: "Open source" })[0]).toHaveAttribute("href", `/?path=lib%2Fapp.rb&commit=${"b".repeat(40)}#L1`);
-    expect(screen.getByText(/Resolved SARIF findings: lib\/app.rb Scanner\/rule line 1: unsafe value/)).toBeInTheDocument();
+    expect(screen.getByText(/Resolved SARIF findings: lib\/app.rb resolved warning\/hazard tier-1 scanner:Scanner\/rule line 1: unsafe value/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Base revision"), { target: { value: "next-base" } });
     fireEvent.change(screen.getByLabelText("Head revision"), { target: { value: "next-head" } });
     fireEvent.click(screen.getByText("Evidence selection"));
@@ -80,7 +84,8 @@ describe("App", () => {
     expect(window.location.search).toContain("selection=production");
     fireEvent.click(screen.getByRole("button", { name: /lib\/app.rb/ }));
     expect(screen.getByText(/Removals/)).toBeInTheDocument();
-    expect(screen.getAllByText(/SARIF findings: new warning\/hazard tier-1 Scanner\/rule line 1: unsafe value/)).toHaveLength(2);
+    expect(screen.getAllByText(/SARIF findings: new warning\/hazard tier-1 scanner:Scanner\/rule line 1: unsafe value/)).toHaveLength(2);
+    expect(screen.getByRole("button", { name: /struct Widget/ })).toBeInTheDocument();
     expect(screen.getByText(/Private changes \(2 functions/)).toBeInTheDocument();
     expect(diffPreview).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /function run/ }));
