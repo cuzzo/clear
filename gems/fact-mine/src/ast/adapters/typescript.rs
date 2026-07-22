@@ -20,6 +20,12 @@ const TYPESCRIPT_TERNARY_KINDS: &[&str] = &[
 pub(crate) struct TypeScriptAstAdapter;
 
 impl AstNormalizationAdapter for TypeScriptAstAdapter {
+    fn absence_literal(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        self.check_node_role(node, "nil")
+            || (node_text(node, source).trim() == "undefined"
+                && !typescript_undefined_is_shadowed(node, source))
+    }
+
     // `abstract class Foo { ... }` is a distinct grammar node
     // (abstract_class_declaration), not `class_declaration` - the default
     // class_node matcher never recognized it, so an abstract base class
@@ -407,6 +413,64 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
             })
             .collect()
     }
+}
+
+fn typescript_undefined_is_shadowed(node: TreeSitterNode<'_>, source: &str) -> bool {
+    let mut ancestor = node.parent();
+    while let Some(scope) = ancestor {
+        if matches!(scope.kind(), "statement_block" | "program")
+            && typescript_scope_declares_undefined(scope, source, true)
+        {
+            return true;
+        }
+        if matches!(
+            scope.kind(),
+            "function_declaration" | "method_definition" | "arrow_function" | "function_expression"
+        ) && typescript_scope_declares_undefined(scope, source, false)
+        {
+            return true;
+        }
+        ancestor = scope.parent();
+    }
+    false
+}
+
+fn typescript_scope_declares_undefined(
+    node: TreeSitterNode<'_>,
+    source: &str,
+    include_local_declarations: bool,
+) -> bool {
+    if matches!(node.kind(), "required_parameter" | "optional_parameter")
+        && typescript_declares_undefined(node, source)
+    {
+        return true;
+    }
+    if include_local_declarations
+        && node.kind() == "variable_declarator"
+        && typescript_declares_undefined(node, source)
+    {
+        return true;
+    }
+    named_children(node).into_iter().any(|child| {
+        !matches!(
+            child.kind(),
+            "statement_block"
+                | "function_declaration"
+                | "method_definition"
+                | "arrow_function"
+                | "function_expression"
+        ) && typescript_scope_declares_undefined(child, source, include_local_declarations)
+    })
+}
+
+fn typescript_declares_undefined(node: TreeSitterNode<'_>, source: &str) -> bool {
+    node.child_by_field_name("name")
+        .or_else(|| {
+            named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "identifier")
+        })
+        .is_some_and(|name| node_text(name, source).trim() == "undefined")
 }
 
 /// TypeScript represents `const f = (...) => ...` and

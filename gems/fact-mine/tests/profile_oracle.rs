@@ -336,6 +336,46 @@ fn csharp_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
 }
 
 #[test]
+fn typescript_null_and_undefined_receiver_operations_follow_direct_flow() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_typescript.ts"), Language::TypeScript)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    for function in ["unsafeNull", "unsafeUndefined"] {
+        assert!(output.nullable_states.iter().any(|state| {
+            state
+                .place_id
+                .contains(&format!("NullableTypeScript#{function}:local:value"))
+                && state.state == "definitely_null"
+                && state.complete
+        }));
+        assert!(output.nullable_operations.iter().any(|operation| {
+            operation.operation_kind == "receiver_member_access"
+                && operation.nil_behavior == "type_error"
+                && operation.state_at_operation == "definitely_null"
+                && operation.complete
+                && operation
+                    .place_id
+                    .contains(&format!("NullableTypeScript#{function}:local:value"))
+        }));
+    }
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement
+            .place_id
+            .contains("NullableTypeScript#guarded:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    assert!(output.nullable_operations.iter().all(|operation| {
+        !operation
+            .place_id
+            .contains("NullableTypeScript#shadowedUndefined:local:undefined")
+    }));
+    Ok(())
+}
+
+#[test]
 fn go_map_lookup_exports_presence_without_proving_payload_non_null() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_presence.go"), Language::Go)?;
     let output = profile::extract(&document, Profile::NilKill);

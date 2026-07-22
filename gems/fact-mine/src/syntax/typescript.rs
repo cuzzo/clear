@@ -8,7 +8,7 @@ use super::normalized_behavior::{
     configured_collection_operation, configured_intrinsic_call_complexity,
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedCollectionOperation, NormalizedLanguageBehavior,
-    NormalizedNilGuardFact, NormalizedSemanticEffect,
+    NormalizedNilGuardFact, NormalizedNullableOperation, NormalizedSemanticEffect,
 };
 use super::CallSite;
 use super::{ExternalCallComplexity, StateDeclaration};
@@ -31,6 +31,20 @@ const TYPESCRIPT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct TypeScriptNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
+    fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
+        (node.r#type == "CALL")
+            .then(|| node.children.first().and_then(crate::ast::node))
+            .flatten()
+            .filter(|receiver| receiver.r#type == "LVAR")
+            .map(|receiver| receiver.text.trim().to_string())
+            .filter(|subject| !subject.is_empty())
+            .map(|subject| NormalizedNullableOperation {
+                subject,
+                operation_kind: "receiver_member_access",
+                nil_behavior: "type_error",
+            })
+    }
+
     fn nested_function_is_local_callable(&self, _function: &Node) -> bool {
         true
     }

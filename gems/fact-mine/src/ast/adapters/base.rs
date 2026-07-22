@@ -235,6 +235,13 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         }
     }
 
+    /// Whether this node is a language-level absence literal. Most languages
+    /// express absence with a dedicated grammar node, while TypeScript's
+    /// `undefined` is an identifier that needs language-owned resolution.
+    fn absence_literal(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        self.check_node_role(node, "nil")
+    }
+
     fn tracks_dynamic_local_scope(&self) -> bool {
         false
     }
