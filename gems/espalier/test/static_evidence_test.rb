@@ -22,6 +22,19 @@ class StaticEvidenceTest < Minitest::Test
 
       assert_equal true, complete.dig("corpus", "complete")
       assert_equal false, partial.dig("corpus", "complete")
+      assert_equal true, complete.dig("input_coverage", "complete")
+      assert_equal true, partial.dig("input_coverage", "complete")
+    end
+  end
+
+  def test_marks_input_coverage_partial_when_fact_mine_recovers_from_syntax_error
+    Dir.mktmpdir("espalier-input-recovery") do |dir|
+      source = File.join(dir, "broken.rb")
+      File.write(source, "def broken(\n")
+
+      evidence = Espalier::StaticEvidence.build([source], root: dir)
+      assert_equal false, evidence.dig("input_coverage", "complete")
+      assert_equal [source], evidence.dig("input_coverage", "parse_recovery_files")
     end
   end
 

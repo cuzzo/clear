@@ -232,9 +232,25 @@ fn build_profile(
                 .with_context(|| format!("cannot detect language for {}", file.display()))?
         };
         let document = syntax::parse_file(file.clone(), language)?;
-        Ok(profile::extract(&document, selected_profile))
+        Ok((
+            profile::extract(&document, selected_profile),
+            document.parse_recovered.then(|| file.to_string_lossy().to_string()),
+        ))
     })?;
-    Ok(profile::merge(all_outputs, selected_profile))
+    let parse_recovery_files = all_outputs
+        .iter()
+        .filter_map(|(_, recovered)| recovered.clone())
+        .collect();
+    let mut output = profile::merge(
+        all_outputs.into_iter().map(|(output, _)| output).collect(),
+        selected_profile,
+    );
+    output.input_coverage = profile::InputCoverage {
+        selected_files: files.len(),
+        parsed_files: files.len(),
+        parse_recovery_files,
+    };
+    Ok(output)
 }
 
 fn render_call_resolution(coverage: &profile::CallResolutionCoverage) -> String {

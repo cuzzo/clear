@@ -243,6 +243,11 @@ pub struct Document {
     pub language: Language,
     #[serde(default)]
     pub source_digest: String,
+    /// Tree-sitter recovered from one or more syntax errors. The document is
+    /// still useful, but consumers must not represent its extracted facts as
+    /// complete input coverage.
+    #[serde(default)]
+    pub parse_recovered: bool,
     /// Parser-classified calls retained with grammar-node kinds for
     /// normalization-loss accounting. This is diagnostic evidence, not a
     /// second call extractor.
@@ -798,6 +803,13 @@ mod tests {
                 .any(|raw| raw.span == origin.raw_call_span)
                 && doc.call_sites.iter().any(|call| call.span == origin.normalized_call_span)
         }));
+    }
+
+    #[test]
+    fn parser_recovery_is_retained_as_input_coverage_evidence() {
+        let doc = document("def broken(\n", Language::Ruby);
+
+        assert!(doc.parse_recovered);
     }
 
     #[test]

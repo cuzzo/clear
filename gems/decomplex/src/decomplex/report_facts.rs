@@ -179,6 +179,21 @@ fn facts_for_source_files_with_corpus(files: &[SourceFile], options: &Options, i
     } else {
         Vec::new()
     };
+    let parse_recovery_files = documents
+        .iter()
+        .filter(|document| document.parse_recovered)
+        .map(|document| document.file.clone())
+        .collect::<Vec<_>>();
+    let input_coverage = json!({
+        "complete": parse_recovery_files.is_empty(),
+        "scope": "selected_source_files",
+        "reason": if parse_recovery_files.is_empty() {
+            "all selected supported source files were parsed without recovery"
+        } else {
+            "tree-sitter recovered from syntax errors in selected source files"
+        },
+        "parse_recovery_files": parse_recovery_files,
+    });
 
     let shared_started = Instant::now();
     let shared = SharedFacts::new(&documents);
@@ -213,11 +228,7 @@ fn facts_for_source_files_with_corpus(files: &[SourceFile], options: &Options, i
         "format": FORMAT,
         "files": reported_files,
         "file_roles": file_roles,
-        "input_coverage": {
-            "complete": true,
-            "scope": "selected_source_files",
-            "reason": "all selected supported source files were collected and parsed successfully",
-        },
+        "input_coverage": input_coverage,
         "corpus": corpus,
         "detectors": detectors,
         "documents": projected_documents,
@@ -966,12 +977,30 @@ mod tests {
 
         let complete = collect(&[dir.path().to_path_buf()], &Options::default(), false).unwrap();
         assert_eq!(complete.pointer("/corpus/complete"), Some(&json!(true)));
+        assert_eq!(complete.pointer("/input_coverage/complete"), Some(&json!(true)));
 
         let partial = collect(&[source], &Options::default(), false).unwrap();
         assert_eq!(partial.pointer("/corpus/complete"), Some(&json!(false)));
+        assert_eq!(partial.pointer("/input_coverage/complete"), Some(&json!(true)));
         let state = partial.get("detectors").and_then(|v| v.get("superfluous_state"))
             .and_then(Value::as_array).unwrap();
         assert!(state.is_empty(), "partial corpora cannot prove state is unread");
+    }
+
+    #[test]
+    fn input_coverage_is_partial_when_tree_sitter_recovers_from_syntax_error() {
+        let dir = TempDir::new().expect("tempdir");
+        let source = dir.path().join("broken.rb");
+        fs::write(&source, "def broken(\n").unwrap();
+
+        let facts = collect(&[source], &Options::default(), false).unwrap();
+        assert_eq!(facts.pointer("/input_coverage/complete"), Some(&json!(false)));
+        assert_eq!(
+            facts.pointer("/input_coverage/parse_recovery_files")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
     }
 
     fn run_git(dir: &Path, args: &[&str]) {

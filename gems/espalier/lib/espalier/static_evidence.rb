@@ -553,7 +553,7 @@ module Espalier
         "languages" => project_languages.map(&:to_s),
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
-        "input_coverage" => input_coverage_metadata,
+        "input_coverage" => input_coverage_metadata(facts),
         "corpus" => corpus_metadata,
         "runtime_fields" => false,
         "files" => files.map { |file| file_record(file) },
@@ -662,7 +662,7 @@ module Espalier
         "root" => @root,
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
-        "input_coverage" => input_coverage_metadata,
+        "input_coverage" => input_coverage_metadata({}),
         "corpus" => corpus_metadata,
         "runtime_fields" => false,
         "files" => [],
@@ -699,11 +699,25 @@ module Espalier
       }
     end
 
-    def input_coverage_metadata
+    def input_coverage_metadata(facts)
+      coverage = Hash(facts["input_coverage"])
+      selected = coverage["selected_files"]
+      parsed = coverage["parsed_files"]
+      recovered = Array(coverage["parse_recovery_files"])
+      return { "complete" => nil, "scope" => "selected_source_files", "reason" => "FactMine did not provide input coverage metadata" } unless selected.is_a?(Numeric) && parsed.is_a?(Numeric)
+
+      complete = selected == parsed && recovered.empty?
       {
-        "complete" => true,
+        "complete" => complete,
         "scope" => "selected_source_files",
-        "reason" => "all selected supported source files were collected and parsed successfully"
+        "reason" => if complete
+          "all selected supported source files were parsed without recovery"
+        elsif recovered.empty?
+          "FactMine did not parse every selected supported source file"
+        else
+          "tree-sitter recovered from syntax errors in #{recovered.size} selected source file(s)"
+        end,
+        "parse_recovery_files" => recovered.sort
       }
     end
 

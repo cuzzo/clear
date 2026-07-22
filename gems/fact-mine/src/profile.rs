@@ -42,6 +42,10 @@ pub enum Profile {
 /// The enriched output matching what Ruby's EspalierProfile::Builder.build returns.
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct ProfileOutput {
+    /// Extraction coverage owned by FactMine. This describes parser input
+    /// availability only; semantic certainty remains in per-fact evidence.
+    #[serde(default, skip_serializing_if = "InputCoverage::is_empty")]
+    pub input_coverage: InputCoverage,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owners: Vec<OwnerRecord>,
     pub methods: Vec<MethodRecord>,
@@ -142,6 +146,20 @@ pub struct ProfileOutput {
     pub hazard_sites: Vec<syntax::HazardSite>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imports: Vec<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Default)]
+pub struct InputCoverage {
+    pub selected_files: usize,
+    pub parsed_files: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parse_recovery_files: Vec<String>,
+}
+
+impl InputCoverage {
+    pub fn is_empty(&self) -> bool {
+        self.selected_files == 0 && self.parsed_files == 0 && self.parse_recovery_files.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1036,6 +1054,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     };
 
     ProfileOutput {
+        input_coverage: InputCoverage::default(),
         owners,
         methods,
         fields,
@@ -1312,6 +1331,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     type_dependencies.dedup_by(|left, right| left["id"] == right["id"]);
 
     ProfileOutput {
+        input_coverage: InputCoverage::default(),
         owners,
         methods,
         fields,
@@ -6122,6 +6142,7 @@ pub(crate) mod tests {
             file: "test.rb".to_string(),
             language: Language::Ruby,
             source_digest: String::new(),
+            parse_recovered: false,
             raw_call_sites: Vec::new(),
             symbol_scope: syntax::SymbolScope::default(),
             function_defs: vec![syntax::FunctionDef {

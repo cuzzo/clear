@@ -1741,6 +1741,23 @@ mod tests {
             Some(&json!("review"))
         );
 
+        let mut partial_input_facts = facts.clone();
+        partial_input_facts["input_coverage"] = json!({
+            "complete": false,
+            "reason": "tree-sitter recovered from a syntax error"
+        });
+        let partial_input_report = Report::from_facts(&partial_input_facts).unwrap();
+        let partial_input_sarif = partial_input_report.to_sarif_value(false, false, None);
+        let partial_count = partial_input_sarif
+            .pointer("/runs/0/results")
+            .and_then(Value::as_array)
+            .unwrap()
+            .len();
+        assert_eq!(
+            partial_input_sarif.pointer("/runs/0/properties/fact_mine.proof_boundary_summary/input_completeness/partial"),
+            Some(&json!(partial_count))
+        );
+
         // Error checking path: missing detectors
         let invalid_facts = json!({
             "format": "invalid",

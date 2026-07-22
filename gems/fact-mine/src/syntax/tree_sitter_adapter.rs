@@ -43,6 +43,7 @@ fn parse_normalized_file(
     let started = Instant::now();
     let raw_call_sites =
         crate::ast::raw_call_sites(parsed.tree.root_node(), &parsed.source, language);
+    let parse_recovered = parsed.tree.root_node().has_error();
     let normalized_root = normalize_tree(parsed.tree.root_node(), &parsed.source, language);
     let (mut namespace, mut explicit_imports) =
         crate::ast::symbol_scope(parsed.tree.root_node(), &parsed.source, language);
@@ -100,6 +101,7 @@ fn parse_normalized_file(
         file: parsed.file.to_string_lossy().to_string(),
         language,
         source_digest: format!("sha256:{:x}", Sha256::digest(parsed.source.as_bytes())),
+        parse_recovered,
         raw_call_sites,
         symbol_scope: SymbolScope {
             canonical: matches!(
