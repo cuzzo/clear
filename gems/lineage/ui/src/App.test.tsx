@@ -1,8 +1,11 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
 const { diffPreview } = vi.hoisted(() => ({ diffPreview: vi.fn() }));
+const lines = { code: 1, comments: 0, other: 0 };
+const verification = { covered_and_killed: 0, covered: 0, partially_covered: 0, not_covered: 0, unknown: 1 };
+const risk = { score: 2, not_covered: 0, partially_covered: 0, added_complexity: 1, tier_one_hazards: 0 };
 
 vi.mock("./monaco/DiffPreview", () => ({ DiffPreview: diffPreview }));
 
@@ -33,8 +36,8 @@ describe("App", () => {
           language_summaries: [{ language: "ruby", production: { code: 1, comments: 0, other: 0 }, test: { code: 0, comments: 0, other: 0 } }],
           evidence: { coverage: "unknown", mutation: "unknown", hazards: "unknown", sarif: "unknown" },
           files: [
-            { path: "lib/app.rb", role: "production", change: "modified", language: "ruby", previous_path: null, base_source: "old", head_source: "new", added_lines: { code: 1, comments: 0, other: 0 }, risk: { score: 2, added_complexity: 1, tier_one_hazards: 0 }, groups: [{ name: "run", kind: "function", start_line: 1, end_line: 2, visibility: "public", added_lines: { code: 1, comments: 0, other: 0 } }, { name: "hide", kind: "function", start_line: 3, end_line: 4, visibility: "private", added_lines: { code: 2, comments: 1, other: 0 } }] },
-            { path: "logo.png", role: "other", change: "added", language: null, previous_path: null, base_source: null, head_source: null, added_lines: { code: 0, comments: 0, other: 0 }, risk: { score: 0, added_complexity: 0, tier_one_hazards: 0 }, groups: [] },
+            { path: "lib/app.rb", role: "production", change: "modified", language: "ruby", previous_path: null, base_source: "old\nold private", head_source: "new\nnew private", added_lines: lines, verification, residual_lines: { code: 0, comments: 0, other: 0 }, risk, groups: [{ name: "run", kind: "function", start_line: 1, end_line: 1, base_start_line: 1, base_end_line: 1, visibility: "public", added_lines: lines, verification, risk }, { name: "fresh", kind: "function", start_line: 1, end_line: 1, base_start_line: null, base_end_line: null, visibility: "public", added_lines: lines, verification, risk: { ...risk, score: 1 } }, { name: "hide", kind: "function", start_line: 2, end_line: 2, base_start_line: 2, base_end_line: 2, visibility: "private", added_lines: { code: 2, comments: 1, other: 0 }, verification: { ...verification, unknown: 2 }, risk: { ...risk, score: 0, added_complexity: 0 } }, { name: "secret", kind: "function", start_line: 2, end_line: 2, base_start_line: 2, base_end_line: 2, visibility: "private", added_lines: lines, verification, risk: { ...risk, score: 0, added_complexity: 0 } }] },
+            { path: "logo.png", role: "other", change: "added", language: null, previous_path: null, base_source: null, head_source: null, added_lines: { code: 0, comments: 0, other: 0 }, verification: { ...verification, unknown: 0 }, residual_lines: { code: 0, comments: 0, other: 0 }, risk: { ...risk, score: 0, added_complexity: 0 }, groups: [] },
           ],
         },
       }),
@@ -46,11 +49,22 @@ describe("App", () => {
     expect(screen.getByText(/unknown package-file change/)).toBeInTheDocument();
     expect(screen.getByText(/ruby: 1 production code lines/)).toBeInTheDocument();
     expect(screen.getByText(/Evidence: coverage unknown/)).toBeInTheDocument();
-    expect(screen.getByText(/1 private changes/)).toBeInTheDocument();
-    expect(screen.getByText(/Binary or one-sided change/)).toBeInTheDocument();
-    expect(diffPreview).toHaveBeenCalledTimes(2);
-    await screen.getByLabelText("Inline").click();
+    fireEvent.click(screen.getByRole("button", { name: /lib\/app.rb/ }));
+    expect(screen.getByText(/Private changes \(2 functions/)).toBeInTheDocument();
+    expect(diffPreview).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /function run/ }));
+    expect(diffPreview).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: /function fresh/ }));
+    expect(diffPreview.mock.calls.at(-1)?.[0].original).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: /Private changes/ }));
+    fireEvent.click(screen.getByRole("button", { name: /function hide/ }));
+    expect(diffPreview.mock.calls.at(-1)?.[0].modified).toBe("new private");
+    fireEvent.click(screen.getByLabelText("Inline"));
     expect(diffPreview.mock.calls.at(-1)?.[0].sideBySide).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: /Open raw file diff/ }));
+    expect(screen.getByText(/Raw diff: lib\/app.rb/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Back to semantic review/ }));
+    expect(screen.getByRole("button", { name: /lib\/app.rb/ })).toBeInTheDocument();
   });
 
   it("makes failed diff requests visible", async () => {

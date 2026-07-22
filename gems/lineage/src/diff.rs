@@ -21,7 +21,7 @@ pub struct DiffScope {
     pub policy_version: &'static str,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DiffPlan {
     pub scope: DiffScope,
     pub inventory: ChangeInventory,
@@ -88,7 +88,7 @@ impl SourceRole {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DiffFile {
     pub path: String,
     pub previous_path: Option<String>,
@@ -98,6 +98,8 @@ pub struct DiffFile {
     pub base_source: Option<String>,
     pub head_source: Option<String>,
     pub added_lines: AddedLines,
+    pub verification: VerificationSlices,
+    pub residual_lines: AddedLines,
     pub groups: Vec<DiffGroup>,
     pub risk: RiskSummary,
 }
@@ -117,8 +119,19 @@ pub enum EvidenceState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct VerificationSlices {
+    pub covered_and_killed: usize,
+    pub covered: usize,
+    pub partially_covered: usize,
+    pub not_covered: usize,
+    pub unknown: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct RiskSummary {
-    pub score: usize,
+    pub score: f64,
+    pub not_covered: usize,
+    pub partially_covered: usize,
     pub added_complexity: usize,
     pub tier_one_hazards: usize,
 }
@@ -137,14 +150,18 @@ pub struct LanguageSummary {
     pub test: AddedLines,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DiffGroup {
     pub name: String,
     pub kind: String,
     pub start_line: u32,
     pub end_line: u32,
+    pub base_start_line: Option<u32>,
+    pub base_end_line: Option<u32>,
     pub visibility: Visibility,
     pub added_lines: AddedLines,
+    pub verification: VerificationSlices,
+    pub risk: RiskSummary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -196,7 +213,10 @@ pub fn build_diff_plan(
         right
             .risk
             .score
-            .cmp(&left.risk.score)
+            .total_cmp(&left.risk.score)
+            .then_with(|| right.risk.tier_one_hazards.cmp(&left.risk.tier_one_hazards))
+            .then_with(|| right.risk.not_covered.cmp(&left.risk.not_covered))
+            .then_with(|| right.added_lines.code.cmp(&left.added_lines.code))
             .then_with(|| left.path.cmp(&right.path))
     });
     let inventory = build_inventory(&files);
@@ -241,6 +261,13 @@ fn plan_file(
     let head_source = head_file.and_then(|file| file.contents.clone());
     let added_line_numbers = added_line_numbers(base_source.as_deref(), head_source.as_deref());
     let added_lines = summarize_added_lines(head_source.as_deref(), &added_line_numbers, path);
+    let groups = semantic_groups(
+        path,
+        base_source.as_deref(),
+        head_source.as_deref(),
+        &added_line_numbers,
+    );
+    let verification = unavailable_verification(&added_lines);
 
     Some(DiffFile {
         path: path.to_string(),
@@ -248,8 +275,10 @@ fn plan_file(
         change,
         role: source_role(path),
         language: language_for_path(path),
-        groups: semantic_groups(path, head_source.as_deref(), &added_line_numbers),
-        risk: risk_summary(head_source.as_deref(), &added_line_numbers, &added_lines),
+        residual_lines: residual_lines(head_source.as_deref(), &added_line_numbers, path, &groups),
+        risk: risk_summary(head_source.as_deref(), &added_line_numbers, &verification),
+        verification,
+        groups,
         base_source,
         head_source,
         added_lines,
@@ -289,17 +318,34 @@ fn unavailable_evidence() -> EvidenceAvailability {
     }
 }
 
-fn risk_summary(source: Option<&str>, added: &BTreeSet<u32>, lines: &AddedLines) -> RiskSummary {
+fn risk_summary(
+    source: Option<&str>,
+    added: &BTreeSet<u32>,
+    verification: &VerificationSlices,
+) -> RiskSummary {
     let added_complexity = source
         .unwrap_or_default()
         .lines()
         .enumerate()
         .filter(|(index, line)| added.contains(&(*index as u32 + 1)) && is_decision_line(line))
         .count();
+    let tier_one_hazards = 0;
     RiskSummary {
-        score: lines.code + added_complexity,
+        score: verification.not_covered as f64
+            + verification.partially_covered as f64 * 0.5
+            + added_complexity as f64 * 2.0
+            + tier_one_hazards as f64 * 8.0,
+        not_covered: verification.not_covered,
+        partially_covered: verification.partially_covered,
         added_complexity,
-        tier_one_hazards: 0,
+        tier_one_hazards,
+    }
+}
+
+fn unavailable_verification(lines: &AddedLines) -> VerificationSlices {
+    VerificationSlices {
+        unknown: lines.code,
+        ..VerificationSlices::default()
     }
 }
 
@@ -373,8 +419,13 @@ fn summarize_added_lines(source: Option<&str>, added: &BTreeSet<u32>, path: &str
     summary
 }
 
-fn semantic_groups(path: &str, source: Option<&str>, added: &BTreeSet<u32>) -> Vec<DiffGroup> {
-    let Some(source) = source else {
+fn semantic_groups(
+    path: &str,
+    base_source: Option<&str>,
+    head_source: Option<&str>,
+    added: &BTreeSet<u32>,
+) -> Vec<DiffGroup> {
+    let Some(source) = head_source else {
         return Vec::new();
     };
     let extractor = HeuristicExtractor::default();
@@ -382,18 +433,66 @@ fn semantic_groups(path: &str, source: Option<&str>, added: &BTreeSet<u32>) -> V
         path: path.to_string(),
         contents: source.to_string(),
     };
+    let base_units = base_source.map(|contents| {
+        extractor.extract_units(&BlobFile {
+            path: path.to_string(),
+            contents: contents.to_string(),
+        })
+    });
     extractor
         .extract_units(&file)
         .into_iter()
-        .map(|unit| DiffGroup {
-            name: unit.name,
-            kind: unit.kind.as_str().to_string(),
-            start_line: unit.start_line,
-            end_line: unit.end_line,
-            visibility: visibility_for(&unit.signature, unit.kind),
-            added_lines: summarize_group_lines(source, added, path, unit.start_line, unit.end_line),
+        .filter_map(|unit| {
+            let added_lines =
+                summarize_group_lines(source, added, path, unit.start_line, unit.end_line);
+            let base_unit = base_units
+                .as_ref()
+                .and_then(|units| matching_base_unit(units, &unit));
+            include_semantic_group(&unit, base_unit, &added_lines).then(|| {
+                let verification = unavailable_verification(&added_lines);
+                let group_added = group_added_line_numbers(added, unit.start_line, unit.end_line);
+                let visibility = visibility_for(source, &unit);
+                let risk = risk_summary(Some(source), &group_added, &verification);
+                DiffGroup {
+                    name: unit.name,
+                    kind: unit.kind.as_str().to_string(),
+                    start_line: unit.start_line,
+                    end_line: unit.end_line,
+                    base_start_line: base_unit.map(|base| base.start_line),
+                    base_end_line: base_unit.map(|base| base.end_line),
+                    visibility,
+                    risk,
+                    verification,
+                    added_lines,
+                }
+            })
         })
         .collect()
+}
+
+fn matching_base_unit<'a>(
+    base_units: &'a [crate::model::LogicalUnit],
+    head: &crate::model::LogicalUnit,
+) -> Option<&'a crate::model::LogicalUnit> {
+    base_units
+        .iter()
+        .find(|base| base.kind == head.kind && base.name == head.name)
+}
+
+fn include_semantic_group(
+    unit: &crate::model::LogicalUnit,
+    base_unit: Option<&crate::model::LogicalUnit>,
+    added_lines: &AddedLines,
+) -> bool {
+    let has_change = added_lines.code + added_lines.comments + added_lines.other > 0;
+    matches!(
+        (has_change, unit.kind, base_unit.is_some()),
+        (true, UnitKind::Function, _) | (true, _, false)
+    )
+}
+
+fn group_added_line_numbers(added: &BTreeSet<u32>, start: u32, end: u32) -> BTreeSet<u32> {
+    added.range(start..=end).copied().collect()
 }
 
 fn summarize_group_lines(
@@ -403,28 +502,56 @@ fn summarize_group_lines(
     start: u32,
     end: u32,
 ) -> AddedLines {
-    let lines = added
-        .iter()
-        .copied()
-        .filter(|line| *line >= start && *line <= end)
-        .collect();
+    let lines = group_added_line_numbers(added, start, end);
     summarize_added_lines(Some(source), &lines, path)
 }
 
-fn visibility_for(signature: &str, kind: UnitKind) -> Visibility {
-    if kind != UnitKind::Function {
+fn visibility_for(source: &str, unit: &crate::model::LogicalUnit) -> Visibility {
+    if unit.kind != UnitKind::Function {
         return Visibility::Unknown;
     }
-    if signature.contains("private") {
+    let signature = unit.signature.as_str();
+    if ruby_private_context(source, unit.start_line) || signature.contains("private") {
         Visibility::Private
     } else if signature.contains("public")
         || signature.contains("pub ")
+        || signature.starts_with("pub fn")
         || signature.starts_with("def ")
     {
         Visibility::Public
     } else {
         Visibility::Unknown
     }
+}
+
+fn ruby_private_context(source: &str, start_line: u32) -> bool {
+    let preceding = source
+        .lines()
+        .take(start_line.saturating_sub(1) as usize)
+        .collect::<Vec<_>>();
+    preceding
+        .into_iter()
+        .rev()
+        .find_map(|line| match line.trim() {
+            "private" | "protected" => Some(true),
+            "public" => Some(false),
+            _ => None,
+        })
+        .unwrap_or(false)
+}
+
+fn residual_lines(
+    source: Option<&str>,
+    added: &BTreeSet<u32>,
+    path: &str,
+    groups: &[DiffGroup],
+) -> AddedLines {
+    let assigned = groups
+        .iter()
+        .flat_map(|group| group.start_line..=group.end_line)
+        .collect();
+    let residual = added.difference(&assigned).copied().collect();
+    summarize_added_lines(source, &residual, path)
 }
 
 enum LineKind {
@@ -929,9 +1056,9 @@ mod tests {
 
         assert_eq!(plan.files[0].path, "lib/risky.rb");
         assert_eq!(plan.files[0].risk.added_complexity, 1);
-        assert_eq!(plan.files[0].risk.score, 4);
+        assert_eq!(plan.files[0].risk.score, 2.0);
         assert_eq!(plan.files[1].path, "lib/safe.rb");
-        assert_eq!(plan.files[1].risk.score, 1);
+        assert_eq!(plan.files[1].risk.score, 0.0);
     }
 
     #[test]
@@ -945,6 +1072,50 @@ mod tests {
 
         assert_eq!(plan.evidence, unavailable_evidence());
         assert_eq!(plan.files[0].risk.tier_one_hazards, 0);
+    }
+
+    #[test]
+    fn groups_changed_public_and_private_ruby_methods_with_matched_base_ranges() {
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            vec![file(
+                "lib/app.rb",
+                "class App\n  def run\n    old\n  end\n\n  private\n\n  def hide\n    old\n  end\nend\n",
+            )],
+            vec![file(
+                "lib/app.rb",
+                "class App\n  def run\n    new\n  end\n\n  private\n\n  def hide\n    new\n  end\nend\n",
+            )],
+        );
+
+        let groups = &plan.files[0].groups;
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].visibility, Visibility::Public);
+        assert_eq!(groups[0].base_start_line, Some(2));
+        assert_eq!(groups[1].visibility, Visibility::Private);
+        assert_eq!(groups[1].base_start_line, Some(8));
+        assert_eq!(groups[0].verification.unknown, 1);
+        assert_eq!(plan.files[0].residual_lines, AddedLines::default());
+    }
+
+    #[test]
+    fn keeps_unassigned_added_lines_in_the_residual_raw_diff_bucket() {
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            Vec::new(),
+            vec![file(
+                "lib/app.rb",
+                "require \"json\"\n\ndef run\n  value\nend\n",
+            )],
+        );
+
+        let changed = &plan.files[0];
+        assert_eq!(changed.groups.len(), 1);
+        assert_eq!(changed.residual_lines.code, 1);
+        assert_eq!(changed.verification.unknown, 3);
+        assert_eq!(changed.risk.not_covered, 0);
     }
 
     #[test]

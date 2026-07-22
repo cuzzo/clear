@@ -10,19 +10,27 @@ export interface DiffFile {
   readonly base_source: string | null;
   readonly head_source: string | null;
   readonly added_lines: AddedLines;
+  readonly verification: VerificationSlices;
+  readonly residual_lines: AddedLines;
   readonly groups: readonly DiffGroup[];
-  readonly risk: { readonly score: number; readonly added_complexity: number; readonly tier_one_hazards: number };
+  readonly risk: RiskSummary;
 }
 
 export interface AddedLines { readonly code: number; readonly comments: number; readonly other: number }
+export interface VerificationSlices { readonly covered_and_killed: number; readonly covered: number; readonly partially_covered: number; readonly not_covered: number; readonly unknown: number }
+export interface RiskSummary { readonly score: number; readonly not_covered: number; readonly partially_covered: number; readonly added_complexity: number; readonly tier_one_hazards: number }
 
 export interface DiffGroup {
   readonly name: string;
   readonly kind: string;
   readonly start_line: number;
   readonly end_line: number;
+  readonly base_start_line: number | null;
+  readonly base_end_line: number | null;
   readonly visibility: "public" | "private" | "unknown";
   readonly added_lines: AddedLines;
+  readonly verification: VerificationSlices;
+  readonly risk: RiskSummary;
 }
 
 export interface DiffPlan {
