@@ -406,6 +406,23 @@ fn cpp_special_nullable_sources_preserve_throwing_new_as_unknown() -> Result<()>
 }
 
 #[test]
+fn cpp_macro_alias_template_and_overload_boundaries_stay_unknown() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_cpp_boundaries.cpp"), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    for function in ["macro_and_alias_boundary", "overload_boundary"] {
+        assert!(output.nullable_operations.iter().any(|operation| {
+            operation.path.ends_with("nullable_cpp_boundaries.cpp")
+                && operation.state_at_operation == "unknown"
+                && !operation.complete
+                && operation.operation_kind == "pointer_dereference"
+                && operation.node_id.contains(function)
+        }), "{function}");
+    }
+    Ok(())
+}
+
+#[test]
 fn typescript_variable_bound_callables_are_emitted_as_project_methods() -> Result<()> {
     let document = syntax::parse_file(fixture("typescript_callable.ts"), Language::TypeScript)?;
     let output = profile::extract(&document, Profile::Espalier);
