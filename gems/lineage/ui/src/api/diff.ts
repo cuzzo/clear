@@ -93,6 +93,7 @@ function isDiffFile(value: unknown): boolean {
     && nullableString(value.base_source)
     && nullableString(value.head_source)
     && isAddedLines(value.added_lines)
+    && isAddedLines(value.removed_lines)
     && isVerification(value.verification)
     && isAddedLines(value.residual_lines)
     && isRisk(value.risk)

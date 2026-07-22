@@ -112,6 +112,7 @@ pub struct DiffFile {
     pub base_source: Option<String>,
     pub head_source: Option<String>,
     pub added_lines: AddedLines,
+    pub removed_lines: AddedLines,
     pub verification: VerificationSlices,
     pub residual_lines: AddedLines,
     pub groups: Vec<DiffGroup>,
@@ -361,24 +362,27 @@ fn plan_file(
     let change = change_kind(base_file, head_file, previous_path.as_ref());
     let base_source = base_file.and_then(|file| file.contents.clone());
     let head_source = head_file.and_then(|file| file.contents.clone());
-    let added_line_numbers = added_line_numbers(base_source.as_deref(), head_source.as_deref());
+    let added_lines_set = added_line_numbers(base_source.as_deref(), head_source.as_deref());
     let classification = classify_source_lines(head_source.as_deref(), path);
     let semantic_classification_available = classification.is_some();
     let line_kinds = classification.unwrap_or_default();
-    let added_lines = summarize_added_lines(&line_kinds, &added_line_numbers);
+    let added_lines = summarize_added_lines(&line_kinds, &added_lines_set);
+    let removed_line_numbers = added_line_numbers(head_source.as_deref(), base_source.as_deref());
+    let base_line_kinds = classify_source_lines(base_source.as_deref(), path).unwrap_or_default();
+    let removed_lines = summarize_added_lines(&base_line_kinds, &removed_line_numbers);
     let groups = semantic_classification_available
         .then(|| {
             semantic_groups(
                 path,
                 base_source.as_deref(),
                 head_source.as_deref(),
-                &added_line_numbers,
+                &added_lines_set,
                 &line_kinds,
             )
         })
         .unwrap_or_default();
     let verification = unavailable_verification(&added_lines);
-    let line_verification = unknown_line_verification(&line_kinds, &added_line_numbers);
+    let line_verification = unknown_line_verification(&line_kinds, &added_lines_set);
     let mut file = DiffFile {
         path: path.to_string(),
         previous_path,
@@ -386,14 +390,15 @@ fn plan_file(
         role: source_role(path),
         language: language_for_path(path),
         semantic_classification_available,
-        residual_lines: residual_lines(&line_kinds, &added_line_numbers, &groups),
-        risk: risk_summary(head_source.as_deref(), &added_line_numbers, &verification),
+        residual_lines: residual_lines(&line_kinds, &added_lines_set, &groups),
+        risk: risk_summary(head_source.as_deref(), &added_lines_set, &verification),
         verification,
         groups,
         sarif_findings: Vec::new(),
         base_source,
         head_source,
         added_lines,
+        removed_lines,
         line_verification,
     };
     refresh_file_verification(&mut file);

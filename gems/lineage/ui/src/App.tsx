@@ -138,6 +138,7 @@ function FileReview({ file, onRaw, sideBySide }: { readonly file: DiffFile; read
       <FindingSummary findings={file.sarif_findings} />
       {file.semantic_classification_available && publicGroups.sort(groupOrder).map((group) => <GroupReview file={file} group={group} key={`${group.kind}:${group.name}:${group.start_line}`} sideBySide={sideBySide} />)}
       <p>Other changed lines: {file.residual_lines.code} code, {file.residual_lines.comments} comments. <button onClick={() => onRaw(file.path)}>Open raw file diff</button></p>
+      {(file.removed_lines.code > 0 || file.removed_lines.comments > 0) && <details><summary>Removals</summary><p>{file.removed_lines.code} code lines and {file.removed_lines.comments} comments removed; review in the raw diff.</p></details>}
       {file.semantic_classification_available && privateGroups.length > 0 && <PrivateReview file={file} groups={privateGroups} sideBySide={sideBySide} />}
       {(file.base_source === null || file.head_source === null) && <p>Binary or one-sided change; open the raw file view for details.</p>}
     </div>}
