@@ -25,7 +25,7 @@ export type ResolvedSarifFinding = { path: string, finding: SarifFindingSummary,
 
 export type DiffGroup = { name: string, kind: string, start_line: number, end_line: number, base_start_line: number | null, base_end_line: number | null, visibility: Visibility, added_lines: AddedLines, verification: VerificationSlices, sarif_findings: Array<SarifFindingSummary>, risk: RiskSummary, };
 
-export type SarifFindingSummary = { source: string, tool: string, rule_id: string, level: string, message: string, fingerprint: string, tier_one: boolean, status: string, start_line: number, end_line: number, };
+export type SarifFindingSummary = { source: string, tool: string, rule_id: string, level: string, category: string, message: string, fingerprint: string, tier: number | null, tier_one: boolean, status: string, start_line: number, end_line: number, };
 
 export type AddedLines = { code: number, comments: number, other: number, };
 

@@ -6,7 +6,7 @@ const { diffPreview } = vi.hoisted(() => ({ diffPreview: vi.fn() }));
 const lines = { code: 1, comments: 0, other: 0 };
 const verification = { covered_and_killed: 0, covered: 0, partially_covered: 0, not_covered: 0, unknown: 1 };
 const risk = { score: 2, not_covered: 0, partially_covered: 0, added_complexity: 1, tier_one_hazards: 0 };
-const findings = [{ source: "scanner", tool: "Scanner", rule_id: "rule", level: "warning", message: "unsafe value", fingerprint: "unsafe", tier_one: true, status: "new", start_line: 1, end_line: 1 }];
+const findings = [{ source: "scanner", tool: "Scanner", rule_id: "rule", level: "warning", category: "hazard", message: "unsafe value", fingerprint: "unsafe", tier: 1, tier_one: true, status: "new", start_line: 1, end_line: 1 }];
 const visibility = { public: verification, private: { ...verification, unknown: 0 }, unknown: { ...verification, unknown: 0 } };
 
 vi.mock("./monaco/DiffPreview", () => ({ DiffPreview: diffPreview }));
@@ -38,7 +38,7 @@ describe("App", () => {
           scope: { base_oid: "a".repeat(40), head_oid: "b".repeat(40), evidence_scope: { revision: "b".repeat(40), selection: "production", mutant_corpus: "mutants", test_set: "suite" }, policy_version: "diff-risk/v1" },
           inventory: { changed_files: 2, changed_directories: 1, added_files: 1, modified_files: 1, deleted_files: 0, renamed_files: 0, by_role: {}, configuration_paths: [{ path: "Gemfile", kind: "ruby_manifest" }], documentation_paths: ["README.md"], generated_paths: ["generated/app.ts"], lockfile_paths: ["Gemfile.lock"] },
           dependency_changes: [{ manifest_path: "Gemfile", status: "unknown_package_file", entries: [] }, { manifest_path: "Cargo.toml", status: "exact", entries: [{ name: "serde", scope: "runtime", before: null, after: "1" }] }, { manifest_path: "package.json", status: "exact", entries: [] }],
-          language_summaries: [{ language: "ruby", production: { code: 1, comments: 0, other: 0 }, test: { code: 0, comments: 0, other: 0 }, production_verification: verification, production_by_visibility: visibility, test_assertions: null }],
+          language_summaries: [{ language: "ruby", production: { code: 1, comments: 2, other: 0 }, test: { code: 0, comments: 3, other: 0 }, production_verification: verification, production_by_visibility: visibility, test_assertions: null }],
           evidence: { coverage: "unknown", mutation: "unknown", hazards: "unknown", sarif: "unknown" },
           resolved_sarif_findings: [{ path: "lib/app.rb", finding: { ...findings[0], status: "resolved" } }],
           files: [
@@ -60,7 +60,7 @@ describe("App", () => {
     expect(screen.getByText(/unknown package-file change/)).toBeInTheDocument();
     expect(screen.getByText(/serde \(runtime\): not declared → 1/)).toBeInTheDocument();
     expect(screen.getByText(/package.json: no declared dependency changes/)).toBeInTheDocument();
-    expect(screen.getByText(/ruby: 1 production code lines.*public 1.*assertions unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/ruby: 1 production code lines · 2 production comments.*public 1.*0 test code lines · 3 test comments · assertions unavailable/)).toBeInTheDocument();
     expect(screen.getByText(/Evidence: coverage unknown/)).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Open source" })[0]).toHaveAttribute("href", `/?path=lib%2Fapp.rb&commit=${"b".repeat(40)}#L1`);
     expect(screen.getByText(/Resolved SARIF findings: lib\/app.rb Scanner\/rule line 1: unsafe value/)).toBeInTheDocument();
@@ -80,7 +80,7 @@ describe("App", () => {
     expect(window.location.search).toContain("selection=production");
     fireEvent.click(screen.getByRole("button", { name: /lib\/app.rb/ }));
     expect(screen.getByText(/Removals/)).toBeInTheDocument();
-    expect(screen.getAllByText(/SARIF findings: new tier-1 Scanner\/rule line 1: unsafe value/)).toHaveLength(2);
+    expect(screen.getAllByText(/SARIF findings: new warning\/hazard tier-1 Scanner\/rule line 1: unsafe value/)).toHaveLength(2);
     expect(screen.getByText(/Private changes \(2 functions/)).toBeInTheDocument();
     expect(diffPreview).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /function run/ }));

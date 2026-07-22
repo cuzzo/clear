@@ -866,6 +866,16 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("new")
         );
+        assert_eq!(
+            json.pointer("/data/files/0/sarif_findings/0/category")
+                .and_then(|value| value.as_str()),
+            Some("hazard")
+        );
+        assert_eq!(
+            json.pointer("/data/files/0/sarif_findings/0/tier")
+                .and_then(|value| value.as_u64()),
+            Some(1)
+        );
     }
 
     #[tokio::test]

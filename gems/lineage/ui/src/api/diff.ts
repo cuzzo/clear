@@ -157,8 +157,9 @@ function isDiffGroup(value: unknown): boolean {
 }
 
 function isFinding(value: unknown): boolean {
-  return hasStrings(value, ["source", "tool", "rule_id", "level", "message", "fingerprint", "status"])
+  return hasStrings(value, ["source", "tool", "rule_id", "level", "category", "message", "fingerprint", "status"])
     && isRecord(value)
+    && nullableNumber(value.tier)
     && typeof value.tier_one === "boolean"
     && hasNumbers(value, ["start_line", "end_line"]);
 }

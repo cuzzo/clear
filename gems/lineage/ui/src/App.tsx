@@ -181,7 +181,7 @@ function DependencySummary({ change }: { readonly change: DependencyChange }): R
 
 function LanguageSummaryCard({ summary }: { readonly summary: DiffPlan["language_summaries"][number] }): React.JSX.Element {
   const visibility = summary.production_by_visibility;
-  return <p>{summary.language}: {summary.production.code} production code lines · public {verificationTotal(visibility.public)} · private {verificationTotal(visibility.private)} · unknown visibility {verificationTotal(visibility.unknown)} · <VerificationSummary verification={summary.production_verification} /> · {summary.test.code} test code lines · assertions {summary.test_assertions ?? "unavailable"}</p>;
+  return <p>{summary.language}: {summary.production.code} production code lines · {summary.production.comments} production comments · public {verificationTotal(visibility.public)} · private {verificationTotal(visibility.private)} · unknown visibility {verificationTotal(visibility.unknown)} · <VerificationSummary verification={summary.production_verification} /> · {summary.test.code} test code lines · {summary.test.comments} test comments · assertions {summary.test_assertions ?? "unavailable"}</p>;
 }
 
 function InventoryPaths({ label, paths }: { readonly label: string; readonly paths: readonly string[] }): React.JSX.Element | null {
@@ -245,7 +245,7 @@ function RiskMetrics({ risk, verification }: { readonly risk: RiskSummary; reado
 
 function FindingSummary({ findings }: { readonly findings: DiffFile["sarif_findings"] }): React.JSX.Element | null {
   if (findings.length === 0) return null;
-  return <p className="metrics">SARIF findings: {findings.map((finding) => `${finding.status}${finding.tier_one ? " tier-1" : ""} ${finding.tool}/${finding.rule_id} line ${finding.start_line}: ${finding.message}`).join(" · ")}</p>;
+  return <p className="metrics">SARIF findings: {findings.map((finding) => `${finding.status} ${finding.level}/${finding.category} ${finding.tier === null ? "unclassified tier" : `tier-${finding.tier}`} ${finding.tool}/${finding.rule_id} line ${finding.start_line}: ${finding.message}`).join(" · ")}</p>;
 }
 
 function sourceRange(source: string | null, start: number | null, end: number | null): string {

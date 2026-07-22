@@ -1338,7 +1338,7 @@ impl Storage {
                 .join(", ");
             let source_filter = source.map(|_| " AND source = ?").unwrap_or("");
             let sql = format!(
-                "SELECT path, source, tool_name, rule_id, level, message, fingerprint, properties_json, start_line, \
+                "SELECT path, source, tool_name, rule_id, level, category, message, fingerprint, properties_json, start_line, \
                  COALESCE(end_line, start_line) FROM sarif_findings \
                  WHERE commit_hash = ?{source_filter} AND path IN ({placeholders}) \
                  ORDER BY path, start_line, rule_id, finding_key"
@@ -1351,6 +1351,8 @@ impl Storage {
             values.extend(paths.iter().cloned().map(rusqlite::types::Value::Text));
             let mut statement = self.conn.prepare(&sql)?;
             let rows = statement.query_map(rusqlite::params_from_iter(values), |row| {
+                let properties_json: String = row.get(8)?;
+                let tier = Self::sarif_tier(&properties_json);
                 Ok(SarifObservation {
                     path: row.get(0)?,
                     finding: SarifFindingSummary {
@@ -1358,12 +1360,14 @@ impl Storage {
                         tool: row.get(2)?,
                         rule_id: row.get(3)?,
                         level: row.get(4)?,
-                        message: row.get(5)?,
-                        fingerprint: row.get(6)?,
-                        tier_one: Self::sarif_tier_one(&row.get::<_, String>(7)?),
+                        category: row.get(5)?,
+                        message: row.get(6)?,
+                        fingerprint: row.get(7)?,
+                        tier,
+                        tier_one: tier == Some(1),
                         status: "partial".into(),
-                        start_line: row.get::<_, i64>(8)?.max(1) as u32,
-                        end_line: row.get::<_, i64>(9)?.max(1) as u32,
+                        start_line: row.get::<_, i64>(9)?.max(1) as u32,
+                        end_line: row.get::<_, i64>(10)?.max(1) as u32,
                     },
                 })
             })?;
@@ -1372,7 +1376,7 @@ impl Storage {
         Ok(observations)
     }
 
-    fn sarif_tier_one(properties_json: &str) -> bool {
+    fn sarif_tier(properties_json: &str) -> Option<u8> {
         serde_json::from_str::<serde_json::Value>(properties_json)
             .ok()
             .and_then(|value| {
@@ -1381,7 +1385,7 @@ impl Storage {
                     .and_then(serde_json::Value::as_i64)
                     .or_else(|| value.get("risk_tier").and_then(serde_json::Value::as_i64))
             })
-            == Some(1)
+            .and_then(|tier| u8::try_from(tier).ok())
     }
 
     #[allow(clippy::too_many_arguments)]
