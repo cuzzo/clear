@@ -289,11 +289,24 @@ pub fn build_diff_plan(
     base_files: Vec<RevisionFile>,
     head_files: Vec<RevisionFile>,
 ) -> DiffPlan {
+    build_diff_plan_with_renames(base_oid, head_oid, base_files, head_files, BTreeMap::new())
+}
+
+/// Builds a plan with Git-provided rename identity. Content-identical fallback
+/// detection remains available for callers that only have two snapshots.
+pub fn build_diff_plan_with_renames(
+    base_oid: impl Into<String>,
+    head_oid: impl Into<String>,
+    base_files: Vec<RevisionFile>,
+    head_files: Vec<RevisionFile>,
+    git_renames: BTreeMap<String, String>,
+) -> DiffPlan {
     let base_oid = base_oid.into();
     let head_oid = head_oid.into();
     let base = file_map(base_files);
     let head = file_map(head_files);
-    let renamed = renamed_paths(&base, &head);
+    let mut renamed = renamed_paths(&base, &head);
+    renamed.extend(git_renames);
     let mut files = changed_paths(&base, &head)
         .into_iter()
         .filter_map(|path| plan_file(&path, &base, &head, &renamed))
@@ -353,12 +366,16 @@ fn plan_file(
     head: &BTreeMap<String, RevisionFile>,
     renamed: &BTreeMap<String, String>,
 ) -> Option<DiffFile> {
-    let base_file = base.get(path);
+    let previous_path = previous_path(path, renamed);
+    let base_file = base.get(path).or_else(|| {
+        previous_path
+            .as_ref()
+            .and_then(|previous| base.get(previous))
+    });
     let head_file = head.get(path);
     if base_file == head_file || is_renamed_source(path, renamed) {
         return None;
     }
-    let previous_path = previous_path(path, renamed);
     let change = change_kind(base_file, head_file, previous_path.as_ref());
     let base_source = base_file.and_then(|file| file.contents.clone());
     let head_source = head_file.and_then(|file| file.contents.clone());
@@ -368,7 +385,11 @@ fn plan_file(
     let line_kinds = classification.unwrap_or_default();
     let added_lines = summarize_added_lines(&line_kinds, &added_lines_set);
     let removed_line_numbers = added_line_numbers(head_source.as_deref(), base_source.as_deref());
-    let base_line_kinds = classify_source_lines(base_source.as_deref(), path).unwrap_or_default();
+    let base_line_kinds = classify_source_lines(
+        base_source.as_deref(),
+        previous_path.as_deref().unwrap_or(path),
+    )
+    .unwrap_or_default();
     let removed_lines = summarize_added_lines(&base_line_kinds, &removed_line_numbers);
     let groups = semantic_classification_available
         .then(|| {
@@ -420,6 +441,9 @@ fn change_kind(
     head_file: Option<&RevisionFile>,
     previous_path: Option<&String>,
 ) -> FileChangeKind {
+    if previous_path.is_some() && head_file.is_some() {
+        return FileChangeKind::Renamed;
+    }
     match (base_file, head_file, previous_path) {
         (None, Some(_), Some(_)) => FileChangeKind::Renamed,
         (None, Some(_), None) => FileChangeKind::Added,

@@ -1,11 +1,11 @@
-use crate::diff::{build_diff_plan, DiffPlan, RevisionFile};
+use crate::diff::{build_diff_plan_with_renames, DiffPlan, RevisionFile};
 use crate::model::{BlobFile, CommitMetadata};
 use crate::vcs::{CommitChanges, VcsProvider};
 use anyhow::{Context, Result};
 use git2::{ObjectType, Repository, Sort, Tree};
 use std::path::{Path, PathBuf};
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub struct GitProvider {
     path: PathBuf,
@@ -74,7 +74,10 @@ impl GitProvider {
         let head_oid = self.resolve_commit(head_revision)?;
         let base = self.revision_snapshot(&base_oid)?;
         let head = self.revision_snapshot(&head_oid)?;
-        Ok(build_diff_plan(base_oid, head_oid, base, head))
+        let renames = self.diff_renames(&base_oid, &head_oid)?;
+        Ok(build_diff_plan_with_renames(
+            base_oid, head_oid, base, head, renames,
+        ))
     }
 
     /// Resolves a review pair to immutable object IDs. With no explicit base,
@@ -111,6 +114,29 @@ impl GitProvider {
         let mut files = Vec::new();
         collect_revision_tree(&repo, &commit.tree()?, PathBuf::new(), &mut files)?;
         Ok(files)
+    }
+
+    fn diff_renames(&self, base_oid: &str, head_oid: &str) -> Result<BTreeMap<String, String>> {
+        let repo = Repository::open(&self.path)?;
+        let base = repo.find_commit(git2::Oid::from_str(base_oid)?)?.tree()?;
+        let head = repo.find_commit(git2::Oid::from_str(head_oid)?)?.tree()?;
+        let mut diff = repo.diff_tree_to_tree(Some(&base), Some(&head), None)?;
+        let mut options = git2::DiffFindOptions::new();
+        options.renames(true);
+        diff.find_similar(Some(&mut options))?;
+        Ok(diff
+            .deltas()
+            .filter_map(|delta| {
+                (delta.status() == git2::Delta::Renamed)
+                    .then(|| {
+                        Some((
+                            delta.old_file().path()?.to_str()?.to_string(),
+                            delta.new_file().path()?.to_str()?.to_string(),
+                        ))
+                    })
+                    .flatten()
+            })
+            .collect())
     }
 }
 
@@ -573,6 +599,53 @@ mod tests {
             provider.diff_revisions(Some(&base), Some("HEAD"))?,
             (base, head)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn diff_plan_preserves_git_detected_renames_with_edits() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path())?;
+        let base = create_commit(
+            &repo,
+            "base",
+            &[(
+                "src/old.rs",
+                "pub fn value() -> i32 {\n    let base = 1;\n    base + 1\n}\n",
+            )],
+        )?;
+        let workdir = repo.workdir().unwrap();
+        fs::create_dir_all(workdir.join("src"))?;
+        fs::rename(workdir.join("src/old.rs"), workdir.join("src/new.rs"))?;
+        let mut index = repo.index()?;
+        index.remove_path(Path::new("src/old.rs"))?;
+        index.write()?;
+        let head = create_commit(
+            &repo,
+            "rename and edit",
+            &[(
+                "src/new.rs",
+                "pub fn value() -> i32 {\n    let base = 2;\n    base + 1\n}\n",
+            )],
+        )?;
+        let plan = GitProvider::open(dir.path())?.diff_plan(&base, &head)?;
+        let file = plan
+            .files
+            .iter()
+            .find(|file| file.path == "src/new.rs")
+            .unwrap();
+        assert_eq!(file.change, crate::diff::FileChangeKind::Renamed);
+        assert_eq!(file.previous_path.as_deref(), Some("src/old.rs"));
+        assert_eq!(
+            file.base_source.as_deref(),
+            Some("pub fn value() -> i32 {\n    let base = 1;\n    base + 1\n}\n")
+        );
+        assert_eq!(
+            file.head_source.as_deref(),
+            Some("pub fn value() -> i32 {\n    let base = 2;\n    base + 1\n}\n")
+        );
+        assert_eq!(plan.inventory.renamed_files, 1);
+        assert_eq!(plan.inventory.deleted_files, 0);
         Ok(())
     }
 
