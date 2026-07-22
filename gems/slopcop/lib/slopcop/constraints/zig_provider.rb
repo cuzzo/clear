@@ -87,6 +87,7 @@ module SlopCop
       def add_callback_finding(out, evidence, cb_sites, path, line)
         site = cb_sites[[path, line]]
         return unless site
+        return unless site.fetch(:coverage_required, true)
         return if LanguageProvider.covered?(evidence, site)
 
         out << Finding.new(
@@ -106,9 +107,7 @@ module SlopCop
           paths,
           repo: repo,
           language_extension: ".zig",
-          hazard_type_filter: "zig_callback_invocation",
-          required_evidence: "nil-kill",
-          label: "Zig callback invocation site"
+          hazard_type_filter: "zig_callback_invocation"
         )
       end
 
@@ -129,10 +128,10 @@ module SlopCop
         end
         cb_sites = cb_paths.empty? ? [] : callback_hazards(repo, cb_paths)
         loom_sites = LoomAtomicCoverage.scan_atomic_sites(scope, repo).map do |site|
-          hazard_site(site, "zig_loom_atomic", "loom")
+          hazard_site(site, "zig_loom_atomic")
         end
         vopr_sites = VoprCoverage.scan_sites(scope, repo).map do |site|
-          hazard_site(site, "zig_vopr_#{site[:category]}", "vopr")
+          hazard_site(site, "zig_vopr_#{site[:category]}")
         end
         wait_files = WaitLoopCoverage.scan_source_files(scope, repo)
         wait_loops, = WaitLoopCoverage.parse_loops(wait_files, repo)
@@ -143,8 +142,7 @@ module SlopCop
               line: loop.begin_line,
               source: source_line(repo, loop.file, loop.begin_line)
             },
-            "zig_wait_loop",
-            "hammer"
+            "zig_wait_loop"
           )
         end
         (loom_sites + vopr_sites + wait_sites + cb_sites)
@@ -155,6 +153,8 @@ module SlopCop
       def add_loom_finding(out, evidence, path, line, source)
         return unless loom_site?(source)
         return if loom_covered?(evidence, path, line, source)
+        hazard_type = "zig_loom_atomic"
+        required_evidence = FactMineProviderHelper.required_evidence_for(hazard_type)
 
         out << Finding.new(
           path: path,
@@ -162,8 +162,8 @@ module SlopCop
           rule_id: "slopcop-zig-loom-uncovered",
           message: "changed atomic/interleaving site has no Loom coverage evidence",
           source: source.strip,
-          hazard_type: "zig_loom_atomic",
-          required_evidence: "loom",
+          hazard_type: hazard_type,
+          required_evidence: required_evidence,
           severity: "warning"
         )
       end
@@ -172,6 +172,8 @@ module SlopCop
         category = vopr_category(source)
         return unless category
         return if vopr_covered?(evidence, path, line, category)
+        hazard_type = "zig_vopr_#{category}"
+        required_evidence = FactMineProviderHelper.required_evidence_for(hazard_type)
 
         label = VoprCoverage::CATEGORY_LABEL.fetch(category, category).to_s
         out << Finding.new(
@@ -180,8 +182,8 @@ module SlopCop
           rule_id: "slopcop-zig-vopr-uncovered",
           message: "changed #{label} site has no VOPR coverage evidence",
           source: source.strip,
-          hazard_type: "zig_vopr_#{category}",
-          required_evidence: "vopr",
+          hazard_type: hazard_type,
+          required_evidence: required_evidence,
           severity: "warning"
         )
       end
@@ -191,14 +193,15 @@ module SlopCop
           wait_indexes ||= wait_loop_indexes(repo)
           tag = begin_match[1]
           unless wait_indexes[:cover_tags].include?(tag)
+            hazard_type = "zig_wait_loop"
             out << Finding.new(
               path: path,
               line: line,
               rule_id: "slopcop-zig-wait-loop-unpaired",
               message: "changed wait-loop tag `#{tag}` has no HAMMER-COVERS marker",
               source: source.strip,
-              hazard_type: "zig_wait_loop",
-              required_evidence: "hammer",
+              hazard_type: hazard_type,
+              required_evidence: FactMineProviderHelper.required_evidence_for(hazard_type),
               severity: "warning"
             )
           end
@@ -206,14 +209,15 @@ module SlopCop
           wait_indexes ||= wait_loop_indexes(repo)
           tag = cover_match[1]
           unless wait_indexes[:loop_tags].include?(tag)
+            hazard_type = "zig_wait_loop"
             out << Finding.new(
               path: path,
               line: line,
               rule_id: "slopcop-zig-wait-loop-unpaired",
               message: "changed HAMMER-COVERS tag `#{tag}` has no source wait-loop marker",
               source: source.strip,
-              hazard_type: "zig_wait_loop",
-              required_evidence: "hammer",
+              hazard_type: hazard_type,
+              required_evidence: FactMineProviderHelper.required_evidence_for(hazard_type),
               severity: "warning"
             )
           end
@@ -271,13 +275,17 @@ module SlopCop
         File.readlines(file)[line.to_i - 1].to_s.rstrip
       end
 
-      def hazard_site(site, hazard_type, required_evidence)
+      def hazard_site(site, hazard_type)
+        policy = FactMineProviderHelper.hazard_policy(hazard_type)
         {
           path: site[:file],
           line: site[:line],
           source: site[:source].to_s.strip,
           hazard_type: hazard_type,
-          required_evidence: required_evidence
+          required_evidence: FactMineProviderHelper.required_evidence_for(hazard_type),
+          label: policy&.fetch("label", "hazard site"),
+          hazard_kind: policy&.fetch("kind", "unknown"),
+          coverage_required: policy.nil? ? true : policy.fetch("coverage_required", true)
         }
       end
     end

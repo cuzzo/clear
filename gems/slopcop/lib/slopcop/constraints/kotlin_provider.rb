@@ -34,8 +34,6 @@ module SlopCop
           repo: repo,
           language_extension: ".kt",
           hazard_type_filter: ["kotlin_metaprogramming", "kotlin_callback_invocation"],
-          required_evidence: "nil-kill",
-          label: "Kotlin metaprogramming site"
         )
       end
 

@@ -349,66 +349,44 @@ fn excluded_zig_file(path: &str) -> bool {
         || matches!(name, "all-tests.zig" | "all-fuzz.zig" | "size_check.zig" | "runtime-header.zig")
 }
 
-// FactMine owns the canonical hazard query definitions. `include_str!` can
-// only ever reach files inside this crate's own directory - a path
-// escaping it (as a previous version of this file did, reaching into the
-// sibling fact-mine crate) is absent from a `cargo package`/published
-// tarball and breaks standalone builds. These are therefore vendored
-// copies, not a live reference; `hazard_scm_vendor_test.rs` (monorepo-only,
-// skipped when the sibling tree is unavailable) fails the build the moment
-// a vendored copy drifts from its fact-mine original, so the two scanners
-// still can never silently drift apart.
-const GO_HAZARDS: &str = include_str!("hazards/go_hazards.scm");
-const RUST_HAZARDS: &str = include_str!("hazards/rust_hazards.scm");
-const ZIG_HAZARDS: &str = include_str!("hazards/zig_hazards.scm");
-const C_HAZARDS: &str = include_str!("hazards/c_hazards.scm");
-const CPP_HAZARDS: &str = include_str!("hazards/cpp_hazards.scm");
-const CSHARP_HAZARDS: &str = include_str!("hazards/csharp_hazards.scm");
+// Both scanners consume the same dependency-free contract. The old Lineage
+// copy classified hazard names independently and could turn `unsafe_block`
+// into a race because it contains the substring "lock".
+const GO_HAZARDS: &str = hazard_contract::GO_HAZARDS;
+const RUST_HAZARDS: &str = hazard_contract::RUST_HAZARDS;
+const ZIG_HAZARDS: &str = hazard_contract::ZIG_HAZARDS;
+const C_HAZARDS: &str = hazard_contract::C_HAZARDS;
+const CPP_HAZARDS: &str = hazard_contract::CPP_HAZARDS;
+const CSHARP_HAZARDS: &str = hazard_contract::CSHARP_HAZARDS;
 
-/// A second, independently-evolved implementation of "classify this
-/// hazard_type string", alongside FactMine's own
-/// `fact_mine_rust::syntax::hazards::required_evidence_for_hazard_type`.
-/// Ideally there would be exactly one; a real Cargo dependency on FactMine
-/// (even dev-only, test-only) currently fails to resolve, because the two
-/// crates pin different, non-overlapping versions across 8+ tree-sitter
-/// grammar crates (e.g. tree-sitter-go 0.25.0 here vs 0.23.4 in FactMine).
-/// Until those pins are aligned and a real shared call is possible, treat
-/// any change here as a change to a hazard-classification contract: the
-/// specific, proven danger is an accidental substring collision like
-/// `"unsafe_block".contains("lock")` silently reclassifying an entire
-/// category of hazard - see
-/// `rust_unsafe_hazards_are_not_misclassified_as_a_race_via_the_lock_substring`.
-fn evidence_for_hazard(hazard_type: &str) -> &'static str {
-    if hazard_type.contains("callback") || hazard_type.contains("metaprogramming") {
-        "nil-kill"
-    } else if hazard_type.contains("concurrency") || hazard_type.contains("channel") || hazard_type.contains("waitgroup") || hazard_type.contains("sync") {
-        "concurrency"
-    } else if hazard_type.contains("unsafe_fn") || hazard_type.contains("unsafe_impl") || hazard_type.contains("unsafe_block") || hazard_type.contains("unsafe_operation") {
-        // Must be checked before the "lock" substring match below:
-        // "unsafe_block" contains "lock" (b-lock), which would otherwise
-        // misclassify every Rust unsafe-block hazard as a data race.
-        "miri"
-    } else if hazard_type.contains("race") || hazard_type.contains("lock") {
-        "race"
-    } else if hazard_type.contains("loom") {
-        "loom"
-    } else if hazard_type.contains("tsan") {
-        "tsan"
-    } else if hazard_type.contains("asan") {
-        "asan"
-    } else if hazard_type.contains("lsan") || hazard_type.contains("lifetime") {
-        "lsan"
-    } else if hazard_type.contains("ubsan") || hazard_type.contains("arithmetic") || hazard_type.contains("cast") {
-        "ubsan"
-    } else if hazard_type.contains("unsafe") {
-        "unsafe"
-    } else if hazard_type.contains("allocator") {
-        "allocator"
-    } else if hazard_type.contains("vopr") {
-        "vopr"
-    } else {
-        "hazard"
-    }
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ContractPolicy {
+    #[serde(rename = "match")]
+    pattern: String,
+    evidence_provider: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct HazardContract {
+    policies: Vec<ContractPolicy>,
+}
+
+fn hazard_policy(hazard_type: &str) -> Option<&'static ContractPolicy> {
+    static CONTRACT: std::sync::OnceLock<HazardContract> = std::sync::OnceLock::new();
+    CONTRACT
+        .get_or_init(|| {
+            serde_json::from_str(hazard_contract::CONTRACT_JSON)
+                .expect("bundled hazard contract must be valid JSON")
+        })
+        .policies
+        .iter()
+        .find(|policy| {
+            if policy.pattern.contains('*') {
+                hazard_type.contains(policy.pattern.trim_matches('*'))
+            } else {
+                policy.pattern == hazard_type
+            }
+        })
 }
 
 fn query_hazards(
@@ -416,7 +394,6 @@ fn query_hazards(
     contents: &str,
     language: tree_sitter::Language,
     query_str: &str,
-    default_evidence: &str,
 ) -> Vec<HazardSite> {
     let mut parser = tree_sitter::Parser::new();
     if parser.set_language(&language).is_err() {
@@ -449,15 +426,19 @@ fn query_hazards(
                     .trim()
                     .to_string();
                 
-                let evidence = evidence_for_hazard(hazard_type);
-                let final_evidence = if evidence == "hazard" { default_evidence } else { evidence };
+                let Some(policy) = hazard_policy(hazard_type) else {
+                    // Unknown query captures are not silently assigned a
+                    // guessed provider. Add the policy before adding a new
+                    // hazard query.
+                    continue;
+                };
 
                 sites.push(HazardSite {
                     path: path.to_string(),
                     line: start_line,
                     source: line_text,
                     hazard_type: hazard_type.to_string(),
-                    required_evidence: final_evidence.to_string(),
+                    required_evidence: policy.evidence_provider.clone(),
                 });
             }
         }
@@ -472,7 +453,7 @@ fn query_hazards(
 }
 
 pub(crate) fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    let sites = query_hazards(path, contents, tree_sitter_zig::LANGUAGE.into(), ZIG_HAZARDS, "vopr");
+    let sites = query_hazards(path, contents, tree_sitter_zig::LANGUAGE.into(), ZIG_HAZARDS);
 
     let mut final_sites = Vec::new();
     let mut in_loom_exclude = false;
@@ -528,17 +509,17 @@ pub(crate) fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     for (idx, &(_loom_ex, vopr_ex, retry, start_retry, _, retry_direct, line)) in line_states.iter().enumerate() {
         let line_no = (idx + 1) as u32;
         if line.contains("HAMMER-WAIT-LOOP-BEGIN") {
-            final_sites.push(site(path, line_no, line, "zig_wait_loop", "hammer"));
+            final_sites.push(site(path, line_no, line, "zig_wait_loop"));
         }
         if vopr_ex {
             continue;
         }
         if start_retry || retry_direct {
-            final_sites.push(site(path, line_no, line, "zig_vopr_retry", "vopr"));
+            final_sites.push(site(path, line_no, line, "zig_vopr_retry"));
         } else if retry && executable_zig_retry_line(line) && !line.contains("VOPR-") {
             let has_structural_vopr = final_sites.iter().any(|s| s.line == line_no && s.hazard_type.starts_with("zig_vopr_"));
             if !has_structural_vopr {
-                final_sites.push(site(path, line_no, line, "zig_vopr_retry_body", "vopr"));
+                final_sites.push(site(path, line_no, line, "zig_vopr_retry_body"));
             }
         }
     }
@@ -554,23 +535,23 @@ fn executable_zig_retry_line(line: &str) -> bool {
 }
 
 pub(crate) fn scan_go_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_go::LANGUAGE.into(), GO_HAZARDS, "race")
+    query_hazards(path, contents, tree_sitter_go::LANGUAGE.into(), GO_HAZARDS)
 }
 
 pub(crate) fn scan_rust_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_rust::LANGUAGE.into(), RUST_HAZARDS, "miri")
+    query_hazards(path, contents, tree_sitter_rust::LANGUAGE.into(), RUST_HAZARDS)
 }
 
 pub(crate) fn scan_c_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_c::LANGUAGE.into(), C_HAZARDS, "tsan")
+    query_hazards(path, contents, tree_sitter_c::LANGUAGE.into(), C_HAZARDS)
 }
 
 pub(crate) fn scan_cpp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_cpp::LANGUAGE.into(), CPP_HAZARDS, "tsan")
+    query_hazards(path, contents, tree_sitter_cpp::LANGUAGE.into(), CPP_HAZARDS)
 }
 
 pub(crate) fn scan_csharp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_c_sharp::LANGUAGE.into(), CSHARP_HAZARDS, "concurrency")
+    query_hazards(path, contents, tree_sitter_c_sharp::LANGUAGE.into(), CSHARP_HAZARDS)
 }
 
 fn site(
@@ -578,14 +559,15 @@ fn site(
     line: u32,
     source: &str,
     hazard_type: &str,
-    required_evidence: &str,
 ) -> HazardSite {
     HazardSite {
         path: path.to_string(),
         line,
         source: source.trim().to_string(),
         hazard_type: hazard_type.to_string(),
-        required_evidence: required_evidence.to_string(),
+        required_evidence: hazard_policy(hazard_type)
+            .map(|policy| policy.evidence_provider.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -1062,32 +1044,23 @@ mod tests {
 
     #[test]
     fn test_query_hazards_invalid_query_error() {
-        let sites = query_hazards("test.rs", "pub fn foo() {}", tree_sitter_rust::LANGUAGE.into(), "(invalid_pattern", "miri");
+        let sites = query_hazards("test.rs", "pub fn foo() {}", tree_sitter_rust::LANGUAGE.into(), "(invalid_pattern");
         assert!(sites.is_empty());
     }
 
     #[test]
-    fn test_evidence_for_hazard_unmatched_keywords() {
-        assert_eq!(evidence_for_hazard("allocator_leak"), "allocator");
-        assert_eq!(evidence_for_hazard("vopr_io"), "vopr");
-        assert_eq!(evidence_for_hazard("unknown_hazard"), "hazard");
+    fn hazard_policy_comes_from_shared_contract() {
+        assert_eq!(hazard_policy("zig_allocator").unwrap().evidence_provider, "allocator");
+        assert_eq!(hazard_policy("zig_vopr_time").unwrap().evidence_provider, "vopr");
+        assert!(hazard_policy("unknown_hazard").is_none());
     }
 
-    // Real bug: "unsafe_block" contains the substring "lock" (b-LOCK), which
-    // matched the "race"-classifying branch before the intended
-    // "unsafe_*" -> "miri" branch was ever reached - every Rust unsafe
-    // block, fn, impl, and operation hazard was misclassified as a data
-    // race. A test previously asserted this wrong value directly rather
-    // than fixing it; fixed here by checking unsafe_* first.
     #[test]
-    fn rust_unsafe_hazards_are_not_misclassified_as_a_race_via_the_lock_substring() {
-        assert_eq!(evidence_for_hazard("rust_unsafe_block"), "miri");
-        assert_eq!(evidence_for_hazard("rust_unsafe_fn"), "miri");
-        assert_eq!(evidence_for_hazard("rust_unsafe_impl"), "miri");
-        assert_eq!(evidence_for_hazard("rust_unsafe_operation"), "miri");
-        // A genuine lock/race hazard must still classify correctly.
-        assert_eq!(evidence_for_hazard("go_race_lock"), "race");
-        assert_eq!(evidence_for_hazard("go_race_atomic"), "race");
+    fn unsafe_hazards_are_not_classified_by_substrings() {
+        assert_eq!(hazard_policy("rust_unsafe_block").unwrap().evidence_provider, "miri");
+        assert_eq!(hazard_policy("rust_unsafe_fn").unwrap().evidence_provider, "miri");
+        assert_eq!(hazard_policy("go_race_lock").unwrap().evidence_provider, "race");
+        assert_eq!(hazard_policy("go_race_atomic").unwrap().evidence_provider, "race");
     }
 
     #[test]
@@ -1100,14 +1073,9 @@ mod tests {
         assert_eq!(stats.scanned_files, 0);
     }
 
-    // The hazard query text below is vendored (not a live include_str! path
-    // into the sibling fact-mine crate - that broke `cargo package`, since
-    // a published tarball never contains sibling directories). Vendoring
-    // trades a build-time guarantee for a test-time one: this only runs
-    // inside the monorepo checkout (skipped otherwise, e.g. when building
-    // from a published crate) and fails the moment a vendored copy drifts
-    // from its fact-mine original, so the two scanners still cannot
-    // silently diverge.
+    // The runtime query text comes from hazard-contract. These copies remain
+    // as generated/package-local resources; this test checks both generated
+    // copies, so a local edit cannot quietly create a second policy owner.
     #[test]
     fn vendored_hazard_queries_match_fact_mines_originals() {
         let originals_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1125,6 +1093,13 @@ mod tests {
             ("csharp_hazards.scm", CSHARP_HAZARDS),
         ];
         for (name, vendored_text) in vendored {
+            let generated_copy = fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("src/db/hazards")
+                    .join(name),
+            )
+            .unwrap_or_else(|_| panic!("lineage generated query {name} is missing"));
+            assert_eq!(vendored_text, generated_copy, "lineage generated {name} drifted from hazard-contract");
             let original = fs::read_to_string(originals_dir.join(name))
                 .unwrap_or_else(|_| panic!("fact-mine original {name} is missing"));
             assert_eq!(

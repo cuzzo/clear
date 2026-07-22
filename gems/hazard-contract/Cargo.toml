@@ -1,0 +1,9 @@
+[package]
+name = "hazard-contract"
+version = "0.1.0"
+edition = "2021"
+description = "Dependency-free hazard policy and query resources shared by source scanners"
+license = "PolyForm-Noncommercial-1.0.0"
+
+[lib]
+path = "src/lib.rs"

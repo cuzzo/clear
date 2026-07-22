@@ -24,6 +24,8 @@ module SlopCop
           changed = lines.to_set
           line = hazard[:line] || hazard["line"]
           next unless changed.include?(line)
+          next if hazard.key?(:coverage_required) && !hazard[:coverage_required]
+          next if hazard.key?("coverage_required") && !hazard["coverage_required"]
           next if covered?(evidence, hazard)
 
           req_ev = hazard[:required_evidence] || hazard["required_evidence"]

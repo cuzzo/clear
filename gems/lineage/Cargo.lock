@@ -670,6 +670,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hazard-contract"
+version = "0.1.0"
+
+[[package]]
 name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -932,6 +936,7 @@ dependencies = [
  "axum",
  "clap",
  "git2",
+ "hazard-contract",
  "hex",
  "idna_adapter",
  "openssl-sys",

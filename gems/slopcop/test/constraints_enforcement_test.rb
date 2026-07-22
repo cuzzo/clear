@@ -41,14 +41,6 @@ class ConstraintsEnforcementTest < Minitest::Test
       required_evidence: "race",
       rule_id: "slopcop-go-race-uncovered"
     },
-    "rust" => {
-      filename: "test.rs",
-      source: "fn test(cb: fn()) { cb(); }",
-      line: 1,
-      hazard_type: "rust_callback_invocation",
-      required_evidence: "nil-kill",
-      rule_id: "slopcop-rust-callback-uncovered"
-    },
     "zig" => {
       filename: "zig/runtime/test.zig",
       source: "fn test(cb: anytype) void { cb.store(1, .release); }",
@@ -57,77 +49,13 @@ class ConstraintsEnforcementTest < Minitest::Test
       required_evidence: "loom",
       rule_id: "slopcop-zig-loom-uncovered"
     },
-    "ruby" => {
-      filename: "test.rb",
-      source: "def test(cb) cb.call end",
+    "rust" => {
+      filename: "test.rs",
+      source: "unsafe fn test() {}",
       line: 1,
-      hazard_type: "ruby_callback_invocation",
-      required_evidence: "nil-kill",
-      rule_id: "slopcop-ruby-metaprogramming-uncovered"
-    },
-    "python" => {
-      filename: "test.py",
-      source: "def test(cb): cb()",
-      line: 1,
-      hazard_type: "python_callback_invocation",
-      required_evidence: "nil-kill",
-      rule_id: "slopcop-python-metaprogramming-uncovered"
-    },
-    "javascript" => {
-      filename: "test.js",
-      source: "function test(cb) { cb(); }",
-      line: 1,
-      hazard_type: "javascript_callback_invocation",
-      required_evidence: "nil-kill",
-      rule_id: "slopcop-javascript-metaprogramming-uncovered"
-    },
-    "typescript" => {
-      filename: "test.ts",
-      source: "function test(cb: () => void) { cb(); }",
-      line: 1,
-      hazard_type: "typescript_callback_invocation",
-      required_evidence: "nil-kill",
-      rule_id: "slopcop-typescript-metaprogramming-uncovered"
-    },
-    "lua" => {
-      filename: "test.lua",
-      source: "function test(cb) cb() end",
-      line: 1,
-      hazard_type: "lua_callback_invocation",
-      required_evidence: "nil-kill",
-      rule_id: "slopcop-lua-metaprogramming-uncovered"
-    },
-    "java" => {
-      filename: "test.java",
-      source: "class Demo { void test(Runnable cb) { cb.run(); } }",
-      line: 1,
-      hazard_type: "java_callback_invocation",
-      required_evidence: "nil-kill",
-      rule_id: "slopcop-java-metaprogramming-uncovered"
-    },
-    "kotlin" => {
-      filename: "test.kt",
-      source: "fun test(cb: () -> Unit) { cb() }",
-      line: 1,
-      hazard_type: "kotlin_callback_invocation",
-      required_evidence: "nil-kill",
-      rule_id: "slopcop-kotlin-metaprogramming-uncovered"
-    },
-    "swift" => {
-      filename: "test.swift",
-      source: "func test(cb: () -> Void) { cb() }",
-      line: 1,
-      hazard_type: "swift_callback_invocation",
-      required_evidence: "nil-kill",
-      rule_id: "slopcop-swift-metaprogramming-uncovered"
-    },
-    "php" => {
-      filename: "test.php",
-      source: "<?php function test($cb) { $cb(); }",
-      line: 1,
-      hazard_type: "php_callback_invocation",
-      required_evidence: "nil-kill",
-      rule_id: "slopcop-php-metaprogramming-uncovered"
+      hazard_type: "rust_unsafe_fn",
+      required_evidence: "miri",
+      rule_id: "slopcop-rust-miri-uncovered"
     }
   }
 
@@ -176,15 +104,16 @@ class ConstraintsEnforcementTest < Minitest::Test
     end
   end
 
-  def test_multiple_hazards_on_one_line_are_retained
-    # 5. Multiple hazards on one line are retained
-    with_file("test.rb", "class Foo; def perform; send(:a); send(:b); end; end") do |dir, path|
-      provider = SlopCop::Constraints::RubyProvider
+  def test_multiple_hazards_are_retained
+    # Multiple sanitizer hazards are retained. Dynamic-boundary
+    # sites intentionally do not become line-coverage failures.
+    with_file("test.c", "void f(void) {\n  malloc(1);\n  memcpy(dst, src, n);\n}") do |dir, path|
+      provider = SlopCop::Constraints::CProvider
       no_evidence = SlopCop::Constraints::Evidence.from_specs([], repo: dir)
-      findings = provider.findings(repo: dir, additions: { path => [1] }, evidence: no_evidence)
+      findings = provider.findings(repo: dir, additions: { path => [2, 3] }, evidence: no_evidence)
       assert_equal 2, findings.size
-      assert_equal "ruby_metaprogramming", findings[0].hazard_type
-      assert_equal "ruby_metaprogramming", findings[1].hazard_type
+      assert_equal "c_lsan_lifetime", findings[0].hazard_type
+      assert_equal "c_asan_raw_memory_api", findings[1].hazard_type
     end
   end
 

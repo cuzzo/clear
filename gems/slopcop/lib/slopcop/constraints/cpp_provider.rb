@@ -15,12 +15,13 @@ module SlopCop
       # (gems/fact-mine/src/syntax/cpp_hazards.scm), the same source of
       # truth Lineage's own hazard ingestion uses.
       SYSTEMS_HAZARD_CATEGORIES = [
-        { hazard_type: "cpp_tsan_concurrency", required_evidence: "tsan", label: "C++ atomic/thread/lock site" },
-        { hazard_type: "cpp_asan_raw_memory_api", required_evidence: "asan", label: "C++ raw-memory or unchecked buffer API" },
-        { hazard_type: "cpp_asan_pointer_or_cast", required_evidence: "asan", label: "C++ pointer/cast hazard" },
-        { hazard_type: "cpp_lsan_lifetime", required_evidence: "lsan", label: "C++ allocation/free lifetime site" },
-        { hazard_type: "cpp_ubsan_arithmetic", required_evidence: "ubsan", label: "C++ divide/modulo/shift arithmetic site" },
-        { hazard_type: "cpp_ubsan_cast", required_evidence: "ubsan", label: "C++ cast site" }
+        { hazard_type: "cpp_tsan_concurrency" },
+        { hazard_type: "cpp_asan_raw_memory_api" },
+        { hazard_type: "cpp_asan_pointer_or_cast" },
+        { hazard_type: "cpp_lsan_lifetime" },
+        { hazard_type: "cpp_ubsan_arithmetic" },
+        { hazard_type: "cpp_ubsan_cast" },
+        { hazard_type: "cpp_dynamic_loading" }
       ].freeze
 
       def rules
@@ -61,7 +62,7 @@ module SlopCop
 
       def scan_hazards(repo:, paths: nil)
         categories = SYSTEMS_HAZARD_CATEGORIES + [
-          { hazard_type: "cpp_callback_invocation", required_evidence: "nil-kill", label: "C++ function-pointer invocation site" }
+          { hazard_type: "cpp_callback_invocation" }
         ]
         hazards = FactMineProviderHelper.scan_multi_hazards_via_fact_mine(
           paths, repo: repo, language_extension: EXTENSIONS, categories: categories

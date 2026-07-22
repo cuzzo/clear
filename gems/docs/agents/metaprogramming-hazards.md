@@ -34,7 +34,7 @@ Ruby relies heavily on metaprogramming. We detect the direct invocation of metap
   * `define_method`, `undef_method`, `remove_method`
   * `eval`, `class_eval`, `module_eval`, `instance_eval`
   * `const_get`, `const_set`
-* **Detection Mechanism:** AST parsing or token scanning for calls to these specific methods.
+* **Detection Mechanism:** AST parsing for calls with an explicit `self` or core-module receiver (`Kernel`, `Object`, `Module`, or `Class`). Calls on arbitrary receivers and unqualified user-defined methods are not treated as proof of Ruby metaprogramming; local methods that shadow these names are excluded.
 
 ### 3.2. Python
 Python’s reflective capabilities allow for extensive runtime modification.
@@ -70,8 +70,8 @@ Go is statically typed, making reflection explicit and easily detectable.
 
 ### 3.6. Java / C#
 * **Hazards (Java):** `java.lang.reflect.*` (e.g., `Method.invoke()`, `Class.forName()`, `Field.get()`).
-* **Hazards (C#):** `System.Reflection` (e.g., `MethodInfo.Invoke()`, `Activator.CreateInstance()`, `Type.GetType()`), and the `dynamic` keyword.
-* **Detection Mechanism:** Identifying imports/using statements for reflection libraries and invocations of `.invoke()` / `.Invoke()`.
+* **Hazards (C#):** `System.Reflection` (e.g., `MethodInfo.Invoke()`, `Activator.CreateInstance()`, `Type.GetType()`). The `dynamic` keyword is intentionally not classified by token name alone because it has no receiver or target provenance.
+* **Detection Mechanism:** FactMine uses API-shaped reflection expressions and typed framework identifiers. Receiver-variable names are not treated as type or provenance evidence.
 
 ### 3.7. C / C++ (Static Function Pointers)
 * **Hazards:**
@@ -87,8 +87,8 @@ When a metaprogramming hazard is detected, it is rarely enough to just say "be c
 
 ### 4.1. Code Constraints (Prefixing and Scoping)
 When dynamically invoking methods (like Ruby's `send`), the biggest risk is that an attacker or an unexpected state can invoke *any* method on the object.
-* **Actionable Suggestion:** Prefix the dynamic string to strictly limit the invocation scope.
-* **Example:** Instead of `send(user_input)`, use `send("process_#{user_input}")`. This structurally limits the invocation so that only methods starting with `process_` can be called. Alternatively, validate against a strict allowlist.
+* **Actionable Suggestion:** Use a static allowlist, a restricted receiver interface, or a generated dispatch table.
+* **Important limitation:** Prefixing the string is only a naming convention. `send("process_#{user_input}")` can still invoke any existing private or dangerous `process_*` method, so it is not a complete mitigation by itself. If a prefix is retained as defense in depth, validate the resulting name against an allowlist before dispatch.
 
 ### 4.2. Runtime Telemetry and Exception Tracking
 Because metaprogramming circumvents static types, failures (e.g., `NoMethodError`, `AttributeError`) occur strictly at runtime, often in unpredictable ways.
@@ -97,8 +97,10 @@ Because metaprogramming circumvents static types, failures (e.g., `NoMethodError
 
 ### 4.3. Nil-Kill / Test-Tracing
 Traditional unit tests often fail to thoroughly cover the permutations of dynamic paths created by `method_missing` or `__getattr__`.
-* **Actionable Suggestion:** Leverage nil-kill runtime test-tracing.
-* **Why:** By instrumenting the code during tests, you can observe exactly which dynamic paths are being generated and executed. Test-tracing allows developers to structurally verify that the dynamic dispatch logic was explicitly executed during the test suite, ensuring the dynamic branches aren't silent blind spots.
+* **Actionable Suggestion:** Leverage nil-kill runtime test-tracing as execution evidence.
+* **Why:** By instrumenting the code during tests, you can observe which dynamic paths executed. This is line/site coverage only; it does **not** prove that eval input is safe, reflection targets are constrained, a native function pointer is valid, an allowlist is complete, or callback behavior is correct. Those claims require static constraints and, where applicable, sanitizer or type-specific evidence.
+
+FactMine records this distinction in the shared `hazard-contract` manifest. Dynamic-dispatch, reflection, native-loader, and unresolved callback sites are review boundaries rather than automatically line-coverage obligations. Typed callbacks with a statically known callable type are ordinary interface calls and are not emitted as callback hazards.
 
 ### 4.4. Untestable / Unmitigable Hazards
 Some metaprogramming paradigms are inherently unsafe and offer no reliable mitigation. If there is no good way to test or protect against them, we simply call them out as such.
@@ -123,12 +125,12 @@ To systemize our approach, we can categorize metaprogramming hazards into distin
 ### Class 2: Unconstrained Dynamic Dispatch (e.g., `send(var)`, `call_user_func(var)`)
 * **Description:** Invoking methods or functions where the method name itself is fully dynamic.
 * **Testability:** **Difficult.** A Loom/VOPR/Hammer test could theoretically fuzz inputs to see if a crash occurs (e.g., a `NoMethodError`), but it cannot easily know *which* methods were intentionally exposed.
-* **Work-around / Prefixing:** **Highly Effective.** This hazard is fully mitigated by structurally prefixing the dispatch (e.g., `send("process_#{var}")`) or validating against a strict, static allowlist. This explicitly limits the state space to known, safe bounds.
+* **Work-around / Prefixing:** A prefix alone is not a mitigation: dangerous methods can share the prefix. Use a strict static allowlist, a restricted receiver interface, or a generated dispatch table; a prefix may only narrow the candidates before that check.
 
 ### Class 3: Dynamic State Mutation/Access (e.g., `instance_variable_get(var)`, `getattr(obj, var)`)
 * **Description:** Reading or writing internal object state or properties using dynamic string keys.
 * **Testability:** **Moderate to High.** Nil-kill tracing is highly effective here. If test-tracing identifies the object as a struct/tuple in disguise, it can test whether a dynamic read (`obj[var]`) results in a nullable miss.
-* **Work-around / Prefixing:** **Highly Effective.** Similar to dynamic dispatch, prefixing the state lookup (e.g., `instance_variable_get("@data_#{var}")`) mitigates the risk of leaking or overwriting arbitrary internal state.
+* **Work-around / Prefixing:** A prefix narrows names but does not prove that every matching field is safe. Prefer a typed/restricted interface or a static allowlist of fields, with prefix validation only as an additional guard.
 
 ### Class 4: Catch-All Interception (e.g., `method_missing`, `__getattr__`)
 * **Description:** Overriding the runtime's default behavior for missing methods or properties to intercept unhandled calls.

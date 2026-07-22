@@ -34,8 +34,6 @@ module SlopCop
           repo: repo,
           language_extension: ".java",
           hazard_type_filter: ["java_metaprogramming", "java_callback_invocation"],
-          required_evidence: "nil-kill",
-          label: "Java metaprogramming site"
         )
       end
 

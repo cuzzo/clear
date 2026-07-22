@@ -9,9 +9,9 @@ module SlopCop
     module FactMineProviderHelper
       module_function
 
-      def scan_hazards_via_fact_mine(paths, repo:, language_extension:, hazard_type_filter:, required_evidence:, label:)
+      def scan_hazards_via_fact_mine(paths, repo:, language_extension:, hazard_type_filter:, required_evidence: nil, label: nil)
         hazard_sites_via_fact_mine(paths, repo: repo, language_extension: language_extension) do |hazard_sites, files, repo_path|
-          filter_and_format_hazards(hazard_sites, files, repo_path, hazard_type_filter, required_evidence, label)
+          filter_and_format_hazards(hazard_sites, files, repo_path, hazard_type_filter)
         end
       end
 
@@ -25,14 +25,15 @@ module SlopCop
       # CI's subprocess-spawn count for no benefit, since every category's
       # data comes from the same single fact-mine pass regardless.
       #
-      # `categories` is an Array of Hashes: { hazard_type:, required_evidence:, label: }
+      # `categories` is an Array of Hashes containing at least `hazard_type`.
+      # Evidence and labels are resolved from FactMine's emitted site and the
+      # shared hazard contract, never from provider-specific copies.
       # `hazard_type` may be a String or an Array of Strings.
       def scan_multi_hazards_via_fact_mine(paths, repo:, language_extension:, categories:)
         hazard_sites_via_fact_mine(paths, repo: repo, language_extension: language_extension) do |hazard_sites, files, repo_path|
           categories.flat_map do |category|
             filter_and_format_hazards(
-              hazard_sites, files, repo_path,
-              category.fetch(:hazard_type), category.fetch(:required_evidence), category.fetch(:label)
+              hazard_sites, files, repo_path, category.fetch(:hazard_type)
             )
           end
         end
@@ -80,7 +81,32 @@ module SlopCop
         end
       end
 
-      def filter_and_format_hazards(hazard_sites, files, repo, hazard_type_filter, required_evidence, label)
+      def hazard_contract
+        @hazard_contract ||= begin
+          candidates = [
+            ENV["HAZARD_CONTRACT_JSON"],
+            File.expand_path("../../../../hazard-contract/contract.json", __dir__),
+            File.expand_path("../../../config/hazard_contract.json", __dir__)
+          ].compact
+          path = candidates.find { |candidate| File.file?(candidate) }
+          raise "hazard contract not found" unless path
+
+          JSON.parse(File.read(path))
+        end
+      end
+
+      def hazard_policy(hazard_type)
+        hazard_contract.fetch("policies").find do |policy|
+          pattern = policy.fetch("match")
+          pattern.include?("*") ? hazard_type.include?(pattern.delete("*")) : hazard_type == pattern
+        end
+      end
+
+      def required_evidence_for(hazard_type)
+        hazard_policy(hazard_type)&.fetch("evidence_provider", "")
+      end
+
+      def filter_and_format_hazards(hazard_sites, files, repo, hazard_type_filter)
         abs_files = files.map { |f| File.expand_path(f, repo) }
 
         hazard_sites.select do |site|
@@ -94,13 +120,22 @@ module SlopCop
                          end
           abs_files.include?(site_abs_path) && match_hazard
         end.map do |site|
+          policy = hazard_policy(site.fetch("hazard_type"))
+          emitted_evidence = site.fetch("required_evidence", nil).to_s
           {
             path: Pathname.new(File.expand_path(site["path"], repo)).relative_path_from(Pathname.new(repo)).to_s,
             line: site["line"],
             source: site["source"].to_s.strip,
             hazard_type: site["hazard_type"],
-            required_evidence: required_evidence,
-            label: label
+            # FactMine's site is authoritative. The contract is only a
+            # validation/default for older precomputed facts; provider
+            # configuration must never overwrite this value.
+            required_evidence: emitted_evidence.empty? ? policy&.fetch("evidence_provider", "") : emitted_evidence,
+            label: site["label"] || policy&.fetch("label", "hazard site"),
+            hazard_kind: site["hazard_kind"] || policy&.fetch("kind", "unknown"),
+            evidence_claim: site["evidence_claim"] || policy&.fetch("evidence_claim", "site_reached"),
+            coverage_required: policy.nil? ? true : policy.fetch("coverage_required", true),
+            mitigation: policy&.fetch("mitigation", "review the hazard contract")
           }
         end
       end
@@ -116,6 +151,7 @@ module SlopCop
           path = hazard[:path]
           lines = additions[path]
           next unless lines
+          next unless hazard.fetch(:coverage_required, true)
           
           changed = lines.to_set
           next unless changed.include?(hazard[:line])

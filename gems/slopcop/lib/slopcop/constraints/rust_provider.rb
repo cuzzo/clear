@@ -17,12 +17,12 @@ module SlopCop
       # "unsafe_block" contains "lock" misclassification for exactly the
       # kind of drift two implementations of "detect this hazard" invite).
       SYSTEMS_HAZARD_CATEGORIES = [
-        { hazard_type: "rust_loom_atomic", required_evidence: "loom", label: "atomic or memory-ordering site" },
-        { hazard_type: "rust_loom_concurrency", required_evidence: "loom", label: "thread/lock/shared-concurrency site" },
-        { hazard_type: "rust_unsafe_fn", required_evidence: "miri", label: "unsafe function" },
-        { hazard_type: "rust_unsafe_impl", required_evidence: "miri", label: "unsafe impl" },
-        { hazard_type: "rust_unsafe_block", required_evidence: "miri", label: "unsafe block" },
-        { hazard_type: "rust_unsafe_operation", required_evidence: "miri", label: "unsafe operation inside unsafe context" }
+        { hazard_type: "rust_loom_atomic" },
+        { hazard_type: "rust_loom_concurrency" },
+        { hazard_type: "rust_unsafe_fn" },
+        { hazard_type: "rust_unsafe_impl" },
+        { hazard_type: "rust_unsafe_block" },
+        { hazard_type: "rust_unsafe_operation" }
       ].freeze
 
       def rules
@@ -63,7 +63,7 @@ module SlopCop
 
       def scan_hazards(repo:, paths: nil)
         categories = SYSTEMS_HAZARD_CATEGORIES + [
-          { hazard_type: "rust_callback_invocation", required_evidence: "nil-kill", label: "Rust callback invocation site" }
+          { hazard_type: "rust_callback_invocation" }
         ]
         hazards = FactMineProviderHelper.scan_multi_hazards_via_fact_mine(
           paths, repo: repo, language_extension: ".rs", categories: categories

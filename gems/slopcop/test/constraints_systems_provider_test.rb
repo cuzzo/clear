@@ -164,7 +164,7 @@ class ConstraintsSystemsProviderTest < Minitest::Test
         additions: { path => [5] },
         evidence: SlopCop::Constraints::Evidence.from_specs([], repo: dir)
       )
-      assert(findings.any? { |finding| finding.rule_id == "slopcop-c-callback-uncovered" })
+      assert_empty findings
     end
   end
 
@@ -188,7 +188,7 @@ class ConstraintsSystemsProviderTest < Minitest::Test
         additions: { path => [5] },
         evidence: SlopCop::Constraints::Evidence.from_specs([], repo: dir)
       )
-      assert(findings.any? { |finding| finding.rule_id == "slopcop-go-callback-uncovered" })
+      assert_empty findings
     end
   end
 

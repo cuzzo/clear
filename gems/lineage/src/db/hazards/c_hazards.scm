@@ -18,12 +18,21 @@
   (#match? @func "^(malloc|calloc|realloc|aligned_alloc|posix_memalign|strdup|strndup|free)$")
 )
 
-;; Division/shift by a literal cannot trap; only non-constant right operands
-;; carry divide-by-zero or oversized-shift risk.
+;; Native dynamic loading is a separate boundary from ordinary calls. A
+;; runtime trace can show that it was exercised, but cannot validate the
+;; library, symbol, ABI, or resulting function pointer.
+(
+  (call_expression function: (identifier) @func) @hazard.c_dynamic_loading
+  (#match? @func "^(dlopen|dlsym|dlclose|dlerror|LoadLibraryA|LoadLibraryW|LoadLibraryExA|LoadLibraryExW|FreeLibrary|GetProcAddress)$")
+)
+
+;; Keep literal operands: x / 0, x % 0, and an oversized literal shift are
+;; sanitizer-relevant UB. The operand type determines whether a shift count
+;; is oversized, so the query intentionally keeps both literal and dynamic
+;; right operands for UBSan to validate.
 (
   (binary_expression operator: _ @op right: (_) @rhs) @hazard.c_ubsan_arithmetic
   (#match? @op "^(/|%|<<|>>)$")
-  (#not-match? @rhs "^[0-9']")
 )
 
 ;; Only pointer-target casts carry alignment/strict-aliasing UB; value casts

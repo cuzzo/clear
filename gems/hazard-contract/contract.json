@@ -1,0 +1,218 @@
+{
+  "version": 1,
+  "evidence": {
+    "nil-kill": {
+      "claim": "site_reached",
+      "proves": ["the reported source site executed under the traced test"],
+      "does_not_prove": [
+        "the eval input is safe",
+        "the reflection target is constrained",
+        "a native function pointer is valid",
+        "a dispatch allowlist is complete",
+        "the callback behavior is correct"
+      ]
+    },
+    "asan": { "claim": "address_safety_checked" },
+    "lsan": { "claim": "leak_safety_checked" },
+    "ubsan": { "claim": "undefined_behavior_checked" },
+    "tsan": { "claim": "data_race_checked" },
+    "race": { "claim": "race_site_reached" },
+    "concurrency": { "claim": "concurrency_site_reached" },
+    "loom": { "claim": "interleaving_site_reached" },
+    "miri": { "claim": "unsafe_execution_checked" },
+    "unsafe": { "claim": "unsafe_site_reached" },
+    "vopr": { "claim": "nondeterministic_site_reached" },
+    "hammer": { "claim": "wait_loop_reached" },
+    "allocator": { "claim": "allocator_site_reached" }
+  },
+  "policies": [
+    {
+      "match": "c_dynamic_loading",
+      "kind": "native_dynamic_loading",
+      "evidence_provider": "nil-kill",
+      "evidence_claim": "site_reached",
+      "coverage_required": false,
+      "label": "C dynamic-loader boundary",
+      "mitigation": "validate_library_and_symbol_allowlists"
+    },
+    {
+      "match": "cpp_dynamic_loading",
+      "kind": "native_dynamic_loading",
+      "evidence_provider": "nil-kill",
+      "evidence_claim": "site_reached",
+      "coverage_required": false,
+      "label": "C++ dynamic-loader boundary",
+      "mitigation": "validate_library_and_symbol_allowlists"
+    },
+    {
+      "match": "go_reflection",
+      "kind": "reflection",
+      "evidence_provider": "nil-kill",
+      "evidence_claim": "site_reached",
+      "coverage_required": false,
+      "label": "Go reflection boundary",
+      "mitigation": "constrain_reflection_targets_and_operations"
+    },
+    {
+      "match": "*_callback_invocation",
+      "kind": "callback_boundary",
+      "evidence_provider": "nil-kill",
+      "evidence_claim": "site_reached",
+      "coverage_required": false,
+      "label": "dynamic callback boundary",
+      "mitigation": "validate_target_or_use_a_typed_interface"
+    },
+    {
+      "match": "*_metaprogramming",
+      "kind": "dynamic_dispatch",
+      "evidence_provider": "nil-kill",
+      "evidence_claim": "site_reached",
+      "coverage_required": false,
+      "label": "dynamic metaprogramming boundary",
+      "mitigation": "static_allowlist_restricted_interface_or_dispatch_table"
+    },
+    {
+      "match": "*_vopr_*",
+      "kind": "nondeterminism",
+      "evidence_provider": "vopr",
+      "evidence_claim": "nondeterministic_site_reached",
+      "coverage_required": true,
+      "label": "nondeterministic site",
+      "mitigation": "inject_deterministic_test_control"
+    },
+    {
+      "match": "*_loom_*",
+      "kind": "concurrency",
+      "evidence_provider": "loom",
+      "evidence_claim": "interleaving_site_reached",
+      "coverage_required": true,
+      "label": "concurrency interleaving site",
+      "mitigation": "model_interleavings_with_a_concurrency_harness"
+    },
+    {
+      "match": "*_wait_loop",
+      "kind": "liveness",
+      "evidence_provider": "hammer",
+      "evidence_claim": "wait_loop_reached",
+      "coverage_required": true,
+      "label": "wait-loop site",
+      "mitigation": "pair_wait_loop_with_a_progress_test"
+    },
+    {
+      "match": "*_asan_*",
+      "kind": "memory_safety",
+      "evidence_provider": "asan",
+      "evidence_claim": "address_safety_checked",
+      "coverage_required": true,
+      "label": "address-safety site",
+      "mitigation": "run_address_sanitizer"
+    },
+    {
+      "match": "*_lsan_*",
+      "kind": "lifetime_safety",
+      "evidence_provider": "lsan",
+      "evidence_claim": "leak_safety_checked",
+      "coverage_required": true,
+      "label": "lifetime site",
+      "mitigation": "run_leak_sanitizer"
+    },
+    {
+      "match": "*_ubsan_*",
+      "kind": "undefined_behavior",
+      "evidence_provider": "ubsan",
+      "evidence_claim": "undefined_behavior_checked",
+      "coverage_required": true,
+      "label": "undefined-behavior site",
+      "mitigation": "run_undefined_behavior_sanitizer"
+    },
+    {
+      "match": "*_tsan_*",
+      "kind": "data_race",
+      "evidence_provider": "tsan",
+      "evidence_claim": "data_race_checked",
+      "coverage_required": true,
+      "label": "data-race site",
+      "mitigation": "run_thread_sanitizer"
+    },
+    {
+      "match": "go_race_*",
+      "kind": "data_race",
+      "evidence_provider": "race",
+      "evidence_claim": "race_site_reached",
+      "coverage_required": true,
+      "label": "Go race-sensitive site",
+      "mitigation": "run_race_detector"
+    },
+    {
+      "match": "go_concurrency_*",
+      "kind": "concurrency",
+      "evidence_provider": "concurrency",
+      "evidence_claim": "concurrency_site_reached",
+      "coverage_required": true,
+      "label": "Go concurrency site",
+      "mitigation": "exercise_concurrent_interleavings"
+    },
+    {
+      "match": "csharp_concurrency",
+      "kind": "concurrency",
+      "evidence_provider": "concurrency",
+      "evidence_claim": "concurrency_site_reached",
+      "coverage_required": true,
+      "label": "C# concurrency site",
+      "mitigation": "exercise_concurrent_interleavings"
+    },
+    {
+      "match": "rust_unsafe_*",
+      "kind": "unsafe_boundary",
+      "evidence_provider": "miri",
+      "evidence_claim": "unsafe_execution_checked",
+      "coverage_required": true,
+      "label": "Rust unsafe boundary",
+      "mitigation": "run_miri_or_review_the_unsafe_contract"
+    },
+    {
+      "match": "csharp_unsafe_memory",
+      "kind": "unsafe_boundary",
+      "evidence_provider": "unsafe",
+      "evidence_claim": "unsafe_site_reached",
+      "coverage_required": true,
+      "label": "C# unsafe/native-memory site",
+      "mitigation": "review_native_memory_invariants"
+    },
+    {
+      "match": "zig_allocator",
+      "kind": "allocator",
+      "evidence_provider": "allocator",
+      "evidence_claim": "allocator_site_reached",
+      "coverage_required": true,
+      "label": "Zig allocator site",
+      "mitigation": "exercise_allocator_lifetime_paths"
+    },
+    {
+      "match": "zig_unsafe_memory",
+      "kind": "memory_safety",
+      "evidence_provider": "unsafe",
+      "evidence_claim": "unsafe_site_reached",
+      "coverage_required": true,
+      "label": "Zig unsafe-memory site",
+      "mitigation": "review_pointer_and_lifetime_invariants"
+    }
+  ],
+  "queries": {
+    "c": "queries/c_hazards.scm",
+    "cpp": "queries/cpp_hazards.scm",
+    "csharp": "queries/csharp_hazards.scm",
+    "go": "queries/go_hazards.scm",
+    "rust": "queries/rust_hazards.scm",
+    "zig": "queries/zig_hazards.scm",
+    "ruby": "queries/ruby_hazards.scm",
+    "python": "queries/python_hazards.scm",
+    "javascript": "queries/javascript_hazards.scm",
+    "typescript": "queries/typescript_hazards.scm",
+    "lua": "queries/lua_hazards.scm",
+    "java": "queries/java_hazards.scm",
+    "php": "queries/php_hazards.scm",
+    "kotlin": "queries/kotlin_hazards.scm",
+    "swift": "queries/swift_hazards.scm"
+  }
+}

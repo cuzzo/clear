@@ -20,11 +20,17 @@ class ConstraintsDynamicProviderTest < Minitest::Test
     assert_same SlopCop::Constraints::PhpProvider, SlopCop::Constraints.providers.fetch("php")
   end
 
+  def test_packaged_hazard_contract_matches_monorepo_contract
+    packaged = JSON.parse(File.read(File.expand_path("../config/hazard_contract.json", __dir__)))
+    canonical = JSON.parse(File.read(File.expand_path("../../hazard-contract/contract.json", __dir__)))
+    assert_equal canonical, packaged
+  end
+
   def test_ruby_provider_finds_metaprogramming_hazard
     with_file("test.rb", <<~RB) do |dir, path|
       class Foo
         def perform
-          send(:run)
+          self.send(:run)
           $1
         end
       end
@@ -35,13 +41,11 @@ class ConstraintsDynamicProviderTest < Minitest::Test
       assert_includes types, "ruby_metaprogramming"
       assert_equal 2, hazards.size
       
-      # Test coverage findings
-      # Write empty/no coverage evidence
+      # Dynamic boundaries are review findings, not claims that nil-kill can
+      # prove safety, so they are not converted into line-coverage failures.
       evidence = SlopCop::Constraints::Evidence.from_specs([], repo: dir)
       findings = SlopCop::Constraints::RubyProvider.findings(repo: dir, additions: { path => [3] }, evidence: evidence)
-      assert_equal 1, findings.size
-      assert_equal "slopcop-ruby-metaprogramming-uncovered", findings.first.rule_id
-      assert_equal 3, findings.first.line
+      assert_empty findings
 
       # Write covered evidence (Cobertura XML covering line 3)
       xml_content = <<~XML

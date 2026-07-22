@@ -18,7 +18,7 @@ Gem::Specification.new do |s|
   DESC
   s.authors     = ["CLEAR"]
   s.license     = "PolyForm-Noncommercial-1.0.0"
-  s.files       = Dir["lib/**/*.rb", "exe/*"]
+  s.files       = Dir["lib/**/*.rb", "config/hazard_contract.json", "exe/*"]
   s.bindir      = "exe"
   s.executables = ["slopcop"]
   s.required_ruby_version = ">= 3.1"

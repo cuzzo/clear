@@ -56,12 +56,23 @@
 (new_expression) @hazard.cpp_lsan_lifetime
 (delete_expression) @hazard.cpp_lsan_lifetime
 
-;; Division/shift by a literal cannot trap; only non-constant right operands
-;; carry divide-by-zero or oversized-shift risk.
+(
+  (call_expression function: (identifier) @func) @hazard.cpp_dynamic_loading
+  (#match? @func "^(dlopen|dlsym|dlclose|dlerror|LoadLibraryA|LoadLibraryW|LoadLibraryExA|LoadLibraryExW|FreeLibrary|GetProcAddress)$")
+)
+
+(
+  (call_expression function: (qualified_identifier) @func) @hazard.cpp_dynamic_loading
+  (#match? @func "^(::)?(dlopen|dlsym|dlclose|dlerror|LoadLibraryA|LoadLibraryW|LoadLibraryExA|LoadLibraryExW|FreeLibrary|GetProcAddress)$")
+)
+
+;; Keep literal operands: x / 0, x % 0, and an oversized literal shift are
+;; sanitizer-relevant UB. The operand type determines whether a shift count
+;; is oversized, so the query intentionally keeps both literal and dynamic
+;; right operands for UBSan to validate.
 (
   (binary_expression operator: _ @op right: (_) @rhs) @hazard.cpp_ubsan_arithmetic
   (#match? @op "^(/|%|<<|>>)$")
-  (#not-match? @rhs "^[0-9']")
 )
 
 ;; Only pointer-target C-style casts and the type-punning named casts carry

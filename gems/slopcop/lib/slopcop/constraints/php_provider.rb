@@ -34,8 +34,6 @@ module SlopCop
           repo: repo,
           language_extension: ".php",
           hazard_type_filter: ["php_metaprogramming", "php_callback_invocation"],
-          required_evidence: "nil-kill",
-          label: "PHP metaprogramming site"
         )
       end
 

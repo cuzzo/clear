@@ -14,8 +14,8 @@ module SlopCop
       # (gems/fact-mine/src/syntax/csharp_hazards.scm), the same source of
       # truth Lineage's own hazard ingestion uses.
       SYSTEMS_HAZARD_CATEGORIES = [
-        { hazard_type: "csharp_concurrency", required_evidence: "concurrency", label: "C# task/thread/lock site" },
-        { hazard_type: "csharp_unsafe_memory", required_evidence: "unsafe", label: "C# unsafe/native-memory site" }
+        { hazard_type: "csharp_concurrency" },
+        { hazard_type: "csharp_unsafe_memory" }
       ].freeze
 
       def rules
@@ -57,9 +57,7 @@ module SlopCop
       def scan_hazards(repo:, paths: nil)
         categories = SYSTEMS_HAZARD_CATEGORIES + [
           {
-            hazard_type: ["csharp_callback_invocation", "csharp_metaprogramming"],
-            required_evidence: "nil-kill",
-            label: "C# metaprogramming or callback site"
+            hazard_type: ["csharp_callback_invocation", "csharp_metaprogramming"]
           }
         ]
         hazards = FactMineProviderHelper.scan_multi_hazards_via_fact_mine(

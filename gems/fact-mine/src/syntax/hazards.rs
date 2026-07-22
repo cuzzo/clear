@@ -1,24 +1,24 @@
 use std::sync::OnceLock;
-use crate::syntax::{HazardSite, Language, Document, FunctionDef};
+use crate::syntax::{Document, FunctionDef, HazardSite, Language, Span};
 use crate::syntax::parser_grammar::grammar_for_language;
 use tree_sitter::{Node, Query, QueryCursor};
 use streaming_iterator::StreamingIterator;
 
-const C_HAZARDS: &str = include_str!("c_hazards.scm");
-const CPP_HAZARDS: &str = include_str!("cpp_hazards.scm");
-const CSHARP_HAZARDS: &str = include_str!("csharp_hazards.scm");
-const GO_HAZARDS: &str = include_str!("go_hazards.scm");
-const RUST_HAZARDS: &str = include_str!("rust_hazards.scm");
-const ZIG_HAZARDS: &str = include_str!("zig_hazards.scm");
-const RUBY_HAZARDS: &str = include_str!("ruby_hazards.scm");
-const PYTHON_HAZARDS: &str = include_str!("python_hazards.scm");
-const JAVASCRIPT_HAZARDS: &str = include_str!("javascript_hazards.scm");
-const TYPESCRIPT_HAZARDS: &str = include_str!("typescript_hazards.scm");
-const LUA_HAZARDS: &str = include_str!("lua_hazards.scm");
-const JAVA_HAZARDS: &str = include_str!("java_hazards.scm");
-const PHP_HAZARDS: &str = include_str!("php_hazards.scm");
-const KOTLIN_HAZARDS: &str = include_str!("kotlin_hazards.scm");
-const SWIFT_HAZARDS: &str = include_str!("swift_hazards.scm");
+const C_HAZARDS: &str = hazard_contract::C_HAZARDS;
+const CPP_HAZARDS: &str = hazard_contract::CPP_HAZARDS;
+const CSHARP_HAZARDS: &str = hazard_contract::CSHARP_HAZARDS;
+const GO_HAZARDS: &str = hazard_contract::GO_HAZARDS;
+const RUST_HAZARDS: &str = hazard_contract::RUST_HAZARDS;
+const ZIG_HAZARDS: &str = hazard_contract::ZIG_HAZARDS;
+const RUBY_HAZARDS: &str = hazard_contract::RUBY_HAZARDS;
+const PYTHON_HAZARDS: &str = hazard_contract::PYTHON_HAZARDS;
+const JAVASCRIPT_HAZARDS: &str = hazard_contract::JAVASCRIPT_HAZARDS;
+const TYPESCRIPT_HAZARDS: &str = hazard_contract::TYPESCRIPT_HAZARDS;
+const LUA_HAZARDS: &str = hazard_contract::LUA_HAZARDS;
+const JAVA_HAZARDS: &str = hazard_contract::JAVA_HAZARDS;
+const PHP_HAZARDS: &str = hazard_contract::PHP_HAZARDS;
+const KOTLIN_HAZARDS: &str = hazard_contract::KOTLIN_HAZARDS;
+const SWIFT_HAZARDS: &str = hazard_contract::SWIFT_HAZARDS;
 
 fn get_cached_query(language: Language) -> Option<&'static Query> {
     macro_rules! cached_query {
@@ -53,43 +53,112 @@ fn get_cached_query(language: Language) -> Option<&'static Query> {
     }
 }
 
-/// FactMine is the single source of truth for what evidence a given hazard
-/// type requires (which test harness must exist to prove it's actually
-/// handled: miri, loom, tsan, ...). Every consumer - Lineage's own hazard
-/// ingestion, SlopCop, anything else - must call this rather than
-/// re-deriving the same meaning from a hazard-name substring on its own;
-/// two independent implementations of "classify this hazard_type string"
-/// are two chances to diverge; a previous, second implementation living in
-/// Lineage did exactly that (`"unsafe_block"` contains `"lock"`, so it
-/// misclassified every Rust unsafe-block hazard as a data race).
-pub fn required_evidence_for_hazard_type(hazard_type: &str) -> String {
-    if hazard_type.contains("_vopr_") || hazard_type.starts_with("zig_vopr_") {
-        "vopr".to_string()
-    } else if hazard_type.contains("_loom_") || hazard_type.starts_with("rust_loom_") {
-        "loom".to_string()
-    } else if hazard_type.contains("_wait_loop") || hazard_type.ends_with("_wait_loop") {
-        "hammer".to_string()
-    } else if hazard_type.contains("_metaprogramming") || hazard_type.contains("_callback_") {
-        "nil-kill".to_string()
-    } else if hazard_type.contains("_asan_") || hazard_type.starts_with("c_asan_") {
-        "asan".to_string()
-    } else if hazard_type.contains("_lsan_") || hazard_type.starts_with("c_lsan_") {
-        "lsan".to_string()
-    } else if hazard_type.contains("_ubsan_") || hazard_type.starts_with("c_ubsan_") {
-        "ubsan".to_string()
-    } else if hazard_type.contains("_tsan_") || hazard_type.starts_with("c_tsan_") {
-        "tsan".to_string()
-    } else if hazard_type.starts_with("go_race_") {
-        "race".to_string()
-    } else if hazard_type.starts_with("go_concurrency_") {
-        "concurrency".to_string()
-    } else if hazard_type == "csharp_unsafe_memory" {
-        "unsafe".to_string()
-    } else if hazard_type.starts_with("rust_unsafe_") {
-        "miri".to_string()
+#[derive(Debug, Clone, serde::Deserialize)]
+struct HazardPolicy {
+    #[serde(rename = "match")]
+    pattern: String,
+    kind: String,
+    evidence_provider: String,
+    evidence_claim: String,
+    coverage_required: bool,
+    label: String,
+    mitigation: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct HazardContract {
+    policies: Vec<HazardPolicy>,
+}
+
+fn hazard_contract() -> &'static HazardContract {
+    static CONTRACT: OnceLock<HazardContract> = OnceLock::new();
+    CONTRACT.get_or_init(|| {
+        serde_json::from_str(hazard_contract::CONTRACT_JSON)
+            .expect("bundled hazard contract must be valid JSON")
+    })
+}
+
+fn contract_pattern_matches(pattern: &str, hazard_type: &str) -> bool {
+    if pattern.contains('*') {
+        hazard_type.contains(pattern.trim_matches('*'))
     } else {
-        "".to_string()
+        hazard_type == pattern
     }
+}
+
+/// Resolve all policy metadata from the shared contract.  The returned copy
+/// is deliberate: callers can attach or transform metadata without creating
+/// a second classifier or borrowing the global manifest.
+fn hazard_policy(hazard_type: &str) -> Option<HazardPolicy> {
+    hazard_contract()
+        .policies
+        .iter()
+        .find(|policy| contract_pattern_matches(&policy.pattern, hazard_type))
+        .cloned()
+}
+
+/// FactMine is the source of the emitted evidence metadata, but the policy
+/// itself lives in the dependency-free hazard contract shared by all
+/// consumers.  `nil-kill` on a dynamic boundary means only "show that this
+/// site executed"; it is never a claim that the eval input, reflection
+/// target, function pointer, allowlist, or callback behavior is safe.
+pub fn required_evidence_for_hazard_type(hazard_type: &str) -> String {
+    hazard_policy(hazard_type)
+        .map(|policy| policy.evidence_provider)
+        .unwrap_or_default()
+}
+
+fn ruby_defined_method_names(root: Node, source: &[u8]) -> std::collections::HashSet<String> {
+    fn visit(node: Node, source: &[u8], names: &mut std::collections::HashSet<String>) {
+        if node.kind() == "method" {
+            if let Some(name) = node.child_by_field_name("name") {
+                if let Ok(text) = name.utf8_text(source) {
+                    names.insert(text.to_string());
+                }
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit(child, source, names);
+        }
+    }
+
+    let mut names = std::collections::HashSet::new();
+    visit(root, source, &mut names);
+    names
+}
+
+fn ruby_call_is_user_defined(node: Node, source: &[u8], defined: &std::collections::HashSet<String>) -> bool {
+    if node.kind() != "call" {
+        return false;
+    }
+    let Some(receiver) = node.child_by_field_name("receiver") else {
+        return false;
+    };
+    if receiver.kind() != "self" {
+        return false;
+    }
+    node.child_by_field_name("method")
+        .and_then(|method| method.utf8_text(source).ok())
+        .is_some_and(|method| defined.contains(method))
+}
+
+fn go_has_reflect_import(root: Node, source: &[u8]) -> bool {
+    fn visit(node: Node, source: &[u8]) -> bool {
+        if node.kind() == "import_spec"
+            && node
+                .child_by_field_name("path")
+                .and_then(|path| path.utf8_text(source).ok())
+                .is_some_and(|path| path.trim_matches('"') == "reflect")
+        {
+            return true;
+        }
+        let mut cursor = node.walk();
+        let found = node.children(&mut cursor).any(|child| visit(child, source));
+        found
+    }
+
+    visit(root, source)
 }
 
 pub(crate) fn extract_hazards(
@@ -106,6 +175,12 @@ pub(crate) fn extract_hazards(
     let source_bytes = source.as_bytes();
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(query, root, source_bytes);
+    let ruby_defined_methods = if language == Language::Ruby {
+        ruby_defined_method_names(root, source_bytes)
+    } else {
+        std::collections::HashSet::new()
+    };
+    let go_has_reflect = language != Language::Go || go_has_reflect_import(root, source_bytes);
     
     let mut sites = Vec::new();
     let mut recorded_lines = std::collections::HashSet::new();
@@ -121,6 +196,21 @@ pub(crate) fn extract_hazards(
             }
             
             let hazard_type = capture_name.strip_prefix("hazard.").unwrap_or("").to_string();
+
+            // A receiver-qualified call to `self.send` is not enough to
+            // establish Ruby's Kernel/Object implementation: a class may
+            // define its own `send`, `eval`, or `const_get`. Suppress that
+            // local shadowing case; the query itself only admits explicit
+            // self/core-module receivers and never arbitrary `obj.send`.
+            if language == Language::Ruby
+                && hazard_type == "ruby_metaprogramming"
+                && ruby_call_is_user_defined(cap.node, source_bytes, &ruby_defined_methods)
+            {
+                continue;
+            }
+            if language == Language::Go && hazard_type == "go_reflection" && !go_has_reflect {
+                continue;
+            }
             
             let line = (cap.node.start_position().row + 1) as u32;
             let line_text = source_lines
@@ -164,9 +254,11 @@ fn supports_interfaces(language: Language) -> bool {
             | Language::Kotlin
             | Language::TypeScript
             | Language::CSharp
+            | Language::Cpp
             | Language::Go
             | Language::Rust
             | Language::Swift
+            | Language::Zig
     )
 }
 
@@ -204,9 +296,12 @@ fn is_cb_type(s: &str) -> bool {
         || s_lower.contains("predicate")
         || s_lower.contains("runnable")
         || s_lower.contains("callable")
+        || s_lower.contains("function")
+        || s_lower == "action"
         || s_lower == "fn"
         || s_lower == "func"
         || s_lower == "function"
+        || s_lower == "()"
         || s_lower.starts_with("fn(")
         || s_lower.starts_with("fn ")
         || s_lower.starts_with("func(")
@@ -218,21 +313,31 @@ fn is_cb_type(s: &str) -> bool {
         || s_lower.contains("=>")
 }
 
+fn safe_typed_callback(language: Language, type_name: &str) -> bool {
+    is_cb_type(type_name)
+        && !(matches!(language, Language::C | Language::Cpp) && type_name.contains("(*)"))
+}
+
 fn is_callback_type_or_name(name: &str, type_str: Option<&str>, language: Language) -> bool {
     if !supports_interfaces(language) {
         return false;
     }
 
-    if is_cb_name(name) {
-        return true;
-    }
     if let Some(t) = type_str {
-        if is_cb_type(t) {
-            return true;
-        }
+        // Once a declaration gives us a type, trust that type. Falling back
+        // to a variable-name heuristic here made `User listener` look like a
+        // callback even when the overload was unrelated to callbacks.
+        return is_cb_type(t);
     }
-    false
+    is_cb_name(name)
 }
+
+/// Exact identity of one normalized function definition.
+///
+/// The line and span are part of the identity because owner/name is not
+/// unique for overloaded declarations. Keeping this key aligned with the
+/// function facts prevents callback analysis from merging overloads.
+type FunctionIdentity = (String, String, usize, Span);
 
 /// Per-function value-origin sets derived from the local dataflow facts.
 ///
@@ -278,30 +383,81 @@ fn method_type_map<'a>(
         &enclosing.name,
         enclosing.line,
     );
-    map.get(&key).or_else(|| map.get(&enclosing.name))
+    map.get(&key)
+}
+
+fn function_identity(function: &FunctionDef, file_stem: &str) -> FunctionIdentity {
+    (
+        canonical_owner(&function.owner, file_stem),
+        function.name.clone(),
+        function.line,
+        function.span,
+    )
+}
+
+fn span_contains(outer: Span, inner: Span) -> bool {
+    (outer[0], outer[1]) <= (inner[0], inner[1])
+        && (outer[2], outer[3]) >= (inner[2], inner[3])
+}
+
+fn function_for_span<'a>(
+    document: &'a Document,
+    owner: &str,
+    name: &str,
+    span: Span,
+) -> Option<&'a FunctionDef> {
+    let file_stem = std::path::Path::new(&document.file)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("");
+    document
+        .function_defs
+        .iter()
+        .filter(|function| {
+            function.file == document.file
+                && function.name == name
+                && canonical_owner(&function.owner, file_stem)
+                    == canonical_owner(owner, file_stem)
+                && span_contains(function.span, span)
+        })
+        .min_by_key(|function| {
+            (
+                function.span[2].saturating_sub(function.span[0]),
+                function.span[3].saturating_sub(function.span[1]),
+            )
+        })
+}
+
+fn function_for_cfg_node<'a>(
+    document: &'a Document,
+    node_id: &str,
+    owner: &str,
+    name: &str,
+) -> Option<&'a FunctionDef> {
+    let node = document.control_flow_nodes.iter().find(|node| {
+        node.id == node_id && node.owner == owner && node.function == name
+    })?;
+    function_for_span(document, owner, name, node.span)
 }
 
 fn compute_callback_origins(
     document: &Document,
-) -> std::collections::HashMap<(String, String), CallbackOrigins> {
+) -> std::collections::HashMap<FunctionIdentity, CallbackOrigins> {
     let file_stem = std::path::Path::new(&document.file)
         .file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or("")
         .to_string();
-    let mut origins: std::collections::HashMap<(String, String), CallbackOrigins> =
+    let mut origins: std::collections::HashMap<FunctionIdentity, CallbackOrigins> =
         std::collections::HashMap::new();
 
     for f in &document.function_defs {
-        let entry = origins
-            .entry((canonical_owner(&f.owner, &file_stem), f.name.clone()))
-            .or_default();
+        let entry = origins.entry(function_identity(f, &file_stem)).or_default();
         for p in &f.params {
             entry.param_derived.insert(p.clone());
         }
         for p in &f.callback_params {
             entry.param_derived.insert(p.clone());
-            entry.callable_typed.insert(p.clone());
         }
         for map in [
             method_type_map(&document.method_param_types, f),
@@ -311,7 +467,7 @@ fn compute_callback_origins(
         .flatten()
         {
             for (name, type_str) in map {
-                if is_cb_type(type_str) {
+                if safe_typed_callback(document.language, type_str) {
                     entry.callable_typed.insert(name.clone());
                 }
             }
@@ -319,25 +475,43 @@ fn compute_callback_origins(
     }
 
     for fact in &document.flow_types {
-        if fact.types.iter().any(|t| is_cb_type(declared_hint_type(t))) {
+        if fact
+            .types
+            .iter()
+            .any(|t| safe_typed_callback(document.language, declared_hint_type(t)))
+        {
             if let Some(name) = place_name_from_id(&fact.place_id) {
-                origins
-                    .entry((canonical_owner(&fact.owner, &file_stem), fact.function.clone()))
-                    .or_default()
-                    .callable_typed
-                    .insert(name.to_string());
+                if let Some(function) = function_for_cfg_node(
+                    document,
+                    &fact.node_id,
+                    &fact.owner,
+                    &fact.function,
+                ) {
+                    origins
+                        .entry(function_identity(function, &file_stem))
+                        .or_default()
+                        .callable_typed
+                        .insert(name.to_string());
+                }
             }
         }
     }
     for effect in &document.node_effects {
         for (place_id, hint) in &effect.write_type_hints {
-            if is_cb_type(declared_hint_type(hint)) {
+            if safe_typed_callback(document.language, declared_hint_type(hint)) {
                 if let Some(name) = place_name_from_id(place_id) {
-                    origins
-                        .entry((canonical_owner(&effect.owner, &file_stem), effect.function.clone()))
-                        .or_default()
-                        .callable_typed
-                        .insert(name.to_string());
+                    if let Some(function) = function_for_cfg_node(
+                        document,
+                        &effect.node_id,
+                        &effect.owner,
+                        &effect.function,
+                    ) {
+                        origins
+                            .entry(function_identity(function, &file_stem))
+                            .or_default()
+                            .callable_typed
+                            .insert(name.to_string());
+                    }
                 }
             }
         }
@@ -346,7 +520,15 @@ fn compute_callback_origins(
     loop {
         let mut changed = false;
         for effect in &document.node_effects {
-            let key = (canonical_owner(&effect.owner, &file_stem), effect.function.clone());
+            let Some(function) = function_for_cfg_node(
+                document,
+                &effect.node_id,
+                &effect.owner,
+                &effect.function,
+            ) else {
+                continue;
+            };
+            let key = function_identity(function, &file_stem);
             let Some(entry) = origins.get_mut(&key) else {
                 continue;
             };
@@ -387,18 +569,13 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
 
     let mut callback_hazards = Vec::new();
 
-    let mut fn_map = std::collections::HashMap::new();
-    for f in &document.function_defs {
-        fn_map.insert((f.owner.clone(), f.name.clone()), f);
-    }
-
     for call in &document.call_sites {
-        let enclosing_fn = match fn_map.get(&(call.owner.clone(), call.function.clone())) {
+        let enclosing_fn = match function_for_span(document, &call.owner, &call.function, call.span) {
             Some(f) => f,
             None => continue,
         };
         let origin = origins
-            .get(&(canonical_owner(&call.owner, &file_stem), call.function.clone()))
+            .get(&function_identity(enclosing_fn, &file_stem))
             .unwrap_or(&empty_origins);
 
         let mut is_callback = false;
@@ -411,12 +588,22 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
             if enclosing_fn.params.contains(&call.message)
                 || enclosing_fn.callback_params.contains(&call.message)
             {
+                let param_type = method_type_map(&document.method_param_types, enclosing_fn)
+                    .and_then(|params| params.get(&call.message).cloned());
+                let is_statically_typed = supports_interfaces(document.language)
+                    && (origin.callable_typed.contains(&call.message)
+                        || param_type
+                            .as_deref()
+                            .is_some_and(|type_name| safe_typed_callback(document.language, type_name)));
                 if call.receiver.is_empty() {
-                    is_var_call = true;
+                    // A statically callable parameter is an ordinary typed
+                    // callback boundary, not automatically a hazard. Native
+                    // function pointers remain conservative because a typed
+                    // pointer can still be null or stale.
+                    is_var_call = !is_statically_typed;
                 } else {
-                    let param_type = method_type_map(&document.method_param_types, enclosing_fn)
-                        .and_then(|params| params.get(&call.message).cloned());
-                    let is_cb = is_callback_type_or_name(&call.message, param_type.as_deref(), document.language)
+                    let is_cb = !is_statically_typed
+                        && (is_callback_type_or_name(&call.message, param_type.as_deref(), document.language)
                         || is_cb_name(&call.message)
                         || matches!(
                             call.message.as_str(),
@@ -424,7 +611,7 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                                 | "work"
                                 | "mapper"
                                 | "runner"
-                        );
+                        ));
                     if is_cb {
                         is_var_call = true;
                     }
@@ -434,9 +621,13 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                 || enclosing_fn.callback_params.contains(&call.message);
             if !is_var_call
                 && !is_raw_param
-                && (origin.param_derived.contains(&call.message)
-                    || origin.callable_typed.contains(&call.message))
-                && !fn_map.contains_key(&(call.owner.clone(), call.message.clone()))
+                && origin.param_derived.contains(&call.message)
+                && !(supports_interfaces(document.language)
+                    && origin.callable_typed.contains(&call.message))
+                && !document
+                    .function_defs
+                    .iter()
+                    .any(|function| function.owner == call.owner && function.name == call.message)
             {
                 // Aliased or typed callable local: my_cb = cb; my_cb().
                 // Raw parameters are excluded - direct param calls are gated
@@ -463,7 +654,6 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                 if enclosing_fn.params.contains(&call.receiver)
                     || enclosing_fn.callback_params.contains(&call.receiver)
                     || origin.param_derived.contains(&call.receiver)
-                    || origin.callable_typed.contains(&call.receiver)
                 {
                     is_cb_receiver = true;
                 }
@@ -500,14 +690,22 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                             method_type_map(&document.method_local_types, enclosing_fn)
                                 .and_then(|locals| locals.get(&call.receiver).cloned())
                         });
-                    let is_callback_type = is_callback_type_or_name(&call.receiver, type_str.as_deref(), document.language)
-                        || origin.callable_typed.contains(&call.receiver);
-                    is_dispatch_name && is_callback_type
+                    let is_statically_typed = origin.callable_typed.contains(&call.receiver)
+                        || type_str
+                            .as_deref()
+                            .is_some_and(|type_name| safe_typed_callback(document.language, type_name));
+                    is_dispatch_name
+                        && !is_statically_typed
+                        && is_callback_type_or_name(
+                            &call.receiver,
+                            type_str.as_deref(),
+                            document.language,
+                        )
                 } else {
                     is_invoker
                         || (is_dispatch_name
-                            && (is_cb_name(&call.receiver)
-                                || origin.callable_typed.contains(&call.receiver)))
+                            && is_cb_name(&call.receiver)
+                            && !origin.callable_typed.contains(&call.receiver))
                 };
 
                 if is_cb {
@@ -524,13 +722,14 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
             };
             
             let hazard_type = format!("{}_callback_invocation", document.language.as_str());
+            let required_evidence = required_evidence_for_hazard_type(&hazard_type);
             
             callback_hazards.push(HazardSite {
                 path: call.file.clone(),
                 line: call.line as u32,
                 snippet,
                 hazard_type,
-                required_evidence: "nil-kill".to_string(),
+                required_evidence,
                 provider: document.language.as_str().to_string(),
                 start_column: Some(call.span[1] as u32),
                 end_line: Some(call.span[2] as u32),
@@ -615,19 +814,26 @@ mod tests {
         let tree = parser.parse(code, None).unwrap();
         
         let hazards = extract_hazards("test.rb", tree.root_node(), code, Language::Ruby);
-        assert_eq!(hazards.len(), 9);
+        assert_eq!(hazards.len(), 6);
         assert!(hazards.iter().all(|h| h.hazard_type == "ruby_metaprogramming"));
         
         let snippets: Vec<&str> = hazards.iter().map(|h| h.snippet.as_str()).collect();
-        assert!(snippets.contains(&"send(:hello)"));
         assert!(snippets.contains(&"self.send(:hello2)"));
-        assert!(snippets.contains(&"instance_variable_get(:@x)"));
-        assert!(snippets.contains(&"const_get(:BAR)"));
         assert!(snippets.contains(&"def method_missing(m, *args)"));
         assert!(snippets.contains(&"$1"));
         assert!(snippets.contains(&"$~"));
         assert!(snippets.contains(&"$&"));
         assert!(snippets.contains(&"$+"));
+
+        let shadowed_code = "class Foo\n  def send(value)\n  end\n  def test\n    self.send(:hello)\n    User.send(:hello)\n  end\nend";
+        let shadowed_tree = parser.parse(shadowed_code, None).unwrap();
+        let shadowed = extract_hazards(
+            "shadowed.rb",
+            shadowed_tree.root_node(),
+            shadowed_code,
+            Language::Ruby,
+        );
+        assert!(shadowed.is_empty(), "user-defined Ruby send must not be treated as Kernel.send");
     }
 
     #[test]
@@ -802,8 +1008,8 @@ local mt = {
         let code = "
             class Foo {
                 void Test() {
-                    System.Type.GetType(\"Bar\");
-                    dynamic x = 1;
+                    Type.GetType(\"Bar\");
+                    typeof(Foo).GetMethod(\"Bar\");
                 }
             }
         ";
@@ -814,6 +1020,33 @@ local mt = {
         let hazards = extract_hazards("test.cs", tree.root_node(), code, Language::CSharp);
         let metaprog_hazards: Vec<_> = hazards.iter().filter(|h| h.hazard_type == "csharp_metaprogramming").collect();
         assert_eq!(metaprog_hazards.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_hazards_go_reflection_and_native_loaders() {
+        let go_code = "package demo\nimport \"reflect\"\nfunc run(value interface{}, name string) {\n  reflect.ValueOf(value).MethodByName(name).Call(nil)\n}";
+        let mut parser = Parser::new();
+        parser.set_language(&grammar_for_language(Language::Go)).unwrap();
+        let tree = parser.parse(go_code, None).unwrap();
+        let go_hazards = extract_hazards("test.go", tree.root_node(), go_code, Language::Go);
+        assert!(go_hazards.iter().any(|hazard| {
+            hazard.hazard_type == "go_reflection" && hazard.required_evidence == "nil-kill"
+        }));
+        let go_without_import = "package demo\nfunc run(value interface{}, name string) {\n  reflect.ValueOf(value).MethodByName(name).Call(nil)\n}";
+        let tree = parser.parse(go_without_import, None).unwrap();
+        assert!(extract_hazards("test.go", tree.root_node(), go_without_import, Language::Go).is_empty());
+
+        let c_code = "void load(void) { void *handle = dlopen(\"plugin.so\", 0); void *symbol = dlsym(handle, \"run\"); }";
+        parser.set_language(&grammar_for_language(Language::C)).unwrap();
+        let tree = parser.parse(c_code, None).unwrap();
+        let c_hazards = extract_hazards("test.c", tree.root_node(), c_code, Language::C);
+        assert_eq!(
+            c_hazards
+                .iter()
+                .filter(|hazard| hazard.hazard_type == "c_dynamic_loading")
+                .count(),
+            2
+        );
     }
 
     #[test]
@@ -875,15 +1108,13 @@ local mt = {
 
         // 3. Go
         let go_pos = check("package main\nfunc test(cb func()) {\n  cb()\n}", ".go", Language::Go);
-        assert_eq!(go_pos.len(), 1);
-        assert_eq!(go_pos[0].hazard_type, "go_callback_invocation");
+        assert_eq!(go_pos.len(), 0, "typed Go callbacks are ordinary calls");
         let go_neg = check("package main\nfunc helper() {}\nfunc test() {\n  helper()\n}", ".go", Language::Go);
         assert_eq!(go_neg.len(), 0);
 
         // 4. Rust
         let rust_pos = check("fn test(cb: fn()) {\n  cb();\n}", ".rs", Language::Rust);
-        assert_eq!(rust_pos.len(), 1);
-        assert_eq!(rust_pos[0].hazard_type, "rust_callback_invocation");
+        assert_eq!(rust_pos.len(), 0, "typed Rust callbacks are ordinary calls");
         let rust_neg = check("fn helper() {}\nfn test() {\n  helper();\n}", ".rs", Language::Rust);
         assert_eq!(rust_neg.len(), 0);
 
@@ -896,23 +1127,19 @@ local mt = {
 
         // 6. Java
         let java_pos = check("class Foo {\n  void test(Runnable cb, MyListener listener) {\n    cb.run();\n    listener.onEvent();\n  }\n}", ".java", Language::Java);
-        assert_eq!(java_pos.len(), 2);
-        assert_eq!(java_pos[0].hazard_type, "java_callback_invocation");
-        assert_eq!(java_pos[1].hazard_type, "java_callback_invocation");
+        assert_eq!(java_pos.len(), 0, "typed Java callbacks are ordinary interface calls");
         let java_neg = check("class Foo {\n  void test(User user) {\n    user.getName();\n  }\n}", ".java", Language::Java);
         assert_eq!(java_neg.len(), 0);
 
         // 7. Kotlin
         let kt_pos = check("fun test(cb: () -> Unit) {\n  cb()\n}", ".kt", Language::Kotlin);
-        assert_eq!(kt_pos.len(), 1);
-        assert_eq!(kt_pos[0].hazard_type, "kotlin_callback_invocation");
+        assert_eq!(kt_pos.len(), 0, "typed Kotlin callbacks are ordinary calls");
         let kt_neg = check("fun test(user: User) {\n  user.getName()\n}", ".kt", Language::Kotlin);
         assert_eq!(kt_neg.len(), 0);
 
         // 8. Swift
         let swift_pos = check("func test(cb: () -> Void) {\n  cb()\n}", ".swift", Language::Swift);
-        assert_eq!(swift_pos.len(), 1);
-        assert_eq!(swift_pos[0].hazard_type, "swift_callback_invocation");
+        assert_eq!(swift_pos.len(), 0, "typed Swift callbacks are ordinary calls");
         let swift_neg = check("func test(user: User) {\n  user.getName()\n}", ".swift", Language::Swift);
         assert_eq!(swift_neg.len(), 0);
 
@@ -939,29 +1166,27 @@ local mt = {
 
         // 12. C++
         let cpp_pos = check("void test(std::function<void()> cb) {\n  cb();\n}", ".cpp", Language::Cpp);
-        assert_eq!(cpp_pos.len(), 1);
-        assert_eq!(cpp_pos[0].hazard_type, "cpp_callback_invocation");
+        assert_eq!(cpp_pos.len(), 0, "std::function is a typed callback interface");
+        let cpp_native = check("void test(void (*cb)(void)) {\n  cb();\n}", ".cpp", Language::Cpp);
+        assert_eq!(cpp_native.len(), 1, "native C++ function pointers retain target-validity risk");
         let cpp_neg = check("void helper() {}\nvoid test() {\n  helper();\n}", ".cpp", Language::Cpp);
         assert_eq!(cpp_neg.len(), 0);
 
         // 13. C#
         let csharp_pos = check("class Foo {\n  void Test(Action cb) {\n    cb();\n  }\n}", ".cs", Language::CSharp);
-        assert_eq!(csharp_pos.len(), 1);
-        assert_eq!(csharp_pos[0].hazard_type, "csharp_callback_invocation");
+        assert_eq!(csharp_pos.len(), 0, "typed C# callbacks are ordinary delegate calls");
         let csharp_neg = check("class Foo {\n  void Helper() {}\n  void Test() {\n    Helper();\n  }\n}", ".cs", Language::CSharp);
         assert_eq!(csharp_neg.len(), 0);
 
         // 14. TypeScript
         let ts_pos = check("function test(cb: () => void) {\n  cb();\n}", ".ts", Language::TypeScript);
-        assert_eq!(ts_pos.len(), 1);
-        assert_eq!(ts_pos[0].hazard_type, "typescript_callback_invocation");
+        assert_eq!(ts_pos.len(), 0, "typed TypeScript callbacks are ordinary calls");
         let ts_neg = check("function test(user: User) {\n  user.getName();\n}", ".ts", Language::TypeScript);
         assert_eq!(ts_neg.len(), 0);
 
         // 15. Zig
         let zig_pos = check("fn test(cb: fn() void) void {\n  cb();\n}", ".zig", Language::Zig);
-        assert_eq!(zig_pos.len(), 1);
-        assert_eq!(zig_pos[0].hazard_type, "zig_callback_invocation");
+        assert_eq!(zig_pos.len(), 0, "typed Zig callbacks are ordinary calls");
         let zig_neg = check("fn helper() void {}\nfn test() void {\n  helper();\n}", ".zig", Language::Zig);
         assert_eq!(zig_neg.len(), 0);
     }
@@ -1030,8 +1255,8 @@ local mt = {
         let kt_service_metaprog: Vec<_> = kt_service.iter().filter(|h| h.hazard_type == "kotlin_metaprogramming").collect();
         assert_eq!(kt_service_metaprog.len(), 0);
 
-        // C/C++ pointer member access, literal shifts, and value casts are not
-        // sanitizer hazards; variable divisors and pointer casts are.
+        // C/C++ pointer member access and value casts are not sanitizer
+        // hazards; arithmetic operations and pointer casts are.
         let c_precision = check_all("
             int scale(struct Cfg *cfg, int n, int d) {
                 int half = n / 2;
@@ -1044,8 +1269,10 @@ local mt = {
         ", ".c", Language::C);
         assert!(c_precision.iter().all(|h| h.hazard_type != "c_asan_pointer"));
         let c_arith: Vec<_> = c_precision.iter().filter(|h| h.hazard_type == "c_ubsan_arithmetic").collect();
-        assert_eq!(c_arith.len(), 1);
-        assert!(c_arith[0].snippet.contains("n / d"));
+        assert_eq!(c_arith.len(), 3);
+        assert!(c_arith.iter().any(|h| h.snippet.contains("n / 2")));
+        assert!(c_arith.iter().any(|h| h.snippet.contains("n << 3")));
+        assert!(c_arith.iter().any(|h| h.snippet.contains("n / d")));
         let c_casts: Vec<_> = c_precision.iter().filter(|h| h.hazard_type == "c_ubsan_cast").collect();
         assert_eq!(c_casts.len(), 1);
         assert!(c_casts[0].snippet.contains("(char *)cfg"));
@@ -1060,11 +1287,40 @@ local mt = {
         ", ".cpp", Language::Cpp);
         assert!(cpp_precision.iter().all(|h| h.hazard_type != "cpp_asan_pointer_or_cast" || h.snippet.contains("reinterpret_cast")));
         let cpp_arith: Vec<_> = cpp_precision.iter().filter(|h| h.hazard_type == "cpp_ubsan_arithmetic").collect();
-        assert_eq!(cpp_arith.len(), 1);
+        assert_eq!(cpp_arith.len(), 2);
+        assert!(cpp_arith.iter().any(|h| h.snippet.contains("n / 2")));
+        assert!(cpp_arith.iter().any(|h| h.snippet.contains("n / d")));
         let cpp_casts: Vec<_> = cpp_precision.iter().filter(|h| h.hazard_type == "cpp_ubsan_cast").collect();
         assert!(cpp_casts.iter().all(|h| h.snippet.contains("reinterpret_cast")));
         assert!(!cpp_casts.is_empty());
         assert!(cpp_precision.iter().all(|h| !h.snippet.contains("static_cast") || h.hazard_type != "cpp_ubsan_cast"));
+
+        // Literal operands must remain visible: zero division/modulo and an
+        // oversized shift are exactly the constant cases UBSan diagnoses.
+        for (code, suffix, language, hazard_type) in [
+            (
+                "int test(int x) { return x / 0 + x % 0 + (x << 64); }",
+                ".c",
+                Language::C,
+                "c_ubsan_arithmetic",
+            ),
+            (
+                "int test(int x) { return x / 0 + x % 0 + (x << 64); }",
+                ".cpp",
+                Language::Cpp,
+                "cpp_ubsan_arithmetic",
+            ),
+        ] {
+            let hazards = check_all(code, suffix, language);
+            let arithmetic: Vec<_> = hazards
+                .iter()
+                .filter(|h| h.hazard_type == hazard_type)
+                .collect();
+            assert_eq!(arithmetic.len(), 3, "{language:?}: {arithmetic:?}");
+            assert!(arithmetic.iter().any(|h| h.snippet.contains("/ 0")));
+            assert!(arithmetic.iter().any(|h| h.snippet.contains("% 0")));
+            assert!(arithmetic.iter().any(|h| h.snippet.contains("<< 64")));
+        }
 
         // 4. Java Real Class.forName vs shadowed class Class
         let java_hazards = check_all("
@@ -1099,8 +1355,8 @@ local mt = {
         let cs_metaprog: Vec<_> = cs_hazards.iter().filter(|h| h.hazard_type == "csharp_metaprogramming").collect();
         assert_eq!(cs_metaprog.len(), 1);
 
-        // Reflection-info receivers flag on Invoke; ordinary identifiers that
-        // merely contain \"mi\"/\"fi\"/\"pi\" as substrings do not.
+        // Receiver-name heuristics are intentionally not reflection
+        // provenance. Only explicit framework type identifiers are reported.
         let cs_invoke = check_all("
             class Demo {
                 void Test() {
@@ -1112,7 +1368,7 @@ local mt = {
             }
         ", ".cs", Language::CSharp);
         let cs_invoke_metaprog: Vec<_> = cs_invoke.iter().filter(|h| h.hazard_type == "csharp_metaprogramming").collect();
-        assert_eq!(cs_invoke_metaprog.len(), 2);
+        assert_eq!(cs_invoke_metaprog.len(), 0);
 
         // 6. Callback compositions: neutral name, aliasing, hops, multiline, struct function pointers
         let compositions_code = "
@@ -1150,7 +1406,32 @@ local mt = {
         std::io::Write::write_all(file.as_file_mut(), compositions_code.as_bytes()).unwrap();
         let doc = crate::syntax::parse_file(file.path().to_path_buf(), Language::Java).unwrap();
         let java_callbacks: Vec<_> = doc.hazard_sites.iter().filter(|h| h.hazard_type == "java_callback_invocation").collect();
-        assert!(java_callbacks.len() >= 6);
+        assert_eq!(java_callbacks.len(), 0, "typed Java callbacks are ordinary interface calls");
+
+        // Overloaded methods have separate callback origins. The ordinary
+        // User overload must not inherit Runnable's callback evidence.
+        let overloaded_java = check_all(
+            "
+            class Demo {
+                void run(Runnable cb) {
+                    cb.run();
+                }
+                void run(User user) {
+                    user.run();
+                }
+            }
+            class User {
+                void run() {}
+            }
+            ",
+            ".java",
+            Language::Java,
+        );
+        let overloaded_callbacks: Vec<_> = overloaded_java
+            .iter()
+            .filter(|h| h.hazard_type == "java_callback_invocation")
+            .collect();
+        assert_eq!(overloaded_callbacks.len(), 0);
 
         // 7. C struct function-pointer members / complex targets
         let mut c_file = tempfile::Builder::new().suffix(".c").tempfile().unwrap();
@@ -1173,7 +1454,7 @@ local mt = {
             }
         ", ".cpp", Language::Cpp);
         let cpp_callbacks: Vec<_> = cpp_compositions.iter().filter(|h| h.hazard_type == "cpp_callback_invocation").collect();
-        assert_eq!(cpp_callbacks.len(), 1);
+        assert_eq!(cpp_callbacks.len(), 0, "std::function is a typed callback interface");
     }
 
     #[test]
@@ -1195,8 +1476,7 @@ local mt = {
             ".go",
             Language::Go,
         );
-        assert_eq!(go_alias.len(), 1);
-        assert_eq!(go_alias[0].line, 4);
+        assert_eq!(go_alias.len(), 0, "typed Go callback aliases are ordinary calls");
 
         let rb_alias = check(
             "def test(cb)\n  my_cb = cb\n  my_cb.call\nend",

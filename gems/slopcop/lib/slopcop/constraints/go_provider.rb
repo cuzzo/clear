@@ -14,11 +14,12 @@ module SlopCop
       # as a second, independent string-needle classifier that can drift
       # from it.
       SYSTEMS_HAZARD_CATEGORIES = [
-        { hazard_type: "go_race_goroutine", required_evidence: "race", label: "goroutine launch" },
-        { hazard_type: "go_race_atomic", required_evidence: "race", label: "atomic operation" },
-        { hazard_type: "go_race_lock", required_evidence: "race", label: "lock/sync primitive" },
-        { hazard_type: "go_concurrency_waitgroup", required_evidence: "concurrency", label: "wait group operation" },
-        { hazard_type: "go_concurrency_channel", required_evidence: "concurrency", label: "channel operation" }
+        { hazard_type: "go_race_goroutine" },
+        { hazard_type: "go_race_atomic" },
+        { hazard_type: "go_race_lock" },
+        { hazard_type: "go_concurrency_waitgroup" },
+        { hazard_type: "go_concurrency_channel" },
+        { hazard_type: "go_reflection" }
       ].freeze
 
       def rules
@@ -66,6 +67,7 @@ module SlopCop
           path = hazard[:path]
           lines = additions[path]
           next unless lines&.include?(hazard[:line])
+          next unless hazard.fetch(:coverage_required, true)
           next if covered?(evidence, hazard)
 
           out << Finding.new(
@@ -107,7 +109,7 @@ module SlopCop
 
       def all_categories
         SYSTEMS_HAZARD_CATEGORIES + [
-          { hazard_type: "go_callback_invocation", required_evidence: "nil-kill", label: "Go callback invocation site" }
+          { hazard_type: "go_callback_invocation" }
         ]
       end
 

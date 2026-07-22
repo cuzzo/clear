@@ -34,8 +34,6 @@ module SlopCop
           repo: repo,
           language_extension: ".py",
           hazard_type_filter: ["python_metaprogramming", "python_callback_invocation"],
-          required_evidence: "nil-kill",
-          label: "Python metaprogramming site"
         )
       end
 

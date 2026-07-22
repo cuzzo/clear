@@ -34,8 +34,6 @@ module SlopCop
           repo: repo,
           language_extension: ".js",
           hazard_type_filter: ["javascript_metaprogramming", "javascript_callback_invocation"],
-          required_evidence: "nil-kill",
-          label: "JavaScript metaprogramming site"
         )
       end
 

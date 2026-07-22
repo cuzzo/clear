@@ -34,8 +34,6 @@ module SlopCop
           repo: repo,
           language_extension: ".lua",
           hazard_type_filter: ["lua_metaprogramming", "lua_callback_invocation"],
-          required_evidence: "nil-kill",
-          label: "Lua metaprogramming site"
         )
       end
 

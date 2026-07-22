@@ -36,3 +36,27 @@
   (unary_expression operator: _ @op) @hazard.go_concurrency_channel
   (#eq? @op "<-")
 )
+
+;; Reflection is a hazard only when the receiver is the reflect package (or
+;; a value returned by it), rather than every method named Call or Method.
+(
+  (call_expression
+    function: (selector_expression
+      operand: (identifier) @pkg
+      field: (field_identifier) @constructor)) @hazard.go_reflection
+  (#eq? @pkg "reflect")
+  (#match? @constructor "^(ValueOf|TypeOf|New|PtrTo|SliceOf)$")
+)
+
+(
+  (call_expression
+    function: (selector_expression
+      operand: (call_expression
+        function: (selector_expression
+          operand: (identifier) @pkg
+          field: (field_identifier) @constructor))
+      field: (field_identifier) @method)) @hazard.go_reflection
+  (#eq? @pkg "reflect")
+  (#eq? @constructor "ValueOf")
+  (#match? @method "^(MethodByName|FieldByName|FieldByIndex|Call)$")
+)

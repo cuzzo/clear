@@ -34,8 +34,6 @@ module SlopCop
           repo: repo,
           language_extension: ".swift",
           hazard_type_filter: ["swift_metaprogramming", "swift_callback_invocation"],
-          required_evidence: "nil-kill",
-          label: "Swift metaprogramming site"
         )
       end
 

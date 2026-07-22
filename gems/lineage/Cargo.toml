@@ -14,6 +14,7 @@ name = "lineage"
 path = "src/main.rs"
 
 [dependencies]
+hazard-contract = { path = "../hazard-contract" }
 anyhow = "1.0"
 askama = "0.12"
 axum = "0.7"

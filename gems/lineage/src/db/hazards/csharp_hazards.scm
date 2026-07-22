@@ -43,13 +43,18 @@
   (#match? @hazard.csharp_unsafe_memory "^\\*")
 )
 
-;; Refined C# Metaprogramming queries for precision
+;; Reflection queries deliberately use API-shaped expressions. Receiver-name
+;; guesses such as `t`, `clazz`, `.*info`, and `.*method` are not provenance:
+;; they flag ordinary user objects and miss renamed real reflection values.
+;; The broad name-based rules were removed; callers should use a typed
+;; interface or an explicit allowlist when the receiver is not syntactically
+;; one of these framework types.
 (
   (invocation_expression
     function: (member_access_expression
-      expression: (identifier) @recv_id
+      expression: (identifier) @assembly_type
       name: (identifier) @method_name)) @hazard.csharp_metaprogramming
-  (#match? @recv_id "^(?i)(Assembly|asm)$")
+  (#eq? @assembly_type "Assembly")
   (#match? @method_name "^(Load|LoadFrom|LoadFile)$")
 )
 
@@ -64,18 +69,18 @@
 (
   (invocation_expression
     function: (member_access_expression
-      expression: _ @recv
+      expression: (identifier) @reflection_type
       name: (identifier) @method_name)) @hazard.csharp_metaprogramming
-  (#match? @recv "^(?i)(t|clazz|class|declaringType|reflectedType|targetType|systemType|type|typeof|typeVal|_type|t_type|System\\.Type)$")
+  (#match? @reflection_type "^(Type|MethodInfo|FieldInfo|PropertyInfo|ConstructorInfo|Assembly)$")
   (#match? @method_name "^(GetType|GetMethod|GetMethods|GetField|GetFields|GetProperty|GetProperties|GetConstructor|GetConstructors|CreateInstance)$")
 )
 
 (
   (invocation_expression
     function: (member_access_expression
-      expression: _ @recv
+      expression: (identifier) @member_info_type
       name: (identifier) @method_name)) @hazard.csharp_metaprogramming
-  (#match? @recv "^(?i)(mi|fi|pi|ci|.*info|.*method|.*field|.*property|.*constructor|.*member)$")
+  (#match? @member_info_type "^(MethodInfo|FieldInfo|PropertyInfo|ConstructorInfo|MemberInfo)$")
   (#match? @method_name "^(Invoke|GetValue|SetValue)$")
 )
 
@@ -86,9 +91,4 @@
       name: (identifier) @method_name)) @hazard.csharp_metaprogramming
   (#eq? @recv_id "Activator")
   (#eq? @method_name "CreateInstance")
-)
-
-(
-  (identifier) @hazard.csharp_metaprogramming
-  (#eq? @hazard.csharp_metaprogramming "dynamic")
 )
