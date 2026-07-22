@@ -341,12 +341,26 @@ fn native_function_pointer_calls_are_nullable_operations() -> Result<()> {
     ] {
         let document = syntax::parse_file(fixture(fixture_name), language)?;
         let output = profile::extract(&document, Profile::NilKill);
-        assert!(output.nullable_operations.iter().any(|operation| {
-            operation.operation_kind == "function_pointer_call"
-                && operation.nil_behavior == "undefined_behavior"
-                && operation.state_at_operation == "definitely_null"
-                && operation.complete
-        }), "{fixture_name}");
+        let calls = output
+            .nullable_operations
+            .iter()
+            .filter(|operation| operation.operation_kind == "function_pointer_call")
+            .map(|operation| {
+                (
+                    operation.nil_behavior.as_str(),
+                    operation.state_at_operation.as_str(),
+                    operation.complete,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            calls,
+            vec![
+                ("undefined_behavior", "definitely_null", true),
+                ("undefined_behavior", "unknown", false),
+            ],
+            "{fixture_name}"
+        );
     }
     Ok(())
 }
