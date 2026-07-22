@@ -43,12 +43,10 @@
   (#match? @hazard.csharp_unsafe_memory "^\\*")
 )
 
-;; Reflection queries deliberately use API-shaped expressions. Receiver-name
-;; guesses such as `t`, `clazz`, `.*info`, and `.*method` are not provenance:
-;; they flag ordinary user objects and miss renamed real reflection values.
-;; The broad name-based rules were removed; callers should use a typed
-;; interface or an explicit allowlist when the receiver is not syntactically
-;; one of these framework types.
+;; Reflection queries deliberately use API-shaped expressions. The Rust
+;; consumers retain the broad receiver form below only after resolving the
+;; receiver's declared framework type (or a short alias flow). Receiver-name
+;; guesses such as `t`, `.*info`, and `.*method` are not provenance.
 (
   (invocation_expression
     function: (member_access_expression
@@ -97,6 +95,17 @@
       name: (identifier) @method_name)) @hazard.csharp_metaprogramming
   (#match? @member_info_type "^(MethodInfo|FieldInfo|PropertyInfo|ConstructorInfo|MemberInfo)$")
   (#match? @method_name "^(Invoke|GetValue|SetValue)$")
+)
+
+;; Candidate form for typed locals and aliases. FactMine and Lineage resolve
+;; the receiver against declarations before retaining this capture; the query
+;; itself intentionally carries no variable-name policy.
+(
+  (invocation_expression
+    function: (member_access_expression
+      expression: (identifier) @typed_reflection_receiver
+      name: (identifier) @typed_reflection_method)) @hazard.csharp_metaprogramming
+  (#match? @typed_reflection_method "^(Load|LoadFrom|LoadFile|GetType|GetMethod|GetMethods|GetField|GetFields|GetProperty|GetProperties|GetConstructor|GetConstructors|CreateInstance|Invoke|GetValue|SetValue)$")
 )
 
 (

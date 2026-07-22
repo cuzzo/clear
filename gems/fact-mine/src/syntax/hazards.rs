@@ -360,6 +360,571 @@ fn csharp_scope_declares_dynamic(scope: Node, call: Node, receiver_name: &str, s
     visit(scope, call, receiver_name, source)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReflectionValueKind {
+    CSharpType,
+    CSharpMethodInfo,
+    CSharpFieldInfo,
+    CSharpPropertyInfo,
+    CSharpConstructorInfo,
+    CSharpAssembly,
+    JavaClass,
+    JavaMethod,
+    JavaConstructor,
+    JavaField,
+    JavaClassLoader,
+}
+
+fn reflection_simple_type_name(type_text: &str) -> &str {
+    let type_text = type_text
+        .trim()
+        .trim_start_matches("global::")
+        .trim_start_matches("java.lang.")
+        .trim_end_matches('?')
+        .trim_end_matches("[]")
+        .trim();
+    let type_text = type_text.split('<').next().unwrap_or(type_text).trim();
+    type_text
+        .rsplit_once("::")
+        .map(|(_, name)| name)
+        .or_else(|| type_text.rsplit_once('.').map(|(_, name)| name))
+        .unwrap_or(type_text)
+}
+
+fn reflection_value_kind(
+    language: Language,
+    type_text: &str,
+    java_user_types: &std::collections::HashSet<String>,
+) -> Option<ReflectionValueKind> {
+    let name = reflection_simple_type_name(type_text);
+    match language {
+        Language::CSharp => match name {
+            "Type" => Some(ReflectionValueKind::CSharpType),
+            "MethodInfo" => Some(ReflectionValueKind::CSharpMethodInfo),
+            "FieldInfo" => Some(ReflectionValueKind::CSharpFieldInfo),
+            "PropertyInfo" => Some(ReflectionValueKind::CSharpPropertyInfo),
+            "ConstructorInfo" => Some(ReflectionValueKind::CSharpConstructorInfo),
+            "Assembly" => Some(ReflectionValueKind::CSharpAssembly),
+            _ => None,
+        },
+        Language::Java if !java_user_types.contains(name) => match name {
+            "Class" => Some(ReflectionValueKind::JavaClass),
+            "Method" => Some(ReflectionValueKind::JavaMethod),
+            "Constructor" => Some(ReflectionValueKind::JavaConstructor),
+            "Field" => Some(ReflectionValueKind::JavaField),
+            "ClassLoader" => Some(ReflectionValueKind::JavaClassLoader),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn java_user_type_names(root: Node, source: &[u8]) -> std::collections::HashSet<String> {
+    fn visit(node: Node, source: &[u8], names: &mut std::collections::HashSet<String>) {
+        if matches!(
+            node.kind(),
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "annotation_type_declaration"
+        ) {
+            if let Some(name) = node
+                .child_by_field_name("name")
+                .and_then(|name| name.utf8_text(source).ok())
+            {
+                names.insert(name.to_string());
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit(child, source, names);
+        }
+    }
+
+    let mut names = std::collections::HashSet::new();
+    visit(root, source, &mut names);
+    names
+}
+
+fn reflection_scope(node: Node, language: Language) -> Option<Node> {
+    let scope_kinds: &[&str] = match language {
+        Language::CSharp => &[
+            "method_declaration",
+            "local_function_statement",
+            "constructor_declaration",
+        ],
+        Language::Java => &["method_declaration", "constructor_declaration"],
+        _ => &[],
+    };
+    let mut current = Some(node);
+    while let Some(candidate) = current {
+        if scope_kinds.contains(&candidate.kind()) {
+            return Some(candidate);
+        }
+        current = candidate.parent();
+    }
+    None
+}
+
+fn reflection_call_parts<'tree>(
+    call: Node<'tree>,
+    language: Language,
+    source: &[u8],
+) -> Option<(Node<'tree>, String)> {
+    match language {
+        Language::CSharp => {
+            let function = call.child_by_field_name("function")?;
+            let receiver = function.child_by_field_name("expression")?;
+            let method = function.child_by_field_name("name")?;
+            Some((receiver, method.utf8_text(source).ok()?.to_string()))
+        }
+        Language::Java => {
+            let receiver = call.child_by_field_name("object")?;
+            let method = call.child_by_field_name("name")?;
+            Some((receiver, method.utf8_text(source).ok()?.to_string()))
+        }
+        _ => None,
+    }
+}
+
+fn reflection_receiver_kind(
+    receiver: Node,
+    language: Language,
+    bindings: &std::collections::HashMap<String, ReflectionValueKind>,
+    java_user_types: &std::collections::HashSet<String>,
+    source: &[u8],
+) -> Option<ReflectionValueKind> {
+    if receiver.kind() != "identifier" {
+        return None;
+    }
+    let name = receiver.utf8_text(source).ok()?;
+    reflection_value_kind(language, name, java_user_types).or_else(|| bindings.get(name).copied())
+}
+
+fn csharp_method_is_reflection(kind: ReflectionValueKind, method: &str) -> bool {
+    match kind {
+        ReflectionValueKind::CSharpType => matches!(
+            method,
+            "GetType"
+                | "GetMethod"
+                | "GetMethods"
+                | "GetField"
+                | "GetFields"
+                | "GetProperty"
+                | "GetProperties"
+                | "GetConstructor"
+                | "GetConstructors"
+                | "CreateInstance"
+        ),
+        ReflectionValueKind::CSharpAssembly => matches!(method, "Load" | "LoadFrom" | "LoadFile"),
+        ReflectionValueKind::CSharpMethodInfo
+        | ReflectionValueKind::CSharpFieldInfo
+        | ReflectionValueKind::CSharpPropertyInfo
+        | ReflectionValueKind::CSharpConstructorInfo => {
+            matches!(method, "Invoke" | "GetValue" | "SetValue")
+        }
+        _ => false,
+    }
+}
+
+fn java_method_is_reflection(kind: ReflectionValueKind, method: &str) -> bool {
+    match kind {
+        ReflectionValueKind::JavaClass => matches!(
+            method,
+            "forName"
+                | "getMethod"
+                | "getDeclaredMethod"
+                | "getField"
+                | "getDeclaredField"
+                | "getConstructor"
+                | "getDeclaredConstructor"
+                | "newInstance"
+        ),
+        ReflectionValueKind::JavaClassLoader => method == "loadClass",
+        ReflectionValueKind::JavaMethod => method == "invoke",
+        ReflectionValueKind::JavaConstructor => method == "newInstance",
+        ReflectionValueKind::JavaField => method == "invoke",
+        _ => false,
+    }
+}
+
+fn reflection_result_kind(
+    language: Language,
+    receiver_kind: Option<ReflectionValueKind>,
+    method: &str,
+) -> Option<ReflectionValueKind> {
+    match (language, receiver_kind, method) {
+        (Language::CSharp, Some(ReflectionValueKind::CSharpType), "GetType") => {
+            Some(ReflectionValueKind::CSharpType)
+        }
+        (Language::CSharp, Some(ReflectionValueKind::CSharpType), method)
+            if matches!(method, "GetMethod" | "GetMethods") =>
+        {
+            Some(ReflectionValueKind::CSharpMethodInfo)
+        }
+        (Language::CSharp, Some(ReflectionValueKind::CSharpType), method)
+            if matches!(method, "GetField" | "GetFields") =>
+        {
+            Some(ReflectionValueKind::CSharpFieldInfo)
+        }
+        (Language::CSharp, Some(ReflectionValueKind::CSharpType), method)
+            if matches!(method, "GetProperty" | "GetProperties") =>
+        {
+            Some(ReflectionValueKind::CSharpPropertyInfo)
+        }
+        (Language::CSharp, Some(ReflectionValueKind::CSharpType), method)
+            if matches!(method, "GetConstructor" | "GetConstructors") =>
+        {
+            Some(ReflectionValueKind::CSharpConstructorInfo)
+        }
+        (Language::CSharp, Some(ReflectionValueKind::CSharpAssembly), method)
+            if matches!(method, "Load" | "LoadFrom" | "LoadFile") =>
+        {
+            Some(ReflectionValueKind::CSharpAssembly)
+        }
+        (Language::Java, Some(ReflectionValueKind::JavaClass), "forName") => {
+            Some(ReflectionValueKind::JavaClass)
+        }
+        (Language::Java, Some(ReflectionValueKind::JavaClassLoader), "loadClass") => {
+            Some(ReflectionValueKind::JavaClass)
+        }
+        (Language::Java, Some(ReflectionValueKind::JavaClass), method)
+            if matches!(method, "getMethod" | "getDeclaredMethod") =>
+        {
+            Some(ReflectionValueKind::JavaMethod)
+        }
+        (Language::Java, Some(ReflectionValueKind::JavaClass), method)
+            if matches!(method, "getField" | "getDeclaredField") =>
+        {
+            Some(ReflectionValueKind::JavaField)
+        }
+        (Language::Java, Some(ReflectionValueKind::JavaClass), method)
+            if matches!(method, "getConstructor" | "getDeclaredConstructor") =>
+        {
+            Some(ReflectionValueKind::JavaConstructor)
+        }
+        _ => None,
+    }
+}
+
+fn infer_reflection_value_kind(
+    value: Node,
+    language: Language,
+    bindings: &std::collections::HashMap<String, ReflectionValueKind>,
+    java_user_types: &std::collections::HashSet<String>,
+    source: &[u8],
+) -> Option<ReflectionValueKind> {
+    if value.kind() == "parenthesized_expression" {
+        let mut cursor = value.walk();
+        for inner in value.children(&mut cursor) {
+            if inner.is_named() {
+                return infer_reflection_value_kind(
+                    inner,
+                    language,
+                    bindings,
+                    java_user_types,
+                    source,
+                );
+            }
+        }
+    }
+    if value.kind() == "typeof_expression" && language == Language::CSharp {
+        return Some(ReflectionValueKind::CSharpType);
+    }
+    if value.kind() == "identifier" {
+        return value
+            .utf8_text(source)
+            .ok()
+            .and_then(|name| bindings.get(name).copied());
+    }
+    let Some((receiver, method)) = reflection_call_parts(value, language, source) else {
+        return None;
+    };
+    let receiver_kind = if language == Language::Java && method == "getClass" {
+        None
+    } else {
+        reflection_receiver_kind(receiver, language, bindings, java_user_types, source)
+    };
+    if language == Language::Java && method == "getClass" {
+        return Some(ReflectionValueKind::JavaClass);
+    }
+    reflection_result_kind(language, receiver_kind, &method)
+}
+
+fn reflection_declarator_value<'tree>(declarator: Node<'tree>) -> Option<Node<'tree>> {
+    if let Some(value) = declarator.child_by_field_name("value") {
+        return Some(value);
+    }
+    let name_id = declarator.child_by_field_name("name").map(|name| name.id());
+    let mut cursor = declarator.walk();
+    for child in declarator.children(&mut cursor) {
+        if child.is_named() && Some(child.id()) != name_id {
+            return Some(child);
+        }
+    }
+    None
+}
+
+fn collect_reflection_bindings(
+    scope: Node,
+    call: Node,
+    language: Language,
+    source: &[u8],
+    java_user_types: &std::collections::HashSet<String>,
+) -> std::collections::HashMap<String, ReflectionValueKind> {
+    fn visit(
+        node: Node,
+        scope: Node,
+        call: Node,
+        language: Language,
+        source: &[u8],
+        java_user_types: &std::collections::HashSet<String>,
+        bindings: &mut std::collections::HashMap<String, ReflectionValueKind>,
+    ) {
+        if node.start_byte() >= call.start_byte() {
+            return;
+        }
+        if node.id() != scope.id()
+            && matches!(
+                node.kind(),
+                "method_declaration"
+                    | "constructor_declaration"
+                    | "local_function_statement"
+                    | "lambda_expression"
+                    | "anonymous_method_expression"
+            )
+        {
+            return;
+        }
+
+        let declaration_type = match (language, node.kind()) {
+            (Language::CSharp, "variable_declaration")
+            | (Language::CSharp, "parameter")
+            | (Language::Java, "local_variable_declaration")
+            | (Language::Java, "formal_parameter") => node
+                .child_by_field_name("type")
+                .and_then(|type_node| type_node.utf8_text(source).ok()),
+            _ => None,
+        };
+
+        if matches!(
+            (language, node.kind()),
+            (Language::CSharp, "variable_declaration")
+                | (Language::Java, "local_variable_declaration")
+        ) {
+            let explicit_kind = declaration_type
+                .and_then(|type_text| reflection_value_kind(language, type_text, java_user_types));
+            let mut cursor = node.walk();
+            for declarator in node
+                .children(&mut cursor)
+                .filter(|child| child.kind() == "variable_declarator")
+            {
+                let Some(name) = declarator
+                    .child_by_field_name("name")
+                    .and_then(|name| name.utf8_text(source).ok())
+                else {
+                    continue;
+                };
+                let inferred_kind = reflection_declarator_value(declarator).and_then(|value| {
+                    infer_reflection_value_kind(value, language, bindings, java_user_types, source)
+                });
+                if let Some(kind) = explicit_kind.or(inferred_kind) {
+                    bindings.insert(name.to_string(), kind);
+                } else {
+                    bindings.remove(name);
+                }
+            }
+        } else if matches!(
+            (language, node.kind()),
+            (Language::CSharp, "parameter") | (Language::Java, "formal_parameter")
+        ) {
+            if let (Some(name), Some(kind)) = (
+                node.child_by_field_name("name")
+                    .and_then(|name| name.utf8_text(source).ok()),
+                declaration_type.and_then(|type_text| {
+                    reflection_value_kind(language, type_text, java_user_types)
+                }),
+            ) {
+                bindings.insert(name.to_string(), kind);
+            }
+        } else if node.kind() == "assignment_expression" {
+            let Some(name) = node
+                .child_by_field_name("left")
+                .filter(|left| left.kind() == "identifier")
+                .and_then(|left| left.utf8_text(source).ok())
+            else {
+                return;
+            };
+            let kind = node.child_by_field_name("right").and_then(|right| {
+                infer_reflection_value_kind(right, language, bindings, java_user_types, source)
+            });
+            if let Some(kind) = kind {
+                bindings.insert(name.to_string(), kind);
+            } else {
+                bindings.remove(name);
+            }
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit(
+                child,
+                scope,
+                call,
+                language,
+                source,
+                java_user_types,
+                bindings,
+            );
+        }
+    }
+
+    let mut bindings = std::collections::HashMap::new();
+    visit(
+        scope,
+        scope,
+        call,
+        language,
+        source,
+        java_user_types,
+        &mut bindings,
+    );
+    bindings
+}
+
+fn csharp_reflection_call_is_proven(
+    call: Node,
+    source: &[u8],
+    bindings: &std::collections::HashMap<String, ReflectionValueKind>,
+) -> bool {
+    let Some((receiver, method)) = reflection_call_parts(call, Language::CSharp, source) else {
+        return false;
+    };
+    if receiver.kind() == "typeof_expression" {
+        return matches!(
+            method.as_str(),
+            "GetMethod"
+                | "GetMethods"
+                | "GetField"
+                | "GetFields"
+                | "GetProperty"
+                | "GetProperties"
+                | "GetConstructor"
+                | "GetConstructors"
+        );
+    }
+    if receiver.kind() == "member_access_expression"
+        && receiver
+            .child_by_field_name("expression")
+            .and_then(|expression| expression.utf8_text(source).ok())
+            .is_some_and(|name| name == "System")
+        && receiver
+            .child_by_field_name("name")
+            .and_then(|name| name.utf8_text(source).ok())
+            .is_some_and(|name| name == "Type")
+    {
+        return method == "GetType";
+    }
+    let Some(kind) = reflection_receiver_kind(
+        receiver,
+        Language::CSharp,
+        bindings,
+        &std::collections::HashSet::new(),
+        source,
+    ) else {
+        return false;
+    };
+    csharp_method_is_reflection(kind, &method)
+}
+
+fn java_reflection_call_is_proven(
+    call: Node,
+    source: &[u8],
+    bindings: &std::collections::HashMap<String, ReflectionValueKind>,
+    java_user_types: &std::collections::HashSet<String>,
+) -> bool {
+    let Some((receiver, method)) = reflection_call_parts(call, Language::Java, source) else {
+        return false;
+    };
+    if receiver.kind() == "method_invocation"
+        && receiver
+            .child_by_field_name("name")
+            .and_then(|name| name.utf8_text(source).ok())
+            .is_some_and(|name| name == "getClass")
+    {
+        return matches!(
+            method.as_str(),
+            "getMethod"
+                | "getDeclaredMethod"
+                | "getField"
+                | "getDeclaredField"
+                | "getConstructor"
+                | "getDeclaredConstructor"
+                | "newInstance"
+                | "invoke"
+        );
+    }
+    if receiver
+        .utf8_text(source)
+        .ok()
+        .is_some_and(|text| text.trim_end().ends_with(".class"))
+    {
+        return matches!(
+            method.as_str(),
+            "getMethod"
+                | "getDeclaredMethod"
+                | "getField"
+                | "getDeclaredField"
+                | "getConstructor"
+                | "getDeclaredConstructor"
+                | "newInstance"
+                | "invoke"
+        );
+    }
+    if let Some(name) = receiver
+        .utf8_text(source)
+        .ok()
+        .filter(|_| receiver.kind() == "identifier")
+    {
+        if (name == "Class" && method == "forName")
+            || (name == "ClassLoader" && method == "loadClass")
+            || (name == "Proxy" && method == "newProxyInstance")
+        {
+            return true;
+        }
+    }
+    let Some(kind) =
+        reflection_receiver_kind(receiver, Language::Java, bindings, java_user_types, source)
+    else {
+        return false;
+    };
+    java_method_is_reflection(kind, &method)
+}
+
+fn typed_reflection_call_is_proven(
+    call: Node,
+    root: Node,
+    source: &[u8],
+    language: Language,
+) -> bool {
+    if !matches!(language, Language::CSharp | Language::Java) {
+        return false;
+    }
+    let java_user_types = if language == Language::Java {
+        java_user_type_names(root, source)
+    } else {
+        std::collections::HashSet::new()
+    };
+    let bindings = reflection_scope(call, language)
+        .map(|scope| collect_reflection_bindings(scope, call, language, source, &java_user_types))
+        .unwrap_or_default();
+    match language {
+        Language::CSharp => csharp_reflection_call_is_proven(call, source, &bindings),
+        Language::Java => java_reflection_call_is_proven(call, source, &bindings, &java_user_types),
+        _ => false,
+    }
+}
+
 pub(crate) fn extract_hazards(
     file_path: &str,
     root: Node,
@@ -430,6 +995,18 @@ pub(crate) fn extract_hazards(
             if language == Language::CSharp
                 && hazard_type == "csharp_dynamic_dispatch"
                 && !csharp_dynamic_call_is_declared(cap.node, source_bytes)
+            {
+                continue;
+            }
+            if language == Language::CSharp
+                && hazard_type == "csharp_metaprogramming"
+                && !typed_reflection_call_is_proven(cap.node, root, source_bytes, language)
+            {
+                continue;
+            }
+            if language == Language::Java
+                && hazard_type == "java_metaprogramming"
+                && !typed_reflection_call_is_proven(cap.node, root, source_bytes, language)
             {
                 continue;
             }
@@ -1290,6 +1867,88 @@ local mt = {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn typed_reflection_locals_and_aliases_require_framework_types() {
+        let mut parser = Parser::new();
+
+        let csharp = r#"
+            class Demo {
+                void Test() {
+                    Type target = typeof(Demo);
+                    MethodInfo method = target.GetMethod("Run");
+                    method.Invoke(null, null);
+                    var alias = method;
+                    alias.Invoke(null, null);
+
+                    object ordinary = new object();
+                    ordinary.GetMethod("Run");
+                    object methodName = new object();
+                    methodName.Invoke(null, null);
+                }
+            }
+        "#;
+        parser
+            .set_language(&grammar_for_language(Language::CSharp))
+            .unwrap();
+        let tree = parser.parse(csharp, None).unwrap();
+        let csharp_hazards = extract_hazards("test.cs", tree.root_node(), csharp, Language::CSharp);
+        let csharp_reflection: Vec<_> = csharp_hazards
+            .iter()
+            .filter(|hazard| hazard.hazard_type == "csharp_metaprogramming")
+            .collect();
+        assert_eq!(csharp_reflection.len(), 3, "{csharp_reflection:?}");
+        assert!(csharp_reflection
+            .iter()
+            .any(|hazard| hazard.snippet.contains("target.GetMethod")));
+        assert!(csharp_reflection
+            .iter()
+            .any(|hazard| hazard.snippet.contains("method.Invoke")));
+        assert!(csharp_reflection
+            .iter()
+            .any(|hazard| hazard.snippet.contains("alias.Invoke")));
+
+        let java = r#"
+            class Demo {
+                void test() throws Exception {
+                    Class target = Class.forName("Demo");
+                    Method method = target.getMethod("run");
+                    method.invoke(null);
+                    var alias = method;
+                    alias.invoke(null);
+
+                    Object clazz = new Object();
+                    clazz.getMethod("run");
+                    Object loader = new Object();
+                    loader.loadClass("Demo");
+                    Object methodName = new Object();
+                    methodName.invoke(null);
+                }
+            }
+        "#;
+        parser
+            .set_language(&grammar_for_language(Language::Java))
+            .unwrap();
+        let tree = parser.parse(java, None).unwrap();
+        let java_hazards = extract_hazards("test.java", tree.root_node(), java, Language::Java);
+        let java_reflection: Vec<_> = java_hazards
+            .iter()
+            .filter(|hazard| hazard.hazard_type == "java_metaprogramming")
+            .collect();
+        assert_eq!(java_reflection.len(), 4);
+        assert!(java_reflection
+            .iter()
+            .any(|hazard| hazard.snippet.contains("Class.forName")));
+        assert!(java_reflection
+            .iter()
+            .any(|hazard| hazard.snippet.contains("target.getMethod")));
+        assert!(java_reflection
+            .iter()
+            .any(|hazard| hazard.snippet.contains("method.invoke")));
+        assert!(java_reflection
+            .iter()
+            .any(|hazard| hazard.snippet.contains("alias.invoke")));
     }
 
     #[test]
