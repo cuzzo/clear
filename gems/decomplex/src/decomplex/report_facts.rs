@@ -1,9 +1,10 @@
 use crate::decomplex::detectors::{
-    co_update, decision_pressure, declared_type_pressure, derived_state, false_simplicity, fat_union, flay_similarity,
-    function_lcom, implicit_control_flow, inconsistent_rename_clone, local_flow, locality_drag,
-    miner, operational_discontinuity, oversized_predicate, path_condition, predicate_alias,
-    redundant_nil_guard, scoped_state_restoration, semantic_alias, sequence_mine, state_branch_density, state_mesh,
-    superfluous_state, temporal_ordering_pressure, weighted_inlined_cognitive_complexity,
+    co_update, decision_pressure, declared_type_pressure, derived_state, false_simplicity,
+    fat_union, flay_similarity, function_lcom, implicit_control_flow, inconsistent_rename_clone,
+    local_flow, locality_drag, miner, operational_discontinuity, oversized_predicate,
+    path_condition, predicate_alias, redundant_nil_guard, scoped_state_restoration, semantic_alias,
+    sequence_mine, state_branch_density, state_mesh, superfluous_state, temporal_ordering_pressure,
+    weighted_inlined_cognitive_complexity,
 };
 use crate::decomplex::parallel;
 use crate::decomplex::syntax::{self, Document, Language};
@@ -87,10 +88,18 @@ struct SharedFacts {
     local_complexity_scores: BTreeMap<(String, String), syntax::LocalComplexityScore>,
     semantic_aliases: semantic_alias::SemanticAliasReport,
     declaration_type_pressures: Vec<fact_mine_rust::profile::DeclarationTypePressure>,
+    /// FactMine owns call identity and resolution.  Keep its evidence with the
+    /// detector facts so report rendering never has to infer certainty from a
+    /// parser-wide boolean.
+    semantic_evidence: Value,
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct CorpusMetadata { complete: bool, reason: String, targets: Vec<String> }
+struct CorpusMetadata {
+    complete: bool,
+    reason: String,
+    targets: Vec<String>,
+}
 
 impl SharedFacts {
     fn new(documents: &[Document]) -> Self {
@@ -114,8 +123,13 @@ impl SharedFacts {
                 profile_phase(profile, "shared.semantic_aliases", started.elapsed());
                 result
             });
-            let declaration_type_pressures = scope.spawn(|| documents.iter()
-                .flat_map(fact_mine_rust::profile::extract_declaration_type_pressures).collect());
+            let declaration_type_pressures = scope.spawn(|| {
+                documents
+                    .iter()
+                    .flat_map(fact_mine_rust::profile::extract_declaration_type_pressures)
+                    .collect()
+            });
+            let semantic_evidence = scope.spawn(|| semantic_evidence(documents));
             Self {
                 local_summaries: local_summaries.join().expect("local-flow facts worker"),
                 local_complexity_scores: local_complexity_scores
@@ -124,8 +138,12 @@ impl SharedFacts {
                 semantic_aliases: semantic_aliases
                     .join()
                     .expect("semantic-alias facts worker"),
-                declaration_type_pressures: declaration_type_pressures.join()
+                declaration_type_pressures: declaration_type_pressures
+                    .join()
                     .expect("declaration-type-pressure facts worker"),
+                semantic_evidence: semantic_evidence
+                    .join()
+                    .expect("semantic-evidence facts worker"),
             }
         })
     }
@@ -151,15 +169,32 @@ pub fn collect_source_files(targets: &[PathBuf], options: &Options) -> Result<Ve
     Ok(files)
 }
 
-pub fn facts_for_source_files(files: &[SourceFile], options: &Options, include_documents: bool) -> Result<Value> {
-    facts_for_source_files_with_corpus(files, options, include_documents, CorpusMetadata {
+pub fn facts_for_source_files(
+    files: &[SourceFile],
+    options: &Options,
+    include_documents: bool,
+) -> Result<Value> {
+    facts_for_source_files_with_corpus(
+        files,
+        options,
+        include_documents,
+        CorpusMetadata {
         complete: false,
         reason: "source files were supplied without a closed-corpus target".to_string(),
-        targets: files.iter().map(|file| file.path.to_string_lossy().to_string()).collect(),
-    })
+            targets: files
+                .iter()
+                .map(|file| file.path.to_string_lossy().to_string())
+                .collect(),
+        },
+    )
 }
 
-fn facts_for_source_files_with_corpus(files: &[SourceFile], options: &Options, include_documents: bool, corpus: CorpusMetadata) -> Result<Value> {
+fn facts_for_source_files_with_corpus(
+    files: &[SourceFile],
+    options: &Options,
+    include_documents: bool,
+    corpus: CorpusMetadata,
+) -> Result<Value> {
     if files.is_empty() {
         bail!("facts requires at least one supported source file");
     }
@@ -173,9 +208,10 @@ fn facts_for_source_files_with_corpus(files: &[SourceFile], options: &Options, i
     profile_phase(profile, "parse", parse_started.elapsed());
 
     let projected_documents: Vec<Value> = if include_documents {
-        documents.iter().map(|doc| {
-            crate::decomplex::syntax_oracle::project_document(doc)
-        }).collect()
+        documents
+            .iter()
+            .map(|doc| crate::decomplex::syntax_oracle::project_document(doc))
+            .collect()
     } else {
         Vec::new()
     };
@@ -229,6 +265,7 @@ fn facts_for_source_files_with_corpus(files: &[SourceFile], options: &Options, i
         "files": reported_files,
         "file_roles": file_roles,
         "input_coverage": input_coverage,
+        "semantic_evidence": shared.semantic_evidence,
         "corpus": corpus,
         "detectors": detectors,
         "documents": projected_documents,
@@ -237,6 +274,53 @@ fn facts_for_source_files_with_corpus(files: &[SourceFile], options: &Options, i
     profile_phase(profile, "facts_total", total_started.elapsed());
 
     Ok(output)
+}
+
+/// Emits the evidence boundary at extraction time.  The call-sensitive
+/// detectors consume normalized call facts, so a missing resolution proof in
+/// their enclosing function is a real partial input.  Other Decomplex
+/// detectors intentionally do not consume call identity and must not inherit
+/// this boundary merely because an unrelated call was unresolved.
+fn semantic_evidence(documents: &[Document]) -> Value {
+    use fact_mine_rust::profile::{self, Profile};
+
+    let output = profile::merge(
+        documents
+            .iter()
+            .map(|document| profile::extract(document, Profile::Espalier))
+            .collect(),
+        Profile::Espalier,
+    );
+    let unresolved_sources = output
+        .calls
+        .iter()
+        .filter(|call| call.resolution_missing_proof.is_some())
+        .map(|call| call.source.as_str())
+        .collect::<HashSet<_>>();
+    let mut by_file = BTreeMap::new();
+    for document in documents {
+        let unresolved_function_spans = output
+            .methods
+            .iter()
+            .filter(|method| {
+                method.path == document.file && unresolved_sources.contains(method.id.as_str())
+            })
+            .filter_map(|method| method.span)
+            .collect::<Vec<_>>();
+        by_file.insert(
+            document.file.clone(),
+            json!({
+                "normalized_ast_complete": !document.parse_recovered,
+                "parse_recovery_spans": document.parse_recovery_spans,
+                "unresolved_call_function_spans": unresolved_function_spans,
+            }),
+        );
+    }
+    json!({
+        "schema": "decomplex.semantic-evidence.v1",
+        "call_resolution": output.call_resolution_coverage,
+        "by_file": by_file,
+    })
 }
 
 fn collect_detector_facts(
@@ -405,7 +489,10 @@ fn detector_tasks<'a>(
     });
     detector_task!("superfluous_state", {
         merge_array_reports(groups, |documents| {
-            json_value(superfluous_state::scan_documents_with_corpus(documents, corpus_complete))
+            json_value(superfluous_state::scan_documents_with_corpus(
+                documents,
+                corpus_complete,
+            ))
         })
     });
     detector_task!("declared_type_pressure", {
@@ -416,16 +503,24 @@ fn detector_tasks<'a>(
         ))
     });
     detector_task!("scoped_state_restoration", {
-        merge_array_reports(groups, |documents| json_value(scoped_state_restoration::scan_documents(documents)))
+        merge_array_reports(groups, |documents| {
+            json_value(scoped_state_restoration::scan_documents(documents))
+        })
     });
     tasks
 }
 
 fn corpus_metadata(targets: &[PathBuf], files: &[SourceFile], options: &Options) -> CorpusMetadata {
-    let normalized_targets = targets.iter().map(|target| normalize_path(target)).collect::<Vec<_>>();
+    let normalized_targets = targets
+        .iter()
+        .map(|target| normalize_path(target))
+        .collect::<Vec<_>>();
     let roots = git_roots_for_files(files).unwrap_or_default();
-    let complete = options.excludes.is_empty() && roots.len() == 1
-        && normalized_targets.iter().any(|target| target.is_dir() && roots.contains(target));
+    let complete = options.excludes.is_empty()
+        && roots.len() == 1
+        && normalized_targets
+            .iter()
+            .any(|target| target.is_dir() && roots.contains(target));
     let reason = if complete {
         "the selected target includes the Git worktree root without custom exclusions"
     } else if !options.excludes.is_empty() {
@@ -436,7 +531,10 @@ fn corpus_metadata(targets: &[PathBuf], files: &[SourceFile], options: &Options)
     CorpusMetadata {
         complete,
         reason: reason.to_string(),
-        targets: normalized_targets.iter().map(|target| target.to_string_lossy().to_string()).collect(),
+        targets: normalized_targets
+            .iter()
+            .map(|target| target.to_string_lossy().to_string())
+            .collect(),
     }
 }
 
@@ -851,7 +949,8 @@ fn push_source_file(
         return;
     }
 
-    let ext_lang = path.extension()
+    let ext_lang = path
+        .extension()
         .and_then(|value| value.to_str())
         .and_then(|extension| Language::for_extension(&extension.to_ascii_lowercase()));
 
@@ -879,9 +978,15 @@ fn push_source_file(
 
 fn source_role(path: &Path) -> SourceRole {
     let text = path.to_string_lossy().replace('\\', "/");
-    let parts = text.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>();
+    let parts = text
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
     let basename = parts.last().copied().unwrap_or_default();
-    if parts.iter().any(|part| matches!(*part, ".git" | ".hg" | ".svn")) {
+    if parts
+        .iter()
+        .any(|part| matches!(*part, ".git" | ".hg" | ".svn"))
+    {
         SourceRole::VcsMetadata
     } else if parts
         .iter()
@@ -972,19 +1077,35 @@ mod tests {
         let dir = TempDir::new().expect("tempdir");
         run_git(dir.path(), &["init"]);
         let source = dir.path().join("state.rb");
-        fs::write(&source, "class State\n  def write\n    @value = 1\n  end\nend\n").unwrap();
+        fs::write(
+            &source,
+            "class State\n  def write\n    @value = 1\n  end\nend\n",
+        )
+        .unwrap();
         run_git(dir.path(), &["add", "state.rb"]);
 
         let complete = collect(&[dir.path().to_path_buf()], &Options::default(), false).unwrap();
         assert_eq!(complete.pointer("/corpus/complete"), Some(&json!(true)));
-        assert_eq!(complete.pointer("/input_coverage/complete"), Some(&json!(true)));
+        assert_eq!(
+            complete.pointer("/input_coverage/complete"),
+            Some(&json!(true))
+        );
 
         let partial = collect(&[source], &Options::default(), false).unwrap();
         assert_eq!(partial.pointer("/corpus/complete"), Some(&json!(false)));
-        assert_eq!(partial.pointer("/input_coverage/complete"), Some(&json!(true)));
-        let state = partial.get("detectors").and_then(|v| v.get("superfluous_state"))
-            .and_then(Value::as_array).unwrap();
-        assert!(state.is_empty(), "partial corpora cannot prove state is unread");
+        assert_eq!(
+            partial.pointer("/input_coverage/complete"),
+            Some(&json!(true))
+        );
+        let state = partial
+            .get("detectors")
+            .and_then(|v| v.get("superfluous_state"))
+            .and_then(Value::as_array)
+            .unwrap();
+        assert!(
+            state.is_empty(),
+            "partial corpora cannot prove state is unread"
+        );
     }
 
     #[test]
@@ -994,9 +1115,13 @@ mod tests {
         fs::write(&source, "def broken(\n").unwrap();
 
         let facts = collect(&[source], &Options::default(), false).unwrap();
-        assert_eq!(facts.pointer("/input_coverage/complete"), Some(&json!(false)));
         assert_eq!(
-            facts.pointer("/input_coverage/parse_recovery_files")
+            facts.pointer("/input_coverage/complete"),
+            Some(&json!(false))
+        );
+        assert_eq!(
+            facts
+                .pointer("/input_coverage/parse_recovery_files")
                 .and_then(Value::as_array)
                 .map(Vec::len),
             Some(1)
@@ -1102,7 +1227,12 @@ mod tests {
 
         // Test non-existent path
         let mut files_nonexistent = Vec::new();
-        expand_target(Path::new("nonexistent-file-12345"), &options, &mut files_nonexistent).unwrap();
+        expand_target(
+            Path::new("nonexistent-file-12345"),
+            &options,
+            &mut files_nonexistent,
+        )
+        .unwrap();
         assert!(files_nonexistent.is_empty());
 
         // Test excluded direct file target
@@ -1123,7 +1253,11 @@ mod tests {
         fs::write(dir.path().join("Dockerfile"), "FROM scratch\n").unwrap();
         fs::write(dir.path().join("install"), "#!/bin/sh\n").unwrap();
         fs::create_dir(dir.path().join(".git")).unwrap();
-        fs::write(dir.path().join(".git").join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            dir.path().join(".git").join("HEAD"),
+            "ref: refs/heads/main\n",
+        )
+        .unwrap();
         let options = Options {
             language: Some(Language::Go),
             ..Options::default()
@@ -1143,11 +1277,8 @@ mod tests {
         fs::write(&production, "package app\n").unwrap();
         fs::write(&test, "package app\n").unwrap();
 
-        let production_files = collect_source_files(
-            &[dir.path().to_path_buf()],
-            &Options::default(),
-        )
-        .unwrap();
+        let production_files =
+            collect_source_files(&[dir.path().to_path_buf()], &Options::default()).unwrap();
         assert_eq!(production_files.len(), 1);
         assert_eq!(production_files[0].path, production);
 
@@ -1182,24 +1313,22 @@ mod tests {
 
     #[test]
     fn test_run_detector_tasks() {
-        let res = run_detector_tasks_sequential(vec![
-            ("task_ok", Box::new(|| Ok(json!([1, 2, 3]))))
-        ]).unwrap();
+        let res =
+            run_detector_tasks_sequential(vec![("task_ok", Box::new(|| Ok(json!([1, 2, 3]))))])
+                .unwrap();
         assert_eq!(res.get("task_ok").unwrap(), &json!([1, 2, 3]));
 
-        let res_err = run_detector_tasks_sequential(vec![
-            ("task_err", Box::new(|| bail!("task failed")))
-        ]);
+        let res_err =
+            run_detector_tasks_sequential(vec![("task_err", Box::new(|| bail!("task failed")))]);
         assert!(res_err.is_err());
 
-        let res_p = run_detector_tasks_parallel(vec![
-            ("task_ok", Box::new(|| Ok(json!([1, 2, 3]))))
-        ], 2).unwrap();
+        let res_p =
+            run_detector_tasks_parallel(vec![("task_ok", Box::new(|| Ok(json!([1, 2, 3]))))], 2)
+                .unwrap();
         assert_eq!(res_p.get("task_ok").unwrap(), &json!([1, 2, 3]));
 
-        let res_p_err = run_detector_tasks_parallel(vec![
-            ("task_err", Box::new(|| bail!("task failed")))
-        ], 2);
+        let res_p_err =
+            run_detector_tasks_parallel(vec![("task_err", Box::new(|| bail!("task failed")))], 2);
         assert!(res_p_err.is_err());
     }
 
@@ -1360,7 +1489,8 @@ mod tests {
         fs::write(&rs_file, "fn main() {\n  println!(\"hello\");\n}\n").unwrap();
 
         let options = Options::default();
-        let result = collect(&[rb_file.clone(), rs_file.clone()], &options, false).expect("collect");
+        let result =
+            collect(&[rb_file.clone(), rs_file.clone()], &options, false).expect("collect");
         assert!(result.is_object());
         let obj = result.as_object().unwrap();
         assert_eq!(obj.get("format").unwrap(), FORMAT);
@@ -1372,7 +1502,8 @@ mod tests {
             language: Some(Language::Ruby),
             ..Options::default()
         };
-        let result_lang = collect(&[dir.path().to_path_buf()], &options_lang, false).expect("collect with lang filter");
+        let result_lang = collect(&[dir.path().to_path_buf()], &options_lang, false)
+            .expect("collect with lang filter");
         let obj_lang = result_lang.as_object().unwrap();
         let files_lang = obj_lang.get("files").unwrap().as_array().unwrap();
         assert_eq!(files_lang.len(), 1);
@@ -1394,7 +1525,10 @@ mod tests {
     fn test_normalize_path() {
         let non_existent = Path::new("/non-existent-dir-12345/some-file.rb");
         let normalized = normalize_path(non_existent);
-        assert_eq!(normalized, PathBuf::from("/non-existent-dir-12345/some-file.rb"));
+        assert_eq!(
+            normalized,
+            PathBuf::from("/non-existent-dir-12345/some-file.rb")
+        );
 
         let non_existent_relative = Path::new("non-existent-dir-12345/some-file.rb");
         let normalized_relative = normalize_path(non_existent_relative);
@@ -1412,7 +1546,8 @@ mod tests {
             "span": [10, 1, 10, 5],
             "statements": [],
             "boundaries": []
-        })).unwrap();
+        }))
+        .unwrap();
 
         let summary2: local_flow::MethodSummary = serde_json::from_value(json!({
             "id": "m2",
@@ -1423,7 +1558,8 @@ mod tests {
             "span": [20, 1, 20, 5],
             "statements": [],
             "boundaries": []
-        })).unwrap();
+        }))
+        .unwrap();
 
         let doc_a: Document = serde_json::from_value(json!({
             "file": "a.rb",
@@ -1452,7 +1588,8 @@ mod tests {
             "type_aliases": {},
             "method_param_types": {},
             "state_param_origins": []
-        })).unwrap();
+        }))
+        .unwrap();
 
         let summaries = vec![summary1, summary2];
         
@@ -1488,7 +1625,8 @@ mod tests {
             "type_aliases": {},
             "method_param_types": {},
             "state_param_origins": []
-        })).unwrap();
+        }))
+        .unwrap();
 
         let res_borrowed = local_summaries_for_documents(&summaries, &[doc_a, doc_b]);
         assert_eq!(res_borrowed.len(), 2);
@@ -1525,22 +1663,17 @@ mod tests {
             "type_aliases": {},
             "method_param_types": {},
             "state_param_origins": []
-        })).unwrap();
+        }))
+        .unwrap();
         groups.insert(Language::Ruby, vec![doc]);
 
-        let res_obj = merge_object_reports(&groups, &["field"], |_docs| {
-            Ok(json!([1, 2, 3]))
-        });
+        let res_obj = merge_object_reports(&groups, &["field"], |_docs| Ok(json!([1, 2, 3])));
         assert!(res_obj.is_err());
 
-        let res_missing = merge_object_reports(&groups, &["field"], |_docs| {
-            Ok(json!({}))
-        });
+        let res_missing = merge_object_reports(&groups, &["field"], |_docs| Ok(json!({})));
         assert!(res_missing.is_err());
 
-        let res_arr = merge_array_reports(&groups, |_docs| {
-            Ok(json!({}))
-        });
+        let res_arr = merge_array_reports(&groups, |_docs| Ok(json!({})));
         assert!(res_arr.is_err());
     }
 }

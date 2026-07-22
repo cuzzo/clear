@@ -45,7 +45,7 @@ impl FindingsRollup {
         let Some(detectors) = rv::get(facts, "detectors") else {
             bail!("report facts missing detectors");
         };
-        let sections = build_sections(detectors, corpus_input_boundary(facts));
+        let sections = build_sections(detectors, facts);
         validate_spans(&sections)?;
         let convergence_sections = sections
             .iter()
@@ -452,10 +452,7 @@ struct SarifLocation {
     end_column: Option<i64>,
 }
 
-fn build_sections(
-    detectors: &Value,
-    (input_completeness, corpus_blockers): (sarif::InputCompleteness, Vec<String>),
-) -> Vec<ReportSection> {
+fn build_sections(detectors: &Value, facts: &Value) -> Vec<ReportSection> {
     let miner = rv::get(detectors, "miner").unwrap_or(&Value::Null);
     let co_update = rv::get(detectors, "co_update").unwrap_or(&Value::Null);
     let semantic_alias = rv::get(detectors, "semantic_alias").unwrap_or(&Value::Null);
@@ -497,43 +494,27 @@ fn build_sections(
         section("False Simplicity", 3, "looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/reflection/reopen -- *POSSIBLE* (noisy)", direct_array(detectors, "false_simplicity")),
         section("Fat Unions", 3, "case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*", nested_array(fat_union, "fat_unions")),
     ];
-    attach_detector_boundaries(&mut sections, input_completeness, &corpus_blockers);
+    attach_detector_boundaries(&mut sections, facts);
     sections
 }
 
-fn corpus_input_boundary(facts: &Value) -> (sarif::InputCompleteness, Vec<String>) {
-    let coverage = rv::get(facts, "input_coverage");
-    match coverage
-        .and_then(|value| rv::get(value, "complete"))
-        .and_then(Value::as_bool)
-    {
-        Some(true) => (sarif::InputCompleteness::Complete, Vec::new()),
-        Some(false) => {
-            let reason = coverage
-                .and_then(|value| rv::get(value, "reason"))
-                .and_then(Value::as_str)
-                .unwrap_or("incomplete_input_coverage")
-                .to_string();
-            (sarif::InputCompleteness::Partial, vec![reason])
-        }
-        None => (sarif::InputCompleteness::Unknown, Vec::new()),
-    }
-}
-
-fn attach_detector_boundaries(
-    sections: &mut [ReportSection],
-    input_completeness: sarif::InputCompleteness,
-    corpus_blockers: &[String],
-) {
+fn attach_detector_boundaries(sections: &mut [ReportSection], facts: &Value) {
     for section in sections {
         let redundant_nil_guard = section.title == "Redundant Nil Guards";
         for finding in &mut section.findings {
-            let Some(object) = finding.as_object_mut() else {
+            if !finding.is_object() {
                 continue;
-            };
-            object
-                .entry("proof_boundary".to_string())
-                .or_insert_with(|| {
+            }
+            if finding.get("proof_boundary").is_some() {
+                continue;
+            }
+            let (input_completeness, blockers) =
+                finding_input_boundary(&section.title, finding, facts);
+            finding
+                .as_object_mut()
+                .expect("object checked above")
+                .insert(
+                    "proof_boundary".to_string(),
                     sarif::proof_boundary(
                         input_completeness,
                         if redundant_nil_guard {
@@ -552,11 +533,84 @@ fn attach_detector_boundaries(
                         } else {
                             "decomplex_detector"
                         },
-                        corpus_blockers.to_vec(),
-                    )
-                });
+                        blockers,
+                    ),
+                );
         }
     }
+}
+
+/// Resolves the boundary from explicit extractor evidence, never from generic
+/// presentation fields.  A structural detector needs only the parsed source
+/// locations it reports.  Call-sensitive detectors additionally need every
+/// enclosing function that supplied call facts to be free of unresolved
+/// eligible calls.
+fn finding_input_boundary(
+    section: &str,
+    finding: &Value,
+    facts: &Value,
+) -> (sarif::InputCompleteness, Vec<String>) {
+    let by_file = facts
+        .pointer("/semantic_evidence/by_file")
+        .and_then(Value::as_object);
+    let locations = sarif_locations_for_finding(finding);
+    if locations.is_empty() {
+        return (
+            sarif::InputCompleteness::Unknown,
+            vec!["missing_finding_location".to_string()],
+        );
+    }
+    let call_sensitive = matches!(
+        section,
+        "False Simplicity" | "Implicit Control Flow" | "Weighted Inlined Cognitive Complexity"
+    );
+    let mut partial = Vec::new();
+    for location in locations {
+        let Some(path) = location.path else {
+            return (
+                sarif::InputCompleteness::Unknown,
+                vec!["missing_finding_path".to_string()],
+            );
+        };
+        let Some(file) = by_file.and_then(|files| files.get(&path)) else {
+            return (
+                sarif::InputCompleteness::Unknown,
+                vec![format!("missing_extractor_evidence:{path}")],
+            );
+        };
+        if file.get("normalized_ast_complete").and_then(Value::as_bool) != Some(true) {
+            partial.push(format!("parser_recovery:{path}"));
+        }
+        if call_sensitive
+            && file
+                .get("unresolved_call_function_spans")
+                .and_then(Value::as_array)
+                .is_some_and(|spans| {
+                    spans
+                        .iter()
+                        .any(|span| span_contains_line(span, location.line))
+                })
+        {
+            partial.push(format!(
+                "unresolved_call_resolution:{path}:{}",
+                location.line
+            ));
+        }
+    }
+    partial.sort();
+    partial.dedup();
+    if partial.is_empty() {
+        (sarif::InputCompleteness::Complete, partial)
+    } else {
+        (sarif::InputCompleteness::Partial, partial)
+    }
+}
+
+fn span_contains_line(span: &Value, line: i64) -> bool {
+    let values = rv::array_from(Some(span));
+    let start = values.first().and_then(Value::as_i64).unwrap_or(i64::MAX);
+    let end = values.get(2).and_then(Value::as_i64).unwrap_or(start);
+    start <= line && line <= end
 }
 
 fn section(title: &str, tier: i64, desc: &str, findings: Vec<Value>) -> ReportSection {
@@ -1754,7 +1808,9 @@ mod tests {
             .unwrap()
             .len();
         assert_eq!(
-            partial_input_sarif.pointer("/runs/0/properties/fact_mine.proof_boundary_summary/input_completeness/partial"),
+            partial_input_sarif.pointer(
+                "/runs/0/properties/fact_mine.proof_boundary_summary/input_completeness/partial"
+            ),
             Some(&json!(partial_count))
         );
 
@@ -1764,6 +1820,44 @@ mod tests {
             "files": []
         });
         assert!(Report::from_facts(&invalid_facts).is_err());
+    }
+
+    #[test]
+    fn semantic_boundaries_follow_finding_dependencies() {
+        let facts = json!({
+            "semantic_evidence": {
+                "by_file": {
+                    "clean.rb": {
+                        "normalized_ast_complete": true,
+                        "unresolved_call_function_spans": [[10, 0, 20, 0]]
+                    },
+                    "recovered.rb": {
+                        "normalized_ast_complete": false,
+                        "unresolved_call_function_spans": []
+                    }
+                }
+            }
+        });
+        let clean = json!({ "at": "clean.rb:work:5" });
+        assert_eq!(
+            finding_input_boundary("Decision Pressure", &clean, &facts).0,
+            sarif::InputCompleteness::Complete
+        );
+        let call_dependent = json!({ "at": "clean.rb:work:12" });
+        let (completeness, blockers) =
+            finding_input_boundary("False Simplicity", &call_dependent, &facts);
+        assert_eq!(completeness, sarif::InputCompleteness::Partial);
+        assert_eq!(blockers, vec!["unresolved_call_resolution:clean.rb:12"]);
+        let recovered = json!({ "at": "recovered.rb:work:3" });
+        assert_eq!(
+            finding_input_boundary("Decision Pressure", &recovered, &facts).0,
+            sarif::InputCompleteness::Partial
+        );
+        let missing = json!({ "at": "missing.rb:work:3" });
+        assert_eq!(
+            finding_input_boundary("Decision Pressure", &missing, &facts).0,
+            sarif::InputCompleteness::Unknown
+        );
     }
 
     #[test]
