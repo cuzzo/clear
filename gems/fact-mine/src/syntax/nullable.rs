@@ -64,6 +64,25 @@ pub struct NullableOperation {
     pub complete: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct PresenceCorrelation {
+    pub group_id: String,
+    pub value_place_id: String,
+    pub presence_place_id: String,
+    pub semantics: String,
+    pub branch_refinement: String,
+    pub complete: bool,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct PresenceCorrelationSeed {
+    pub(crate) function: String,
+    pub(crate) span: Span,
+    pub(crate) value_subject: String,
+    pub(crate) presence_subject: String,
+    pub(crate) semantics: String,
+}
+
 /// Projects normalized guard semantics onto stable CFG places. The guard
 /// extractor owns predicate interpretation; this module only joins its seeds
 /// to already-built CFG identities.
@@ -347,6 +366,22 @@ pub(crate) fn project_operations(
             },
         )
         .collect()
+}
+
+pub(crate) fn project_presence_correlations(seeds: &[PresenceCorrelationSeed], facts: &ControlFlowFacts) -> Vec<PresenceCorrelation> {
+    let places = facts.places.iter().map(|place| (place.id.as_str(), place.name.as_str())).collect::<BTreeMap<_, _>>();
+    let effects = facts.effects.iter().map(|effect| (effect.node_id.as_str(), effect)).collect::<BTreeMap<_, _>>();
+    let mut rows = BTreeSet::new();
+    for seed in seeds {
+        for node in facts.nodes.iter().filter(|node| node.function == seed.function && span_contains(node.span, seed.span)) {
+            let Some(effect) = effects.get(node.id.as_str()) else { continue; };
+            let place_for = |subject: &str| effect.reads.iter().chain(effect.writes.iter())
+                .find(|place_id| places.get(place_id.as_str()) == Some(&subject)).cloned();
+            let (Some(value_place_id), Some(presence_place_id)) = (place_for(&seed.value_subject), place_for(&seed.presence_subject)) else { continue; };
+            rows.insert((format!("presence:{}:{value_place_id}:{presence_place_id}", node.id), value_place_id, presence_place_id, seed.semantics.clone(), "presence_on_true".to_string(), effect.complete));
+        }
+    }
+    rows.into_iter().map(|(group_id, value_place_id, presence_place_id, semantics, branch_refinement, complete)| PresenceCorrelation { group_id, value_place_id, presence_place_id, semantics, branch_refinement, complete }).collect()
 }
 
 fn join_projected_states<'a>(states: impl Iterator<Item = &'a str>) -> DefinitionState {

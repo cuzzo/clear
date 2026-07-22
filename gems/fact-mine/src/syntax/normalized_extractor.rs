@@ -3,7 +3,7 @@ use super::{
         NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedOwner,
         NormalizedStateRead,
     },
-    nullable::NullableOperationSeed, BranchArm, BranchDecision, CallSite, ComparisonUse,
+    nullable::{NullableOperationSeed, PresenceCorrelationSeed}, BranchArm, BranchDecision, CallSite, ComparisonUse,
     DecisionSite, DispatchSite, FunctionDef,
     OwnerDef, PathConditionSite, PredicateAlias, RawNode, SemanticEffectSite, StateDeclaration,
     StateRead, StateWrite, HazardSite,
@@ -37,6 +37,7 @@ pub(crate) struct NormalizedFacts {
     pub(crate) path_condition_sites: Vec<PathConditionSite>,
     pub(crate) hazard_sites: Vec<HazardSite>,
     pub(crate) nullable_operation_seeds: Vec<NullableOperationSeed>,
+    pub(crate) presence_correlation_seeds: Vec<PresenceCorrelationSeed>,
 }
 
 pub(crate) fn extract(
@@ -120,6 +121,7 @@ impl<'a> Extractor<'a> {
 
     fn scan(&mut self, node: &Node) {
         self.record_nullable_operation(node);
+        self.record_presence_correlation(node);
         self.record_behavior_node_reads(node);
         self.record_behavior_node_calls(node);
         self.record_behavior_initializer_writes(node);
@@ -190,6 +192,15 @@ impl<'a> Extractor<'a> {
                 operation_kind: operation.operation_kind.to_string(),
                 nil_behavior: operation.nil_behavior.to_string(),
             });
+    }
+
+    fn record_presence_correlation(&mut self, node: &Node) {
+        let Some(correlation) = self.behavior.presence_correlation(node) else { return; };
+        self.facts.presence_correlation_seeds.push(PresenceCorrelationSeed {
+            function: self.current_function(), span: span(node),
+            value_subject: correlation.value_subject, presence_subject: correlation.presence_subject,
+            semantics: correlation.semantics.to_string(),
+        });
     }
 
     fn scan_children(&mut self, node: &Node) {

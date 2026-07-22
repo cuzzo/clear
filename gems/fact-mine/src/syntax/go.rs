@@ -9,7 +9,7 @@ use super::normalized_behavior::{
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
-    NormalizedNullableOperation, NormalizedOwner,
+    NormalizedNullableOperation, NormalizedOwner, NormalizedPresenceCorrelation,
     method_param_types_from_signatures, NormalizedSemanticEffect, NormalizedStateRead,
     NormalizedStateWrite, SyntaxMetadata,
 };
@@ -203,6 +203,20 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             subject,
             operation_kind: "pointer_dereference",
             nil_behavior: "panic",
+        })
+    }
+
+    fn presence_correlation(&self, node: &Node) -> Option<NormalizedPresenceCorrelation> {
+        if node.r#type != "SHORT_VAR_DECLARATION" { return None; }
+        let targets = node.children.first().and_then(crate::ast::node)?;
+        let source = node.children.get(1).and_then(crate::ast::node)?;
+        if targets.r#type != "EXPRESSION_LIST" || source.r#type != "EXPRESSION_LIST" { return None; }
+        let subjects = targets.children.iter().filter_map(crate::ast::node)
+            .filter(|target| target.r#type == "LVAR")
+            .map(|target| target.text.trim().to_string()).collect::<Vec<_>>();
+        let lookup = source.children.first().and_then(crate::ast::node)?;
+        (subjects.len() == 2 && lookup.r#type == "INDEX_EXPRESSION").then(|| NormalizedPresenceCorrelation {
+            value_subject: subjects[0].clone(), presence_subject: subjects[1].clone(), semantics: "map_lookup",
         })
     }
 

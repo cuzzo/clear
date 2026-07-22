@@ -517,6 +517,7 @@ mod tests {
             nullable_states: Vec::new(),
             nullable_summaries: Vec::new(),
             nullable_operations: Vec::new(),
+            presence_correlations: Vec::new(),
             immutable_struct_readers: BTreeMap::new(),
             immutable_struct_reader_types: BTreeMap::new(),
             type_aliases: BTreeMap::new(),
@@ -576,6 +577,7 @@ mod tests {
             nullable_states: Vec::new(),
             nullable_summaries: Vec::new(),
             nullable_operations: Vec::new(),
+            presence_correlations: Vec::new(),
             immutable_struct_readers: vec![("OtherType".to_string(), vec!["b".to_string()])]
                 .into_iter()
                 .collect(),

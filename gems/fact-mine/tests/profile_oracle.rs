@@ -201,6 +201,19 @@ fn nullable_operations_join_native_dereferences_to_proven_null_states() -> Resul
 }
 
 #[test]
+fn go_map_lookup_exports_presence_without_proving_payload_non_null() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_presence.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    assert!(output.presence_correlations.iter().any(|correlation| {
+        correlation.semantics == "map_lookup" && correlation.branch_refinement == "presence_on_true"
+            && correlation.complete && correlation.value_place_id.ends_with(":value")
+            && correlation.presence_place_id.ends_with(":ok")
+    }));
+    assert!(output.nullable_states.iter().all(|state| !state.place_id.ends_with(":value") || state.state != "definitely_non_null"));
+    Ok(())
+}
+
+#[test]
 fn typescript_variable_bound_callables_are_emitted_as_project_methods() -> Result<()> {
     let document = syntax::parse_file(fixture("typescript_callable.ts"), Language::TypeScript)?;
     let output = profile::extract(&document, Profile::Espalier);

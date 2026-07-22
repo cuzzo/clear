@@ -51,6 +51,7 @@ pub(crate) struct StatefulSyntaxMetadata {
     pub(crate) nullable_states: Vec<nullable::NullableState>,
     pub(crate) nullable_summaries: Vec<nullable::NullableSummary>,
     pub(crate) nullable_operations: Vec<nullable::NullableOperation>,
+    pub(crate) presence_correlations: Vec<nullable::PresenceCorrelation>,
     pub(crate) syntax: SyntaxMetadata,
 }
 
@@ -160,6 +161,9 @@ impl<'a> StatefulSyntaxPass<'a> {
             &control_flow,
             &nullable_states,
         );
+        let presence_correlations = nullable::project_presence_correlations(
+            &facts.presence_correlation_seeds, &control_flow,
+        );
 
         StatefulSyntaxMetadata {
             local_complexity_scores: complexity::local_complexity_scores_from_methods(
@@ -177,6 +181,7 @@ impl<'a> StatefulSyntaxPass<'a> {
             nullable_states,
             nullable_summaries,
             nullable_operations,
+            presence_correlations,
             syntax,
         }
     }

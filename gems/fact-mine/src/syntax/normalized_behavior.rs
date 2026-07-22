@@ -85,6 +85,13 @@ pub(crate) struct NormalizedNullableOperation {
     pub(crate) nil_behavior: &'static str,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedPresenceCorrelation {
+    pub(crate) value_subject: String,
+    pub(crate) presence_subject: String,
+    pub(crate) semantics: &'static str,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BlockCallSemantics {
     Iteration,
@@ -730,6 +737,10 @@ pub(crate) fn configured_collection_operation(
 
 pub(crate) trait NormalizedLanguageBehavior: Sync {
     fn nullable_operation(&self, _node: &Node) -> Option<NormalizedNullableOperation> {
+        None
+    }
+
+    fn presence_correlation(&self, _node: &Node) -> Option<NormalizedPresenceCorrelation> {
         None
     }
     /// The configuration key for this source language. Keeping this at the

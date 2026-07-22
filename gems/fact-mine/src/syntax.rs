@@ -324,6 +324,8 @@ pub struct Document {
     pub nullable_summaries: Vec<nullable::NullableSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nullable_operations: Vec<nullable::NullableOperation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presence_correlations: Vec<nullable::PresenceCorrelation>,
     #[serde(default)]
     pub immutable_struct_readers: BTreeMap<String, Vec<String>>,
     #[serde(default)]
