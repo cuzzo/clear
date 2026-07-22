@@ -117,7 +117,10 @@ group :development do
   # Automatically run npm install in development mode during bundle install/update
   if defined?(Bundler) && (ARGV.empty? || ARGV.any? { |a| a =~ /\b(install|update)\b/ })
     without = Bundler.settings[:without] || []
-    unless without.include?(:development) || without.include?("development")
+    grammar_install_needed = packages.values.any? do |pkg|
+      !File.directory?(File.join(__dir__, "node_modules", pkg))
+    end
+    unless without.include?(:development) || without.include?("development") || !grammar_install_needed
       $stderr.puts "Bundler hook: Installing Tree-Sitter grammars..."
       Dir.chdir(__dir__) do
         system("npm install", out: :err)

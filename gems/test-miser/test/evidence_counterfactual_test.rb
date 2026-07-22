@@ -13,7 +13,7 @@ class EvidenceCounterfactualTest < Minitest::Test
 
   def test_assertion_failure_proves_only_when_the_result_parser_recognizes_it
     fake = FakeRunner.new([
-      result(0), result(0, "abc123\n"), result(0), result(0), result(0), result(0), result(0),
+      result(0), result(0, "#{'a' * 40}\n"), result(0), result(0), result(0), result(0), result(0),
       result(1, "Failure: expected new behavior"), result(0),
     ])
     result_value = runner(fake).run
@@ -22,11 +22,13 @@ class EvidenceCounterfactualTest < Minitest::Test
     assert_equal false, result_value.baseline_detects_reversal
     assert_equal "new tests fail after the production change is reversed", result_value.reason
     assert_equal true, result_value.provenance&.clean_worktree
-    assert_equal "abc123", result_value.provenance&.resolved_revision
+    assert_equal "a" * 40, result_value.provenance&.resolved_revision
     assert_equal File.expand_path(PATCH_FIXTURE), result_value.provenance&.production_patch_path
     refute_empty result_value.provenance&.production_patch_sha256.to_s
     assert_equal ["git", "worktree", "add", "--detach"], fake.commands.find { |command, _| command[0, 2] == ["git", "worktree"] }.first.first(4)
     assert_equal ["git", "worktree", "remove", "--force"], fake.commands.last.first.first(4)
+    head_command = fake.commands.find { |command, _chdir| command == ["bundle", "exec", "test", "new"] }
+    refute_equal Dir.tmpdir, head_command[1]
     assert_equal "test-quality-evidence/counterfactual-v1", result_value.to_h.fetch("schema")
   end
 
@@ -61,8 +63,8 @@ class EvidenceCounterfactualTest < Minitest::Test
     result_value = runner(fake).run
 
     assert_equal Evidence::CounterfactualStatus::Inconclusive, result_value.status
-    assert_equal "current baseline-test result was ASSERTION_FAILURE, not PASSED", result_value.reason
-    assert_nil result_value.worktree
+    assert_equal "requested-revision selected-test result was ASSERTION_FAILURE, not PASSED", result_value.reason
+    assert result_value.worktree&.success?
   end
 
   def test_baseline_command_without_head_verification_is_inconclusive
@@ -72,11 +74,11 @@ class EvidenceCounterfactualTest < Minitest::Test
     result_value = Evidence::CounterfactualRunner.new(request, runner: fake).run
 
     assert_equal Evidence::CounterfactualStatus::Inconclusive, result_value.status
-    assert_equal "baseline tests were not verified on the unreversed source", result_value.reason
+    assert_equal "baseline tests were not verified on the requested revision before reversal", result_value.reason
   end
 
   def test_head_reverse_build_timeout_and_infrastructure_failures_are_inconclusive
-    head_fake = FakeRunner.new([result(0), result(0), result(1, "Failure: head")])
+    head_fake = FakeRunner.new([result(0), result(0), result(0), result(1, "Failure: head")])
     head_result = Evidence::CounterfactualRunner.new(request_for, runner: head_fake).run
     assert_equal Evidence::CounterfactualStatus::Inconclusive, head_result.status
     assert_includes head_result.reason, "ASSERTION_FAILURE"
@@ -192,6 +194,8 @@ class EvidenceCounterfactualTest < Minitest::Test
     parser = Evidence::DefaultTestResultParser.new
     assert_equal Evidence::TestOutcome::Passed, parser.parse(result(0))
     assert_equal Evidence::TestOutcome::AssertionFailure, parser.parse(result(1, "Failure: expected"))
+    assert_equal Evidence::TestOutcome::AssertionFailure, parser.parse(result(1, "E       assert 1 == 2"))
+    assert_equal Evidence::TestOutcome::AssertionFailure, parser.parse(result(1, "AssertionFailedError: expected <2> but was <1>"))
     assert_equal Evidence::TestOutcome::Crash, parser.parse(result(1, "NoMethodError"))
     assert_equal Evidence::TestOutcome::TimedOut, parser.parse(result(1, "", timed_out: true))
     assert_equal Evidence::TestOutcome::ResourceLimited, parser.parse(result(1, "", output_truncated: true))
@@ -257,6 +261,10 @@ class EvidenceCounterfactualTest < Minitest::Test
       @commands << [command, chdir, limits]
       result = @results.shift || Evidence::CommandResult.new(status: 0, stdout: "", stderr: "")
       raise "runner unavailable" if result == :raise
+
+      if command[0, 3] == ["git", "rev-parse", "--verify"] && result.stdout.empty?
+        result = result.with(stdout: "#{'a' * 40}\n")
+      end
 
       result
     end

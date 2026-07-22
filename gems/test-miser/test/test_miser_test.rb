@@ -264,7 +264,23 @@ class TestMiserTest < Minitest::Test
       assert_equal "DISABLE_ORACLE", executions.fetch(0).dig("disabled_rewrite", "mutation")
       assert_equal "NEGATE_BOOLEAN", executions.fetch(0).dig("control_rewrite", "mutation")
       assert_equal true, executions.fetch(0).fetch("control_verified")
-      assert_equal "HEAD", payload.dig("scope", "revision")
+      expected_revision = Open3.capture3("git", "rev-parse", "HEAD", chdir: File.expand_path("../../..", __dir__)).first.strip
+      assert_equal expected_revision, payload.dig("scope", "revision")
+    end
+  end
+
+  def test_cli_rejects_symbolic_revision_in_precomputed_oracle_evidence
+    executable = File.expand_path("../exe/test-miser", __dir__)
+    Dir.mktmpdir("test-miser-oracle-input") do |dir|
+      input_path = File.join(dir, "oracle.json")
+      File.write(input_path, JSON.generate("revision" => "HEAD", "facts" => [], "original_kills" => {}))
+
+      _stdout, stderr, status = Open3.capture3(
+        "ruby", executable, "evidence", "--oracle-input", input_path, FIXTURE,
+      )
+
+      refute status.success?
+      assert_includes stderr, "resolved commit revision"
     end
   end
 

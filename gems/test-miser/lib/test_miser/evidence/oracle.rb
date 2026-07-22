@@ -15,6 +15,36 @@ module TestMiser
   module Evidence
     class InvalidOracleFacts < ArgumentError; end
 
+    class OracleRevisionSnapshot
+      extend T::Sig
+
+      sig do
+        params(
+          repository: String,
+          revision: String,
+          source_path: String,
+          block: T.proc.params(archived_source_path: String, resolved_revision: String).returns(T.untyped),
+        ).returns(T.untyped)
+      end
+      def self.with(repository:, revision:, source_path:, &block)
+        relative_source_path = SafeSourcePath.relative!(source_path)
+        resolved_revision = RevisionResolver.resolve!(repository: repository, revision: revision)
+        Dir.mktmpdir("test-miser-oracle-source-") do |directory|
+          archive_path = File.join(directory, "source.tar")
+          _stdout, stderr, status = Open3.capture3(
+            "git", "archive", "--format=tar", "-o", archive_path, resolved_revision, chdir: repository,
+          )
+          raise InvalidOracleFacts, "could not archive #{resolved_revision}: #{stderr}" unless status.success?
+
+          _stdout, stderr, status = Open3.capture3("tar", "-xf", archive_path, "-C", directory)
+          raise InvalidOracleFacts, "could not extract #{resolved_revision}: #{stderr}" unless status.success?
+
+          archived_source_path = SafeSourcePath.inside!(directory, relative_source_path)
+          yield archived_source_path, resolved_revision
+        end
+      end
+    end
+
     class SourceSpan < T::Struct
       extend T::Sig
 
@@ -178,6 +208,9 @@ module TestMiser
           end
           if start_offset && start_offset.negative? || end_offset && end_offset.negative?
             raise InvalidOracleFacts, "oracle span offsets must not be negative"
+          end
+          if start_offset.nil? != end_offset.nil?
+            raise InvalidOracleFacts, "oracle span offsets must be supplied as a pair"
           end
           if start_offset && end_offset && end_offset < start_offset
             raise InvalidOracleFacts, "oracle span end offset must not precede its start offset"
@@ -378,11 +411,12 @@ module TestMiser
       extend T::Sig
       include OracleFactProvider
 
-      sig { params(binary: String, runner: T.untyped, framework: T.nilable(String)).void }
-      def initialize(binary: ENV.fetch("FACT_MINE_RUST_BINARY", "gems/fact-mine/target/release/fact-mine-rust"), runner: Open3, framework: nil)
+      sig { params(binary: String, runner: T.untyped, framework: T.nilable(String), source_identity: T.nilable(String)).void }
+      def initialize(binary: ENV.fetch("FACT_MINE_RUST_BINARY", "gems/fact-mine/target/release/fact-mine-rust"), runner: Open3, framework: nil, source_identity: nil)
         @binary = binary
         @runner = runner
         @framework = framework
+        @source_identity = source_identity
       end
 
       sig do
@@ -397,6 +431,7 @@ module TestMiser
         framework = OracleFramework.detect(source, language, override: @framework)
         return [] if framework.nil?
         calls = Array(payload["documents"]).flat_map { |document| Array(document["calls"]) }
+        identity = @source_identity || source_path
         calls.filter_map.with_index do |call, index|
           next unless belongs_to_test?(call, test_id, source, framework)
           kind = OracleFramework.kind(framework, call)
@@ -404,13 +439,13 @@ module TestMiser
 
           span = oracle_span(call, calls, framework)
           OracleFact.new(
-            oracle_id: "factmine:#{Digest::SHA256.hexdigest("#{source_path}:#{index}:#{span.to_h}")[0, 16]}",
+            oracle_id: "factmine:#{Digest::SHA256.hexdigest("#{identity}:#{index}:#{span.to_h}")[0, 16]}",
             test_id: test_id,
             oracle_kind: kind,
             oracle_span: span,
             framework: framework,
             confidence: 0.90,
-            source_file: source_path,
+            source_file: identity,
           )
         end
       rescue JSON::ParserError => error
@@ -483,9 +518,9 @@ module TestMiser
 
         SourceSpan.new(
           start_line: [values[0], 1].max,
-          start_column: [values[1], 1].max,
+          start_column: [values[1] + 1, 1].max,
           end_line: [values[2], 1].max,
-          end_column: [values[3], 1].max,
+          end_column: [values[3] + 1, 1].max,
         )
       end
     end
@@ -499,22 +534,27 @@ module TestMiser
       extend T::Sig
       include OracleFactProvider
 
-      sig { params(grammar_paths: T::Hash[String, String], framework: T.nilable(String)).void }
-      def initialize(grammar_paths: {}, framework: nil)
+      sig { params(grammar_paths: T::Hash[String, String], framework: T.nilable(String), tree_sitter: T.untyped, source_identity: T.nilable(String)).void }
+      def initialize(grammar_paths: {}, framework: nil, tree_sitter: nil, source_identity: nil)
         @grammar_paths = grammar_paths
         @framework = framework
+        @tree_sitter = tree_sitter
+        @source_identity = source_identity
       end
 
       sig do
         override.params(test_id: String, source_path: String, language: String).returns(T::Array[OracleFact])
       end
       def facts(test_id:, source_path:, language:)
-        require "tree_sitter"
-        grammar = @grammar_paths[language] || ENV["TREE_SITTER_#{language.upcase}_PATH"] || ENV["DECOMPLEX_TS_#{language.upcase}_PATH"]
-        raise InvalidOracleFacts, "Tree-sitter grammar path is required for #{language}" if grammar.to_s.empty?
+        tree_sitter = @tree_sitter
+        if tree_sitter.nil?
+          require "tree_sitter"
+          grammar = @grammar_paths[language] || ENV["TREE_SITTER_#{language.upcase}_PATH"] || ENV["DECOMPLEX_TS_#{language.upcase}_PATH"]
+          raise InvalidOracleFacts, "Tree-sitter grammar path is required for #{language}" if grammar.to_s.empty?
 
-        tree_sitter = T.unsafe(Object.const_get(:TreeSitter))
-        tree_sitter.register_language(language, grammar) unless tree_sitter.languages.include?(language)
+          tree_sitter = T.unsafe(Object.const_get(:TreeSitter))
+          tree_sitter.register_language(language, grammar) unless tree_sitter.languages.include?(language)
+        end
         parser = tree_sitter.const_get(:Parser).new
         parser.language = language
         source = File.read(source_path)
@@ -562,14 +602,15 @@ module TestMiser
               )
             end
           end
+          identity = @source_identity || source_path
           OracleFact.new(
-            oracle_id: "tree-sitter:#{Digest::SHA256.hexdigest("#{source_path}:#{index}:#{node.start_byte}")[0, 16]}",
+            oracle_id: "tree-sitter:#{Digest::SHA256.hexdigest("#{identity}:#{index}:#{node.start_byte}")[0, 16]}",
             test_id: test_id,
             oracle_kind: kind,
             oracle_span: span,
             framework: framework,
             confidence: 0.85,
-            source_file: source_path,
+            source_file: identity,
           )
         end
       rescue LoadError => error
@@ -769,8 +810,7 @@ module TestMiser
         start_offset, end_offset = offsets
         original = source.byteslice(start_offset...end_offset).to_s
         replacement = replacement_for(plan.mutation, original, language, fact.framework)
-        rewritten = source.dup
-        rewritten[start_offset...end_offset] = replacement
+        rewritten = source.byteslice(0, start_offset).to_s + replacement + source.byteslice(end_offset..).to_s
         [rewritten, OracleRewrite.new(oracle_id: fact.oracle_id, mutation: plan.mutation, recognized: true, applied: true, reason: "conservative source rewrite applied")]
       rescue StandardError => error
         [source, OracleRewrite.new(oracle_id: fact.oracle_id, mutation: plan.mutation, recognized: true, applied: false, reason: "rewrite rejected: #{error.message}")]
@@ -781,21 +821,38 @@ module TestMiser
       sig { params(source: String, span: T.nilable(SourceSpan)).returns(T.nilable([Integer, Integer])) }
       def source_offsets(source, span)
         return nil if span.nil?
-        return [T.must(span.start_offset), T.must(span.end_offset)] if span.start_offset && span.end_offset
+        if span.start_offset && span.end_offset
+          start_offset = T.must(span.start_offset)
+          end_offset = T.must(span.end_offset)
+          return nil if start_offset.negative? || end_offset < start_offset || end_offset > source.bytesize
+          return nil unless source.byteslice(0, start_offset).to_s.valid_encoding? && source.byteslice(0, end_offset).to_s.valid_encoding?
+
+          return [start_offset, end_offset]
+        end
+        return nil if span.start_offset || span.end_offset
 
         lines = source.lines
         return nil if span.start_line > lines.length || span.end_line > lines.length
 
-        start_offset = lines.first(span.start_line - 1).sum(&:bytesize) + character_offset(T.must(lines[span.start_line - 1]), span.start_column)
-        end_offset = lines.first(span.end_line - 1).sum(&:bytesize) + character_offset(T.must(lines[span.end_line - 1]), span.end_column)
+        start_line = T.must(lines[span.start_line - 1])
+        end_line = T.must(lines[span.end_line - 1])
+        start_column = byte_offset(start_line, span.start_column)
+        end_column = byte_offset(end_line, span.end_column)
+        return nil if start_column.nil? || end_column.nil?
+
+        start_offset = lines.first(span.start_line - 1).sum(&:bytesize) + start_column
+        end_offset = lines.first(span.end_line - 1).sum(&:bytesize) + end_column
         return nil if start_offset > end_offset || end_offset > source.bytesize
+        return nil unless source.byteslice(0, start_offset).to_s.valid_encoding? && source.byteslice(0, end_offset).to_s.valid_encoding?
 
         [start_offset, end_offset]
       end
 
-      sig { params(line: String, column: Integer).returns(Integer) }
-      def character_offset(line, column)
-        line.byteslice(0, [column - 1, 0].max).to_s.bytesize
+      sig { params(line: String, column: Integer).returns(T.nilable(Integer)) }
+      def byte_offset(line, column)
+        return nil unless column.positive? && column <= line.bytesize + 1
+
+        [column - 1, line.bytesize].min
       end
 
       sig { params(original: String, language: String, framework: String).returns(String) }
@@ -810,7 +867,7 @@ module TestMiser
         end
 
         if language.downcase == "ruby" && framework == "rspec"
-          return evaluate_arguments(original, "expect", 0, language) if original.match?(/\bexpect\s*\(/)
+          return evaluate_matcher_arguments(original, "expect", /\.\s*(?:to\s+)?(eq|eql|be_nil|raise_error|have_received)\b/, language) if original.match?(/\bexpect\s*\(/)
         end
 
         if language.downcase == "python" && framework == "pytest" && original.lstrip.start_with?("assert")
@@ -824,7 +881,7 @@ module TestMiser
         end
 
         if %w[javascript typescript].include?(language.downcase) && framework == "jest"
-          return evaluate_arguments(original, "expect", 0, language) if original.match?(/\bexpect\s*\(/)
+          return evaluate_matcher_arguments(original, "expect", /\.\s*(toEqual|toStrictEqual|toBe|toBeTruthy|toBeFalsy|toBeNull|toThrow)\b/, language) if original.match?(/\bexpect\s*\(/)
         end
 
         if %w[java kotlin].include?(language.downcase) && framework == "junit"
@@ -843,7 +900,19 @@ module TestMiser
         arguments = call_arguments(original, method)
         raise ArgumentError, "oracle call has no argument at index #{actual_index}" if arguments.fetch(actual_index, "").strip.empty?
 
-        return arguments.fetch(actual_index).strip if arguments.length == 1 || %w[java kotlin].include?(language.downcase)
+        if %w[java kotlin].include?(language.downcase)
+          expressions = arguments.map.with_index do |argument, index|
+            value = argument.strip
+            if language.downcase == "java"
+              "Object __test_miser_arg_#{index} = (#{value})"
+            else
+              "val __test_miser_arg_#{index} = (#{value})"
+            end
+          end
+          return language.downcase == "java" ? "{ #{expressions.join('; ')}; }" : "run { #{expressions.join('; ')} }"
+        end
+
+        return arguments.fetch(actual_index).strip if arguments.length == 1
 
         case language.downcase
         when "ruby"
@@ -857,6 +926,21 @@ module TestMiser
         end
       end
 
+      sig { params(original: String, method: String, matcher_pattern: Regexp, language: String).returns(String) }
+      def evaluate_matcher_arguments(original, method, matcher_pattern, language)
+        arguments = call_arguments(original, method).map(&:strip).reject(&:empty?)
+        raise ArgumentError, "oracle call has no argument at index 0" if arguments.empty?
+
+        matcher_match = matcher_pattern.match(original)
+        if matcher_match
+          matcher_text = original[matcher_match.begin(0)..].to_s.sub(/\A\.\s*(?:to\s+)?/, "")
+          arguments.concat(call_arguments(matcher_text, T.must(matcher_match[1])).map(&:strip).reject(&:empty?))
+        end
+
+        expressions = arguments.join(language.downcase == "ruby" ? "; " : ", ")
+        language.downcase == "ruby" ? "begin #{expressions} end" : "[#{expressions}]"
+      end
+
       sig { params(original: String, method: String).returns(T::Array[String]) }
       def call_arguments(original, method)
         text = original.strip
@@ -864,7 +948,7 @@ module TestMiser
         match = prefix.match(text)
         raise ArgumentError, "could not locate #{method} call" if match.nil?
 
-        rest = text.byteslice(match.end(0)..).to_s.lstrip
+        rest = text[match.end(0)..].to_s.lstrip
         if rest.start_with?("(")
           inner, = balanced_parentheses(rest)
           split_arguments(inner)
@@ -878,7 +962,8 @@ module TestMiser
         depth = 0
         quote = T.let(nil, T.nilable(String))
         escape = T.let(false, T::Boolean)
-        text.each_char.with_index do |character, index|
+        text.bytes.each_with_index do |byte, index|
+          character = byte.chr
           if quote
             if escape
               escape = false
@@ -887,7 +972,7 @@ module TestMiser
             elsif character == quote
               quote = nil
             end
-          elsif %w[\" '].include?(character)
+          elsif ["\"", "'", "`"].include?(character)
             quote = character
           elsif character == "("
             depth += 1
@@ -901,12 +986,15 @@ module TestMiser
 
       sig { params(text: String).returns(T::Array[String]) }
       def split_arguments(text)
+        return [] if text.strip.empty?
+
         arguments = []
         start = 0
         depth = 0
         quote = T.let(nil, T.nilable(String))
         escape = T.let(false, T::Boolean)
-        text.each_char.with_index do |character, index|
+        text.bytes.each_with_index do |byte, index|
+          character = byte.chr
           if quote
             if escape
               escape = false
@@ -915,11 +1003,11 @@ module TestMiser
             elsif character == quote
               quote = nil
             end
-          elsif %w[\" '].include?(character)
+          elsif ["\"", "'", "`"].include?(character)
             quote = character
-          elsif "([{<".include?(character)
+          elsif "([{".include?(character)
             depth += 1
-          elsif ")]} >".delete(" ").include?(character)
+          elsif ")]}".include?(character)
             depth -= 1 if depth.positive?
           elsif character == "," && depth.zero?
             arguments << text.byteslice(start...index).to_s
@@ -1128,6 +1216,7 @@ module TestMiser
         raise ArgumentError, "min_trials must be positive" unless min_trials.positive?
 
         facts.validate_unique_ids!
+        validate_scope_identity!(facts, scope)
         duplicate_rewrites = rewrites.group_by(&:oracle_id).select { |_id, rows| rows.length > 1 }.keys.sort
         raise InvalidOracleFacts, "duplicate oracle rewrite IDs: #{duplicate_rewrites.join(', ')}" unless duplicate_rewrites.empty?
         rewrite_by_id = rewrites.to_h { |rewrite| [rewrite.oracle_id, rewrite] }
@@ -1160,6 +1249,26 @@ module TestMiser
         extend T::Sig
 
         private
+
+        sig { params(facts: OracleFacts, scope: T.nilable(EvidenceScope)).void }
+        def validate_scope_identity!(facts, scope)
+          return if scope.nil?
+
+          metadata_revision = facts.metadata["revision"]
+          if metadata_revision && metadata_revision != scope.revision
+            raise EvidenceScopeMismatch, "oracle facts revision does not match the evidence scope"
+          end
+          metadata_scope = facts.metadata["scope"]
+          return if metadata_scope.nil?
+          unless metadata_scope.is_a?(Hash)
+            raise InvalidOracleFacts, "oracle facts scope metadata must be an object"
+          end
+
+          fingerprint = metadata_scope["fingerprint"]
+          if fingerprint && fingerprint != scope.fingerprint
+            raise EvidenceScopeMismatch, "oracle facts scope does not match the evidence scope"
+          end
+        end
 
         sig do
           params(
@@ -1334,13 +1443,13 @@ module TestMiser
       sig { params(request: OracleExecutionRequest).returns(OracleExecutionResult) }
       def run(request)
         raise ArgumentError, "trial_count must be positive" unless request.trial_count.positive?
+        relative_source_path = SafeSourcePath.relative!(request.source_path)
         ensure_clean_repository!(request)
         run_id = "oracle-#{SecureRandom.uuid}"
 
         Dir.mktmpdir("test-miser-oracle-") do |directory|
-          archive_revision(request, directory)
-          target = File.join(directory, request.source_path)
-          raise InvalidOracleFacts, "#{request.revision} does not contain #{request.source_path}" unless File.file?(target)
+          resolved_revision = archive_revision(request, directory)
+          target = SafeSourcePath.inside!(directory, relative_source_path)
 
           original_source = File.read(target)
           disable_plan = request.plan.mutation == OracleMutationKind::DisableOracle ? request.plan : OracleMutationPlanner.plan(request.fact).first
@@ -1355,7 +1464,7 @@ module TestMiser
           else
             [original_source, nil]
           end
-          environment = Digest::SHA256.hexdigest("#{request.revision}:#{request.language}:#{Digest::SHA256.hexdigest(original_source)}")
+          environment = Digest::SHA256.hexdigest("#{resolved_revision}:#{request.language}:#{Digest::SHA256.hexdigest(original_source)}")
           baseline = @command_runner.run(request.baseline_test_command || request.test_command, chdir: directory, limits: request.limits)
           baseline_outcome = @parser.parse(baseline)
           disabled_control_outcome = TestOutcome::InfrastructureFailure
@@ -1399,7 +1508,7 @@ module TestMiser
             disabled_trials: disabled_trials.freeze,
             run_id: run_id,
             environment_fingerprint: environment,
-            revision: request.revision,
+            revision: resolved_revision,
             source_path: request.source_path,
           )
         end
@@ -1417,12 +1526,14 @@ module TestMiser
         raise InvalidOracleFacts, "oracle execution requires a clean worktree"
       end
 
-      sig { params(request: OracleExecutionRequest, directory: String).void }
+      sig { params(request: OracleExecutionRequest, directory: String).returns(String) }
       def archive_revision(request, directory)
-        _stdout, stderr, status = Open3.capture3("git", "archive", request.revision, "-o", "#{directory}/source.tar", chdir: request.repository)
+        resolved_revision = RevisionResolver.resolve!(repository: request.repository, revision: request.revision)
+        _stdout, stderr, status = Open3.capture3("git", "archive", resolved_revision, "-o", "#{directory}/source.tar", chdir: request.repository)
         raise InvalidOracleFacts, "could not archive #{request.revision}: #{stderr}" unless status.success?
         _stdout, stderr, status = Open3.capture3("tar", "-xf", "#{directory}/source.tar", "-C", directory)
         raise InvalidOracleFacts, "could not extract #{request.revision}: #{stderr}" unless status.success?
+        resolved_revision
       end
     end
   end

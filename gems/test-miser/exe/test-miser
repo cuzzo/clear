@@ -128,7 +128,38 @@ begin
     corpus = TestMiser::Evidence::Corpus.from_report(report)
     counterfactual_config = options[:counterfactual_config] ? JSON.parse(File.read(options[:counterfactual_config])) : nil
     oracle_execute_config = options[:oracle_execute] ? JSON.parse(File.read(options[:oracle_execute])) : nil
-    scope_revision = counterfactual_config&.fetch("revision", nil) || oracle_execute_config&.fetch("revision", nil) || "unknown"
+    oracle_input_payload = options[:oracle_input] ? JSON.parse(File.read(options[:oracle_input])) : nil
+    oracle_facts_payload = options[:oracle_facts] ? JSON.parse(File.read(options[:oracle_facts])) : nil
+    full_revision = ->(value) { value.to_s.match?(/\A[0-9a-f]{40,64}\z/) }
+    precomputed_revision_values = [oracle_input_payload, oracle_facts_payload].compact.flat_map do |payload|
+      next [] unless payload.is_a?(Hash)
+
+      candidates = [
+        payload.dig("scope", "revision"), payload["revision"], payload.dig("metadata", "revision"),
+        *Array(payload["execution_results"]).map { |result| result["revision"] },
+      ]
+      candidates.compact.map(&:to_s)
+    end
+    symbolic_precomputed_revisions = precomputed_revision_values.reject { |revision| full_revision.call(revision) || revision == "unknown" }
+    unless symbolic_precomputed_revisions.empty?
+      raise TestMiser::Evidence::RevisionResolutionError, "precomputed oracle evidence must record a resolved commit revision"
+    end
+    precomputed_revisions = precomputed_revision_values.filter_map { |revision| revision if full_revision.call(revision) }.uniq
+    if options[:oracle_input] && oracle_execute_config.nil? && precomputed_revisions.empty?
+      raise TestMiser::Evidence::RevisionResolutionError, "oracle input must record a resolved commit revision"
+    end
+    revision_configs = [counterfactual_config, oracle_execute_config].compact
+    revision_pairs = revision_configs.map do |config|
+      repository = config.fetch("repository")
+      requested_revision = config.fetch("revision", "HEAD")
+      [repository, TestMiser::Evidence::RevisionResolver.resolve!(repository: repository, revision: requested_revision)]
+    end.uniq
+    configured_revisions = revision_pairs.map(&:last)
+    all_revisions = (configured_revisions + precomputed_revisions).uniq
+    if all_revisions.length > 1
+      raise TestMiser::Evidence::EvidenceScopeMismatch, "evidence inputs use different repositories or revisions"
+    end
+    scope_revision = all_revisions.empty? ? "unknown" : all_revisions.fetch(0)
     report_scope = corpus.evidence_scope(revision: scope_revision)
     contributions = TestMiser::Evidence::ContributionAnalyzer.new(corpus, scope: report_scope).analyze(
       new_test_ids: options[:new_test_ids],
@@ -153,48 +184,58 @@ begin
       source_path = config.fetch("source_path")
       test_id = config.fetch("test_id")
       language = config.fetch("language")
-      provider = case config.fetch("provider", "factmine")
-                 when "factmine"
-                   TestMiser::Evidence::FactMineOracleFactProvider.new(
-                     binary: config.fetch("binary", ENV.fetch("FACT_MINE_RUST_BINARY", "gems/fact-mine/target/release/fact-mine-rust")),
-                     framework: config["framework"],
-                   )
-                 when "tree-sitter"
-                   TestMiser::Evidence::TreeSitterOracleFactProvider.new(
-                     grammar_paths: config.fetch("grammar_paths", {}), framework: config["framework"],
-                   )
-                 else
-                   raise TestMiser::Evidence::InvalidOracleFacts, "unknown oracle provider: #{config.fetch("provider")}"
-                 end
-      facts = TestMiser::Evidence::OracleFacts.new(
-        facts: provider.facts(test_id: test_id, source_path: source_path, language: language),
-        metadata: {"provider" => config.fetch("provider", "factmine")},
-      )
-      facts.validate_unique_ids!
       limits = TestMiser::Evidence::CommandLimits.new(**config.fetch("limits", {}).transform_keys(&:to_sym))
-      execution_results = facts.facts.map do |fact|
-        disable_plan = TestMiser::Evidence::OracleMutationPlanner.plan(fact).fetch(0)
-        control_plan = TestMiser::Evidence::OracleMutationPlanner.control_plan(fact)
-        TestMiser::Evidence::OracleExecutionRunner.new.run(
-          TestMiser::Evidence::OracleExecutionRequest.new(
-            repository: repository,
-            revision: config.fetch("revision", "HEAD"),
-            source_path: source_path,
-            test_command: config.fetch("test_command"),
-            baseline_test_command: config["baseline_test_command"],
-            mutant_commands: config.fetch("mutant_commands", {}),
-            test_id: test_id,
-            fact: fact,
-            plan: disable_plan,
-            control_plan: control_plan,
-            language: language,
-            trial_count: Integer(config.fetch("trial_count", 3)),
-            limits: limits,
-            scope: report_scope,
-            allow_dirty: config.fetch("allow_dirty", false),
-          ),
-        )
+      facts = nil
+      execution_results = nil
+      TestMiser::Evidence::OracleRevisionSnapshot.with(
+        repository: repository, revision: scope_revision, source_path: source_path,
+      ) do |archived_source_path, _resolved_revision|
+        provider = case config.fetch("provider", "factmine")
+                   when "factmine"
+                     TestMiser::Evidence::FactMineOracleFactProvider.new(
+                       binary: config.fetch("binary", ENV.fetch("FACT_MINE_RUST_BINARY", "gems/fact-mine/target/release/fact-mine-rust")),
+                       framework: config["framework"], source_identity: source_path,
+                     )
+                   when "tree-sitter"
+                     TestMiser::Evidence::TreeSitterOracleFactProvider.new(
+                       grammar_paths: config.fetch("grammar_paths", {}), framework: config["framework"], source_identity: source_path,
+                     )
+                   else
+                     raise TestMiser::Evidence::InvalidOracleFacts, "unknown oracle provider: #{config.fetch("provider")}"
+                   end
+          facts = TestMiser::Evidence::OracleFacts.new(
+            facts: provider.facts(test_id: test_id, source_path: archived_source_path, language: language),
+            metadata: {
+              "provider" => config.fetch("provider", "factmine"), "revision" => scope_revision, "scope" => report_scope.to_h,
+            },
+          )
+          facts.validate_unique_ids!
+          execution_results = facts.facts.map do |fact|
+            disable_plan = TestMiser::Evidence::OracleMutationPlanner.plan(fact).fetch(0)
+            control_plan = TestMiser::Evidence::OracleMutationPlanner.control_plan(fact)
+            TestMiser::Evidence::OracleExecutionRunner.new.run(
+              TestMiser::Evidence::OracleExecutionRequest.new(
+                repository: repository,
+                revision: scope_revision,
+                source_path: source_path,
+                test_command: config.fetch("test_command"),
+                baseline_test_command: config["baseline_test_command"],
+                mutant_commands: config.fetch("mutant_commands", {}),
+                test_id: test_id,
+                fact: fact,
+                plan: disable_plan,
+                control_plan: control_plan,
+                language: language,
+                trial_count: Integer(config.fetch("trial_count", 3)),
+                limits: limits,
+                scope: report_scope,
+                allow_dirty: config.fetch("allow_dirty", false),
+              ),
+            )
+          end
       end
+      facts = T.must(facts)
+      execution_results = T.must(execution_results)
       oracle_sensitivity = TestMiser::Evidence::OracleSensitivityAnalyzer.analyze(
         facts: facts,
         original_kills: config.fetch("original_kills"),
@@ -206,11 +247,14 @@ begin
         execution_results: execution_results.map(&:to_h),
       )
     elsif options[:oracle_input] || options[:oracle_facts]
-      payload = options[:oracle_input] ? JSON.parse(File.read(options[:oracle_input])) : {}
+      payload = oracle_input_payload || {}
       facts = if options[:oracle_facts]
         TestMiser::Evidence::OracleFacts.load(options[:oracle_facts])
       else
-        TestMiser::Evidence::OracleFacts.from_rows(Array(payload.fetch("facts")), metadata: payload.fetch("metadata", {}))
+        metadata = payload.fetch("metadata", {})
+        raise TestMiser::Evidence::InvalidOracleFacts, "oracle input metadata must be an object" unless metadata.is_a?(Hash)
+        metadata = metadata.merge("scope" => payload.fetch("scope")) if payload.key?("scope")
+        TestMiser::Evidence::OracleFacts.from_rows(Array(payload.fetch("facts")), metadata: metadata)
       end
       original_kills = payload.fetch("original_kills", {})
       disabled_trials = Array(payload.fetch("disabled_trials", [])).map do |row|
@@ -241,7 +285,7 @@ begin
         repository: config.fetch("repository"), production_patch_path: config.fetch("production_patch_path"),
         head_command: config.fetch("head_command"), build_command: config.fetch("build_command"),
         new_test_command: config.fetch("new_test_command"), baseline_head_command: config["baseline_head_command"],
-        baseline_test_command: config["baseline_test_command"], revision: config.fetch("revision", "HEAD"),
+        baseline_test_command: config["baseline_test_command"], revision: scope_revision == "unknown" ? config.fetch("revision", "HEAD") : scope_revision,
         scope: report_scope, allow_dirty: config.fetch("allow_dirty", false),
         limits: TestMiser::Evidence::CommandLimits.new(**config.fetch("limits", {}).transform_keys(&:to_sym)),
       )
@@ -286,7 +330,7 @@ begin
   else
     puts output
   end
-rescue TestMiser::InvalidReport, TestMiser::Evidence::InvalidCohort, TestMiser::Evidence::InvalidOracleFacts, TestMiser::Evidence::EvidenceScopeMismatch, Errno::ENOENT, JSON::ParserError => error
+rescue TestMiser::InvalidReport, TestMiser::Evidence::InvalidCohort, TestMiser::Evidence::InvalidOracleFacts, TestMiser::Evidence::EvidenceScopeMismatch, TestMiser::Evidence::RevisionResolutionError, Errno::ENOENT, JSON::ParserError => error
   warn "test-miser: #{error.message}"
   exit 1
 end

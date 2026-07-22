@@ -231,7 +231,7 @@ module TestMiser
       include TestResultParser
 
       ASSERTION_MARKERS = T.let(
-        /(?:Minitest::Assertion|RSpec::Expectations::ExpectationNotMetError|AssertionError:|^Failure:|^Expected:)/,
+        /(?:Minitest::Assertion|RSpec::Expectations::ExpectationNotMetError|AssertionError:|AssertionFailedError|ComparisonFailure|Failure\/Error:|^\s*(?:\d+\)\s+)?Failure:|^\s*(?:Expected|expected|got|Received):|^\s*E\s+assert\b)/,
         Regexp,
       )
       CRASH_MARKERS = T.let(/(?:Segmentation fault|NoMethodError|Traceback \(most recent call last\))/, Regexp)
@@ -406,6 +406,15 @@ module TestMiser
         ) unless revision_resolution.success?
 
         resolved_revision = revision_resolution.stdout.strip
+        unless resolved_revision.match?(/\A[0-9a-f]{40,64}\z/)
+          return inconclusive(
+            head: not_run,
+            repository_status: repository_status,
+            revision_resolution: revision_resolution,
+            provenance: provenance,
+            reason: "requested revision did not resolve to a full commit identity",
+          )
+        end
         provenance = provenance_for(
           patch_path: patch_path,
           patch_sha256: patch_sha256,
@@ -413,39 +422,18 @@ module TestMiser
           clean_worktree: repository_status.stdout.empty?,
           worktree_path: nil,
         )
-        head = safe_run(@request.head_command, @request.repository)
-        head_outcome = parse_result(head)
-        return inconclusive(
-          head: head,
-          repository_status: repository_status,
-          revision_resolution: revision_resolution,
-          provenance: provenance,
-          reason: "current selected-test result was #{head_outcome.serialize}, not PASSED",
-        ) unless head_outcome == TestOutcome::Passed
-
-        baseline_head = nil
-        unless @request.baseline_test_command.nil?
-          if @request.baseline_head_command.nil?
-            return inconclusive(
-              head: head,
-              repository_status: repository_status,
-              revision_resolution: revision_resolution,
-              provenance: provenance,
-              reason: "baseline tests were not verified on the unreversed source",
-            )
-          end
-          baseline_head = safe_run(T.must(@request.baseline_head_command), @request.repository)
-          baseline_head_outcome = parse_result(baseline_head)
+        scope = @request.scope
+        if scope && scope.revision != resolved_revision
           return inconclusive(
-            head: head,
+            head: not_run,
             repository_status: repository_status,
             revision_resolution: revision_resolution,
-            baseline_head: baseline_head,
             provenance: provenance,
-            reason: "current baseline-test result was #{baseline_head_outcome.serialize}, not PASSED",
-          ) unless baseline_head_outcome == TestOutcome::Passed
+            reason: "counterfactual execution revision does not match the evidence scope",
+          )
         end
-
+        head = not_run
+        baseline_head = nil
         worktree = nil
         reverse_patch = nil
         build = nil
@@ -455,7 +443,7 @@ module TestMiser
         begin
           worktree_path = temporary_worktree_path
           worktree = safe_run(
-            ["git", "worktree", "add", "--detach", worktree_path, @request.revision],
+            ["git", "worktree", "add", "--detach", worktree_path, resolved_revision],
             @request.repository,
           )
           provenance = provenance_for(
@@ -474,6 +462,41 @@ module TestMiser
             provenance: provenance,
             reason: "isolated worktree could not be created",
           ) unless worktree.success?
+
+          head = safe_run(@request.head_command, worktree_path)
+          head_outcome = parse_result(head)
+          return inconclusive(
+            head: head,
+            repository_status: repository_status,
+            revision_resolution: revision_resolution,
+            worktree: worktree,
+            provenance: provenance,
+            reason: "requested-revision selected-test result was #{head_outcome.serialize}, not PASSED",
+          ) unless head_outcome == TestOutcome::Passed
+
+          unless @request.baseline_test_command.nil?
+            if @request.baseline_head_command.nil?
+              return inconclusive(
+                head: head,
+                repository_status: repository_status,
+                revision_resolution: revision_resolution,
+                worktree: worktree,
+                provenance: provenance,
+                reason: "baseline tests were not verified on the requested revision before reversal",
+              )
+            end
+            baseline_head = safe_run(T.must(@request.baseline_head_command), worktree_path)
+            baseline_head_outcome = parse_result(baseline_head)
+            return inconclusive(
+              head: head,
+              repository_status: repository_status,
+              revision_resolution: revision_resolution,
+              baseline_head: baseline_head,
+              worktree: worktree,
+              provenance: provenance,
+              reason: "requested-revision baseline-test result was #{baseline_head_outcome.serialize}, not PASSED",
+            ) unless baseline_head_outcome == TestOutcome::Passed
+          end
 
           reverse_patch = safe_run(
             ["git", "apply", "--reverse", "--whitespace=nowarn", patch_path],

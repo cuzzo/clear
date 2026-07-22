@@ -108,6 +108,7 @@ module TestMiser
           corpus: Corpus,
           scope: T.nilable(EvidenceScope),
           revision: String,
+          repository: T.nilable(String),
           max_distinct_kill_sets: Integer,
           max_relation_checks: Integer,
         ).void
@@ -116,6 +117,7 @@ module TestMiser
         corpus,
         scope: nil,
         revision: "unknown",
+        repository: nil,
         max_distinct_kill_sets: DEFAULT_MAX_DISTINCT_KILL_SETS,
         max_relation_checks: DEFAULT_MAX_RELATION_CHECKS
       )
@@ -123,7 +125,7 @@ module TestMiser
         raise ArgumentError, "max_relation_checks must be positive" unless max_relation_checks.positive?
 
         @corpus = corpus
-        @scope = T.let(scope || corpus.evidence_scope(revision: revision), EvidenceScope)
+        @scope = T.let(scope || corpus.evidence_scope(revision: revision, repository: repository), EvidenceScope)
         @max_distinct_kill_sets = max_distinct_kill_sets
         @max_relation_checks = max_relation_checks
       end

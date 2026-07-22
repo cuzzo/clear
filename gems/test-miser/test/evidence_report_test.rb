@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
+require "open3"
 require_relative "../lib/test_miser/evidence/report"
 
 class EvidenceReportTest < Minitest::Test
@@ -282,6 +283,17 @@ class EvidenceReportTest < Minitest::Test
         counterfactual: counterfactual(Evidence::CounterfactualStatus::Inconclusive),
       )
     end
+  end
+
+  def test_scope_resolves_symbolic_revisions_when_repository_is_supplied
+    corpus = complete_corpus
+    repository = File.expand_path("../../..", __dir__)
+    expected = Open3.capture3("git", "rev-parse", "HEAD", chdir: repository).first.strip
+
+    scope = corpus.evidence_scope(revision: "HEAD", repository: repository)
+
+    assert_equal expected, scope.revision
+    assert_match(/\A[0-9a-f]{64}\z/, scope.fingerprint)
   end
 
   private

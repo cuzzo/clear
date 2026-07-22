@@ -100,13 +100,13 @@ module TestMiser
     class StabilityAnalyzer
       extend T::Sig
 
-      sig { params(corpus: Corpus, threshold: Integer, scope: T.nilable(EvidenceScope), revision: String).void }
-      def initialize(corpus, threshold: 3, scope: nil, revision: "unknown")
+      sig { params(corpus: Corpus, threshold: Integer, scope: T.nilable(EvidenceScope), revision: String, repository: T.nilable(String)).void }
+      def initialize(corpus, threshold: 3, scope: nil, revision: "unknown", repository: nil)
         raise ArgumentError, "threshold must be positive" unless threshold.positive?
 
         @corpus = corpus
         @threshold = threshold
-        @scope = T.let(scope || corpus.evidence_scope(revision: revision), EvidenceScope)
+        @scope = T.let(scope || corpus.evidence_scope(revision: revision, repository: repository), EvidenceScope)
       end
 
       sig do

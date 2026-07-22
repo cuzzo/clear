@@ -149,6 +149,17 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest oracle fixture runtime
+        run: python -m pip install --disable-pip-version-check pytest
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Jest oracle fixture runtime
+        run: npm install --no-save --no-package-lock jest@30.0.5
       - uses: dtolnay/rust-toolchain@stable
       - name: Build Lineage release binary
         # The ingestion round-trip test below skips silently (not fails)

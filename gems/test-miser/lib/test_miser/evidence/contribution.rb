@@ -137,14 +137,15 @@ module TestMiser
       end
 
       sig do
-        params(revision: String, selection_scope: String).returns(EvidenceScope)
+        params(revision: String, selection_scope: String, repository: T.nilable(String)).returns(EvidenceScope)
       end
-      def evidence_scope(revision: "unknown", selection_scope: "all")
+      def evidence_scope(revision: "unknown", selection_scope: "all", repository: nil)
         EvidenceScope.from_parts(
           revision: revision,
           selection_scope: selection_scope,
           mutants: mutants.map(&:to_h),
           test_ids: tests.map(&:id),
+          repository: repository,
         )
       end
 
@@ -243,10 +244,10 @@ module TestMiser
     class ContributionAnalyzer
       extend T::Sig
 
-      sig { params(corpus: Corpus, scope: T.nilable(EvidenceScope), revision: String).void }
-      def initialize(corpus, scope: nil, revision: "unknown")
+      sig { params(corpus: Corpus, scope: T.nilable(EvidenceScope), revision: String, repository: T.nilable(String)).void }
+      def initialize(corpus, scope: nil, revision: "unknown", repository: nil)
         @corpus = corpus
-        @scope = T.let(scope || corpus.evidence_scope(revision: revision), EvidenceScope)
+        @scope = T.let(scope || corpus.evidence_scope(revision: revision, repository: repository), EvidenceScope)
       end
 
       sig do
