@@ -1,16 +1,21 @@
 //! Typed configuration and manifest contracts for the Lineage evidence pipeline.
 
 use anyhow::{bail, Context, Result};
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 
 pub const CONFIG_FILE_NAME: &str = "lineage.yml";
 pub const CONFIG_JSON_FILE_NAME: &str = "lineage.json";
 pub const RUN_MANIFEST_VERSION: &str = "lineage-run/v1";
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LineageConfig {
     pub version: u32,
@@ -22,7 +27,7 @@ pub struct LineageConfig {
     pub producers: BTreeMap<String, EvidenceProducer>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ArtifactStoreConfig {
     #[serde(default = "default_artifact_directory")]
@@ -40,20 +45,20 @@ impl Default for ArtifactStoreConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactCompression {
     Gzip,
     None,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VerificationProfile {
     pub producers: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EvidenceProducer {
     pub executor: ProducerExecutor,
@@ -63,14 +68,14 @@ pub struct EvidenceProducer {
     pub produces: Vec<ProducedArtifact>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProducerExecutor {
     Command,
     Lineage,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProducedArtifact {
     pub kind: ArtifactKind,
@@ -174,6 +179,140 @@ pub fn latest_run_directory(repo: &Path, config: &LineageConfig) -> PathBuf {
     repo.join(&config.artifacts.directory).join("latest")
 }
 
+/// Executes one configured profile and replaces the bounded `latest` run.
+/// Commands receive no shell interpolation; their declared outputs are copied
+/// only after a zero-exit status, then compressed unless opted out.
+pub fn execute_profile(
+    repo: &Path,
+    config: &LineageConfig,
+    profile_name: &str,
+    revision: &str,
+) -> Result<RunManifest> {
+    let profile = config
+        .profiles
+        .get(profile_name)
+        .with_context(|| format!("unknown Lineage profile {profile_name:?}"))?;
+    let run_directory = latest_run_directory(repo, config);
+    reset_latest_directory(&run_directory)?;
+    let mut artifacts = Vec::new();
+    for producer_name in &profile.producers {
+        let producer = &config.producers[producer_name];
+        execute_producer(repo, producer_name, producer, &run_directory)?;
+        for (index, artifact) in producer.produces.iter().enumerate() {
+            artifacts.push(stage_artifact(
+                repo,
+                &run_directory,
+                producer_name,
+                index,
+                artifact,
+                config.artifacts.compression,
+            )?);
+        }
+    }
+    let manifest = RunManifest {
+        version: RUN_MANIFEST_VERSION.into(),
+        revision: revision.into(),
+        configuration_hash: config_hash(config)?,
+        artifacts,
+    };
+    fs::write(
+        run_directory.join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest)?,
+    )?;
+    Ok(manifest)
+}
+
+fn reset_latest_directory(path: &Path) -> Result<()> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() {
+            bail!(
+                "refusing to replace symlinked latest artifact directory {}",
+                path.display()
+            );
+        }
+        fs::remove_dir_all(path)
+            .with_context(|| format!("replace latest artifact directory {}", path.display()))?;
+    }
+    fs::create_dir_all(path)?;
+    Ok(())
+}
+
+fn execute_producer(
+    repo: &Path,
+    name: &str,
+    producer: &EvidenceProducer,
+    run_directory: &Path,
+) -> Result<()> {
+    if producer.executor != ProducerExecutor::Command {
+        bail!(
+            "producer {name:?} uses unsupported executor {:?}",
+            producer.executor
+        );
+    }
+    let output = Command::new(&producer.argv[0])
+        .args(&producer.argv[1..])
+        .current_dir(repo)
+        .output()
+        .with_context(|| format!("start producer {name:?}"))?;
+    let logs = run_directory.join("logs");
+    fs::create_dir_all(&logs)?;
+    fs::write(logs.join(format!("{name}.stdout")), &output.stdout)?;
+    fs::write(logs.join(format!("{name}.stderr")), &output.stderr)?;
+    if !output.status.success() {
+        bail!("producer {name:?} exited with {}", output.status);
+    }
+    Ok(())
+}
+
+fn stage_artifact(
+    repo: &Path,
+    run_directory: &Path,
+    producer: &str,
+    index: usize,
+    artifact: &ProducedArtifact,
+    compression: ArtifactCompression,
+) -> Result<ManifestArtifact> {
+    let source = repo.join(&artifact.path);
+    let bytes = fs::read(&source).with_context(|| format!("read artifact {}", source.display()))?;
+    let file_name = artifact
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("artifact");
+    let relative = PathBuf::from("artifacts")
+        .join(producer)
+        .join(format!("{index}-{file_name}"));
+    let target = run_directory.join(&relative);
+    fs::create_dir_all(target.parent().expect("artifact target parent exists"))?;
+    let path = match compression {
+        ArtifactCompression::None => {
+            fs::write(&target, &bytes)?;
+            relative
+        }
+        ArtifactCompression::Gzip => {
+            let compressed_relative = relative.with_added_extension("gz");
+            let compressed = run_directory.join(&compressed_relative);
+            let mut encoder = GzEncoder::new(fs::File::create(compressed)?, Compression::default());
+            encoder.write_all(&bytes)?;
+            encoder.finish()?;
+            compressed_relative
+        }
+    };
+    Ok(ManifestArtifact {
+        producer: producer.into(),
+        kind: artifact.kind,
+        format: artifact.format.clone(),
+        path,
+        content_hash: hex::encode(Sha256::digest(&bytes)),
+        scope: artifact.scope.clone(),
+        complete: artifact.complete,
+    })
+}
+
+fn config_hash(config: &LineageConfig) -> Result<String> {
+    Ok(hex::encode(Sha256::digest(serde_json::to_vec(config)?)))
+}
+
 pub fn validate_relative_path(path: &Path, label: &str) -> Result<()> {
     if path.as_os_str().is_empty() || path.is_absolute() {
         bail!("{label} must be a non-empty relative path");
@@ -239,5 +378,55 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("both lineage.yml"));
+    }
+
+    #[test]
+    fn replaces_latest_run_and_compresses_declared_artifacts() {
+        let directory = tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("coverage")).unwrap();
+        fs::write(
+            directory.path().join("coverage/report.json"),
+            "{\"files\":{}}\n",
+        )
+        .unwrap();
+        let config = validate_config(LineageConfig {
+            version: 1,
+            artifacts: ArtifactStoreConfig::default(),
+            profiles: BTreeMap::from([(
+                "ci".into(),
+                VerificationProfile {
+                    producers: vec!["coverage".into()],
+                },
+            )]),
+            producers: BTreeMap::from([(
+                "coverage".into(),
+                EvidenceProducer {
+                    executor: ProducerExecutor::Command,
+                    argv: vec!["true".into()],
+                    produces: vec![ProducedArtifact {
+                        kind: ArtifactKind::Coverage,
+                        format: "generic".into(),
+                        path: "coverage/report.json".into(),
+                        scope: Some("unit".into()),
+                        complete: true,
+                    }],
+                },
+            )]),
+        })
+        .unwrap();
+        let latest = latest_run_directory(directory.path(), &config);
+        fs::create_dir_all(&latest).unwrap();
+        fs::write(latest.join("old.txt"), "old").unwrap();
+
+        let manifest = execute_profile(directory.path(), &config, "ci", "abc").unwrap();
+
+        assert_eq!(manifest.version, RUN_MANIFEST_VERSION);
+        assert_eq!(
+            manifest.artifacts[0].path,
+            PathBuf::from("artifacts/coverage/0-report.json.gz")
+        );
+        assert!(!latest.join("old.txt").exists());
+        assert!(latest.join("manifest.json").exists());
+        assert!(latest.join(&manifest.artifacts[0].path).exists());
     }
 }
