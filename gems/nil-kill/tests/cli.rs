@@ -112,3 +112,56 @@ fn binary_reports_causal_nullable_pressure_from_public_facts() {
     assert_eq!(action["path"], "src/cache.c");
     assert_eq!(action["line"], 22);
 }
+
+#[test]
+fn binary_reports_primitive_domain_from_canonical_factmine_observations() {
+    let bin = env!("CARGO_BIN_EXE_nil-kill-infer-rust");
+    let dir = tempfile::tempdir().unwrap();
+    let input_path = dir.path().join("input.json");
+    let output_path = dir.path().join("output.json");
+    fs::write(
+        &input_path,
+        serde_json::to_vec_pretty(&json!({
+            "facts": {
+                "hidden_enum_observations": [
+                    {
+                        "event": "producer", "kind": "state", "key": "state\0workflow",
+                        "path": "src/workflow.rb", "line": 2, "slot": "@state",
+                        "site": {"path": "src/workflow.rb", "line": 4, "kind": "assignment"},
+                        "values": [{"kind": "String", "value": "\"draft\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state\0workflow",
+                        "path": "src/workflow.rb", "line": 2, "slot": "@state",
+                        "site": {"path": "src/workflow.rb", "line": 8, "kind": "case"},
+                        "values": [
+                            {"kind": "String", "value": "\"draft\""},
+                            {"kind": "String", "value": "\"sent\""}
+                        ]
+                    }
+                ]
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let run = Command::new(bin)
+        .arg(&input_path)
+        .arg(&output_path)
+        .output()
+        .unwrap();
+    assert!(run.status.success());
+
+    let output: serde_json::Value =
+        serde_json::from_slice(&fs::read(&output_path).unwrap()).unwrap();
+    let action = output["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|action| action["kind"] == "report_static_primitive_domain")
+        .unwrap();
+    assert_eq!(action["confidence"], "review");
+    assert_eq!(action["path"], "src/workflow.rb");
+    assert_eq!(action["data"]["values"], json!(["\"draft\"", "\"sent\""]));
+}

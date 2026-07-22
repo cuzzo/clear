@@ -1379,9 +1379,6 @@ RSpec.describe "NilKill coverage hardening" do
       facts["collection_runtime"] = [
         { "path" => rel_worker, "line" => 60, "owner_kind" => "method_return", "name" => "items", "kind" => "Array", "elem_classes" => ["String"], "classes" => ["Array"] },
       ]
-      facts["hidden_enum_pressure"] = [
-        { "path" => rel_worker, "line" => 70, "owner" => "Worker", "method" => "status", "slot" => "state", "kind" => "param", "values" => %w[draft sent], "decision_pressure" => 4, "score" => 12, "confidence" => "high", "suggestion" => "extract enum" },
-      ]
       facts["fallibility_pressure"] = [
         { "path" => rel_worker, "line" => 80, "label" => "Worker#danger", "score" => 20, "handler_pressure" => 2, "direct_sources" => ["raise"], "fallible_callers" => ["Worker#call"], "runtime" => { "calls" => 10, "raised_calls" => 3, "raised_classes" => ["RuntimeError"], "raised_rate" => 30.0 } },
       ]
@@ -1462,7 +1459,6 @@ RSpec.describe "NilKill coverage hardening" do
 
         expect(out).to include("Project Prioritization")
         expect(out).to include("Foreign Scalar Inputs Into Object-Typed Params")
-        expect(out).to include("Hidden Enum Pressure")
         expect(out).to include("Fallibility Pressure")
         expect(out).to include("Struct Shape Report")
         expect(out).to include("Collection Type Report")
@@ -1471,7 +1467,7 @@ RSpec.describe "NilKill coverage hardening" do
 
         sarif = described_class.new(["--format", "sarif"], evidence: evidence).to_sarif_hash(evidence)
         rule_ids = sarif.dig("runs", 0, "tool", "driver", "rules").map { |rule| rule["id"] }
-        expect(rule_ids).to include("nil-kill.pressure.hidden-enum", "nil-kill.pressure.fallibility")
+        expect(rule_ids).to include("nil-kill.pressure.fallibility")
         expect(sarif.dig("runs", 0, "results").map { |result| result["ruleId"] }).to include("nil-kill.action.fix-sig-return")
       end
     end

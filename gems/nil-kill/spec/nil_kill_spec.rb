@@ -389,23 +389,6 @@ RSpec.describe NilKill do
     it "renders pressure facts as actionable SARIF findings" do
       evidence = {
         "facts" => {
-          "hidden_enum_pressure" => [{
-            "path" => "src/workflow.rb",
-            "line" => 10,
-            "owner" => "Workflow",
-            "method" => "label",
-            "method_kind" => "instance",
-            "kind" => "param",
-            "slot" => "status",
-            "confidence" => "high",
-            "score" => 12,
-            "values" => %w[:active :pending],
-            "decision_pressure" => 2,
-            "runtime" => {"calls" => 5, "classes" => ["Symbol"]},
-            "blockers" => [],
-            "suggestion" => "review for a named Status enum or literal-union contract",
-            "decisions" => [],
-          }],
           "fallibility_pressure" => [{
             "label" => "Parser#parse",
             "path" => "src/parser.rb",
@@ -432,7 +415,18 @@ RSpec.describe NilKill do
           "param_origins" => [],
           "return_origins" => [],
         },
-        "actions" => [],
+        "actions" => [{
+          "kind" => "report_static_primitive_domain",
+          "confidence" => "review",
+          "path" => "src/workflow.rb",
+          "line" => 10,
+          "message" => "state @status has a closed-looking string domain across 1 decision sites",
+          "data" => {
+            "slot" => "@status",
+            "values" => ['"active"', '"pending"'],
+            "decision_sites" => ["src/workflow.rb:11"],
+          },
+        }],
         "diagnostics" => [],
       }
 
@@ -440,8 +434,8 @@ RSpec.describe NilKill do
       results = sarif.fetch("runs").first.fetch("results")
 
       expect(results).to include(a_hash_including(
-        "ruleId" => "nil-kill.pressure.hidden-enum",
-        "message" => a_hash_including("text" => include("hidden enum pressure: Workflow#label param `status`")),
+        "ruleId" => "nil-kill.action.report-static-primitive-domain",
+        "message" => a_hash_including("text" => include("report_static_primitive_domain [review]")),
       ))
       expect(results).to include(a_hash_including(
         "ruleId" => "nil-kill.pressure.fallibility",

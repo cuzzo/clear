@@ -61,7 +61,6 @@ module NilKill
       append_param_origin_report(lines, evidence)
       append_foreign_class_pressure(lines, evidence)
       append_type_normalizer_report(lines, evidence)
-      append_hidden_enum_pressure_report(lines, evidence)
       append_fallibility_pressure_report(lines, evidence)
       append_struct_report(lines, evidence)
       append_collection_report(lines, evidence)
@@ -470,26 +469,8 @@ module NilKill
     end
 
     def sarif_pressure_findings(evidence)
-      hidden_enum_pressure_findings(evidence) +
-        fallibility_pressure_findings(evidence) +
+      fallibility_pressure_findings(evidence) +
         primitive_record_pressure_findings(evidence)
-    end
-
-    def hidden_enum_pressure_findings(evidence)
-      Array(evidence.dig("facts", "hidden_enum_pressure")).map do |row|
-        values = Array(row["values"]).first(10).join(", ")
-        label = pressure_member_label(row)
-        {
-          "kind" => "hidden_enum",
-          "level" => row["confidence"].to_s == "high" ? "warning" : "note",
-          "message" => "hidden enum pressure: #{label} #{row["kind"]} `#{row["slot"]}` has values #{values}; " \
-                       "decision pressure #{row["decision_pressure"].to_i}, score #{row["score"].to_i}; " \
-                       "#{row["suggestion"]}",
-          "path" => row["path"],
-          "line" => row["line"],
-          "pressure" => row,
-        }
-      end
     end
 
     def fallibility_pressure_findings(evidence)
@@ -528,16 +509,6 @@ module NilKill
           "pressure" => row,
         }
       end
-    end
-
-    def pressure_member_label(row)
-      owner = row["owner"].to_s
-      method = row["method"].to_s
-      return owner if method.empty?
-      return method if owner.empty?
-
-      separator = row["method_kind"] == "class" ? "." : "#"
-      "#{owner}#{separator}#{method}"
     end
 
     def sarif_action_result(action, evidence)
@@ -1817,35 +1788,6 @@ module NilKill
         end
         lines << "  - ... #{sites.size - 5} more" if sites.size > 5
       end
-    end
-
-    def append_hidden_enum_pressure_report(lines, evidence)
-      rows = Array(evidence.dig("facts", "hidden_enum_pressure"))
-      lines << ""
-      lines << "## Hidden Enum Pressure (#{rows.size})"
-      lines << "- primitive String/Symbol slots with static closed-set decisions; report-only, no automated rewrite"
-      if rows.empty?
-        lines << "- none"
-        return
-      end
-
-      rows.first(50).each do |row|
-        values = Array(row["values"]).first(10).join(", ")
-        runtime = row["runtime"] || {}
-        runtime_text = runtime.empty? ? "" : "; runtime #{runtime["calls"].to_i} call(s), classes #{Array(runtime["classes"]).join(", ")}"
-        blockers = Array(row["blockers"])
-        blocker_text = blockers.empty? ? "" : "; blockers #{blockers.map { |site| site["kind"] }.uniq.join(", ")}"
-        label = [row["owner"], row["method"]].compact.reject(&:empty?).join(row["method_kind"] == "class" ? "." : "#")
-        label = row["owner"].to_s if label.empty?
-        lines << "- #{row["path"]}:#{row["line"]} #{label} #{row["kind"]} `#{row["slot"]}`: " \
-                 "#{row["confidence"]} score #{row["score"].to_i}; values #{values}; " \
-                 "decision pressure #{row["decision_pressure"].to_i}#{runtime_text}#{blocker_text}; #{row["suggestion"]}"
-        Array(row["decisions"]).first(3).each do |site|
-          lines << "  - decision: #{site["path"]}:#{site["line"]} #{site["kind"]} `#{site["code"]}`"
-        end
-        lines << "  - ... #{Array(row["decisions"]).size - 3} more decision(s)" if Array(row["decisions"]).size > 3
-      end
-      lines << "- ... #{rows.size - 50} more hidden enum candidate(s)" if rows.size > 50
     end
 
     def append_fallibility_pressure_report(lines, evidence)

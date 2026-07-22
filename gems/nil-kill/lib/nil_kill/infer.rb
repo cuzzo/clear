@@ -16,7 +16,6 @@ module NilKill
       load_sorbet if @run_sorbet
       build_flow_graph
       build_fallibility_pressure
-      build_hidden_enum_pressure
 
       input_data = @store.to_h
       input_data["unused_return_methods_by_location"] = unused_return_methods_by_location.to_h { |k, v| [k.to_json, v] }
@@ -40,14 +39,6 @@ module NilKill
         files,
         runtime_methods: @store.methods.values,
         runtime_edges: @store.facts["runtime_call_edges"]
-      )
-    end
-
-    def build_hidden_enum_pressure
-      files = NilKill.target_files.select { |path| File.extname(path) == ".rb" }
-      @store.facts["hidden_enum_pressure"] = HiddenEnumPressure.scan(
-        files,
-        evidence: @store.to_h
       )
     end
 
