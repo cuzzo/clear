@@ -1045,19 +1045,23 @@ fn dependency_changes(files: &[DiffFile]) -> Vec<DependencyChange> {
 }
 
 fn dependency_change(file: &DiffFile) -> Option<DependencyChange> {
-    match file.path.as_str() {
-        "package.json" | _ if file.path.ends_with("/package.json") => {
-            Some(package_json_dependencies(file))
-        }
-        "Cargo.toml" | _ if file.path.ends_with("/Cargo.toml") => {
-            Some(cargo_toml_dependencies(file))
-        }
-        path if is_manifest_path(path) => Some(DependencyChange {
+    let path = file.path.as_str();
+    if path == "package.json" || path.ends_with("/package.json") {
+        Some(package_json_dependencies(file))
+    } else if path == "Cargo.toml" || path.ends_with("/Cargo.toml") {
+        Some(cargo_toml_dependencies(file))
+    } else if path == "pyproject.toml" || path.ends_with("/pyproject.toml") {
+        Some(pyproject_toml_dependencies(file))
+    } else if path == "go.mod" || path.ends_with("/go.mod") {
+        Some(go_mod_dependencies(file))
+    } else if is_manifest_path(path) {
+        Some(DependencyChange {
             manifest_path: file.path.clone(),
             status: DependencyStatus::UnknownPackageFile,
             entries: Vec::new(),
-        }),
-        _ => None,
+        })
+    } else {
+        None
     }
 }
 
@@ -1089,6 +1093,32 @@ fn package_json_dependencies(file: &DiffFile) -> DependencyChange {
         .as_deref()
         .map(parse_package_json)
         .transpose();
+    let (Ok(before), Ok(after)) = (before, after) else {
+        return unknown_dependency_change(file);
+    };
+    exact_dependency_change(file, before.unwrap_or_default(), after.unwrap_or_default())
+}
+
+fn pyproject_toml_dependencies(file: &DiffFile) -> DependencyChange {
+    let before = file
+        .base_source
+        .as_deref()
+        .map(parse_pyproject_toml)
+        .transpose();
+    let after = file
+        .head_source
+        .as_deref()
+        .map(parse_pyproject_toml)
+        .transpose();
+    let (Ok(before), Ok(after)) = (before, after) else {
+        return unknown_dependency_change(file);
+    };
+    exact_dependency_change(file, before.unwrap_or_default(), after.unwrap_or_default())
+}
+
+fn go_mod_dependencies(file: &DiffFile) -> DependencyChange {
+    let before = file.base_source.as_deref().map(parse_go_mod).transpose();
+    let after = file.head_source.as_deref().map(parse_go_mod).transpose();
     let (Ok(before), Ok(after)) = (before, after) else {
         return unknown_dependency_change(file);
     };
@@ -1182,6 +1212,107 @@ fn cargo_dependency_requirement(value: &toml::Value) -> Result<String, ()> {
             .ok_or(()),
         _ => Err(()),
     }
+}
+
+fn parse_pyproject_toml(contents: &str) -> Result<BTreeMap<(String, String), String>, ()> {
+    let value: toml::Value = contents.parse().map_err(|_| ())?;
+    let root = value.as_table().ok_or(())?;
+    let mut dependencies = BTreeMap::new();
+    if let Some(project) = root.get("project").and_then(toml::Value::as_table) {
+        if let Some(entries) = project.get("dependencies") {
+            python_dependency_array(entries, "dependencies", &mut dependencies)?;
+        }
+        if let Some(optional) = project.get("optional-dependencies") {
+            for (name, entries) in optional.as_table().ok_or(())? {
+                python_dependency_array(entries, &format!("optional:{name}"), &mut dependencies)?;
+            }
+        }
+    }
+    if let Some(poetry) = root
+        .get("tool")
+        .and_then(toml::Value::as_table)
+        .and_then(|tool| tool.get("poetry"))
+        .and_then(toml::Value::as_table)
+    {
+        for scope in ["dependencies", "dev-dependencies"] {
+            if let Some(entries) = poetry.get(scope) {
+                for (name, value) in entries.as_table().ok_or(())? {
+                    dependencies.insert(
+                        (format!("poetry:{scope}"), name.clone()),
+                        cargo_dependency_requirement(value)?,
+                    );
+                }
+            }
+        }
+    }
+    Ok(dependencies)
+}
+
+fn python_dependency_array(
+    value: &toml::Value,
+    scope: &str,
+    dependencies: &mut BTreeMap<(String, String), String>,
+) -> Result<(), ()> {
+    for requirement in value.as_array().ok_or(())? {
+        let requirement = requirement.as_str().ok_or(())?;
+        let name_end = requirement
+            .find(|character: char| {
+                matches!(character, ' ' | '<' | '>' | '=' | '!' | '~' | ';' | '[')
+            })
+            .unwrap_or(requirement.len());
+        if name_end == 0 {
+            return Err(());
+        }
+        dependencies.insert(
+            (scope.to_string(), requirement[..name_end].to_string()),
+            requirement.to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn parse_go_mod(contents: &str) -> Result<BTreeMap<(String, String), String>, ()> {
+    let mut dependencies = BTreeMap::new();
+    let mut in_require_block = false;
+    for original in contents.lines() {
+        let line = original.split("//").next().unwrap_or_default().trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line == "require (" {
+            in_require_block = true;
+            continue;
+        }
+        if in_require_block && line == ")" {
+            in_require_block = false;
+            continue;
+        }
+        if line.starts_with("replace ")
+            || line.starts_with("exclude ")
+            || line.starts_with("retract ")
+        {
+            return Err(());
+        }
+        let requirement = if let Some(value) = line.strip_prefix("require ") {
+            value
+        } else if in_require_block {
+            line
+        } else {
+            continue;
+        };
+        let mut parts = requirement.split_whitespace();
+        let (Some(name), Some(version), None) = (parts.next(), parts.next(), parts.next()) else {
+            return Err(());
+        };
+        if !version.starts_with('v') {
+            return Err(());
+        }
+        dependencies.insert(
+            ("require".to_string(), name.to_string()),
+            version.to_string(),
+        );
+    }
+    (!in_require_block).then_some(dependencies).ok_or(())
 }
 
 fn source_role(path: &str) -> SourceRole {
@@ -1559,6 +1690,91 @@ mod tests {
             plan.dependency_changes[0].status,
             DependencyStatus::UnknownPackageFile
         );
+    }
+
+    #[test]
+    fn reports_static_pyproject_and_go_mod_dependencies_exactly() {
+        assert!(parse_pyproject_toml("[project]\ndependencies = [\"requests>=2\"]\n[project.optional-dependencies]\ntest = [\"pytest>=7\"]\n").is_ok());
+        assert!(parse_go_mod("module example.test/app\n\nrequire example.test/old v1.0.0\nrequire (\n  example.test/keep v1.0.0\n)\n").is_ok());
+        assert!(parse_pyproject_toml("[project]\ndependencies = [\"requests>=3\", \"httpx>=1\"]\n[project.optional-dependencies]\ntest = [\"pytest>=8\"]\n").is_ok());
+        assert!(parse_go_mod("module example.test/app\n\nrequire (\n  example.test/keep v1.1.0\n  example.test/new v0.1.0\n)\n").is_ok());
+        let plan = build_diff_plan(
+            "base", "head",
+            vec![
+                file("pyproject.toml", "[project]\ndependencies = [\"requests>=2\"]\n[project.optional-dependencies]\ntest = [\"pytest>=7\"]\n"),
+                file("go.mod", "module example.test/app\n\nrequire example.test/old v1.0.0\nrequire (\n  example.test/keep v1.0.0\n)\n"),
+            ],
+            vec![
+                file("pyproject.toml", "[project]\ndependencies = [\"requests>=3\", \"httpx>=1\"]\n[project.optional-dependencies]\ntest = [\"pytest>=8\"]\n"),
+                file("go.mod", "module example.test/app\n\nrequire (\n  example.test/keep v1.1.0\n  example.test/new v0.1.0\n)\n"),
+            ],
+        );
+        assert_eq!(plan.dependency_changes.len(), 2);
+        assert!(
+            plan.dependency_changes
+                .iter()
+                .all(|change| change.status == DependencyStatus::Exact),
+            "{:#?}",
+            plan.dependency_changes
+        );
+        let python = plan
+            .dependency_changes
+            .iter()
+            .find(|change| change.manifest_path == "pyproject.toml")
+            .unwrap();
+        assert!(
+            python
+                .entries
+                .iter()
+                .any(|entry| entry.name == "requests"
+                    && entry.after.as_deref() == Some("requests>=3"))
+        );
+        assert!(python
+            .entries
+            .iter()
+            .any(|entry| entry.name == "pytest" && entry.scope == "optional:test"));
+        let go = plan
+            .dependency_changes
+            .iter()
+            .find(|change| change.manifest_path == "go.mod")
+            .unwrap();
+        assert!(go
+            .entries
+            .iter()
+            .any(|entry| entry.name == "example.test/old" && entry.after.is_none()));
+        assert!(go
+            .entries
+            .iter()
+            .any(|entry| entry.name == "example.test/new" && entry.before.is_none()));
+    }
+
+    #[test]
+    fn keeps_dynamic_python_and_go_module_changes_unknown() {
+        let plan = build_diff_plan(
+            "base",
+            "head",
+            vec![
+                file("pyproject.toml", "[project]\ndependencies = [1]\n"),
+                file(
+                    "go.mod",
+                    "module example.test/app\nreplace example.test/a => example.test/b v1.0.0\n",
+                ),
+            ],
+            vec![
+                file(
+                    "pyproject.toml",
+                    "[project]\ndependencies = [\"requests\"]\n",
+                ),
+                file(
+                    "go.mod",
+                    "module example.test/app\nrequire example.test/a v1.0.0\n",
+                ),
+            ],
+        );
+        assert!(plan
+            .dependency_changes
+            .iter()
+            .all(|change| change.status == DependencyStatus::UnknownPackageFile));
     }
 
     #[test]
