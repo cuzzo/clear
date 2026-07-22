@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
@@ -18,7 +18,10 @@ describe("App", () => {
     window.history.replaceState({}, "", "/diff");
   });
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
 
   it("asks for two immutable revisions when the URL is incomplete", () => {
     render(<App />);
@@ -34,7 +37,7 @@ describe("App", () => {
         data: {
           scope: { base_oid: "a".repeat(40), head_oid: "b".repeat(40), policy_version: "diff-risk/v1" },
           inventory: { changed_files: 2, changed_directories: 1, added_files: 1, modified_files: 1, deleted_files: 0, renamed_files: 0, by_role: {}, configuration_paths: [{ path: "Gemfile", kind: "ruby_manifest" }], documentation_paths: ["README.md"], generated_paths: ["generated/app.ts"], lockfile_paths: ["Gemfile.lock"] },
-          dependency_changes: [{ manifest_path: "Gemfile", status: "unknown_package_file" }],
+          dependency_changes: [{ manifest_path: "Gemfile", status: "unknown_package_file", entries: [] }, { manifest_path: "Cargo.toml", status: "exact", entries: [{ name: "serde", scope: "runtime", before: null, after: "1" }] }, { manifest_path: "package.json", status: "exact", entries: [] }],
           language_summaries: [{ language: "ruby", production: { code: 1, comments: 0, other: 0 }, test: { code: 0, comments: 0, other: 0 }, production_verification: verification, production_by_visibility: visibility, test_assertions: null }],
           evidence: { coverage: "unknown", mutation: "unknown", hazards: "unknown", sarif: "unknown" },
           files: [
@@ -54,8 +57,15 @@ describe("App", () => {
     expect(screen.getByText(/Generated: generated\/app.ts/)).toBeInTheDocument();
     expect(screen.getByText(/Lockfiles: Gemfile.lock/)).toBeInTheDocument();
     expect(screen.getByText(/unknown package-file change/)).toBeInTheDocument();
+    expect(screen.getByText(/serde \(runtime\): not declared → 1/)).toBeInTheDocument();
+    expect(screen.getByText(/package.json: no declared dependency changes/)).toBeInTheDocument();
     expect(screen.getByText(/ruby: 1 production code lines.*public 1.*assertions unavailable/)).toBeInTheDocument();
     expect(screen.getByText(/Evidence: coverage unknown/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Base revision"), { target: { value: "next-base" } });
+    fireEvent.change(screen.getByLabelText("Head revision"), { target: { value: "next-head" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compare revisions" }));
+    expect(window.location.search).toContain("base=next-base");
+    expect(window.location.search).toContain("head=next-head");
     fireEvent.click(screen.getByRole("button", { name: /lib\/app.rb/ }));
     expect(screen.getAllByText(/SARIF findings \(partial\): Scanner\/rule line 1: unsafe value/)).toHaveLength(2);
     expect(screen.getByText(/Private changes \(2 functions/)).toBeInTheDocument();

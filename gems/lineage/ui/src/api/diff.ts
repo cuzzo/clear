@@ -1,4 +1,4 @@
-export type { AddedLines, DiffFile, DiffGroup, DiffPlan, RiskSummary, VerificationSlices } from "../generated/diff";
+export type { AddedLines, DependencyChange, DiffFile, DiffGroup, DiffPlan, RiskSummary, VerificationSlices } from "../generated/diff";
 import type { DiffPlan } from "../generated/diff";
 
 export class DiffApiError extends Error {}
@@ -26,12 +26,119 @@ function parseEnvelope(value: unknown): DiffPlan {
     throw new DiffApiError("Diff API returned an incompatible response");
   }
   const { data } = value;
-  if (!isRecord(data.scope) || !isRecord(data.inventory) || !Array.isArray(data.files) || !Array.isArray(data.dependency_changes)) {
+  if (!isDiffPlan(data)) {
     throw new DiffApiError("Diff API response is missing required plan fields");
   }
-  return data as unknown as DiffPlan;
+  return data;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
+
+function isDiffPlan(value: Record<string, unknown>): value is DiffPlan {
+  return isScope(value.scope)
+    && isInventory(value.inventory)
+    && isEvidence(value.evidence)
+    && isArrayOf(value.dependency_changes, isDependencyChange)
+    && isArrayOf(value.language_summaries, isLanguageSummary)
+    && isArrayOf(value.files, isDiffFile);
+}
+
+function isScope(value: unknown): boolean {
+  return hasStrings(value, ["base_oid", "head_oid", "policy_version"]);
+}
+
+function isInventory(value: unknown): boolean {
+  return hasNumbers(value, ["changed_directories", "changed_files", "added_files", "modified_files", "deleted_files", "renamed_files"])
+    && isRecord(value)
+    && isRecord(value.by_role)
+    && isArrayOf(value.configuration_paths, (entry) => hasStrings(entry, ["path", "kind"]))
+    && isArrayOf(value.documentation_paths, isString)
+    && isArrayOf(value.generated_paths, isString)
+    && isArrayOf(value.lockfile_paths, isString);
+}
+
+function isEvidence(value: unknown): boolean {
+  return hasEnumFields(value, ["coverage", "mutation", "hazards", "sarif"], evidenceStates);
+}
+
+function isDependencyChange(value: unknown): boolean {
+  return hasStrings(value, ["manifest_path"])
+    && hasEnumFields(value, ["status"], dependencyStatuses)
+    && isRecord(value)
+    && isArrayOf(value.entries, isDependencyEntry);
+}
+
+function isLanguageSummary(value: unknown): boolean {
+  return hasStrings(value, ["language"])
+    && isRecord(value)
+    && isAddedLines(value.production)
+    && isAddedLines(value.test)
+    && isVerification(value.production_verification)
+    && isVisibilityVerification(value.production_by_visibility)
+    && (typeof value.test_assertions === "number" || value.test_assertions === null);
+}
+
+function isDiffFile(value: unknown): boolean {
+  return hasStrings(value, ["path"])
+    && hasEnumFields(value, ["change"], fileChangeKinds)
+    && hasEnumFields(value, ["role"], sourceRoles)
+    && isRecord(value)
+    && nullableString(value.previous_path)
+    && nullableString(value.language)
+    && nullableString(value.base_source)
+    && nullableString(value.head_source)
+    && isAddedLines(value.added_lines)
+    && isVerification(value.verification)
+    && isAddedLines(value.residual_lines)
+    && isRisk(value.risk)
+    && isArrayOf(value.groups, isDiffGroup)
+    && isArrayOf(value.sarif_findings, isFinding);
+}
+
+function isDiffGroup(value: unknown): boolean {
+  return hasStrings(value, ["name", "kind"])
+    && hasNumbers(value, ["start_line", "end_line"])
+    && hasEnumFields(value, ["visibility"], visibilities)
+    && isRecord(value)
+    && nullableNumber(value.base_start_line)
+    && nullableNumber(value.base_end_line)
+    && isAddedLines(value.added_lines)
+    && isVerification(value.verification)
+    && isRisk(value.risk)
+    && isArrayOf(value.sarif_findings, isFinding);
+}
+
+function isFinding(value: unknown): boolean {
+  return hasStrings(value, ["source", "tool", "rule_id", "level", "message"])
+    && hasNumbers(value, ["start_line", "end_line"]);
+}
+
+function isDependencyEntry(value: unknown): boolean {
+  return isRecord(value)
+    && hasStrings(value, ["name", "scope"])
+    && nullableString(value.before)
+    && nullableString(value.after);
+}
+
+function isAddedLines(value: unknown): boolean { return hasNumbers(value, ["code", "comments", "other"]); }
+function isVerification(value: unknown): boolean { return hasNumbers(value, ["covered_and_killed", "covered", "partially_covered", "not_covered", "unknown"]); }
+function isRisk(value: unknown): boolean { return hasNumbers(value, ["score", "not_covered", "partially_covered", "added_complexity", "tier_one_hazards"]); }
+function isVisibilityVerification(value: unknown): boolean {
+  return isRecord(value) && isVerification(value.public) && isVerification(value.private) && isVerification(value.unknown);
+}
+
+function hasStrings(value: unknown, fields: readonly string[]): boolean { return isRecord(value) && fields.every((field) => typeof value[field] === "string"); }
+function hasNumbers(value: unknown, fields: readonly string[]): boolean { return isRecord(value) && fields.every((field) => typeof value[field] === "number" && Number.isFinite(value[field])); }
+function hasEnumFields(value: unknown, fields: readonly string[], allowed: readonly string[]): boolean { return isRecord(value) && fields.every((field) => typeof value[field] === "string" && allowed.includes(value[field])); }
+function isArrayOf(value: unknown, predicate: (entry: unknown) => boolean): boolean { return Array.isArray(value) && value.every(predicate); }
+function isString(value: unknown): boolean { return typeof value === "string"; }
+function nullableString(value: unknown): boolean { return typeof value === "string" || value === null; }
+function nullableNumber(value: unknown): boolean { return typeof value === "number" || value === null; }
+
+const evidenceStates = ["exact", "stale", "missing", "partial", "unknown"] as const;
+const dependencyStatuses = ["exact", "unknown_package_file"] as const;
+const fileChangeKinds = ["added", "modified", "deleted", "renamed"] as const;
+const sourceRoles = ["production", "test", "documentation", "configuration", "generated", "lockfile", "other"] as const;
+const visibilities = ["public", "private", "unknown"] as const;

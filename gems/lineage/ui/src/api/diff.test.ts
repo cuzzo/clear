@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { DiffApiError, fetchDiffPlan, revisionsFromSearch } from "./diff";
 
-const plan = { scope: {}, inventory: {}, dependency_changes: [], files: [] };
+const slices = { covered_and_killed: 0, covered: 0, partially_covered: 0, not_covered: 0, unknown: 0 };
+const plan = {
+  scope: { base_oid: "a".repeat(40), head_oid: "b".repeat(40), policy_version: "diff-risk/v1" },
+  inventory: { changed_directories: 1, changed_files: 1, added_files: 0, modified_files: 1, deleted_files: 0, renamed_files: 0, by_role: {}, configuration_paths: [], documentation_paths: [], generated_paths: [], lockfile_paths: [] },
+  dependency_changes: [{ manifest_path: "Cargo.toml", status: "exact", entries: [{ name: "serde", scope: "runtime", before: null, after: "1" }] }],
+  language_summaries: [],
+  evidence: { coverage: "missing", mutation: "missing", hazards: "missing", sarif: "missing" },
+  files: [{ path: "lib/example.rb", previous_path: null, change: "modified", role: "production", language: "ruby", base_source: "old", head_source: "new", added_lines: { code: 1, comments: 0, other: 0 }, verification: slices, residual_lines: { code: 1, comments: 0, other: 0 }, groups: [], sarif_findings: [], risk: { score: 0, not_covered: 0, partially_covered: 0, added_complexity: 0, tier_one_hazards: 0 } }],
+};
 
 describe("diff API", () => {
   it("reads only complete revision pairs from the URL", () => {
@@ -20,5 +28,6 @@ describe("diff API", () => {
     await expect(fetchDiffPlan({ base: "a", head: "b" }, vi.fn().mockResolvedValue({ ok: false, status: 500 }))).rejects.toBeInstanceOf(DiffApiError);
     await expect(fetchDiffPlan({ base: "a", head: "b" }, vi.fn().mockResolvedValue({ ok: true, json: async () => ({ api_version: "v2", data: plan }) }))).rejects.toBeInstanceOf(DiffApiError);
     await expect(fetchDiffPlan({ base: "a", head: "b" }, vi.fn().mockResolvedValue({ ok: true, json: async () => ({ api_version: "v1", data: {} }) }))).rejects.toBeInstanceOf(DiffApiError);
+    await expect(fetchDiffPlan({ base: "a", head: "b" }, vi.fn().mockResolvedValue({ ok: true, json: async () => ({ api_version: "v1", data: { ...plan, files: [{ ...plan.files[0], risk: { score: "unsafe" } }] } }) }))).rejects.toBeInstanceOf(DiffApiError);
   });
 });

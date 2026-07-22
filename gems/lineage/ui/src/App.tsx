@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
-import { DiffApiError, type AddedLines, type DiffFile, type DiffGroup, type DiffPlan, type RiskSummary, type VerificationSlices, fetchDiffPlan, revisionsFromSearch } from "./api/diff";
+import { DiffApiError, type AddedLines, type DependencyChange, type DiffFile, type DiffGroup, type DiffPlan, type RiskSummary, type VerificationSlices, fetchDiffPlan, revisionsFromSearch } from "./api/diff";
 import { DiffPreview, type SourceHighlight } from "./monaco/DiffPreview";
 
 export function App(): React.JSX.Element {
   const [location, setLocation] = useState(window.location.search);
   const revisions = revisionsFromSearch(location);
   const query = new URLSearchParams(location);
+  const requestedLayout = query.get("layout");
+  const initialLayout = requestedLayout === "inline" || requestedLayout === "split"
+    ? requestedLayout
+    : window.localStorage.getItem("lineage.diff.layout") === "inline" || window.innerWidth < 900
+      ? "inline"
+      : "split";
   const [plan, setPlan] = useState<DiffPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,20 +35,23 @@ export function App(): React.JSX.Element {
         <h1>Revision-aware diff review</h1>
         <p>Revision-pinned inventory and raw source review.</p>
       </header>
+      <RevisionControls revisions={revisions} />
       {!revisions && <p role="status">Add immutable base and head revisions to the URL to begin review.</p>}
       {error && <p role="alert">{error}</p>}
-      {plan && <DiffReview initialLayout={query.get("layout") === "inline" ? "inline" : "split"} plan={plan} rawPath={query.get("presentation") === "raw" ? query.get("path") : null} />}
+      {plan && <DiffReview initialLayout={initialLayout} plan={plan} rawPath={query.get("presentation") === "raw" ? query.get("path") : null} />}
     </main>
   );
 }
 
 function DiffReview({ initialLayout, plan, rawPath }: { readonly initialLayout: "inline" | "split"; readonly plan: DiffPlan; readonly rawPath: string | null }): React.JSX.Element {
-  const [sideBySide, setSideBySide] = useState(initialLayout === "split");
+  const [sideBySide, setSideBySide] = useState(() => initialLayout === "split");
   const rawFile = rawPath ? plan.files.find((file) => file.path === rawPath) : undefined;
+  useEffect(() => setSideBySide(initialLayout === "split"), [initialLayout]);
   const setLayout = (next: boolean) => {
     const nextQuery = new URLSearchParams(window.location.search);
     nextQuery.set("layout", next ? "split" : "inline");
     window.history.replaceState({}, "", `${window.location.pathname}?${nextQuery}`);
+    window.localStorage.setItem("lineage.diff.layout", next ? "split" : "inline");
     setSideBySide(next);
   };
   const openRaw = (path: string) => {
@@ -68,11 +77,47 @@ function DiffReview({ initialLayout, plan, rawPath }: { readonly initialLayout: 
     <InventoryPaths label="Documentation" paths={plan.inventory.documentation_paths} />
     <InventoryPaths label="Generated" paths={plan.inventory.generated_paths} />
     <InventoryPaths label="Lockfiles" paths={plan.inventory.lockfile_paths} />
-    {plan.dependency_changes.map((change) => <p key={change.manifest_path}>{change.manifest_path}: {change.status === "exact" ? "dependency changes parsed" : "unknown package-file change"}</p>)}
-    {plan.language_summaries.map((summary) => <p key={summary.language}>{summary.language}: {summary.production.code} production code lines · public {summary.production_by_visibility.public.unknown + summary.production_by_visibility.public.covered + summary.production_by_visibility.public.covered_and_killed + summary.production_by_visibility.public.partially_covered} · private {summary.production_by_visibility.private.unknown + summary.production_by_visibility.private.covered + summary.production_by_visibility.private.covered_and_killed + summary.production_by_visibility.private.partially_covered} · unknown visibility {summary.production_by_visibility.unknown.unknown + summary.production_by_visibility.unknown.covered + summary.production_by_visibility.unknown.covered_and_killed + summary.production_by_visibility.unknown.partially_covered} · {summary.production_verification.covered_and_killed} covered+killed · {summary.production_verification.covered} covered · {summary.production_verification.partially_covered} partial · {summary.production_verification.not_covered} not covered · {summary.production_verification.unknown} unknown · {summary.test.code} test code lines · assertions {summary.test_assertions ?? "unavailable"}</p>)}
+    {plan.dependency_changes.map((change) => <DependencySummary change={change} key={change.manifest_path} />)}
+    {plan.language_summaries.map((summary) => <LanguageSummaryCard key={summary.language} summary={summary} />)}
     <fieldset><legend>Diff layout</legend><label><input checked={sideBySide} name="layout" onChange={() => setLayout(true)} type="radio" />Side by side</label><label><input checked={!sideBySide} name="layout" onChange={() => setLayout(false)} type="radio" />Inline</label></fieldset>
     {rawFile ? <RawReview file={rawFile} onBack={closeRaw} sideBySide={sideBySide} /> : plan.files.map((file) => <FileReview file={file} key={file.path} onRaw={openRaw} sideBySide={sideBySide} />)}
   </section>;
+}
+
+function RevisionControls({ revisions }: { readonly revisions: { readonly base: string; readonly head: string } | null }): React.JSX.Element {
+  const [base, setBase] = useState(revisions?.base ?? "");
+  const [head, setHead] = useState(revisions?.head ?? "");
+  useEffect(() => {
+    setBase(revisions?.base ?? "");
+    setHead(revisions?.head ?? "");
+  }, [revisions?.base, revisions?.head]);
+  const chooseRevisions = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!base.trim() || !head.trim()) return;
+    const next = new URLSearchParams(window.location.search);
+    next.set("base", base.trim());
+    next.set("head", head.trim());
+    next.delete("presentation");
+    next.delete("path");
+    window.history.pushState({}, "", `${window.location.pathname}?${next}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
+  return <form aria-label="Revision comparison" className="revision-controls" onSubmit={chooseRevisions}>
+    <label>Base revision <input aria-label="Base revision" onChange={(event) => setBase(event.target.value)} required value={base} /></label>
+    <label>Head revision <input aria-label="Head revision" onChange={(event) => setHead(event.target.value)} required value={head} /></label>
+    <button type="submit">Compare revisions</button>
+  </form>;
+}
+
+function DependencySummary({ change }: { readonly change: DependencyChange }): React.JSX.Element {
+  if (change.status !== "exact") return <p>{change.manifest_path}: unknown package-file change</p>;
+  if (change.entries.length === 0) return <p>{change.manifest_path}: no declared dependency changes</p>;
+  return <section aria-label={`Dependency changes for ${change.manifest_path}`}><p>{change.manifest_path}: declared dependency changes</p><ul>{change.entries.map((entry) => <li key={`${entry.scope}:${entry.name}`}>{entry.name} ({entry.scope}): {entry.before ?? "not declared"} → {entry.after ?? "not declared"}</li>)}</ul></section>;
+}
+
+function LanguageSummaryCard({ summary }: { readonly summary: DiffPlan["language_summaries"][number] }): React.JSX.Element {
+  const visibility = summary.production_by_visibility;
+  return <p>{summary.language}: {summary.production.code} production code lines · public {verificationTotal(visibility.public)} · private {verificationTotal(visibility.private)} · unknown visibility {verificationTotal(visibility.unknown)} · <VerificationSummary verification={summary.production_verification} /> · {summary.test.code} test code lines · assertions {summary.test_assertions ?? "unavailable"}</p>;
 }
 
 function InventoryPaths({ label, paths }: { readonly label: string; readonly paths: readonly string[] }): React.JSX.Element | null {
@@ -98,7 +143,9 @@ function FileReview({ file, onRaw, sideBySide }: { readonly file: DiffFile; read
 function PrivateReview({ file, groups, sideBySide }: { readonly file: DiffFile; readonly groups: readonly DiffGroup[]; readonly sideBySide: boolean }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const added = groups.reduce(addAddedLines, emptyLines());
-  return <section><button aria-expanded={expanded} className="disclosure" onClick={() => setExpanded(!expanded)}>Private changes ({groups.length} functions, {added.code} code, +{groups.reduce((total, group) => total + group.risk.added_complexity, 0)} complexity)</button>
+  const verification = groups.reduce(addVerification, emptyVerification());
+  const hazards = groups.reduce((total, group) => total + group.risk.tier_one_hazards, 0);
+  return <section><button aria-expanded={expanded} className="disclosure" onClick={() => setExpanded(!expanded)}>Private changes ({groups.length} functions, {added.code} code, +{groups.reduce((total, group) => total + group.risk.added_complexity, 0)} complexity, +{hazards} tier-1 hazards, <VerificationSummary verification={verification} />)</button>
     {expanded && groups.slice().sort(groupOrder).map((group) => <GroupReview file={file} group={group} key={`${group.kind}:${group.name}:${group.start_line}`} sideBySide={sideBySide} />)}
   </section>;
 }
@@ -117,7 +164,7 @@ function RawReview({ file, onBack, sideBySide }: { readonly file: DiffFile; read
 }
 
 function RiskMetrics({ risk, verification }: { readonly risk: RiskSummary; readonly verification: VerificationSlices }): React.JSX.Element {
-  return <p className="metrics">{risk.not_covered} not covered · {risk.partially_covered} partial · +{risk.added_complexity} complexity · +{risk.tier_one_hazards} tier-1 hazards · {verification.unknown} unknown evidence</p>;
+  return <p className="metrics"><VerificationSummary verification={verification} /> · +{risk.added_complexity} complexity · +{risk.tier_one_hazards} tier-1 hazards</p>;
 }
 
 function FindingSummary({ findings }: { readonly findings: DiffFile["sarif_findings"] }): React.JSX.Element | null {
@@ -135,8 +182,26 @@ function groupOrder(left: DiffGroup, right: DiffGroup): number {
 }
 
 function emptyLines(): AddedLines { return { code: 0, comments: 0, other: 0 }; }
+function emptyVerification(): VerificationSlices { return { covered_and_killed: 0, covered: 0, partially_covered: 0, not_covered: 0, unknown: 0 }; }
 function addAddedLines(total: AddedLines, group: DiffGroup): AddedLines {
   return { code: total.code + group.added_lines.code, comments: total.comments + group.added_lines.comments, other: total.other + group.added_lines.other };
+}
+function addVerification(total: VerificationSlices, group: DiffGroup): VerificationSlices {
+  return {
+    covered_and_killed: total.covered_and_killed + group.verification.covered_and_killed,
+    covered: total.covered + group.verification.covered,
+    partially_covered: total.partially_covered + group.verification.partially_covered,
+    not_covered: total.not_covered + group.verification.not_covered,
+    unknown: total.unknown + group.verification.unknown,
+  };
+}
+
+function verificationTotal(verification: VerificationSlices): number {
+  return verification.covered_and_killed + verification.covered + verification.partially_covered + verification.not_covered + verification.unknown;
+}
+
+function VerificationSummary({ verification }: { readonly verification: VerificationSlices }): React.JSX.Element {
+  return <>{verification.covered_and_killed} covered+killed · {verification.covered} covered · {verification.partially_covered} partial · {verification.not_covered} not covered · {verification.unknown} unknown</>;
 }
 
 function relativeHighlights(group: DiffGroup): SourceHighlight[] {
