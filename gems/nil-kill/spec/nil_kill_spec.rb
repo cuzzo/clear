@@ -382,7 +382,7 @@ RSpec.describe NilKill do
         :static_proof_boundary,
         { "complete" => true, "proof_tier" => "review" },
         "legacy_static_nil_finding",
-        { "corpus" => { "complete" => true } }
+        { "static" => { "input_coverage" => { "complete" => true } } }
       )
 
       expect(boundary).to include(

@@ -31,7 +31,7 @@ module Espalier
     def self.project_modules(evidence, source_roles: ["production"])
       return [] unless evidence && evidence["methods"]
 
-      input_boundary = proof_boundary_from_corpus(evidence["corpus"])
+      input_boundary = proof_boundary_from_input_coverage(evidence["input_coverage"])
       allowed_roles = Array(source_roles).map(&:to_s).to_set
       roles_by_path = Array(evidence["files"]).each_with_object({}) do |file, roles|
         path = file["path"].to_s
@@ -300,10 +300,10 @@ module Espalier
     # formatter. Keep the narrow input dimension alongside every projected
     # module so downstream analyses can preserve it without guessing from
     # their own estimate-specific flags.
-    def self.proof_boundary_from_corpus(corpus)
-      corpus = Hash(corpus || {})
-      complete = corpus["complete"]
-      reason = corpus["reason"].to_s
+    def self.proof_boundary_from_input_coverage(coverage)
+      coverage = Hash(coverage || {})
+      complete = coverage["complete"]
+      reason = coverage["reason"].to_s
       if complete == true
         { input_completeness: "complete", input_blockers: [] }
       elsif complete == false
@@ -553,6 +553,7 @@ module Espalier
         "languages" => project_languages.map(&:to_s),
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
+        "input_coverage" => input_coverage_metadata,
         "corpus" => corpus_metadata,
         "runtime_fields" => false,
         "files" => files.map { |file| file_record(file) },
@@ -661,6 +662,7 @@ module Espalier
         "root" => @root,
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
+        "input_coverage" => input_coverage_metadata,
         "corpus" => corpus_metadata,
         "runtime_fields" => false,
         "files" => [],
@@ -694,6 +696,14 @@ module Espalier
         else
           "the selected target is not a proven closed corpus"
         end
+      }
+    end
+
+    def input_coverage_metadata
+      {
+        "complete" => true,
+        "scope" => "selected_source_files",
+        "reason" => "all selected supported source files were collected and parsed successfully"
       }
     end
 

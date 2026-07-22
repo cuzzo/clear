@@ -213,6 +213,11 @@ fn facts_for_source_files_with_corpus(files: &[SourceFile], options: &Options, i
         "format": FORMAT,
         "files": reported_files,
         "file_roles": file_roles,
+        "input_coverage": {
+            "complete": true,
+            "scope": "selected_source_files",
+            "reason": "all selected supported source files were collected and parsed successfully",
+        },
         "corpus": corpus,
         "detectors": detectors,
         "documents": projected_documents,

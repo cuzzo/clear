@@ -502,17 +502,17 @@ fn build_sections(
 }
 
 fn corpus_input_boundary(facts: &Value) -> (sarif::InputCompleteness, Vec<String>) {
-    let corpus = rv::get(facts, "corpus");
-    match corpus
+    let coverage = rv::get(facts, "input_coverage");
+    match coverage
         .and_then(|value| rv::get(value, "complete"))
         .and_then(Value::as_bool)
     {
         Some(true) => (sarif::InputCompleteness::Complete, Vec::new()),
         Some(false) => {
-            let reason = corpus
+            let reason = coverage
                 .and_then(|value| rv::get(value, "reason"))
                 .and_then(Value::as_str)
-                .unwrap_or("incomplete_corpus")
+                .unwrap_or("incomplete_input_coverage")
                 .to_string();
             (sarif::InputCompleteness::Partial, vec![reason])
         }

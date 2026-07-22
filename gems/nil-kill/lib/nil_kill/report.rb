@@ -625,29 +625,29 @@ module NilKill
     end
 
     def apply_corpus_completeness(boundary, evidence)
-      corpus = corpus_boundary_attributes(evidence)
+      coverage = corpus_boundary_attributes(evidence)
       return boundary unless boundary["input_completeness"] == "unknown"
-      return boundary if corpus.fetch(:input_completeness) == "unknown"
+      return boundary if coverage.fetch(:input_completeness) == "unknown"
 
       NilKill::Sarif.proof_boundary(
-        input_completeness: corpus.fetch(:input_completeness),
+        input_completeness: coverage.fetch(:input_completeness),
         claim_status: boundary.fetch("claim_status"),
         coverage_discharge: boundary.fetch("coverage_discharge"),
         authority: boundary.fetch("authority"),
         scope: boundary.fetch("scope"),
-        blockers: Array(boundary["blockers"]) + corpus.fetch(:blockers)
+        blockers: Array(boundary["blockers"]) + coverage.fetch(:blockers)
       )
     end
 
     def corpus_boundary_attributes(evidence)
-      corpus = evidence.is_a?(Hash) ? (evidence.dig("static", "corpus") || evidence["corpus"]) : nil
+      corpus = evidence.is_a?(Hash) ? (evidence.dig("static", "input_coverage") || evidence["input_coverage"]) : nil
       return { input_completeness: "unknown", blockers: [] } unless corpus.is_a?(Hash)
       return { input_completeness: "complete", blockers: [] } if corpus["complete"] == true
 
       if corpus["complete"] == false
         return {
           input_completeness: "partial",
-          blockers: [corpus["reason"].to_s.empty? ? "incomplete_corpus" : corpus["reason"].to_s]
+          blockers: [corpus["reason"].to_s.empty? ? "incomplete_input_coverage" : corpus["reason"].to_s]
         }
       end
 

@@ -48,6 +48,7 @@ module NilKill
           "collections" => Array(raw["collections"]),
           "facts" => Hash(raw["facts"] || {}),
           "summary" => Hash(raw["summary"] || {}),
+          "input_coverage" => Hash(raw["input_coverage"] || {}),
           "language_capabilities" => Hash(raw["language_capabilities"] || {}),
           "language_extensions" => Hash(raw["language_extensions"] || {}),
         }.tap do |out|
@@ -55,9 +56,11 @@ module NilKill
             out["methods"] = Array(raw["methods"])
             out["facts"] = raw["facts"] || {}
             out["summary"] = raw["summary"] || {}
+            out["input_coverage"] = raw["input_coverage"] || {}
             out["language_extensions"]["nil_kill_static_evidence"] = {
               "facts" => raw["facts"] || {},
               "summary" => raw["summary"] || {},
+              "input_coverage" => raw["input_coverage"] || {},
               "language_capabilities" => raw["language_capabilities"] || {},
             }
           end
