@@ -2589,39 +2589,65 @@ fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
     #[derive(Default)]
     struct Domain {
         values: BTreeSet<String>,
-        sites: BTreeSet<String>,
+        decision_sites: BTreeSet<String>,
+        producer_sites: BTreeSet<String>,
         path: String,
         line: i64,
         slot: String,
+        blocked: bool,
+        strong_decision: bool,
     }
 
     let mut domains = BTreeMap::<String, Domain>::new();
     for observation in fact_objects(input, "hidden_enum_observations") {
-        if fact_string(observation, "event") != Some("decision")
-            || fact_string(observation, "kind") != Some("state")
-        {
+        // Parameters are open-world inputs without a caller contract.  Keep
+        // each remaining stable FactMine identity separate rather than
+        // grouping conditions by spelling or by their literal set.
+        if fact_string(observation, "kind") != Some("state") {
             continue;
         }
-        let Some(key) = fact_string(observation, "key") else { continue; };
+        let Some(key) = fact_string(observation, "key") else {
+            continue;
+        };
         let domain = domains.entry(key.to_string()).or_default();
         domain.path = fact_string(observation, "path").unwrap_or("").to_string();
         domain.line = fact_i64(observation, "line").unwrap_or(0);
         domain.slot = fact_string(observation, "slot").unwrap_or("").to_string();
-        if let Some(site) = observation.get("site").and_then(serde_json::Value::as_object) {
+        let site = observation
+            .get("site")
+            .and_then(serde_json::Value::as_object);
+        let site_id = site.map(|site| {
             let line = fact_i64(site, "line").unwrap_or(0);
-            domain.sites.insert(format!("{}:{line}", fact_string(site, "path").unwrap_or("")));
-        }
-        for value in observation.get("values").and_then(serde_json::Value::as_array).into_iter().flatten() {
-            if value.get("kind").and_then(serde_json::Value::as_str) == Some("String") {
-                if let Some(value) = value.get("value").and_then(serde_json::Value::as_str) {
-                    domain.values.insert(value.to_string());
+            format!("{}:{line}", fact_string(site, "path").unwrap_or(""))
+        });
+        match fact_string(observation, "event") {
+            Some("decision") => {
+                if let Some(site_id) = site_id {
+                    domain.decision_sites.insert(site_id);
                 }
+                domain.strong_decision |= site
+                    .and_then(|site| fact_string(site, "kind"))
+                    .is_some_and(|kind| matches!(kind, "case" | "switch"));
+                add_string_domain_values(&mut domain.values, observation);
             }
+            Some("producer") => {
+                if let Some(site_id) = site_id {
+                    domain.producer_sites.insert(site_id);
+                }
+                add_string_domain_values(&mut domain.values, observation);
+            }
+            Some("blocker") => domain.blocked = true,
+            _ => {}
         }
     }
     domains
         .into_values()
-        .filter(|domain| (2..=10).contains(&domain.values.len()) && domain.sites.len() >= 2)
+        .filter(|domain| {
+            !domain.blocked
+                && (2..=10).contains(&domain.values.len())
+                && (domain.decision_sites.len() >= 2
+                    || (domain.strong_decision && !domain.producer_sites.is_empty()))
+        })
         .map(|domain| Action {
             kind: "report_static_primitive_domain".to_string(),
             confidence: "review".to_string(),
@@ -2630,15 +2656,36 @@ fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
             message: format!(
                 "state {} has a closed-looking string domain across {} decision sites",
                 domain.slot,
-                domain.sites.len()
+                domain.decision_sites.len()
             ),
             data: HashMap::from([
                 ("slot".to_string(), serde_json::Value::String(domain.slot)),
                 ("values".to_string(), json_strings(domain.values)),
-                ("decision_sites".to_string(), json_strings(domain.sites)),
+                (
+                    "decision_sites".to_string(),
+                    json_strings(domain.decision_sites),
+                ),
             ]),
         })
         .collect()
+}
+
+fn add_string_domain_values(
+    values: &mut BTreeSet<String>,
+    observation: &serde_json::Map<String, serde_json::Value>,
+) {
+    for value in observation
+        .get("values")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if value.get("kind").and_then(serde_json::Value::as_str) == Some("String") {
+            if let Some(value) = value.get("value").and_then(serde_json::Value::as_str) {
+                values.insert(value.to_string());
+            }
+        }
+    }
 }
 
 /// Produces a review-only causal report from FactMine's public nullable
@@ -2927,6 +2974,124 @@ mod tests {
         assert_eq!(actions[0].kind, "report_static_primitive_domain");
         assert_eq!(actions[0].data["values"], serde_json::json!(["\"draft\"", "\"published\""]));
         assert_eq!(actions[0].data["decision_sites"], serde_json::json!(["post.rb:4", "post.rb:8"]));
+    }
+
+    #[test]
+    fn excludes_open_world_unrelated_and_non_string_domain_observations() {
+        let input = input_from_json(serde_json::json!({
+            "methods": [],
+            "facts": {
+                "hidden_enum_observations": [
+                    {
+                        "event": "decision", "kind": "state",
+                        "path": "ignored.rb", "line": 1, "slot": "@ignored",
+                        "site": {"path": "ignored.rb", "line": 1},
+                        "values": [{"kind": "String", "value": "\"ignored\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:open",
+                        "path": "post.rb", "line": 2, "slot": "@status",
+                        "site": {"path": "post.rb", "line": 4, "kind": "if"},
+                        "values": [{"kind": "String", "value": "\"draft\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:open",
+                        "path": "post.rb", "line": 2, "slot": "@status",
+                        "site": {"path": "post.rb", "line": 8},
+                        "values": [{"kind": "String", "value": "\"published\""}]
+                    },
+                    {
+                        "event": "blocker", "kind": "state", "key": "state:open",
+                        "path": "post.rb", "line": 2, "slot": "@status",
+                        "site": {"path": "post.rb", "line": 3, "kind": "open-world producer"}
+                    },
+                    {
+                        "event": "producer", "kind": "state", "key": "state:open",
+                        "path": "post.rb", "line": 2, "slot": "@status",
+                        "values": [{"kind": "String", "value": "\"abandoned\""}]
+                    },
+                    {
+                        "event": "note", "kind": "state", "key": "state:open",
+                        "path": "post.rb", "line": 2, "slot": "@status"
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:first",
+                        "path": "first.rb", "line": 2, "slot": "status",
+                        "site": {"path": "first.rb", "line": 4},
+                        "values": [{"kind": "String", "value": "\"draft\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:second",
+                        "path": "second.rb", "line": 2, "slot": "status",
+                        "site": {"path": "second.rb", "line": 4},
+                        "values": [{"kind": "String", "value": "\"published\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "param", "key": "param:status",
+                        "path": "post.rb", "line": 12, "slot": "status",
+                        "site": {"path": "post.rb", "line": 13},
+                        "values": [{"kind": "String", "value": "\"draft\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "param", "key": "param:status",
+                        "path": "post.rb", "line": 12, "slot": "status",
+                        "site": {"path": "post.rb", "line": 14},
+                        "values": [{"kind": "String", "value": "\"published\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:flags",
+                        "path": "post.rb", "line": 16, "slot": "@flags",
+                        "site": {"path": "post.rb", "line": 17},
+                        "values": [{"kind": "Integer", "value": "1"}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:flags",
+                        "path": "post.rb", "line": 16, "slot": "@flags",
+                        "site": {"path": "post.rb", "line": 18},
+                        "values": [{"kind": "Integer", "value": "2"}]
+                    }
+                ]
+            }
+        }));
+
+        assert!(report_static_primitive_domains(&input).is_empty());
+    }
+
+    #[test]
+    fn reports_a_closed_switch_with_a_literal_producer() {
+        let input = input_from_json(serde_json::json!({
+            "methods": [],
+            "facts": {
+                "hidden_enum_observations": [
+                    {
+                        "event": "decision", "kind": "state", "key": "state:workflow",
+                        "path": "workflow.rb", "line": 2, "slot": "@state",
+                        "site": {"path": "workflow.rb", "line": 8, "kind": "case"},
+                        "values": [
+                            {"kind": "String", "value": "\"draft\""},
+                            {"kind": "String", "value": "\"sent\""}
+                        ]
+                    },
+                    {
+                        "event": "producer", "kind": "state", "key": "state:workflow",
+                        "path": "workflow.rb", "line": 2, "slot": "@state",
+                        "site": {"path": "workflow.rb", "line": 4, "kind": "producer"},
+                        "values": [{"kind": "String", "value": "\"archived\""}]
+                    }
+                ]
+            }
+        }));
+
+        let actions = report_static_primitive_domains(&input);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0].data["values"],
+            serde_json::json!(["\"archived\"", "\"draft\"", "\"sent\""])
+        );
+        assert_eq!(
+            actions[0].data["decision_sites"],
+            serde_json::json!(["workflow.rb:8"])
+        );
     }
 
     #[test]
