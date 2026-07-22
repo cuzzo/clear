@@ -1173,6 +1173,58 @@ impl Storage {
         commit_hash: &str,
         paths: &[String],
     ) -> Result<Vec<SarifObservation>> {
+        self.sarif_observations_for_commit_paths_source(commit_hash, paths, None)
+    }
+
+    pub fn scoped_sarif_observations(
+        &self,
+        source: &str,
+        scope: &EvidenceScopeFingerprint,
+        paths: &[String],
+    ) -> Result<Option<Vec<SarifObservation>>> {
+        let complete = self.conn.query_row(
+            "SELECT complete FROM evidence_artifact_scopes WHERE family = 'sarif' AND source = ?1 \
+             AND revision = ?2 AND selection_scope = ?3 AND mutant_corpus = ?4 AND test_set = ?5",
+            params![source, scope.revision, scope.selection, scope.mutant_corpus, scope.test_set],
+            |row| row.get::<_, i64>(0),
+        ).optional()?;
+        (complete == Some(1))
+            .then(|| {
+                self.sarif_observations_for_commit_paths_source(
+                    &scope.revision,
+                    paths,
+                    Some(source),
+                )
+            })
+            .transpose()
+    }
+
+    pub fn sarif_identities_for_commit_source(
+        &self,
+        commit_hash: &str,
+        source: &str,
+    ) -> Result<HashSet<String>> {
+        let mut statement = self.conn.prepare(
+            "SELECT source, tool_name, rule_id, fingerprint FROM sarif_findings WHERE commit_hash = ?1 AND source = ?2",
+        )?;
+        let rows = statement.query_map(params![commit_hash, source], |row| {
+            Ok(format!(
+                "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?
+            ))
+        })?;
+        Ok(rows.collect::<std::result::Result<HashSet<_>, _>>()?)
+    }
+
+    fn sarif_observations_for_commit_paths_source(
+        &self,
+        commit_hash: &str,
+        paths: &[String],
+        source: Option<&str>,
+    ) -> Result<Vec<SarifObservation>> {
         if paths.is_empty() {
             return Ok(Vec::new());
         }
@@ -1182,14 +1234,18 @@ impl Storage {
                 .take(paths.len())
                 .collect::<Vec<_>>()
                 .join(", ");
+            let source_filter = source.map(|_| " AND source = ?").unwrap_or("");
             let sql = format!(
                 "SELECT path, source, tool_name, rule_id, level, message, fingerprint, properties_json, start_line, \
                  COALESCE(end_line, start_line) FROM sarif_findings \
-                 WHERE commit_hash = ? AND path IN ({placeholders}) \
+                 WHERE commit_hash = ?{source_filter} AND path IN ({placeholders}) \
                  ORDER BY path, start_line, rule_id, finding_key"
             );
-            let mut values = Vec::<rusqlite::types::Value>::with_capacity(paths.len() + 1);
+            let mut values = Vec::<rusqlite::types::Value>::with_capacity(paths.len() + 2);
             values.push(rusqlite::types::Value::Text(commit_hash.to_string()));
+            if let Some(source) = source {
+                values.push(rusqlite::types::Value::Text(source.to_string()));
+            }
             values.extend(paths.iter().cloned().map(rusqlite::types::Value::Text));
             let mut statement = self.conn.prepare(&sql)?;
             let rows = statement.query_map(rusqlite::params_from_iter(values), |row| {

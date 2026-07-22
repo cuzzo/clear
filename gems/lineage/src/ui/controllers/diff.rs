@@ -13,6 +13,7 @@ struct DiffQuery {
     base: Option<String>,
     head: Option<String>,
     coverage_source: Option<String>,
+    sarif_source: Option<String>,
     selection: Option<String>,
     mutant_corpus: Option<String>,
     test_set: Option<String>,
@@ -34,6 +35,7 @@ struct DiffFileQuery {
     head: Option<String>,
     path: Option<String>,
     coverage_source: Option<String>,
+    sarif_source: Option<String>,
     selection: Option<String>,
     mutant_corpus: Option<String>,
     test_set: Option<String>,
@@ -79,7 +81,7 @@ async fn api_diff_plan_handler(
             );
             apply_known_coverage(&state, &mut plan, query.coverage_source.as_deref());
             apply_known_mutation_kills(&state, &mut plan);
-            apply_known_sarif(&state, &mut plan);
+            apply_known_sarif(&state, &mut plan, query.sarif_source.as_deref());
             Json(ApiEnvelope {
                 api_version: crate::diff::DIFF_API_VERSION,
                 data: plan,
@@ -90,7 +92,11 @@ async fn api_diff_plan_handler(
     }
 }
 
-fn apply_known_sarif(state: &UiServerState, plan: &mut crate::diff::DiffPlan) {
+fn apply_known_sarif(
+    state: &UiServerState,
+    plan: &mut crate::diff::DiffPlan,
+    source: Option<&str>,
+) {
     if !state.db.exists() {
         return;
     }
@@ -102,6 +108,19 @@ fn apply_known_sarif(state: &UiServerState, plan: &mut crate::diff::DiffPlan) {
         .iter()
         .map(|file| file.path.clone())
         .collect::<Vec<_>>();
+    if let Some(source) = source {
+        if let Ok(Some(rows)) =
+            storage.scoped_sarif_observations(source, &plan.scope.evidence_scope, &paths)
+        {
+            let base = storage
+                .sarif_identities_for_commit_source(&plan.scope.base_oid, source)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            crate::diff::apply_exact_sarif_findings(plan, &rows, &base);
+            return;
+        }
+    }
     let Ok(rows) = storage.sarif_observations_for_commit_paths(&plan.scope.head_oid, &paths) else {
         return;
     };
@@ -204,7 +223,7 @@ async fn api_diff_file_handler(
             );
             apply_known_coverage(&state, &mut plan, query.coverage_source.as_deref());
             apply_known_mutation_kills(&state, &mut plan);
-            apply_known_sarif(&state, &mut plan);
+            apply_known_sarif(&state, &mut plan, query.sarif_source.as_deref());
             match plan.files.into_iter().find(|file| file.path == path) {
                 Some(file) => Json(ApiEnvelope {
                     api_version: crate::diff::DIFF_API_VERSION,
@@ -349,6 +368,7 @@ mod tests {
                 base: Some(base.clone()),
                 head: Some(head.clone()),
                 coverage_source: None,
+                sarif_source: None,
                 selection: None,
                 mutant_corpus: None,
                 test_set: None,
@@ -363,6 +383,7 @@ mod tests {
                 head: Some(head),
                 path: Some("app.rb".into()),
                 coverage_source: None,
+                sarif_source: None,
                 selection: None,
                 mutant_corpus: None,
                 test_set: None,
@@ -377,6 +398,7 @@ mod tests {
                 head: None,
                 path: None,
                 coverage_source: None,
+                sarif_source: None,
                 selection: None,
                 mutant_corpus: None,
                 test_set: None,
@@ -400,6 +422,7 @@ mod tests {
                 base: Some(base),
                 head: Some(head),
                 coverage_source: None,
+                sarif_source: None,
                 selection: None,
                 mutant_corpus: None,
                 test_set: None,
@@ -453,6 +476,7 @@ mod tests {
                 base: Some(base),
                 head: Some(head),
                 coverage_source: Some("complete".into()),
+                sarif_source: None,
                 selection: Some("all-production".into()),
                 mutant_corpus: Some("mutants-1".into()),
                 test_set: Some("tests-1".into()),
@@ -521,6 +545,7 @@ mod tests {
                 base: Some(base),
                 head: Some(head),
                 coverage_source: None,
+                sarif_source: None,
                 selection: None,
                 mutant_corpus: None,
                 test_set: None,
@@ -543,6 +568,94 @@ mod tests {
             json.pointer("/data/files/0/risk/tier_one_hazards")
                 .and_then(|value| value.as_u64()),
             Some(0)
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_api_uses_complete_scoped_sarif_for_new_tier_one_risk() {
+        let (_dir, state, base, head) = test_state();
+        let storage = crate::storage::Storage::open(state.db.as_ref()).unwrap();
+        let artifact_id = storage
+            .insert_sarif_artifact(&crate::model::SarifArtifact {
+                source: "scanner".into(),
+                tool_name: "Scanner".into(),
+                run_format: "sarif".into(),
+                artifact_path: "scan.sarif#0".into(),
+                artifact_sha256: "head".into(),
+                commit_hash: head.clone(),
+                timestamp: 1,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .insert_sarif_finding(&crate::model::SarifFinding {
+                artifact_id,
+                finding_key: "new-finding".into(),
+                source: "scanner".into(),
+                tool_name: "Scanner".into(),
+                run_format: "sarif".into(),
+                commit_hash: head.clone(),
+                timestamp: 1,
+                rule_id: "scanner.rule".into(),
+                level: "warning".into(),
+                message: "new tier one finding".into(),
+                path: "app.rb".into(),
+                start_line: 1,
+                start_column: None,
+                end_line: None,
+                end_column: None,
+                category: "hazard".into(),
+                is_dark_arm: false,
+                unit_id: None,
+                fingerprint: "new-finding".into(),
+                properties_json: "{\"tier\":1}".into(),
+                raw_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .record_evidence_artifact_scope(&crate::storage::EvidenceArtifactScope {
+                family: "sarif".into(),
+                source: "scanner".into(),
+                scope: crate::diff::EvidenceScopeFingerprint {
+                    revision: head.clone(),
+                    selection: "production".into(),
+                    mutant_corpus: "mutants".into(),
+                    test_set: "suite".into(),
+                },
+                complete: true,
+                expected_lines: Default::default(),
+            })
+            .unwrap();
+        let response = api_diff_plan_handler(
+            State(state),
+            Query(DiffQuery {
+                base: Some(base),
+                head: Some(head),
+                coverage_source: None,
+                sarif_source: Some("scanner".into()),
+                selection: Some("production".into()),
+                mutant_corpus: Some("mutants".into()),
+                test_set: Some("suite".into()),
+            }),
+        )
+        .await;
+        let json: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            json.pointer("/data/evidence/sarif")
+                .and_then(|value| value.as_str()),
+            Some("exact")
+        );
+        assert_eq!(
+            json.pointer("/data/files/0/risk/tier_one_hazards")
+                .and_then(|value| value.as_u64()),
+            Some(1)
+        );
+        assert_eq!(
+            json.pointer("/data/files/0/sarif_findings/0/status")
+                .and_then(|value| value.as_str()),
+            Some("new")
         );
     }
 }

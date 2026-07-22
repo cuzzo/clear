@@ -7,6 +7,7 @@ export interface DiffRequest {
   readonly base: string;
   readonly head: string;
   readonly coverage_source?: string;
+  readonly sarif_source?: string;
   readonly selection?: string;
   readonly mutant_corpus?: string;
   readonly test_set?: string;
@@ -22,6 +23,7 @@ export function revisionsFromSearch(search: string): DiffRequest | null {
     base,
     head,
     coverage_source: optional("coverage_source"),
+    sarif_source: optional("sarif_source"),
     selection: optional("selection"),
     mutant_corpus: optional("mutant_corpus"),
     test_set: optional("test_set"),
@@ -136,7 +138,9 @@ function isDiffGroup(value: unknown): boolean {
 }
 
 function isFinding(value: unknown): boolean {
-  return hasStrings(value, ["source", "tool", "rule_id", "level", "message"])
+  return hasStrings(value, ["source", "tool", "rule_id", "level", "message", "fingerprint", "status"])
+    && isRecord(value)
+    && typeof value.tier_one === "boolean"
     && hasNumbers(value, ["start_line", "end_line"]);
 }
 

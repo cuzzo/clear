@@ -6,7 +6,7 @@ const { diffPreview } = vi.hoisted(() => ({ diffPreview: vi.fn() }));
 const lines = { code: 1, comments: 0, other: 0 };
 const verification = { covered_and_killed: 0, covered: 0, partially_covered: 0, not_covered: 0, unknown: 1 };
 const risk = { score: 2, not_covered: 0, partially_covered: 0, added_complexity: 1, tier_one_hazards: 0 };
-const findings = [{ source: "scanner", tool: "Scanner", rule_id: "rule", level: "warning", message: "unsafe value", start_line: 1, end_line: 1 }];
+const findings = [{ source: "scanner", tool: "Scanner", rule_id: "rule", level: "warning", message: "unsafe value", fingerprint: "unsafe", tier_one: true, status: "new", start_line: 1, end_line: 1 }];
 const visibility = { public: verification, private: { ...verification, unknown: 0 }, unknown: { ...verification, unknown: 0 } };
 
 vi.mock("./monaco/DiffPreview", () => ({ DiffPreview: diffPreview }));
@@ -65,6 +65,7 @@ describe("App", () => {
     fireEvent.change(screen.getByLabelText("Head revision"), { target: { value: "next-head" } });
     fireEvent.click(screen.getByText("Evidence selection"));
     fireEvent.change(screen.getByLabelText("Coverage source"), { target: { value: "coverage:ci" } });
+    fireEvent.change(screen.getByLabelText("SARIF source"), { target: { value: "scanner" } });
     fireEvent.change(screen.getByLabelText("Evidence selection"), { target: { value: "production" } });
     fireEvent.change(screen.getByLabelText("Mutant corpus"), { target: { value: "mutants" } });
     fireEvent.change(screen.getByLabelText("Test set"), { target: { value: "suite" } });
@@ -72,10 +73,11 @@ describe("App", () => {
     expect(window.location.search).toContain("base=next-base");
     expect(window.location.search).toContain("head=next-head");
     expect(window.location.search).toContain("coverage_source=coverage%3Aci");
+    expect(window.location.search).toContain("sarif_source=scanner");
     expect(window.location.search).toContain("selection=production");
     fireEvent.click(screen.getByRole("button", { name: /lib\/app.rb/ }));
     expect(screen.getByText(/Removals/)).toBeInTheDocument();
-    expect(screen.getAllByText(/SARIF findings \(partial\): Scanner\/rule line 1: unsafe value/)).toHaveLength(2);
+    expect(screen.getAllByText(/SARIF findings: new tier-1 Scanner\/rule line 1: unsafe value/)).toHaveLength(2);
     expect(screen.getByText(/Private changes \(2 functions/)).toBeInTheDocument();
     expect(diffPreview).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /function run/ }));
