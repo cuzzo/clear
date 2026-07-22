@@ -1,9 +1,9 @@
-# SARIF proof-boundary contract (v1)
+# SARIF proof-boundary contract (v2)
 
 Consumers of FactMine-derived facts publish this contract on individual SARIF
-results. It answers a deliberately narrow question: what is the weakest proof
-boundary of the facts used to produce this finding? It is not a claim that an
-entire repository scan is complete or incomplete.
+results. It separates three questions that must not share a scalar tier: are
+the inputs complete, how strong is the finding's claim, and can line coverage
+discharge that claim?
 
 ## Result property
 
@@ -11,20 +11,22 @@ Every participating result has a `fact_mine.proof_boundary` property:
 
 ```json
 {
-  "schema": "fact-mine.proof-boundary.v1",
-  "tier": "complete | partial | review",
+  "schema": "fact-mine.proof-boundary.v2",
+  "input_completeness": "complete | partial | unknown",
+  "claim_status": "proven | observed | review",
+  "coverage_discharge": "satisfiable | unsatisfiable | not_applicable | unknown",
   "authority": ["fact_mine_normalized_ast"],
   "scope": "detector_local",
   "blockers": []
 }
 ```
 
-- `complete` means every fact required for the stated `scope` was available.
-  It does not imply a whole-program proof.
-- `partial` means a required fact was absent or unresolved. `blockers` names
-  the missing information.
-- `review` means the result is intentionally visible but line coverage or the
-  available static evidence cannot discharge the underlying concern.
+- `input_completeness` is `complete` or `partial` only when an upstream fact
+  explicitly supplies that information; otherwise it is `unknown`.
+- `claim_status` says whether the reported conclusion is proven, observed, or
+  intentionally left for review. An observed AST pattern is not a proof.
+- `coverage_discharge` says whether coverage could satisfy the concern. It is
+  independent of both proof and input completeness.
 - `authority` identifies the fact producers actually used; `scope` prevents a
   local observation from being mistaken for a global semantic guarantee.
 
@@ -36,15 +38,15 @@ The run-level `fact_mine.proof_boundary_summary` has the same `schema` and:
 {
   "result_count": 12,
   "results_with_boundary": 10,
-  "tiers": {"complete": 7, "partial": 2, "review": 1},
-  "partial_or_review_results": 3,
-  "partial_or_review_percent": 30.0
+  "input_completeness": {"complete": 4, "partial": 2, "unknown": 4},
+  "claim_status": {"proven": 1, "observed": 7, "review": 2},
+  "coverage_discharge": {"satisfiable": 3, "unsatisfiable": 2, "not_applicable": 5, "unknown": 0}
 }
 ```
 
-The denominator for `partial_or_review_percent` is
-`results_with_boundary`, never every result in the scan. This keeps unrelated
-SARIF producers and unannotated legacy results from silently becoming unknown.
+`results_with_boundary` is the denominator for rates calculated from any one
+dimension; consumers must never combine `review` with `partial`, or infer
+`complete` from a missing field.
 
 Current producers are Decomplex, Espalier, NilKill, and SlopCop. Consumers
 must preserve these properties when re-emitting SARIF rather than replacing

@@ -207,9 +207,11 @@ class AggregatorTest < Minitest::Test
         result.dig("properties", "function", "name") == "sort_names"
     }
     assert_equal "espalier.manifest.sarif.v1", run.dig("properties", "format")
-    assert_equal "complete", complexity.dig("properties", "fact_mine.proof_boundary", "tier")
+    assert_equal "unknown", complexity.dig("properties", "fact_mine.proof_boundary", "input_completeness")
+    assert_equal "observed", complexity.dig("properties", "fact_mine.proof_boundary", "claim_status")
     assert_equal 3, run.dig("properties", "fact_mine.proof_boundary_summary", "results_with_boundary")
-    assert_equal 0, run.dig("properties", "fact_mine.proof_boundary_summary", "partial_or_review_results")
+    assert_equal 0, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "complete")
+    assert_equal 3, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "unknown")
   end
 
   def test_formatter_sarif_marks_incomplete_complexity_as_partial
@@ -232,9 +234,10 @@ class AggregatorTest < Minitest::Test
     run = JSON.parse(Espalier::Formatter.to_sarif(manifest)).fetch("runs").first
     result = run.fetch("results").first
     boundary = result.dig("properties", "fact_mine.proof_boundary")
-    assert_equal "partial", boundary.fetch("tier")
+    assert_equal "unknown", boundary.fetch("input_completeness")
+    assert_equal "observed", boundary.fetch("claim_status")
     assert_includes boundary.fetch("blockers"), "dispatch target unresolved"
-    assert_equal 1, run.dig("properties", "fact_mine.proof_boundary_summary", "partial_or_review_results")
+    assert_equal 1, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "unknown")
   end
 
   def test_delegations_mapped_to_concrete_type_when_available

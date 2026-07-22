@@ -58,7 +58,9 @@ module SlopCop
       def proof_boundary_for(finding)
         review = finding.message.to_s.include?("requires review")
         SlopCop::Sarif.proof_boundary(
-          tier: review ? "review" : "partial",
+          input_completeness: "unknown",
+          claim_status: review ? "review" : "observed",
+          coverage_discharge: review ? "unsatisfiable" : "satisfiable",
           authority: ["fact_mine_hazard_contract", "slopcop_coverage"],
           scope: "changed_hazard_coverage",
           blockers: review ? ["coverage_cannot_satisfy_hazard"] : [finding.required_evidence.to_s, "runtime_coverage_is_observational"]

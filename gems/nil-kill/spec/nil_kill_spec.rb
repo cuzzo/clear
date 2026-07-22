@@ -339,7 +339,8 @@ RSpec.describe NilKill do
         "message" => a_hash_including("text" => include("CurrentUnitSpan#id")),
       ))
       static_result = results.find { |result| result.fetch("ruleId") == "nil-kill.static.untyped-signature" }
-      expect(static_result.dig("properties", "fact_mine.proof_boundary", "tier")).to eq("review")
+      expect(static_result.dig("properties", "fact_mine.proof_boundary", "input_completeness")).to eq("unknown")
+      expect(static_result.dig("properties", "fact_mine.proof_boundary", "claim_status")).to eq("review")
       expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "results_with_boundary")).to be_positive
     end
 
@@ -368,11 +369,11 @@ RSpec.describe NilKill do
       }
 
       sarif = JSON.parse(described_class.new(["--format=sarif"], evidence: evidence).to_sarif(evidence))
-      boundaries = sarif.dig("runs", 0, "results").map { |result| result.dig("properties", "fact_mine.proof_boundary", "tier") }.compact
-      expect(boundaries).to include("complete", "review")
-      expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "tiers", "review")).to be_positive
+      claims = sarif.dig("runs", 0, "results").map { |result| result.dig("properties", "fact_mine.proof_boundary", "claim_status") }.compact
+      expect(claims).to include("proven", "review")
+      expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "claim_status", "review")).to be_positive
       partial_boundary = described_class.new.send(:static_proof_boundary, { "unknown_reasons" => ["dynamic dispatch"] }, "static_nil_finding")
-      expect(partial_boundary.fetch("tier")).to eq("partial")
+      expect(partial_boundary.fetch("input_completeness")).to eq("partial")
       expect(partial_boundary.fetch("blockers")).to eq(["dynamic dispatch"])
     end
 

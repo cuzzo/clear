@@ -66,7 +66,8 @@ class ConstraintsTest < Minitest::Test
       assert_equal "slopcop-zig-vopr-uncovered", result.fetch("ruleId")
       assert_equal path, result.dig("locations", 0, "physicalLocation", "artifactLocation", "uri")
       assert_equal 1, result.dig("locations", 0, "physicalLocation", "region", "startLine")
-      assert_equal "partial", result.dig("properties", "fact_mine.proof_boundary", "tier")
+      assert_equal "observed", result.dig("properties", "fact_mine.proof_boundary", "claim_status")
+      assert_equal "satisfiable", result.dig("properties", "fact_mine.proof_boundary", "coverage_discharge")
       assert_equal 1, sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "results_with_boundary")
     end
   end

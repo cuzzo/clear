@@ -155,7 +155,9 @@ module Espalier
           },
           "source_format" => "espalier.manifest.v1",
           Decomplex::Sarif::PROOF_BOUNDARY_PROPERTY => Decomplex::Sarif.proof_boundary(
-            tier: "complete",
+            input_completeness: "unknown",
+            claim_status: "observed",
+            coverage_discharge: "not_applicable",
             authority: ["fact_mine_normalized_ast"],
             scope: "function_effect_observation"
           )
@@ -173,8 +175,6 @@ module Espalier
       known_space = metrics[:big_o_space_known_component] || metrics["big_o_space_known_component"] || space
       time_complete = metrics.key?(:big_o_complete) ? metrics[:big_o_complete] : metrics["big_o_complete"]
       space_complete = metrics.key?(:big_o_space_complete) ? metrics[:big_o_space_complete] : metrics["big_o_space_complete"]
-      time_complete = time != "unknown" if time_complete.nil?
-      space_complete = space != "unknown" if space_complete.nil?
       return nil if time.to_s.empty?
 
       dynamic = metrics.key?(:big_o_dynamic) ? metrics[:big_o_dynamic] : metrics["big_o_dynamic"]
@@ -220,7 +220,12 @@ module Espalier
             "variables" => variables
           },
           Decomplex::Sarif::PROOF_BOUNDARY_PROPERTY => Decomplex::Sarif.proof_boundary(
-            tier: time_complete && space_complete ? "complete" : "partial",
+            # Big-O completeness describes Espalier's estimate, not the
+            # completeness of the FactMine input. FactMine does not yet emit
+            # the corresponding per-finding metadata, so do not infer it.
+            input_completeness: "unknown",
+            claim_status: "observed",
+            coverage_discharge: "not_applicable",
             authority: ["fact_mine_normalized_ast", "espalier_static"],
             scope: "function_complexity",
             blockers: complexity_proof_blockers(unknowns, warnings, time_complete, space_complete)

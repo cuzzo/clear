@@ -244,7 +244,9 @@ module SlopCop
             "category" => "genuine",
             "source_format" => "slopcop.report.v1",
             SlopCop::Sarif::PROOF_BOUNDARY_PROPERTY => SlopCop::Sarif.proof_boundary(
-              tier: "partial",
+              input_completeness: "unknown",
+              claim_status: "observed",
+              coverage_discharge: "satisfiable",
               authority: ["slopcop_coverage"],
               scope: "coverage_gap",
               blockers: ["runtime_coverage_is_observational"]
@@ -272,7 +274,9 @@ module SlopCop
             "category" => "dark arm: #{category}",
             "source_format" => "slopcop.report.v1",
             SlopCop::Sarif::PROOF_BOUNDARY_PROPERTY => SlopCop::Sarif.proof_boundary(
-              tier: "partial",
+              input_completeness: "unknown",
+              claim_status: "observed",
+              coverage_discharge: "satisfiable",
               authority: ["slopcop_coverage"],
               scope: "coverage_gap",
               blockers: ["runtime_coverage_is_observational"]

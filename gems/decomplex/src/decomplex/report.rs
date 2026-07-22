@@ -381,27 +381,38 @@ fn finding_proof_boundary(section: &str, finding: &Value) -> Value {
         .iter()
         .flat_map(|key| rv::field_array_strings(finding, key))
         .collect::<Vec<_>>();
-    let is_review = complete == Some(false)
-        || !blockers.is_empty()
-        || (section == "Redundant Nil Guards" && proof_tier != "static_proven");
-    let mut blockers = blockers;
-    if is_review && blockers.is_empty() {
-        blockers.push("review_only_local_proof".to_string());
-    }
-    let (tier, authority, scope) = if is_review {
-        (
-            "review",
-            vec!["fact_mine_normalized_ast", "fact_mine_cfg"],
-            "local_control_flow",
-        )
+    let input_completeness = if complete == Some(true) {
+        "complete"
+    } else if complete == Some(false) || !blockers.is_empty() {
+        "partial"
     } else {
-        (
-            "complete",
-            vec!["fact_mine_normalized_ast"],
-            "detector_local",
-        )
+        "unknown"
     };
-    sarif::proof_boundary(tier, &authority, scope, blockers)
+    let claim_status = if proof_tier == "static_proven" {
+        "proven"
+    } else if section == "Redundant Nil Guards" {
+        "review"
+    } else {
+        "observed"
+    };
+    let authority = if section == "Redundant Nil Guards" {
+        vec!["fact_mine_normalized_ast", "fact_mine_cfg"]
+    } else {
+        vec!["fact_mine_normalized_ast"]
+    };
+    let scope = if section == "Redundant Nil Guards" {
+        "local_control_flow"
+    } else {
+        "detector_local"
+    };
+    sarif::proof_boundary(
+        input_completeness,
+        claim_status,
+        "not_applicable",
+        &authority,
+        scope,
+        blockers,
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -1682,7 +1693,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            nil_guard.pointer("/properties/fact_mine.proof_boundary/tier"),
+            nil_guard.pointer("/properties/fact_mine.proof_boundary/claim_status"),
             Some(&json!("review"))
         );
 

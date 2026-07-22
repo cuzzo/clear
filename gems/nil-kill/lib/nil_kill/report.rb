@@ -524,7 +524,8 @@ module NilKill
         path: action_path(action),
         line: action_line(action),
         properties: NilKill::Sarif.json_safe_value(action).merge(
-          "source_format" => Schema::EvidenceBundle.v2?(evidence) ? "nil-kill.evidence.v2" : "nil-kill.evidence.v1"
+          "source_format" => Schema::EvidenceBundle.v2?(evidence) ? "nil-kill.evidence.v2" : "nil-kill.evidence.v1",
+          NilKill::Sarif::PROOF_BOUNDARY_PROPERTY => unknown_observation_boundary("nil_kill_action")
         )
       )
     end
@@ -538,7 +539,8 @@ module NilKill
         path: diagnostic_path(diagnostic),
         line: diagnostic_line(diagnostic),
         properties: NilKill::Sarif.json_safe_value(diagnostic).merge(
-          "source_format" => "nil-kill.diagnostics"
+          "source_format" => "nil-kill.diagnostics",
+          NilKill::Sarif::PROOF_BOUNDARY_PROPERTY => unknown_observation_boundary("nil_kill_diagnostic")
         )
       )
     end
@@ -577,19 +579,30 @@ module NilKill
       blockers = Array(finding["unknown_reasons"]) + Array(finding["blockers"])
       proof_tier = finding["proof_tier"].to_s
       complete = finding["complete"]
-      tier = if proof_tier == "static_proven" || complete == true
-               "complete"
-             elsif blockers.empty?
-               "review"
-             else
-               "partial"
-             end
-      blockers << "review_only_static_evidence" if tier == "review" && blockers.empty?
+      input_completeness = if proof_tier == "static_proven" || complete == true
+                             "complete"
+                           elsif blockers.empty?
+                             "unknown"
+                           else
+                             "partial"
+                           end
       NilKill::Sarif.proof_boundary(
-        tier: tier,
+        input_completeness: input_completeness,
+        claim_status: proof_tier == "static_proven" || complete == true ? "proven" : "review",
+        coverage_discharge: "unsatisfiable",
         authority: ["fact_mine_normalized_ast", "nil_kill_static"],
         scope: scope,
         blockers: blockers
+      )
+    end
+
+    def unknown_observation_boundary(scope)
+      NilKill::Sarif.proof_boundary(
+        input_completeness: "unknown",
+        claim_status: "observed",
+        coverage_discharge: "not_applicable",
+        authority: ["nil_kill"],
+        scope: scope
       )
     end
 

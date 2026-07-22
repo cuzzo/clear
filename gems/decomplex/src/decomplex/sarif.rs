@@ -4,65 +4,92 @@ use std::collections::BTreeSet;
 const SCHEMA: &str = "https://json.schemastore.org/sarif-2.1.0.json";
 pub const PROOF_BOUNDARY_PROPERTY: &str = "fact_mine.proof_boundary";
 pub const PROOF_BOUNDARY_SUMMARY_PROPERTY: &str = "fact_mine.proof_boundary_summary";
-pub const PROOF_BOUNDARY_SCHEMA: &str = "fact-mine.proof-boundary.v1";
+pub const PROOF_BOUNDARY_SCHEMA: &str = "fact-mine.proof-boundary.v2";
 
-/// Records the narrowest completeness claim that supports one SARIF result.
-///
-/// This deliberately describes the facts used by the result, rather than the
-/// completeness of the entire scan.  A local syntax finding can therefore be
-/// complete even when an unrelated project-wide analysis is partial.
-pub fn proof_boundary(tier: &str, authority: &[&str], scope: &str, blockers: Vec<String>) -> Value {
-    debug_assert!(matches!(tier, "complete" | "partial" | "review"));
+/// Separates fact completeness, claim strength, and coverage discharge.
+/// Missing completeness metadata is `unknown`, never implicitly `complete`.
+pub fn proof_boundary(
+    input_completeness: &str,
+    claim_status: &str,
+    coverage_discharge: &str,
+    authority: &[&str],
+    scope: &str,
+    blockers: Vec<String>,
+) -> Value {
+    debug_assert!(matches!(
+        input_completeness,
+        "complete" | "partial" | "unknown"
+    ));
+    debug_assert!(matches!(claim_status, "proven" | "observed" | "review"));
+    debug_assert!(matches!(
+        coverage_discharge,
+        "satisfiable" | "unsatisfiable" | "not_applicable" | "unknown"
+    ));
     json!({
         "schema": PROOF_BOUNDARY_SCHEMA,
-        "tier": tier,
+        "input_completeness": input_completeness,
+        "claim_status": claim_status,
+        "coverage_discharge": coverage_discharge,
         "authority": authority,
         "scope": scope,
         "blockers": blockers,
     })
 }
 
-/// Summarizes only results that declare a proof boundary.  Consumers can use
-/// this to disclose the partial-data rate without treating every result in a
-/// scan as unknown.
+/// Summarizes each proof-boundary dimension independently.
 pub fn proof_boundary_summary(results: &[Value]) -> Value {
     let mut complete = 0usize;
     let mut partial = 0usize;
+    let mut input_unknown = 0usize;
+    let mut proven = 0usize;
+    let mut observed = 0usize;
     let mut review = 0usize;
+    let mut satisfiable = 0usize;
+    let mut unsatisfiable = 0usize;
+    let mut not_applicable = 0usize;
+    let mut discharge_unknown = 0usize;
+    let mut results_with_boundary = 0usize;
     for result in results {
-        let Some(tier) = result
+        let Some(boundary) = result
             .pointer(&format!("/properties/{PROOF_BOUNDARY_PROPERTY}"))
             .and_then(Value::as_object)
-            .and_then(|boundary| boundary.get("tier"))
-            .and_then(Value::as_str)
         else {
             continue;
         };
-        match tier {
-            "complete" => complete += 1,
-            "partial" => partial += 1,
-            "review" => review += 1,
-            _ => {}
+        results_with_boundary += 1;
+        match boundary.get("input_completeness").and_then(Value::as_str) {
+            Some("complete") => complete += 1,
+            Some("partial") => partial += 1,
+            _ => input_unknown += 1,
+        }
+        match boundary.get("claim_status").and_then(Value::as_str) {
+            Some("proven") => proven += 1,
+            Some("observed") => observed += 1,
+            _ => review += 1,
+        }
+        match boundary.get("coverage_discharge").and_then(Value::as_str) {
+            Some("satisfiable") => satisfiable += 1,
+            Some("unsatisfiable") => unsatisfiable += 1,
+            Some("not_applicable") => not_applicable += 1,
+            _ => discharge_unknown += 1,
         }
     }
-    let results_with_boundary = complete + partial + review;
-    let partial_or_review = partial + review;
-    let partial_or_review_percent = if results_with_boundary == 0 {
-        0.0
-    } else {
-        (partial_or_review as f64 * 100.0) / results_with_boundary as f64
-    };
     json!({
         "schema": PROOF_BOUNDARY_SCHEMA,
         "result_count": results.len(),
         "results_with_boundary": results_with_boundary,
-        "tiers": {
+        "input_completeness": {
             "complete": complete,
             "partial": partial,
-            "review": review,
+            "unknown": input_unknown,
         },
-        "partial_or_review_results": partial_or_review,
-        "partial_or_review_percent": partial_or_review_percent,
+        "claim_status": { "proven": proven, "observed": observed, "review": review },
+        "coverage_discharge": {
+            "satisfiable": satisfiable,
+            "unsatisfiable": unsatisfiable,
+            "not_applicable": not_applicable,
+            "unknown": discharge_unknown,
+        },
     })
 }
 
@@ -359,6 +386,8 @@ mod tests {
                 "properties": {
                     PROOF_BOUNDARY_PROPERTY: proof_boundary(
                         "complete",
+                        "proven",
+                        "not_applicable",
                         &["fact_mine_normalized_ast"],
                         "local",
                         vec![],
@@ -369,6 +398,8 @@ mod tests {
                 "properties": {
                     PROOF_BOUNDARY_PROPERTY: proof_boundary(
                         "partial",
+                        "review",
+                        "unsatisfiable",
                         &["fact_mine_normalized_ast"],
                         "local",
                         vec!["unresolved_call".to_string()],
@@ -381,11 +412,15 @@ mod tests {
         let summary = proof_boundary_summary(&results);
         assert_eq!(summary.pointer("/result_count"), Some(&json!(3)));
         assert_eq!(summary.pointer("/results_with_boundary"), Some(&json!(2)));
-        assert_eq!(summary.pointer("/tiers/complete"), Some(&json!(1)));
-        assert_eq!(summary.pointer("/tiers/partial"), Some(&json!(1)));
         assert_eq!(
-            summary.pointer("/partial_or_review_percent"),
-            Some(&json!(50.0))
+            summary.pointer("/input_completeness/complete"),
+            Some(&json!(1))
         );
+        assert_eq!(
+            summary.pointer("/input_completeness/partial"),
+            Some(&json!(1))
+        );
+        assert_eq!(summary.pointer("/claim_status/proven"), Some(&json!(1)));
+        assert_eq!(summary.pointer("/claim_status/review"), Some(&json!(1)));
     }
 }

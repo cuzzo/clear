@@ -523,7 +523,7 @@ class SlopcopReportCovTest < Minitest::Test
     sarif = JSON.parse(report.to_sarif)
     assert_equal "2.1.0", sarif["version"]
     assert_equal 2, sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "results_with_boundary")
-    assert_equal "partial", sarif.dig("runs", 0, "results", 0, "properties", "fact_mine.proof_boundary", "tier")
+    assert_equal "unknown", sarif.dig("runs", 0, "results", 0, "properties", "fact_mine.proof_boundary", "input_completeness")
   end
 
   # --- DarkArmOverlay Tests ---
@@ -587,12 +587,13 @@ class SlopcopReportCovTest < Minitest::Test
 
   def test_sarif_proof_boundary_summary
     results = [
-      { "properties" => { "fact_mine.proof_boundary" => SlopCop::Sarif.proof_boundary(tier: "complete", authority: ["fact_mine"], scope: "local") } },
-      { "properties" => { "fact_mine.proof_boundary" => SlopCop::Sarif.proof_boundary(tier: "review", authority: ["fact_mine"], scope: "local", blockers: ["dynamic"]) } }
+      { "properties" => { "fact_mine.proof_boundary" => SlopCop::Sarif.proof_boundary(input_completeness: "complete", claim_status: "proven", coverage_discharge: "not_applicable", authority: ["fact_mine"], scope: "local") } },
+      { "properties" => { "fact_mine.proof_boundary" => SlopCop::Sarif.proof_boundary(input_completeness: "partial", claim_status: "review", coverage_discharge: "unsatisfiable", authority: ["fact_mine"], scope: "local", blockers: ["dynamic"]) } }
     ]
     summary = SlopCop::Sarif.proof_boundary_summary(results)
     assert_equal 2, summary["results_with_boundary"]
-    assert_equal 50.0, summary["partial_or_review_percent"]
+    assert_equal 1, summary.dig("input_completeness", "complete")
+    assert_equal 1, summary.dig("claim_status", "review")
   end
 
   # --- Lexicons Tests ---
