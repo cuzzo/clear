@@ -5,7 +5,8 @@
 #
 # Accepts either a canonical corpus envelope (mutation-corpus.json.zst, as
 # published by the test-miser GitHub workflow) or an already-materialized
-# directory containing mutant-facts-*.json and weak-tests.sarif. Runs
+# directory containing mutant-facts-*.json, weak-tests.sarif, and the required
+# advanced evidence.sarif artifact. Runs
 # `lineage ingest-mutants` for every per-suite facts file and
 # `lineage ingest-sarif` for the combined Weak Tests SARIF, completing the
 # checkpoint -> ledger path described in
@@ -106,6 +107,15 @@ ingest = lambda do |directory|
                "--commit", commit_used, "--replace"
              ])
   puts "weak-tests: #{out.strip}"
+  evidence_path = File.join(directory, "evidence.sarif")
+  abort "evidence.sarif missing in #{directory}; the corpus is incomplete" unless File.file?(evidence_path)
+  out = run!([
+               options[:lineage_bin], "ingest-sarif",
+               "--db", db, "--repo", repo,
+               "--input", evidence_path, "--source", "test-miser-evidence",
+               "--commit", commit_used, "--replace"
+             ])
+  puts "evidence: #{out.strip}"
   puts "ingested #{ingested} mutant-facts file(s) at commit #{commit_used}"
 end
 

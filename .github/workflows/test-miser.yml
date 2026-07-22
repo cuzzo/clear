@@ -672,6 +672,10 @@ jobs:
         with:
           sarif_file: tmp/test-miser-corpus/lineage/weak-tests.sarif
           category: test-miser-canonical
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: tmp/test-miser-corpus/lineage/evidence.sarif
+          category: test-miser-evidence
       - uses: actions/upload-artifact@v4
         with:
           name: test-miser-corpus-${{ needs.plan.outputs.head_sha }}

@@ -72,6 +72,19 @@ class LineageIngestIntegrationTest < Minitest::Test
           }]
         }]
       ))
+      File.write(File.join(materialized, "evidence.sarif"), JSON.generate(
+        "$schema" => "https://json.schemastore.org/sarif-2.1.0.json",
+        "version" => "2.1.0",
+        "runs" => [{
+          "tool" => { "driver" => { "name" => "test-miser", "rules" => [{ "id" => "test-miser.evidence.persists_without_oracle" }] } },
+          "properties" => { "format" => "test-miser.evidence.sarif.v1" },
+          "results" => [{
+            "ruleId" => "test-miser.evidence.persists_without_oracle", "level" => "warning",
+            "message" => { "text" => "kill persists without this oracle" },
+            "locations" => [{ "physicalLocation" => { "artifactLocation" => { "uri" => "src/worker_test.rb" }, "region" => { "startLine" => 1 } } }]
+          }]
+        }]
+      ))
 
       db = File.join(repo, "lineage.db")
       run!([LINEAGE_BIN, "init", "--db", db], repo)
@@ -84,8 +97,11 @@ class LineageIngestIntegrationTest < Minitest::Test
 
       rows = SQLite3::Database.new(db).execute(
         "SELECT source, rule_id, path, run_format FROM sarif_findings"
-      )
-      assert_equal [["test-miser", "test-miser.zero-kill", "src/worker_test.rb", "test-miser.report.sarif.v1"]], rows
+      ).sort
+      assert_equal [
+        ["test-miser", "test-miser.zero-kill", "src/worker_test.rb", "test-miser.report.sarif.v1"],
+        ["test-miser-evidence", "test-miser.evidence.persists_without_oracle", "src/worker_test.rb", "test-miser.evidence.sarif.v1"],
+      ], rows
 
       exposure = SQLite3::Database.new(db).execute("SELECT COUNT(*) FROM test_exposure_events").first.first
       assert_equal 3, exposure
@@ -195,6 +211,15 @@ class LineageIngestIntegrationTest < Minitest::Test
             }
           }]
         }]
+      }]
+    ))
+    File.write(File.join(directory, "evidence.sarif"), JSON.generate(
+      "$schema" => "https://json.schemastore.org/sarif-2.1.0.json",
+      "version" => "2.1.0",
+      "runs" => [{
+        "tool" => { "driver" => { "name" => "test-miser", "rules" => [{ "id" => "test-miser.evidence.unknown" }] } },
+        "properties" => { "format" => "test-miser.evidence.sarif.v1" },
+        "results" => []
       }]
     ))
   end

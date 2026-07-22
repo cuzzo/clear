@@ -42,7 +42,7 @@ class EvidenceReportTest < Minitest::Test
     assert_includes kinds, "ADDS_GROUP_DETECTION"
     assert_includes kinds, "PROVES_REVERTED_CHANGE"
     assert_includes kinds, "STRENGTHENS_EXISTING_ORACLE"
-    assert_includes kinds, "INCIDENTAL_MUTANT_KILLS"
+    assert_includes kinds, "PERSISTS_WITHOUT_ORACLE"
     assert_includes kinds, "MUTATION_REDUNDANT"
     assert_includes kinds, "EQUAL_KILL_SET"
     assert_includes kinds, "MUTATION_DOMINATED"
@@ -50,6 +50,12 @@ class EvidenceReportTest < Minitest::Test
     assert_includes kinds, "OUT_OF_MUTATION_SCOPE"
     assert_includes kinds, "HIGH_COST_NO_MARGINAL_DETECTION"
     assert_equal report.json, JSON.pretty_generate(report.to_h)
+    assert_includes report.markdown, "# TestMiser evidence"
+    assert_includes report.markdown, "PERSISTS_WITHOUT_ORACLE"
+    sarif = JSON.parse(report.sarif)
+    assert_equal "2.1.0", sarif.fetch("version")
+    assert_equal "test-miser.evidence.sarif.v1", sarif.fetch("runs").fetch(0).fetch("properties").fetch("format")
+    assert sarif.fetch("runs").fetch(0).fetch("results").any?
     assert_equal ["t2", "t3"], report.findings.select { |finding| finding.kind == Evidence::ReviewFindingKind::HighCostNoMarginalDetection }.map(&:test_id).sort
     assert_equal({"test_id" => "t2", "runtime_ms" => 2_000.0}, Evidence::CostObservation.new(test_id: "t2", runtime_ms: 2_000.0).to_h)
   end

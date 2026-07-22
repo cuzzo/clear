@@ -69,7 +69,7 @@ module TestMiser
         DoesNotDetectRevertedChange = new("DOES_NOT_DETECT_REVERTED_CHANGE")
         DuplicatesChangeDetection = new("DUPLICATES_CHANGE_DETECTION")
         StrengthensExistingOracle = new("STRENGTHENS_EXISTING_ORACLE")
-        IncidentalMutantKills = new("INCIDENTAL_MUTANT_KILLS")
+        PersistsWithoutOracle = new("PERSISTS_WITHOUT_ORACLE")
         MutationRedundant = new("MUTATION_REDUNDANT")
         MutationDominated = new("MUTATION_DOMINATED")
         EqualKillSet = new("EQUAL_KILL_SET")
@@ -194,6 +194,57 @@ module TestMiser
       sig { returns(String) }
       def json
         JSON.pretty_generate(to_h)
+      end
+
+      sig { returns(String) }
+      def markdown
+        lines = [
+          "# TestMiser evidence",
+          "",
+          "Scope: `#{scope.fingerprint}` (#{scope.revision})",
+          "",
+          "| Finding | Test | Reason |",
+          "| --- | --- | --- |",
+        ]
+        findings.each do |finding|
+          lines << "| `#{finding.kind.serialize}` | `#{finding.test_id || 'cohort'}` | #{finding.reason.gsub('|', '\\|')} |"
+        end
+        lines << "" if findings.empty?
+        lines << (findings.empty? ? "No evidence findings." : "#{findings.length} evidence finding(s).")
+        lines.join("\n")
+      end
+
+      sig { returns(String) }
+      def sarif
+        rules = findings.map(&:kind).uniq.map do |kind|
+          {"id" => "test-miser.evidence.#{kind.serialize.downcase}", "shortDescription" => {"text" => kind.serialize}}
+        end
+        results = findings.map do |finding|
+          result = {
+            "ruleId" => "test-miser.evidence.#{finding.kind.serialize.downcase}",
+            "level" => "warning",
+            "message" => {"text" => finding.reason},
+            "properties" => {"testId" => finding.test_id, "evidence" => finding.evidence}.compact,
+          }
+          if finding.test_id
+            result["locations"] = [{
+              "physicalLocation" => {
+                "artifactLocation" => {"uri" => finding.test_id},
+                "region" => {"startLine" => 1},
+              },
+            }]
+          end
+          result
+        end
+        JSON.pretty_generate(
+          "$schema" => "https://json.schemastore.org/sarif-2.1.0.json",
+          "version" => "2.1.0",
+          "runs" => [{
+            "tool" => {"driver" => {"name" => "test-miser", "rules" => rules}},
+            "properties" => {"format" => "test-miser.evidence.sarif.v1", "scope" => scope.to_h},
+            "results" => results,
+          }],
+        )
       end
     end
 
@@ -453,12 +504,12 @@ module TestMiser
               evidence: {"oracle_id" => result.oracle_id, "oracle_dependent_kills" => result.oracle_dependent_kills},
             )
           end
-          unless result.incidental_kills.empty?
-            rows << ReviewFinding.new(
-              kind: ReviewFindingKind::IncidentalMutantKills,
+            unless result.persists_without_oracle.empty?
+              rows << ReviewFinding.new(
+              kind: ReviewFindingKind::PersistsWithoutOracle,
               test_id: result.test_id,
               reason: "mutant kills persist when this oracle is disabled",
-              evidence: {"oracle_id" => result.oracle_id, "incidental_kills" => result.incidental_kills},
+              evidence: {"oracle_id" => result.oracle_id, "persists_without_oracle" => result.persists_without_oracle},
             )
           end
           rows

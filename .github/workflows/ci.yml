@@ -161,6 +161,17 @@ jobs:
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/step_summary_test.rb
       - name: Verify Lineage corpus ingestion round-trip
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/lineage_ingest_integration_test.rb
+      - name: Verify Test Miser evidence analyzers and product formats
+        run: |
+          bundle exec ruby -I gems/test-miser/test -e '
+            require "simplecov";
+            SimpleCov.start do
+              enable_coverage :branch;
+              track_files "gems/test-miser/lib/test_miser/evidence/**/*.rb";
+              minimum_coverage 95;
+            end;
+            Dir["gems/test-miser/test/evidence_*_test.rb"].sort.each { |file| require File.expand_path(file) }
+          '
 
   boobytrap-go-unit:
     name: boobytrap Go tests

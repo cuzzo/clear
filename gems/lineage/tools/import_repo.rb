@@ -533,7 +533,7 @@ if options[:mutation_corpus]
       "--db=#{db}", "--repo=#{repo}", "#{mode}=#{corpus_path}",
       "--lineage-bin=#{lineage_bin}",
     ]
-    run_command("ingest-mutation-corpus", cmd, chdir: repo, log_dir: log_dir, optional: true)
+    run_command("ingest-mutation-corpus", cmd, chdir: repo, log_dir: log_dir)
   end
 end
 

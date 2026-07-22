@@ -8,7 +8,8 @@ command = %w[infer adapt evidence].include?(ARGV.first) ? ARGV.shift : "report"
 options = {
   format: command == "infer" ? "sarif" : command == "evidence" ? "json" : "markdown", output: nil,
   root: Dir.pwd, language: "java", selected_components: [], new_test_ids: [], baseline_test_ids: [],
-  runtimes: {}, high_cost_ms: 1_000.0
+  runtimes: {}, high_cost_ms: 1_000.0, stability_trials: nil, stability_threshold: 3,
+  oracle_facts: nil, oracle_input: nil, counterfactual_config: nil, counterfactual_test_ids: []
 }
 parser = OptionParser.new do |opts|
   opts.banner = "Usage: test-miser [infer|adapt|evidence] [options] INPUT [...]"
@@ -43,6 +44,12 @@ parser = OptionParser.new do |opts|
   opts.on("--high-cost-ms MILLISECONDS", Float, "Runtime threshold for cost findings") do |milliseconds|
     options[:high_cost_ms] = milliseconds
   end
+  opts.on("--stability-trials FILE", "JSON array or {trials: [...]} of repeated kill observations") { |path| options[:stability_trials] = path }
+  opts.on("--stability-threshold COUNT", Integer, "Minimum repeated trials (default 3)") { |count| options[:stability_threshold] = count }
+  opts.on("--oracle-facts FILE", "Normalized test-quality-oracle-facts/v1 artifact") { |path| options[:oracle_facts] = path }
+  opts.on("--oracle-input FILE", "JSON envelope with facts, original_kills, disabled_trials, and rewrites") { |path| options[:oracle_input] = path }
+  opts.on("--counterfactual-config FILE", "JSON CounterfactualRequest configuration") { |path| options[:counterfactual_config] = path }
+  opts.on("--counterfactual-test TEST_ID", "Test ID covered by the counterfactual command") { |test_id| options[:counterfactual_test_ids] << test_id }
   opts.on("-h", "--help", "Show this help") do
     puts opts
     exit 0
@@ -118,18 +125,81 @@ begin
   if command == "evidence"
     report = TestMiser::MutationReport.load_files(ARGV)
     corpus = TestMiser::Evidence::Corpus.from_report(report)
+    counterfactual_config = options[:counterfactual_config] ? JSON.parse(File.read(options[:counterfactual_config])) : nil
+    report_scope = corpus.evidence_scope(revision: counterfactual_config&.fetch("revision", "HEAD") || "unknown")
     contributions = TestMiser::Evidence::ContributionAnalyzer.new(corpus).analyze(
       new_test_ids: options[:new_test_ids],
       baseline_test_ids: options[:baseline_test_ids],
     )
     subsumption = TestMiser::Evidence::SubsumptionAnalyzer.new(corpus).analyze(contributions: contributions)
-    evidence = TestMiser::Evidence::ReportBuilder.new(corpus).build(
+    stability = nil
+    if options[:stability_trials]
+      payload = JSON.parse(File.read(options[:stability_trials]))
+      rows = payload.is_a?(Hash) ? payload.fetch("trials") : payload
+      trials = Array(rows).map do |row|
+        TestMiser::Evidence::KillTrial.new(
+          test_id: row.fetch("test_id"), mutant_id: row.fetch("mutant_id"), killed: row.fetch("killed"), trial: Integer(row.fetch("trial")),
+        )
+      end
+      stability = TestMiser::Evidence::StabilityAnalyzer.new(corpus, threshold: options[:stability_threshold], scope: report_scope).analyze(trials)
+    end
+    oracle_sensitivity = nil
+    if options[:oracle_input] || options[:oracle_facts]
+      payload = options[:oracle_input] ? JSON.parse(File.read(options[:oracle_input])) : {}
+      facts = if options[:oracle_facts]
+        TestMiser::Evidence::OracleFacts.load(options[:oracle_facts])
+      else
+        TestMiser::Evidence::OracleFacts.from_rows(Array(payload.fetch("facts")), metadata: payload.fetch("metadata", {}))
+      end
+      original_kills = payload.fetch("original_kills", {})
+      disabled_trials = Array(payload.fetch("disabled_trials", [])).map do |row|
+        TestMiser::Evidence::OracleTrial.new(
+          test_id: row.fetch("test_id"), oracle_id: row.fetch("oracle_id"), mutant_id: row.fetch("mutant_id"),
+          killed: row.fetch("killed"), executed: row.fetch("executed"), trial: Integer(row.fetch("trial", 0)),
+          trial_id: row.fetch("trial_id", "legacy"), environment_fingerprint: row["environment_fingerprint"],
+        )
+      end
+      rewrites = Array(payload.fetch("rewrites", [])).map do |row|
+        TestMiser::Evidence::OracleRewrite.new(
+          oracle_id: row.fetch("oracle_id"), mutation: TestMiser::Evidence::OracleMutationKind.deserialize(row.fetch("mutation")),
+          recognized: row.fetch("recognized"), applied: row.fetch("applied"), reason: row.fetch("reason"),
+        )
+      end
+      oracle_sensitivity = TestMiser::Evidence::OracleSensitivityAnalyzer.analyze(
+        facts: facts, original_kills: original_kills, disabled_trials: disabled_trials, rewrites: rewrites,
+        scope: report_scope, trial_ids: payload["trial_ids"], min_trials: Integer(payload.fetch("min_trials", 1)),
+      )
+    end
+    counterfactual = nil
+    counterfactual_test_ids = options[:counterfactual_test_ids]
+    if counterfactual_config
+      config = counterfactual_config
+      request = TestMiser::Evidence::CounterfactualRequest.new(
+        repository: config.fetch("repository"), production_patch_path: config.fetch("production_patch_path"),
+        head_command: config.fetch("head_command"), build_command: config.fetch("build_command"),
+        new_test_command: config.fetch("new_test_command"), baseline_head_command: config["baseline_head_command"],
+        baseline_test_command: config["baseline_test_command"], revision: config.fetch("revision", "HEAD"),
+        scope: report_scope, allow_dirty: config.fetch("allow_dirty", false),
+        limits: TestMiser::Evidence::CommandLimits.new(**config.fetch("limits", {}).transform_keys(&:to_sym)),
+      )
+      counterfactual = TestMiser::Evidence::CounterfactualRunner.new(request).run
+      counterfactual_test_ids = Array(config.fetch("test_ids", counterfactual_test_ids))
+    end
+    evidence = TestMiser::Evidence::ReportBuilder.new(corpus, scope: report_scope).build(
       contributions: contributions,
       subsumption: subsumption,
+      stability: stability,
+      counterfactual: counterfactual,
+      oracle_sensitivity: oracle_sensitivity,
+      counterfactual_test_ids: counterfactual_test_ids,
       runtimes: options[:runtimes],
       high_cost_ms: options[:high_cost_ms],
     )
-    output = evidence.json
+    output = case options[:format]
+             when "markdown" then evidence.markdown
+             when "sarif" then evidence.sarif
+             else evidence.json
+             end
     if options[:output]
       File.write(options[:output], "#{output}\n")
     else
@@ -153,7 +223,7 @@ begin
   else
     puts output
   end
-rescue TestMiser::InvalidReport, TestMiser::Evidence::InvalidCohort, Errno::ENOENT => error
+rescue TestMiser::InvalidReport, TestMiser::Evidence::InvalidCohort, TestMiser::Evidence::InvalidOracleFacts, Errno::ENOENT, JSON::ParserError => error
   warn "test-miser: #{error.message}"
   exit 1
 end

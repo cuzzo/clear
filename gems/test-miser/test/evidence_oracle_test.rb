@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
+require "fileutils"
 require "tempfile"
+require "tmpdir"
 require_relative "../lib/test_miser/evidence/oracle"
 
 class EvidenceOracleTest < Minitest::Test
@@ -55,7 +57,7 @@ class EvidenceOracleTest < Minitest::Test
     assert_includes unknown.fetch(0).to_h.fetch("reason"), "unsupported"
   end
 
-  def test_sensitivity_separates_dependent_and_incidental_kills
+  def test_sensitivity_separates_dependent_and_persistent_kills
     facts = Evidence::OracleFacts.new(facts: [
       fact("o1", kind: Evidence::OracleKind::Equality, test_id: "t1"),
       fact("o2", kind: Evidence::OracleKind::Truthiness, test_id: "t2"),
@@ -98,7 +100,7 @@ class EvidenceOracleTest < Minitest::Test
     o6 = analysis.results.find { |result| result.oracle_id == "o6" }
 
     assert_equal ["m1"], o1&.oracle_dependent_kills
-    assert_equal ["m2"], o1&.incidental_kills
+    assert_equal ["m2"], o1&.persists_without_oracle
     assert o1&.complete
     assert_equal "oracle rewrite was not recognized", o2&.unknown_reason
     assert_equal "oracle rewrite could not be applied", o3&.unknown_reason
@@ -171,6 +173,102 @@ class EvidenceOracleTest < Minitest::Test
     assert_equal "original kill attribution is missing", missing_original.unknown_reason
   end
 
+  def test_duplicate_fact_and_rewrite_ids_are_rejected
+    duplicate = fact("same", kind: Evidence::OracleKind::Equality)
+    assert_raises(Evidence::InvalidOracleFacts) { Evidence::OracleFacts.new(facts: [duplicate, duplicate]).validate_unique_ids! }
+
+    assert_raises(Evidence::InvalidOracleFacts) do
+      Evidence::OracleSensitivityAnalyzer.analyze(
+        facts: Evidence::OracleFacts.new(facts: [duplicate]), original_kills: {"t1" => ["m1"]},
+        disabled_trials: [trial("t1", "same", "m1", killed: false)], rewrites: [rewrite("same", recognized: true, applied: true), rewrite("same", recognized: true, applied: true)],
+      )
+    end
+  end
+
+  def test_factmine_provider_and_conservative_ruby_rewrite_are_executable
+    binary = File.expand_path("../../fact-mine/target/release/fact-mine-rust", __dir__)
+    skip "FactMine binary missing" unless File.executable?(binary)
+
+    source_path = File.expand_path("fixtures/collector/setup.rb", __dir__)
+    facts = Evidence::FactMineOracleFactProvider.new(binary: binary).facts(
+      test_id: "t1", source_path: source_path, language: "ruby",
+    )
+    assert_equal 2, facts.length
+    assert facts.all? { |oracle| oracle.oracle_kind == Evidence::OracleKind::Equality }
+    grammar = ENV["DECOMPLEX_TS_RUBY_PATH"]
+    skip "Tree-sitter Ruby grammar missing" unless grammar && File.file?(grammar)
+    tree_facts = Evidence::TreeSitterOracleFactProvider.new.facts(
+      test_id: "t1", source_path: source_path, language: "ruby",
+    )
+    assert_equal 2, tree_facts.length
+    assert tree_facts.all? { |oracle| oracle.framework == "tree-sitter:ruby" }
+
+    source = "assert_equal 1, 1\n"
+    fact_value = Evidence::OracleFact.new(
+      oracle_id: "ruby", test_id: "t1", oracle_kind: Evidence::OracleKind::Equality,
+      oracle_span: Evidence::SourceSpan.new(start_line: 1, start_column: 1, end_line: 1, end_column: source.bytesize + 1),
+      framework: "minitest", confidence: 1.0,
+    )
+    plan = Evidence::OracleMutationPlanner.plan(fact_value).first
+    rewritten, rewrite_result = Evidence::ConservativeOracleRewriteAdapter.new.rewrite(
+      fact: fact_value, plan: plan, source: source, language: "ruby",
+    )
+    assert_equal "refute_equal 1, 1\n", rewritten
+    assert rewrite_result.applied
+  end
+
+  def test_repeated_oracle_trials_require_a_complete_stable_matrix
+    fact_value = fact("o1", kind: Evidence::OracleKind::Equality)
+    rows = (1..3).map do |index|
+      trial("t1", "o1", "m1", killed: false, trial_id: "run-#{index}", trial: index)
+    end
+    result = Evidence::OracleSensitivityAnalyzer.analyze(
+      facts: Evidence::OracleFacts.new(facts: [fact_value]), original_kills: {"t1" => ["m1"]},
+      disabled_trials: rows, rewrites: [rewrite("o1", recognized: true, applied: true)],
+      trial_ids: rows.map(&:trial_id), min_trials: 3,
+    ).results.fetch(0)
+    assert result.complete
+    assert result.stable
+    assert_equal 3, result.observed_trials
+    assert_equal ["m1"], result.oracle_dependent_kills
+
+    flaky = rows.first.with(killed: true)
+    flaky_result = Evidence::OracleSensitivityAnalyzer.analyze(
+      facts: Evidence::OracleFacts.new(facts: [fact_value]), original_kills: {"t1" => ["m1"]},
+      disabled_trials: [flaky, *rows.drop(1)], rewrites: [rewrite("o1", recognized: true, applied: true)],
+      trial_ids: rows.map(&:trial_id), min_trials: 3,
+    ).results.fetch(0)
+    refute flaky_result.complete
+    assert_equal "oracle-disabled results are flaky", flaky_result.unknown_reason
+  end
+
+  def test_oracle_execution_requires_mutated_oracle_control_failure
+    Dir.mktmpdir do |repository|
+      FileUtils.mkdir_p(File.join(repository, "lib"))
+      File.write(File.join(repository, "lib/test.rb"), "assert_equal 1, 1\n")
+      Dir.chdir(repository) do
+        system("git init -q && git config user.email t@t && git config user.name t", exception: true)
+        system("git add -A && git commit -qm init", exception: true)
+      end
+      revision = Dir.chdir(repository) { `git rev-parse HEAD`.strip }
+      fact_value = Evidence::OracleFact.new(
+        oracle_id: "o1", test_id: "t1", oracle_kind: Evidence::OracleKind::Equality,
+        oracle_span: Evidence::SourceSpan.new(start_line: 1, start_column: 1, end_line: 1, end_column: 18),
+        framework: "minitest", confidence: 1.0,
+      )
+      request = Evidence::OracleExecutionRequest.new(
+        repository: repository, revision: revision, source_path: "lib/test.rb", test_command: ["control"],
+        baseline_test_command: ["baseline"], mutant_commands: {"m1" => ["mutant"]}, test_id: "t1", fact: fact_value,
+        plan: Evidence::OracleMutationPlanner.plan(fact_value).first, language: "ruby", trial_count: 3,
+      )
+      result = Evidence::OracleExecutionRunner.new(command_runner: OracleFakeRunner.new).run(request)
+      assert_equal Evidence::TestOutcome::Passed, result.baseline_outcome
+      assert_equal Evidence::TestOutcome::AssertionFailure, result.control_outcome
+      assert_equal 3, result.trials.length
+      assert result.trials.all?(&:executed)
+    end
+  end
+
   private
 
   def span
@@ -201,14 +299,29 @@ class EvidenceOracleTest < Minitest::Test
     )
   end
 
-  def trial(test_id, oracle_id, mutant_id, killed:, executed: true)
+  def trial(test_id, oracle_id, mutant_id, killed:, executed: true, trial: 0, trial_id: "legacy")
     Evidence::OracleTrial.new(
       test_id: test_id,
       oracle_id: oracle_id,
       mutant_id: mutant_id,
       killed: killed,
       executed: executed,
+      trial: trial,
+      trial_id: trial_id,
     )
+  end
+
+  class OracleFakeRunner
+    include Evidence::CommandRunner
+
+    def run(command, chdir:, limits:)
+      case command.first
+      when "baseline"
+        Evidence::CommandResult.new(status: 0, stdout: "", stderr: "")
+      else
+        Evidence::CommandResult.new(status: 1, stdout: "", stderr: "Minitest::Assertion")
+      end
+    end
   end
 
   def fact_payload

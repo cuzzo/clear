@@ -1,6 +1,6 @@
 # TestMiser Extended Features
 
-Status: Core implementation landed; counterfactual and oracle execution remain adapter-driven
+Status: Core implementation landed; counterfactual and oracle execution are evidence-gated and adapter-backed
 
 ## Purpose
 
@@ -112,7 +112,7 @@ For a test with recognized explicit oracles:
 
 ```text
 oracle_dependent_kills = original_kills - kills_with_oracle_disabled
-incidental_kills       = original_kills intersect kills_with_oracle_disabled
+persists_without_oracle = original_kills intersect kills_with_oracle_disabled
 ```
 
 Kills that disappear when the oracle is disabled are evidence that the assertion distinguishes behavior. Kills that persist may be incidental. This is a review signal, not proof that the test is worthless: crash safety and termination can themselves be intended properties.
@@ -154,8 +154,8 @@ TestMiser must not become another multi-language parser.
 
 Preferred architecture:
 
-- FactMine or a FactMine-backed provider extracts normalized oracle facts.
-- Small Tree-sitter query packs recognize known framework primitives.
+- FactMine's `syntax-facts` output is adapted into normalized oracle facts.
+- Tree-sitter framework providers recognize assertion-shaped calls from registered grammar packs.
 - TestMiser consumes those facts, schedules transformations, executes tests, and evaluates outcomes.
 
 A framework query should normally be tens of lines, not a language-specific analyzer. Aliases, wrappers, metaprogrammed assertions, and uncertain data flow remain unknown unless another provider resolves them.
@@ -245,7 +245,7 @@ Review candidates:
 - `EQUAL_KILL_SET`
 - `COVERED_WEAK_ORACLE`
 - `HIGH_COST_NO_MARGINAL_DETECTION`
-- `INCIDENTAL_MUTANT_KILLS`
+- `PERSISTS_WITHOUT_ORACLE`
 
 A “likely low-value” summary should require several independent, stable signals—for example: no marginal kills, relevant mutant coverage, dominance by another test, failure to detect the reverted production change, and kills that persist after disabling the oracle.
 
@@ -339,10 +339,9 @@ Estimated production size: 500–900 lines plus runner fixtures and tests.
 ### Phase 4: oracle facts and sensitivity
 
 - Define the normalized oracle-facts schema.
-- Add a FactMine-backed provider interface.
-- Implement a small number of high-confidence framework query packs.
-- Add oracle disabling and sensitivity transformations.
-- Rerun only affected tests and originally killed mutants.
+- Run the FactMine and Tree-sitter oracle providers.
+- Apply conservative span-based rewrites and require a correct-production control failure.
+- Rerun originally killed mutants under unique, comparable repeated trial IDs.
 
 Estimated generic production size: 300–600 lines, plus approximately 10–40 lines per straightforward framework query and framework-specific fixtures. Complex frameworks should be deferred rather than forcing low-confidence recognition.
 

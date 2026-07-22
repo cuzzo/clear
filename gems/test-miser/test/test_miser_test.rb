@@ -333,8 +333,9 @@ class TestMiserTest < Minitest::Test
       facts = Dir[File.join(lineage, "mutant-facts-*.json")].map { |path| JSON.parse(File.read(path)) }
       assert_equal %w[ruby zig], facts.map { |payload| payload.fetch("language") }.sort
       assert_equal 2, manifest_payload.dig("lineage", "mutant_facts").length
-      assert_equal ["lineage/weak-tests.sarif"], manifest_payload.dig("lineage", "sarif")
+      assert_equal %w[lineage/evidence.sarif lineage/weak-tests.sarif], manifest_payload.dig("lineage", "sarif")
       assert File.file?(File.join(lineage, "weak-tests.sarif"))
+      assert File.file?(File.join(lineage, "evidence.sarif"))
 
       materialized = File.join(dir, manifest_payload.dig("lineage", "mutant_facts").first)
       File.open(materialized, "a") { |file| file.write("tampered") }

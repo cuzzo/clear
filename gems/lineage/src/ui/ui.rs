@@ -5175,6 +5175,7 @@ fn render_weak_tests_section(storage: &Storage, directory: &str) -> String {
         "SELECT path, message, start_line, properties_json, rule_id \
          FROM current_sarif_findings \
          WHERE run_format = 'test-miser.report.sarif.v1' \
+            OR run_format = 'test-miser.evidence.sarif.v1' \
             OR rule_id LIKE 'test-miser.%' \
          ORDER BY path, start_line, message",
     );
@@ -5196,6 +5197,7 @@ fn render_weak_tests_section(storage: &Storage, directory: &str) -> String {
                 let properties: Value = serde_json::from_str(&properties_json).unwrap_or(Value::Null);
                 let name = properties
                     .get("testName")
+                    .or_else(|| properties.get("testId"))
                     .and_then(Value::as_str)
                     .unwrap_or(&message)
                     .to_string();
