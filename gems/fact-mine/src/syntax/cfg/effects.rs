@@ -392,6 +392,10 @@ fn collect(node: &Node, effect: &mut RawEffect, function_value_calls_are_local_r
         if let Some(name) = node_name(node) {
             effect.writes.insert(name.clone());
             effect.record_place(name.clone(), place_kind_for_node(&node.r#type));
+            if let Some(base) = indexed_base_name(&name) {
+                effect.reads.insert(base.clone());
+                effect.record_place(base, "local");
+            }
             if !matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
                 effect.mutations.insert(name.clone());
             }
@@ -436,6 +440,15 @@ fn collect(node: &Node, effect: &mut RawEffect, function_value_calls_are_local_r
     for child in node.children.iter().filter_map(ast::node) {
         collect(child, effect, function_value_calls_are_local_reads);
     }
+}
+
+fn indexed_base_name(name: &str) -> Option<String> {
+    let base = name.split_once('[')?.0.trim();
+    (!base.is_empty()
+        && base
+            .bytes()
+            .all(|byte| byte == b'_' || byte.is_ascii_alphanumeric()))
+    .then(|| base.to_string())
 }
 
 fn literal_value_hint(node: &Node) -> Option<String> {
@@ -655,6 +668,15 @@ mod tests {
         );
         assert_eq!(direct_call_result_node(&multi_expression), None);
         assert_eq!(direct_call_result_node(&node("OPCALL", Vec::new())), None);
+    }
+
+    #[test]
+    fn indexed_base_reads_require_a_simple_local_receiver() {
+        assert_eq!(indexed_base_name("values[key]"), Some("values".to_string()));
+        assert_eq!(indexed_base_name("items [ index ]"), Some("items".to_string()));
+        assert_eq!(indexed_base_name("object.values[key]"), None);
+        assert_eq!(indexed_base_name("values"), None);
+        assert_eq!(indexed_base_name("[key]"), None);
     }
 }
 

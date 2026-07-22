@@ -192,10 +192,11 @@ pub(crate) struct GoNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
-        let (subject, operation_kind) = match node.r#type.as_str() {
+        let (subject, operation_kind, nil_behavior) = match node.r#type.as_str() {
             "UNARY_EXPRESSION" if node.text.trim_start().starts_with('*') => (
                 local_subject(node.children.first().and_then(crate::ast::node))?,
                 "pointer_dereference",
+                "panic",
             ),
             // Go field and method selectors both panic when their receiver is
             // a nil pointer. The generic extractor later joins this local
@@ -204,6 +205,7 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             "CALL" => (
                 local_subject(node.children.first().and_then(crate::ast::node))?,
                 "pointer_selector",
+                "panic",
             ),
             // A bare local call can be a function value. Keeping the
             // descriptor local to the normalized VCALL shape avoids treating
@@ -211,10 +213,26 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             "VCALL" => (
                 local_symbol(node.children.first())?,
                 "function_value_call",
+                "panic",
+            ),
+            "LASGN" => (
+                indexed_assignment_subject(node)?,
+                "indexed_write",
+                "panic",
+            ),
+            "SEND_STATEMENT" => (
+                local_subject(node.children.first().and_then(crate::ast::node))?,
+                "channel_send",
+                "blocks",
+            ),
+            "FCALL" if local_symbol(node.children.first())? == "close" => (
+                single_local_argument(node)?,
+                "channel_close",
+                "panic",
             ),
             _ => return None,
         };
-        Some(NormalizedNullableOperation { subject, operation_kind, nil_behavior: "panic" })
+        Some(NormalizedNullableOperation { subject, operation_kind, nil_behavior })
     }
 
     fn presence_correlation(&self, node: &Node) -> Option<NormalizedPresenceCorrelation> {
@@ -770,6 +788,29 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     }
 }
 
+fn indexed_assignment_subject(node: &Node) -> Option<String> {
+    let target = node.children.first().and_then(|child| match child {
+        Child::String(target) | Child::Symbol(target) => Some(target.as_str()),
+        _ => None,
+    })?;
+    let subject = target.split_once('[')?.0.trim();
+    is_simple_name(subject).then(|| subject.to_string())
+}
+
+fn single_local_argument(node: &Node) -> Option<String> {
+    let arguments = node.children.get(1).and_then(crate::ast::node)?;
+    let mut values = arguments.children.iter().filter_map(crate::ast::node);
+    let value = values.next()?;
+    values.next().is_none().then(|| local_subject(Some(value))).flatten()
+}
+
+fn is_simple_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+}
+
 fn local_subject(node: Option<&Node>) -> Option<String> {
     node.filter(|node| node.r#type == "LVAR")
         .map(|node| node.text.trim().to_string())
@@ -1157,6 +1198,42 @@ mod tests {
             last_column: text.lines().last().map(str::len).unwrap_or_default(),
             text: text.to_string(),
         }
+    }
+
+    #[test]
+    fn nullable_collection_operations_require_direct_local_subjects() {
+        let behavior = GoNormalizedBehavior;
+        let indexed_write = Node {
+            children: vec![Child::String("values[key]".to_string())],
+            ..node("LASGN", "values[key] = 1")
+        };
+        let indexed = behavior.nullable_operation(&indexed_write).unwrap();
+        assert_eq!(indexed.subject, "values");
+        assert_eq!(indexed.operation_kind, "indexed_write");
+        assert_eq!(indexed.nil_behavior, "panic");
+        let field_write = Node {
+            children: vec![Child::String("object.values[key]".to_string())],
+            ..node("LASGN", "object.values[key] = 1")
+        };
+        assert!(behavior.nullable_operation(&field_write).is_none());
+
+        let close = Node {
+            children: vec![
+                Child::Symbol("close".to_string()),
+                Child::Node(Box::new(Node {
+                    children: vec![Child::Node(Box::new(Node {
+                        children: vec![Child::String("channel".to_string())],
+                        ..node("LVAR", "channel")
+                    }))],
+                    ..node("LIST", "channel")
+                })),
+            ],
+            ..node("FCALL", "close(channel)")
+        };
+        let close = behavior.nullable_operation(&close).unwrap();
+        assert_eq!(close.subject, "channel");
+        assert_eq!(close.operation_kind, "channel_close");
+        assert_eq!(close.nil_behavior, "panic");
     }
 
     #[test]

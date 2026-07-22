@@ -231,6 +231,27 @@ fn go_nullable_operations_distinguish_pointer_selectors_and_function_values() ->
 }
 
 #[test]
+fn go_nullable_operations_cover_index_writes_and_channels() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_go_collections.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let operations = output
+        .nullable_operations
+        .iter()
+        .filter(|operation| operation.state_at_operation == "definitely_null" && operation.complete)
+        .map(|operation| (operation.operation_kind.as_str(), operation.nil_behavior.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        operations,
+        vec![
+            ("channel_close", "panic"),
+            ("channel_send", "blocks"),
+            ("indexed_write", "panic"),
+        ]
+    );
+    Ok(())
+}
+
+#[test]
 fn native_function_pointer_calls_are_nullable_operations() -> Result<()> {
     for (fixture_name, language) in [
         ("nullable_function_pointer.c", Language::C),
