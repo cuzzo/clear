@@ -65,6 +65,7 @@ function isDiffPlan(value: Record<string, unknown>): value is DiffPlan {
     && isEvidence(value.evidence)
     && isArrayOf(value.dependency_changes, isDependencyChange)
     && isArrayOf(value.language_summaries, isLanguageSummary)
+    && isArrayOf(value.resolved_sarif_findings, isResolvedSarifFinding)
     && isArrayOf(value.files, isDiffFile);
 }
 
@@ -127,6 +128,10 @@ function isDiffFile(value: unknown): boolean {
 
 function isLineAnnotation(value: unknown): boolean {
   return isRecord(value) && typeof value.line === "number" && lineVerifications.includes(value.verification as never);
+}
+
+function isResolvedSarifFinding(value: unknown): boolean {
+  return hasStrings(value, ["path"]) && isRecord(value) && isFinding(value.finding);
 }
 
 function isDiffGroup(value: unknown): boolean {

@@ -1287,6 +1287,20 @@ impl Storage {
             .transpose()
     }
 
+    /// Returns whether this source has declared any scoped SARIF artifact.
+    /// Callers use this to distinguish absent legacy evidence from evidence
+    /// that exists but belongs to another immutable comparison scope.
+    pub fn has_scoped_sarif_source(&self, source: &str) -> Result<bool> {
+        self.conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM evidence_artifact_scopes WHERE family = 'sarif' AND source = ?1)",
+                params![source],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|exists| exists != 0)
+            .map_err(Into::into)
+    }
+
     pub fn sarif_identities_for_commit_source(
         &self,
         commit_hash: &str,

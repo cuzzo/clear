@@ -112,12 +112,29 @@ fn apply_known_sarif(
         if let Ok(Some(rows)) =
             storage.scoped_sarif_observations(source, &plan.scope.evidence_scope, &paths)
         {
-            let base = storage
-                .sarif_identities_for_commit_source(&plan.scope.base_oid, source)
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
-            crate::diff::apply_exact_sarif_findings(plan, &rows, &base);
+            let base_scope = crate::diff::EvidenceScopeFingerprint {
+                revision: plan.scope.base_oid.clone(),
+                selection: plan.scope.evidence_scope.selection.clone(),
+                mutant_corpus: plan.scope.evidence_scope.mutant_corpus.clone(),
+                test_set: plan.scope.evidence_scope.test_set.clone(),
+            };
+            let base_paths = plan
+                .files
+                .iter()
+                .map(|file| file.previous_path.clone().unwrap_or_else(|| file.path.clone()))
+                .collect::<Vec<_>>();
+            if let Ok(Some(base_rows)) =
+                storage.scoped_sarif_observations(source, &base_scope, &base_paths)
+            {
+                crate::diff::apply_exact_sarif_findings(plan, &rows, &base_rows);
+            } else {
+                crate::diff::apply_head_only_sarif_findings(plan, &rows);
+            }
+            return;
+        }
+        if storage.has_scoped_sarif_source(source).unwrap_or(false) {
+            plan.evidence.sarif = crate::diff::EvidenceState::Stale;
+            plan.evidence.hazards = crate::diff::EvidenceState::Stale;
             return;
         }
     }
@@ -712,6 +729,20 @@ mod tests {
                 expected_lines: Default::default(),
             })
             .unwrap();
+        storage
+            .record_evidence_artifact_scope(&crate::storage::EvidenceArtifactScope {
+                family: "sarif".into(),
+                source: "scanner".into(),
+                scope: crate::diff::EvidenceScopeFingerprint {
+                    revision: base.clone(),
+                    selection: "production".into(),
+                    mutant_corpus: "mutants".into(),
+                    test_set: "suite".into(),
+                },
+                complete: true,
+                expected_lines: Default::default(),
+            })
+            .unwrap();
         let response = api_diff_plan_handler(
             State(state),
             Query(DiffQuery {
@@ -742,6 +773,47 @@ mod tests {
             json.pointer("/data/files/0/sarif_findings/0/status")
                 .and_then(|value| value.as_str()),
             Some("new")
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_api_marks_incompatible_scoped_sarif_as_stale() {
+        let (_dir, state, base, head) = test_state();
+        let storage = crate::storage::Storage::open(state.db.as_ref()).unwrap();
+        storage
+            .record_evidence_artifact_scope(&crate::storage::EvidenceArtifactScope {
+                family: "sarif".into(),
+                source: "scanner".into(),
+                scope: crate::diff::EvidenceScopeFingerprint {
+                    revision: "another-commit".into(),
+                    selection: "production".into(),
+                    mutant_corpus: "mutants".into(),
+                    test_set: "suite".into(),
+                },
+                complete: true,
+                expected_lines: Default::default(),
+            })
+            .unwrap();
+        let response = api_diff_plan_handler(
+            State(state),
+            Query(DiffQuery {
+                base: Some(base),
+                head: Some(head),
+                coverage_source: None,
+                sarif_source: Some("scanner".into()),
+                selection: Some("production".into()),
+                mutant_corpus: Some("mutants".into()),
+                test_set: Some("suite".into()),
+            }),
+        )
+        .await;
+        let json: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            json.pointer("/data/evidence/sarif")
+                .and_then(|value| value.as_str()),
+            Some("stale")
         );
     }
 }

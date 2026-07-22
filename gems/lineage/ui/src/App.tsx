@@ -76,6 +76,7 @@ function DiffReview({ initialLayout, plan, rawPath }: { readonly initialLayout: 
     <p>Base {plan.scope.base_oid} · Head {plan.scope.head_oid}</p>
     <p>Evidence scope: {plan.scope.evidence_scope.selection} · {plan.scope.evidence_scope.mutant_corpus} · {plan.scope.evidence_scope.test_set}</p>
     <p>Evidence: coverage {plan.evidence.coverage} · mutation {plan.evidence.mutation} · hazards {plan.evidence.hazards} · SARIF {plan.evidence.sarif}</p>
+    {plan.resolved_sarif_findings.length > 0 && <p>Resolved SARIF findings: {plan.resolved_sarif_findings.map((entry) => `${entry.path} ${entry.finding.tool}/${entry.finding.rule_id} line ${entry.finding.start_line}: ${entry.finding.message}`).join(" · ")}</p>}
     <InventoryPaths label="Configuration" paths={plan.inventory.configuration_paths.map((file) => `${file.path} (${file.kind})`)} />
     <InventoryPaths label="Documentation" paths={plan.inventory.documentation_paths} />
     <InventoryPaths label="Generated" paths={plan.inventory.generated_paths} />

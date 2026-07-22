@@ -39,6 +39,7 @@ pub struct DiffPlan {
     pub dependency_changes: Vec<DependencyChange>,
     pub language_summaries: Vec<LanguageSummary>,
     pub evidence: EvidenceAvailability,
+    pub resolved_sarif_findings: Vec<ResolvedSarifFinding>,
     pub files: Vec<DiffFile>,
 }
 
@@ -190,6 +191,12 @@ pub struct SarifFindingSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SarifObservation {
+    pub path: String,
+    pub finding: SarifFindingSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct ResolvedSarifFinding {
     pub path: String,
     pub finding: SarifFindingSummary,
 }
@@ -360,6 +367,7 @@ pub fn build_diff_plan_with_renames(
         dependency_changes,
         language_summaries,
         evidence: unavailable_evidence(),
+        resolved_sarif_findings: Vec::new(),
         files,
     }
 }
@@ -647,31 +655,68 @@ pub fn apply_partial_sarif_findings(plan: &mut DiffPlan, observations: &[SarifOb
     }
 }
 
+/// A complete head report without a matching complete baseline is useful
+/// location evidence, but it cannot distinguish a new finding from one that
+/// simply was not observed in the baseline. Keep it visible and explicitly
+/// incomparable rather than assigning it risk.
+pub fn apply_head_only_sarif_findings(plan: &mut DiffPlan, observations: &[SarifObservation]) {
+    let mut observations = observations.to_vec();
+    for observation in &mut observations {
+        observation.finding.status = "uncompared".into();
+    }
+    apply_partial_sarif_findings(plan, &observations);
+}
+
 /// Applies a complete SARIF comparison. Only newly introduced tier-one
 /// findings may contribute to the policy's H1 term; persisted findings remain
 /// visible but are not re-counted as review risk.
 pub fn apply_exact_sarif_findings(
     plan: &mut DiffPlan,
     observations: &[SarifObservation],
-    base_identities: &BTreeSet<String>,
+    base_observations: &[SarifObservation],
 ) {
-    if observations.is_empty() {
-        plan.evidence.sarif = EvidenceState::Exact;
-        plan.evidence.hazards = EvidenceState::Exact;
-        return;
-    }
     plan.evidence.sarif = EvidenceState::Exact;
     plan.evidence.hazards = EvidenceState::Exact;
+    let base_by_identity = base_observations.iter().fold(
+        BTreeMap::<String, Vec<&SarifObservation>>::new(),
+        |mut grouped, observation| {
+            grouped
+                .entry(sarif_identity(&observation.finding))
+                .or_default()
+                .push(observation);
+            grouped
+        },
+    );
+    let head_identities = observations
+        .iter()
+        .map(|observation| sarif_identity(&observation.finding))
+        .collect::<BTreeSet<_>>();
+    plan.resolved_sarif_findings = base_observations
+        .iter()
+        .filter(|observation| !head_identities.contains(&sarif_identity(&observation.finding)))
+        .map(|observation| {
+            let mut finding = observation.finding.clone();
+            finding.status = "resolved".into();
+            ResolvedSarifFinding {
+                path: observation.path.clone(),
+                finding,
+            }
+        })
+        .collect();
     for file in &mut plan.files {
         let findings = observations
             .iter()
             .filter(|observation| observation.path == file.path)
             .map(|observation| {
                 let mut finding = observation.finding.clone();
-                finding.status = if base_identities.contains(&sarif_identity(&finding)) {
-                    "persisted"
-                } else {
-                    "new"
+                finding.status = match base_by_identity.get(&sarif_identity(&finding)) {
+                    None => "new",
+                    Some(base) if base.iter().any(|candidate| {
+                        candidate.path == observation.path
+                            && candidate.finding.start_line == finding.start_line
+                            && candidate.finding.end_line == finding.end_line
+                    }) => "persisted",
+                    Some(_) => "moved",
                 }
                 .into();
                 finding
@@ -2870,6 +2915,28 @@ mod tests {
     }
 
     #[test]
+    fn complete_head_only_sarif_stays_uncompared_and_out_of_risk() {
+        let mut plan = build_diff_plan(
+            "base",
+            "head",
+            Vec::new(),
+            vec![file("lib/app.rb", "def run\n  value\nend\n")],
+        );
+        let mut finding = sarif_finding(2, 2, "uncompared");
+        finding.tier_one = true;
+        apply_head_only_sarif_findings(
+            &mut plan,
+            &[SarifObservation {
+                path: "lib/app.rb".into(),
+                finding,
+            }],
+        );
+        assert_eq!(plan.evidence.sarif, EvidenceState::Partial);
+        assert_eq!(plan.files[0].sarif_findings[0].status, "uncompared");
+        assert_eq!(plan.files[0].risk.tier_one_hazards, 0);
+    }
+
+    #[test]
     fn exact_sarif_counts_only_new_tier_one_findings_in_risk() {
         let mut plan = build_diff_plan(
             "base",
@@ -2881,7 +2948,10 @@ mod tests {
         persisted.tier_one = true;
         let mut introduced = sarif_finding(2, 2, "introduced");
         introduced.tier_one = true;
-        let base = [sarif_identity(&persisted)].into_iter().collect();
+        let base = [SarifObservation {
+            path: "lib/app.rb".into(),
+            finding: persisted.clone(),
+        }];
         apply_exact_sarif_findings(
             &mut plan,
             &[
@@ -2903,6 +2973,38 @@ mod tests {
         assert_eq!(file.sarif_findings[0].status, "persisted");
         assert_eq!(file.sarif_findings[1].status, "new");
         assert_eq!(file.groups[0].risk.tier_one_hazards, 1);
+    }
+
+    #[test]
+    fn exact_sarif_distinguishes_moved_and_resolved_findings() {
+        let mut plan = build_diff_plan(
+            "base",
+            "head",
+            vec![file("lib/old.rb", "def run\n  old\nend\n")],
+            vec![file("lib/new.rb", "def run\n  new\nend\n")],
+        );
+        let moved = sarif_finding(2, 2, "moved");
+        let resolved = sarif_finding(2, 2, "resolved");
+        apply_exact_sarif_findings(
+            &mut plan,
+            &[SarifObservation {
+                path: "lib/new.rb".into(),
+                finding: moved.clone(),
+            }],
+            &[
+                SarifObservation {
+                    path: "lib/old.rb".into(),
+                    finding: moved,
+                },
+                SarifObservation {
+                    path: "lib/old.rb".into(),
+                    finding: resolved,
+                },
+            ],
+        );
+        assert_eq!(plan.files[0].sarif_findings[0].status, "moved");
+        assert_eq!(plan.resolved_sarif_findings.len(), 1);
+        assert_eq!(plan.resolved_sarif_findings[0].finding.status, "resolved");
     }
 
     fn sarif_finding(start_line: u32, end_line: u32, message: &str) -> SarifFindingSummary {
