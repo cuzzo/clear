@@ -229,6 +229,11 @@ fn c_native_nullability_annotations_survive_parser_preprocessing() -> Result<()>
             && operation.state_at_operation == "maybe_null"
             && operation.complete
     }));
+    assert!(output.nullable_operations.iter().all(|operation| {
+        operation.path.ends_with("nullable_annotations.c")
+            .then_some(operation.operation_kind.as_str())
+            != Some("function_pointer_call")
+    }));
     Ok(())
 }
 

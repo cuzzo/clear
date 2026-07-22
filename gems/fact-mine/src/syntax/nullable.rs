@@ -341,6 +341,20 @@ pub(crate) fn project_operations(
                 ));
                 continue;
             };
+            // C/C++ normalize both a local function-pointer invocation and a
+            // direct bare function call as VCALL.  Only the former has a
+            // definition for the callee's local place at this node.  Do not
+            // reinterpret an unresolved direct function as a nullable value
+            // invocation merely because its syntactic call form is bare.
+            if seed.operation_kind == "function_pointer_call"
+                && !facts.reaching_definitions.iter().any(|fact| {
+                    fact.node_id == node.id
+                        && fact.place_id == *place_id
+                        && !fact.definitions.is_empty()
+                })
+            {
+                continue;
+            }
             let state = state_by_place
                 .get(&(node.id.as_str(), place_id.as_str()))
                 .copied();
