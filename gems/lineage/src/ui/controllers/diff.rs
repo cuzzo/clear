@@ -21,6 +21,7 @@ struct DiffPageQuery {
     presentation: Option<String>,
     layout: Option<String>,
     path: Option<String>,
+    focus: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,6 +171,7 @@ fn canonical_diff_location(query: &DiffPageQuery, base: &str, head: &str) -> Str
         ("presentation", query.presentation.as_deref()),
         ("layout", query.layout.as_deref()),
         ("path", query.path.as_deref()),
+        ("focus", query.focus.as_deref()),
     ] {
         if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
             output.push((name, value.to_string()));
@@ -204,11 +206,12 @@ mod tests {
             presentation: Some("raw".into()),
             layout: Some("inline".into()),
             path: Some("lib/app.rb".into()),
+            focus: Some("residual".into()),
         };
         assert!(requires_canonical_redirect(&query, "a", "b"));
         assert_eq!(
             canonical_diff_location(&query, "a", "b"),
-            "/diff?base=a&head=b&presentation=raw&layout=inline&path=lib%2Fapp.rb"
+            "/diff?base=a&head=b&presentation=raw&layout=inline&path=lib%2Fapp.rb&focus=residual"
         );
     }
 
@@ -264,6 +267,7 @@ mod tests {
                 presentation: Some("semantic".into()),
                 layout: None,
                 path: None,
+                focus: None,
             }),
         )
         .await;

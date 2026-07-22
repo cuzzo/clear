@@ -58,6 +58,7 @@ function DiffReview({ initialLayout, plan, rawPath }: { readonly initialLayout: 
     const nextQuery = new URLSearchParams(window.location.search);
     nextQuery.set("presentation", "raw");
     nextQuery.set("path", path);
+    nextQuery.set("focus", "residual");
     window.history.replaceState({}, "", `${window.location.pathname}?${nextQuery}`);
     window.dispatchEvent(new PopStateEvent("popstate"));
   };
@@ -65,6 +66,7 @@ function DiffReview({ initialLayout, plan, rawPath }: { readonly initialLayout: 
     const nextQuery = new URLSearchParams(window.location.search);
     nextQuery.delete("presentation");
     nextQuery.delete("path");
+    nextQuery.delete("focus");
     window.history.replaceState({}, "", `${window.location.pathname}?${nextQuery}`);
     window.dispatchEvent(new PopStateEvent("popstate"));
   };
