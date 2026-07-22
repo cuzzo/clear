@@ -1016,6 +1016,8 @@ fn is_test_path(path: &str) -> bool {
 fn is_generated(path: &str) -> bool {
     path.contains("/generated/")
         || path.starts_with("generated/")
+        || path.contains("/vendor/")
+        || path.starts_with("vendor/")
         || path.contains("/target/")
         || path.starts_with("target/")
         || path.ends_with(".min.js")
@@ -1037,6 +1039,8 @@ fn is_lockfile(path: &str) -> bool {
             | "go.sum"
             | "composer.lock"
             | "Package.resolved"
+            | "packages.lock.json"
+            | "gradle.lockfile"
     )
 }
 
@@ -1046,37 +1050,123 @@ fn config_kind(path: &str) -> Option<&'static str> {
     {
         return Some("github_workflow");
     }
+    if path.starts_with(".github/actions/") {
+        return Some("github_action");
+    }
+    if is_repository_config(file) || is_container_config(file) {
+        return Some("repository");
+    }
+    if is_ruby_config(path, file) {
+        return Some("ruby_manifest");
+    }
+    if is_rust_config(path, file) {
+        return Some("rust_manifest");
+    }
+    if is_javascript_config(file) {
+        return Some("javascript_manifest");
+    }
+    if is_python_config(file) {
+        return Some("python_manifest");
+    }
+    if is_go_config(file) {
+        return Some("go_manifest");
+    }
+    if is_zig_config(file) {
+        return Some("zig_manifest");
+    }
+    if is_native_config(file) {
+        return Some("native_build");
+    }
+    if is_jvm_config(path, file) {
+        return Some("jvm_manifest");
+    }
+    if is_dotnet_config(file) {
+        return Some("dotnet_manifest");
+    }
     match file {
-        ".gitignore" | ".gitattributes" | ".editorconfig" | ".rspec" | ".ruby-version" => {
-            Some("repository")
-        }
-        "Gemfile" | "Rakefile" | "*.gemspec" => Some("ruby_manifest"),
-        "Cargo.toml" | "rust-toolchain" | "rust-toolchain.toml" => Some("rust_manifest"),
-        "package.json" | "tsconfig.json" | "vite.config.ts" | "eslint.config.js" => {
-            Some("javascript_manifest")
-        }
-        "pyproject.toml" | "requirements.txt" | "setup.py" | "setup.cfg" | "Pipfile"
-        | "tox.ini" | "noxfile.py" => Some("python_manifest"),
-        "go.mod" | ".golangci.yml" | "Makefile" => Some("go_manifest"),
-        "build.zig" | "build.zig.zon" => Some("zig_manifest"),
-        "CMakeLists.txt" | "meson.build" | "vcpkg.json" | "conanfile.txt" | "conanfile.py" => {
-            Some("native_build")
-        }
-        "pom.xml"
-        | "build.gradle"
-        | "build.gradle.kts"
-        | "settings.gradle"
-        | "settings.gradle.kts"
-        | "libs.versions.toml" => Some("jvm_manifest"),
         "Package.swift" => Some("swift_manifest"),
         "composer.json" => Some("php_manifest"),
-        _ if file.ends_with(".gemspec") => Some("ruby_manifest"),
-        _ if file.ends_with(".csproj") || file.ends_with(".fsproj") || file.ends_with(".sln") => {
-            Some("dotnet_manifest")
-        }
+        ".luacheckrc" | "config.lua" => Some("lua_manifest"),
         _ if file.ends_with(".rockspec") => Some("lua_manifest"),
         _ => None,
     }
+}
+
+fn is_repository_config(file: &str) -> bool {
+    matches!(
+        file,
+        ".gitignore" | ".gitattributes" | ".editorconfig" | ".rspec" | ".ruby-version"
+    )
+}
+
+fn is_container_config(file: &str) -> bool {
+    file == "Dockerfile"
+        || file.starts_with("compose") && (file.ends_with(".yml") || file.ends_with(".yaml"))
+}
+
+fn is_ruby_config(path: &str, file: &str) -> bool {
+    matches!(file, "Gemfile" | "Rakefile")
+        || file.ends_with(".gemspec")
+        || file.starts_with(".rubocop") && (file.ends_with(".yml") || file.ends_with(".yaml"))
+        || path.starts_with("config/") && (file.ends_with(".yml") || file.ends_with(".yaml"))
+}
+
+fn is_rust_config(path: &str, file: &str) -> bool {
+    matches!(
+        file,
+        "Cargo.toml" | "rust-toolchain" | "rust-toolchain.toml"
+    ) || path.starts_with(".cargo/") && file.ends_with(".toml")
+}
+
+fn is_javascript_config(file: &str) -> bool {
+    matches!(
+        file,
+        "package.json" | "eslint.config.js" | "eslint.config.mjs" | "eslint.config.cjs"
+    ) || file.starts_with("tsconfig") && file.ends_with(".json")
+        || file.starts_with(".eslintrc")
+        || file.starts_with("vite.config.")
+        || file.starts_with("webpack.config.")
+}
+
+fn is_python_config(file: &str) -> bool {
+    matches!(
+        file,
+        "pyproject.toml" | "setup.cfg" | "setup.py" | "Pipfile" | "tox.ini" | "noxfile.py"
+    ) || file.starts_with("requirements") && file.ends_with(".txt")
+}
+
+fn is_go_config(file: &str) -> bool {
+    file == "go.mod" || file.starts_with(".golangci.") || file == "Makefile"
+}
+
+fn is_zig_config(file: &str) -> bool {
+    matches!(file, "build.zig" | "build.zig.zon" | "zig.mod")
+}
+
+fn is_native_config(file: &str) -> bool {
+    matches!(file, "CMakeLists.txt" | "meson.build" | "vcpkg.json")
+        || file.ends_with(".cmake")
+        || file.starts_with("conanfile.")
+}
+
+fn is_jvm_config(path: &str, file: &str) -> bool {
+    matches!(
+        file,
+        "pom.xml"
+            | "build.gradle"
+            | "build.gradle.kts"
+            | "settings.gradle"
+            | "settings.gradle.kts"
+            | "gradle.properties"
+    ) || path.ends_with("/gradle/libs.versions.toml")
+}
+
+fn is_dotnet_config(file: &str) -> bool {
+    file.ends_with(".csproj")
+        || file.ends_with(".fsproj")
+        || file.ends_with(".sln")
+        || file.starts_with("Directory.Build.")
+        || file == "NuGet.config"
 }
 
 fn is_manifest_path(path: &str) -> bool {
@@ -1639,6 +1729,26 @@ mod tests {
         assert_eq!(source_role("go.sum"), SourceRole::Lockfile);
         assert_eq!(source_role("image.avif"), SourceRole::Other);
         assert_eq!(config_kind("Library.gemspec"), Some("ruby_manifest"));
+        assert_eq!(
+            config_kind(".github/actions/setup/action.yml"),
+            Some("github_action")
+        );
+        assert_eq!(
+            config_kind("apps/web/tsconfig.build.json"),
+            Some("javascript_manifest")
+        );
+        assert_eq!(
+            config_kind("services/api/requirements-dev.txt"),
+            Some("python_manifest")
+        );
+        assert_eq!(config_kind("native/toolchain.cmake"), Some("native_build"));
+        assert_eq!(
+            config_kind("src/Directory.Build.props"),
+            Some("dotnet_manifest")
+        );
+        assert_eq!(config_kind("config/database.yml"), Some("ruby_manifest"));
+        assert!(is_lockfile("src/gradle.lockfile"));
+        assert!(is_generated("vendor/dependency.rb"));
         assert_eq!(config_kind("src/app.rs"), None);
     }
 }
