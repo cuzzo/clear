@@ -55,7 +55,22 @@ pub fn document(
     let normalized_results = results
         .into_iter()
         .map(|result| {
+            // Proof boundaries are a strict wire contract. Generic SARIF
+            // compaction normally removes empty arrays, but `blockers: []` is
+            // required by that contract and must survive serialization.
+            let proof_boundary = result
+                .pointer(&format!("/properties/{PROOF_BOUNDARY_PROPERTY}"))
+                .cloned();
             let mut result = compact_value(json_safe_value(result));
+            if let Some(boundary) = proof_boundary {
+                if let Some(properties) = result
+                    .as_object_mut()
+                    .and_then(|object| object.get_mut("properties"))
+                    .and_then(Value::as_object_mut)
+                {
+                    properties.insert(PROOF_BOUNDARY_PROPERTY.to_string(), boundary);
+                }
+            }
             if let Some(rule_id) = result.get("ruleId").and_then(Value::as_str) {
                 if let Some(index) = rule_index.get(rule_id) {
                     if let Some(object) = result.as_object_mut() {
@@ -75,17 +90,37 @@ pub fn document(
     driver.insert("rules".to_string(), Value::Array(normalized_rules));
     let driver = compact_object(driver);
 
+    let preserved_boundaries = normalized_results
+        .iter()
+        .enumerate()
+        .filter_map(|(index, result)| {
+            result
+                .pointer(&format!("/properties/{PROOF_BOUNDARY_PROPERTY}"))
+                .cloned()
+                .map(|boundary| (index, boundary))
+        })
+        .collect::<Vec<_>>();
+
     let run = compact_value(json!({
         "tool": { "driver": driver },
         "results": normalized_results,
         "properties": json_safe_value(properties),
     }));
 
-    compact_value(json!({
+    let mut document = compact_value(json!({
         "version": "2.1.0",
         "$schema": SCHEMA,
         "runs": [run],
-    }))
+    }));
+    for (index, boundary) in preserved_boundaries {
+        if let Some(properties) = document
+            .pointer_mut(&format!("/runs/0/results/{index}/properties"))
+            .and_then(Value::as_object_mut)
+        {
+            properties.insert(PROOF_BOUNDARY_PROPERTY.to_string(), boundary);
+        }
+    }
+    document
 }
 
 pub fn rule(
@@ -120,14 +155,27 @@ pub fn result(
     properties: Value,
     partial_fingerprints: Value,
 ) -> Value {
-    compact_value(json!({
+    let proof_boundary = properties
+        .pointer(&format!("/{PROOF_BOUNDARY_PROPERTY}"))
+        .cloned();
+    let mut result = compact_value(json!({
         "ruleId": rule_id,
         "level": level,
         "message": { "text": message },
         "locations": sarif_locations(path, line, start_column, end_line, end_column),
         "partialFingerprints": json_safe_value(partial_fingerprints),
         "properties": json_safe_value(properties),
-    }))
+    }));
+    if let Some(boundary) = proof_boundary {
+        if let Some(properties) = result
+            .as_object_mut()
+            .and_then(|object| object.get_mut("properties"))
+            .and_then(Value::as_object_mut)
+        {
+            properties.insert(PROOF_BOUNDARY_PROPERTY.to_string(), boundary);
+        }
+    }
+    result
 }
 
 fn sarif_locations(
@@ -389,6 +437,45 @@ mod tests {
         );
         assert_eq!(summary.pointer("/claim_status/proven"), Some(&json!(1)));
         assert_eq!(summary.pointer("/claim_status/review"), Some(&json!(1)));
+    }
+
+    #[test]
+    fn document_preserves_an_empty_required_blocker_list() {
+        let boundary = proof_boundary(
+            InputCompleteness::Complete,
+            ClaimStatus::Observed,
+            CoverageDischarge::NotApplicable,
+            &["fact_mine_normalized_ast"],
+            "decision_pressure",
+            ProofScopeKind::ReportedSpan,
+            false,
+            vec![],
+        );
+        let document = document(
+            "Decomplex",
+            vec![],
+            vec![result(
+                "decomplex.decision-pressure",
+                "example",
+                Some("example.c"),
+                Some(1),
+                None,
+                None,
+                None,
+                "warning",
+                json!({ PROOF_BOUNDARY_PROPERTY: boundary }),
+                json!({}),
+            )],
+            None,
+            json!({}),
+        );
+        let emitted = document
+            .pointer(&format!(
+                "/runs/0/results/0/properties/{PROOF_BOUNDARY_PROPERTY}"
+            ))
+            .expect("proof boundary must survive SARIF compaction");
+        assert_eq!(emitted.get("blockers"), Some(&json!([])));
+        assert!(parse_validate_normalize(emitted).is_ok());
     }
 
     #[test]
