@@ -3,12 +3,25 @@
 
 require "fileutils"
 require "json"
+require "optparse"
 require "rbconfig"
+
+options = { fact_mine_consumers: false, coverage: true }
+OptionParser.new do |parser|
+  parser.on("--fact-mine-consumers", "Run only Ruby suites that invoke FactMine") do
+    options[:fact_mine_consumers] = true
+  end
+  parser.on("--without-coverage", "Run tests without SimpleCov instrumentation") do
+    options[:coverage] = false
+  end
+end.parse!
 
 root = File.expand_path("..", __dir__)
 Dir.chdir(root)
-FileUtils.rm_rf(File.join(root, "coverage", "ruby-gems"))
-FileUtils.rm_rf(File.join(root, "coverage", "ruby-gems-subprocess"))
+if options[:coverage]
+  FileUtils.rm_rf(File.join(root, "coverage", "ruby-gems"))
+  FileUtils.rm_rf(File.join(root, "coverage", "ruby-gems-subprocess"))
+end
 
 def merge_nil_kill_subprocess_coverage(root)
   child_resultset = File.join(root, "coverage", "ruby-gems-subprocess", ".resultset.json")
@@ -23,41 +36,43 @@ rescue JSON::ParserError
   warn "failed to merge nil-kill subprocess coverage"
 end
 
-$LOAD_PATH.unshift(File.join(root, "gems/ruby-to-clear/lib"))
+if options[:coverage]
+  $LOAD_PATH.unshift(File.join(root, "gems/ruby-to-clear/lib"))
 
-require "simplecov"
-begin
-  require "simplecov-cobertura"
-  cobertura_available = true
-rescue LoadError
-  cobertura_available = false
-end
+  require "simplecov"
+  begin
+    require "simplecov-cobertura"
+    cobertura_available = true
+  rescue LoadError
+    cobertura_available = false
+  end
 
-SimpleCov.command_name "ruby-gems"
-SimpleCov.coverage_dir "coverage/ruby-gems"
-SimpleCov.print_error_status = false
-SimpleCov.minimum_coverage 0
-SimpleCov.start do
-  enable_coverage :branch
-  track_files "gems/{auto-type,boobytrap,decomplex,espalier,fact-mine,nil-kill,ruby-to-clear,slopcop}/lib/**/*.rb"
-  add_filter "/vendor/"
-  add_filter "/spec/"
-  add_filter "/test/"
-  add_filter "/tmp/"
-  add_group "auto-type", "gems/auto-type/lib"
-  add_group "boobytrap", "gems/boobytrap/lib"
-  add_group "decomplex", "gems/decomplex/lib"
-  add_group "espalier", "gems/espalier/lib"
-  add_group "fact-mine", "gems/fact-mine/lib"
-  add_group "nil-kill", "gems/nil-kill/lib"
-  add_group "ruby-to-clear", "gems/ruby-to-clear/lib"
-  add_group "slopcop", "gems/slopcop/lib"
+  SimpleCov.command_name "ruby-gems"
+  SimpleCov.coverage_dir "coverage/ruby-gems"
+  SimpleCov.print_error_status = false
+  SimpleCov.minimum_coverage 0
+  SimpleCov.start do
+    enable_coverage :branch
+    track_files "gems/{auto-type,boobytrap,decomplex,espalier,fact-mine,nil-kill,ruby-to-clear,slopcop}/lib/**/*.rb"
+    add_filter "/vendor/"
+    add_filter "/spec/"
+    add_filter "/test/"
+    add_filter "/tmp/"
+    add_group "auto-type", "gems/auto-type/lib"
+    add_group "boobytrap", "gems/boobytrap/lib"
+    add_group "decomplex", "gems/decomplex/lib"
+    add_group "espalier", "gems/espalier/lib"
+    add_group "fact-mine", "gems/fact-mine/lib"
+    add_group "nil-kill", "gems/nil-kill/lib"
+    add_group "ruby-to-clear", "gems/ruby-to-clear/lib"
+    add_group "slopcop", "gems/slopcop/lib"
 
-  if cobertura_available
-    formatter SimpleCov::Formatter::MultiFormatter.new([
-      SimpleCov::Formatter::HTMLFormatter,
-      SimpleCov::Formatter::CoberturaFormatter,
-    ])
+    if cobertura_available
+      formatter SimpleCov::Formatter::MultiFormatter.new([
+        SimpleCov::Formatter::HTMLFormatter,
+        SimpleCov::Formatter::CoberturaFormatter,
+      ])
+    end
   end
 end
 
@@ -65,23 +80,39 @@ end
 # because this harness owns the all-gems SimpleCov session.
 ENV.delete("NIL_KILL_COVERAGE")
 ENV["NIL_KILL_TMP_DIR"] ||= File.join(root, "tmp", "ruby-gem-coverage", Process.pid.to_s)
-ENV["NIL_KILL_SUBPROCESS_COVERAGE"] = "1"
-ENV["NIL_KILL_SUBPROCESS_COVERAGE_DIR"] = File.join(root, "coverage", "ruby-gems-subprocess")
+if options[:coverage]
+  ENV["NIL_KILL_SUBPROCESS_COVERAGE"] = "1"
+  ENV["NIL_KILL_SUBPROCESS_COVERAGE_DIR"] = File.join(root, "coverage", "ruby-gems-subprocess")
+else
+  ENV.delete("NIL_KILL_SUBPROCESS_COVERAGE")
+  ENV.delete("NIL_KILL_SUBPROCESS_COVERAGE_DIR")
+end
 
 require "rspec/core"
 
-rspec_files = Dir[
-  "gems/auto-type/spec/**/*_spec.rb",
-  "gems/nil-kill/spec/**/*_spec.rb",
-  "gems/ruby-to-clear/spec/**/*_spec.rb",
-].sort
-minitest_files = Dir[
-  "gems/boobytrap/test/**/*_test.rb",
-  "gems/decomplex/test/**/*_test.rb",
-  "gems/espalier/test/**/*_test.rb",
-  "gems/fact-mine/test/**/*_test.rb",
-  "gems/slopcop/test/**/*_test.rb",
-].sort
+rspec_patterns, minitest_patterns = if options[:fact_mine_consumers]
+  [
+    ["gems/nil-kill/spec/**/*_spec.rb"],
+    ["gems/espalier/test/**/*_test.rb", "gems/slopcop/test/**/*_test.rb"],
+  ]
+else
+  [
+    [
+      "gems/auto-type/spec/**/*_spec.rb",
+      "gems/nil-kill/spec/**/*_spec.rb",
+      "gems/ruby-to-clear/spec/**/*_spec.rb",
+    ],
+    [
+      "gems/boobytrap/test/**/*_test.rb",
+      "gems/decomplex/test/**/*_test.rb",
+      "gems/espalier/test/**/*_test.rb",
+      "gems/fact-mine/test/**/*_test.rb",
+      "gems/slopcop/test/**/*_test.rb",
+    ],
+  ]
+end
+rspec_files = Dir[*rspec_patterns].sort
+minitest_files = Dir[*minitest_patterns].sort
 coverage_owned_minitest_files, simplecov_minitest_files =
   minitest_files.partition { |file| File.read(file).include?("Coverage.start") }
 
@@ -101,8 +132,6 @@ at_exit do
   exit external_status if external_status != 0 && $!.nil?
 end
 
-at_exit do
-  merge_nil_kill_subprocess_coverage(root)
-end
+at_exit { merge_nil_kill_subprocess_coverage(root) } if options[:coverage]
 
 simplecov_minitest_files.each { |file| require File.expand_path(file, root) }

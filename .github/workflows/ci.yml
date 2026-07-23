@@ -470,11 +470,14 @@ jobs:
           cargo build --release --manifest-path gems/nil-kill/Cargo.toml
           cargo build --release --manifest-path gems/decomplex/Cargo.toml
           cargo build --release --manifest-path gems/lineage/Cargo.toml
-          FACT_MINE_RUST_BINARY=${{ github.workspace }}/gems/fact-mine/target/llvm-cov-target/debug/fact-mine-rust \
+          # The release FactMine binary is built once above. The focused Ruby
+          # consumer suite reuses that same executable; LLVM coverage comes
+          # from FactMine's instrumented Rust test run rather than rebuilding
+          # a second binary for every cross-gem invocation.
+          FACT_MINE_RUST_BINARY=${{ github.workspace }}/gems/fact-mine/target/release/fact-mine-rust \
           NIL_KILL_INFER_RUST_BINARY=${{ github.workspace }}/gems/nil-kill/target/release/nil-kill-infer-rust \
           DECOMPLEX_RUST_BINARY=${{ github.workspace }}/gems/decomplex/target/release/decomplex-rust \
-          LLVM_PROFILE_FILE='${{ github.workspace }}/gems/fact-mine/target/llvm-cov-target/fact-mine-%p-%32m.profraw' \
-          bundle exec ruby tools/run_ruby_gem_coverage.rb
+          bundle exec ruby tools/run_ruby_gem_coverage.rb --fact-mine-consumers --without-coverage
           cargo llvm-cov report \
             --manifest-path gems/fact-mine/Cargo.toml \
             --cobertura \
